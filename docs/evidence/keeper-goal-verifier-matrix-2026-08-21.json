@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-08-21T02:24:41Z",
+  "captured_at": "2026-08-21T07:48:41Z",
   "live_observation_started_at": "2026-08-21T02:00:00Z",
   "kind": "keeper_goal_verifier_matrix_delta",
   "authority": "source_ci_and_operator_observation_separated",
@@ -11,9 +11,9 @@
     "catalog_validation": "passed",
     "browser": "chromium_full_page",
     "screenshot_path": "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.png",
-    "screenshot_sha256": "cbc15bdd56f1f546697a1afc90eba3601dc18c684a1a5b079382cf30ff09a25a",
+    "screenshot_sha256": "cc10a158b68d9a5ebc0a1aa2eeb527386555ab66c70dd6b2c74b32f660a1b6d9",
     "screenshot_width_px": 1280,
-    "screenshot_height_px": 20714,
+    "screenshot_height_px": 20978,
     "screenshot_semantics": "Document-render evidence only; it is not product runtime or Goal verifier evidence."
   },
   "implementation": {
@@ -24,6 +24,15 @@
     "typed_authority_replaces_closed_pr": 29236,
     "typed_authority_head": "0371eb7133fe83455ba65ee35d8d6dd9690d308a",
     "typed_authority_ci_at_capture": "merged_exact_head",
+    "verifier_run_registry_pr": 29257,
+    "dashboard_projection_pr": 29258,
+    "dashboard_panel_pr": 29259,
+    "verdict_run_join_pr": 29261,
+    "human_confirmation_purge_pr": 29262,
+    "crash_reconciliation_pr": 29264,
+    "rw23_goal_verifier_pr": 29265,
+    "final_source_sha": "c884017be761e1d614305b32e53aac7285f62470",
+    "final_source_ci": "passed",
     "public_goal_transition_actions": [
       "request_complete",
       "pause",
@@ -44,10 +53,11 @@
   "scenario_catalog": {
     "command": "python3 scripts/harness/workload/keeper_multi_collaboration_acceptance.py --validate-catalog",
     "status": "passed",
-    "mission_count": 22,
-    "assertion_count": 44,
+    "mission_count": 23,
+    "assertion_count": 47,
     "acceptance_authority": "real_world_product_outcomes",
-    "execution_claim": "none",
+    "execution_claim": "protected_main_run_32455741544_failed",
+    "protected_main_evidence": "docs/evidence/keeper-rw23-protected-main-2026-08-21.json",
     "latest_tracked_complete_bundle": "docs/evidence/keeper-e0-campaign-r6-2026-08-18.json",
     "latest_tracked_complete_bundle_result": {
       "status": "failed",
@@ -81,9 +91,9 @@
   "limitations": [
     "Catalog validation proves definitions only, not a real execution.",
     "Historical green observations from different runs are not unioned.",
-    "RW22 proves Task verification, not Goal verification.",
+    "RW23 defines Task rejection, Goal refutation, Task approval, Goal proof, durable run join, and real-backend browser evidence; protected-main run 32455741544 failed before Goal verdicts because autonomous work completed the verifier Task before the directed refutation phase.",
     "The runner supports a strict five-distinct-runtime role map, but no heterogeneous execution bundle exists at this capture.",
-    "No 22-of-22 tracked PASS bundle exists at this capture.",
-    "No deployed standalone Goal-verifier verdict or Goal-verifier dashboard screenshot exists at this capture."
+    "No 23-of-23 tracked PASS bundle exists at this refresh.",
+    "Protected-main run 32455741544 produced no Goal-verifier verdict or Goal-verifier dashboard screenshot; fix PR 29272 defers verifier Task creation to the directed RW23 phase."
   ]
 }

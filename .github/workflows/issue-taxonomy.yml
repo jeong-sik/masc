@@ -34,7 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: .github/issue-taxonomy.json
+          sparse-checkout: |
+            .github/issue-taxonomy.json
+            .github/scripts/issue-taxonomy-core.cjs
           sparse-checkout-cone-mode: false
 
       - uses: actions/github-script@v9
@@ -46,13 +48,19 @@ jobs:
             const fs = require('fs');
             const { owner, repo } = context.repo;
             const SSOT = JSON.parse(fs.readFileSync('.github/issue-taxonomy.json', 'utf8'));
+            const { createIssueTaxonomyCore } = require('./.github/scripts/issue-taxonomy-core.cjs');
+            const taxonomy = createIssueTaxonomyCore(SSOT);
+            const {
+              knownLabels,
+              orderedValues,
+              severityOrderErrors,
+              parseDeclaration,
+              resolve,
+              managed,
+              reconciliationPlan,
+            } = taxonomy;
             const LANG = SSOT.declaration_block_language;
             const MARKER = '<!-- masc-taxonomy-gate -->';
-
-            const knownLabels = new Set();
-            for (const ax of Object.values(SSOT.axes))
-              for (const v of Object.values(ax.values)) knownLabels.add(v.label);
-            for (const f of Object.values(SSOT.flags)) knownLabels.add(f.label);
 
             const repoLabels = new Set(
               (await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 }))
@@ -67,78 +75,13 @@ jobs:
               return;
             }
 
-            const declaredKeys = new Set([...Object.keys(SSOT.axes), ...Object.keys(SSOT.flags)]);
-
             // severity_order is the priority order the docs quote. Keep it honest against the
             // value set it orders, or the two drift inside one file.
-            for (const [ax, spec] of Object.entries(SSOT.axes)) {
-              if (!spec.severity_order) continue;
-              const a = [...spec.severity_order].sort().join(',');
-              const b = Object.keys(spec.values).sort().join(',');
-              if (a !== b) {
-                core.setFailed(`axis '${ax}': severity_order does not cover its values (${a} vs ${b}).`);
-                return;
-              }
+            const severityErrors = severityOrderErrors();
+            if (severityErrors.length) {
+              core.setFailed(severityErrors.join('\n'));
+              return;
             }
-
-            const orderedValues = (spec) => spec.severity_order || Object.keys(spec.values);
-
-            function parseDeclaration(body) {
-              const re = new RegExp('```' + LANG + '\\s*\\n([\\s\\S]*?)```', 'g');
-              const blocks = [...(body || '').matchAll(re)];
-              if (blocks.length === 0) return { present: false };
-              if (blocks.length > 1)
-                return { present: true, error: `the body carries ${blocks.length} ${LANG} blocks; keep exactly one` };
-              const out = {};
-              for (const raw of blocks[0][1].split('\n')) {
-                const line = raw.trim();
-                if (!line || line.startsWith('#')) continue;
-                const sep = line.indexOf(':');
-                if (sep < 0) return { present: true, error: `line is not key: value -> ${line}` };
-                const key = line.slice(0, sep).trim().toLowerCase();
-                if (!declaredKeys.has(key))
-                  return { present: true, error: `unknown key '${key}'. Keys: ${[...declaredKeys].join(', ')}` };
-                if (key in out) return { present: true, error: `key '${key}' appears twice` };
-                out[key] = line.slice(sep + 1).trim().toLowerCase();
-              }
-              return { present: true, fields: out };
-            }
-
-            function splitList(v) {
-              return v.replace(/^\[|\]$/g, '').split(',').map((s) => s.trim()).filter(Boolean);
-            }
-
-            function resolve(fields) {
-              const add = [], errors = [];
-              for (const [ax, spec] of Object.entries(SSOT.axes)) {
-                const raw = fields[ax];
-                if (raw === undefined || raw === '') {
-                  if (spec.required) errors.push(`axis '${ax}' is not declared.`);
-                  continue;
-                }
-                const vals = splitList(raw);
-                if (spec.cardinality === 'one' && vals.length !== 1) {
-                  errors.push(`axis '${ax}' takes exactly one value, got ${vals.length}: ${raw}`);
-                  continue;
-                }
-                for (const v of vals) {
-                  const hit = spec.values[v];
-                  if (!hit) errors.push(`'${ax}: ${v}' is not in the vocabulary. Allowed: ${orderedValues(spec).join(', ')}`);
-                  else add.push(hit.label);
-                }
-              }
-              for (const [flag, spec] of Object.entries(SSOT.flags)) {
-                const raw = fields[flag] || '';
-                if (raw === 'true') add.push(spec.label);
-                else if (raw && raw !== 'false') errors.push(`'${flag}' takes true or false, got: ${raw}`);
-              }
-              return { add: [...new Set(add)], errors };
-            }
-
-            // One source for label names: knownLabels is what the SSOT declares. The prefixes
-            // only catch orphans left behind by a value that the SSOT no longer carries.
-            const axisPrefixes = Object.keys(SSOT.axes).map((a) => a + '/');
-            const managed = (name) => knownLabels.has(name) || axisPrefixes.some((p) => name.startsWith(p));
 
             async function commentOnce(issue_number, body) {
               const existing = await github.paginate(github.rest.issues.listComments, {
@@ -190,8 +133,7 @@ jobs:
               if (errors.length) return reject(`The declaration block does not match the vocabulary.\n\n- ${errors.join('\n- ')}`);
 
               const target = new Set(add);
-              const toRemove = current.filter((l) => managed(l) && !target.has(l));
-              const toAdd = [...target].filter((l) => !current.includes(l));
+              const { toRemove, toAdd } = reconciliationPlan(current, target);
 
               for (const label of toRemove)
                 await github.rest.issues.removeLabel({ owner, repo, issue_number, name: label })

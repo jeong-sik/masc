@@ -243,6 +243,18 @@ jq -n \
     effective_base_path: $effective_base_path,
     runtime_id: (if ($runtime_by_role_json | fromjson | length) > 0 then null else $runtime_id end),
     runtime_by_role: ($runtime_by_role_json | fromjson),
+    runtime_strategy: (
+      if ($require_heterogeneous_runtimes == "true") then "heterogeneous_required"
+      elif ($runtime_by_role_json | fromjson | length) > 0 then "role_map"
+      else "shared_runtime"
+      end
+    ),
+    distinct_runtime_count: (
+      if ($runtime_by_role_json | fromjson | length) > 0
+      then ([$runtime_by_role_json | fromjson | .[]] | unique | length)
+      else 1
+      end
+    ),
     require_heterogeneous_runtimes: ($require_heterogeneous_runtimes == "true"),
     github_run_id: $run_id,
     github_run_attempt: $run_attempt

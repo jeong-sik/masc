@@ -86,6 +86,32 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 require_heterogeneous=False,
             )
 
+    def test_runtime_strategy_receipt_is_exact_and_fail_closed(self):
+        mapping = {
+            "coordinator": "runtime-a",
+            "builder-a": "runtime-b",
+            "builder-b": "runtime-c",
+            "reviewer": "runtime-d",
+            "researcher": "runtime-e",
+        }
+        receipt = acceptance.runtime_strategy_receipt(
+            runtime_id=None,
+            runtime_by_role=mapping,
+            require_heterogeneous=True,
+        )
+        self.assertEqual(receipt["runtime_strategy"], "heterogeneous_required")
+        self.assertEqual(receipt["runtime_by_role"], mapping)
+        self.assertEqual(receipt["distinct_runtime_count"], 5)
+
+        with self.assertRaisesRegex(
+            acceptance.AcceptanceError, "exact runtime selection"
+        ):
+            acceptance.runtime_strategy_receipt(
+                runtime_id=None,
+                runtime_by_role={},
+                require_heterogeneous=False,
+            )
+
     def test_catalog_has_exact_rw19_persistence_projection_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 

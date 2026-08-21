@@ -617,6 +617,35 @@ def validate_runtime_strategy(
             )
 
 
+def runtime_strategy_receipt(
+    *,
+    runtime_id: str | None,
+    runtime_by_role: dict[str, str],
+    require_heterogeneous: bool,
+    roles: set[str] = EXPECTED_ROLES,
+) -> dict[str, Any]:
+    resolved = {
+        role: runtime_by_role.get(role, runtime_id) for role in sorted(roles)
+    }
+    if any(value is None for value in resolved.values()):
+        raise AcceptanceError(
+            "an exact runtime selection is required before a mutable run"
+        )
+    exact = {role: str(value) for role, value in resolved.items()}
+    distinct_count = len(set(exact.values()))
+    return {
+        "runtime_strategy": (
+            "heterogeneous_required"
+            if require_heterogeneous
+            else "role_map"
+            if runtime_by_role
+            else "shared_runtime"
+        ),
+        "runtime_by_role": exact,
+        "distinct_runtime_count": distinct_count,
+    }
+
+
 def default_health_url(mcp_url: str) -> str:
     parsed = urllib.parse.urlsplit(mcp_url)
     return urllib.parse.urlunsplit(
@@ -2659,22 +2688,11 @@ def build_bundle(
         "preflight": preflight_result,
         "resources": {
             "keepers": run.roles,
-            "runtime_strategy": (
-                "heterogeneous_required"
-                if run.require_heterogeneous_runtimes
-                else "role_map"
-                if run.runtime_by_role
-                else "shared_runtime"
-            ),
-            "runtime_by_role": {
-                role: run.runtime_for_role(role) for role in sorted(run.roles)
-            },
-            "distinct_runtime_count": len(
-                {
-                    runtime_id
-                    for role in run.roles
-                    if (runtime_id := run.runtime_for_role(role)) is not None
-                }
+            **runtime_strategy_receipt(
+                runtime_id=run.runtime_id,
+                runtime_by_role=run.runtime_by_role,
+                require_heterogeneous=run.require_heterogeneous_runtimes,
+                roles=set(run.roles),
             ),
             "goal_id": run.goal_id,
             "task_ids": run.task_ids,
@@ -2761,6 +2779,8 @@ def verify_bundle(
         errors.append(
             "heterogeneous runtime strategy does not contain five distinct runtimes"
         )
+    if runtime_strategy == "shared_runtime" and distinct_runtime_count != 1:
+        errors.append("shared runtime strategy does not contain one runtime id")
     artifacts = bundle.get("artifacts") or []
     if len(artifacts) < 20:
         errors.append("artifact manifest is unexpectedly small")
@@ -2948,6 +2968,11 @@ def main() -> int:
 
         if not args.allow_mutation:
             raise AcceptanceError("--run requires explicit --allow-mutation")
+        runtime_receipt = runtime_strategy_receipt(
+            runtime_id=args.runtime_id,
+            runtime_by_role=runtime_by_role,
+            require_heterogeneous=args.require_heterogeneous_runtimes,
+        )
         if not args.expected_base_path:
             raise AcceptanceError("--run requires exact --expected-base-path")
         if not args.expected_source_sha:
@@ -3002,17 +3027,7 @@ def main() -> int:
                     },
                     "resources": {
                         "keepers": mission_run.roles,
-                        "runtime_strategy": (
-                            "heterogeneous_required"
-                            if mission_run.require_heterogeneous_runtimes
-                            else "role_map"
-                            if mission_run.runtime_by_role
-                            else "shared_runtime"
-                        ),
-                        "runtime_by_role": {
-                            role: mission_run.runtime_for_role(role)
-                            for role in sorted(mission_run.roles)
-                        },
+                        **runtime_receipt,
                         "goal_id": mission_run.goal_id,
                         "task_ids": mission_run.task_ids,
                         "schedule_id": mission_run.schedule_id,

@@ -404,8 +404,11 @@ let review
           compaction lanes: each slot is tried at most once, in declaration
           order, and a slot that produces no usable verdict — provider error or
           a reply without exactly one valid verdict tool call — yields to the
-          next slot. The terminal result describes the last attempt, so a
-          single-slot lane reports exactly what the pre-lane path reported. *)
+          next slot. The terminal runtime/reason describes the last attempt,
+          while retryability aggregates every typed evaluator error: one
+          transient slot must not be masked by a later statically unavailable
+          fallback. A single-slot lane still reports exactly what the pre-lane
+          path reported. *)
        let run_attempt slot =
          try
            (Atomic.get run_llm_reviewer_fn)
@@ -426,7 +429,7 @@ let review
                    "task completion evaluator raised unexpectedly: %s"
                    (Printexc.to_string exn)))
        in
-       let rec attempt slot remaining =
+       let rec attempt ~retryable_error_seen slot remaining =
          match run_attempt slot with
          | Ok (Some verdict) ->
            (match verdict with
@@ -461,7 +464,7 @@ let review
                 detail
                 slot
                 next;
-              attempt next rest
+              attempt ~retryable_error_seen next rest
             | [] ->
               task_warn "[task-completion-review] %s" detail;
               emit
@@ -470,7 +473,8 @@ let review
                 ; generator_runtime
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
-                ; evaluator_error_retryable = None
+                ; evaluator_error_retryable =
+                    (if retryable_error_seen then Some true else None)
                 })
          | Error error ->
            let detail = Agent_core.Error.to_string error in
@@ -486,12 +490,16 @@ let review
                 retryable
                 next
                 detail;
-              attempt next rest
+              attempt
+                ~retryable_error_seen:(retryable_error_seen || retryable)
+                next
+                rest
             | [] ->
+              let exhausted_retryable = retryable_error_seen || retryable in
               task_warn
                 "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; task remains nonterminal: %s"
                 slot
-                retryable
+                exhausted_retryable
                 detail;
               emit
                 { verdict = None
@@ -499,8 +507,9 @@ let review
                 ; generator_runtime
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
-                ; evaluator_error_retryable = Some retryable
+                ; evaluator_error_retryable =
+                    Some exhausted_retryable
                 })
        in
-       attempt first_slot rest_slots)
+       attempt ~retryable_error_seen:false first_slot rest_slots)
 ;;

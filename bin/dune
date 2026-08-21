@@ -223,6 +223,12 @@
   masc.masc_types
   yojson))
 
+(library
+ (name masc_tui_message_layout)
+ (wrapped false)
+ (modules masc_tui_message_layout)
+ (libraries masc.masc_core))
+
 (executable
  (name masc_tui)
  (modules
@@ -237,6 +243,7 @@
  (libraries
   masc
   masc_tui_keeper_chat_projection
+  masc_tui_message_layout
   masc_tui_operator_projection
   masc.dashboard
   masc.server

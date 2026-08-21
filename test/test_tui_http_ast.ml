@@ -36,14 +36,58 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
-let test_keeper_chat_omits_removed_model_args () =
+let test_keeper_chat_uses_current_async_contract () =
   let module_path = "bin/masc_tui.ml" in
   check int "TUI keeper chat has no removed models field" 0
     (Ast_grep.count_string_literals ~module_path ~needle:"models");
-  check int "TUI still targets the keeper chat stream" 1
+  check int "TUI targets the keeper chat stream once" 1
     (Ast_grep.count_string_literals
-       ~module_path
-       ~needle:"/api/v1/keepers/chat/stream")
+       ~module_path:"bin/masc_tui_http.ml"
+       ~needle:"/api/v1/keepers/chat/stream");
+  check int "request projection owns the required request id field" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui_keeper_chat_projection.ml"
+       ~needle:"request_id");
+  check int "blocking send helper is gone" 0
+    (Ast_grep.count_value_bindings ~module_path ~name:"send_keeper_message");
+  check int "permissive whole-body decoder is not used by the TUI" 0
+    (Ast_grep.count_calls_across_files
+       ~module_paths:[ "bin/masc_tui.ml"; "bin/masc_tui_http.ml" ]
+       ~callee:"Tui_decode.parse_keeper_chat_response");
+  check int "chat POST has no dashboard request deadline" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"post_keeper_chat" ~callee:"request_timeout_sec");
+  check int "chat send does not keep the root switch alive on exit" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork");
+  check bool "chat send runs in a cancellable daemon fiber" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork_daemon"
+     >= 1);
+  check bool "async completion checks request identity" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"apply_keeper_chat_result"
+       ~callee:"Keeper_chat.same_request_identity"
+     >= 1);
+  check int "same-ID reconnect never mints a fresh request" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"retry_keeper_message"
+       ~callee:"Keeper_chat.create_request");
+  check bool "same-ID recovery uses exact operation reconciliation" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"retry_keeper_message"
+       ~callee:"launch_keeper_reconciliation"
+     >= 1);
+  check int "same-ID recovery never re-POSTs the chat request" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_reconciliation"
+       ~callee:"Masc_tui_http.post_keeper_chat");
+  check bool "recovery polls the exact durable operation" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_reconciliation"
+       ~callee:"Masc_tui_http.fetch_keeper_chat_operation"
+     >= 1)
 ;;
 
 let test_operator_approvals_use_current_contract () =
@@ -368,9 +412,9 @@ let () =
           `Quick
           test_http_client_does_not_own_tui_env_contract;
         test_case
-          "keeper chat omits removed model args"
+          "keeper chat uses current async contract"
           `Quick
-          test_keeper_chat_omits_removed_model_args;
+          test_keeper_chat_uses_current_async_contract;
         test_case
           "operator approvals use current contract"
           `Quick

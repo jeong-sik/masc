@@ -2581,6 +2581,11 @@
   yojson))
 
 (test
+ (name test_tui_message_layout)
+ (modules test_tui_message_layout)
+ (libraries alcotest masc_tui_message_layout))
+
+(test
  (name test_fs_compat_capability_exact_read)
  (modules test_fs_compat_capability_exact_read)
  (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)

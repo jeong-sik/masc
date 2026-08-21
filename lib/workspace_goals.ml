@@ -719,12 +719,10 @@ let reconcile_committed_proof config ~goal_id =
          | Goal_verification.Proof_refuted
              ({ outcome = Goal_verification.Refuted { reason }; _ } as verdict) ->
            Some (Goal_phase.Record_proof_refuted, verdict, Some reason)
-         | Goal_verification.Proof_proven
-             { outcome = Goal_verification.Refuted _; _ }
          | Goal_verification.Proof_refuted
              { outcome = Goal_verification.Proven; _ } ->
-           (* Rejected by the explicit malformed-ledger guards above. This
-              arm keeps the closed sum exhaustive at the use site. *)
+           (* Rejected by the explicit malformed-ledger guard above. This arm
+              keeps the closed sum exhaustive at the use site. *)
            None
          | Goal_verification.Completion_idle
          | Goal_verification.Proof_pending _ -> None

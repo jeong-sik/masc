@@ -23,6 +23,8 @@ const screenshotPath = join(artifactDir, 'keeper-composition-inspector.png')
 const measurementPath = join(artifactDir, 'keeper-composition-inspector.json')
 const persistenceScreenshotPath = join(artifactDir, 'keeper-persistence-proof.png')
 const persistenceMeasurementPath = join(artifactDir, 'keeper-persistence-proof.json')
+const failureScreenshotPath = join(artifactDir, 'keeper-composition-failure.png')
+const failureStatePath = join(artifactDir, 'keeper-composition-failure.json')
 const viewport = { width: 1440, height: 1000 }
 
 const healthResponse = await fetch(new URL('/health?full=1', dashboardUrl))
@@ -238,6 +240,37 @@ try {
     `${JSON.stringify(persistenceMeasurement, null, 2)}\n`,
   )
   process.stdout.write(`${JSON.stringify({ composition: measurement, persistence: persistenceMeasurement })}\n`)
+} catch (error) {
+  // The success path screenshots after every assertion has passed, so a locator
+  // timeout produced only its own message: run 32434575143 aborted on
+  // getByLabel('메시지 입력') with no record of what the page actually showed.
+  // The aria-label exists in the component, so the element was absent from the
+  // rendered state rather than mislocated, and separating "keeper missing from
+  // the list" from "route selected nothing" from "panel refused to draw" needs
+  // the page itself. Capture is best-effort: a browser that died takes its
+  // page with it, and the original error must still surface.
+  try {
+    const page = browser.contexts()[0]?.pages()[0]
+    if (page) {
+      await page.screenshot({ path: failureScreenshotPath, fullPage: true })
+      writeFileSync(
+        failureStatePath,
+        `${JSON.stringify(
+          {
+            error: String(error?.message ?? error),
+            url: page.url(),
+            title: await page.title(),
+            body_text: (await page.locator('body').innerText()).slice(0, 20000),
+          },
+          null,
+          2,
+        )}\n`,
+      )
+    }
+  } catch (captureError) {
+    process.stderr.write(`failure capture unavailable: ${captureError}\n`)
+  }
+  throw error
 } finally {
   await browser.close()
 }

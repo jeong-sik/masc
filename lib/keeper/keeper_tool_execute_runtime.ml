@@ -778,7 +778,7 @@ let handle_tool_execute_typed
                   disposition marked the whole turn
                   Terminal_effect_failed (sticky), so a keeper probing a
                   missing path with `ls` died mid-mission — four turn
-                  deaths across the E0 campaign and the polisher pilot
+                  deaths across the E0 campaign and a pilot Keeper
                   (masc#28983). Only infra failures — sandbox dispatch,
                   secret projection, output/manifest persistence — keep
                   the failure disposition. *)

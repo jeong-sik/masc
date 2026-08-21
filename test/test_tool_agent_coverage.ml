@@ -155,11 +155,11 @@ let record_completed_metric config ~agent_id ~task_id =
 let test_get_metrics_resolves_keeper_agent_alias () =
   with_ctx (fun ctx ->
   record_completed_metric ctx.config
-    ~agent_id:"nick0cave"
+    ~agent_id:"theta0"
     ~task_id:"task-alias-metric";
   let args =
     `Assoc
-      [ ("agent_name", `String "keeper-nick0cave-agent")
+      [ ("agent_name", `String "keeper-theta0-agent")
       ; ("days", `Int 7)
       ]
   in
@@ -168,11 +168,11 @@ let test_get_metrics_resolves_keeper_agent_alias () =
     (Tool_result.is_success result);
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string (Tool_result.message result) in
-  Alcotest.(check string) "resolved agent id" "nick0cave"
+  Alcotest.(check string) "resolved agent id" "theta0"
     (json |> member "agent_id" |> to_string);
-  Alcotest.(check string) "requested agent name" "keeper-nick0cave-agent"
+  Alcotest.(check string) "requested agent name" "keeper-theta0-agent"
     (json |> member "requested_agent_name" |> to_string);
-  Alcotest.(check string) "resolved agent name" "nick0cave"
+  Alcotest.(check string) "resolved agent name" "theta0"
     (json |> member "resolved_agent_name" |> to_string);
   Alcotest.(check int) "total tasks" 1
     (json |> member "total_tasks" |> to_int);

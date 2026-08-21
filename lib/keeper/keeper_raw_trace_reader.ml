@@ -103,7 +103,7 @@ let trace_id_of_line ~file ~line_number line =
    for a page of at most [limit] entries. Measured 2026-08-12 over the 1,229
    retained traces on this host: p50 3.7 KB, p90 60 KB, p95 218 KB — and one
    runaway turn of 372.5 MB (16,801 tool executions in a single turn) holding
-   84% of the corpus. That one file made the listing take 3.35 s for [sangsu]
+   84% of the corpus. That one file made the listing take 3.35 s for one Keeper
    while another keeper with *more* files but less data answered in 0.039 s.
 
    With a per-file budget the listing costs O(entries x budget) no matter what

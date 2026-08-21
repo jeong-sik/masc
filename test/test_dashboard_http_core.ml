@@ -3295,7 +3295,7 @@ let test_tool_call_fleet_cache_tracks_durable_revision () =
          (Dashboard_cache.get_or_compute key ~ttl:30.0 (fun () -> `List []));
        check bool "fleet cache is seeded" true (Option.is_some (Dashboard_cache.peek key));
        Masc.Keeper_tool_call_log.log_call
-         ~keeper_name:"analyst"
+         ~keeper_name:"delta"
          ~tool_name:"keeper_time_now"
          ~input:(`Assoc [])
          ~output_text:"ok"

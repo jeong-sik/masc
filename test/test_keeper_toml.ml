@@ -823,7 +823,7 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
                   (KTP.keeper_toml_load_error_to_string e))
            | Ok _defaults -> ()))
 
-let test_bundled_issue_king_uses_local_sandbox () =
+let test_bundled_profiles_include_local_sandbox () =
   let repo = repo_root () in
   Fun.protect
     ~finally:(fun () -> Config_dir_resolver.reset ())
@@ -831,17 +831,22 @@ let test_bundled_issue_king_uses_local_sandbox () =
       with_env_restore [ "MASC_CONFIG_DIR" ] (fun () ->
           Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
           Config_dir_resolver.reset ();
-          match KTP.load_keeper_profile_defaults_result "issue_king" with
-          | Error e ->
-            fail
-              (Printf.sprintf
-                 "issue_king failed to resolve: %s"
-                 (KTP.keeper_toml_load_error_to_string e))
-          | Ok defaults ->
-            check (option string) "issue_king sandbox" (Some "local")
-              (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-            check (option string) "issue_king network" (Some "inherit")
-              (Option.map KTP.network_mode_to_string defaults.network_mode)))
+          let keepers_dir = Filename.concat repo "config/keepers" in
+          let has_local_profile =
+            Sys.readdir keepers_dir
+            |> Array.to_list
+            |> List.filter (fun file -> Filename.check_suffix file ".toml")
+            |> List.exists (fun file ->
+                 let name = Filename.chop_extension file in
+                 match KTP.load_keeper_profile_defaults_result name with
+                 | Error _ -> false
+                 | Ok defaults ->
+                   Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile
+                   = Some "local"
+                   && Option.map KTP.network_mode_to_string defaults.network_mode
+                      = Some "inherit")
+          in
+          check bool "a bundled profile exercises local/inherit" true has_local_profile))
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -1094,8 +1099,8 @@ let test_absent_profile_is_legitimate_empty_defaults () =
 
 let test_keeper_agent_prompt_loads_with_keeper_toml () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "analyst.toml" in
-  let agent_dir = Filename.concat keepers_dir "analyst" in
+  let keeper_path = Filename.concat keepers_dir "delta.toml" in
+  let agent_dir = Filename.concat keepers_dir "delta" in
   mkdir_p agent_dir;
   let instructions_path = Filename.concat agent_dir "AGENT.md" in
   write_file keeper_path "[keeper]\nautoboot_enabled = true\n";
@@ -1103,7 +1108,7 @@ let test_keeper_agent_prompt_loads_with_keeper_toml () =
   match
     KTP.load_keeper_profile_defaults_result_for_base_path
       ~base_path
-      "analyst"
+      "delta"
   with
   | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
   | Ok defaults ->
@@ -1137,8 +1142,8 @@ let test_empty_keeper_agent_prompt_is_typed_profile_error () =
 
 let test_keeper_agent_read_failure_is_typed_profile_error () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "analyst.toml" in
-  let agent_dir = Filename.concat keepers_dir "analyst" in
+  let keeper_path = Filename.concat keepers_dir "delta.toml" in
+  let agent_dir = Filename.concat keepers_dir "delta" in
   mkdir_p agent_dir;
   let instructions_path = Filename.concat agent_dir "AGENT.md" in
   write_file keeper_path "[keeper]\nautoboot_enabled = true\n";
@@ -1146,7 +1151,7 @@ let test_keeper_agent_read_failure_is_typed_profile_error () =
   match
     KTP.load_keeper_profile_defaults_result_for_base_path
       ~base_path
-      "analyst"
+      "delta"
   with
   | Ok _ -> fail "unreadable keeper instructions must fail before defaults projection"
   | Error error ->
@@ -1699,7 +1704,7 @@ let () =
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick
             test_bundled_keeper_profiles_resolve_prompt_defaults;
-          test_case "bundled issue_king uses local sandbox" `Quick
-            test_bundled_issue_king_uses_local_sandbox;
+          test_case "bundled profiles include local sandbox" `Quick
+            test_bundled_profiles_include_local_sandbox;
         ] );
     ]

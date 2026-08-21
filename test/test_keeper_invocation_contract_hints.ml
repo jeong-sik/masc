@@ -19,8 +19,8 @@ let contains ~needle haystack =
   nl = 0 || go 0
 
 let test_undeclared_field_names_the_accepted_set () =
-  (* The exact shape taskmaster sent. *)
-  let json = `Assoc [ "agent", `String "analyst" ] in
+  (* The exact shape fixture-keeper sent. *)
+  let json = `Assoc [ "agent", `String "delta" ] in
   match message_of_target_json json with
   | None -> Alcotest.fail "expected target.agent to be rejected"
   | Some msg ->
@@ -32,7 +32,7 @@ let test_undeclared_field_names_the_accepted_set () =
 let test_other_guessed_names_get_the_same_hint () =
   List.iter
     (fun field ->
-      let json = `Assoc [ field, `String "analyst" ] in
+      let json = `Assoc [ field, `String "delta" ] in
       match message_of_target_json json with
       | None -> Alcotest.failf "expected target.%s to be rejected" field
       | Some msg ->
@@ -43,7 +43,7 @@ let test_other_guessed_names_get_the_same_hint () =
     [ "keeper_name"; "keeper" ]
 
 let test_valid_target_still_parses () =
-  let json = `Assoc [ "kind", `String "keeper"; "name", `String "analyst" ] in
+  let json = `Assoc [ "kind", `String "keeper"; "name", `String "delta" ] in
   match C.target_of_json json with
   | Ok _ -> ()
   | Error err ->
@@ -61,7 +61,7 @@ let request_json ?capability () =
     ((match capability with
       | None -> []
       | Some value -> [ "capability", `String value ])
-     @ [ "target", `Assoc [ "kind", `String "keeper"; "name", `String "analyst" ]
+     @ [ "target", `Assoc [ "kind", `String "keeper"; "name", `String "delta" ]
        ; "prompt", `String "Claim and work on task-154."
        ])
 

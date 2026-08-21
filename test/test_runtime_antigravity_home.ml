@@ -29,14 +29,14 @@ let test_prepares_private_home_with_oauth_seed () =
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
-      ~owner_leaf:"keeper-sangsu"
+      ~owner_leaf:"keeper-alpha"
       ~oauth_source
     |> require_ok
   in
   let expected_home =
     Filename.concat runtime_root "official-clients"
     |> fun path -> Filename.concat path "antigravity"
-    |> fun path -> Filename.concat path "keeper-sangsu"
+    |> fun path -> Filename.concat path "keeper-alpha"
   in
   let home_dir = Runtime_antigravity_home.home_dir layout in
   let paths = Runtime_antigravity_home.For_testing.paths layout in
@@ -94,7 +94,7 @@ let test_rejects_non_private_or_indirect_oauth_source () =
   (match
      Runtime_antigravity_home.prepare
        ~runtime_root
-       ~owner_leaf:"keeper-sangsu"
+       ~owner_leaf:"keeper-alpha"
        ~oauth_source
    with
    | Error (Runtime_antigravity_home.Invalid_oauth_source _) -> ()
@@ -108,7 +108,7 @@ let test_rejects_non_private_or_indirect_oauth_source () =
   match
     Runtime_antigravity_home.prepare
       ~runtime_root
-      ~owner_leaf:"keeper-sangsu"
+      ~owner_leaf:"keeper-alpha"
       ~oauth_source:oauth_symlink
   with
   | Error (Runtime_antigravity_home.Invalid_oauth_source _) -> ()
@@ -124,7 +124,7 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
-      ~owner_leaf:"keeper-sangsu"
+      ~owner_leaf:"keeper-alpha"
       ~oauth_source
     |> require_ok
   in
@@ -134,7 +134,7 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   let refreshed =
     Runtime_antigravity_home.prepare
       ~runtime_root
-      ~owner_leaf:"keeper-sangsu"
+      ~owner_leaf:"keeper-alpha"
       ~oauth_source
     |> require_ok
   in
@@ -163,7 +163,7 @@ let test_rejects_unsafe_existing_runtime_oauth () =
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
-      ~owner_leaf:"keeper-sangsu"
+      ~owner_leaf:"keeper-alpha"
       ~oauth_source
     |> require_ok
   in
@@ -172,7 +172,7 @@ let test_rejects_unsafe_existing_runtime_oauth () =
   match
     Runtime_antigravity_home.prepare
       ~runtime_root
-      ~owner_leaf:"keeper-sangsu"
+      ~owner_leaf:"keeper-alpha"
       ~oauth_source
   with
   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
@@ -188,7 +188,7 @@ let test_mcp_capability_is_turn_scoped () =
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
-      ~owner_leaf:"keeper-sangsu"
+      ~owner_leaf:"keeper-alpha"
       ~oauth_source
     |> require_ok
   in

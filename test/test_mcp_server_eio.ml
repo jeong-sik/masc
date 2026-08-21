@@ -1836,7 +1836,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Auth.create_token base_path ~agent_name:"qa-king" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"mu-king" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1849,7 +1849,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
       ~mcp_session_id:"sid-hyphenated-generated-alias"
       ~auth_token:raw_token state
       ~name:"keeper_task_claim"
-      ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
+      ~arguments:(`Assoc [ ("agent_name", `String "mu-king-warm-heron") ])
   in
   Alcotest.(check bool) "claim_next rejected by public MCP path" false
     (Tool_result.is_success result);
@@ -2181,7 +2181,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
       Keeper_registry.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
-      let keeper_name = "sangsu" in
+      let keeper_name = "alpha" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       let keeper_meta =
         make_keeper_meta ~agent_name:keeper_agent_name keeper_name
@@ -2219,7 +2219,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
           Masc.Keeper_registry_tool_usage_persistence.flush ~base_path keeper_name;
           let persisted =
             Yojson.Safe.from_file
-              (Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json")
+              (Filename.concat base_path ".masc/keepers/tool_usage/alpha.json")
           in
           let open Yojson.Safe.Util in
           Alcotest.(check int) "persisted schema version" 2
@@ -2273,7 +2273,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
             (Some 1)
             (Option.map (fun restored -> restored.Keeper_types.count) restored);
           let persisted_path =
-            Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json"
+            Filename.concat base_path ".masc/keepers/tool_usage/alpha.json"
           in
           Fs_compat.save_file
             persisted_path
@@ -2389,7 +2389,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
       cleanup_dir base_path)
     (fun () ->
       Keeper_registry.For_testing.clear ();
-      let keeper_name = "sangsu" in
+      let keeper_name = "alpha" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       ignore
         (Keeper_registry.For_testing.register ~base_path keeper_name

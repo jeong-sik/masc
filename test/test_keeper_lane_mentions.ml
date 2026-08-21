@@ -41,14 +41,14 @@ let test_parser_goldens () =
   check ids "newline separated" [ "alice" ] (parse "line one\n@alice two");
   check ids "deduplicated" [ "alice" ] (parse "@alice and @alice again");
   check ids "two distinct"
-    [ "alice"; "sangsu" ]
-    (parse "@sangsu and @alice please");
+    [ "alice"; "alpha" ]
+    (parse "@alpha and @alice please");
   check ids "keeper-shaped form canonicalizes (documented widening)"
     [ "alice" ]
     (parse "cc @keeper-alice");
-  (* Apostrophe is an internal (kept) character — "@sangsu's" is its own
-     token and never reaches "sangsu"; same as the legacy tokenizer. *)
-  check ids "possessive stays distinct" [ "sangsu's" ] (parse "@sangsu's note")
+  (* Apostrophe is an internal (kept) character — "@alpha's" is its own
+     token and never reaches "alpha"; same as the legacy tokenizer. *)
+  check ids "possessive stays distinct" [ "alpha's" ] (parse "@alpha's note")
 
 let test_explicit_address_is_closed () =
   let check_address label expected content =
@@ -68,13 +68,13 @@ let test_explicit_address_is_closed () =
   check_address "exact broadcast" "broadcast" "release note @@all";
   check_address
     "generic agent-type broadcast is not Keeper authority"
-    "unsupported:analyst"
-    "release note @@analyst";
+    "unsupported:delta"
+    "release note @@delta";
   check_address "empty broadcast selector fails closed" "unsupported:" "release @@";
   check_address
     "mixed valid and unsupported broadcast fails closed"
-    "unsupported:all,analyst"
-    "@@all @@analyst";
+    "unsupported:all,delta"
+    "@@all @@delta";
   check_address
     "broadcast precedence"
     "broadcast"
@@ -130,8 +130,8 @@ let corpus_contents =
   ; "PING @DREAMER NOW"
   ; "ok @alice, thanks"
   ; "just chatting here"
-  ; "@sangsu and @alice please"
-  ; "@analyst: status?"
+  ; "@alpha and @alice please"
+  ; "@delta: status?"
   ; "tab\t@alice\tseparated"
   ; "(@alice)"
   ; "@@alice double at"
@@ -141,14 +141,14 @@ let corpus_contents =
   ; "@vincent are you there"
   ; "mid@alice token"
   ; "@alice."
-  ; "...@sangsu..."
+  ; "...@alpha..."
   ]
 
 let corpus_target_sets =
   [ [ "alice" ]
-  ; [ "sangsu" ]
-  ; [ "alice"; "sangsu" ]
-  ; [ "analyst" ]
+  ; [ "alpha" ]
+  ; [ "alice"; "alpha" ]
+  ; [ "delta" ]
   ; [ "vincent" ]
   ; []
   ; [ "" ]
@@ -200,16 +200,16 @@ let message_mentions (m : Store.chat_message) =
 let test_append_persists_mentions () =
   with_base "lane-mentions-append" (fun base ->
       Store.append_user_message ~base_dir:base ~keeper_name:"alice"
-        ~content:"@alice please look at @sangsu note" ();
+        ~content:"@alice please look at @alpha note" ();
       Store.append_turn ~base_dir:base ~keeper_name:"alice"
-        ~user_content:"thanks @analyst" ~user_attachments:[]
+        ~user_content:"thanks @delta" ~user_attachments:[]
         ~assistant_content:"done" ();
       match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ first; second; third ] ->
           check ids "user message mentions"
-            [ "alice"; "sangsu" ]
+            [ "alice"; "alpha" ]
             (message_mentions first);
-          check ids "turn user line mentions" [ "analyst" ]
+          check ids "turn user line mentions" [ "delta" ]
             (message_mentions second);
           check ids "assistant line has none" [] (message_mentions third)
       | other ->

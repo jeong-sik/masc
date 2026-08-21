@@ -1102,12 +1102,12 @@ let () = test "handle_transition_submit_does_not_have_a_disable_bypass"
 let () = test "handle_transition_submit_rejects_registered_keeper_alias"
     (fun () ->
   (
-    let ctx = make_test_ctx_with_agent "keeper-executor-agent" in
+    let ctx = make_test_ctx_with_agent "keeper-omega-agent" in
     ignore
-      (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+      (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
          ~capabilities:[] ());
-    register_test_keeper ctx ~keeper_name:"executor"
-      ~agent_name:"keeper-executor-agent";
+    register_test_keeper ctx ~keeper_name:"omega"
+      ~agent_name:"keeper-omega-agent";
     let _ =
       Task.Tool.handle_add_task
         ~tool_name:"test_tool"
@@ -1116,13 +1116,13 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
         (`Assoc [ ("title", `String "Canonical submit identity") ])
     in
     (match
-       Workspace.claim_task_r ctx.config ~agent_name:"keeper-executor-agent"
+       Workspace.claim_task_r ctx.config ~agent_name:"keeper-omega-agent"
          ~task_id:"task-001" ()
      with
      | Ok _ -> ()
      | Error err -> failwith (Masc_domain.masc_error_to_string err));
     let alias_ctx =
-      { ctx with Task.Tool.agent_name = "keeper-executor" }
+      { ctx with Task.Tool.agent_name = "keeper-omega" }
     in
     let result =
       Task.Tool.handle_transition
@@ -1145,15 +1145,15 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
        an incidental FSM one. The old assertion pinned the literal "requires
        owning the task", which the message stopped using while still rejecting
        for exactly this reason. *)
-    assert (str_contains (Tool_result.message result) "keeper-executor-agent");
-    assert_task_claimed_by ctx "keeper-executor-agent"))
+    assert (str_contains (Tool_result.message result) "keeper-omega-agent");
+    assert_task_claimed_by ctx "keeper-omega-agent"))
 
 let () = test "keeper_reconciliation_ignores_prefix_matched_agent"
     (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in
-  let keeper_name = "executor" in
-  let keeper_agent_name = "keeper-executor-agent" in
-  let foreign_agent_name = "keeper-executor-agent-shadow" in
+  let keeper_name = "omega" in
+  let keeper_agent_name = "keeper-omega-agent" in
+  let foreign_agent_name = "keeper-omega-agent-shadow" in
   ignore
     (Workspace.bind_session
        ctx.config
@@ -1307,7 +1307,7 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
   | _ -> failwith "expected exactly one task"
 )
 
-(* Regression: 2026-05-17 nick0cave production case. masc_transition with
+(* Regression: 2026-05-17 theta0 production case. masc_transition with
    action=claim/start does not require [handoff_context.summary]; the LLM
    has nothing to summarize at work entry. Previously the parser rejected
    any empty summary regardless of action, which broke entry-class
@@ -1562,7 +1562,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
 
 let () = test "agent verdict verbs remain refused after terminal completion" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
-  let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
+  let verifier_ctx = { ctx with Task.Tool.agent_name = "fixture-reviewer" } in
   let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
   let _ = Workspace.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
   let _ =
@@ -1614,7 +1614,7 @@ let () = test "agent verdict verbs remain refused after terminal completion" (fu
 let () = test "operator verdict path replaces verifier agent actions" (fun () ->
   (
     let worker_ctx = make_test_ctx_with_agent "worker" in
-    let verifier_ctx = { worker_ctx with Task.Tool.agent_name = "verifier" } in
+    let verifier_ctx = { worker_ctx with Task.Tool.agent_name = "fixture-reviewer" } in
     let _ =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 worker_ctx
         (`Assoc [ ("title", `String "Verifier may approve") ])
@@ -1912,12 +1912,12 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"executor"
-    ~agent_name:"keeper-executor-agent";
+  register_test_keeper ctx ~keeper_name:"omega"
+    ~agent_name:"keeper-omega-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-executor-agent" }
+    { ctx with Task.Tool.agent_name = "keeper-omega-agent" }
   in
   let result =
     Task.Tool.handle_claim
@@ -1949,12 +1949,12 @@ let () = test "keeper_alias_claim_updates_planning_as_exact_agent" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"executor"
-    ~agent_name:"keeper-executor-agent";
+  register_test_keeper ctx ~keeper_name:"omega"
+    ~agent_name:"keeper-omega-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-executor" }
+    { ctx with Task.Tool.agent_name = "keeper-omega" }
   in
   let result =
     Task.Tool.handle_claim
@@ -1986,15 +1986,15 @@ let () = test "keeper_generated_alias_claim_updates_planning_as_exact_agent" (fu
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
        ~capabilities:[] ());
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-warm-raven-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-warm-raven-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"executor"
-    ~agent_name:"keeper-executor-agent";
+  register_test_keeper ctx ~keeper_name:"omega"
+    ~agent_name:"keeper-omega-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-executor-warm-raven-agent" }
+    { ctx with Task.Tool.agent_name = "keeper-omega-warm-raven-agent" }
   in
   let result =
     Task.Tool.handle_claim
@@ -2026,15 +2026,15 @@ let () = test "keeper_separator_alias_claim_updates_planning_as_exact_agent" (fu
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-tech-glutton-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-pi-glutton-agent"
        ~capabilities:[] ());
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-tech_glutton-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-pi_glutton-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"tech-glutton"
-    ~agent_name:"keeper-tech-glutton-agent";
+  register_test_keeper ctx ~keeper_name:"pi-glutton"
+    ~agent_name:"keeper-pi-glutton-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-tech_glutton-agent" }
+    { ctx with Task.Tool.agent_name = "keeper-pi_glutton-agent" }
   in
   let result =
     Task.Tool.handle_claim
@@ -2907,7 +2907,7 @@ let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
 let () =
   test "strict verdict validates justification and credits producer metrics" (fun () ->
     let ctx = make_test_ctx_with_agent "producer" in
-    let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
+    let verifier_ctx = { ctx with Task.Tool.agent_name = "fixture-reviewer" } in
     add_priority_task ctx ~title:"Strict completion metrics";
     set_only_task_contract
       ctx

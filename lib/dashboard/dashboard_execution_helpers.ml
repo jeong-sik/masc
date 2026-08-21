@@ -76,14 +76,14 @@ type agent_profile = {
 }
 
 (** Extract the Keeper name from a MASC agent name.
-    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc"
+    "keeper-example-agent" -> "example", "claude-agent-abc" -> "claude-agent-abc"
 
     [Keeper_identity] owns this parse. It enumerates the four accepted
     spellings — keeper-/-agent, keeper_/_agent, and the two mixed forms — and
     its own comment records what happens when a spelling is known in one place
     and not another. This function used to hand-roll the first pair with
     [String.sub s 7] and [String.sub s (len - 6) 6], so an agent named
-    keeper_sangsu_agent kept its affixes and the profile lookup below searched
+    keeper_example_agent kept its affixes and the profile lookup below searched
     for a directory of that name. *)
 let extract_keeper_name (agent_name : string) : string =
   match Keeper_identity.keeper_name_of_agent_alias agent_name with

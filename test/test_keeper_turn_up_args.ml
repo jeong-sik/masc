@@ -82,11 +82,11 @@ let test_parse_rejects_runtime_agent_identity_as_keeper_name () =
           (String.starts_with body ~prefix:"invalid keeper name:");
         check bool "names the canonical keeper" true
           (String.ends_with body
-             ~suffix:"use the canonical keeper name \"executor\""))
-    [ "keeper-executor-agent"
-    ; "keeper_executor_agent"
-    ; "keeper-executor_agent"
-    ; "keeper_executor-agent"
+             ~suffix:"use the canonical keeper name \"omega\""))
+    [ "keeper-omega-agent"
+    ; "keeper_omega_agent"
+    ; "keeper-omega_agent"
+    ; "keeper_omega-agent"
     ]
 
 let test_parse_max_context_override () =

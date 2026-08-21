@@ -82,7 +82,7 @@ let threshold_sec = 900.0
 let attempt_started_at = 1_000_000.0
 
 let test_a_progressing_attempt_is_not_stalled () =
-  (* rondo, 2026-08-12 13:59:44Z: the attempt was cancelled 6 seconds after a
+  (* beta, 2026-08-12 13:59:44Z: the attempt was cancelled 6 seconds after a
      successful masc_transition, with 30+ tool calls inside the window. Its
      ELAPSED time had reached the threshold -- which is exactly why the
      pre-#28417 axis killed it -- while its progress was 6 seconds old. *)
@@ -97,7 +97,7 @@ let test_a_progressing_attempt_is_not_stalled () =
 ;;
 
 let test_a_wedged_attempt_is_stalled () =
-  (* sangsu, 2026-08-12 10:04Z-11:10Z: zero trajectory events for 65 minutes.
+  (* alpha, 2026-08-12 10:04Z-11:10Z: zero trajectory events for 65 minutes.
      This is the class #27355 introduced the deadline for and it must still
      fire on the new axis. *)
   let now = attempt_started_at +. 4_000.0 in
@@ -110,7 +110,7 @@ let test_a_wedged_attempt_is_stalled () =
 ;;
 
 let test_a_tool_in_flight_is_not_a_stall () =
-  (* One Execute ran 120s inside rondo's window without refreshing the
+  (* One Execute ran 120s inside beta's window without refreshing the
      progress signal. A tool that has been issued but not completed is work,
      not a stall -- the exclusion [active_tool_count] has documented since
      RFC-0197 with no code reading it until now. *)

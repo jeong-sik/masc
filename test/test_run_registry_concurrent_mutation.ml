@@ -46,7 +46,7 @@ let register t ~verification_id ~started_at =
     t
     ~verification_id
     ~task_id:"task-concurrent"
-    ~producer:"keeper-rondo-agent"
+    ~producer:"keeper-beta-agent"
     ~authority_kind:"system_llm_agent"
     ~authority_actor:("system-llm-agent-" ^ verification_id)
     ~started_at
@@ -149,7 +149,7 @@ let register_exact t ~run_id =
     ~run_id
     ~lane:Ex.Board_attention
     ~subject_id:("cand-" ^ run_id)
-    ~actor:"keeper-rondo-agent"
+    ~actor:"keeper-beta-agent"
     ~started_at:100.0
     ~input:(Ex.Exact_input (`Assoc []))
 ;;

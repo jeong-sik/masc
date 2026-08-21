@@ -71,7 +71,7 @@ let is_assistant (message : Agent_core.Types.message) =
    (#25537). That outer guard had no rationale of its own: the commit message
    justified it with "providers replay [signed thinking] byte-exact", which the
    [signature = None] pattern already enforces per block. On an agentic keeper
-   the guard swallows nearly everything — measured on the sangsu checkpoint
+   the guard swallows nearly everything — measured on a live Keeper checkpoint
    after a full purge, 418 of 422 surviving unsigned Thinking blocks (490,370 B,
    41.0% of the 1,196,574 B file) sat in messages that also carried a ToolUse.
    Unsigned thinking additionally cannot be replayed to Anthropic in that
@@ -209,7 +209,7 @@ let purge_messages ~config messages =
          distinct assistant messages byte-identical, and only the stripped
          form participates in duplicate grouping. This ordering is what makes
          a single pass a fixpoint (verified by the idempotence test; measured
-         on the sangsu checkpoint, R1-first left 229 duplicates for a second
+         on the same checkpoint, R1-first left 229 duplicates for a second
          pass to find). *)
       let dedup_key_of message =
         if is_text_only message

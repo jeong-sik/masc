@@ -25,7 +25,7 @@ let route_annotation : Types.annotation =
   ; file_path = "lib/keeper/keeper_tool_ide_runtime.ml"
   ; line_start = 12
   ; line_end = 14
-  ; keeper_id = "sangsu"
+  ; keeper_id = "alpha"
   ; kind = Types.Comment
   ; content = "Connect this line to the active review context."
   ; goal_id = Some "goal-ide"
@@ -132,7 +132,7 @@ let test_create_lists_route_context () =
       Store.create
         ~base_dir
         ~codebase:"github.com_other_repo"
-        ~keeper_id:"sangsu"
+        ~keeper_id:"alpha"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
@@ -169,7 +169,7 @@ let test_lsp_overlay_exposes_route_context () =
       Store.create
         ~base_dir
         ~codebase:"github.com_other_repo"
-        ~keeper_id:"sangsu"
+        ~keeper_id:"alpha"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
@@ -225,7 +225,7 @@ let test_region_tracker_writes_fixed_regions_file () =
     Region.ingest_tool_call
       ~base_dir
       ~codebase:"github.com_other_repo"
-      ~keeper_id:"sangsu"
+      ~keeper_id:"alpha"
       ~turn:7
       (`Assoc
         [ "name", `String "write_file"
@@ -241,7 +241,7 @@ let test_region_tracker_writes_fixed_regions_file () =
       check string "file path" "lib/a.ml" region.Types.file_path;
       check int "line start" 1 region.line_start;
       check int "line end" 1 region.line_end;
-      check string "keeper" "sangsu" region.keeper_id;
+      check string "keeper" "alpha" region.keeper_id;
       (match region.source with
        | Types.Tool_call { tool_name; turn } ->
          check string "tool name" "write_file" tool_name;
@@ -264,7 +264,7 @@ let create_in_codebase ~base_dir ~codebase ~kind ~content () =
   Store.create
     ~base_dir
     ~codebase
-    ~keeper_id:"sangsu"
+    ~keeper_id:"alpha"
     ~file_path:"lib/foo.ml"
     ~line_start:1
     ~line_end:3
@@ -357,7 +357,7 @@ let test_explicit_codebase_store () =
       Store.create
         ~base_dir
         ~codebase:"github.com_other_repo"
-        ~keeper_id:"sangsu"
+        ~keeper_id:"alpha"
         ~file_path:"lib/foo.ml"
         ~line_start:1
         ~line_end:3
@@ -394,7 +394,7 @@ let test_delete_is_codebase_scoped () =
         ~base_dir
         ~codebase:"github.com_other_repo"
         ~id:by_url.id
-        ~keeper_id:"sangsu"
+        ~keeper_id:"alpha"
         ()
     in
     (match in_other with
@@ -405,7 +405,7 @@ let test_delete_is_codebase_scoped () =
         ~base_dir
         ~codebase:(slug)
         ~id:by_url.id
-        ~keeper_id:"sangsu"
+        ~keeper_id:"alpha"
         ()
     in
     (match in_by_url with
@@ -417,7 +417,7 @@ let test_region_append_isolates_codebases () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let region : Types.code_region =
-      { keeper_id = "sangsu"
+      { keeper_id = "alpha"
       ; file_path = "lib/foo.ml"
       ; line_start = 1
       ; line_end = 5
@@ -480,7 +480,7 @@ let test_ingest_edit_file_content_fallback () =
     Region.ingest_tool_call
       ~base_dir
       ~codebase:(slug)
-      ~keeper_id:"sangsu"
+      ~keeper_id:"alpha"
       ~turn:1
       json;
     let by_url_path =
@@ -516,7 +516,7 @@ let test_ingest_no_double_write () =
     Region.ingest_tool_call
       ~base_dir
       ~codebase:(slug)
-      ~keeper_id:"sangsu"
+      ~keeper_id:"alpha"
       ~turn:0
       json;
     let by_url_path =
@@ -592,7 +592,7 @@ let test_compact_preserves_annotations () =
         Store.create
           ~base_dir
           ~codebase:"github.com_other_repo"
-          ~keeper_id:"sangsu"
+          ~keeper_id:"alpha"
           ~file_path:"lib/x.ml"
           ~line_start:1
           ~line_end:2

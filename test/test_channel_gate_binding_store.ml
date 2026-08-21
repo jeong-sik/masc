@@ -88,7 +88,7 @@ let test_rejects_malformed_binding_rows () =
   expect_error "duplicate channel id was accepted"
     (`Assoc
       [ "channel-1", `String "luna"
-      ; "channel-1", `String "sangsu"
+      ; "channel-1", `String "alpha"
       ])
 
 let test_read_bindings_result_missing_store_is_empty () =
@@ -131,7 +131,7 @@ let test_audit_failure_rolls_back_binding_mutation () =
   let result =
     Store.mutate_bindings store ~decide:(fun _ ->
       Ok
-        ( [ ({ channel_id = "channel-2"; keeper_name = "sangsu" }
+        ( [ ({ channel_id = "channel-2"; keeper_name = "alpha" }
             : Store.binding) ]
         , sample_event ~action:"bind" ()
         , () ))
@@ -195,7 +195,7 @@ let test_failed_mutation_cannot_erase_concurrent_success () =
       in
       Ok (updated, sample_event ~action:"bind" (), ()))
   in
-  let failed = Domain.spawn (fun () -> bind "failed" "sangsu") in
+  let failed = Domain.spawn (fun () -> bind "failed" "alpha") in
   Stdlib.Mutex.lock coordination_mu;
   while not !first_audit_waiting do
     Stdlib.Condition.wait coordination coordination_mu

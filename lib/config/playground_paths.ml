@@ -21,7 +21,7 @@ let all_playgrounds_prefix : string =
 
 (** Strip the [keeper-...-agent] canonical wrapper when present,
     returning the inner short name.  E.g.
-    ["keeper-masc-improver-agent"] -> ["masc-improver"].
+    ["keeper-example-keeper-agent"] -> ["example-keeper"].
 
     The MCP session resolver generates canonical names via
     [keeper_agent_name] in [keeper_types_profile.ml], but playground

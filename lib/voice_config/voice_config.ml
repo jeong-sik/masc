@@ -12,7 +12,6 @@ type endpoint = {
   api_key_env : string option;
   enabled : bool;
   timeout_seconds : float option;
-  max_retries : int option;
 }
 
 type voice_tuning = {
@@ -147,6 +146,12 @@ let string_of_endpoint_kind = function
 
 let parse_endpoint ~ctx json =
   let open Result in
+  let* () =
+    match json with
+    | `Assoc fields when List.mem_assoc "max_retries" fields ->
+      Error (Printf.sprintf "%s.max_retries is no longer supported" ctx)
+    | _ -> Ok ()
+  in
   let* id = require_string ~ctx ~field:"id" json in
   let* kind_raw = require_string ~ctx ~field:"kind" json in
   let* kind = endpoint_kind_of_string kind_raw in
@@ -158,7 +163,6 @@ let parse_endpoint ~ctx json =
     Option.value ~default:true (Json_util.get_bool json "enabled")
   in
   let timeout_seconds = Json_util.get_float json "timeout_seconds" in
-  let max_retries = Json_util.get_int json "max_retries" in
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
@@ -182,7 +186,6 @@ let parse_endpoint ~ctx json =
       api_key_env;
       enabled;
       timeout_seconds;
-      max_retries;
     }
 
 let rec parse_endpoints ~ctx acc = function

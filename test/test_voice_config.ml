@@ -149,6 +149,18 @@ let test_session_empty_endpoints_ok () =
   | Error err ->
     fail (Printf.sprintf "expected Ok, got Error: %s" err)
 
+let test_removed_max_retries_is_rejected () =
+  let endpoints =
+    {|[{"id":"session","kind":"voice_mcp","mcp_url":"http://localhost/mcp","max_retries":2}]|}
+  in
+  match parse (minimal_config_json ~session_endpoints:endpoints) with
+  | Error message ->
+    check bool "removed field is named" true
+      (String_util.string_contains_substring
+         ~needle:"max_retries is no longer supported"
+         message)
+  | Ok _ -> fail "removed max_retries field was accepted"
+
 let test_session_with_endpoint_ok () =
   let session_ep =
     {|[{ "id": "voice-mcp", "kind": "voice_mcp",
@@ -235,6 +247,8 @@ let () =
         [
           test_case "empty session endpoints parses ok"
             `Quick test_session_empty_endpoints_ok;
+          test_case "removed max_retries is rejected"
+            `Quick test_removed_max_retries_is_rejected;
           test_case "session with endpoint parses ok"
             `Quick test_session_with_endpoint_ok;
           test_case "tts reachable when session empty"

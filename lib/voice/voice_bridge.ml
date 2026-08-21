@@ -210,15 +210,12 @@ type agent_speak_result =
   }
 
 (** ============================================
-    HTTP Client with Timeout and Retry (Eio-native)
+    HTTP Client with Timeout (Eio-native)
     ============================================ *)
 
-(** The four ways a Voice MCP call can fail. Retryability used to be decided by
-    sniffing the rendered message — [starts_with "connection"], [starts_with
-    "timeout"], [Scanf "http %d"] — over strings this same module produces. The
-    timeout branch never fired: [with_timeout] renders "Request timeout after
-    30.0s", which starts with "request", so the retry loop refused to retry its
-    own timeouts. Deciding on the constructor removes the round trip. *)
+(** The four ways a Voice MCP call can fail. The caller receives the exact
+    typed observation from one endpoint attempt; this module does not infer a
+    replay policy from the constructor or rendered message. *)
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string
@@ -236,12 +233,6 @@ let mcp_call_error_to_string = function
     Printf.sprintf "Voice MCP: invalid JSON body: %s" detail
 ;;
 
-let is_retryable_error = function
-  | Timed_out _ | Connection_failed _ -> true
-  | Http_status { code; _ } -> code >= 500 && code < 600
-  | Malformed_body _ -> false
-;;
-
 (** Timeout helper using Eio.Fiber.first - returns Error after specified seconds *)
 let with_timeout ~clock ?timeout operation =
   let timeout_sec =
@@ -254,31 +245,6 @@ let with_timeout ~clock ?timeout operation =
     (fun () ->
        Eio.Time.sleep clock timeout_sec;
        Error (Timed_out timeout_sec))
-;;
-
-(** Retry with exponential backoff - Eio version *)
-let rec retry_with_backoff ~clock ~attempt ~max_attempts ~backoff_sec operation =
-  let result = operation () in
-  match result with
-  | Ok _ as success -> success
-  | Error e when attempt < max_attempts && is_retryable_error e ->
-    log_info
-      (Printf.sprintf
-         "Retry %d/%d after %.1fs (error: %s)"
-         attempt
-         max_attempts
-         backoff_sec
-         (mcp_call_error_to_string e));
-    Eio.Time.sleep clock backoff_sec;
-    retry_with_backoff
-      ~clock
-      ~attempt:(attempt + 1)
-      ~max_attempts
-      ~backoff_sec:(backoff_sec *. backoff_multiplier ())
-      operation
-  | Error _ as failure ->
-    log_error (Printf.sprintf "All %d retries exhausted" max_attempts);
-    failure
 ;;
 
 let parse_json_response body =
@@ -367,15 +333,7 @@ let call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments =
     with_timeout ~clock ~timeout (fun () ->
       single_voice_mcp_call ~net ~uri ~headers_list ~body_str)
   in
-  (* The typed error stays inside the retry decision; callers keep the string
-     surface they already consume. *)
-  retry_with_backoff
-    ~clock
-    ~attempt:1
-    ~max_attempts:(Option.value endpoint.max_retries ~default:(max_retries ()))
-    ~backoff_sec:(initial_backoff_seconds ())
-    operation
-  |> Result.map_error mcp_call_error_to_string
+  operation () |> Result.map_error mcp_call_error_to_string
 ;;
 
 let attempt_tts_endpoint

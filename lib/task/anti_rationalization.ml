@@ -287,20 +287,6 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
   | exn -> Error (sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
 ;;
 
-(* ================================================================ *)
-(* Cross-model runtime selection (#3067, RFC-0361 D7(a))             *)
-(* ================================================================ *)
-
-(** [\[runtime.exact_output_lanes.verifier_exact\]] — the dedicated exact-output
-    lane every completion-authority judgement call runs on. The lane's admitted
-    slots, in frozen declaration order, are the single provider-selection SSOT:
-    there is no second selector path and no [\[runtime\].default] fallback.
-
-    Cross-model evaluation is more effective than same-model different-role
-    because different model architectures have different blindspots.
-    See: Anthropic "Harness Design" blog analysis. *)
-let verifier_exact_lane_id = "verifier_exact"
-
 (** Ordered evaluator slot list for one review. An explicit
     [~evaluator_runtime] override is a single-slot lane (tests,
     [--evaluator-runtime]); without one the published [verifier_exact] lane

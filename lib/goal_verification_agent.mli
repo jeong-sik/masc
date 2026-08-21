@@ -4,8 +4,8 @@
     verification ledger's durable pending requests — [Criterion_pending] (B2)
     and [Proof_pending] (B3) — judges each through
     {!Task.Anti_rationalization.review} on the [verifier_exact] lane, and
-    commits the verdict through {!Workspace_goals.handle_goal_transition}, the
-    same FSM+ledger+phase+event path the MCP surface uses, under the fixed
+    commits the verdict through {!Workspace_goals.commit_verifier_decision},
+    the typed internal FSM+ledger+phase+event boundary, under the fixed
     identity [System_llm_agent { agent_run_id = "verifier_exact" }]
     (RFC-0361 D7(b)).
 

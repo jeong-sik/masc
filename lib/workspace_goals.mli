@@ -42,11 +42,30 @@ val handle_goal_assign
 
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
-    {!goal_transition_action_strings}). [request_complete] moves an executing
-    Goal directly to [Completed]. *)
+    {!Goal_phase.Public_action.all}). [request_complete] moves an executing
+    Goal to [Verifying]; verifier verdicts are not public actions. *)
 val handle_goal_transition
   :  tool_name:string
   -> start_time:float
   -> Workspace_types.context
   -> Yojson.Safe.t
+  -> Tool_result.result
+
+type verifier_decision =
+  | Criterion_viable
+  | Criterion_unreachable of { reason : string }
+  | Proof_proven
+  | Proof_refuted of { reason : string }
+
+(** Commit one verdict from the application-owned Goal verifier. The fixed
+    [verifier_exact] authority is constructed inside this boundary; callers
+    cannot supply or impersonate it. The ledger commit precedes any phase
+    write, and a stale/non-pending verdict is refused. *)
+val commit_verifier_decision
+  :  tool_name:string
+  -> start_time:float
+  -> Workspace_utils_backend_setup.config
+  -> goal_id:string
+  -> decision:verifier_decision
+  -> evidence:string
   -> Tool_result.result

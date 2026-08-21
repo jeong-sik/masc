@@ -303,7 +303,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup ~on_tool_result () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let lookup_schemas, lookup_dispatch =
@@ -397,6 +397,7 @@ let install () =
           ~masc_tools:(report_tool_schema :: lookup_schemas)
           ~dispatch
           ~provider_config_transform:apply_review_verdict_output_contract
+          ~on_runtime_attempt_error
           ?sw
           ())
     with

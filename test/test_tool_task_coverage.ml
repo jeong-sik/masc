@@ -103,7 +103,7 @@ let install_test_hooks () =
     Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
     (fun () -> Ok [ "test-evaluator-runtime" ]);
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
        Ok (Some Task.Anti_rationalization.Approve))
 
 let with_env name value_opt f =
@@ -1479,7 +1479,7 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
             String.equal agent_name "admin-agent");
        let reviewer_called = ref false in
        Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-         (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+         (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
             reviewer_called := true;
             Ok (Some Task.Anti_rationalization.Approve));
        let result =

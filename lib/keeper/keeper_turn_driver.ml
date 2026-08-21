@@ -95,23 +95,6 @@ let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
       run_result
 ;;
 
-type deferred_runtime_lane =
-  { assignment_id : string
-  ; failed_runtime_id : string
-  ; next_runtime_id : string
-  ; later_runtime_ids : string list
-  ; failure : Agent_core.Error.t
-  }
-
-let deferred_runtime_ids hint =
-  hint.next_runtime_id :: hint.later_runtime_ids
-
-(* Quota demotion must never promote a candidate the runtime table cannot
-   resolve (for example one removed by a runtime.toml reload while a deferred
-   suffix was frozen): a missing id at the head fails the attempt with a
-   non-rotating error before resolvable alternatives are tried. Order is
-   therefore resolvable-active, then resolvable-exhausted, then unresolvable —
-   declared relative order preserved within each class (PR #28219 review). *)
 let quota_ordered_runtime_ids ~now runtime_ids =
   let resolvable, unresolvable =
     List.partition
@@ -124,19 +107,6 @@ let quota_ordered_runtime_ids ~now runtime_ids =
     resolvable
   @ unresolvable
 ;;
-
-let quota_ordered_deferred_runtime_lane ~now hint =
-  match quota_ordered_runtime_ids ~now (deferred_runtime_ids hint) with
-  | next_runtime_id :: later_runtime_ids ->
-    { hint with next_runtime_id; later_runtime_ids }
-  | [] -> hint
-;;
-
-let equal_deferred_runtime_lane left right =
-  String.equal left.assignment_id right.assignment_id
-  && String.equal left.failed_runtime_id right.failed_runtime_id
-  && String.equal left.next_runtime_id right.next_runtime_id
-  && left.later_runtime_ids = right.later_runtime_ids
 
 let project_provider_attempt_result ~replay_prefix_projection provider_result =
   let turn_result =
@@ -513,8 +483,6 @@ let run_named
     ?on_model_input_window_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
-    ?deferred_runtime_lane
-    ?on_deferred_runtime_consumed
     ?provider_config_transform
     ?sw
     ?net
@@ -571,10 +539,7 @@ let run_named
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
   (* Quota-window demotion is ordering only — a demoted candidate is still
-     attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
-     selecting a fresh lane walk. A deferred suffix was already frozen before
-     pre-dispatch shaping, so re-reading wall-clock quota state here could make
-     the actual provider differ from the runtime used to shape the request. *)
+     attempted when the lane has nothing else (RFC-0370 §3.3). *)
   let pre_tool_rejects =
     match pre_tool_rejects with
     | Some rejects -> rejects
@@ -588,21 +553,17 @@ let run_named
       candidates
   in
   let lane_id_opt, lane_candidate_ids =
-    match deferred_runtime_lane with
-    | Some hint ->
-      Some hint.assignment_id, deferred_runtime_ids hint
-    | None ->
-      (match Runtime.resolve_assignment runtime_id with
-       | `Missing -> None, []
-       | `Lane lane ->
-         let lane_id = Runtime_lane.id lane in
-         ( Some lane_id
-         , (* Demotion runs after sticky preference: a provider that stated
-              "exhausted until T" outranks a remembered last-good candidate
-              on that same account. *)
-           Runtime_lane_preference.prefer_order ~lane_id
-             (Runtime_lane.ordered_candidates lane)
-           |> demote_quota_exhausted ))
+    match Runtime.resolve_assignment runtime_id with
+    | `Missing -> None, []
+    | `Lane lane ->
+      let lane_id = Runtime_lane.id lane in
+      ( Some lane_id
+      , (* Demotion runs after sticky preference: a provider that stated
+           "exhausted until T" outranks a remembered last-good candidate
+           on that same account. *)
+        Runtime_lane_preference.prefer_order ~lane_id
+          (Runtime_lane.ordered_candidates lane)
+        |> demote_quota_exhausted )
   in
   if lane_candidate_ids = []
   then
@@ -636,28 +597,18 @@ let run_named
     | [] -> runtime_id, []
   in
   let* first_candidate =
-    resolve_runtime_candidate_for_attempt
-      ?on_missing:
-        (match deferred_runtime_lane with
-         | Some _ -> on_deferred_runtime_consumed
-         | None -> None)
-      first_candidate_id
+    resolve_runtime_candidate_for_attempt first_candidate_id
   in
   let* remaining_runtimes =
-    match deferred_runtime_lane with
-    | Some _ -> Ok []
-    | None -> resolve_runtime_candidates remaining_candidate_ids
+    resolve_runtime_candidates remaining_candidate_ids
   in
   let reroute_decision =
-    match deferred_runtime_lane with
-    | Some _ -> Runtime_agent.No_reroute_needed
-    | None ->
-      lane_modality_reroute_decision
-        ~checkpoint_messages
-        ~initial_messages
-        ~goal_blocks:current_goal_blocks
-        ~first_candidate
-        ~remaining_runtimes
+    lane_modality_reroute_decision
+      ~checkpoint_messages
+      ~initial_messages
+      ~goal_blocks:current_goal_blocks
+      ~first_candidate
+      ~remaining_runtimes
   in
   let first_runtime_id, first_runtime =
     first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
@@ -667,15 +618,7 @@ let run_named
     dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
   in
   let attempt_candidates =
-    match deferred_runtime_lane with
-    | None -> List.map (fun runtime -> Resolved_runtime runtime) attempt_runtimes
-    | Some hint ->
-      List.map
-        (fun runtime_id ->
-           match Runtime.get_runtime_by_id runtime_id with
-           | Some runtime -> Resolved_runtime runtime
-           | None -> Missing_runtime runtime_id)
-        lane_candidate_ids
+    List.map (fun runtime -> Resolved_runtime runtime) attempt_runtimes
   in
   let assigned_runtime_context_window =
     Runtime.max_context_of_runtime first_candidate
@@ -796,10 +739,7 @@ let run_named
       if allowed
       then Candidate_transition_allowed
       else Candidate_transition_denied)
-    ~runtime_id:
-      (match deferred_runtime_lane with
-       | Some hint -> hint.assignment_id
-       | None -> runtime_id)
+    ~runtime_id
     ~runtime_id_of:(function
       | Resolved_runtime runtime -> runtime.Runtime.id
       | Missing_runtime runtime_id -> runtime_id)
@@ -816,7 +756,6 @@ let run_named
     ~run_attempt:(fun ~idx ~runtime_id:attempt_runtime_id candidate ->
       match candidate with
       | Missing_runtime runtime_id ->
-        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         ( Error (runtime_candidate_missing_error runtime_id)
         , None
         , Keeper_provider_attempt_effect.No_effect_observed )
@@ -895,7 +834,6 @@ let run_named
              | None -> ());
             run_codex ~initial_messages ()
         in
-        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let codex_result =
           Result.bind codex_attempt.result (fun run_result ->
             match codex_attempt.successful_tool_completion with
@@ -989,7 +927,6 @@ let run_named
             run_antigravity_with_history ()
           | None, None -> run_antigravity_with_history ()
         in
-        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let antigravity_result =
           Result.bind antigravity_attempt.result (fun run_result ->
             apply_official_client_accept
@@ -1071,7 +1008,6 @@ let run_named
             run_claude ~initial_messages ()
           | None, None -> run_claude ~initial_messages ()
         in
-        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let claude_result =
           Result.bind claude_attempt.result (fun run_result ->
             apply_official_client_accept
@@ -1097,7 +1033,6 @@ let run_named
           | Some transform -> transform runtime_provider_config
         with
       | Error err ->
-        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None, Keeper_provider_attempt_effect.No_effect_observed
       | Ok provider_config ->
         (match
@@ -1106,7 +1041,6 @@ let run_named
              provider_config
          with
          | Error err ->
-           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
            Error err, None, Keeper_provider_attempt_effect.No_effect_observed
          | Ok max_request_body_bytes ->
           let candidate = Runtime_candidate.of_provider_config provider_config in
@@ -1201,7 +1135,6 @@ let run_named
             ; seq_ref
             }
           in
-          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider
               try_provider_ctx candidate
@@ -1220,16 +1153,6 @@ let run_named
 
 module For_testing = struct
   type nonrec provider_attempt_outcomes = provider_attempt_outcomes
-
-  let make_deferred_runtime_lane ~assignment_id ~failed_runtime_id
-        ~next_runtime_id ~later_runtime_ids ~failure =
-    { assignment_id
-    ; failed_runtime_id
-    ; next_runtime_id
-    ; later_runtime_ids
-    ; failure
-    }
-  ;;
 
   let project_provider_attempt_result = project_provider_attempt_result
   let provider_result outcomes = outcomes.provider_result

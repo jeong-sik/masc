@@ -154,7 +154,6 @@ val compaction_outcomes_of_cycle_outcome :
     durable compaction state. *)
 
 type failed_source_disposition =
-  | Preserve_for_deferred_runtime
   | Quarantine_source of { detail : string }
   | Pause_keeper_for_integrity of { detail : string }
 
@@ -183,7 +182,6 @@ and batch_defer_reason =
   | Turn_skipped
 
 and batch_preserve_reason =
-  | Deferred_runtime_owns_source
   | Integrity_pause_owns_terminalization
   | No_cycle_outcome
 
@@ -222,10 +220,6 @@ val run_keepalive_unified_turn :
   proactive_warmup_elapsed:bool ->
   reactive_wake:bool ->
   shared_context:Agent_core.Context.t ->
-  deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
-  on_deferred_runtime_consumed:(unit -> unit) ->
-  record_deferred_runtime_lane:
-    (Keeper_turn_driver.deferred_runtime_lane -> unit) ->
   keepalive_turn_outcome
 
 val refresh_work_as_heartbeat :
@@ -267,12 +261,4 @@ val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
-module For_testing : sig
-  (** Deferred runtime lane hints have nothing to do with continuation
-      delivery; they only shared this module with it. The implementation and
-      its live caller both remain, so the export stays too. *)
-  val consume_deferred_runtime_lane_hint :
-    Keeper_turn_driver.deferred_runtime_lane option ref ->
-    Keeper_turn_driver.deferred_runtime_lane ->
-    bool
-end
+module For_testing : sig end

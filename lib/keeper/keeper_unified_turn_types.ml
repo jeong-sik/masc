@@ -15,7 +15,6 @@ type turn_state =
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   ; degraded_retry_info : Keeper_error_classify.degraded_retry option
-  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; retry_phase_started_at : float option
@@ -31,21 +30,6 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
     in
     Log.Keeper.error "%s" (Agent_core.Error.to_string err);
     Error err
-;;
-
-type keeper_cycle_failed_runtime_attribution =
-  { reported_runtime_id : string
-  ; deferred_next_runtime_id : string
-  }
-
-let keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane ~execution_runtime_id =
-  match deferred_runtime_lane with
-  | Some (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-    { reported_runtime_id = hint.failed_runtime_id
-    ; deferred_next_runtime_id = hint.next_runtime_id
-    }
-  | None ->
-    { reported_runtime_id = execution_runtime_id; deferred_next_runtime_id = "none" }
 ;;
 
 let turn_event_bus_manifest_decision

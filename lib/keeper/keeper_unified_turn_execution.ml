@@ -90,8 +90,6 @@ type ctx =
   ; shared_context : Agent_core.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
-  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
-  ; on_deferred_runtime_consumed : (unit -> unit) option
   }
 
 let run (ctx : ctx)
@@ -130,8 +128,6 @@ let run (ctx : ctx)
       ; event_bus_integrity_error_snapshot = _
       ; tool_completed_count_snapshot = _
       ; attempt = _attempt
-      ; deferred_runtime_lane
-      ; on_deferred_runtime_consumed
       } =
     ctx
   in
@@ -217,10 +213,6 @@ let run (ctx : ctx)
                       turn_state.degraded_retry_info)
                  ~runtime_rotation_attempts:
                    (List.rev turn_state.runtime_rotation_attempts)
-                 ?deferred_runtime_lane:
-                   (if is_retry then None else deferred_runtime_lane)
-                 ?on_deferred_runtime_consumed:
-                   (if is_retry then None else on_deferred_runtime_consumed)
                  ~temperature:execution.temperature
                  ~trajectory_acc
                  ~is_retry
@@ -313,20 +305,6 @@ let run (ctx : ctx)
         meta.name;
       Ok result, turn_state
     | Error err ->
-      match deferred_runtime_lane with
-      | Some _ ->
-        Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-          ~keeper_name:meta.name
-          ~runtime_id:execution.runtime_id
-          ~decision:No_degraded_retry
-          ~reason:"frozen_runtime_suffix_exhausted"
-          ~next_runtime:None
-          ~attempt
-          ~error_kind:(Some Agent_core.Error.(category err |> category_label))
-          ~error_message:(Some (Agent_core.Error.to_string err));
-        mark_terminal_error err;
-        Error err, turn_state
-      | None ->
         (match declared_lane_failure_of_error err with
          | Provider_context_overflow { limit_tokens } ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution

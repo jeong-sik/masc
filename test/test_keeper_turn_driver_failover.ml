@@ -720,60 +720,6 @@ let test_prior_checkpoint_appends_current_goal_once () =
       1
       current_goal_count)
 
-let test_deferred_tail_rejects_transformed_uncapped_runtime () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
-    Eio_main.run
-    @@ fun env ->
-    Eio.Switch.run
-    @@ fun sw ->
-    Masc_test_deps.init_eio_clock ~sw env;
-    let transformed_urls = ref [] in
-    let deferred_runtime_lane =
-      Driver.For_testing.make_deferred_runtime_lane
-        ~assignment_id:"resilient"
-        ~failed_runtime_id:"previous.test_model"
-        ~next_runtime_id:"primary.test_model"
-        ~later_runtime_ids:[ "fallback.test_model" ]
-        ~failure:(network_unavailable_error "previous cycle failed")
-    in
-    let result =
-      Driver.run_named
-        ~runtime_id:"resilient"
-        ~keeper_name:"deferred-request-cap"
-        ~base_path:(Filename.get_temp_dir_name ())
-        ~goal:"prove final provider request admission"
-        ~deferred_runtime_lane
-        ~provider_config_transform:(fun provider_config ->
-          transformed_urls := provider_config.base_url :: !transformed_urls;
-          if String.equal provider_config.base_url "http://127.0.0.1:2"
-          then Ok { provider_config with max_request_body_bytes = None }
-          else Ok provider_config)
-        ~body_timeout_s:0.5
-        ~sw
-        ~net:env#net
-        ()
-    in
-    (match result with
-     | Error
-         (Agent_core.Error.Config
-           (Agent_core.Error.InvalidConfig
-             { field = "max-request-body-bytes"; detail })) ->
-       Alcotest.(check bool)
-         "typed rejection names the deferred tail runtime"
-         true
-         (contains ~needle:"fallback.test_model" detail)
-     | Error error ->
-       Alcotest.failf
-         "expected final request-cap rejection, got %s"
-         (Agent_core.Error.to_string error)
-     | Ok _ ->
-       Alcotest.fail
-         "transformed uncapped deferred runtime reached provider execution");
-    Alcotest.(check (list string))
-      "capped next candidate runs, then transformed tail is checked"
-      [ "http://127.0.0.1:1"; "http://127.0.0.1:2" ]
-      (List.rev !transformed_urls))
-
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
@@ -1558,101 +1504,6 @@ let test_attempt_quota_scope_survives_runtime_reload () =
            None
            (Runtime_quota_window.active_until ~scope:rebound_scope ~now)))
 
-let test_deferred_quota_order_is_frozen_before_predispatch () =
-  with_runtime_config runtime_toml_quota_lane (fun () ->
-    Runtime_quota_window.reset_for_testing ();
-    Fun.protect
-      ~finally:Runtime_quota_window.reset_for_testing
-      (fun () ->
-         let shared_scope =
-           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
-         in
-         Runtime_quota_window.note_exhausted
-           ~scope:shared_scope
-           ~resets_at:500.0;
-         let hint =
-           Driver.For_testing.make_deferred_runtime_lane
-             ~assignment_id:"quota_lane"
-             ~failed_runtime_id:"previous.test_model"
-             ~next_runtime_id:"shared_a.test_model"
-             ~later_runtime_ids:
-               [ "shared_b.test_model"; "other.test_model" ]
-             ~failure:(network_unavailable_error "previous cycle failed")
-         in
-         let ordered =
-           Driver.quota_ordered_deferred_runtime_lane ~now:100.0 hint
-         in
-         Alcotest.(check (list string))
-           "pre-dispatch and driver share the same reordered suffix"
-           [ "other.test_model"
-           ; "shared_a.test_model"
-           ; "shared_b.test_model"
-           ]
-           (Driver.deferred_runtime_ids ordered)))
-
-let test_deferred_dispatch_preserves_predispatch_quota_order () =
-  with_runtime_config runtime_toml_quota_lane (fun () ->
-    Runtime_quota_window.reset_for_testing ();
-    Fun.protect
-      ~finally:Runtime_quota_window.reset_for_testing
-      (fun () ->
-         let hint =
-           Driver.For_testing.make_deferred_runtime_lane
-             ~assignment_id:"quota_lane"
-             ~failed_runtime_id:"previous.test_model"
-             ~next_runtime_id:"shared_a.test_model"
-             ~later_runtime_ids:
-               [ "shared_b.test_model"; "other.test_model" ]
-             ~failure:(network_unavailable_error "previous cycle failed")
-         in
-         let frozen =
-           Driver.quota_ordered_deferred_runtime_lane
-             ~now:(Unix.gettimeofday ())
-             hint
-         in
-         let shared_scope =
-           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
-         in
-         Runtime_quota_window.note_exhausted
-           ~scope:shared_scope
-           ~resets_at:(Unix.gettimeofday () +. 300.0);
-         Eio_main.run
-         @@ fun env ->
-         Eio.Switch.run
-         @@ fun sw ->
-         Masc_test_deps.init_eio_clock ~sw env;
-         let transformed_urls = ref [] in
-         let result =
-           Driver.run_named
-             ~runtime_id:"quota_lane"
-             ~keeper_name:"deferred-frozen-quota-order"
-             ~base_path:(Filename.get_temp_dir_name ())
-             ~goal:"preserve the pre-dispatch runtime binding"
-             ~deferred_runtime_lane:frozen
-             ~provider_config_transform:(fun provider_config ->
-               transformed_urls := provider_config.base_url :: !transformed_urls;
-               Error
-                 (Agent_core.Error.Config
-                    (Agent_core.Error.InvalidConfig
-                       { field = "provider-config-transform"
-                       ; detail = "stop after observing the selected runtime"
-                       })))
-             ~sw
-             ~net:env#net
-             ()
-         in
-         (match result with
-          | Error error when !transformed_urls = [] ->
-            Alcotest.failf
-              "dispatch did not reach the selected runtime: %s"
-              (Agent_core.Error.to_string error)
-          | Error _ -> ()
-          | Ok _ -> Alcotest.fail "test provider transform unexpectedly succeeded");
-         Alcotest.(check (list string))
-           "dispatch keeps the runtime frozen before pre-dispatch"
-           [ "http://127.0.0.1:1" ]
-           (List.rev !transformed_urls)))
-
 let test_official_client_does_not_inherit_registry_api_key_scope () =
   with_runtime_config runtime_toml_official_provider_named_like_registry (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -1937,10 +1788,6 @@ let () =
             `Quick
             test_prior_checkpoint_appends_current_goal_once;
           Alcotest.test_case
-            "deferred tail rejects transformed uncapped runtime"
-            `Quick
-            test_deferred_tail_rejects_transformed_uncapped_runtime;
-          Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick
             test_attempt_loop_stops_on_nonretryable_failure;
@@ -1984,14 +1831,6 @@ let () =
             "hard quota keeps attempted scope across runtime reload"
             `Quick
             test_attempt_quota_scope_survives_runtime_reload;
-          Alcotest.test_case
-            "deferred quota order is frozen before pre-dispatch"
-            `Quick
-            test_deferred_quota_order_is_frozen_before_predispatch;
-          Alcotest.test_case
-            "deferred dispatch preserves pre-dispatch quota order"
-            `Quick
-            test_deferred_dispatch_preserves_predispatch_quota_order;
           Alcotest.test_case
             "official client quota excludes registry API-key scope"
             `Quick

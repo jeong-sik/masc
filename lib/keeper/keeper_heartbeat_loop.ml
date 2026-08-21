@@ -137,15 +137,6 @@ type keepalive_turn_outcome = {
   cycle_status : keepalive_cycle_status;
 }
 
-let consume_deferred_runtime_lane_hint hint_ref expected =
-  match !hint_ref with
-  | Some current
-    when Keeper_turn_driver.equal_deferred_runtime_lane expected current ->
-    hint_ref := None;
-    true
-  | None | Some _ -> false
-;;
-
 exception Event_queue_cycle_failed of string
 
 let connector_attention_event_ids_of_stimuli stimuli =
@@ -309,15 +300,10 @@ let record_compaction_outcome_metric ~keeper_name outcome =
 ;;
 
 (* Pure liveness policy for a [Cycle.Failed] outcome holding one exact source.
-   A frozen runtime successor keeps that selection bound to the failover walk.
-   Retryable failures rotate to the urgency-lane tail. Deterministic failures
-   move only the source into a durable terminal receipt. An effect-fenced
-   provider failure always moves the exact source to that receipt even when a
-   stale deferred successor exists, because replay could duplicate an external
-   effect. Transcript corruption alone pauses the Keeper because continuing
-   with a structurally invalid history can duplicate or misattribute effects. *)
+   Failed sources move into a durable terminal receipt. Transcript corruption
+   pauses the Keeper because continuing with structurally invalid history can
+   duplicate or misattribute effects. *)
 type failed_source_disposition =
-  | Preserve_for_deferred_runtime
   | Quarantine_source of { detail : string }
   | Pause_keeper_for_integrity of { detail : string }
 
@@ -336,19 +322,14 @@ let failed_source_disposition
          ; detail
          ; _
          } -> Quarantine_source { detail }
-     | route ->
-       (match failure.Keeper_unified_turn.deferred_runtime_lane with
-        | Some _ -> Preserve_for_deferred_runtime
-        | None ->
-          (match route with
-           | Keeper_runtime_failure_route.Exhausted_visible_alive
-               { detail; _ } -> Quarantine_source { detail }
-           | Keeper_runtime_failure_route.Rotate_now { rotate } ->
-             Quarantine_source
-               { detail =
-                   "runtime_successor_unavailable:"
-                   ^ Keeper_runtime_failure_route.rotate_class_label rotate
-               })))
+     | Keeper_runtime_failure_route.Exhausted_visible_alive { detail; _ } ->
+       Quarantine_source { detail }
+     | Keeper_runtime_failure_route.Rotate_now { rotate } ->
+       Quarantine_source
+         { detail =
+             "runtime_successor_unavailable:"
+             ^ Keeper_runtime_failure_route.rotate_class_label rotate
+         })
 ;;
 
 (* RFC-0377 batch disposition: the queue action a turn outcome implies for
@@ -376,7 +357,6 @@ and batch_defer_reason =
   | Turn_skipped
 
 and batch_preserve_reason =
-  | Deferred_runtime_owns_source
   | Integrity_pause_owns_terminalization
   | No_cycle_outcome
 
@@ -402,8 +382,6 @@ let batch_disposition_of_cycle_outcome
   | Some (Cycle.Failed { failure; _ }) ->
     (match failed_source_disposition failure with
      | Quarantine_source { detail } -> Batch_quarantine { detail }
-     | Preserve_for_deferred_runtime ->
-       Batch_preserve { reason = Deferred_runtime_owns_source }
      | Pause_keeper_for_integrity _ ->
        Batch_preserve { reason = Integrity_pause_owns_terminalization })
   | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
@@ -441,10 +419,6 @@ let run_keepalive_unified_turn
       ~(proactive_warmup_elapsed : bool)
       ~(reactive_wake : bool)
       ~(shared_context : Agent_core.Context.t)
-      ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
-      ~(on_deferred_runtime_consumed : unit -> unit)
-      ~(record_deferred_runtime_lane :
-          Keeper_turn_driver.deferred_runtime_lane -> unit)
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
@@ -797,8 +771,6 @@ let run_keepalive_unified_turn
           let run_fresh_cycle () =
             run_keeper_cycle
               ~admission_token
-              ?deferred_runtime_lane
-              ~on_deferred_runtime_consumed
               ?event_bus
               ?hitl_resolution
               ~ctx
@@ -813,9 +785,6 @@ let run_keepalive_unified_turn
           in
           let run_cycle () = run_fresh_cycle () in
           let cycle_outcome = run_cycle () in
-          Option.iter
-            record_deferred_runtime_lane
-            (Cycle.deferred_runtime_lane cycle_outcome);
           cycle_outcome_ref := Some cycle_outcome;
           Cycle.meta cycle_outcome)
         else meta_after_triage
@@ -1163,7 +1132,6 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_core.Context.create () in
-  let deferred_runtime_lane_ref = ref None in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1328,16 +1296,6 @@ let run_heartbeat_loop
               | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
                 false
             in
-            let deferred_runtime_lane = !deferred_runtime_lane_ref in
-            let on_deferred_runtime_consumed () =
-              Option.iter
-                (fun expected ->
-                   ignore
-                     (consume_deferred_runtime_lane_hint
-                        deferred_runtime_lane_ref
-                        expected))
-                deferred_runtime_lane
-            in
             let r =
               run_keepalive_unified_turn
                 ~ctx
@@ -1347,10 +1305,6 @@ let run_heartbeat_loop
                 ~proactive_warmup_elapsed
                 ~reactive_wake
                 ~shared_context
-                ~deferred_runtime_lane
-                ~on_deferred_runtime_consumed
-                ~record_deferred_runtime_lane:
-                  (fun hint -> deferred_runtime_lane_ref := Some hint)
             in
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;
@@ -1442,6 +1396,4 @@ let run_heartbeat_loop
   loop ()
 ;;
 
-module For_testing = struct
-  let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
-end
+module For_testing = struct end

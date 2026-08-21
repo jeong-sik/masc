@@ -3,10 +3,8 @@
 
     With automatic overflow-compaction recovery removed, the heartbeat owns
     typed liveness disposition for a failed turn holding a pending Event Queue
-    selection: a frozen successor preserves it; without a successor every
-    failed source receives a terminal observation,
-    an effect-fenced provider failure quarantines that source even if a stale
-    successor exists, and transcript corruption alone pauses the Keeper. *)
+    selection: every failed source receives a terminal observation, and
+    transcript corruption alone pauses the Keeper. *)
 
 open Alcotest
 
@@ -19,56 +17,32 @@ let overflow_error =
     (ContextOverflow { message = "exceeded"; limit = Some 32768 })
 ;;
 
-let failure ?deferred_runtime_lane ~route ~source_disposition error =
+let failure ~route ~source_disposition error =
   { Turn.error
   ; runtime_id = "lane-a"
   ; route
   ; source_disposition
-  ; deferred_runtime_lane
   }
 ;;
 
-let overflow_failure ?deferred_runtime_lane () =
+let overflow_failure () =
   (* Route through the real classifier so this test also pins
      "typed ContextOverflow maps to the Context_overflow terminal". *)
   failure
-    ?deferred_runtime_lane
     ~route:(KFR.route_of_error ~boundary:KFR.Agent_core_execution overflow_error)
     ~source_disposition:Turn.Follow_failure_route
     overflow_error
-;;
-
-let deferred_lane =
-  Masc.Keeper_turn_driver.For_testing.make_deferred_runtime_lane
-    ~assignment_id:"assignment-1"
-    ~failed_runtime_id:"lane-a"
-    ~next_runtime_id:"lane-b"
-    ~later_runtime_ids:[]
-    ~failure:overflow_error
 ;;
 
 let test_overflow_without_successor_terminalizes () =
   match Loop.failed_source_disposition (overflow_failure ()) with
   | Loop.Quarantine_source { detail } ->
     check bool "detail is non-empty" true (String.length detail > 0)
-  | Loop.Preserve_for_deferred_runtime
   | Loop.Pause_keeper_for_integrity _ ->
     fail
       "context overflow with no recovery successor must terminalize the \
        selection: retrying re-dispatches the same bounded payload every \
        heartbeat"
-;;
-
-let test_overflow_with_deferred_lane_preserves () =
-  check bool "a frozen successor lane keeps the selection bound to it" true
-    (match
-       Loop.failed_source_disposition
-         (overflow_failure ~deferred_runtime_lane:deferred_lane ())
-     with
-     | Loop.Preserve_for_deferred_runtime -> true
-     | Loop.Quarantine_source _
-     | Loop.Pause_keeper_for_integrity _ ->
-       false)
 ;;
 
 let test_effect_fenced_failure_terminalizes_exact_source () =
@@ -87,14 +61,12 @@ let test_effect_fenced_failure_terminalizes_exact_source () =
   match
     Loop.failed_source_disposition
       (failure
-         ~deferred_runtime_lane:deferred_lane
          ~route
          ~source_disposition:Turn.Follow_failure_route
          error)
   with
   | Loop.Quarantine_source { detail } ->
     check bool "detail is non-empty" true (String.length detail > 0)
-  | Loop.Preserve_for_deferred_runtime
   | Loop.Pause_keeper_for_integrity _ ->
     fail
       "effect-fenced failure must terminalize the exact failed source instead \
@@ -130,7 +102,6 @@ let test_other_terminal_classes_quarantine_source () =
                  overflow_error)
           with
           | Loop.Quarantine_source { detail } -> String.length detail > 0
-          | Loop.Preserve_for_deferred_runtime
           | Loop.Pause_keeper_for_integrity _ ->
             false))
     preserving_terminal_classes
@@ -161,7 +132,6 @@ let test_exhausted_configuration_classes_quarantine_source () =
                  overflow_error)
           with
           | Loop.Quarantine_source _ -> true
-          | Loop.Preserve_for_deferred_runtime
           | Loop.Pause_keeper_for_integrity _ ->
             false))
     exhausted_configuration_classes
@@ -180,7 +150,6 @@ let test_unavailable_runtime_without_successor_terminalizes () =
             overflow_error)
      with
      | Loop.Quarantine_source _ -> true
-     | Loop.Preserve_for_deferred_runtime
      | Loop.Pause_keeper_for_integrity _ ->
        false)
 ;;
@@ -200,7 +169,6 @@ let test_transcript_corruption_pauses_keeper () =
      with
      | Loop.Pause_keeper_for_integrity { detail } ->
        String.equal detail "corrupt"
-     | Loop.Preserve_for_deferred_runtime
      | Loop.Quarantine_source _ ->
        false)
 ;;
@@ -250,10 +218,6 @@ let () =
             "overflow without successor terminalizes"
             `Quick
             test_overflow_without_successor_terminalizes
-        ; test_case
-            "overflow with deferred lane preserves"
-            `Quick
-            test_overflow_with_deferred_lane_preserves
         ; test_case
             "effect-fenced failure terminalizes the exact source"
             `Quick

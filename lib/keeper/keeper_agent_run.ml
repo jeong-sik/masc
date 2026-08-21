@@ -415,8 +415,6 @@ let run_turn
       ?degraded_retry_runtime
       ?fallback_reason
       ?(runtime_rotation_attempts = [])
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
       ?(is_retry = false)
       ?shared_context
       ?event_bus
@@ -884,8 +882,6 @@ let run_turn
                              ~site:"runtime_runtime"
                              config
                              manifest)
-                      ?deferred_runtime_lane
-                      ?on_deferred_runtime_consumed
                       ?stream_idle_timeout_s
                       ?body_timeout_s:
                         (Keeper_runtime_resolved.body_timeout_override_sec ())

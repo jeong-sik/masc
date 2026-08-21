@@ -565,19 +565,29 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
         | ( Completion_idle, _ )
         | ( Human_confirmed _, _ ) -> false
       in
-      if committable
+      if not committable
       then
+        Error
+          (Printf.sprintf
+             "goal_verification: proof verdict for %s has no pending proof \
+              request"
+             goal_id)
+      else
+        match current.criterion with
+        | Criterion_viable _ ->
         let completion =
           match verdict.outcome with
           | Proven -> Proof_proven verdict
           | Refuted _ -> Proof_refuted verdict
         in
         Ok { current with completion }
-      else
-        Error
+        | Criterion_unchecked
+        | Criterion_pending _
+        | Criterion_unreachable _ ->
+          Error
           (Printf.sprintf
-             "goal_verification: proof verdict for %s has no pending proof \
-              request"
+             "goal_verification: proof verdict for %s requires a viable \
+              criterion"
              goal_id))
 
 let record_human_confirmation config ~goal_id ~confirmed_by =

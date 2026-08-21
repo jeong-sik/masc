@@ -248,6 +248,13 @@ let test_refuted_proof_returns_to_executing () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Refutable goal" in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (recording_reviewer
+         (ref [])
+         [ "verifier-a", Stub_approve "criterion is measurable" ])
+    (fun () -> drain config);
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   with_lane_and_reviewer
@@ -369,14 +376,55 @@ let test_all_slots_failed_keeps_the_pending_row () =
          calls
          [ "verifier-a", Stub_malformed; "verifier-b", Stub_malformed ])
     (fun () -> drain config);
-  check (list string) "every slot was tried for criterion and proof"
-    [ "verifier-a"; "verifier-b"; "verifier-a"; "verifier-b" ]
+  check (list string) "every slot was tried for the blocking criterion"
+    [ "verifier-a"; "verifier-b" ]
     !calls;
   check string "the phase never left verifying" "verifying"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_pending _ -> ()
   | _ -> fail "all-slots-fail must not consume the pending row"
+;;
+
+let test_unreachable_criterion_blocks_the_pending_proof () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Unreachable criterion goal" in
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let calls = ref [] in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (recording_reviewer
+         calls
+         [ "verifier-a", Stub_reject "metric cannot be measured" ])
+    (fun () -> drain config);
+  check (list string) "proof reviewer was never called"
+    [ "verifier-a" ] !calls;
+  (match (ledger_record config goal_id).criterion with
+   | Goal_verification.Criterion_unreachable _ -> ()
+   | _ -> fail "criterion must hold the unreachable verdict");
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "blocked proof must remain durable");
+  check string "proof cannot complete the goal" "verifying"
+    (stored_phase config goal_id)
+;;
+
+let test_group_pending_orders_criterion_before_proof () =
+  let proof : Agent.pending_work =
+    { goal_id = "goal-a"; kind = Agent.Completion_proof }
+  in
+  let criterion : Agent.pending_work =
+    { goal_id = "goal-a"; kind = Agent.Criterion_check }
+  in
+  match Agent.group_pending_by_goal [ proof; criterion ] with
+  | [ [ { Agent.kind = Agent.Criterion_check; _ }
+        ; { Agent.kind = Agent.Completion_proof; _ }
+        ] ] -> ()
+  | _ -> fail "one goal worker must run criterion before proof"
 ;;
 
 (* (f) An APPROVE without the model's stated reason is not a judgment:
@@ -450,8 +498,14 @@ let () =
             test_malformed_reply_fails_over_to_the_next_slot
         ; test_case "all slots failed keeps the pending row" `Quick
             test_all_slots_failed_keeps_the_pending_row
+        ; test_case "unreachable criterion blocks the pending proof" `Quick
+            test_unreachable_criterion_blocks_the_pending_proof
         ; test_case "approve without a stated reason does not commit" `Quick
             test_approve_without_a_stated_reason_does_not_commit
+        ] )
+    ; ( "scheduling"
+      , [ test_case "groups criterion before proof per goal" `Quick
+            test_group_pending_orders_criterion_before_proof
         ] )
     ; ( "re-arm"
       , [ test_case "verifying goal with a missing request is rearmed and drained"

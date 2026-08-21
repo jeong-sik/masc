@@ -51,11 +51,33 @@ let pending_kind_to_string = function
   | Completion_proof -> "proof"
 ;;
 
-let pending_work_equal left right =
-  String.equal left.goal_id right.goal_id
-  && (match left.kind, right.kind with
-      | Criterion_check, Criterion_check | Completion_proof, Completion_proof -> true
-      | Criterion_check, Completion_proof | Completion_proof, Criterion_check -> false)
+let pending_work_same_goal left right = String.equal left.goal_id right.goal_id
+
+let pending_kind_rank = function
+  | Criterion_check -> 0
+  | Completion_proof -> 1
+;;
+
+(* A goal's criterion must settle before its completion proof can run. Keep
+   ledger order within each goal (the scanner emits criterion before proof)
+   while preserving first-goal order for deterministic worker admission. *)
+let group_pending_by_goal work =
+  let groups = Hashtbl.create (List.length work) in
+  let goal_order = ref [] in
+  List.iter
+    (fun item ->
+       match Hashtbl.find_opt groups item.goal_id with
+       | Some existing -> Hashtbl.replace groups item.goal_id (existing @ [ item ])
+       | None ->
+         goal_order := item.goal_id :: !goal_order;
+         Hashtbl.add groups item.goal_id [ item ])
+    work;
+  List.rev_map
+    (fun goal_id ->
+       Hashtbl.find groups goal_id
+       |> List.stable_sort (fun left right ->
+         Int.compare (pending_kind_rank left.kind) (pending_kind_rank right.kind)))
+    !goal_order
 ;;
 
 (* {1 Scan}
@@ -171,6 +193,9 @@ let criterion_description (goal : Goal_store.goal) =
 ;;
 
 let task_rollup_json (task : Masc_domain.task) =
+  let verification_evidence =
+    Tool_task_completion_review.concrete_verification_evidence task
+  in
   let status_fields =
     match task.task_status with
     | Masc_domain.Done { assignee; completed_at; notes } ->
@@ -191,22 +216,41 @@ let task_rollup_json (task : Masc_domain.task) =
     ([ "task_id", `String task.id
      ; "title", `String task.title
      ; "status", `String (Masc_domain.task_status_to_string task.task_status)
+     ; ( "verification_evidence"
+       , Tool_task_completion_review.verification_evidence_to_yojson
+           verification_evidence )
      ]
      @ status_fields)
 ;;
 
+let task_submitted_evidence (task : Masc_domain.task) =
+  let evidence =
+    Tool_task_completion_review.concrete_verification_evidence task
+  in
+  evidence.Tool_task_completion_review.submitted_evidence
+;;
+
 (* A backlog that does not read is infrastructure failure: the proof review
    defers rather than judging a goal on an absent rollup. *)
-let linked_task_rollup config ~goal_id : (string, string) result =
+let linked_task_rollup config ~goal_id : (string * string list, string) result =
   match Workspace_backlog.read_backlog_r config with
   | Error detail -> Error detail
   | Ok backlog ->
-    let goal_task_links = Workspace_goal_index.read_goal_task_links config in
-    let index =
-      Workspace_goal_index.build_goal_task_index ~goal_task_links backlog.tasks
-    in
-    let tasks = Workspace_goal_index.tasks_for_goal index ~goal_id in
-    Ok (Yojson.Safe.pretty_to_string (`List (List.map task_rollup_json tasks)))
+    (match Workspace_goal_index.read_goal_task_links_r config with
+     | Error detail -> Error detail
+     | Ok goal_task_links ->
+       let index =
+         Workspace_goal_index.build_goal_task_index ~goal_task_links backlog.tasks
+       in
+       let tasks = Workspace_goal_index.tasks_for_goal index ~goal_id in
+       let evidence_refs =
+         tasks
+         |> List.concat_map task_submitted_evidence
+         |> List.sort_uniq String.compare
+       in
+       Ok
+         ( Yojson.Safe.pretty_to_string (`List (List.map task_rollup_json tasks))
+         , evidence_refs ))
 ;;
 
 let goal_owner_name (goal : Goal_store.goal) =
@@ -238,9 +282,12 @@ let build_review_request config (goal : Goal_store.goal) kind
   | Completion_proof ->
     (match linked_task_rollup config ~goal_id:goal.id with
      | Error _ as error -> error
-     | Ok rollup ->
+     | Ok (rollup, evidence_refs) ->
        Ok
-         ( { base with Task.Anti_rationalization.completion_notes = rollup }
+         ( { base with
+             Task.Anti_rationalization.completion_notes = rollup
+           ; evidence_refs
+           }
          , Prompt_names.goal_verification_proof ))
 ;;
 
@@ -294,9 +341,35 @@ let defer ~goal_id ~kind ~retryable ~reason =
   Deferred { retryable }
 ;;
 
+let admit_proof_against_criterion config (work : pending_work) =
+  match work.kind with
+  | Criterion_check -> Ok ()
+  | Completion_proof ->
+    (match Goal_verification.get_record config ~goal_id:work.goal_id with
+     | Error detail -> Error (true, detail)
+     | Ok None ->
+       Error (true, "proof request has no verification ledger record")
+     | Ok (Some record) ->
+       (match record.Goal_verification.criterion with
+        | Goal_verification.Criterion_viable _ -> Ok ()
+        | Goal_verification.Criterion_pending _
+        | Goal_verification.Criterion_unchecked ->
+          Error
+            ( true
+            , "proof waits until the durable criterion verdict is viable" )
+        | Goal_verification.Criterion_unreachable _ ->
+          Error
+            ( false
+            , "proof refused because the durable criterion is unreachable" )))
+;;
+
 let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
   : process_outcome
   =
+  match admit_proof_against_criterion config work with
+  | Error (retryable, reason) ->
+    defer ~goal_id:work.goal_id ~kind:work.kind ~retryable ~reason
+  | Ok () ->
   match Goal_store.get_goal config ~goal_id:work.goal_id with
   | None ->
     (* The row stays durable — failure keeps evidence — but retrying cannot
@@ -474,15 +547,15 @@ type runtime =
   ; retry_scheduled : bool Atomic.t
   ; retry_interval_sec : float
   ; in_flight : pending_work list Atomic.t
-  ; review_slots : Eio.Semaphore.t
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
+let max_concurrent_reviews = 4
 
 let claim_review (runtime : runtime) work =
   let rec loop () =
     let current = Atomic.get runtime.in_flight in
-    if List.exists (pending_work_equal work) current
+    if List.exists (pending_work_same_goal work) current
     then false
     else if Atomic.compare_and_set runtime.in_flight current (work :: current)
     then true
@@ -495,7 +568,7 @@ let release_review (runtime : runtime) work =
   let rec loop () =
     let current = Atomic.get runtime.in_flight in
     let next =
-      List.filter (fun candidate -> not (pending_work_equal candidate work)) current
+      List.filter (fun candidate -> not (pending_work_same_goal candidate work)) current
     in
     if List.length next = List.length current
     then ()
@@ -514,27 +587,53 @@ let request_scan (runtime : runtime) =
 let schedule_retry (runtime : runtime) =
   if Atomic.compare_and_set runtime.retry_scheduled false true
   then
-    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+    Eio.Fiber.fork_daemon ~sw:runtime.sw (fun () ->
       Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
       Atomic.set runtime.retry_scheduled false;
-      request_scan runtime)
+      request_scan runtime;
+      `Stop_daemon)
 ;;
 
-let process_work (runtime : runtime) work =
-  if claim_review runtime work
-  then (
-    let outcome =
-      Fun.protect
-        ~finally:(fun () -> release_review runtime work)
-        (fun () ->
-           process_pending_work ~sw:(Some runtime.sw) runtime.config work)
+let process_goal_work (runtime : runtime) work =
+  match work with
+  | [] -> ()
+  | representative :: _ ->
+    let retryable =
+      Eio.Switch.run (fun work_sw ->
+        Eio.Switch.on_release work_sw (fun () ->
+          release_review runtime representative);
+        Cancel_safe.protect
+          ~on_exn:(fun exn ->
+            Log.Misc.error
+              "goal verifier isolated unexpected worker failure goal_id=%s detail=%s"
+              representative.goal_id
+              (Printexc.to_string exn);
+            true)
+          (fun () ->
+             let rec loop = function
+               | [] -> false
+               | item :: rest ->
+                 (match
+                    process_pending_work
+                      ~sw:(Some work_sw)
+                      runtime.config
+                      item
+                  with
+                  | Committed -> loop rest
+                  | Deferred { retryable } -> retryable)
+             in
+             loop work))
     in
-    if should_schedule_retry outcome then schedule_retry runtime)
-  else
-    Log.Misc.debug
-      "goal verifier skipped duplicate in-flight review goal_id=%s kind=%s"
-      work.goal_id
-      (pending_kind_to_string work.kind)
+    if retryable then schedule_retry runtime
+;;
+
+let take_items limit items =
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | item :: rest -> loop (remaining - 1) (item :: acc) rest
+  in
+  loop limit [] items
 ;;
 
 let process_pending (runtime : runtime) =
@@ -545,24 +644,39 @@ let process_pending (runtime : runtime) =
       detail;
     schedule_retry runtime
   | Ok work ->
+    let active = Atomic.get runtime.in_flight in
+    let available = max 0 (max_concurrent_reviews - List.length active) in
+    let eligible =
+      group_pending_by_goal work
+      |> List.filter (function
+        | [] -> false
+        | representative :: _ ->
+          not (List.exists (pending_work_same_goal representative) active))
+    in
+    let selected = take_items available eligible in
     List.iter
-      (fun item ->
-         Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-           Eio.Semaphore.acquire runtime.review_slots;
-           (* fun-protect-finally-ok: [Eio.Semaphore.release] is
-              non-suspending and must return the bounded review slot on
-              normal completion, exception, or cancellation. *)
-           Fun.protect
-             ~finally:(fun () -> Eio.Semaphore.release runtime.review_slots)
-             (fun () -> process_work runtime item)))
-      work
+      (function
+        | [] -> ()
+        | representative :: _ as goal_work ->
+          if claim_review runtime representative
+          then
+            Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+              process_goal_work runtime goal_work))
+      selected;
+    if List.length selected < List.length eligible then schedule_retry runtime
 ;;
 
 let run (runtime : runtime) : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
     if Atomic.exchange runtime.pending false
     then (
-      process_pending runtime;
+      Cancel_safe.observe
+        ~on_exn:(fun exn ->
+          Log.Misc.error
+            "goal verifier isolated unexpected scan failure detail=%s"
+            (Printexc.to_string exn);
+          schedule_retry runtime)
+        (fun () -> process_pending runtime);
       None)
     else None)
 ;;
@@ -593,7 +707,6 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; retry_scheduled = Atomic.make false
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
-    ; review_slots = Eio.Semaphore.make 4
     }
   in
   let owner = Some runtime in
@@ -647,4 +760,5 @@ module For_testing = struct
     | Deferred of { retryable : bool }
 
   let should_schedule_retry = should_schedule_retry
+  let group_pending_by_goal = group_pending_by_goal
 end

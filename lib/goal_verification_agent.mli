@@ -40,6 +40,10 @@ module For_testing : sig
   (** Whether the maintenance-pulse retry timer should arm for this outcome.
       [false] for [Committed] and for non-retryable deferrals. *)
 
+  val group_pending_by_goal : pending_work list -> pending_work list list
+  (** Stable grouping used by the daemon: criterion work precedes proof work
+      for the same goal, so no goal has concurrent verifier transitions. *)
+
   val collect_pending :
     Workspace_utils_backend_setup.config ->
     (pending_work list, string) result

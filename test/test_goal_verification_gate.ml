@@ -291,6 +291,36 @@ let test_proof_verdict_requires_a_pending_request () =
       (String_util.contains_substring msg "no pending proof request")
 ;;
 
+let test_proof_verdict_requires_a_viable_criterion () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = "goal-unreachable-proof" in
+  (match Goal_verification.mark_criterion_pending config ~goal_id with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match Goal_verification.mark_proof_pending config ~goal_id with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict (Goal_verification.Refuted { reason = "not measurable" }))
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  match
+    Goal_verification.record_proof_verdict
+      config
+      ~goal_id
+      (verdict Goal_verification.Proven)
+  with
+  | Ok _ -> fail "proof committed after the criterion became unreachable"
+  | Error msg ->
+    check bool "the refusal names the criterion invariant" true
+      (String_util.contains_substring msg "requires a viable criterion")
+;;
+
 let test_human_confirmation_requires_a_proven_proof () =
   with_workspace
   @@ fun config ->
@@ -819,6 +849,8 @@ let () =
     ; ( "ledger record-only discipline"
       , [ test_case "proof verdict requires a pending request" `Quick
             test_proof_verdict_requires_a_pending_request
+        ; test_case "proof verdict requires a viable criterion" `Quick
+            test_proof_verdict_requires_a_viable_criterion
         ; test_case "human confirmation requires a proven proof" `Quick
             test_human_confirmation_requires_a_proven_proof
         ] )

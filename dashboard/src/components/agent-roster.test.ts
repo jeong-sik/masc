@@ -292,15 +292,6 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     expect(note).toBeNull()
   })
 
-  it('offline keeper with assigned task shows interrupted work label', () => {
-    const note = rosterStateNote(
-      k({ phase: 'Crashed', status: 'offline', agent: { current_task: 'task-001', exists: true } }),
-      null,
-      null,
-    )
-    expect(note).toEqual({ label: '작업 중단', text: '할당된 작업이 있으나 keeper가 crashed 상태입니다' })
-  })
-
   it('null keeper returns null', () => {
     expect(rosterStateNote(null, null, null)).toBeNull()
   })

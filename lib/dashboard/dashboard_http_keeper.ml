@@ -97,7 +97,6 @@ let degraded_keeper_dashboard_row
      ; ("status", `String "degraded")
      ; ("degraded", `Bool true)
      ; ("degraded_reason", `String site)
-     ; ("agent", `Null)
      ; ("diagnostic", diagnostic)
      ; ("trust", runtime_trust)
      ; ("runtime_trust", runtime_trust)
@@ -369,8 +368,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
       match Keeper_meta_store.read_meta config name with
       | Error _ | Ok None -> None
       | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
-          let agent = Keeper_status_runtime.parse_agent_status config ~agent_name:m.agent_name in
-
           let created_ts =
             Workspace_resilience.Time.parse_iso8601_opt m.created_at
             |> Option.value ~default:0.0
@@ -683,7 +680,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                Keeper_status_runtime.keeper_diagnostic_json
 	                  ~config
 	                  ~meta:m
-	                  ~agent_status:agent
 	                  ~keepalive_running
 	                  ~history_items:conversation_items
 	                  ~now_ts
@@ -822,11 +818,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("keeper_snapshot_interval_s", `Float snapshot_interval_s);
               ("heartbeat_stale_after_s", `Float heartbeat_stale_after_s);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
-              ("agent", agent);
               ( "status",
                 `String
-                  (Keeper_status_runtime.keeper_surface_status ~agent_status:agent
-                     ~diagnostic) );
+                  (Keeper_status_runtime.keeper_surface_status ~diagnostic) );
               ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
               ( "uptime_hours"
               , Json_util.option_to_yojson
@@ -1008,9 +1002,6 @@ let execution_trust_row_of_meta
       (config : Workspace.config)
       (m : Keeper_meta_contract.keeper_meta)
   =
-  let agent =
-    Keeper_status_runtime.parse_agent_status config ~agent_name:m.agent_name
-  in
   let keepalive_running = runtime_keepalive_running config m in
   let registry_entry =
     Keeper_registry.get ~base_path:config.base_path m.name
@@ -1029,7 +1020,6 @@ let execution_trust_row_of_meta
     Keeper_status_runtime.keeper_diagnostic_json
       ~config
       ~meta:m
-      ~agent_status:agent
       ~keepalive_running
       ~history_items:[]
       ~now_ts
@@ -1045,9 +1035,7 @@ let execution_trust_row_of_meta
     ; ("pipeline_stage", `String pipeline_stage)
     ; ( "status"
       , `String
-          (Keeper_status_runtime.keeper_surface_status
-             ~agent_status:agent
-             ~diagnostic) )
+          (Keeper_status_runtime.keeper_surface_status ~diagnostic) )
     ; ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id))
     ; ("generation", `Int m.runtime.nonce)
     ; ( "current_task_id"

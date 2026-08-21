@@ -12,6 +12,7 @@
     could resume an approved Gate effect. *)
 
 type t
+type forest
 
 val create :
   config:Workspace.config -> producer:string -> (t, string) result
@@ -19,3 +20,14 @@ val create :
 val schemas : t -> Types_core.tool_schema list
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
+
+val create_forest :
+  config:Workspace.config -> producers:string list -> (forest, string) result
+(** Bind a read-only verifier surface to a closed set of producer trees. The
+    filesystem schemas require an exact [producer] chosen from this set; the
+    dispatcher refuses every other identity before reaching a tree. *)
+
+val forest_schemas : forest -> Types_core.tool_schema list
+
+val dispatch_forest :
+  forest -> name:string -> args:Yojson.Safe.t -> (string, string) result

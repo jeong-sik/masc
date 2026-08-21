@@ -31,21 +31,9 @@ val keeper_metric_producer_active : base_path:string -> bool
     turn's lane is in its legitimate inter-cycle cadence sleep. These are the
     two intervals in which the next metrics-ledger append is still owned by a
     live producer even when the prior row exceeds its age-only SLO. *)
-(** Parse the "status" field of an agent-status snapshot blob (produced by
-    {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
-    An absent agent-registry record is represented by an empty object; the
-    snapshot has no separate existence flag.
-    Returns [None] when the field is absent or not one of the four canonical
-    lowercase labels, so callers classify the closed domain exhaustively
-    instead of comparing string literals. *)
-val agent_runtime_status_opt : Yojson.Safe.t -> Masc_domain.agent_status option
-
-val agent_runtime_has_live_signal : Yojson.Safe.t -> bool
-val parse_agent_status : Workspace.config -> agent_name:string -> Yojson.Safe.t
 val keeper_diagnostic_json :
   config:Workspace.config ->
   meta:keeper_meta ->
-  agent_status:Yojson.Safe.t ->
   keepalive_running:bool ->
   history_items:Yojson.Safe.t list ->
   now_ts:float ->
@@ -63,9 +51,9 @@ val augment_keeper_diagnostic_json :
     call site. *)
 val keeper_health_of_string_opt : string -> keeper_health option
 
-(** Keeper display status derived from (keeper_health x agent_status). Closed so
-    consumers that classify it match exhaustively. "paused" is an operator
-    override applied above this layer, not a member of this domain. *)
+(** Keeper display status derived from keeper health. Closed so consumers that
+    classify it match exhaustively. "paused" is an operator override applied
+    above this layer, not a member of this domain. *)
 type surface_status =
   | Surface_active
   | Surface_busy
@@ -96,7 +84,6 @@ val control_plane_status_to_string : control_plane_status -> string
 val control_plane_status_of_string_opt : string -> control_plane_status option
 
 val keeper_surface_status :
-  agent_status:Yojson.Safe.t ->
   diagnostic:Yojson.Safe.t ->
   string
 

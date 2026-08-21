@@ -223,10 +223,6 @@ export function rosterStateNote(
     }
   }
 
-  if (state.kind === 'offline' && keeper.agent?.current_task) {
-    return { label: '작업 중단', text: `할당된 작업이 있으나 keeper가 ${state.cause} 상태입니다` }
-  }
-
   const diagnosticError = keeper.diagnostic?.last_error?.trim()
   if (diagnosticError) {
     return { label: state.kind === 'running' ? '이전 오류' : '최근 오류', text: diagnosticError }
@@ -472,7 +468,6 @@ function keeperRelationKeys(source: Keeper): string[] {
     relationKey('keeper-id', source.keeper_id),
     relationKey('keeper-name', source.name),
     relationKey('agent-name', source.agent_name),
-    relationKey('agent-name', source.agent?.name),
   ]
   return Array.from(new Set(keys.filter((key): key is string => key != null)))
 }
@@ -624,7 +619,6 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
   const displayName = relationValue(source.name)
   if (!displayName) return null
 
-  const linkedAgent = source.agent
   const liveCurrentTask =
     source.recent_output_preview
     ?? source.recent_input_preview
@@ -634,13 +628,9 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
     name: displayName,
     keeper_name: source.name,
     keeper_id: source.keeper_id ?? null,
-    agent_type: linkedAgent?.agent_type,
-    status: (linkedAgent?.status as Agent['status'] | undefined) ?? (source.status as Agent['status'] | undefined),
-    current_task: linkedAgent?.current_task ?? liveCurrentTask,
+    status: source.status as Agent['status'] | undefined,
+    current_task: liveCurrentTask,
     context_ratio: source.context_ratio ?? undefined,
-    session_bound_at: linkedAgent?.session_bound_at,
-    last_seen: linkedAgent?.last_seen,
-    capabilities: linkedAgent?.capabilities,
     emoji: source.emoji,
     koreanName: source.koreanName,
     rosterSource: 'keeper_runtime',

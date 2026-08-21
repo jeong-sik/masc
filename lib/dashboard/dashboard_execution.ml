@@ -290,7 +290,6 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
                  Keeper_status_runtime.keeper_diagnostic_json
                    ~config
                    ~meta
-                   ~agent_status:(Option.value ~default:`Null (Json_util.assoc_member_opt "agent" keeper_json))
                    ~keepalive_running
                    ~history_items:[]
                    ~now_ts
@@ -830,7 +829,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         )
       ; "agents", agents_json ~keepers ~agents
       ; (* pipeline_stage is now included in the snapshot keepers_json,
-             so no redundant read_meta + parse_agent_status needed here. *)
+             so no redundant read_meta is needed here. *)
         "keepers", `List keepers
       ]
     in

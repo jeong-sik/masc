@@ -102,6 +102,9 @@ KNOWN_ASSERTIONS = {
     "qa_coverage_execution_observed",
     "qa_coverage_passes_verification",
     "qa_coverage_review_matches_spec",
+    "goal_verifier_refutation_observed",
+    "goal_verifier_reentry_proven",
+    "goal_verifier_dashboard_browser_observed",
 }
 
 
@@ -529,17 +532,37 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
-    if not isinstance(missions, list) or len(missions) != 22:
-        raise AcceptanceError("mission catalog must contain exactly 22 missions")
+    if not isinstance(missions, list) or len(missions) != 23:
+        raise AcceptanceError("mission catalog must contain exactly 23 missions")
     ids = [mission.get("id") for mission in missions]
-    expected_ids = [f"RW{index:02d}" for index in range(1, 23)]
+    expected_ids = [f"RW{index:02d}" for index in range(1, 24)]
     if ids != expected_ids:
-        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW22")
+        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW23")
     roles = catalog.get("roles")
     if not isinstance(roles, list) or set(roles) != EXPECTED_ROLES:
         raise AcceptanceError("catalog must define the exact five collaboration roles")
     if catalog.get("minimum_keeper_count") != len(roles):
         raise AcceptanceError("minimum_keeper_count must equal the five-role fleet")
+    approaches = catalog.get("execution_approaches")
+    if (
+        catalog.get("approaches_apply_to_each_mission") is not True
+        or not isinstance(approaches, list)
+        or [approach.get("id") for approach in approaches] != ["A", "B", "C"]
+    ):
+        raise AcceptanceError(
+            "catalog must apply the exact A/B/C execution approaches to every mission"
+        )
+    for approach in approaches:
+        for field in ("name", "method"):
+            if not isinstance(approach.get(field), str) or not approach[field].strip():
+                raise AcceptanceError(f"approach {approach.get('id')} is missing {field}")
+        evidence = approach.get("required_evidence")
+        if not isinstance(evidence, list) or not evidence or not all(
+            isinstance(item, str) and item.strip() for item in evidence
+        ):
+            raise AcceptanceError(
+                f"approach {approach.get('id')} has invalid required_evidence"
+            )
     for mission in missions:
         actors = mission.get("actors")
         if not isinstance(actors, list) or not actors or not set(actors) <= EXPECTED_ROLES:
@@ -852,6 +875,9 @@ class MissionRun:
         self.expected_base_path = expected_base_path
         self.secret = f"memory-{uuid.uuid4().hex[:12]}"
         self.goal_id = f"goal-{self.marker}"
+        self.verifier_goal_id = f"goal-{self.marker}-verifier"
+        self.verifier_artifact = f"artifacts/{self.marker}-goal-proof.txt"
+        self.verifier_success_token = f"GOAL_PROOF_PASS={self.marker}"
         self.schedule_id = f"schedule-{self.marker}"
         self.roles = {
             "coordinator": f"rw-{self.slug}-coord",
@@ -861,6 +887,7 @@ class MissionRun:
             "researcher": f"rw-{self.slug}-research",
         }
         self.task_ids: dict[str, str] = {}
+        self.verifier_task_id = ""
         self.task_create_receipts: dict[str, ToolObservation] = {}
         self.turns: dict[str, TurnObservation] = {}
         self.statuses: dict[str, Any] = {}
@@ -868,6 +895,8 @@ class MissionRun:
         self.tool_call_rows: dict[str, list[dict[str, Any]]] = {}
         self.browser_proof: dict[str, Any] = {}
         self.persistence_browser_proof: dict[str, Any] = {}
+        self.goal_verifier_browser_proof: dict[str, Any] = {}
+        self.goal_verifier_evidence: dict[str, Any] = {}
 
     def runtime_for_role(self, role: str) -> str | None:
         return self.runtime_by_role.get(role, self.runtime_id)
@@ -899,6 +928,152 @@ class MissionRun:
         if not isinstance(value, dict):
             raise AcceptanceError(f"Dashboard GET {path} returned a non-object payload")
         return value
+
+    def find_goal(self, value: Any, goal_id: str) -> dict[str, Any] | None:
+        if isinstance(value, dict):
+            if value.get("id") == goal_id or value.get("goal_id") == goal_id:
+                if "phase" in value and "verification" in value:
+                    return value
+            for nested in value.values():
+                found = self.find_goal(nested, goal_id)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for nested in value:
+                found = self.find_goal(nested, goal_id)
+                if found is not None:
+                    return found
+        return None
+
+    def read_goal(self, goal_id: str, label: str) -> dict[str, Any]:
+        observation = self.call(label, "masc_goal_list", {})
+        goal = self.find_goal(observation.data, goal_id)
+        if goal is None:
+            raise AcceptanceError(f"goal list did not contain {goal_id}")
+        return goal
+
+    def wait_for_goal_state(
+        self,
+        *,
+        phase: str,
+        completion_state: str | None = None,
+        criterion_state: str | None = None,
+        timeout: float = 300.0,
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        attempt = 0
+        last: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            attempt += 1
+            last = self.read_goal(
+                self.verifier_goal_id,
+                f"goal-verifier-poll-{phase}-{attempt}",
+            )
+            verification = last.get("verification")
+            criterion = (
+                verification.get("criterion")
+                if isinstance(verification, dict)
+                else None
+            )
+            completion = (
+                verification.get("completion")
+                if isinstance(verification, dict)
+                else None
+            )
+            if (
+                last.get("phase") == phase
+                and (
+                    criterion_state is None
+                    or (
+                        isinstance(criterion, dict)
+                        and criterion.get("state") == criterion_state
+                    )
+                )
+                and (
+                    completion_state is None
+                    or (
+                        isinstance(completion, dict)
+                        and completion.get("state") == completion_state
+                    )
+                )
+            ):
+                return last
+            time.sleep(2.0)
+        raise AcceptanceError(
+            "Goal verifier state did not converge: "
+            f"expected phase={phase} criterion={criterion_state} "
+            f"completion={completion_state}, last={json.dumps(last, ensure_ascii=False)}"
+        )
+
+    def find_task(self, value: Any, task_id: str) -> dict[str, Any] | None:
+        if isinstance(value, dict):
+            if value.get("id") == task_id or value.get("task_id") == task_id:
+                if "task_status" in value or "status" in value:
+                    return value
+            for nested in value.values():
+                found = self.find_task(nested, task_id)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for nested in value:
+                found = self.find_task(nested, task_id)
+                if found is not None:
+                    return found
+        return None
+
+    def wait_for_verifier_task_status(
+        self, expected_status: str, timeout: float = 300.0
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        attempt = 0
+        last: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            attempt += 1
+            observation = self.call(
+                f"goal-verifier-task-poll-{expected_status}-{attempt}",
+                "masc_tasks",
+                {"include_done": True, "include_cancelled": True},
+            )
+            last = self.find_task(observation.data, self.verifier_task_id)
+            if isinstance(last, dict) and (
+                last.get("task_status") == expected_status
+                or last.get("status") == expected_status
+            ):
+                return last
+            time.sleep(2.0)
+        raise AcceptanceError(
+            f"verifier Task did not reach {expected_status}: "
+            f"last={json.dumps(last, ensure_ascii=False)}"
+        )
+
+    def wait_for_verifier_task_verdict(
+        self, to_status: str, timeout: float = 300.0
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        attempt = 0
+        last: Any = None
+        while time.monotonic() < deadline:
+            attempt += 1
+            history = self.call(
+                f"goal-verifier-task-history-{to_status}-{attempt}",
+                "masc_task_history",
+                {"task_id": self.verifier_task_id, "limit": 100},
+            )
+            last = history.data
+            entries = last if isinstance(last, list) else []
+            for entry in entries:
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("type") == "task_completion_verdict"
+                    and entry.get("to_status") == to_status
+                    and entry.get("verification_id")
+                ):
+                    return entry
+            time.sleep(2.0)
+        raise AcceptanceError(
+            f"verifier Task has no completion verdict to {to_status}: "
+            f"last={json.dumps(last, ensure_ascii=False)}"
+        )
 
     def role_instructions(self, role: str) -> str:
         shared = (
@@ -975,6 +1150,28 @@ class MissionRun:
             "goal-assign",
             "masc_goal_assign",
             {"goal_id": self.goal_id, "owner": self.roles["coordinator"]},
+        )
+        self.call(
+            "goal-verifier-upsert",
+            "masc_goal_upsert",
+            {
+                "id": self.verifier_goal_id,
+                "title": f"Artifact-gated Goal verifier mission {self.marker}",
+                "metric": (
+                    f"owner artifact {self.verifier_artifact} contains the exact "
+                    f"token {self.verifier_success_token}"
+                ),
+                "target_value": self.verifier_success_token,
+                "priority": 1,
+            },
+        )
+        self.call(
+            "goal-verifier-assign",
+            "masc_goal_assign",
+            {
+                "goal_id": self.verifier_goal_id,
+                "owner": self.roles["coordinator"],
+            },
         )
         for role, keeper in self.roles.items():
             arguments: dict[str, Any] = {
@@ -1242,6 +1439,10 @@ class MissionRun:
                 "MASC_COMPOSITION_KEEPER_NAME": self.roles["coordinator"],
                 "MASC_COMPOSITION_EXPECTED_BASE_PATH": self.expected_base_path,
                 "MASC_COMPOSITION_BROWSER_ARTIFACT_DIR": str(browser_dir),
+                "MASC_GOAL_VERIFICATION_GOAL_ID": self.verifier_goal_id,
+                "MASC_GOAL_VERIFICATION_RUN_ID": str(
+                    self.goal_verifier_evidence.get("proven_run_id", "")
+                ),
             }
         )
         completed = subprocess.run(
@@ -1276,6 +1477,9 @@ class MissionRun:
         self.browser_proof = read_measurement("keeper-composition-inspector.json")
         self.persistence_browser_proof = read_measurement(
             "keeper-persistence-proof.json"
+        )
+        self.goal_verifier_browser_proof = read_measurement(
+            "goal-verification-run-proof.json"
         )
 
     def run_contention(self, post_id: str) -> None:
@@ -1478,6 +1682,156 @@ class MissionRun:
                 "빠졌으면 QA_COVERAGE_VERDICT=MISSING:<빠진 케이스 이름> comment를 남기세요. "
                 "Board에서 읽은 값만 쓰고 새로 만들지 마세요."
             ),
+        )
+
+    def run_goal_verifier_refute_reenter_prove(self) -> None:
+        self.wait_for_goal_state(
+            phase="executing",
+            criterion_state="viable",
+            completion_state="idle",
+        )
+        verifier_task = self.call(
+            "goal-verifier-task-create",
+            "masc_add_task",
+            {
+                "title": f"[{self.marker}] Produce exact Goal proof artifact",
+                "description": (
+                    f"Write {self.verifier_artifact} so its exact content is "
+                    f"{self.verifier_success_token}; submit that artifact as "
+                    "verification evidence."
+                ),
+                "priority": 1,
+                "goal_id": self.verifier_goal_id,
+            },
+        )
+        self.verifier_task_id = extract_identity(verifier_task.text, ["task-"])
+        failure_token = f"GOAL_PROOF_FAIL={self.marker}"
+        self.run_turn(
+            "coordinator",
+            "goal-verifier-refute-artifact",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"exact Task {self.verifier_task_id}를 claim하세요. "
+                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}에 "
+                f"정확히 '{failure_token}' 한 줄만 쓰세요. 다른 토큰을 추가하지 마세요. "
+                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
+                "제출하세요. 실패 내용이어도 완료를 가장하지 말고 실제 파일을 그대로 제출하세요."
+            ),
+        )
+        rejected_task_verdict = self.wait_for_verifier_task_verdict("in_progress")
+        self.wait_for_verifier_task_status("in_progress")
+        self.writer.write_json(
+            "observations/goal-verifier-task-refuted.json",
+            rejected_task_verdict,
+        )
+        self.call(
+            "goal-verifier-request-refute",
+            "masc_goal_transition",
+            {"goal_id": self.verifier_goal_id, "action": "request_complete"},
+        )
+        refuted = self.wait_for_goal_state(
+            phase="executing",
+            criterion_state="viable",
+            completion_state="proof_refuted",
+        )
+        refuted_verdict = (
+            refuted.get("verification", {})
+            .get("completion", {})
+            .get("verdict", {})
+        )
+        refuted_run_id = refuted_verdict.get("verification_run_id")
+        if not isinstance(refuted_run_id, str) or not refuted_run_id.strip():
+            raise AcceptanceError("refuted Goal verdict has no verification_run_id")
+        self.writer.write_json("observations/goal-verifier-refuted.json", refuted)
+
+        self.run_turn(
+            "coordinator",
+            "goal-verifier-proven-artifact",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}를 "
+                f"정확히 '{self.verifier_success_token}' 한 줄로 교체하세요. "
+                "쓴 뒤 파일의 exact content를 다시 읽어 확인하고, "
+                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
+                "다시 제출하세요."
+            ),
+        )
+        approved_task_verdict = self.wait_for_verifier_task_verdict("done")
+        self.wait_for_verifier_task_status("done")
+        self.writer.write_json(
+            "observations/goal-verifier-task-proven.json",
+            approved_task_verdict,
+        )
+        self.call(
+            "goal-verifier-request-prove",
+            "masc_goal_transition",
+            {"goal_id": self.verifier_goal_id, "action": "request_complete"},
+        )
+        proven = self.wait_for_goal_state(
+            phase="completed",
+            criterion_state="viable",
+            completion_state="proof_proven",
+        )
+        proven_verdict = (
+            proven.get("verification", {})
+            .get("completion", {})
+            .get("verdict", {})
+        )
+        proven_run_id = proven_verdict.get("verification_run_id")
+        if not isinstance(proven_run_id, str) or not proven_run_id.strip():
+            raise AcceptanceError("proven Goal verdict has no verification_run_id")
+        if proven_run_id == refuted_run_id:
+            raise AcceptanceError("refutation and proof reused one verification run ID")
+        self.writer.write_json("observations/goal-verifier-proven.json", proven)
+
+        runs_payload = self.dashboard_get(
+            "/api/v1/dashboard/goal-verification-runs"
+        )
+        runs = runs_payload.get("runs")
+        if not isinstance(runs, list):
+            raise AcceptanceError("Goal verification runs route has no runs array")
+        proof_runs = [
+            run
+            for run in runs
+            if isinstance(run, dict)
+            and run.get("goal_id") == self.verifier_goal_id
+            and run.get("review_kind") == "proof"
+        ]
+        by_id = {
+            run.get("run_id"): run
+            for run in proof_runs
+            if isinstance(run.get("run_id"), str)
+        }
+        for expected_run_id in (refuted_run_id, proven_run_id):
+            run = by_id.get(expected_run_id)
+            if not isinstance(run, dict) or run.get("status") != "committed":
+                raise AcceptanceError(
+                    f"Goal proof run {expected_run_id} is not durably committed"
+                )
+            tools = run.get("tools")
+            if not isinstance(tools, list) or not any(
+                isinstance(tool, dict)
+                and tool.get("tool_name") == "verification_read_file"
+                for tool in tools
+            ):
+                raise AcceptanceError(
+                    f"Goal proof run {expected_run_id} has no artifact read"
+                )
+        self.goal_verifier_evidence = {
+            "goal_id": self.verifier_goal_id,
+            "artifact": self.verifier_artifact,
+            "task_id": self.verifier_task_id,
+            "task_refuted_verdict": rejected_task_verdict,
+            "task_proven_verdict": approved_task_verdict,
+            "refuted_run_id": refuted_run_id,
+            "proven_run_id": proven_run_id,
+            "refuted_goal": refuted,
+            "proven_goal": proven,
+            "runs": proof_runs,
+        }
+        self.writer.write_json(
+            "observations/goal-verification-runs.json",
+            {"payload": runs_payload, "evidence": self.goal_verifier_evidence},
         )
 
     def restart_and_recall(self, post_id: str) -> None:
@@ -1749,6 +2103,22 @@ class MissionRun:
         qa_verdicts = [
             self._completion_verdict(key) for key in ("qa-implement", "qa-test")
         ]
+        goal_verifier_refuted = self.goal_verifier_evidence.get("refuted_goal")
+        goal_verifier_proven = self.goal_verifier_evidence.get("proven_goal")
+        goal_verifier_refuted_run = self.goal_verifier_evidence.get(
+            "refuted_run_id"
+        )
+        goal_verifier_proven_run = self.goal_verifier_evidence.get(
+            "proven_run_id"
+        )
+        goal_verifier_runs = self.goal_verifier_evidence.get("runs")
+        goal_verifier_runs_by_id = {
+            run.get("run_id"): run
+            for run in (
+                goal_verifier_runs if isinstance(goal_verifier_runs, list) else []
+            )
+            if isinstance(run, dict) and isinstance(run.get("run_id"), str)
+        }
         parallel_turns = [
             turn for label, turn in self.turns.items() if label.startswith("parallel-")
         ]
@@ -2547,6 +2917,61 @@ class MissionRun:
                 "reviewer's verdict quotes the rebuttal token (absent from its "
                 "prompt, readable only on the Board)",
             ),
+            "goal_verifier_refutation_observed": (
+                isinstance(goal_verifier_refuted, dict)
+                and goal_verifier_refuted.get("phase") == "executing"
+                and isinstance(goal_verifier_refuted_run, str)
+                and text_contains(goal_verifier_refuted, "proof_refuted")
+                and text_contains(
+                    goal_verifier_runs_by_id.get(goal_verifier_refuted_run),
+                    self.verifier_artifact,
+                ),
+                f"goal={self.verifier_goal_id} refuted_run={goal_verifier_refuted_run}",
+            ),
+            "goal_verifier_reentry_proven": (
+                isinstance(goal_verifier_proven, dict)
+                and goal_verifier_proven.get("phase") == "completed"
+                and isinstance(goal_verifier_proven_run, str)
+                and goal_verifier_proven_run != goal_verifier_refuted_run
+                and text_contains(goal_verifier_proven, "proof_proven")
+                and text_contains(goal_verifier_proven, self.verifier_success_token)
+                and text_contains(
+                    goal_verifier_runs_by_id.get(goal_verifier_proven_run),
+                    self.verifier_artifact,
+                ),
+                f"goal={self.verifier_goal_id} proven_run={goal_verifier_proven_run}",
+            ),
+            "goal_verifier_dashboard_browser_observed": (
+                self.goal_verifier_browser_proof.get("schema")
+                == "masc.goal_verification_browser_evidence.v1"
+                and self.goal_verifier_browser_proof.get("goal_id")
+                == self.verifier_goal_id
+                and self.goal_verifier_browser_proof.get("run_id")
+                == goal_verifier_proven_run
+                and self.goal_verifier_browser_proof.get("status") == "committed"
+                and self.goal_verifier_browser_proof.get("review_kind") == "proof"
+                and self.goal_verifier_browser_proof.get("artifact_tool_visible")
+                is True
+                and isinstance(
+                    self.goal_verifier_browser_proof.get("screenshot_sha256"),
+                    str,
+                )
+                and len(self.goal_verifier_browser_proof["screenshot_sha256"])
+                == 64
+                and (
+                    self.writer.output_dir
+                    / "browser"
+                    / "goal-verification-run-proof.png"
+                ).is_file()
+                and sha256_file(
+                    self.writer.output_dir
+                    / "browser"
+                    / "goal-verification-run-proof.png"
+                )
+                == self.goal_verifier_browser_proof["screenshot_sha256"],
+                "real-backend browser expanded the exact proven Goal run and "
+                "rendered verification_read_file evidence",
+            ),
         }
         malformed = [
             name
@@ -2570,6 +2995,7 @@ class MissionRun:
         self.run_poc_delivery(post_id)
         self.run_debate(post_id)
         self.run_qa_coverage(post_id)
+        self.run_goal_verifier_refute_reenter_prove()
         self.run_continuity_chain(post_id)
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()
@@ -2588,6 +3014,15 @@ def bundle_markdown(bundle: dict[str, Any]) -> str:
         f"- Effective base path: `{bundle['effective_base_path']}`",
         f"- Status: **{bundle['status']}** ({bundle['passed_count']}/{bundle['scenario_count']})",
         f"- Bundle ID: `{bundle['bundle_id']}`",
+        "- Approach A: **not executed by this runner** (hermetic CI remains separate)",
+        "- Approach B: **"
+        + next(
+            row["status"]
+            for row in bundle["approach_results"]
+            if row["id"] == "B"
+        )
+        + "** (this isolated real-world run)",
+        "- Approach C: **not executed by this runner** (duration canary remains separate)",
         "",
         "| ID | Real-world mission | Status | Failed assertions |",
         "|---|---|---|---|",
@@ -2640,6 +3075,19 @@ def build_bundle(
             {"name": name, **assertions[name]} for name in mission["assertions"]
         ]
         passed = all(row["passed"] for row in routed)
+        approach_results = [
+            {
+                "id": approach["id"],
+                "name": approach["name"],
+                "status": (
+                    ("passed" if passed else "failed")
+                    if approach["id"] == "B"
+                    else "not_executed_by_this_runner"
+                ),
+                "required_evidence": approach["required_evidence"],
+            }
+            for approach in catalog["execution_approaches"]
+        ]
         missions.append(
             {
                 "id": mission["id"],
@@ -2651,6 +3099,7 @@ def build_bundle(
                 "status": "passed" if passed else "failed",
                 "assertions": routed,
                 "evidence": mission["evidence"],
+                "approaches": approach_results,
             }
         )
     passed_count = sum(mission["status"] == "passed" for mission in missions)
@@ -2683,6 +3132,24 @@ def build_bundle(
         "status": "passed" if passed_count == len(missions) else "failed",
         "scenario_count": len(missions),
         "passed_count": passed_count,
+        "approach_results": [
+            {
+                "id": approach["id"],
+                "name": approach["name"],
+                "status": (
+                    (
+                        "passed"
+                        if passed_count == len(missions)
+                        else "failed"
+                    )
+                    if approach["id"] == "B"
+                    else "not_executed_by_this_runner"
+                ),
+                "method": approach["method"],
+                "required_evidence": approach["required_evidence"],
+            }
+            for approach in catalog["execution_approaches"]
+        ],
         "effective_base_path": health_base_path(health),
         "effective_masc_root": health_masc_root(health),
         "preflight": preflight_result,
@@ -2695,6 +3162,8 @@ def build_bundle(
                 roles=set(run.roles),
             ),
             "goal_id": run.goal_id,
+            "goal_verifier_goal_id": run.verifier_goal_id,
+            "goal_verifier_task_id": run.verifier_task_id,
             "task_ids": run.task_ids,
             "board_post_id": post_id,
             "schedule_id": run.schedule_id,
@@ -2731,6 +3200,30 @@ def verify_bundle(
         errors.append(f"mission ids mismatch: {actual_ids!r}")
     if bundle.get("scenario_count") != len(expected_ids):
         errors.append("scenario count mismatch")
+    expected_approach_ids = ["A", "B", "C"]
+    approach_results = bundle.get("approach_results")
+    if (
+        not isinstance(approach_results, list)
+        or [row.get("id") for row in approach_results] != expected_approach_ids
+        or [row.get("status") for row in approach_results]
+        != ["not_executed_by_this_runner", "passed", "not_executed_by_this_runner"]
+    ):
+        errors.append("bundle A/B/C approach results are missing or conflated")
+    for mission in missions:
+        approaches = mission.get("approaches")
+        if (
+            not isinstance(approaches, list)
+            or [row.get("id") for row in approaches] != expected_approach_ids
+            or [row.get("status") for row in approaches]
+            != [
+                "not_executed_by_this_runner",
+                mission.get("status"),
+                "not_executed_by_this_runner",
+            ]
+        ):
+            errors.append(
+                f"mission {mission.get('id')} A/B/C results are missing or conflated"
+            )
     passed_count = sum(mission.get("status") == "passed" for mission in missions)
     if bundle.get("passed_count") != passed_count:
         errors.append("passed count mismatch")
@@ -2848,6 +3341,54 @@ def verify_bundle(
         )
         if not persistence_valid:
             errors.append(f"persistence browser proof is invalid: {persistence_detail}")
+    goal_proof_path = output_dir / "browser" / "goal-verification-run-proof.json"
+    goal_screenshot_path = output_dir / "browser" / "goal-verification-run-proof.png"
+    proven_goal_path = output_dir / "observations" / "goal-verifier-proven.json"
+    try:
+        goal_proof = json.loads(goal_proof_path.read_text(encoding="utf-8"))
+        proven_goal = json.loads(proven_goal_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"Goal verifier browser/ledger proof is unreadable: {error}")
+    else:
+        resources = bundle.get("resources")
+        expected_goal_id = (
+            resources.get("goal_verifier_goal_id")
+            if isinstance(resources, dict)
+            else None
+        )
+        verification = (
+            proven_goal.get("verification")
+            if isinstance(proven_goal, dict)
+            else None
+        )
+        completion = (
+            verification.get("completion")
+            if isinstance(verification, dict)
+            else None
+        )
+        verdict = (
+            completion.get("verdict") if isinstance(completion, dict) else None
+        )
+        expected_run_id = (
+            verdict.get("verification_run_id")
+            if isinstance(verdict, dict)
+            else None
+        )
+        if (
+            goal_proof.get("schema")
+            != "masc.goal_verification_browser_evidence.v1"
+            or not isinstance(expected_goal_id, str)
+            or goal_proof.get("goal_id") != expected_goal_id
+            or not isinstance(expected_run_id, str)
+            or goal_proof.get("run_id") != expected_run_id
+            or goal_proof.get("status") != "committed"
+            or goal_proof.get("review_kind") != "proof"
+            or goal_proof.get("artifact_tool_visible") is not True
+            or not goal_screenshot_path.is_file()
+            or goal_proof.get("screenshot_sha256")
+            != sha256_file(goal_screenshot_path)
+        ):
+            errors.append("Goal verifier browser proof does not match ledger run identity")
     seed = {
         "source_sha": bundle.get("source_sha"),
         "runner_source_sha": bundle.get("runner_source_sha"),
@@ -2927,6 +3468,10 @@ def main() -> int:
                         "catalog": str(pathlib.Path(args.catalog)),
                         "mission_count": len(catalog["missions"]),
                         "assertion_count": len(KNOWN_ASSERTIONS),
+                        "approach_ids": [
+                            approach["id"]
+                            for approach in catalog["execution_approaches"]
+                        ],
                         "acceptance_authority": catalog["acceptance_authority"],
                     },
                     ensure_ascii=False,

@@ -2817,7 +2817,6 @@ let test_reconciled_lifecycle_event_preserves_durable_pause () =
         ; ("paused", `Bool true)
         ; ("phase", `String "paused")
         ; ("pipeline_stage", `String "paused")
-        ; ("agent", `Assoc [ ("status", `String "active") ])
         ])
   in
   let open Yojson.Safe.Util in
@@ -2859,7 +2858,6 @@ let test_stopped_lifecycle_event_preserves_durable_pause () =
         [ ("name", `String "paused-stop-target")
         ; ("status", `String "paused")
         ; ("paused", `Bool true)
-        ; ("agent", `Assoc [ ("status", `String "active") ])
         ])
   in
   check string "terminal stop preserves paused status" "paused"
@@ -2930,7 +2928,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
        let keeper_row =
          `Assoc
            [ "name", `String keeper_name
-           ; "agent", `Assoc []
            ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
            ; "keeper_id", `String ("k-" ^ keeper_name)
            ; "status", `String "active"

@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import inspect
 import json
 import sys
 import tempfile
@@ -115,7 +116,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
     def test_catalog_has_exact_rw19_persistence_projection_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        self.assertEqual(len(catalog["missions"]), 22)
+        self.assertEqual(len(catalog["missions"]), 23)
         self.assertEqual(catalog["missions"][18]["id"], "RW19")
         self.assertEqual(
             catalog["missions"][18]["assertions"],
@@ -158,6 +159,50 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertIn("tool_execute", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_claim", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_done", catalog["keeper_required_tools"])
+
+    def test_catalog_has_exact_rw23_goal_verifier_mission(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+
+        goal_verifier = catalog["missions"][22]
+        self.assertEqual(goal_verifier["id"], "RW23")
+        self.assertEqual(
+            goal_verifier["assertions"],
+            [
+                "goal_verifier_refutation_observed",
+                "goal_verifier_reentry_proven",
+                "goal_verifier_dashboard_browser_observed",
+            ],
+        )
+        self.assertIn("Goal", goal_verifier["capabilities"])
+        self.assertIn("Browser", goal_verifier["capabilities"])
+        self.assertIn("masc_goal_transition", catalog["operator_required_tools"])
+        self.assertTrue(catalog["approaches_apply_to_each_mission"])
+        self.assertEqual(
+            [approach["id"] for approach in catalog["execution_approaches"]],
+            ["A", "B", "C"],
+        )
+
+    def test_rw23_task_is_not_exposed_to_autonomous_work_before_refutation(self):
+        setup_source = inspect.getsource(acceptance.MissionRun.setup_product_state)
+        rw23_source = inspect.getsource(
+            acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
+        )
+
+        # The success-token Task used to be created during fleet setup and the
+        # coordinator completed it autonomously before RW23 could write the
+        # failing artifact. Keep the Task creation inside the directed RW23
+        # phase and keep the verifier Goal out of the ordinary fleet scope.
+        self.assertNotIn("goal-verifier-task-create", setup_source)
+        self.assertIn('"active_goal_ids": [self.goal_id]', setup_source)
+        self.assertNotIn(
+            '"active_goal_ids": [self.goal_id, self.verifier_goal_id]',
+            setup_source,
+        )
+        self.assertIn("goal-verifier-task-create", rw23_source)
+        self.assertLess(
+            rw23_source.index("goal-verifier-task-create"),
+            rw23_source.index("goal-verifier-refute-artifact"),
+        )
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}

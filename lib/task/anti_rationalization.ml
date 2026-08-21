@@ -23,11 +23,16 @@ type review_request =
   ; evidence_refs : string list
   }
 
+type lookup_scope =
+  | Producer_tree
+  | Producer_forest of { producers : string list }
+
 type lookup_surface =
   | No_lookup_surface
   | Lookup_tools of
       { schemas : Types_core.tool_schema list
       ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
+      ; scope : lookup_scope
       }
 
 type verdict =
@@ -151,35 +156,51 @@ let lookup_section = function
      snapshot inside `completion_notes`. You have no tool that opens anything \
      else, so a reference you cannot read there is a reference you cannot \
      verify.\n"
-  | Lookup_tools { schemas; dispatch = _ } ->
+  | Lookup_tools { schemas; dispatch = _; scope = Producer_tree } ->
     sprintf
       "\n\
        <live_lookup>\n\
        You hold the producer's own tools, pointed at the producer's tree: %s. \
        They run inside that producer's sandbox — the same jail the producer \
-       worked in — and they are not restricted to reading.\n\n\
+       worked in — and this verifier surface is read-only.\n\n\
        The snapshot is what was true when the work was submitted. A lookup is what \
        is true now. Both are evidence, and disagreement between them is also \
        evidence: a file the snapshot shows and the tree no longer contains was \
        not durable.\n\n\
-       Present is not the same as durable. Work that exists only as an \
-       uncommitted change survives until the next task cleans that working tree, \
-       and reading the file cannot tell you which of the two you are looking at. \
-       Ask what differs from the last commit before treating a file's contents as \
-       the completed work.\n\n\
        A claim about behaviour is not settled by reading the code that makes it. \
-       If the submitter says a build succeeds or a test passes, run it. You are \
-       judging the work, not the description of the work.\n\n\
-       Because these tools can change the tree, one rule binds you: do not repair \
-       what you are judging. If a build fails, that is a finding, not a task. \
-       Fixing it and then approving produces work no one verified — yours. Every \
-       call you make is recorded against this review, so a verdict reached after \
-       you changed the tree is visible as exactly that.\n\n\
+       If the submitter says a build or test passed, require an inspectable run \
+       receipt or log. This surface cannot execute that claim, so source text \
+       alone must not be upgraded into execution evidence.\n\n\
        A note claiming a path, a commit, or a command result is still not proof by \
        itself. The difference is that you can now check the claims that name \
        something in the producer's tree, so approving without checking an \
        available one is your omission rather than the submitter's.\n\
        </live_lookup>\n"
+      (schemas
+       |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
+       |> String.concat ", ")
+  | Lookup_tools
+      { schemas
+      ; dispatch = _
+      ; scope = Producer_forest { producers }
+      } ->
+    sprintf
+      "\n\
+       <live_lookup>\n\
+       This Goal is backed by linked Tasks performed in different owned trees. \
+       The closed producer set is: %s. Filesystem calls require one producer \
+       from that set; selecting a producer does not grant access to any other \
+       tree. The available tools are: %s.\n\n\
+       Read the linked-task rollup first, then inspect the submitted artifact \
+       in the tree of the Task performer that supplied it. A reference, a Task \
+       completion state, or another verifier's verdict is not a substitute for \
+       this Goal verifier's own inspection. Snapshot/live disagreement is \
+       evidence that the claimed result is not durable.\n\n\
+       These tools are read-only. Do not reinterpret a failed or refused call \
+       as empty output. If an artifact cannot be inspected in its producer \
+       tree, reject or defer rather than approving from the submitter's prose.\n\
+       </live_lookup>\n"
+      (String.concat ", " producers)
       (schemas
        |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
        |> String.concat ", ")

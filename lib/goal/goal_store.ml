@@ -337,6 +337,32 @@ let update_goal config ~goal_id f =
           let* () = write_state_result config next_state in
           Ok updated_goal)
 
+type conditional_update =
+  | Goal_updated of goal
+  | Goal_phase_mismatch of Goal_phase.t
+
+let update_goal_if_phase config ~goal_id ~expected_phase f =
+  let lock_path = goals_path config in
+  Workspace_utils.with_file_lock config lock_path (fun () ->
+      match load_state config with
+      | Undecodable detail -> Error (undecodable_store_error config detail)
+      | Loaded state ->
+        (match find_goal state.goals goal_id with
+         | None -> Error "goal not found"
+         | Some goal when goal.phase <> expected_phase ->
+           Ok (Goal_phase_mismatch goal.phase)
+         | Some goal ->
+           let now = Masc_domain.now_iso () in
+           let updated_goal = f { goal with updated_at = now } in
+           let next_state =
+             { version = state.version + 1
+             ; updated_at = now
+             ; goals = replace_goal state.goals updated_goal
+             }
+           in
+           let* () = write_state_result config next_state in
+           Ok (Goal_updated updated_goal)))
+
 type delete_goal_outcome =
   | Deleted
   | Deleted_with_orphaned_links of string
@@ -534,4 +560,3 @@ let compute_rollup goals =
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
   }
-

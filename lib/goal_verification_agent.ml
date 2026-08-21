@@ -39,11 +39,14 @@ type pending_work =
 
 type process_outcome =
   | Committed
-  | Deferred of { retryable : bool }
+  | Deferred of
+      { retryable : bool
+      ; reason : string
+      }
 
 let should_schedule_retry = function
   | Committed -> false
-  | Deferred { retryable } -> retryable
+  | Deferred { retryable; reason = _ } -> retryable
 ;;
 
 let pending_kind_to_string = function
@@ -87,9 +90,9 @@ let group_pending_by_goal work =
    ledger row lost the durable proof request is re-armed via
    [mark_proof_pending] and joins the work set, the same recovery
    [answer_verifying_repeat] performs on the MCP surface. A [Verifying] goal
-   with a committed verdict ([Proof_proven] / [Human_confirmed]) is the
-   crash-between-writes case the keeper's repeated [request_complete]
-   reconciles; the lane must not overwrite that verdict. *)
+   with a committed proof verdict is the crash-between-writes case: the exact
+   stored verdict reconciles the missing phase/event effect without another
+   model call or ledger rewrite. *)
 
 let collect_pending config : (pending_work list, string) result =
   match Goal_verification.load_records config with
@@ -112,15 +115,14 @@ let collect_pending config : (pending_work list, string) result =
                [ { goal_id = record.goal_id; kind = Completion_proof } ]
              | Goal_verification.Completion_idle
              | Goal_verification.Proof_proven _
-             | Goal_verification.Proof_refuted _
-             | Goal_verification.Human_confirmed _ -> []
+             | Goal_verification.Proof_refuted _ -> []
            in
            criterion @ proof)
         records
     in
-    let rearmed =
-      Goal_store.list_goals config ~phase:Goal_phase.Verifying ()
-      |> List.filter_map (fun (goal : Goal_store.goal) ->
+    let rec reconcile_verifying acc = function
+      | [] -> Ok (List.rev acc)
+      | (goal : Goal_store.goal) :: rest ->
         if
           List.exists
             (fun work ->
@@ -129,7 +131,7 @@ let collect_pending config : (pending_work list, string) result =
                 | Criterion_check -> false)
                && String.equal work.goal_id goal.id)
             from_rows
-        then None
+        then reconcile_verifying acc rest
         else
           match
             List.find_opt
@@ -138,34 +140,67 @@ let collect_pending config : (pending_work list, string) result =
               records
           with
           | Some
-              { Goal_verification.completion =
-                  ( Goal_verification.Proof_proven _
-                  | Goal_verification.Human_confirmed _
-                  | Goal_verification.Proof_pending _ )
-              ; _
-              } -> None
+              { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
+            reconcile_verifying acc rest
           | Some
               { Goal_verification.completion =
-                  ( Goal_verification.Completion_idle
-                  | Goal_verification.Proof_refuted _ )
+                  (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _)
               ; _
-              }
+              } ->
+            (match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
+             | Error detail ->
+               Error
+                 (Printf.sprintf
+                    "goal verifier could not reconcile committed proof goal_id=%s \
+                     detail=%s"
+                    goal.id
+                    detail)
+             | Ok Workspace_goals.No_committed_proof ->
+               Error
+                 (Printf.sprintf
+                    "goal verifier saw a committed proof but reconciliation \
+                     found none goal_id=%s"
+                    goal.id)
+             | Ok (Workspace_goals.Reconciled phase) ->
+               Log.Misc.info
+                 "goal verifier reconciled committed proof after restart \
+                  goal_id=%s phase=%s"
+                 goal.id
+                 (Goal_phase.to_string phase);
+               reconcile_verifying acc rest
+             | Ok (Workspace_goals.Reconciliation_not_needed phase) ->
+               Log.Misc.info
+                 "goal verifier skipped proof reconciliation after concurrent \
+                  phase change goal_id=%s phase=%s"
+                 goal.id
+                 (Goal_phase.to_string phase);
+               reconcile_verifying acc rest)
+          | Some
+              { Goal_verification.completion = Goal_verification.Completion_idle; _ }
           | None ->
             (match Goal_verification.mark_proof_pending config ~goal_id:goal.id with
              | Ok _ ->
                Log.Misc.info
                  "goal verifier re-armed a missing proof request (P0-2) goal_id=%s"
                  goal.id;
-               Some { goal_id = goal.id; kind = Completion_proof }
+               reconcile_verifying
+                 ({ goal_id = goal.id; kind = Completion_proof } :: acc)
+                 rest
              | Error msg ->
-               Log.Misc.error
-                 "goal verifier could not re-arm a missing proof request goal_id=%s \
-                  detail=%s"
-                 goal.id
-                 msg;
-               None))
+               Error
+                 (Printf.sprintf
+                    "goal verifier could not re-arm a missing proof request \
+                     goal_id=%s detail=%s"
+                    goal.id
+                    msg))
     in
-    Ok (from_rows @ rearmed)
+    (match
+       reconcile_verifying
+         []
+         (Goal_store.list_goals config ~phase:Goal_phase.Verifying ())
+     with
+     | Error _ as error -> error
+     | Ok rearmed -> Ok (from_rows @ rearmed))
 ;;
 
 (* {1 Review request construction}
@@ -196,6 +231,7 @@ let task_rollup_json (task : Masc_domain.task) =
   let verification_evidence =
     Task.Completion_review.concrete_verification_evidence task
   in
+  let producer = Masc_domain.task_performer_of_status task.task_status in
   let status_fields =
     match task.task_status with
     | Masc_domain.Done { assignee; completed_at; notes } ->
@@ -216,6 +252,10 @@ let task_rollup_json (task : Masc_domain.task) =
     ([ "task_id", `String task.id
      ; "title", `String task.title
      ; "status", `String (Masc_domain.task_status_to_string task.task_status)
+     ; ( "producer"
+       , match producer with
+         | Some producer -> `String producer
+         | None -> `Null )
      ; ( "verification_evidence"
        , Task.Completion_review.verification_evidence_to_yojson
            verification_evidence )
@@ -232,7 +272,9 @@ let task_submitted_evidence (task : Masc_domain.task) =
 
 (* A backlog that does not read is infrastructure failure: the proof review
    defers rather than judging a goal on an absent rollup. *)
-let linked_task_rollup config ~goal_id : (string * string list, string) result =
+let linked_task_rollup config ~goal_id
+  : (string * string list * Masc_domain.task list, string) result
+  =
   match Workspace_backlog.read_backlog_r config with
   | Error detail -> Error detail
   | Ok backlog ->
@@ -250,7 +292,8 @@ let linked_task_rollup config ~goal_id : (string * string list, string) result =
        in
        Ok
          ( Yojson.Safe.pretty_to_string (`List (List.map task_rollup_json tasks))
-         , evidence_refs ))
+         , evidence_refs
+         , tasks ))
 ;;
 
 (* [review_request] is task-shaped and its [agent_name] names the producer whose
@@ -261,8 +304,57 @@ let linked_task_rollup config ~goal_id : (string * string list, string) result =
    surface -- it only tells the judge there is no single author to attribute. *)
 let goal_producer_name = "no single producer (shared Goal)"
 
+let single_producer_lookup config ~producer =
+  let open Result.Syntax in
+  let* tools = Verification_authority_tools.create ~config ~producer in
+  Ok
+    (Task.Anti_rationalization.Lookup_tools
+       { schemas = Verification_authority_tools.schemas tools
+       ; dispatch = Verification_authority_tools.dispatch tools
+       ; scope = Task.Anti_rationalization.Producer_tree
+       })
+;;
+
+let task_producer (task : Masc_domain.task) =
+  match Masc_domain.task_performer_of_status task.task_status with
+  | Some producer when not (String.equal (String.trim producer) "") -> Ok producer
+  | Some _ | None ->
+    Error
+      (Printf.sprintf
+         "linked task %s has no performer tree for Goal verification"
+         task.id)
+;;
+
+let rec task_producers = function
+  | [] -> Ok []
+  | task :: rest ->
+    let open Result.Syntax in
+    let* producer = task_producer task in
+    let* producers = task_producers rest in
+    Ok (producer :: producers)
+;;
+
+let linked_task_lookup config tasks =
+  let open Result.Syntax in
+  let* producers = task_producers tasks in
+  let producers = List.sort_uniq String.compare producers in
+  let* tools =
+    Verification_authority_tools.create_forest ~config ~producers
+  in
+  Ok
+    (Task.Anti_rationalization.Lookup_tools
+       { schemas = Verification_authority_tools.forest_schemas tools
+       ; dispatch = Verification_authority_tools.dispatch_forest tools
+       ; scope = Task.Anti_rationalization.Producer_forest { producers }
+       })
+;;
+
 let build_review_request config (goal : Goal_store.goal) kind
-  : (Task.Anti_rationalization.review_request * string, string) result
+  : ( Task.Anti_rationalization.review_request
+      * string
+      * Task.Anti_rationalization.lookup_surface
+    , string )
+      result
   =
   let base =
     { Task.Anti_rationalization.task_title = goal.title
@@ -275,22 +367,38 @@ let build_review_request config (goal : Goal_store.goal) kind
   in
   match kind with
   | Criterion_check ->
+    let open Result.Syntax in
+    let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
     Ok
       ( { base with
           Task.Anti_rationalization.completion_notes =
             Yojson.Safe.pretty_to_string (Goal_store.goal_to_yojson goal)
         }
-      , Prompt_names.goal_verification_criterion )
+      , Prompt_names.goal_verification_criterion
+      , lookup )
   | Completion_proof ->
     (match linked_task_rollup config ~goal_id:goal.id with
      | Error _ as error -> error
-     | Ok (rollup, evidence_refs) ->
+     | Ok (rollup, evidence_refs, []) ->
+       let open Result.Syntax in
+       let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
        Ok
          ( { base with
              Task.Anti_rationalization.completion_notes = rollup
            ; evidence_refs
            }
-         , Prompt_names.goal_verification_proof ))
+         , Prompt_names.goal_verification_proof
+         , lookup )
+     | Ok (rollup, evidence_refs, tasks) ->
+       let open Result.Syntax in
+       let* lookup = linked_task_lookup config tasks in
+       Ok
+         ( { base with
+             Task.Anti_rationalization.completion_notes = rollup
+           ; evidence_refs
+           }
+         , Prompt_names.goal_verification_proof
+         , lookup ))
 ;;
 
 (* {1 Verdict commit}
@@ -299,7 +407,7 @@ let build_review_request config (goal : Goal_store.goal) kind
    callers can request lifecycle changes but cannot name verifier verdicts or
    impersonate the fixed verifier authority. *)
 
-let commit_gate_verdict config ~goal_id ~decision ~evidence
+let commit_gate_verdict config ~goal_id ~verification_run_id ~decision ~evidence
   : (unit, string) result
   =
   let result =
@@ -308,6 +416,7 @@ let commit_gate_verdict config ~goal_id ~decision ~evidence
       ~start_time:(Time_compat.now ())
       config
       ~goal_id
+      ~verification_run_id
       ~decision
       ~evidence
   in
@@ -325,7 +434,7 @@ let defer ~goal_id ~kind ~retryable ~reason =
     (pending_kind_to_string kind)
     retryable
     reason;
-  Deferred { retryable }
+  Deferred { retryable; reason }
 ;;
 
 let admit_proof_against_criterion config (work : pending_work) =
@@ -350,7 +459,14 @@ let admit_proof_against_criterion config (work : pending_work) =
             , "proof refused because the durable criterion is unreachable" )))
 ;;
 
-let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
+let process_pending_work_inner
+      ?(sw : Eio.Switch.t option = None)
+      ~observe_tool
+      ~observe_evaluator_runtime
+      ~persist_reviewed
+      ~verification_run_id
+      config
+      (work : pending_work)
   : process_outcome
   =
   match admit_proof_against_criterion config work with
@@ -376,13 +492,14 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
        (match build_review_request config goal work.kind with
         | Error detail ->
           defer ~goal_id:work.goal_id ~kind:work.kind ~retryable:true ~reason:detail
-        | Ok (review_request, prompt_name) ->
+        | Ok (review_request, prompt_name, lookup) ->
           (* The verdict channel drops the reason for [Approve]; capture the
              stated reason from the successful verdict tool call — exactly one
              such call exists per review, and it belongs to the winning slot
              (a slot that recorded a verdict never fails over). *)
           let stated_reason = ref None in
           let on_tool_result ~input result =
+            observe_tool ~input result;
             if Tool_result.is_success result
             then
               match
@@ -400,10 +517,11 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
               ~base_path:config.base_path
               ~sw
               ~prompt_name
-              ~lookup:Task.Anti_rationalization.No_lookup_surface
+              ~lookup
               ~on_tool_result
               review_request
           in
+          observe_evaluator_runtime result.evaluator_runtime;
           (match result.verdict with
            | None ->
              let detail =
@@ -435,10 +553,12 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
                   | Criterion_check, Task.Anti_rationalization.Reject reason ->
                     Workspace_goals.Criterion_unreachable { reason }
                 in
+                persist_reviewed ();
                 (match
                    commit_gate_verdict
                      config
                      ~goal_id:work.goal_id
+                     ~verification_run_id
                      ~decision
                      ~evidence
                  with
@@ -499,6 +619,84 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
          ~kind:work.kind
          ~retryable:false
          ~reason:"criterion request pending on a terminal goal; left durable")
+;;
+
+let registry_review_kind = function
+  | Criterion_check -> Goal_verification_run_registry.Criterion
+  | Completion_proof -> Goal_verification_run_registry.Proof
+;;
+
+let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
+  : process_outcome
+  =
+  let registry = Goal_verification_run_registry.global () in
+  let run_id = Random_id.uuid_v7 () in
+  let started_at = Time_compat.now () in
+  let tools = ref [] in
+  let evaluator_runtime = ref None in
+  Goal_verification_run_registry.register_running
+    registry
+    ~run_id
+    ~goal_id:work.goal_id
+    ~review_kind:(registry_review_kind work.kind)
+    ~authority_actor:Runtime.verifier_exact_lane_id
+    ~started_at;
+  let observe_tool ~input result =
+    tools :=
+      Verification_run_registry.observe_tool_result
+        ~input
+        ~finished_at:(Time_compat.now ())
+        result
+      :: !tools
+  in
+  let observe_evaluator_runtime runtime = evaluator_runtime := Some runtime in
+  let persist outcome =
+    Goal_verification_run_registry.mark_completed
+      registry
+      ~run_id
+      ~outcome
+      ~tools:(List.rev !tools)
+      ?evaluator_runtime:!evaluator_runtime
+      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
+      ()
+  in
+  let persist_reviewed () = persist Goal_verification_run_registry.Reviewed in
+  let complete outcome =
+    let registry_outcome =
+      match outcome with
+      | Committed -> Goal_verification_run_registry.Committed
+      | Deferred { retryable; reason } ->
+        Goal_verification_run_registry.Deferred { retryable; detail = reason }
+    in
+    persist registry_outcome
+  in
+  try
+    let outcome =
+      process_pending_work_inner
+        ~sw
+        ~observe_tool
+        ~observe_evaluator_runtime
+        ~persist_reviewed
+        ~verification_run_id:run_id
+        config
+        work
+    in
+    complete outcome;
+    outcome
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Goal_verification_run_registry.mark_completed
+      registry
+      ~run_id
+      ~outcome:
+        (Goal_verification_run_registry.Raised
+           { detail = Printexc.to_string exn })
+      ~tools:(List.rev !tools)
+      ?evaluator_runtime:!evaluator_runtime
+      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
+      ();
+    raise exn
 ;;
 
 let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, string) result =
@@ -606,7 +804,7 @@ let process_goal_work (runtime : runtime) work =
                       item
                   with
                   | Committed -> loop rest
-                  | Deferred { retryable } -> retryable)
+                  | Deferred { retryable; reason = _ } -> retryable)
              in
              loop work))
     in
@@ -743,7 +941,10 @@ module For_testing = struct
 
   type nonrec process_outcome = process_outcome =
     | Committed
-    | Deferred of { retryable : bool }
+    | Deferred of
+        { retryable : bool
+        ; reason : string
+        }
 
   let should_schedule_retry = should_schedule_retry
   let group_pending_by_goal = group_pending_by_goal

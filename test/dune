@@ -1819,6 +1819,7 @@
 (include stanzas/test_goal_verification_gate.inc)
 
 (include stanzas/test_goal_verification_agent.inc)
+(include stanzas/test_goal_verification_run_registry.inc)
 
 
 
@@ -1845,7 +1846,6 @@
 
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 
-(include stanzas/test_keeper_agent_runtime_status.inc)
 
 (include stanzas/test_keeper_autoboot_single_owner.inc)
 

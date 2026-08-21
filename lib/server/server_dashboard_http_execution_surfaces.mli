@@ -56,7 +56,7 @@
     [_last_broadcast_hash] /
     [_broadcast_hash_mu] / [broadcast_cached_surface],
     [_transport_health_cache],
-    [keeper_agent_status_opt] / [patched_keeper_status],
+    [keeper_top_level_status_opt] / [patched_keeper_status],
     [patch_keeper_rows] SSE-event row patcher helper,
     [running_keeper_names],
     [patchexecution_cache_for_keeper],

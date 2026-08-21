@@ -98,6 +98,7 @@ let json_bool json path =
 
 let verdict ?(evidence = "observed by the verifier") outcome : Goal_verification.verdict =
   { Goal_verification.outcome
+  ; verification_run_id = "goal-verifier-test-run"
   ; authority = Masc_domain.System_llm_agent { agent_run_id = "test-verifier" }
   ; evidence
   ; recorded_at = Masc_domain.now_iso ()
@@ -374,21 +375,6 @@ let test_proof_verdict_requires_a_viable_criterion () =
       (String_util.contains_substring msg "requires a viable criterion")
 ;;
 
-let test_human_confirmation_requires_a_proven_proof () =
-  with_workspace
-  @@ fun config ->
-  match
-    Goal_verification.record_human_confirmation
-      config
-      ~goal_id:"goal-unproven"
-      ~confirmed_by:"operator-test"
-  with
-  | Ok _ -> fail "human confirmation committed without a proven proof"
-  | Error msg ->
-    check bool "the refusal names the missing proof" true
-      (String_util.contains_substring msg "needs a proven proof")
-;;
-
 (* Ledger: strict decode, fail-closed mutations, fail-loud reads *)
 
 let test_undecodable_ledger_fails_closed_and_loud () =
@@ -465,6 +451,42 @@ let test_unknown_ledger_field_is_a_decode_error () =
   | Error msg ->
     check bool "the unknown field is named" true
       (String_util.contains_substring msg "surprise_field")
+;;
+
+let test_retired_human_confirmation_state_is_a_decode_error () =
+  with_workspace
+  @@ fun config ->
+  mark_criterion_pending config "goal-no-human-legacy";
+  let path = Goal_verification.verifications_path config in
+  let json = Yojson.Safe.from_file path in
+  let poisoned =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "records", `List [ `Assoc row ] ->
+                let row =
+                  List.map
+                    (fun (field, value) ->
+                       if String.equal field "completion"
+                       then field, `Assoc [ "state", `String "human_confirmed" ]
+                       else field, value)
+                    row
+                in
+                key, `List [ `Assoc row ]
+              | _ -> key, value)
+           fields)
+    | _ -> fail "unexpected ledger shape"
+  in
+  Yojson.Safe.to_file path poisoned;
+  Yojson.Safe.to_file (path ^ ".last-good") poisoned;
+  match Goal_verification.get_record config ~goal_id:"goal-no-human-legacy" with
+  | Ok _ -> fail "retired human confirmation state decoded silently"
+  | Error msg ->
+    check bool "the retired state is rejected as unknown" true
+      (String_util.contains_substring msg "human_confirmed")
 ;;
 
 (* Observability: the read surfaces join the ledger *)
@@ -576,6 +598,7 @@ let verifier_transition config goal_id decision evidence =
     ~start_time:0.
     config
     ~goal_id
+    ~verification_run_id:"goal-verifier-test-run"
     ~decision
     ~evidence
 ;;
@@ -675,6 +698,21 @@ let test_proof_proven_completes_with_authority_and_evidence () =
     (json_state blank [ "error_code" ]);
   check string "a refused verdict does not move the phase" "verifying"
     (stored_phase config goal_id);
+  let unbound_attempt =
+    must_fail "typed proof verdict with blank run ID"
+      (Workspace_goals.commit_verifier_decision
+         ~tool_name:"goal_verifier_commit"
+         ~start_time:0.
+         config
+         ~goal_id
+         ~verification_run_id:"   "
+         ~decision:Workspace_goals.Proof_proven
+         ~evidence:"metric observed at target")
+  in
+  check string "blank run ID is a typed validation error" "validation_error"
+    (json_state unbound_attempt [ "error_code" ]);
+  check string "an unbound verdict does not move the phase" "verifying"
+    (stored_phase config goal_id);
   let completed =
     must_succeed "typed proof proven"
       (verifier_transition
@@ -689,6 +727,11 @@ let test_proof_proven_completes_with_authority_and_evidence () =
     (json_state completed [ "verification"; "completion"; "state" ]);
   check string "the evidence is on the verdict" "metric observed at target"
     (json_state completed [ "verification"; "completion"; "verdict"; "evidence" ]);
+  check string "the verdict retains its exact verifier attempt"
+    "goal-verifier-test-run"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "verification_run_id" ]);
   check string "the caller cannot impersonate the typed authority" "verifier_exact"
     (json_state
        completed
@@ -784,6 +827,39 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
   in
   check string "the re-armed gate completes" "completed"
     (json_state completed [ "goal"; "phase" ])
+;;
+
+let test_verifying_repeat_reconciles_a_committed_proof () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Proof committed before crash" in
+  mark_criterion_viable ctx goal_id;
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  (match
+     Goal_verification.record_proof_verdict
+       config
+       ~goal_id
+       (verdict ~evidence:"artifact inspected before crash" Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  check string "phase write is the simulated missing effect" "verifying"
+    (stored_phase config goal_id);
+  let answered =
+    must_succeed "repeated request reconciles proof"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "response exposes recovery" true
+    (json_bool answered [ "reconciled" ]);
+  check string "the committed proof converges to completed" "completed"
+    (json_state answered [ "goal"; "phase" ]);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven proof ->
+    check string "recovery preserves the original proof run"
+      "goal-verifier-test-run" proof.verification_run_id
+  | _ -> fail "recovery rewrote the committed proof"
 ;;
 
 (* (e) A criterion judged unreachable blocks the completion request with a
@@ -936,14 +1012,14 @@ let () =
             test_proof_verdict_requires_a_pending_request
         ; test_case "proof verdict requires a viable criterion" `Quick
             test_proof_verdict_requires_a_viable_criterion
-        ; test_case "human confirmation requires a proven proof" `Quick
-            test_human_confirmation_requires_a_proven_proof
         ] )
     ; ( "store discipline"
       , [ test_case "undecodable ledger fails closed and loud" `Quick
             test_undecodable_ledger_fails_closed_and_loud
         ; test_case "unknown ledger field is a decode error" `Quick
             test_unknown_ledger_field_is_a_decode_error
+        ; test_case "retired human confirmation state is a decode error" `Quick
+            test_retired_human_confirmation_state_is_a_decode_error
         ] )
     ; ( "observability"
       , [ test_case "goal list joins the ledger" `Quick
@@ -960,6 +1036,8 @@ let () =
             test_proof_refuted_returns_to_executing_with_reason
         ; test_case "verifying repeat re-arms a missing proof request" `Quick
             test_verifying_repeat_rearms_a_missing_proof_request
+        ; test_case "verifying repeat reconciles a committed proof" `Quick
+            test_verifying_repeat_reconciles_a_committed_proof
         ; test_case "unreachable criterion blocks request_complete" `Quick
             test_unreachable_criterion_blocks_request_complete
         ; test_case "creation writes criterion pending" `Quick

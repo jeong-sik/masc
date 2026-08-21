@@ -227,11 +227,11 @@ type mcp_call_error =
 
 type effect_disposition =
   | Proven_pre_effect
-  | Outcome_unknown
+  | Remote_effect_unresolved
 
 let mcp_call_effect_disposition = function
   | Timed_out _ | Connection_failed _ | Http_status _ | Malformed_body _ ->
-    Outcome_unknown
+    Remote_effect_unresolved
 ;;
 
 let mcp_call_error_to_string = function
@@ -470,7 +470,7 @@ let attempt_tts_endpoint
         (match mcp_call_effect_disposition error with
          | Proven_pre_effect ->
            Error (`Proven_pre_effect (mcp_call_error_to_string error))
-         | Outcome_unknown ->
+         | Remote_effect_unresolved ->
            Error (`Outcome_unknown (mcp_call_error_to_string error)))
       | Ok json ->
         (match extract_mcp_result json with

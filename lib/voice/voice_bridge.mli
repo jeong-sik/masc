@@ -22,7 +22,7 @@ type mcp_call_error =
 
 type effect_disposition =
   | Proven_pre_effect
-  | Outcome_unknown
+  | Remote_effect_unresolved
 
 val mcp_call_error_to_string : mcp_call_error -> string
 val mcp_call_effect_disposition : mcp_call_error -> effect_disposition

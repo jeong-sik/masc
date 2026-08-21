@@ -23,7 +23,7 @@ let test_voice_mcp_failures_do_not_authorize_failover () =
        check bool
          label
          true
-         (Voice.mcp_call_effect_disposition error = Voice.Outcome_unknown))
+         (Voice.mcp_call_effect_disposition error = Voice.Remote_effect_unresolved))
     [ "timeout", Voice.Timed_out 30.0
     ; "connection", Voice.Connection_failed "econnrefused"
     ; "http", Voice.Http_status { code = 503; body = "unavailable" }

@@ -428,8 +428,7 @@ type keeper_meta =
   ; (* -- Performance & Limits -- *)
     max_context_override : int option
   ; (* -- Operational control (top-level, not runtime) -- *)
-    active_goal_ids : string list
-  ; paused : bool
+    paused : bool
   ; latched_reason : Keeper_latched_reason.t option
     (** Typed companion to [paused]. Explicit operator pause and
         transcript-corruption reset-required paths may write it. [None] while
@@ -558,8 +557,6 @@ let effective_meta_of_profile_defaults
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
-          active_goal_ids =
-            apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
           max_context_override =
             apply_profile_default_opt defaults.max_context_override
               meta.max_context_override;

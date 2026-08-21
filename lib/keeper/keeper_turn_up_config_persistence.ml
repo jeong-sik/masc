@@ -39,7 +39,6 @@ let full_fields
     ; "mention_targets", Keeper_toml_loader.Toml_string_array meta.mention_targets
     ; "proactive_enabled", Keeper_toml_loader.Toml_bool meta.proactive.enabled
     ; "autoboot_enabled", Keeper_toml_loader.Toml_bool meta.autoboot_enabled
-    ; "active_goal_ids", Keeper_toml_loader.Toml_string_array meta.active_goal_ids
     ]
   in
   let fields =
@@ -66,7 +65,6 @@ let explicit_edits
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
   |> append_optional "proactive_enabled" set_bool parsed.proactive_enabled_opt
   |> append_optional "autoboot_enabled" set_bool parsed.autoboot_enabled_opt
-  |> append_optional "active_goal_ids" set_strings parsed.active_goal_ids_opt
   |> fun fields ->
   (if not parsed.max_context_override_present
    then fields

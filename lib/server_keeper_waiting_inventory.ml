@@ -365,7 +365,6 @@ let hitl_rows keeper_name pending =
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-          ; "goal_ids", `List (List.map (fun id -> `String id) entry.goal_ids)
           ]
     })
 ;;

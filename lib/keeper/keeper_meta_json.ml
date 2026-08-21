@@ -57,7 +57,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; ( Last_compaction_decision
       , `String (compaction_runtime_decision_to_string rt.compaction_rt.last_decision)
       )
-    ; Active_goal_ids, `List (List.map (fun s -> `String s) m.active_goal_ids)
     ; Last_autonomous_action_at, `String rt.last_autonomous_action_at
     ; Autonomous_action_count, `Int rt.autonomous_action_count
     ; Autonomous_turn_count, `Int rt.autonomous_turn_count

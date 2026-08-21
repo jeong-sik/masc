@@ -3417,7 +3417,6 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
          ; base_path = config.base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -3496,7 +3495,6 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
          ; base_path = config.base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in

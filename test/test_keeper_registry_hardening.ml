@@ -779,8 +779,7 @@ let test_goal_reconciliation_prefers_authoritative_assignment
             producer_meta);
        let assigned_meta =
          { (make_goal_reconciler_meta ()) with
-           active_goal_ids = [ goal.id ]
-         ; paused = assigned_paused
+           paused = assigned_paused
          }
        in
        ignore
@@ -1031,7 +1030,7 @@ let test_goal_reconciliation_retry_after_keeper_registration () =
        Atomic.set Workspace_hooks.task_terminal_committed_fn
          (fun _config ~agent_name:_ ~task_id:_ ->
             Workspace_hooks.Task_terminal_delivered);
-       let goal, _ =
+       let _goal, _ =
          add_and_cancel_goal_task
            ~config
            ~goal_id:"goal-reconciliation-late-keeper"
@@ -1043,7 +1042,7 @@ let test_goal_reconciliation_retry_after_keeper_registration () =
        in
        check int "ready Goal remains visibly unresolved" 1 unresolved.unresolved_count;
        let meta =
-         { (make_goal_reconciler_meta ()) with active_goal_ids = [ goal.id ] }
+         make_goal_reconciler_meta ()
        in
        let entry =
          KR.For_testing.register ~base_path:config.base_path meta.name meta

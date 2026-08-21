@@ -31,7 +31,7 @@ let build_base_system_prompt
       ~(meta : keeper_meta)
   =
   let active_goal_summaries =
-    Keeper_unified_prompt.active_goal_summaries ~config ~meta
+    Keeper_unified_prompt.active_goal_summaries_of_store ~config
   in
   Keeper_unified_prompt.build_system_prompt
     ~meta
@@ -53,15 +53,6 @@ let prepare_run_context
   =
   let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
-  let validated_goal_ids =
-    Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ()
-  in
-  let meta =
-    if List.length validated_goal_ids <> List.length meta.active_goal_ids then
-      { meta with active_goal_ids = validated_goal_ids }
-    else
-      meta
-  in
   (* 0. Resolve inference parameters via Runtime_inference *)
   let fallback_temperature () =
     match temperature with

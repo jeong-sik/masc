@@ -2448,8 +2448,6 @@ let internal_descriptors : t list =
      |> with_composable_output (Json_output { schema = goal_list_output_schema }))
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
        ~readonly:false
-  ; masc_workspace_descriptor "goal_assign" "masc_goal_assign"
-       ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)

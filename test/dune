@@ -194,7 +194,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -500,7 +499,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -1119,7 +1117,6 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
-  test_keeper_goal_reconciliation_target
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
@@ -1261,7 +1258,6 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
-  test_keeper_goal_reconciliation_target
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync

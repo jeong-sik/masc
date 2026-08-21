@@ -143,7 +143,6 @@ let finalize
     ; agent_core_turn_count = !receipt_turn_count_ref
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
-    ; goal_ids = meta.active_goal_ids
     ; outcome =
         (match turn_result with
          | Ok _ -> `Ok

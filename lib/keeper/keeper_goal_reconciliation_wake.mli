@@ -15,14 +15,6 @@ type reconciliation_summary = {
   failed_count : int;
 }
 
-(** Choose who a Goal completion wakes when several keepers carry it.
-
-    A wake is a message into a queue, not a contract, so several recipients is
-    an ordinary outcome. The declared owner (RFC-0362) narrows the wake when
-    the Goal names one that is actually working under it; otherwise everyone
-    carrying the goal hears. Never empty when [keeper_names] is non-empty. *)
-val resolve_assignment : owner:string option -> keeper_names:string list -> string list
-
 val enqueue_if_ready :
   config:Workspace.config ->
   completing_agent_name:string ->

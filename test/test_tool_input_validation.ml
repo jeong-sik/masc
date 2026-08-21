@@ -778,7 +778,6 @@ let test_keeper_up_accepts_live_traffic_fields () =
     `Assoc
       [ "name", `String "sangsu"
       ; "instructions", `String "do the thing"
-      ; "active_goal_ids", `List [ `String "g1" ]
       ; "sandbox_profile", `String "local"
       ; "allowed_paths", `List [ `String "/tmp" ]
       ; "mention_targets", `List [ `String "sangsu" ]

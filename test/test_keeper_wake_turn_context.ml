@@ -406,12 +406,11 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
         [
           ("name", `String "wake-context-keeper");
           ("trace_id", `String "test-trace-wake-context");
-          ("active_goal_ids", `List [ `String "missing-goal" ]);
         ])
   in
   let config = Masc.Workspace.default_config "/tmp/unused" in
   let active_goal_summaries =
-    Prompt.active_goal_summaries ~config ~meta:meta_with_goal
+    Prompt.active_goal_summaries_of_store ~config
   in
   let decision = WO.keeper_cycle_decision ~meta:meta_with_goal base_observation in
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =

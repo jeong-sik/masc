@@ -701,7 +701,7 @@ let run_keeper_cycle
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in
                let active_goal_summaries =
-                 Keeper_unified_prompt.active_goal_summaries ~config ~meta
+                 Keeper_unified_prompt.active_goal_summaries_of_store ~config
                in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt

@@ -10,8 +10,6 @@ type task_owner_hooks =
   { is_keeper_agent_identity :
       Workspace_core.config -> agent_name:string -> bool
   ; sync_current_task_binding : Workspace_core.config -> agent_name:string -> unit
-  ; active_goal_phases_for_agent :
-      Workspace_core.config -> agent_name:string -> string list
   }
 
 val push_event_to_sessions_fn : (Yojson.Safe.t -> unit) Atomic.t

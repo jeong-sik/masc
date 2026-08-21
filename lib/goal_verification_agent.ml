@@ -296,24 +296,13 @@ let linked_task_rollup config ~goal_id
          , tasks ))
 ;;
 
-let goal_owner_name (goal : Goal_store.goal) =
-  match goal.owner with
-  | Some owner when String.trim owner <> "" -> owner
-  | Some _ | None -> "unassigned"
-;;
-
-let single_producer_lookup config ~producer =
-  let open Result.Syntax in
-  let* tools = Verification_authority_tools.create ~config ~producer in
-  let* root_layout = Verification_authority_tools.root_layout tools in
-  Ok
-    (Task.Anti_rationalization.Lookup_tools
-       { schemas = Verification_authority_tools.schemas tools
-       ; dispatch = Verification_authority_tools.dispatch tools
-       ; scope = Task.Anti_rationalization.Producer_tree
-       ; root_layout
-       })
-;;
+(* [review_request] is task-shaped and its [agent_name] names the producer whose
+   work is being judged. A Goal has no producer: it is a shared intent that any
+   Keeper may advance, and the evidence under review is the Goal's own declared
+   criterion plus its linked Task rollup, not one agent's submission. The lane
+   passes [No_lookup_surface], so this string builds no producer-bound tool
+   surface -- it only tells the judge there is no single author to attribute. *)
+let goal_producer_name = "no single producer (shared Goal)"
 
 let task_producer (task : Masc_domain.task) =
   match Masc_domain.task_performer_of_status task.task_status with
@@ -362,35 +351,36 @@ let build_review_request config (goal : Goal_store.goal) kind
     { Task.Anti_rationalization.task_title = goal.title
     ; task_description = criterion_description goal
     ; completion_notes = ""
-    ; agent_name = goal_owner_name goal
+    ; agent_name = goal_producer_name
     ; task_id = goal.id
     ; evidence_refs = []
     }
   in
   match kind with
   | Criterion_check ->
-    let open Result.Syntax in
-    let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
+    (* The creation-time check judges the declared success condition itself --
+       whether it names something a verifier could later measure. No tree
+       answers that, and there is no producer to name: nobody has done work on
+       a Goal that was just created. [No_lookup_surface] states that the
+       criterion text is the whole of what was checked. *)
     Ok
       ( { base with
           Task.Anti_rationalization.completion_notes =
             Yojson.Safe.pretty_to_string (Goal_store.goal_to_yojson goal)
         }
       , Prompt_names.goal_verification_criterion
-      , lookup )
+      , Task.Anti_rationalization.No_lookup_surface )
   | Completion_proof ->
     (match linked_task_rollup config ~goal_id:goal.id with
      | Error _ as error -> error
-     | Ok (rollup, evidence_refs, []) ->
-       let open Result.Syntax in
-       let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
-       Ok
-         ( { base with
-             Task.Anti_rationalization.completion_notes = rollup
-           ; evidence_refs
-           }
-         , Prompt_names.goal_verification_proof
-         , lookup )
+     (* [admit_proof_against_criterion] refuses a proof with no linked Task, so
+        this is unreachable. It fails loudly rather than building a review with
+        no evidence and no tree: if the admission ever stops covering this, the
+        judge must not silently rate the claim against itself. *)
+     | Ok (_, _, []) ->
+       Error
+         "proof review reached build with no linked Task; admission should \
+          have refused it"
      | Ok (rollup, evidence_refs, tasks) ->
        let open Result.Syntax in
        let* lookup = linked_task_lookup config tasks in
@@ -449,7 +439,26 @@ let admit_proof_against_criterion config (work : pending_work) =
        Error (true, "proof request has no verification ledger record")
      | Ok (Some record) ->
        (match record.Goal_verification.criterion with
-        | Goal_verification.Criterion_viable _ -> Ok ()
+        | Goal_verification.Criterion_viable _ ->
+          (* A completion proof is judged against the linked Tasks: their
+             rollup is the evidence and their performers are the trees the
+             judge may open. With no linked Task there is neither. The Goal's
+             own metric and target are the CLAIM under review, so letting the
+             review proceed on those alone would let the judge approve the
+             claim by reading the claim -- the independent proof gate would be
+             satisfied by prose.
+
+             Retryable: nothing is wrong with the request, there is just
+             nothing to verify yet. The pending row stays durable, and the
+             first linked Task makes the next drain admissible. *)
+          (match linked_task_rollup config ~goal_id:work.goal_id with
+           | Error detail -> Error (true, detail)
+           | Ok (_, _, []) ->
+             Error
+               ( true
+               , "proof has no linked Task: the Goal's own metric and target \
+                  are the claim under review, not evidence for it" )
+           | Ok (_, _, _ :: _) -> Ok ())
         | Goal_verification.Criterion_pending _
         | Goal_verification.Criterion_unchecked ->
           Error

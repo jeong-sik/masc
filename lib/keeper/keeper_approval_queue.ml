@@ -425,7 +425,6 @@ let pending_entry_to_yojson
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", Json_util.json_string_list entry.goal_ids
       ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
       ; "summary_status", summary_status_to_yojson entry.summary_status
       ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
@@ -703,8 +702,6 @@ let reject_unknown_fields = Json_util.reject_unknown_fields
 let required_string = Json_util.require_field_string
 let required_float = Json_util.require_field_float
 let required_positive_int = Json_util.require_field_positive_int
-let required_string_list = Json_util.require_field_string_list
-
 let required_member ~surface field fields =
   match List.assoc_opt field fields with
   | Some value -> Ok value
@@ -853,8 +850,6 @@ let pending_entry_of_yojson ~base_path json =
           ; "request_context_version"
           ; "task_id"
           ; "goal_id"
-          ; "goal_ids"
-          ; "continuation_channel"
           ; "summary_status"
           ; "exact_attempt"
           ; "summary_attempt_disposition"
@@ -906,7 +901,6 @@ let pending_entry_of_yojson ~base_path json =
     in
     let* task_id = optional_string ~surface "task_id" fields in
     let* goal_id = optional_string ~surface "goal_id" fields in
-    let* goal_ids = required_string_list ~surface "goal_ids" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
       let* summary_json = required_member ~surface "summary_status" fields in
@@ -941,7 +935,6 @@ let pending_entry_of_yojson ~base_path json =
       ; request_context
       ; task_id
       ; goal_id
-      ; goal_ids
       ; continuation_channel
         ; audit_base_path = base_path
         ; summary_status
@@ -1753,7 +1746,6 @@ let consume_approved_resolution
         ?turn_id:entry.turn_id
         ?task_id:entry.task_id
         ?goal_id:entry.goal_id
-        ~goal_ids:entry.goal_ids
         ~source_approval_id:id
         ~decision_source:delivery.source
         ~decision:Decision.Approve
@@ -1782,7 +1774,6 @@ let create_entry
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ~continuation_channel
       ~audit_base_path
       ()
@@ -1799,7 +1790,6 @@ let create_entry
   ; request_context
   ; task_id
   ; goal_id
-  ; goal_ids
     ; continuation_channel
     ; audit_base_path
     ; summary_status = Summary_not_requested
@@ -1822,7 +1812,6 @@ let pending_entry_json_fields
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-  ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
   ]
   @ (if include_input
      then
@@ -1880,7 +1869,6 @@ let record_pending (entry : pending_approval) =
       ?turn_id:entry.turn_id
       ?task_id:entry.task_id
       ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
       ()
   in
   broadcast_pending entry audit_receipt;
@@ -2868,7 +2856,6 @@ let resolve_entry
       ?turn_id:entry.turn_id
       ?task_id:entry.task_id
       ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
       ?actor
       ~decision_source:source
       ~decision
@@ -2917,7 +2904,6 @@ let pending_entry_matches
       ~input_hash
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
@@ -2926,7 +2912,6 @@ let pending_entry_matches
   && String.equal entry.input_hash input_hash
   && entry.task_id = task_id
   && entry.goal_id = goal_id
-  && entry.goal_ids = goal_ids
   && Yojson.Safe.equal
        (Keeper_continuation_channel.to_yojson entry.continuation_channel)
        (Keeper_continuation_channel.to_yojson continuation_channel)
@@ -2940,7 +2925,6 @@ let find_pending_id_in_map
       ~input_hash
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   SMap.fold
@@ -2957,7 +2941,6 @@ let find_pending_id_in_map
              ~input_hash
              ~task_id
              ~goal_id
-             ~goal_ids
              ~continuation_channel
          then Some id
          else None)
@@ -2980,7 +2963,6 @@ let find_unconsumed_grant_id_in_deliveries
       ~input_hash
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   SMap.fold
@@ -3001,7 +2983,6 @@ let find_unconsumed_grant_id_in_deliveries
                    ~input_hash
                    ~task_id
                    ~goal_id
-                   ~goal_ids
                    ~continuation_channel
             then Some id
             else None))
@@ -3020,7 +3001,6 @@ let submit_pending
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ()
   : (pending_submission, storage_error) result
@@ -3050,7 +3030,6 @@ let submit_pending
              ~input_hash
              ~task_id
              ~goal_id
-             ~goal_ids
              ~continuation_channel
          with
          | Some id -> Ok (`Deduplicated id)
@@ -3064,7 +3043,6 @@ let submit_pending
                 ~input_hash
                 ~task_id
                 ~goal_id
-                ~goal_ids
                 ~continuation_channel
             with
             | Some id -> Ok (`Folded_onto_unconsumed_grant id)
@@ -3088,7 +3066,6 @@ let submit_pending
               ?request_context
               ?task_id
               ?goal_id
-              ~goal_ids
               ~continuation_channel
               ~audit_base_path:base_path
               ()

@@ -1175,26 +1175,12 @@ let collect_board_events_without_advancing_cursor
     ~meta
 ;;
 
-(* [meta.active_goal_ids] records which goals were assigned to this keeper. It
-   is not cleared when a goal reaches a terminal phase, and
-   [resolve_active_goal_ids] only checks that the id exists — so a Completed or
-   Dropped goal stays on the list indefinitely. The store's phase is the
-   authority on whether the goal is still work, and
-   [Goal_phase.admits_self_directed_progress] is the exhaustive predicate for
-   it. Filtering here keeps the observation honest for every reader, instead of
-   leaving each prompt surface to remember the question.
-
-   An id the store cannot resolve is kept: that is a different fault (an
-   assigned goal that no longer exists) and dropping it here would replace a
-   visible inconsistency with a silent one. *)
-let live_active_goal_ids ~(config : Workspace.config) (meta : keeper_meta) =
-  List.filter
-    (fun goal_id ->
-      match Goal_store.get_goal config ~goal_id with
-      | Some { Goal_store.phase; _ } ->
-        Goal_phase.admits_self_directed_progress phase
-      | None -> true)
-    meta.active_goal_ids
+(* Goals are shared intent: the store is the only record of which ones are
+   still open, so the observation reads it directly. *)
+let open_goal_ids ~(config : Workspace.config) =
+  Goal_store.list_goals config ()
+  |> List.filter_map (fun (g : Goal_store.goal) ->
+       if Goal_phase.admits_self_directed_progress g.phase then Some g.id else None)
 ;;
 
 let observe
@@ -1237,7 +1223,7 @@ let observe
   { pending_messages
   ; pending_board_events
   ; idle_seconds
-  ; active_goals = live_active_goal_ids ~config meta
+  ; active_goals = open_goal_ids ~config
   ; unclaimed_task_count
   ; claimable_tasks
   ; failed_task_count
@@ -1275,7 +1261,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   { pending_messages = []
   ; pending_board_events = []
   ; idle_seconds = compute_idle_seconds ~meta
-  ; active_goals = live_active_goal_ids ~config meta
+  ; active_goals = open_goal_ids ~config
   ; unclaimed_task_count
   ; claimable_tasks
   ; failed_task_count

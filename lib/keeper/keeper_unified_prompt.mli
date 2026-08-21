@@ -84,33 +84,15 @@ val effective_instructions :
 (** Alias of [effective_autonomous_instructions]; kept for callers that
     predate the channel-aware rename. *)
 
-val owned_executing_goals_without_tasks :
-  config:Workspace.config ->
-  keeper_name:string ->
-  (string * string) list
-(** RFC-0362 §4.3 — the Goals this keeper owns that are still executing and
-    carry no linked Task. Read from [goal.owner], not from
-    [meta.active_goal_ids]: ownership lives on the Goal, and that keeper-side
-    pointer names a Completed Goal for the one keeper that has it set.
-
-    The RFC's acceptance criterion (§4.3) reads off this list: the measured
-    0-of-10 executing goals with a Task must move, or the owner field is
-    decoration and should be removed. *)
-
-val unowned_executing_goals_without_tasks :
+val executing_goals_without_tasks :
   config:Workspace.config -> (string * string) list
-(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves, as
-    [(id, title)]. The same list for every keeper, because an unowned Goal is
-    addressed to whoever reads it.
+(** The executing Goals no Task serves, as [(id, title)].
 
-    The prompt already states that taking one is a move a keeper can make, and
-    [handle_goal_assign] carries no ownership check. What was missing was the
-    sighting: with 15 of 16 live Goals unowned,
-    {!owned_executing_goals_without_tasks} renders for nobody.
-
-    The parent rides along because the list misreads without it: on the live
-    store seven of the ten are children of the eighth, and as peers "take one"
-    cannot distinguish taking the umbrella from taking one service under it. *)
+    The same list for every keeper: a Goal is shared intent that names nobody,
+    so an executing Goal with no Task is one fact addressed to whoever reads it.
+    [Verifying] is deliberately excluded -- a goal awaiting its proof verdict is
+    not "work with no Task yet", and nudging new tasks onto it would race the
+    RFC-0387 gate. *)
 
 (** What the prompt knows about one active goal: id, title, and the stored
     phase. [summary_phase] is [None] only for an id the store cannot resolve
@@ -123,17 +105,14 @@ type goal_summary = {
   summary_phase : Goal_phase.t option;
 }
 
-val active_goal_summaries :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  goal_summary list
-(** Resolve the active goal ids a keeper can still progress, for the stable
-    prompt contract. [meta.active_goal_ids] records assignment and is never
-    cleared when a goal reaches a terminal phase, so ids whose stored phase
-    fails {!Goal_phase.admits_self_directed_progress} are dropped rather than
-    announced as available work. Unknown ids remain present with an empty title
-    so every entrypoint renders the same bare-id fallback: an assigned goal that
-    no longer exists is a different fault and stays visible. *)
+val active_goal_summaries_of_store :
+  config:Workspace.config -> goal_summary list
+(** The Goals still open enough to progress, read straight from the store.
+
+    A Goal is shared intent and names no keeper, so this is the same list for
+    everyone. {!Goal_phase.admits_self_directed_progress} decides membership --
+    [Verifying] stays in (the gate holds the phase, not the work) and terminal
+    phases drop out. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->

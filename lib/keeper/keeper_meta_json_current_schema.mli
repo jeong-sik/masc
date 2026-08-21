@@ -41,7 +41,6 @@ type field =
   | Consecutive_noop_count
   | Last_compaction_check_ts
   | Last_compaction_decision
-  | Active_goal_ids
   | Last_autonomous_action_at
   | Autonomous_action_count
   | Autonomous_turn_count

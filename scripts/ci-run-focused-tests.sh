@@ -237,7 +237,6 @@ normal_targets=(
   @test/runtest-test_keeper_tool_execute_exit_result
   @test/runtest-test_goal_store
   @test/runtest-test_keeper_goal_phase_projection
-  @test/runtest-test_keeper_goal_reconciliation_target
   @test/runtest-test_keeper_tool_descriptor_registry_integrity
   @test/runtest-test_schedule_runner
   @test/runtest-test_schedule_store

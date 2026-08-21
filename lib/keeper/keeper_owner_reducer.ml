@@ -69,7 +69,6 @@ type profile_update =
   ; mention_targets : string list
   ; proactive_enabled : bool
   ; max_context_override : int option
-  ; active_goal_ids : string list
   ; autoboot_enabled : bool
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
@@ -636,7 +635,6 @@ let apply_existing (state : state) meta command =
          ; mention_targets = update.mention_targets
          ; proactive = { enabled = update.proactive_enabled }
          ; max_context_override = update.max_context_override
-         ; active_goal_ids = update.active_goal_ids
          ; autoboot_enabled = update.autoboot_enabled
          ; telemetry_feedback_enabled = update.telemetry_feedback_enabled
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours

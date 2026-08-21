@@ -39,26 +39,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some paths -> paths
     | None -> Option.value ~default:[] p.profile_defaults.allowed_paths
   in
-  let active_goal_ids =
-    match p.active_goal_ids_opt with
-    | Some ids -> ids
-    | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
-  in
-  let active_goal_ids_error =
-    match p.active_goal_ids_opt with
-    | None -> None
-    | Some _ ->
-        let missing =
-          List.filter
-            (fun goal_id -> Option.is_none (Goal_store.get_goal ctx.config ~goal_id))
-            active_goal_ids
-        in
-        if missing = [] then None
-        else
-          Some
-            (Printf.sprintf "unknown active_goal_ids: %s"
-               (String.concat ", " missing))
-  in
   let sandbox_profile =
     resolve_sandbox_profile
       ?requested:p.sandbox_profile_opt
@@ -83,9 +63,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
-  match active_goal_ids_error with
-  | Some msg -> tool_result_error msg
-  | None ->
     match
       validate_sandbox_settings ~allowed_paths
     with
@@ -170,7 +147,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                       ~base_dir
                   in
       let nonce = 1 in
-      let meta = {
+      let meta : Keeper_meta_contract.keeper_meta = {
         id = None;
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
@@ -188,8 +165,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
-        active_goal_ids =
-          active_goal_ids;
         paused = false;
         latched_reason = None;
         autoboot_enabled;

@@ -90,17 +90,16 @@ let keeper_config_json (config : Workspace.config) (name : string)
          in
          `OK, with_keeper_config_field_presence body
        | Ok (defaults, m) ->
+      (* Goals name no keeper: the open set is the same fact for everyone. *)
       let active_goals =
-        List.filter_map
-          (fun goal_id ->
-             match Goal_store.get_goal config ~goal_id with
-             | Some { Goal_store.id; title; _ } ->
-                 Some (id, title)
-               | None -> None)
-          m.active_goal_ids
+        Goal_store.list_goals config ()
+        |> List.filter_map (fun (g : Goal_store.goal) ->
+             if Goal_phase.admits_self_directed_progress g.phase
+             then Some (g.id, g.title)
+             else None)
       in
       let active_goal_ids_json =
-        `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
+        `List (List.map (fun (id, _) -> `String id) active_goals)
       in
       let active_goals_json =
         `List
@@ -112,14 +111,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
                 ])
              active_goals)
       in
-      let resolved_active_goal_ids =
-        List.map (fun (id, _) -> id) active_goals
-      in
-      let missing_active_goal_ids =
-        m.active_goal_ids
-        |> List.filter (fun goal_id ->
-               not (List.mem goal_id resolved_active_goal_ids))
-      in
+      let missing_active_goal_ids = [] in
       let workspace =
         match workspace_surface_json m with
         | `Assoc fields ->
@@ -128,7 +120,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
                @ [
                    ("active_goal_ids", active_goal_ids_json);
                    ("active_goals", active_goals_json);
-                   ("active_goal_count", `Int (List.length m.active_goal_ids));
+                   ("active_goal_count", `Int (List.length active_goals));
                    ( "missing_active_goal_ids",
                      `List
                        (List.map
@@ -172,7 +164,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
         in
         let parts =
           let active_goal_summaries =
-            Keeper_unified_prompt.active_goal_summaries ~config ~meta:m
+            Keeper_unified_prompt.active_goal_summaries_of_store ~config
           in
           let current_task =
             Keeper_world_observation_inputs.read_current_task ~config ~meta:m

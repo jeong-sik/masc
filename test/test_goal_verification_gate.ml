@@ -930,17 +930,11 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
         (`Assoc
            [ "name", `String "gate-keeper"
            ; "trace_id", `String "gate-keeper-trace"
-           ; "active_goal_ids", `List [ `String goal_id ]
            ])
     with
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json_fixture: " ^ e)
   in
-  check
-    (list string)
-    "the cross-check keeps the verifying goal"
-    [ goal_id ]
-    (Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ());
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
   in
@@ -949,7 +943,7 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
     "the world observation keeps the verifying goal"
     [ goal_id ]
     observation.Keeper_world_observation.active_goals;
-  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
+  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
   let { Keeper_unified_prompt.world_state; _ } =
     Keeper_unified_prompt.build_prompt
       ~meta

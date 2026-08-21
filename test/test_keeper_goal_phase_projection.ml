@@ -6,7 +6,7 @@
     Dropped goal stays on the list indefinitely.
 
     Two prompt surfaces read that list: [<available_goals>] in the system prompt
-    (via {!Keeper_unified_prompt.active_goal_summaries}) and [### Active Goals]
+    (via {!Keeper_unified_prompt.active_goal_summaries_of_store}) and [### Active Goals]
     in the per-turn world state (via [world_observation.active_goals]). Both
     announced terminal goals as this keeper's work, on every turn, under
     headings that call them available.
@@ -50,7 +50,6 @@ let goal_in phase id title =
   ; phase
   ; last_review_note = None
   ; last_review_at = None
-  ; owner = None
   ; created_at = ts
   ; updated_at = ts
   }
@@ -81,7 +80,6 @@ let meta_with_goals ids =
       (`Assoc
          [ "name", `String "goal-phase-keeper"
          ; "trace_id", `String "test-trace-goal-phase"
-         ; "active_goal_ids", `List (List.map (fun id -> `String id) ids)
          ])
   with
   | Ok m -> m
@@ -118,8 +116,8 @@ let summary_title_opt goal_id summaries =
 let test_system_prompt_surface_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals all_ids in
-  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
+  let _meta = meta_with_goals all_ids in
+  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
   check (list string) "only progressable goals are offered"
     [ "goal-executing"; "goal-verifying" ]
     (summary_ids summaries);
@@ -146,8 +144,8 @@ let test_unresolved_goal_id_stays_visible () =
      silent one, so it keeps its bare-id rendering. *)
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals [ "goal-completed"; "goal-vanished" ] in
-  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
+  let _meta = meta_with_goals [ "goal-completed"; "goal-vanished" ] in
+  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
   check (list string) "the terminal goal goes, the unknown id stays"
     [ "goal-vanished" ] (summary_ids summaries);
   check (option string) "unknown id renders with no title" (Some "")
@@ -157,9 +155,10 @@ let test_unresolved_goal_id_stays_visible () =
 let test_no_goals_surface_when_all_are_terminal () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals [ "goal-completed"; "goal-dropped" ] in
+  let _meta = meta_with_goals [ "goal-completed"; "goal-dropped" ] in
+  let meta = meta_with_goals [] in
   check (list string) "no goal block rather than an empty-looking one" []
-    (summary_ids (Keeper_unified_prompt.active_goal_summaries ~config ~meta));
+    (summary_ids (Keeper_unified_prompt.active_goal_summaries_of_store ~config));
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta
@@ -169,129 +168,33 @@ let test_no_goals_surface_when_all_are_terminal () =
 ;;
 
 
-(* RFC-0362 §4.3 — the owner consumer. The Goal carries the owner; the keeper's
-   [active_goal_ids] is empty here on purpose, because it is empty for every
-   keeper on the live workspace and the fact must surface without it.
+(* An executing Goal that no Task serves is one fact addressed to every Keeper.
+   The keeper's [active_goal_ids] is empty here on purpose: the fact lives on
+   the Goal store and must surface without any keeper-side pointer.
 
-   Three cases in one predicate: owned + executing + no linked Task surfaces;
-   owned but terminal does not; owned, executing, but already carrying a Task
-   does not (the owner has nothing to decide there). *)
-let owner_meta () =
-  match
-    Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-         [ "name", `String "owner-keeper"
-         ; "trace_id", `String "test-trace-owner"
-         ; "active_goal_ids", `List []
-         ])
-  with
-  | Ok m -> m
-  | Error e -> failwith ("meta_of_json failed: " ^ e)
+   Four exclusions in one predicate: terminal Goals are not open work, a Goal
+   already carrying a Task is not an invitation, and [Verifying] is held back so
+   a nudge to start new tasks cannot race the RFC-0387 proof gate. *)
+
+let untasked config =
+  List.map fst (Keeper_unified_prompt.executing_goals_without_tasks ~config)
 ;;
 
-let goal_owned_by owner phase id title =
-  { (goal_in phase id title) with Goal_store.owner = Some owner }
-;;
-
-let test_owned_executing_goal_without_task_surfaces () =
+let test_executing_goal_without_task_surfaces () =
   with_workspace (fun config ->
     Goal_store.write_state config
       { version = 1
       ; updated_at = Masc_domain.now_iso ()
       ; goals =
-          [ goal_owned_by "owner-keeper" Goal_phase.Executing "goal-mine" "mine to split"
-          ; goal_owned_by "owner-keeper" Goal_phase.Completed "goal-done" "already achieved"
-          ; goal_in Goal_phase.Executing "goal-unowned" "nobody holds this"
+          [ goal_in Goal_phase.Executing "goal-open" "nobody started this"
+          ; goal_in Goal_phase.Completed "goal-done" "already achieved"
           ]
       };
-    let found =
-      Keeper_unified_prompt.owned_executing_goals_without_tasks
-        ~config
-        ~keeper_name:"owner-keeper"
-    in
-    check (list string) "only the owned, executing, task-less goal"
-      [ "goal-mine" ]
-      (List.map fst found))
+    check (list string) "only the executing, task-less goal" [ "goal-open" ]
+      (untasked config))
 ;;
 
-let test_owner_of_a_terminal_goal_is_told_nothing () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_owned_by "owner-keeper" Goal_phase.Completed "goal-done" "achieved" ]
-      };
-    check (list string) "terminal goals are not the owner's open work"
-      []
-      (List.map fst
-         (Keeper_unified_prompt.owned_executing_goals_without_tasks
-            ~config
-            ~keeper_name:"owner-keeper")))
-;;
-
-let test_another_keepers_goal_is_not_surfaced () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_owned_by "someone-else" Goal_phase.Executing "goal-theirs" "not mine" ]
-      };
-    check (list string) "ownership is not shared"
-      []
-      (List.map fst
-         (Keeper_unified_prompt.owned_executing_goals_without_tasks
-            ~config
-            ~keeper_name:"owner-keeper")))
-;;
-
-(* RFC-0362 §6 Q2. The owned list above renders for nobody while 15 of 16 live
-   Goals are unowned, so ten executing Goals were visible at no surface. These
-   pin the sighting and, more importantly, that it stays as narrow as the owned
-   one: same phase filter, same "already has a Task" exclusion. *)
-
-let unowned config =
-  List.map
-    (fun (goal_id, _) -> goal_id)
-    (Keeper_unified_prompt.unowned_executing_goals_without_tasks ~config)
-
-let test_unowned_executing_goal_without_task_surfaces () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_in Goal_phase.Executing "goal-open" "nobody holds this"
-          ; goal_owned_by "someone" Goal_phase.Executing "goal-theirs" "taken"
-          ]
-      };
-    check (list string) "only the unowned executing goal" [ "goal-open" ] (unowned config))
-;;
-
-(* The two lists partition the Goals: an owner sees theirs, everyone sees the
-   ones nobody took, and no Goal appears in both. *)
-let test_owned_and_unowned_lists_do_not_overlap () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_owned_by "owner-keeper" Goal_phase.Executing "goal-mine" "mine"
-          ; goal_in Goal_phase.Executing "goal-open" "free"
-          ]
-      };
-    let owned =
-      List.map fst
-        (Keeper_unified_prompt.owned_executing_goals_without_tasks
-           ~config
-           ~keeper_name:"owner-keeper")
-    in
-    check (list string) "owner sees only their own" [ "goal-mine" ] owned;
-    check (list string) "everyone sees only the untaken one" [ "goal-open" ] (unowned config))
-;;
-
-let test_terminal_unowned_goal_is_not_surfaced () =
+let test_terminal_goals_are_not_open_work () =
   with_workspace (fun config ->
     Goal_store.write_state config
       { version = 1
@@ -301,12 +204,28 @@ let test_terminal_unowned_goal_is_not_surfaced () =
           ; goal_in Goal_phase.Dropped "goal-gone" "abandoned"
           ]
       };
-    check (list string) "a finished Goal is not an invitation" [] (unowned config))
+    check (list string) "a finished Goal is not an invitation" [] (untasked config))
 ;;
 
-(* The name says "without tasks". A Goal somebody is already working is not an
-   invitation, whoever owns it. *)
-let test_unowned_goal_with_a_linked_task_is_not_surfaced () =
+(* The proof gate holds the phase, not the work (RFC-0387 stage 2). A Goal
+   awaiting its verdict is still progressible, but it is not "work with no Task
+   yet" -- offering it here would invite new tasks against a pending proof. *)
+let test_verifying_goal_is_held_back () =
+  with_workspace (fun config ->
+    Goal_store.write_state config
+      { version = 1
+      ; updated_at = Masc_domain.now_iso ()
+      ; goals =
+          [ goal_in Goal_phase.Verifying "goal-judging" "proof pending"
+          ; goal_in Goal_phase.Executing "goal-open" "has none"
+          ]
+      };
+    check (list string) "a goal awaiting its verdict is not offered"
+      [ "goal-open" ]
+      (untasked config))
+;;
+
+let test_goal_with_a_linked_task_is_not_surfaced () =
   with_workspace (fun config ->
     Goal_store.write_state config
       { version = 1
@@ -325,12 +244,12 @@ let test_unowned_goal_with_a_linked_task_is_not_surfaced () =
          ~description:"");
     check (list string) "a Goal with a Task is not an open invitation"
       [ "goal-open" ]
-      (unowned config))
+      (untasked config))
 ;;
 
-(* The helper cases above prove which Goals qualify. This proves a Keeper is
-   actually handed them: the block is what closes RFC-0362 §6 Q2, and a correct
-   list nobody renders is the state this change exists to end. *)
+(* The cases above prove which Goals qualify. This proves a Keeper is actually
+   handed them: a correct list nobody renders is the state this block exists to
+   end. *)
 let rendered_world_state config =
   let meta = meta_with_goals [] in
   let observation =
@@ -354,22 +273,23 @@ let contains_in haystack needle =
   n = 0 || go 0
 ;;
 
-let test_unowned_goals_reach_the_rendered_turn () =
+let test_untasked_goals_reach_the_rendered_turn () =
   with_workspace @@ fun config ->
   Goal_store.write_state config
     { version = 1
     ; updated_at = Masc_domain.now_iso ()
     ; goals =
-        [ goal_in Goal_phase.Executing "goal-open" "nobody holds this"
+        [ goal_in Goal_phase.Executing "goal-open" "nobody started this"
         ; goal_in Goal_phase.Completed "goal-done" "already achieved"
         ]
     };
   let world = rendered_world_state config in
   check bool "the heading names the move the prompt already promises" true
     (contains_in world
-       "### Unowned Goals, no Task yet — taking one is a move you can make (1)");
+       "### Executing Goals with no Task yet — picking one up is a move you can \
+        make (1)");
   check bool "the goal is named with its title" true
-    (contains_in world "- goal-open — nobody holds this");
+    (contains_in world "- goal-open — nobody started this");
   check bool "a completed goal is not offered" false (contains_in world "goal-done")
 ;;
 
@@ -385,25 +305,17 @@ let () =
         ; test_case "all-terminal yields no goals at either surface" `Quick
             test_no_goals_surface_when_all_are_terminal
         ] )
-    ; ( "rfc-0362 owner consumer"
-      , [ test_case "owned executing goal without a task surfaces" `Quick
-            test_owned_executing_goal_without_task_surfaces
-        ; test_case "terminal owned goal is not open work" `Quick
-            test_owner_of_a_terminal_goal_is_told_nothing
-        ; test_case "another keeper's goal is not surfaced" `Quick
-            test_another_keepers_goal_is_not_surfaced
-        ] )
-    ; ( "rfc-0362 q2 unowned sighting"
-      , [ test_case "unowned executing goal without a task surfaces" `Quick
-            test_unowned_executing_goal_without_task_surfaces
-        ; test_case "owned and unowned lists do not overlap" `Quick
-            test_owned_and_unowned_lists_do_not_overlap
-        ; test_case "terminal unowned goal is not surfaced" `Quick
-            test_terminal_unowned_goal_is_not_surfaced
-        ; test_case "unowned goal with a linked task is not surfaced" `Quick
-            test_unowned_goal_with_a_linked_task_is_not_surfaced
-        ; test_case "unowned goals reach the rendered turn" `Quick
-            test_unowned_goals_reach_the_rendered_turn
+    ; ( "executing goals with no task"
+      , [ test_case "executing goal without a task surfaces" `Quick
+            test_executing_goal_without_task_surfaces
+        ; test_case "terminal goals are not open work" `Quick
+            test_terminal_goals_are_not_open_work
+        ; test_case "verifying goal is held back from the invitation" `Quick
+            test_verifying_goal_is_held_back
+        ; test_case "goal with a linked task is not surfaced" `Quick
+            test_goal_with_a_linked_task_is_not_surfaced
+        ; test_case "untasked goals reach the rendered turn" `Quick
+            test_untasked_goals_reach_the_rendered_turn
         ] )
     ]
 ;;

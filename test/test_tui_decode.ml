@@ -49,7 +49,6 @@ let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String
     ([
        ("goal", `String "keep the system healthy");
        ("soul_profile", `String "balanced");
-       ("active_goal_ids", `List []);
        ("generation", `Int 2);
        ("models", models);
        ("proactive_enabled", `Bool true);

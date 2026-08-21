@@ -46,7 +46,7 @@ let make_goal id title =
     Goal_store.id; title;
     metric = None; target_value = None; due_date = None;
     priority = 3; phase = Goal_phase.Executing;
-    last_review_note = None; last_review_at = None; owner = None;
+    last_review_note = None; last_review_at = None;
     created_at = ts; updated_at = ts;
   }
 

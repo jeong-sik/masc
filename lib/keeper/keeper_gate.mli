@@ -18,7 +18,6 @@ type request =
   ; base_path : string
   ; causal_context : causal_context option
   ; task_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t option
   }
 

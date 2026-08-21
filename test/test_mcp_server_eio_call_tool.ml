@@ -676,9 +676,6 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check (option int) "turn" (Some 1) ctx.turn;
       check (option int) "keeper_turn_id" (Some 1) ctx.keeper_turn_id;
       check (option string) "task_id" (Some "task-123") ctx.task_id;
-      check (option (list string)) "goal_ids"
-        (Some [ "goal-1"; "goal-2" ])
-        ctx.goal_ids;
       check bool "model populated" true (String.trim ctx.model <> "");
       check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
       check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);

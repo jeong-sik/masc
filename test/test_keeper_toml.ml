@@ -587,7 +587,6 @@ let test_profile_full () =
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 autoboot_enabled = false
-active_goal_ids = ["goal-runtime", "goal-masc"]
 max_context_override = 128001
 |} in
   match TL.parse_toml input with
@@ -599,9 +598,6 @@ max_context_override = 128001
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
-      check (option (list string)) "active_goal_ids"
-        (Some [ "goal-runtime"; "goal-masc" ])
-        d.active_goal_ids;
       check (option int) "max_context_override" (Some 128_001)
         d.max_context_override
 
@@ -1260,7 +1256,6 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 [keeper]
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-active_goal_ids = ["goal-runtime"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e

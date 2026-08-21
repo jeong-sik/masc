@@ -129,6 +129,28 @@ let producer_playground (config : Workspace.config) producer =
   ensure_producer_playground config producer
 ;;
 
+(* A completion proof is admitted only when the Goal has a linked Task -- the
+   rollup is the evidence and the performers are the trees. Tests that drive a
+   proof verdict need one; they do not all need an artifact to read. *)
+let link_bare_task config ~goal_id =
+  let producer = "proof-producer" in
+  let created =
+    match
+      Workspace.add_task_with_result config ~goal_id ~created_by:producer
+        ~title:"Linked proof task" ~priority:1 ~description:"proof evidence"
+    with
+    | Ok created -> created
+    | Error error ->
+      fail ("add linked task: " ^ Workspace.add_task_error_to_string error)
+  in
+  (match
+     Workspace.claim_task_r config ~agent_name:producer ~task_id:created.task_id ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  created.task_id
+;;
+
 let add_linked_task_with_evidence config ~goal_id ~producer ~evidence_ref =
   let created =
     match
@@ -295,9 +317,15 @@ let inspecting_goal_reviewer ~producer ~file_name ~expected ~forest_reads =
       Ok (Some AR.Approve)
     in
     match lookup with
-    | AR.No_lookup_surface -> fail "Goal verifier received no lookup surface"
+    (* The creation-time criterion review gets no tree: it judges the declared
+       success condition, and at creation nobody has produced anything for it.
+       A Goal names no responsible keeper, so there is no single producer whose
+       tree could stand in. *)
+    | AR.No_lookup_surface -> report "criterion is measurable"
     | AR.Lookup_tools { scope = AR.Producer_tree; _ } ->
-      report "criterion is measurable"
+      fail
+        "Goal review was handed a single-producer tree; a Goal has no single \
+         producer"
     | AR.Lookup_tools
         { schemas
         ; dispatch
@@ -361,6 +389,7 @@ let test_proof_pending_drains_to_completed () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Provable goal" in
+  ignore (link_bare_task config ~goal_id);
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   check string "the durable request stands" "proof_pending"
@@ -382,6 +411,45 @@ let test_proof_pending_drains_to_completed () =
     check string "authority kind is the system-llm slot" "system_llm_agent"
       (Masc_domain.completion_authority_kind verdict.Goal_verification.authority)
   | _ -> fail "ledger must hold the proven verdict"
+;;
+
+(* A Goal with no linked Task carries no evidence: the rollup is empty and no
+   performer tree exists. Its metric and target are the CLAIM under review, so
+   admitting the review would let the judge approve the claim by reading the
+   claim. The request is not consumed -- it stays pending, and the first linked
+   Task makes the next drain admissible. *)
+let test_proof_without_a_linked_task_is_not_judged () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Goal with nothing linked" in
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let calls = ref [] in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:(recording_reviewer calls [ "verifier-a", Stub_approve "looks done" ])
+    (fun () -> drain config);
+  (* One call, and it is the creation-time criterion check -- that one is
+     legitimately about the declared condition. The proof is never handed to an
+     evaluator, so the claim is never rated against itself. *)
+  check (list string) "only the criterion was judged, never the proof"
+    [ "verifier-a" ] !calls;
+  check string "the goal stays in verifying" "verifying" (stored_phase config goal_id);
+  check string "the durable proof request survives" "proof_pending"
+    (match (ledger_record config goal_id).completion with
+     | Goal_verification.Proof_pending _ -> "proof_pending"
+     | Goal_verification.Proof_proven _ -> "proof_proven"
+     | Goal_verification.Proof_refuted _ -> "proof_refuted"
+     | Goal_verification.Completion_idle -> "idle");
+  (* Linking a Task makes the same request admissible on the next drain. *)
+  ignore (link_bare_task config ~goal_id);
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:(recording_reviewer (ref []) [ "verifier-a", Stub_approve "task evidence holds" ])
+    (fun () -> drain config);
+  check string "with evidence the same request completes" "completed"
+    (stored_phase config goal_id)
 ;;
 
 let test_goal_proof_reads_linked_task_producer_artifact () =
@@ -456,6 +524,7 @@ let test_refuted_proof_returns_to_executing () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Refutable goal" in
+  ignore (link_bare_task config ~goal_id);
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
     ~reviewer:
@@ -548,6 +617,7 @@ let test_malformed_reply_fails_over_to_the_next_slot () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Failover goal" in
+  ignore (link_bare_task config ~goal_id);
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let calls = ref [] in
@@ -663,6 +733,7 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Wedged goal" in
+  ignore (link_bare_task config ~goal_id);
   (* Simulate the crash window: the phase is Verifying but the ledger never
      recorded the proof request. *)
   (match
@@ -779,6 +850,8 @@ let () =
     [ ( "drain"
       , [ test_case "proof pending drains to completed" `Quick
             test_proof_pending_drains_to_completed
+        ; test_case "proof without a linked Task is not judged" `Quick
+            test_proof_without_a_linked_task_is_not_judged
         ; test_case
             "Goal proof reads linked Task producer artifact"
             `Quick

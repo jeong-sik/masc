@@ -49,10 +49,8 @@ let build_tree context goals goal =
            | None -> None)
   in
   let direct_goal_keeper_names =
-    context.keeper_metas
-    |> List.filter (fun (meta : Keeper_meta_contract.keeper_meta) ->
-           List.mem goal.Goal_store.id meta.active_goal_ids)
-    |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
+    ignore context;
+    []
   in
   let direct_linked_keeper_names =
     dedupe_sort (direct_task_keeper_names @ direct_goal_keeper_names)

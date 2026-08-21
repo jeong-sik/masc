@@ -26,7 +26,6 @@ let make_goal ?metric ?target_value id title =
     phase = Goal_phase.Executing;
     last_review_note = None;
     last_review_at = None;
-    owner = None;
     created_at = iso_now ();
     updated_at = iso_now ();
   }
@@ -369,83 +368,6 @@ let test_tree_task_without_cancellation_carries_no_cancellation_fields () =
   check bool "no reason on a completed task" false
     (Option.is_some (tree_field "reason" json))
 
-(* RFC-0362 — the goal's [owner] reaches the dashboard only through this tree
-   projection: the store serializes it (goal_store.ml) and goal_owner events
-   carry it, but the tree JSON is what the goals surface decodes.
-   [Dashboard_goals.tree_node] is a nominal copy of [Acc.tree_node], so the
-   node is built against the renderer's own type. *)
-let make_dashboard_tree_node goal : Dashboard_goals.tree_node =
-  {
-    goal;
-    children = [];
-    tasks = [];
-    last_activity_at = iso_now ();
-    stagnation_seconds = Some 0;
-    linked_keeper_names = [];
-    pending_approval_count = 0;
-    latest_keeper_ref = None;
-    latest_turn_ref = None;
-    activity_observation = "none";
-  }
-
-let test_tree_node_projects_owner () =
-  let goal = { (make_goal "goal-owned" "Owned goal") with owner = Some "dancer" } in
-  let json = Dashboard_goals.tree_node_to_json (make_dashboard_tree_node goal) in
-  check (option string) "the owner is projected" (Some "dancer")
-    (match tree_field "owner" json with Some (`String v) -> Some v | _ -> None)
-
-let test_tree_node_projects_an_absent_owner_as_null () =
-  let json =
-    Dashboard_goals.tree_node_to_json
-      (make_dashboard_tree_node (make_goal "goal-plain" "Plain goal"))
-  in
-  check bool "an absent owner is explicit null" true
-    (tree_field "owner" json = Some `Null)
-
-(* RFC-0362 §4.2 — a goal_owner event carries both sides of the transition,
-   but the default goal-event arm rendered only the bare kind string, so the
-   dashboard timeline counted the event without naming who lost or gained the
-   goal. *)
-let goal_owner_event ~previous_owner ~owner ~actor =
-  let owner_side = function Some value -> `String value | None -> `Null in
-  `Assoc
-    [ ("event_type", `String "goal_owner")
-    ; ("ts", `String "2026-08-05T01:00:00Z")
-    ; ("payload",
-       `Assoc
-         [ ("previous_owner", owner_side previous_owner)
-         ; ("owner", owner_side owner)
-         ; ("actor", `String actor)
-         ])
-    ]
-
-let test_goal_owner_timeline_names_the_transition () =
-  let json =
-    Timeline.goal_event_timeline_json
-      (goal_owner_event ~previous_owner:(Some "dancer") ~owner:(Some "sangsu")
-         ~actor:"operator")
-  in
-  check string "the transition names both owners" "owner: dancer -> sangsu by operator"
-    (json_str json "summary");
-  check string "kind stays the event type" "goal_owner" (json_str json "kind")
-
-let test_goal_owner_timeline_names_unassigned_sides () =
-  let assigned =
-    Timeline.goal_event_timeline_json
-      (goal_owner_event ~previous_owner:None ~owner:(Some "sangsu") ~actor:"operator")
-  in
-  check string "an unassigned previous owner is explicit"
-    "owner: <unassigned> -> sangsu by operator"
-    (json_str assigned "summary");
-  let cleared =
-    Timeline.goal_event_timeline_json
-      (goal_owner_event ~previous_owner:(Some "dancer") ~owner:None ~actor:"operator")
-  in
-  check string "an unassigned new owner is explicit"
-    "owner: dancer -> <unassigned> by operator"
-    (json_str cleared "summary")
-
-
 (* #29117 — the lifecycle phase is not a measurement.
 
    [goal_attainment_to_json] used to special-case [Completed] with
@@ -576,14 +498,6 @@ let () =
             test_tree_task_omits_an_absent_cancellation_reason;
           test_case "non-cancelled tree task carries no cancellation fields" `Quick
             test_tree_task_without_cancellation_carries_no_cancellation_fields;
-          test_case "tree node projects the goal owner" `Quick
-            test_tree_node_projects_owner;
-          test_case "tree node projects an absent owner as null" `Quick
-            test_tree_node_projects_an_absent_owner_as_null;
-          test_case "goal_owner timeline names the transition" `Quick
-            test_goal_owner_timeline_names_the_transition;
-          test_case "goal_owner timeline names unassigned sides" `Quick
-            test_goal_owner_timeline_names_unassigned_sides;
           test_case "korean count metric is measured" `Quick
             test_korean_count_metric_is_measured;
           test_case "metric wording does not select percent" `Quick

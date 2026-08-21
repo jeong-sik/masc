@@ -189,8 +189,6 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
         match meta.current_task_id with
         | Some task_id -> `String (Keeper_id.Task_id.to_string task_id)
         | None -> `Null );
-      ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) );
       ( "sandbox_profile",
         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) );
       ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
@@ -261,27 +259,6 @@ let goal_event_timeline_json event =
           | "blocked" -> "bad"
           | "paused" -> "warn"
           | _ -> "ok") )
-    | "goal_owner" ->
-        (* Unlike the bracketed markers above, [<unassigned>] names a real
-           state, not a producer gap: workspace_goals.ml writes both sides of
-           the transition and [Null] means the goal was unassigned there. *)
-        let previous_owner =
-          payload_field "previous_owner" |> json_to_string_opt
-        in
-        let owner = payload_field "owner" |> json_to_string_opt in
-        let actor = payload_field "actor" |> json_to_string_opt in
-        (* DET-OK: [owner]/[previous_owner] are persisted goal_owner payload
-           fields; [Null] is the typed unassigned state, not unknown input. *)
-        let side value = Option.value ~default:"<unassigned>" value (* renders the typed unassigned state *) in
-        ( "Goal Owner",
-          (match actor with
-          | Some actor_id ->
-              Printf.sprintf "owner: %s -> %s by %s" (side previous_owner)
-                (side owner) actor_id
-          | None ->
-              Printf.sprintf "owner: %s -> %s" (side previous_owner)
-                (side owner)),
-          "ok" )
     | _ ->
         ("Goal Event", event_type, "ok")
   in

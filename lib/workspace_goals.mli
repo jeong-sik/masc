@@ -28,18 +28,6 @@ val handle_goal_upsert
   -> Yojson.Safe.t
   -> Tool_result.result
 
-(** [handle_goal_assign ctx args] handles [masc_goal_assign] — RFC-0362 §4.2.
-    Both [goal_id] and [owner] are required; omitting [owner] is an error, never
-    an auto-pick. [owner] must name a registered keeper (its metadata file under
-    the keepers runtime dir); an unknown goal or unknown owner is a typed
-    validation error rather than a permissive default. *)
-val handle_goal_assign
-  :  tool_name:string
-  -> start_time:float
-  -> Workspace_types.context
-  -> Yojson.Safe.t
-  -> Tool_result.result
-
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
     {!Goal_phase.Public_action.all}). [request_complete] moves an executing

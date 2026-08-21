@@ -16,10 +16,6 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
-  (* RFC-0362: the keeper responsible for turning this Goal into Tasks.
-     [None] is the default and is legitimate -- an unowned Goal is a stated
-     intent nobody has picked up, which is a reportable state, not an error. *)
-  owner : string option;
   created_at : string;
   updated_at : string;
 }
@@ -50,7 +46,6 @@ and goal_to_yojson (goal : goal) =
       ("phase", Goal_phase.to_yojson goal.phase);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
-      ("owner", Json_util.string_opt_to_json goal.owner);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
@@ -87,7 +82,6 @@ and goal_of_yojson = function
         ; "phase"
         ; "last_review_note"
         ; "last_review_at"
-        ; "owner"
         ; "created_at"
         ; "updated_at"
         ]
@@ -143,7 +137,6 @@ and goal_of_yojson = function
                     phase;
                     last_review_note = Json_util.get_string json "last_review_note";
                     last_review_at = Json_util.get_string json "last_review_at";
-                    owner = Json_util.get_string json "owner";
                     created_at;
                     updated_at;
                   }
@@ -529,7 +522,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         phase = default_phase;
                         last_review_note = None;
                         last_review_at = None;
-                        owner = None;
                         created_at = now;
                         updated_at = now;
                       }

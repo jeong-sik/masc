@@ -245,7 +245,6 @@ let base_receipt : R.t =
   ; turn_count = Some 1
   ; agent_core_turn_count = None
   ; current_task_id = None
-  ; goal_ids = []
   ; outcome = `Error
   ; terminal_reason_code = ""
   ; response_text_present = false
@@ -890,7 +889,6 @@ let () =
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Completion_no_visible_output
-    ; goal_ids = [ "GOAL-1" ]
     ; actionable_signal
     }
   in

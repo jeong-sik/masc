@@ -190,7 +190,6 @@ let observe_node_result
       ~turn:(Agent_core.Tool_contract.Invocation.turn parent_invocation)
       ?keeper_turn_id:context.keeper_turn_id
       ?task_id:context.task_id
-      ?goal_ids:context.goal_ids
       ?sandbox_profile:context.sandbox_profile
       ?sandbox_root:context.sandbox_root
       ?allowed_paths:context.allowed_paths

@@ -139,7 +139,6 @@ let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
               ; "keeper_record_id", `Null
               ; "keeper_runtime_uid", `Null
               ; "instructions", `String "continue"
-              ; "active_goal_ids", `List []
               ; "current_task_id", `Null
               ; "mention_keeper_ids", `List [ `String keeper_name ]
               ] )

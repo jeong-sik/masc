@@ -1164,7 +1164,6 @@ jobs:
         # on the live workspace before this was closed.
         run: |
           opam exec -- dune build --root . \
-            @test/runtest-test_goal_scope_terminal_phase \
             @test/runtest-test_claimable_task_summaries
 
       - name: Run goal phase suite

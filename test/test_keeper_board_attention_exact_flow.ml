@@ -174,7 +174,6 @@ let candidate post_id : Candidate.candidate =
               ; "keeper_record_id", `Null
               ; "keeper_runtime_uid", `Null
               ; "instructions", `String "continue"
-              ; "active_goal_ids", `List []
               ; "current_task_id", `Null
               ; "mention_keeper_ids", `List [ `String keeper_name ]
               ] )

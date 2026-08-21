@@ -432,11 +432,6 @@ let keepers_json
                          @ keeper_runtime_identity_fields meta
                          @ [ "keepalive_running", `Bool keepalive_running
                            ; "next_model_hint", `Null
-                           ; ( "active_goal_ids"
-                             , `List
-                                 (List.map
-                                    (fun goal_id -> `String goal_id)
-                                    meta.active_goal_ids) )
                            ; ( "last_autonomous_action_at"
                              , if String.trim meta.runtime.last_autonomous_action_at = ""
                                then `Null

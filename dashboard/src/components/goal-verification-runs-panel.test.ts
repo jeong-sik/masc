@@ -50,7 +50,11 @@ describe('GoalVerificationRunsPanel', () => {
     expect(details?.open).toBe(true)
     expect(screen.getByText('verification_read_file')).toBeTruthy()
     expect(screen.getByText('three services verified')).toBeTruthy()
-    expect(container.querySelector('.v2-workspace-row')).not.toBeNull()
+    const row = container.querySelector('[data-goal-verification-run="run-a"]')
+    expect(row?.getAttribute('data-goal-id')).toBe('goal-a')
+    expect(row?.getAttribute('data-run-status')).toBe('committed')
+    expect(row?.getAttribute('data-review-kind')).toBe('proof')
+    expect(container.querySelector('[data-testid="goal-verification-runs-panel"]')).not.toBeNull()
   })
 
   it('refreshes through the same endpoint', async () => {

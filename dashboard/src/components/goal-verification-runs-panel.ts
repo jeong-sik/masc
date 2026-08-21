@@ -51,7 +51,7 @@ function ToolCalls({ row }: { row: GoalVerificationRunRecord }) {
   if (tools.length === 0) return html`<span class="text-[var(--color-fg-muted)]">—</span>`
   const label = `${tools.length} tool call${tools.length === 1 ? '' : 's'}`
   return html`
-    <details>
+    <details data-goal-verification-tools=${row.runId}>
       <summary class="cursor-pointer text-[var(--color-fg-accent)]">${label}</summary>
       <ol class="mt-2 flex flex-col gap-2" aria-label=${`Goal verifier tools for ${row.goalId}`}>
         ${tools.map((tool, index) => html`
@@ -71,7 +71,13 @@ function ToolCalls({ row }: { row: GoalVerificationRunRecord }) {
 
 function GoalVerificationRunRow({ row }: { row: GoalVerificationRunRecord }) {
   return html`
-    <tr class="v2-workspace-row border-b border-[var(--color-border-default)] last:border-b-0 align-top">
+    <tr
+      class="v2-workspace-row border-b border-[var(--color-border-default)] last:border-b-0 align-top"
+      data-goal-verification-run=${row.runId}
+      data-goal-id=${row.goalId}
+      data-run-status=${row.status}
+      data-review-kind=${row.reviewKind}
+    >
       <td class="py-2 pr-2">
         <${StatusBadge}
           tone=${goalVerificationRunTone(row.status)}
@@ -108,7 +114,10 @@ export function GoalVerificationRunsPanel() {
   const rows = data?.runs ?? []
 
   return html`
-    <div class="v2-workspace-surface flex flex-col gap-3">
+    <div
+      class="v2-workspace-surface flex flex-col gap-3"
+      data-testid="goal-verification-runs-panel"
+    >
       <div class="flex flex-wrap items-center gap-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-primary)]">Goal 판정 실행</h2>
         <${Btn} class="v2-workspace-action" onClick=${() => void loadData(resource)}>새로고침<//>

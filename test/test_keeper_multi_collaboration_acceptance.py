@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import inspect
 import json
 import sys
 import tempfile
@@ -179,6 +180,28 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertEqual(
             [approach["id"] for approach in catalog["execution_approaches"]],
             ["A", "B", "C"],
+        )
+
+    def test_rw23_task_is_not_exposed_to_autonomous_work_before_refutation(self):
+        setup_source = inspect.getsource(acceptance.MissionRun.setup_product_state)
+        rw23_source = inspect.getsource(
+            acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
+        )
+
+        # The success-token Task used to be created during fleet setup and the
+        # coordinator completed it autonomously before RW23 could write the
+        # failing artifact. Keep the Task creation inside the directed RW23
+        # phase and keep the verifier Goal out of the ordinary fleet scope.
+        self.assertNotIn("goal-verifier-task-create", setup_source)
+        self.assertIn('"active_goal_ids": [self.goal_id]', setup_source)
+        self.assertNotIn(
+            '"active_goal_ids": [self.goal_id, self.verifier_goal_id]',
+            setup_source,
+        )
+        self.assertIn("goal-verifier-task-create", rw23_source)
+        self.assertLess(
+            rw23_source.index("goal-verifier-task-create"),
+            rw23_source.index("goal-verifier-refute-artifact"),
         )
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):

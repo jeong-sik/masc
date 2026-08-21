@@ -1173,25 +1173,10 @@ class MissionRun:
                 "owner": self.roles["coordinator"],
             },
         )
-        verifier_task = self.call(
-            "goal-verifier-task-create",
-            "masc_add_task",
-            {
-                "title": f"[{self.marker}] Produce exact Goal proof artifact",
-                "description": (
-                    f"Write {self.verifier_artifact} so its exact content is "
-                    f"{self.verifier_success_token}; submit that artifact as "
-                    "verification evidence."
-                ),
-                "priority": 1,
-                "goal_id": self.verifier_goal_id,
-            },
-        )
-        self.verifier_task_id = extract_identity(verifier_task.text, ["task-"])
         for role, keeper in self.roles.items():
             arguments: dict[str, Any] = {
                 "name": keeper,
-                "active_goal_ids": [self.goal_id, self.verifier_goal_id],
+                "active_goal_ids": [self.goal_id],
             }
             runtime_id = self.runtime_for_role(role)
             if runtime_id:
@@ -1705,6 +1690,21 @@ class MissionRun:
             criterion_state="viable",
             completion_state="idle",
         )
+        verifier_task = self.call(
+            "goal-verifier-task-create",
+            "masc_add_task",
+            {
+                "title": f"[{self.marker}] Produce exact Goal proof artifact",
+                "description": (
+                    f"Write {self.verifier_artifact} so its exact content is "
+                    f"{self.verifier_success_token}; submit that artifact as "
+                    "verification evidence."
+                ),
+                "priority": 1,
+                "goal_id": self.verifier_goal_id,
+            },
+        )
+        self.verifier_task_id = extract_identity(verifier_task.text, ["task-"])
         failure_token = f"GOAL_PROOF_FAIL={self.marker}"
         self.run_turn(
             "coordinator",

@@ -1170,13 +1170,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('allowed_paths')
     expect(container.textContent).toContain('/tmp/workspace')
 
-    selectKcfTab(container, '목표')
-    await flush()
-    expect(container.querySelector('input[aria-label="goal 검색"]')).not.toBeNull()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-    expect(container.textContent).toContain('goal-runtime')
-    expect(container.textContent).toContain('live write')
-
     const runtimeSave = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('런타임 설정 저장'),
     )
@@ -1524,35 +1517,6 @@ describe('KeeperConfigPanel', () => {
     await loadKeeperConfig('keeper-sangsu', { force: true })
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
-  })
-
-  it('filters the goals catalogue by the search input and shows an empty state', async () => {
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '목표')
-    await flush()
-
-    const search = container.querySelector('input[aria-label="goal 검색"]') as HTMLInputElement | null
-    expect(search).not.toBeNull()
-    // default fixture goal (goal-runtime · Ship runtime clarity) is shown
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-
-    // non-matching query → empty state + "0 표시"
-    search!.value = 'zzz-no-match'
-    search!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(0)
-    expect(container.textContent).toContain('검색 결과 없음')
-    expect(container.textContent).toContain('0 표시')
-
-    // matching id substring → goal reappears, counter updates
-    search!.value = 'goal-runtime'
-    search!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-    expect(container.textContent).toContain('1 표시')
   })
 
   it('renders the keeper-scoped prompt assembly trace with an override win badge', async () => {

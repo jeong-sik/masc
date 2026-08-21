@@ -158,7 +158,12 @@ let tool_subject ~name:_ ~args =
   else (
     match Yojson.Safe.from_string trimmed with
     | `Assoc fields -> subject_of_assoc fields
-    | _ -> Some (shorten trimmed)
+    | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `List _ | `Null ->
+      (* A tool whose whole argument is one scalar or array has no key to pick,
+         so the argument is its own subject. Spelled out rather than left to a
+         catch-all: a new Yojson variant should stop the build, not silently
+         land here. *)
+      Some (shorten trimmed)
     | exception Yojson.Json_error _ ->
       (* Arguments still streaming in, or a provider that does not send JSON.
          The fragment names the call better than nothing does. *)

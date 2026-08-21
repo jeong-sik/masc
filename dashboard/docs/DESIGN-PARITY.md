@@ -99,7 +99,7 @@ this design drop, so it was put to the operator on 2026-08-22 with the
 measurement — the decision is to keep full width.
 
 Cost: overview measures **0.842**; restoring `max-width: 1280px; margin: 0 auto`
-takes it to **0.996**, and the fleet mean from 0.939 to 0.950. No other
+takes it to **0.996**, and the fleet mean from 0.934 to 0.945. No other
 surface moves — `.ov-scroll` is the only centred container, and `work`,
 `approvals` and `board` render full-width in the design too.
 

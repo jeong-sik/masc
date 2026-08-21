@@ -492,7 +492,7 @@ let test_read_entries_since () =
     let all = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
     Alcotest.(check int) "all entries" 3 (List.length all))
 
-let test_read_entries_since_result_parses_gate_summary () =
+let test_rows_without_a_gate_object_are_not_read () =
   with_tmpdir (fun dir ->
     let masc_root = dir in
     let keeper = "test-keeper" in
@@ -509,16 +509,11 @@ let test_read_entries_since_result_parses_gate_summary () =
     let oc = open_out path in
     List.iter (Printf.fprintf oc "%s\n") rows;
     close_out oc;
-    let result =
-      Trajectory.read_entries_since_result ~masc_root ~keeper_name:keeper
-        ~since:0.0
-    in
-    Alcotest.(check int) "three entries" 3 (List.length result.Trajectory.entries);
-    Alcotest.(check int) "parsed gate count" 2
-      result.Trajectory.gate_decode.parsed_gate_count;
-    Alcotest.(check int) "legacy default count" 1
-      result.Trajectory.gate_decode.legacy_default_count;
-    match List.nth result.Trajectory.entries 1 with
+    let entries = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
+    (* The third row carries no gate object. It used to arrive as [Pass], a
+       verdict it never recorded; it is now not an entry at all. *)
+    Alcotest.(check int) "only the two rows with a gate object" 2 (List.length entries);
+    match List.nth entries 1 with
     | { Trajectory.gate_decision = Trajectory.Reject reason; _ } ->
       Alcotest.(check string) "reject reason parsed" "blocked" reason
     | _ -> Alcotest.fail "expected persisted reject gate")
@@ -961,8 +956,8 @@ let () =
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
-      Alcotest.test_case "parses persisted gate summary" `Quick
-        test_read_entries_since_result_parses_gate_summary;
+      Alcotest.test_case "rows without a gate object are not read" `Quick
+        test_rows_without_a_gate_object_are_not_read;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
       Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
         test_read_recent_lines_skips_malformed_rows;

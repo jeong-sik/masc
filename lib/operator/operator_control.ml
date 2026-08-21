@@ -253,6 +253,10 @@ let validate_request request =
     | Some _ -> Ok ()
     | None -> Error (Printf.sprintf "unsupported action_type: %s" request.action_type)
 
+let invalidate_operator_snapshot_views config =
+  invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config
+
 let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* request = action_request_of_args ?actor_hint ctx args in
@@ -280,6 +284,7 @@ let action_json ?actor_hint (ctx : _ context) args :
       }
     in
     let* () = upsert_pending_confirm ctx.config entry in
+    let () = invalidate_operator_snapshot_views ctx.config in
     append_action_log ctx.config
       {
         trace_id;
@@ -357,6 +362,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
       | None -> Error "pending confirmation not found"
       | Some entry when pending_confirm_expired entry ->
           let* () = remove_pending_confirm ctx.config confirm_token in
+          let () = invalidate_operator_snapshot_views ctx.config in
           append_action_log ctx.config
             {
               trace_id = entry.trace_id;
@@ -401,6 +407,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
       | Some entry ->
           if String.equal decision "deny" then (
             let* () = remove_pending_confirm ctx.config confirm_token in
+            let () = invalidate_operator_snapshot_views ctx.config in
             append_action_log ctx.config
               {
                 trace_id = entry.trace_id;
@@ -440,7 +447,9 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               }
             in
             let* () = remove_pending_confirm ctx.config confirm_token in
+            let () = invalidate_operator_snapshot_views ctx.config in
             let* executed, result_status = execute_action ctx request in
+            let () = invalidate_operator_snapshot_views ctx.config in
             let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
             append_action_log ctx.config
               {

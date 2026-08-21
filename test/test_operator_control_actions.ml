@@ -162,6 +162,90 @@ let test_task_inject_executes_after_confirmation () =
       Alcotest.(check int) "task injected after confirmation" 1
         (List.length tasks))
 
+let test_pending_confirmation_mutations_invalidate_snapshot_views () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let snapshot () =
+        Operator_control.snapshot_json ~actor:"operator" ~view:"summary"
+          ~include_messages:false ~include_keepers:false ctx
+      in
+      let pending snapshot =
+        snapshot |> Yojson.Safe.Util.member "pending_confirm_envelope"
+        |> Yojson.Safe.Util.member "items" |> Yojson.Safe.Util.to_list
+      in
+      let action payload =
+        Operator_control.action_json ctx
+          (`Assoc
+            [ "actor", `String "operator"
+            ; "action_type", `String "task_inject"
+            ; ( "target_type"
+              , `String Operator_action_constants.workspace_target_type )
+            ; "payload", payload
+            ])
+        |> Result.get_ok
+      in
+      let token json =
+        Yojson.Safe.Util.(json |> member "confirm_token" |> to_string)
+      in
+      let confirm token decision =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [ "actor", `String "operator"
+            ; "confirm_token", `String token
+            ; "decision", `String decision
+            ])
+      in
+      let projection_computes = ref 0 in
+      let projection () =
+        Dashboard_projection_cache.get_or_compute_snapshot_json ~config
+          ~actor:(Some "operator") (fun _ ->
+            incr projection_computes;
+            `Int !projection_computes)
+      in
+      Alcotest.(check int) "prewarmed queue is empty" 0
+        (List.length (pending (snapshot ())));
+      ignore (projection ());
+      Alcotest.(check int) "projection prewarmed once" 1 !projection_computes;
+
+      let valid =
+        action
+          (`Assoc
+            [ "title", `String "Injected task"
+            ; "description", `String "created by operator"
+            ])
+      in
+      Alcotest.(check int) "preview appears after cached empty snapshot" 1
+        (List.length (pending (snapshot ())));
+      ignore (projection ());
+      Alcotest.(check int) "preview invalidates dashboard projection" 2
+        !projection_computes;
+      ignore (confirm (token valid) "deny" |> Result.get_ok);
+      Alcotest.(check int) "denied preview disappears immediately" 0
+        (List.length (pending (snapshot ())));
+      ignore (projection ());
+      Alcotest.(check int) "deny invalidates dashboard projection" 3
+        !projection_computes;
+
+      let invalid = action (`Assoc []) in
+      Alcotest.(check int) "invalid action preview is cached" 1
+        (List.length (pending (snapshot ())));
+      let result = confirm (token invalid) "confirm" in
+      Alcotest.(check bool) "execution fails after consuming preview" true
+        (Result.is_error result);
+      Alcotest.(check int) "failed execution cannot leave cached preview" 0
+        (List.length (pending (snapshot ()))))
+
 let test_digest_defaults_to_workspace_target () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -366,6 +450,10 @@ let () =
             "task inject executes after confirmation"
             `Quick
             test_task_inject_executes_after_confirmation
+        ; Alcotest.test_case
+            "pending-confirm mutations invalidate snapshot views"
+            `Quick
+            test_pending_confirmation_mutations_invalidate_snapshot_views
         ; Alcotest.test_case
             "snapshot preserves backlog failure contract"
             `Quick

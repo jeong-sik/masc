@@ -2557,6 +2557,11 @@
   (source_tree ../bin)))
 
 (test
+ (name test_tui_operator_projection)
+ (modules test_tui_operator_projection)
+ (libraries alcotest masc_tui_operator_projection yojson))
+
+(test
  (name test_fs_compat_capability_exact_read)
  (modules test_fs_compat_capability_exact_read)
  (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)

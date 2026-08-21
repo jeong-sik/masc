@@ -279,31 +279,6 @@ let decode_attention_item json =
 let decode_attention_items json_list =
   decode_list "attention_items" decode_attention_item json_list
 
-let decode_approval_item json =
-  let* ap_token = required_string_field json "confirm_token" in
-  let* ap_actor = required_string_field json "actor" in
-  let* ap_action_type = required_string_field json "action_type" in
-  let* ap_target_type = required_string_field json "target_type" in
-  let* ap_target_id = optional_string_field json "target_id" in
-  let* ap_delegated_tool = required_string_field json "delegated_tool" in
-  let ap_summary =
-    Printf.sprintf "%s on %s (%s)" ap_action_type ap_target_type
-      ap_delegated_tool
-  in
-  Ok
-    {
-      ap_token;
-      ap_actor;
-      ap_action_type;
-      ap_target_type;
-      ap_target_id;
-      ap_delegated_tool;
-      ap_summary;
-    }
-
-let decode_approval_items json_list =
-  decode_list "pending_confirms" decode_approval_item json_list
-
 let decode_board_post ?(require_body = false) json =
   let* bp_id = required_string_field json "id" in
   let* bp_author = required_string_field json "author" in
@@ -367,6 +342,14 @@ let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
       let* comments = decode_board_comments comments_json in
       Ok (post, comments)
 
+(** Load the actor-scoped pending confirmation envelope from the operator
+    surface. Missing or malformed envelopes remain explicit errors. *)
+let load_approvals ~(host : string) ~(port : int) :
+    (approval_snapshot, string) result =
+  match fetch_operator_snapshot ~host ~port with
+  | Error err -> Error ("approvals load failed: " ^ err)
+  | Ok json -> Masc_tui_operator_projection.decode_snapshot json
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -386,14 +369,6 @@ let load_overview ~(host : string) ~(port : int) :
       let* attention_items =
         let* items = optional_list_field json "attention_items" in
         decode_attention_items items
-      in
-      let* pending_confirms =
-        let* operator_targets = optional_object_field json "operator_targets" in
-        match operator_targets with
-        | None -> Ok []
-        | Some operator_targets ->
-            let* items = optional_list_field operator_targets "pending_confirms" in
-            decode_approval_items items
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
       let* top_attention =
@@ -419,15 +394,6 @@ let load_overview ~(host : string) ~(port : int) :
       let* ov_active_agents =
         int_field_or summary "active_agents" ~default:(List.length agent_briefs)
       in
-      let* ov_pending_approvals =
-        match command_focus with
-        | Some command_focus ->
-            int_field_or command_focus "pending_approvals"
-              ~default:(List.length pending_confirms)
-        | None ->
-            int_field_or summary "pending_approvals"
-              ~default:(List.length pending_confirms)
-      in
       let* ov_incident_count =
         int_field_or summary "incident_count" ~default:(List.length incidents)
       in
@@ -438,11 +404,9 @@ let load_overview ~(host : string) ~(port : int) :
           ov_cluster;
           ov_project;
           ov_active_agents;
-          ov_pending_approvals;
           ov_incident_count;
           ov_attention_items = incidents @ attention_queue @ attention_items;
           ov_top_attention = top_attention;
-          ov_pending_confirms = pending_confirms;
           ov_generated_at;
         }
 

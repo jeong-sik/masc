@@ -64,20 +64,18 @@ both are gitignored and regenerated.
 | logs | 0.996 | | schedule | 0.944 |
 | connectors | 0.986 | | ide | 0.935 |
 | lab | 0.986 | | monitor | 0.928 |
-| fusion | 0.978 | | board | 0.853 |
-| command | 0.969 | | keepers | 0.848 |
-| approvals | 0.966 | | overview | 0.842 |
-| work | 0.965 | | **mean** | **0.939** |
-| registry | 0.955 | | | |
+| fusion | 0.978 | | work | 0.891 |
+| command | 0.969 | | board | 0.853 |
+| approvals | 0.966 | | keepers | 0.848 |
+| registry | 0.955 | | overview | 0.842 |
+| | | | **mean** | **0.934** |
 
-Ten of the fourteen sit at 0.93 or above and seven at 0.96+. The four below are
-each held there by one named cause, ledgered below — none of them skin drift.
-
-Ten of the fourteen sit at 0.93 or above and seven at 0.96+. The four below are
-each held there by one named cause, ledgered below — none of them skin drift.
+Nine of the fourteen sit at 0.93 or above and seven at 0.96 or above. The five
+below are each held there by one named cause, ledgered underneath — none of them
+skin drift.
 
 Style conformance — `getComputedStyle` compared property by property across every
-classed element on ten surfaces — is **96.95%** (41,207 of 42,504 declarations),
+classed element on ten surfaces — is **96.83%** (41,155 of 42,504 declarations),
 from 85.85% before this pass. The largest remaining group is `font-family` (263),
 which is the UA fallback the dashboard deliberately does not reproduce (see
 below); without it the figure is 97.6%.
@@ -148,6 +146,24 @@ context minmax 108→96) is merged into it.
 
 Cost: on the parity page the prototype's five cells are laid into a six-track
 grid, so every column lands wide of the design. monitor measures **0.928**.
+
+### Work — the dashboard moved past the design here
+
+`#29300` rebuilt the Work goal detail while this sync was in flight. The expanded
+card used to print one undifferentiated strip of mono chips, including a
+completion percentage that read 100% for a goal no evaluator had ever measured;
+it is now four labelled sections built around the declared completion criteria,
+and the prototype's `.wk-note` strip is gone with it.
+
+The v5 export predates that, so the design still draws the old strip. This is the
+design being behind the dashboard, not the dashboard drifting from the design —
+nothing here should be pulled back toward the prototype. The claimable-backlog
+double-inset fixed in this pass is separate and still holds (the backlog measures
+identically to the design).
+
+Cost: the goal detail is ~26px shorter than the mock's per open goal, so every
+goal below the first sits high. work measures **0.891**, down from 0.965 before
+`#29300` landed.
 
 ### Systemic: the prototype ships no CSS reset
 

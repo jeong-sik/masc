@@ -111,6 +111,9 @@ jobs:
             bin/main_eio.exe \
             bin/deployment_preflight_helper.exe
 
+      - name: Source quickstart onboarding smoke
+        run: scripts/quickstart-smoke.sh
+
       - name: Release binary smoke (boot + README drift)
         run: |
           chmod +x scripts/release-binary-smoke.sh

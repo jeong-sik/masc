@@ -62,21 +62,20 @@ both are gitignored and regenerated.
 | Surface | SSIM | | Surface | SSIM |
 |---|---|---|---|---|
 | logs | 0.996 | | registry | 0.955 |
-| connectors | 0.986 | | schedule | 0.944 |
-| lab | 0.986 | | ide | 0.935 |
-| fusion | 0.978 | | monitor | 0.928 |
-| command | 0.969 | | keepers | 0.909 |
-| approvals | 0.966 | | work | 0.891 |
-| | | | board | 0.853 |
-| | | | overview | 0.842 |
-| | | | **mean** | **0.939** |
+| monitor | 0.995 | | schedule | 0.944 |
+| ide | 0.995 | | keepers | 0.909 |
+| connectors | 0.986 | | work | 0.891 |
+| lab | 0.986 | | board | 0.853 |
+| fusion | 0.978 | | overview | 0.842 |
+| command | 0.969 | | | |
+| approvals | 0.966 | | **mean** | **0.948** |
 
-Nine of the fourteen sit at 0.93 or above and seven at 0.95 or above. The four
-that do not — overview, board, work, monitor — are each held there by one named
-cause, ledgered underneath, and none of the four is skin drift. **Across the ten
-surfaces where the two sides agree on structure the mean is 0.962**; that is the
-figure to read as "does the skin match". The 0.939 fleet mean includes the four
-and is the figure to read as "how close is the whole dashboard to the mock".
+Ten of the fourteen sit at 0.95 or above. The four that do not — overview,
+board, work, keepers — are each held there by one named cause, ledgered
+underneath, and none of the four is skin drift. **Across the ten surfaces where
+the two sides agree on structure the mean is 0.977**; that is the figure to read
+as "does the skin match". The 0.948 fleet mean includes the four and is the
+figure to read as "how close is the whole dashboard to the mock".
 
 Style conformance — `getComputedStyle` compared property by property across every
 classed element on ten surfaces — is **96.89%** (41,182 of 42,504 declarations),
@@ -103,7 +102,7 @@ this design drop, so it was put to the operator on 2026-08-22 with the
 measurement — the decision is to keep full width.
 
 Cost: overview measures **0.842**; restoring `max-width: 1280px; margin: 0 auto`
-takes it to **0.996**, and the fleet mean from 0.939 to 0.950. No other
+takes it to **0.996**, and the fleet mean from 0.948 to 0.959 — over the bar. No other
 surface moves — `.ov-scroll` is the only centred container, and `work`,
 `approvals` and `board` render full-width in the design too.
 
@@ -124,31 +123,55 @@ a `SuggestionChip` rendering the design's `.chip`; nothing imported it, and it
 is gone. The live suggestion chip is `components/common/suggestion-chip.ts`,
 whose metrics are now the design's.
 
-keepers went **0.848 → 0.909** on that. What is left is the roster and thread
-chrome, where the residual is the button font fallback described below.
+keepers went **0.848 → 0.909** on that. What is left is the button font metric
+described under "the prototype ships no CSS reset": `.cf-view`, `.tasktag` and
+the top-bar attention chips each stand 2–3px taller than the mock because
+`line-height: normal` resolves against Noto Sans KR's metrics rather than
+Arial's. Substituting a numeric leading was measured and rejected — it inherits
+into the grid cells and cost the fleet 8.7pp.
 
 ### Board — `.bd-stateblock` is a design component the dashboard has not built
 
 The design's board renders a state-transition post (`Running → Overflowed`,
-context 100%, `restart` pending) as a `.bd-stateblock`. The class appears nowhere
-in `dashboard/src`. Vendoring the four rules would move the number without
-changing anything the app renders, which is the fake this repo's *mark-don't-fake*
-rule exists to prevent. Not vendored.
+context 100%, `restart` pending) as a `.bd-stateblock`, reading three fields off
+`post.stateBlock`. `BoardPost` in `types/core.ts` has no counterpart — no
+from/to state, no context figure, no pending action — so the backend does not
+emit the data the block displays. Vendoring the four CSS rules would move the
+number without changing anything the app renders, and building the block without
+the fields would mean inventing them; both are the fake this repo's
+*mark-don't-fake* rule exists to prevent. Not vendored.
 
 Cost: the second mock post is 56px shorter, and every post below it shifts.
 board measures **0.853**.
 
-### Monitor — the roster grid has six tracks, the design has five
+### Monitor — resolved: the roster grid had six tracks, the design has five
 
-`--fl-cols` in `keeper-v2/fleet.css` carries the local contract: *"Last track =
-action cell (멈춤/깨움/종료): the 3 text buttons render ~156px, so the track must be
-wide enough or the button group overflows left into the context value."* The
-live row has an action cell the mock row does not, so the vendored grid has six
-tracks against the design's five. The v5 width refinement (state 140→152,
-context minmax 108→96) is merged into it.
+The live row carries a `.fl-runtime` cell between context and recent-tool that
+the mock's row has no counterpart for, and its action group is three text buttons
+(멈춤/깨움/종료) rendering ~156px, so the last track needs 160px. That six-track
+value used to live in the shared `--fl-cols`, which laid the design's five cells
+into six tracks and pushed every column wide.
 
-Cost: on the parity page the prototype's five cells are laid into a six-track
-grid, so every column lands wide of the design. monitor measures **0.928**.
+`keeper-v2/fleet.css` carries the design's five tracks now, and
+`v2-monitoring.css` restates six for `.v2-monitoring-surface` alone, bounded to
+the widths above the shed-a-column tier so that tier keeps its own set. The live
+roster still renders six cells in six tracks with a 160px action cell and no
+overflow.
+
+monitor went **0.928 → 0.995**.
+
+### IDE — resolved: the rail tabs had two names
+
+The live rail tabs rendered `.ide-v2-rail-tab*`; the design draws the same
+component as `.ide-rail-tab*`, and the design's rules were never vendored, so the
+tabs fell back to the generic button chrome. The component uses the design's
+names now, `keeper-v2/surfaces.css` owns its type, spacing and selected state,
+and `ide-v2.css` keeps only what the mock never had to solve: three tabs sharing
+a 320px rail without wrapping, and a label that truncates instead of pushing its
+neighbours out. `flex: 0 1 auto` rather than `1 1 0`, so a tab sizes to its label
+the way the design draws it and still shrinks under pressure.
+
+ide went **0.935 → 0.995**.
 
 ### Work — the dashboard moved past the design here
 

@@ -565,40 +565,30 @@
   grid-template-rows: none;
 }
 
-.ide-v2-rail-tabs {
-  flex: none;
-  display: flex;
+/* The rail tabs now carry the design's own class names, so keeper-v2/surfaces.css
+   owns their type, spacing and selected state. What stays here is the part the
+   design's static mock never had to solve: three tabs sharing a 320px rail
+   without wrapping, and a label that truncates rather than pushing its
+   neighbours out. */
+.ide-rail-tabs {
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: flex-end;
-  gap: 2px;
-  padding: 10px 10px 0;
-  border-bottom: 1px solid var(--border-soft);
 }
 
-.ide-v2-rail-tab {
-  flex: 1 1 0;
+.ide-rail-tab {
+  /* `0 1 auto`, not `1 1 0`: the tab sizes to its label the way the design draws
+     it, and still shrinks with an ellipsis when a longer label would push its
+     neighbours past the 320px rail. Leading is the design's — the explicit 1.2
+     that used to sit here made the tab 2.8px shorter than the mock. */
+  flex: 0 1 auto;
   min-width: 0;
-  font-family: var(--font-ui);
-  font-size: var(--fs-10);
-  line-height: 1.2;
-  padding: 6px 8px;
-  border: 0;
-  background: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ide-v2-rail-tab.on {
-  color: var(--volt-strong);
-  border-bottom-color: var(--volt);
-}
-
-.ide-v2-rail-tab[aria-selected="true"] {
+.ide-rail-tab[aria-selected="true"] {
   color: var(--volt-strong);
 }
 

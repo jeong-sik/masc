@@ -70,7 +70,6 @@ export type ToolCallRouteEvidence = {
   backend?: string
   runtime_handler?: string
   readonly?: boolean
-  retryable?: boolean
   receipt_labels?: Record<string, string>
   status?: string
 }
@@ -231,7 +230,6 @@ function decodeRouteEvidence(raw: unknown): ToolCallRouteEvidence | undefined {
     backend: asString(raw.backend),
     runtime_handler: asString(raw.runtime_handler),
     readonly: asBoolean(raw.readonly),
-    retryable: asBoolean(raw.retryable),
     receipt_labels: asStringRecord(raw.receipt_labels),
     status: decodeRouteStatus(raw.status),
   }

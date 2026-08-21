@@ -4602,7 +4602,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             let transient_terminal_error =
               Keeper_internal_error.core_error_of_masc_internal_error
                 (Keeper_internal_error.Terminal_effect_failed
-                   { failure_class = Tool_result.Transient_error
+                   { failure_class = Tool_result.Dependency_unavailable
                    ; effect_disposition = Tool_result.Effect_outcome_unknown
                    ; diagnostic = "unknown transient terminal effect"
                    })
@@ -4614,7 +4614,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_transient_failure
+                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
                  ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
                  } ->

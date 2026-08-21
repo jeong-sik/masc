@@ -26,7 +26,7 @@ type context = {
    Failure-class mapping (caller-input violations only in this cluster):
    - [Workflow_rejection] : invalid dashboard scope; missing
                             tool_name; unknown tool.
-   - No [Runtime_failure] / [Transient_error] sites here — the
+   - No [Runtime_failure] / [Dependency_unavailable] sites here — the
      [Workspace.gc] / [Dashboard.generate]
      backends assume-success or raise. When a backend later returns
      a typed Error variant, the construction site here gets the

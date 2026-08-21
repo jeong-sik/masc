@@ -149,7 +149,6 @@ type runtime_handler =
 type policy =
   { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
-  ; retryable : bool
   ; cwd_scope : string option
   ; polling_read : bool
   }
@@ -314,8 +313,7 @@ let discovery_example ~label ?cwd ~argv () =
   `Assoc [ "label", `String label; "input", input ]
 ;;
 
-let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
-      ?(polling_read = false) ()
+let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -324,7 +322,6 @@ let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
   in
   { readonly_of_input
   ; readonly_hint = readonly
-  ; retryable
   ; cwd_scope
   ; polling_read
   }
@@ -765,7 +762,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
-           ~retryable:false
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -805,7 +801,6 @@ let public_descriptors =
            ~readonly:true
            ~readonly_of_input:search_files_readonly_of_input
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
-           ~retryable:true
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -838,7 +833,6 @@ let public_descriptors =
         (policy
            ~readonly:true
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
-           ~retryable:true
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process
@@ -922,7 +916,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~retryable:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
@@ -948,7 +941,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~retryable:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
@@ -1205,11 +1197,11 @@ let ide_annotate_schema_source, ide_annotate_schema =
 ;;
 
 let read_only_in_process_policy ?(polling_read = false) () =
-  policy ~readonly:true ~retryable:true ~polling_read ()
+  policy ~readonly:true ~polling_read ()
 ;;
 
-let write_in_process_policy ?(retryable = false) () =
-  policy ~readonly:false ~retryable ()
+let write_in_process_policy () =
+  policy ~readonly:false ()
 ;;
 
 let in_process_descriptor_with_schema_source
@@ -1765,7 +1757,7 @@ let masc_board_descriptor board_name =
       | Board_sub_board_update
       | Board_vote ) -> Serial
   in
-  let policy = policy ~readonly ~retryable:readonly () in
+  let policy = policy ~readonly () in
   let canonical_keeper_input_schema =
     remove_schema_fields
       (Board_tool_registry.identity_fields_for_board_name board_name)
@@ -2064,10 +2056,7 @@ let masc_local_runtime_descriptor
     Tool_schemas_local_runtime.execution_policy definition.operation
   in
   let policy =
-    policy
-      ~readonly:execution_policy.read_only
-      ~retryable:execution_policy.retryable
-      ()
+    policy ~readonly:execution_policy.read_only ()
   in
   in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
@@ -2645,7 +2634,6 @@ let eval_tags_json d =
 
 let common_policy_json_fields ~readonly_key policy =
   [ readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
-  ; "retryable", `Bool policy.retryable
   ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
   ; "polling_read", `Bool policy.polling_read
   ]

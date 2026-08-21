@@ -350,7 +350,6 @@ let make_tool_bundle_for_descriptors
                ~base_path:config.base_path
                ~model_projection:descriptor.model_output_projection
                ?on_externalization_error
-               ~externalization_error_recoverable:descriptor.policy.retryable
                ~name:model_name
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema

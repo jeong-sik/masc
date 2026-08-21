@@ -24,10 +24,11 @@ type terminal_class =
   | Protocol_error
   | Config_mismatch
   | Provider_integration
-  | Terminal_effect_transient_failure
+  | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
+  | Terminal_effect_operator_cancelled
   | Provider_attempt_effect_fenced
   | Tool_correction_lost
   | Internal_opaque
@@ -133,8 +134,8 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
        exhaust_failure Contract_violation
      | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
        (match failure_class with
-        | Tool_result.Transient_error ->
-          exhaust_failure Terminal_effect_transient_failure
+        | Tool_result.Dependency_unavailable ->
+          exhaust_failure Terminal_effect_dependency_unavailable
         | Tool_result.Policy_rejection ->
           exhaust_failure Terminal_effect_policy_rejection
         | Tool_result.Runtime_failure ->
@@ -142,12 +143,7 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
         | Tool_result.Workflow_rejection ->
           exhaust_failure Terminal_effect_workflow_rejection
         | Tool_result.Operator_cancelled ->
-          (* Operator interrupt observed as a terminal-effect failure class:
-             route like a transient outcome (it is not a crash and the
-             effect may be re-attempted by a later turn); the
-             operation-level classification already records the typed
-             cancel (#28810). *)
-          exhaust_failure Terminal_effect_transient_failure))
+          exhaust_failure Terminal_effect_operator_cancelled))
   | Keeper_internal_error.Provider_attempt_effect_fenced
       { effect_disposition; _ } ->
     (match effect_disposition with
@@ -286,10 +282,12 @@ let terminal_class_label = function
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
   | Provider_integration -> "provider_integration"
-  | Terminal_effect_transient_failure -> "terminal_effect_transient_failure"
+  | Terminal_effect_dependency_unavailable ->
+    "terminal_effect_dependency_unavailable"
   | Terminal_effect_policy_rejection -> "terminal_effect_policy_rejection"
   | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
   | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
+  | Terminal_effect_operator_cancelled -> "terminal_effect_operator_cancelled"
   | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
   | Tool_correction_lost -> "tool_correction_lost"
   | Internal_opaque -> "internal_opaque"

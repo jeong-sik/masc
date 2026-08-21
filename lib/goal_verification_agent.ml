@@ -372,18 +372,14 @@ let build_review_request config (goal : Goal_store.goal) kind
   | Completion_proof ->
     (match linked_task_rollup config ~goal_id:goal.id with
      | Error _ as error -> error
-     (* No linked Task means no producer: nothing was claimed, so there is no
-        owned tree the judge could open. Naming one anyway would hand the judge
-        somebody's playground as if it were this Goal's evidence. The rollup and
-        the submitted references are the upper bound of what can be checked. *)
-     | Ok (rollup, evidence_refs, []) ->
-       Ok
-         ( { base with
-             Task.Anti_rationalization.completion_notes = rollup
-           ; evidence_refs
-           }
-         , Prompt_names.goal_verification_proof
-         , Task.Anti_rationalization.No_lookup_surface )
+     (* [admit_proof_against_criterion] refuses a proof with no linked Task, so
+        this is unreachable. It fails loudly rather than building a review with
+        no evidence and no tree: if the admission ever stops covering this, the
+        judge must not silently rate the claim against itself. *)
+     | Ok (_, _, []) ->
+       Error
+         "proof review reached build with no linked Task; admission should \
+          have refused it"
      | Ok (rollup, evidence_refs, tasks) ->
        let open Result.Syntax in
        let* lookup = linked_task_lookup config tasks in
@@ -442,7 +438,26 @@ let admit_proof_against_criterion config (work : pending_work) =
        Error (true, "proof request has no verification ledger record")
      | Ok (Some record) ->
        (match record.Goal_verification.criterion with
-        | Goal_verification.Criterion_viable _ -> Ok ()
+        | Goal_verification.Criterion_viable _ ->
+          (* A completion proof is judged against the linked Tasks: their
+             rollup is the evidence and their performers are the trees the
+             judge may open. With no linked Task there is neither. The Goal's
+             own metric and target are the CLAIM under review, so letting the
+             review proceed on those alone would let the judge approve the
+             claim by reading the claim -- the independent proof gate would be
+             satisfied by prose.
+
+             Retryable: nothing is wrong with the request, there is just
+             nothing to verify yet. The pending row stays durable, and the
+             first linked Task makes the next drain admissible. *)
+          (match linked_task_rollup config ~goal_id:work.goal_id with
+           | Error detail -> Error (true, detail)
+           | Ok (_, _, []) ->
+             Error
+               ( true
+               , "proof has no linked Task: the Goal's own metric and target \
+                  are the claim under review, not evidence for it" )
+           | Ok (_, _, _ :: _) -> Ok ())
         | Goal_verification.Criterion_pending _
         | Goal_verification.Criterion_unchecked ->
           Error

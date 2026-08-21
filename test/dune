@@ -1697,6 +1697,7 @@
 (include stanzas/test_discord_wss_lifecycle.inc)
 
 (include stanzas/test_keeper_chat_discord.inc)
+(include stanzas/test_keeper_chat_tool_trail.inc)
 
 (test
  (name test_keeper_chat_slack)

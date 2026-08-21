@@ -134,6 +134,7 @@ let producer_playground (config : Workspace.config) producer =
    proof verdict need one; they do not all need an artifact to read. *)
 let link_bare_task config ~goal_id =
   let producer = "proof-producer" in
+  ignore (ensure_producer_playground config producer);
   let created =
     match
       Workspace.add_task_with_result config ~goal_id ~created_by:producer

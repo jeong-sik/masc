@@ -87,7 +87,6 @@ let seed_resolved ~base_path ~ts ~id ?(keeper = "rondo") ?(tool = "tool_execute"
     ; "turn_id", `Null
     ; "task_id", `Null
     ; "goal_id", `Null
-    ; "goal_ids", `List []
     ; "actor", `String "operator"
     ; "decision_source", `String source
     ; "authorization_source", `Null
@@ -290,7 +289,6 @@ let test_nullable_string_projection_is_literal base_path =
         ; "turn_id", `Null
         ; "task_id", `Null
         ; "goal_id", `Null
-        ; "goal_ids", `List []
         ; "actor", `Null
         ; "decision_source", `String "auto_judge"
         ; "authorization_source", `Null
@@ -315,7 +313,6 @@ let test_nullable_string_projection_is_literal base_path =
         ; "turn_id", `Null
         ; "task_id", `String "task-7"
         ; "goal_id", `String "goal-9"
-        ; "goal_ids", `List [ `String "goal-9" ]
         ; "actor", `String "operator"
         ; "decision_source", `String "human_operator"
         ; "authorization_source", `Null
@@ -343,7 +340,6 @@ let test_nullable_string_projection_is_literal base_path =
         ; "turn_id", `Null
         ; "task_id", `String "task-7"
         ; "goal_id", `String "goal-9"
-        ; "goal_ids", `List [ `String "goal-9" ]
         ; "actor", `String "operator"
         ; "decision_source", `String "human_operator"
         ; "summary_status", `String "not_requested"
@@ -361,7 +357,6 @@ let test_nullable_string_projection_is_literal base_path =
         ; "turn_id", `Null
         ; "task_id", `Null
         ; "goal_id", `Null
-        ; "goal_ids", `List []
         ; "actor", `Null
         ; "decision_source", `String "auto_judge"
         ; "summary_status", `String "not_requested"
@@ -389,7 +384,6 @@ let test_judge_evidence_passes_through base_path =
         ; "turn_id", `Null
         ; "task_id", `Null
         ; "goal_id", `Null
-        ; "goal_ids", `List []
         ; "actor", `String "operator"
         ; "decision_source", `String "auto_judge"
         ; "authorization_source", `Null

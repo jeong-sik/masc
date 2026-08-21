@@ -21,13 +21,11 @@ val enqueue_if_ready :
   task_id:string ->
   enqueue_outcome
 (** Re-read canonical Goal/Task state after a terminal Task commit, durably
-    enqueue one typed reconciliation stimulus, then wake its Keeper. The
-    registered or persisted Keeper assignment whose [active_goal_ids] contains
-    the Goal is authoritative. When no unambiguous assignment exists, an
-    exact live or persisted [agent_name] binding may identify the producer;
-    identity strings are never parsed to invent a Keeper name. The function
-    never mutates Goal phase, and reports a non-authoritative recovery snapshot
-    as [Backlog_read_failed]. *)
+    enqueue one typed reconciliation stimulus, then wake the exact Keeper bound
+    to the Task performer. A Goal names no owner and no per-Keeper assignment
+    participates in routing; identity strings are never parsed to invent a
+    Keeper name. The function never mutates Goal phase, and reports a
+    non-authoritative recovery snapshot as [Backlog_read_failed]. *)
 
 val reconcile_startup :
   config:Workspace.config -> reconciliation_summary

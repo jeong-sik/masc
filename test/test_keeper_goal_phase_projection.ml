@@ -1,11 +1,6 @@
-(** A keeper is handed only the goals it can still progress.
+(** A keeper is handed only the shared Goals it can still progress.
 
-    [keeper_meta.active_goal_ids] records which goals were assigned to a keeper.
-    Nothing removes an id when the goal reaches a terminal phase, and
-    [resolve_active_goal_ids] only checks that the id exists — so a Completed or
-    Dropped goal stays on the list indefinitely.
-
-    Two prompt surfaces read that list: [<available_goals>] in the system prompt
+    Two prompt surfaces read the open Goal store: [<available_goals>] in the system prompt
     (via {!Keeper_unified_prompt.active_goal_summaries_of_store}) and [### Active Goals]
     in the per-turn world state (via [world_observation.active_goals]). Both
     announced terminal goals as this keeper's work, on every turn, under
@@ -87,7 +82,7 @@ let seed_terminal_phases_only config =
     }
 ;;
 
-let meta_with_goals ids =
+let keeper_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -97,16 +92,6 @@ let meta_with_goals ids =
   with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
-;;
-
-let all_ids =
-  [ "goal-executing"
-  ; "goal-verifying"
-  ; "goal-blocked"
-  ; "goal-paused"
-  ; "goal-completed"
-  ; "goal-dropped"
-  ]
 ;;
 
 let summary_ids summaries =
@@ -129,7 +114,7 @@ let summary_title_opt goal_id summaries =
 let test_system_prompt_surface_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let _meta = meta_with_goals all_ids in
+  let _meta = keeper_meta () in
   let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
   check (list string) "only progressable goals are offered"
     [ "goal-executing"; "goal-verifying" ]
@@ -141,7 +126,7 @@ let test_system_prompt_surface_drops_terminal_goals () =
 let test_world_observation_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals all_ids in
+  let meta = keeper_meta () in
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta
@@ -157,7 +142,7 @@ let test_world_observation_drops_terminal_goals () =
 let test_no_goals_surface_when_all_are_terminal () =
   with_workspace @@ fun config ->
   seed_terminal_phases_only config;
-  let meta = meta_with_goals [] in
+  let meta = keeper_meta () in
   check (list string) "no goal block rather than an empty-looking one" []
     (summary_ids (Keeper_unified_prompt.active_goal_summaries_of_store ~config));
   let observation =
@@ -169,8 +154,7 @@ let test_no_goals_surface_when_all_are_terminal () =
 ;;
 
 (* An executing Goal that no Task serves is one fact addressed to every Keeper.
-   The keeper's [active_goal_ids] is empty here on purpose: the fact lives on
-   the Goal store and must surface without any keeper-side pointer.
+   The fact lives on the Goal store and surfaces without a keeper-side pointer.
 
    Four exclusions in one predicate: terminal Goals are not open work, a Goal
    already carrying a Task is not an invitation, and [Verifying] is held back so
@@ -251,7 +235,7 @@ let test_goal_with_a_linked_task_is_not_surfaced () =
    handed them: a correct list nobody renders is the state this block exists to
    end. *)
 let rendered_world_state config =
-  let meta = meta_with_goals [] in
+  let meta = keeper_meta () in
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
   in

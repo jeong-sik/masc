@@ -398,7 +398,7 @@ let test_direct_and_autonomous_share_system_prompt () =
   check bool "shared contract leads with the result" true
     (contains_prose ~needle:"lead with the result" base_system_prompt)
 
-let test_unresolved_goal_keeps_one_stable_safety_contract () =
+let test_open_goal_store_keeps_one_stable_safety_contract () =
   with_repo_prompt_config @@ fun () ->
   let meta_with_goal =
     meta_of_json
@@ -434,7 +434,7 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
     "unresolved goal does not split direct and autonomous prompts"
     base_system_prompt
     autonomous_system_prompt;
-  check bool "unresolved goal remains as a bare id" true
+  check bool "removed per-Keeper goal id is absent" false
     (contains ~needle:"- missing-goal\n" base_system_prompt);
   check bool "identity block is preserved" true
     (contains ~needle:"<identity>" base_system_prompt);
@@ -634,7 +634,7 @@ let () =
             `Quick
             test_direct_and_autonomous_share_system_prompt;
           test_case "unresolved goal keeps one stable safety contract" `Quick
-            test_unresolved_goal_keeps_one_stable_safety_contract;
+            test_open_goal_store_keeps_one_stable_safety_contract;
         ] );
       ( "threaded turn decision",
         [

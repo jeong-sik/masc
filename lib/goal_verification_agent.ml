@@ -194,7 +194,7 @@ let criterion_description (goal : Goal_store.goal) =
 
 let task_rollup_json (task : Masc_domain.task) =
   let verification_evidence =
-    Tool_task_completion_review.concrete_verification_evidence task
+    Task.Completion_review.concrete_verification_evidence task
   in
   let status_fields =
     match task.task_status with
@@ -217,7 +217,7 @@ let task_rollup_json (task : Masc_domain.task) =
      ; "title", `String task.title
      ; "status", `String (Masc_domain.task_status_to_string task.task_status)
      ; ( "verification_evidence"
-       , Tool_task_completion_review.verification_evidence_to_yojson
+       , Task.Completion_review.verification_evidence_to_yojson
            verification_evidence )
      ]
      @ status_fields)
@@ -225,9 +225,9 @@ let task_rollup_json (task : Masc_domain.task) =
 
 let task_submitted_evidence (task : Masc_domain.task) =
   let evidence =
-    Tool_task_completion_review.concrete_verification_evidence task
+    Task.Completion_review.concrete_verification_evidence task
   in
-  evidence.Tool_task_completion_review.submitted_evidence
+  evidence.Task.Completion_review.submitted_evidence
 ;;
 
 (* A backlog that does not read is infrastructure failure: the proof review

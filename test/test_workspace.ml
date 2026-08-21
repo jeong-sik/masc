@@ -267,13 +267,18 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     in
     Option.bind agent_opt (fun (agent : Masc_domain.agent) -> agent.current_task)
   in
-  let _ = Workspace.init config ~agent_name:(Some "fixture-keeper") in
+  let _ = Workspace.init config ~agent_name:(Some "fixture-agent") in
+  let broadcaster =
+    match Workspace.get_agents_raw config with
+    | [ agent ] -> agent.Masc_domain.name
+    | _ -> Alcotest.fail "expected exactly one bound broadcaster"
+  in
   let _ = Workspace.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
+  let _ = Workspace.claim_task config ~agent_name:broadcaster ~task_id:"task-001" in
   (match
      transition_done_r
        config
-       ~agent_name:"nick0cave"
+       ~agent_name:broadcaster
        ~task_id:"task-001"
        ~notes:"terminal in backlog"
    with
@@ -288,7 +293,20 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Alcotest.(check (option string))
     "assignee current_task already cleared before invariant"
     None
-    (current_task_for "nick0cave");
+    (current_task_for broadcaster);
+
+  let agent_file =
+    Filename.concat
+      (Workspace.agents_dir config)
+      (Workspace.safe_filename broadcaster ^ ".json")
+  in
+  let stale_agent =
+    match Workspace.read_json config agent_file |> Masc_domain.agent_of_yojson with
+    | Ok agent ->
+      { agent with status = Masc_domain.Busy; current_task = Some "task-001" }
+    | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
+  in
+  Workspace.write_json config agent_file (Masc_domain.agent_to_yojson stale_agent);
 
   let stale_message =
     "@nick0cave task-001 stale claim detected: current_task_id=null but \
@@ -299,7 +317,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     |> List.fold_left (fun acc msg -> max acc msg.Masc_domain.seq) 0
   in
   let result =
-    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"fixture-keeper-jade-heron" ~content:stale_message
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:broadcaster ~content:stale_message
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -316,7 +334,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     result.mention;
   Alcotest.(check string)
     "delivery exposes the canonical persisted sender"
-    "fixture-keeper-jade-heron"
+    broadcaster
     result.from_agent;
   let messages = Workspace.get_all_messages_raw config ~since_seq in
   (match messages with
@@ -328,19 +346,19 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
      Alcotest.(check bool)
        "replacement cites terminal task"
        true
-       (str_contains msg.content "task-001=done")
+       (str_contains msg.content "task task-001 is done")
    | msgs ->
      Alcotest.failf "expected one replacement message, got %d" (List.length msgs));
   Alcotest.(check (option string))
     "stale current_task cleared"
     None
-    (current_task_for "nick0cave");
+    (current_task_for broadcaster);
 
   let normal_update =
     "Normal update: blocked by task-001 while I wait for review context."
   in
   let normal_result =
-    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"fixture-keeper-jade-heron" ~content:normal_update
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:broadcaster ~content:normal_update
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -351,10 +369,10 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:stale_message
     |> Result.get_ok
   in
-  Alcotest.(check bool)
-    "sender identity does not bypass terminal-task truth"
-    true
-    (str_contains operator_result.rendered "[cache_invalidated]");
+  Alcotest.(check string)
+    "untyped operator prose is preserved"
+    stale_message
+    operator_result.content;
 
   let _ = Workspace.reset config in
   Unix.rmdir tmp_dir

@@ -781,10 +781,10 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
   in
   ensure_initialized config;
 
-  (* Fleet-wide invariant (PR-B): if the broadcasting agent's current_task is
-     terminal in the backlog, replace the original broadcast with a single
-     cache_invalidated notice and clear the stale state (issue #13397).
-     Only applied to regular "broadcast" messages to avoid recursion. *)
+  (* Fleet-wide invariant (PR-B): if the broadcasting agent's typed
+     [current_task] is terminal in the canonical backlog, replace the original
+     broadcast and clear that stale state.  Message prose is deliberately not
+     inspected: arbitrary operator/agent text is not a cache signal. *)
   let content, msg_type =
     if String.equal msg_type "broadcast" then
       let agent_file =
@@ -794,37 +794,20 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
         match agent_of_yojson (read_json config agent_file) with
         | Ok agent -> (
             match agent.current_task with
-            | Some task_id -> (
-                match Task_cache_invariant.fresh_task_status config ~task_id with
-                | Some status when Task_cache_invariant.is_terminal status ->
-                    Task_cache_invariant.clear_stale_agent_task config
-                      ~agent_name:from_agent ~task_id ~status
-                      ~module_name:"workspace_broadcast";
-                    let inv_content =
-                      Printf.sprintf
-                        "[cache_invalidated] workspace_broadcast: task %s is %s \
-                         — stale broadcast suppressed"
-                        task_id (Masc_domain.task_status_to_string status)
-                    in
-                    (inv_content, "cache_invalidated")
-                | _ ->
-                    ( Workspace_task_cache_invariant.rewrite_broadcast_content
-                        ~config ~from_agent ~module_name:"workspace_broadcast"
-                        ~content,
-                      msg_type ))
-            | None ->
-                ( Workspace_task_cache_invariant.rewrite_broadcast_content
-                    ~config ~from_agent ~module_name:"workspace_broadcast"
-                    ~content,
-                  msg_type ))
-        | Error _ ->
-            ( Workspace_task_cache_invariant.rewrite_broadcast_content
-                ~config ~from_agent ~module_name:"workspace_broadcast" ~content,
-              msg_type )
-      else
-        ( Workspace_task_cache_invariant.rewrite_broadcast_content
-            ~config ~from_agent ~module_name:"workspace_broadcast" ~content,
-          msg_type )
+            | Some task_id ->
+              (match
+                 Workspace_task_cache_invariant.rewrite_current_task
+                   ~config
+                   ~from_agent
+                   ~module_name:"workspace_broadcast"
+                   ~task_id
+                   ~content
+               with
+               | Unchanged content -> content, msg_type
+               | Invalidated content -> content, "cache_invalidated")
+            | None -> content, msg_type)
+        | Error _ -> content, msg_type
+      else content, msg_type
     else (content, msg_type)
   in
   let seq = Workspace_state.next_seq config in

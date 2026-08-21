@@ -389,6 +389,7 @@ agent_core_targets=(
 )
 
 operator_targets=(
+  @test/runtest-test_tui_operator_projection
   @test/runtest-test_operator_control_snapshot_state
   @test/runtest-test_operator_control_snapshot
   @test/runtest-test_operator_control_snapshot_cache

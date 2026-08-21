@@ -67,8 +67,6 @@ type preset =
           [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
           허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
           명시적으로 설정할 수 있다. *)
-  ; fallback_judge_model : string option
-      (** Legacy observed value; failures never trigger an automatic call. *)
   }
 [@@deriving show, eq]
 

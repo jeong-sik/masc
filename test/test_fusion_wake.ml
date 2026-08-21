@@ -210,7 +210,6 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; judge_timeout_s = None
     ; judges = []
     ; min_answered = Fusion_policy.default_min_answered
-    ; fallback_judge_model = None
     }
   in
   { enabled = true

@@ -1290,8 +1290,8 @@ let failed_drives_wake failed_task_count = failed_task_count > 0
 (* An AwaitingVerification obligation is NOT a Keeper wake signal: the
    application-owned system LLM completion authority or authenticated HITL
    operator decides it out of band. Neither authority is a Keeper. Surfacing
-   it here would hand Keepers work that is not theirs — a concrete Keeper name
-   must never confer approval authority. *)
+   it here would hand Keepers work that is not theirs — which is how a Keeper
+   named "verifier" came to hold approval authority in the first place. *)
 let actionable_signal_present (observation : world_observation) =
   observation.pending_messages <> []
   || observation.pending_board_events <> []

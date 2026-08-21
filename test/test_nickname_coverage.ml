@@ -103,8 +103,8 @@ let test_is_dictionary_generated_nickname_rejects_structured () =
     (Nickname.is_dictionary_generated_nickname "keeper-alpha-agent");
   check bool "keeper-kappa_keeper-agent" false
     (Nickname.is_dictionary_generated_nickname "keeper-kappa_keeper-agent");
-  check bool "keeper-fixture-reviewer-agent" false
-    (Nickname.is_dictionary_generated_nickname "keeper-fixture-reviewer-agent");
+  check bool "keeper-verifier-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-verifier-agent");
   check bool "keeper-theta0-agent" false
     (Nickname.is_dictionary_generated_nickname "keeper-theta0-agent");
   check bool "admin-board-keeper" false

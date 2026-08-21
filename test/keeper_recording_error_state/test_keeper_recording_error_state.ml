@@ -6,9 +6,9 @@ let reset () = S.reset_for_test ()
 let test_record_first_then_repeated () =
   reset ();
   let error = "opaque diagnostic text" in
-  check bool "first" true (S.record ~keeper:"fixture-reviewer" ~error = `First);
-  check bool "second" true (S.record ~keeper:"fixture-reviewer" ~error = `Repeated 2);
-  check bool "third" true (S.record ~keeper:"fixture-reviewer" ~error = `Repeated 3)
+  check bool "first" true (S.record ~keeper:"verifier" ~error = `First);
+  check bool "second" true (S.record ~keeper:"verifier" ~error = `Repeated 2);
+  check bool "third" true (S.record ~keeper:"verifier" ~error = `Repeated 3)
 ;;
 
 let test_distinct_keepers_are_independent () =

@@ -174,8 +174,9 @@ let init_runtime_default_for_tests () =
 (* A verifier is not a Keeper. An AwaitingVerification obligation is decided by
    the application-owned system LLM completion authority or an authenticated
    HITL operator, never through the Keeper tool surface, so no Keeper is
-   offered a task_verify affordance. Guards against any Keeper whose name
-   resembles an authority role re-acquiring approval authority. *)
+   offered a task_verify affordance. The exact [verifier] role-collision
+   sentinel is preserved in the lifecycle and task-tool tests: protocol-role
+   vocabulary is not a concrete Keeper identity. *)
 let test_no_task_verify_affordance_for_any_keeper () =
   check bool "no task_verify affordance" false
     (List.mem "task_verify" (UM.observed_affordances_of_observation base_observation))

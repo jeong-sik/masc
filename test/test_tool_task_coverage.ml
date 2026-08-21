@@ -1562,7 +1562,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
 
 let () = test "agent verdict verbs remain refused after terminal completion" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
-  let verifier_ctx = { ctx with Task.Tool.agent_name = "fixture-reviewer" } in
+  let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
   let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
   let _ = Workspace.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
   let _ =
@@ -1614,7 +1614,7 @@ let () = test "agent verdict verbs remain refused after terminal completion" (fu
 let () = test "operator verdict path replaces verifier agent actions" (fun () ->
   (
     let worker_ctx = make_test_ctx_with_agent "worker" in
-    let verifier_ctx = { worker_ctx with Task.Tool.agent_name = "fixture-reviewer" } in
+    let verifier_ctx = { worker_ctx with Task.Tool.agent_name = "verifier" } in
     let _ =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 worker_ctx
         (`Assoc [ ("title", `String "Verifier may approve") ])
@@ -2907,7 +2907,7 @@ let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
 let () =
   test "strict verdict validates justification and credits producer metrics" (fun () ->
     let ctx = make_test_ctx_with_agent "producer" in
-    let verifier_ctx = { ctx with Task.Tool.agent_name = "fixture-reviewer" } in
+    let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
     add_priority_task ctx ~title:"Strict completion metrics";
     set_only_task_contract
       ctx

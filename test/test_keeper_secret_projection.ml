@@ -229,7 +229,7 @@ let test_base_secret_env_and_files_project_to_keeper_docker_args () =
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"idealist"
+      ~keeper_name:"fixture-keeper"
       ~container_name:"container"
       ()
   with
@@ -256,7 +256,7 @@ let test_keeper_secret_overrides_base_secret_entries () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
-  let keeper_root = secret_root_default ~base ~keeper_name:"idealist" in
+  let keeper_root = secret_root_default ~base ~keeper_name:"fixture-keeper" in
   let base_ssh =
     Filename.concat
       (Filename.concat base_root "files")
@@ -274,7 +274,7 @@ let test_keeper_secret_overrides_base_secret_entries () =
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"idealist"
+      ~keeper_name:"fixture-keeper"
       ~container_name:"container"
       ()
   with
@@ -411,7 +411,7 @@ let test_local_env_inherits_base_secret_without_product_rewrite () =
     Keeper_secret_projection.local_env_for_keeper
       ~host_env
       ~base_path:base
-      ~keeper_name:"idealist"
+      ~keeper_name:"fixture-keeper"
       ()
   with
   | Error err -> Alcotest.fail err

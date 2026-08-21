@@ -17,7 +17,7 @@ let check_status label expected actual =
 ;;
 
 let test_disconnected_gateway_is_noop () =
-  let keepers = [ keeper ~running:true ~bound_channels:[ "C123" ] "fixture-reviewer" ] in
+  let keepers = [ keeper ~running:true ~bound_channels:[ "C123" ] "verifier" ] in
   check_status
     "disconnected gateway"
     None

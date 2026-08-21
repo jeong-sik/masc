@@ -2306,7 +2306,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "producer must not claim its pending obligation");
     (match
-       W.claim_task_r config ~agent_name:"keeper-fixture-reviewer-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-verifier-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "no Keeper may claim a pending obligation");

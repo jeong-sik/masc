@@ -4,7 +4,6 @@ type severity =
   | Critical
 
 type recoverability =
-  | Retryable
   | Operator_action_required
   | Fatal
 

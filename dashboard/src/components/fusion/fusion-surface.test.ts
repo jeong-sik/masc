@@ -1085,7 +1085,12 @@ describe('FusionSurface', () => {
     expect(rationale?.textContent).toContain('rollback')
   })
 
-  const minimalFusionPost = (runId: string, createdAt: string, updatedAt: string) =>
+  const minimalFusionPost = (
+    runId: string,
+    createdAt: string,
+    updatedAt: string,
+    startedAt: number | null = Date.parse(createdAt) / 1000,
+  ) =>
     boardPost({
       id: `post-${runId}`,
       title: `Fusion deliberation (run ${runId})`,
@@ -1094,13 +1099,14 @@ describe('FusionSurface', () => {
       origin: { source: 'fusion', fusion_run_id: runId },
       meta: {
         question: `Question for ${runId}?`,
+        ...(startedAt === null ? {} : { started_at: startedAt }),
         panel: [],
         judge: { status: 'synthesized', decision: 'answer', synthesis: 's', resolved_answer: 'r' },
       },
     })
 
-  it('orders the master list by creation time, not board update time (#34)', () => {
-    // fus-old was CREATED first but its board post was touched later;
+  it('orders the master list by durable start time, not board update time (#34)', () => {
+    // fus-old STARTED first but its board post was touched later;
     // fus-new must still render above it.
     fusionBoardPosts.value = [
       minimalFusionPost('fus-old', '2026-06-19T01:00:00Z', '2026-06-19T09:00:00Z'),
@@ -1113,6 +1119,51 @@ describe('FusionSurface', () => {
       el => el.textContent,
     )
     expect(ids).toEqual(['fus-new', 'fus-old'])
+  })
+
+  it('uses persisted board start after the bounded registry evicts a completed run', () => {
+    fusionBoardPosts.value = [
+      minimalFusionPost(
+        'fus-created-late-started-old',
+        '2026-06-19T09:00:00Z',
+        '2026-06-19T09:01:00Z',
+        Date.parse('2026-06-19T01:00:00Z') / 1000,
+      ),
+      minimalFusionPost(
+        'fus-created-early-started-new',
+        '2026-06-19T05:00:00Z',
+        '2026-06-19T05:01:00Z',
+        Date.parse('2026-06-19T04:00:00Z') / 1000,
+      ),
+    ]
+    fusionRuns.value = []
+
+    render(html`<${FusionSurface} />`, container)
+
+    const ids = Array.from(container.querySelectorAll('.fus-run-id')).map(
+      element => element.textContent,
+    )
+    expect(ids).toEqual(['fus-created-early-started-new', 'fus-created-late-started-old'])
+  })
+
+  it('places legacy board evidence after known starts instead of using completion time', () => {
+    fusionBoardPosts.value = [
+      minimalFusionPost(
+        'fus-legacy-created-late',
+        '2026-06-19T09:00:00Z',
+        '2026-06-19T09:01:00Z',
+        null,
+      ),
+      minimalFusionPost('fus-known-start', '2026-06-19T01:00:00Z', '2026-06-19T01:01:00Z'),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const ids = Array.from(container.querySelectorAll('.fus-run-id')).map(
+      element => element.textContent,
+    )
+    expect(ids).toEqual(['fus-known-start', 'fus-legacy-created-late'])
+    expect(container.textContent).toContain('시작 미상')
   })
 
   it('keeps one newest-first axis instead of heuristically pinning running rows', () => {

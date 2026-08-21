@@ -64,6 +64,16 @@ let int_field label fields key =
          (Yojson.Safe.to_string json))
 ;;
 
+let number_field label fields key =
+  match field label fields key with
+  | `Float value -> value
+  | `Int value -> Float.of_int value
+  | json ->
+    fail
+      (Printf.sprintf "%s.%s: expected number, got %s" label key
+         (Yojson.Safe.to_string json))
+;;
+
 let bool_field label fields key =
   match field label fields key with
   | `Bool value -> value
@@ -458,6 +468,8 @@ let test_emit_success_projects_board_chat_and_registry () =
     check bool "meta.source is not duplicated" false (List.mem_assoc "source" meta);
     check bool "meta.run_id is not duplicated" false (List.mem_assoc "run_id" meta);
     check string "meta.question" question (string_field "board.meta" meta "question");
+    check (float 0.000001) "meta.started_at" 2.0
+      (number_field "board.meta" meta "started_at");
     (match list_field "board.meta" meta "panel" with
      | [ panel_json ] ->
        let p = assoc_fields "board.meta.panel[0]" panel_json in

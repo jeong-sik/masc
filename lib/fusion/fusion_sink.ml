@@ -419,6 +419,27 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
+  let persisted_board_started_at () =
+    match Board.find_post_by_run_id (Board.global ()) ~run_id with
+    | Some { meta_json = Some (`Assoc fields); _ } ->
+      (match List.assoc_opt "started_at" fields with
+       | Some (`Float value) -> Some value
+       | Some (`Int value) -> Some (Float.of_int value)
+       | Some _ | None -> None)
+    | Some _ | None -> None
+  in
+  let* started_at =
+    match Fusion_run_registry.get registry ~run_id with
+    | Some run -> Ok run.started_at
+    | None ->
+      (match persisted_board_started_at () with
+       | Some started_at -> Ok started_at
+       | None ->
+         Error
+           (Printf.sprintf
+              "Fusion run %s has no durable start time in the registry or existing board evidence"
+              run_id))
+  in
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
@@ -472,6 +493,7 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
       Some
         (`Assoc
            [ ("question", `String question)
+           ; ("started_at", `Float started_at)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
              (* RFC-0284: 실행된 심판 노드 관측 배열 (panel과 동형). 기존 단일 [judge]

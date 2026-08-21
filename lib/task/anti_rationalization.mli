@@ -36,6 +36,20 @@ type lookup_surface =
       { schemas : Types_core.tool_schema list
       ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
       ; scope : lookup_scope
+      ; root_layout : string list
+            (** Paths the lookup tools actually resolve against, listed from
+                disk at review time and relative to the root they are rooted
+                at. The evaluator is otherwise told only that the tools point
+                at "the producer's tree" and has to guess the shape: an
+                evaluator that assumed a repository root spent 77 consecutive
+                failed reads on [dune-project], [.git], [lib/], [README.md],
+                [Makefile], [src] and [bin] against a sandbox root whose real
+                entries were [repos/], [artifacts/], [mind/] and [poc/]
+                (masc task-403, vrf-8bac5f46, 2026-08-21). Empty when the
+                root could not be listed — the prompt then says so rather
+                than implying an empty tree. For a [Producer_forest] scope
+                this is the forest root, so a producer name is one of the
+                entries. *)
       }
 
 type verdict =
@@ -58,18 +72,18 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
-  ; retryable : bool
-        (** Whether retrying this same review is expected to change the
-            outcome. [true] unless a typed evaluator error says otherwise:
-              only the [Error error] arm of [run_llm_reviewer_fn]'s result
-              carries an {!Agent_core.Error.t} to classify, so this is
-              [Agent_core.Error.is_retryable error] there and [true]
-              everywhere else (a produced verdict, a malformed tool call, or
-              a runtime/prompt resolution failure with no typed error to
-              consult). [false] means the same review_request will keep
-              failing the same way — a model-input-budget refusal on a
-              single-atom review being the case this exists for — and a
-              caller should not schedule another automatic attempt. *)
+  ; evaluator_error_retryable : bool option
+        (** [Some b] only where a typed {!Agent_core.Error.t} existed to
+            classify — the [Error error] arm of [run_llm_reviewer_fn] — and
+            [b] is then [Agent_core.Error.is_retryable error]. [None]
+            everywhere else: a produced verdict, a reply without exactly one
+            verdict tool call, a prompt or slot resolution failure. [None] is
+            not "retry": nothing about those outcomes says a repeat of the
+            same request would end differently, and a caller that wants to
+            repeat one must say so on its own evidence. This was a plain
+            [bool] defaulting to [true], which is why an [Invalid_verdict]
+            review re-ran on the maintenance pulse forever without telling
+            anyone. *)
   }
 
 val review
@@ -77,7 +91,6 @@ val review
   -> ?generator_runtime:string
   -> ?completion_contract:string list
   -> ?required_evidence:string list
-  -> ?verify_gate_evidence:string list
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?few_shot_block:string
@@ -110,7 +123,6 @@ val build_prompt
   :  ?few_shot_block:string
   -> ?completion_contract:string list
   -> ?required_evidence:string list
-  -> ?verify_gate_evidence:string list
   -> ?prompt_name:string
   -> lookup:lookup_surface
   -> review_request

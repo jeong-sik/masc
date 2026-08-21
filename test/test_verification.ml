@@ -341,7 +341,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; generator_runtime = None
     ; gate = Masc.Task.Anti_rationalization.Structured_tool
     ; fallback_reason = None
-    ; retryable = true
+    ; evaluator_error_retryable = None
     }
   in
   let notes =

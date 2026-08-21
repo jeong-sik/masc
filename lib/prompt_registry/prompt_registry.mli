@@ -235,13 +235,6 @@ val prompts_json : unit -> Yojson.Safe.t
 
 (** {1 Validation} *)
 
-val validate_required_prompt_files : unit -> (string * string) list
-(** Returns [(key, path)] for every prompt whose meta
-    declares [required_file = true] but whose markdown
-    file is missing or unreadable.  [path] is the
-    expected location, or ["<invalid-key>"] when the
-    markdown dir is unset. *)
-
 val validate_prompt_templates : unit -> (string * string) list
 (** Returns [(key, variable)] pairs for every template
     that references a variable not declared in the

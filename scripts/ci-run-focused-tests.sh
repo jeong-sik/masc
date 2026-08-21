@@ -114,7 +114,6 @@ normal_targets=(
   @test/runtest-test_trailing_slash_rules
   @test/runtest-test_verification_run_registry
   @test/runtest-test_verifier_exact_lane
-  @test/runtest-test_completion_authority_retry_policy
   @test/runtest-test_keeper_canary_facts
   @test/runtest-test_keeper_canary_evidence
   @test/runtest-test_keeper_canary_judge
@@ -223,6 +222,8 @@ normal_targets=(
   @test/runtest-test_workspace
   @test/runtest-test_http_server_eio
   @test/runtest-test_verification
+  @test/runtest-test_review_prompt_sections_reach_the_model
+  @test/runtest-test_prompt_templates_render
   @test/runtest-test_dashboard_verification
   @test/runtest-test_tool_schema_constraint_enforcement
   @test/runtest-test_keeper_artifact_read_request

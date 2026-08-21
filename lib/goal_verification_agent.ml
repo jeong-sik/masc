@@ -310,6 +310,7 @@ let single_producer_lookup config ~producer =
        { schemas = Verification_authority_tools.schemas tools
        ; dispatch = Verification_authority_tools.dispatch tools
        ; scope = Task.Anti_rationalization.Producer_tree
+       ; root_layout = Verification_authority_tools.root_layout tools
        })
 ;;
 
@@ -344,6 +345,7 @@ let linked_task_lookup config tasks =
        { schemas = Verification_authority_tools.forest_schemas tools
        ; dispatch = Verification_authority_tools.dispatch_forest tools
        ; scope = Task.Anti_rationalization.Producer_forest { producers }
+       ; root_layout = Verification_authority_tools.forest_root_layout tools
        })
 ;;
 
@@ -527,10 +529,22 @@ let process_pending_work_inner
                | Some reason -> reason
                | None -> Task.Anti_rationalization.gate_to_string result.gate
              in
+             (* No verdict was committed. Only a typed evaluator error says
+                anything about whether a repeat would end differently; without
+                one — a reply that skipped the verdict tool call, a prompt or
+                slot that would not resolve — nothing here justifies running
+                the same review again, so this stops instead of re-arming the
+                pulse. The row stays durable and the next real wake rescans
+                it. *)
+             let retryable =
+               match result.evaluator_error_retryable with
+               | Some retryable -> retryable
+               | None -> false
+             in
              defer
                ~goal_id:work.goal_id
                ~kind:work.kind
-               ~retryable:result.retryable
+               ~retryable
                ~reason:detail
            | Some review_verdict ->
              let evidence =

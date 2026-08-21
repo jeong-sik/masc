@@ -1107,35 +1107,25 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
      before the registry scans the directory (#20929: merged prompt edits
      never reached the runtime dir otherwise). *)
   sync_prompt_assets_from_binary ();
-  (* Initialize prompt registry with defaults and restore saved overrides *)
-  let prompt_markdown_dir =
-    Prompt_defaults.bootstrap_runtime
-      ~workspace_path:config.workspace_path
-      ~base_path:config.base_path
-  in
-  let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
-  if prompt_markdown_dir <> expected_prompt_dir then
-    Log.Misc.warn
-      "prompt markdown dir diverges from resolved config root: %s (expected %s)"
-      prompt_markdown_dir expected_prompt_dir;
-  let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
-  if missing_prompt_files <> [] then
-    begin
-    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
-    Log.Misc.error "required prompt files missing: %s"
-      (missing_prompt_files
-      |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
-      |> String.concat ", ");
-  end;
-  let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
-  if invalid_prompt_templates <> [] then
-    begin
-    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
-    Log.Misc.error "prompt templates use unknown variables: %s"
-      (invalid_prompt_templates
-      |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
-      |> String.concat ", ")
-  end
+  (* Load the registry and replay operator overrides. The resolved directory is
+     not inspected afterwards: three checks used to stand here and none of them
+     gated. One compared a value against the call that produced it. One
+     re-asserted a post-condition of the directory scan itself, and could not
+     see the failure it read as protecting against, because a file the loader
+     never read is never registered. One logged templates using undeclared
+     variables. All three continued on failure, so a boot serving silently
+     shorter prompts looked healthy.
+
+     The prompts ship embedded in this binary, and
+     [test_prompt_templates_render] requires every file under config/prompts to
+     register as a key, resolve from a real source, render with the variables
+     its own frontmatter declares, and use each one. Repeating that at start
+     decides nothing the build did not already decide. *)
+  ignore
+    (Prompt_defaults.bootstrap_runtime
+       ~workspace_path:config.workspace_path
+       ~base_path:config.base_path
+     : string)
 
 let start_owner_lazy_tasks ~sw state =
   let run_lazy_task (task_name, task_fn) =

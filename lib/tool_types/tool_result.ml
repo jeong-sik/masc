@@ -38,7 +38,7 @@ let tool_failure_class_to_string = function
 ;;
 
 let tool_failure_class_of_string = function
-  | "dependency_unavailable" -> Some Dependency_unavailable
+  | "dependency_unavailable" | "transient_error" -> Some Dependency_unavailable
   | "policy_rejection" -> Some Policy_rejection
   | "runtime_failure" -> Some Runtime_failure
   | "workflow_rejection" -> Some Workflow_rejection

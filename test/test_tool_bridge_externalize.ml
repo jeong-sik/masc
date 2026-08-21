@@ -319,8 +319,8 @@ let test_to_agent_core_dependency_failure_carries_no_replay_hint () =
   | Error { recoverable; error_class; _ } ->
     Alcotest.(check bool) "no replay hint" false recoverable;
     (match error_class with
-     | Some Agent_core.Types.Unknown -> ()
-     | _ -> Alcotest.fail "expected unknown error_class")
+     | Some Agent_core.Types.Transient -> ()
+     | _ -> Alcotest.fail "expected transient diagnostic class")
 
 let test_round_trip_through_agent_core () =
   let payload = "inline payload" in

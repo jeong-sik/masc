@@ -200,8 +200,8 @@ let agent_core_error_class_of_tool_failure_class = function
      an operator explicitly stopped (#28810). *)
   | Tool_result.Operator_cancelled ->
     Agent_core.Types.Deterministic
-  | Tool_result.Dependency_unavailable | Tool_result.Runtime_failure ->
-    Agent_core.Types.Unknown
+  | Tool_result.Dependency_unavailable -> Agent_core.Types.Transient
+  | Tool_result.Runtime_failure -> Agent_core.Types.Unknown
 ;;
 
 (** {1 Schema Conversion}

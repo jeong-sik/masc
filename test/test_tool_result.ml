@@ -95,6 +95,34 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
      | None -> "none")
 ;;
 
+let test_legacy_transient_failure_class_decodes_as_dependency () =
+  match Tool_result.tool_failure_class_of_string "transient_error" with
+  | Some Tool_result.Dependency_unavailable -> ()
+  | Some class_ ->
+    Alcotest.failf
+      "legacy class decoded as %s"
+      (Tool_result.tool_failure_class_to_string class_)
+  | None -> Alcotest.fail "legacy persisted failure class was lost"
+;;
+
+let test_persisted_terminal_effect_legacy_class_remains_readable () =
+  let persisted =
+    `Assoc
+      [ "kind", `String "terminal_effect_failed"
+      ; "failure_class", `String "transient_error"
+      ; "effect_disposition", `String "effect_outcome_unknown"
+      ; "diagnostic", `String "legacy receipt"
+      ]
+  in
+  match Keeper_internal_error.parse_masc_internal_error_json persisted with
+  | Some
+      (Keeper_internal_error.Terminal_effect_failed
+        { failure_class = Tool_result.Dependency_unavailable; _ }) ->
+    ()
+  | Some _ -> Alcotest.fail "legacy receipt decoded to the wrong internal error"
+  | None -> Alcotest.fail "legacy persisted terminal effect was dropped"
+;;
+
 let test_exception_message_does_not_infer_failure_class () =
   let r =
     Tool_result.of_exn
@@ -494,6 +522,14 @@ let () =
             "plain dispatch failure honors explicit failure_class"
             `Quick
             test_plain_dispatch_failure_honors_explicit_failure_class
+        ; Alcotest.test_case
+            "legacy transient failure class remains readable"
+            `Quick
+            test_legacy_transient_failure_class_decodes_as_dependency
+        ; Alcotest.test_case
+            "legacy persisted terminal effect remains readable"
+            `Quick
+            test_persisted_terminal_effect_legacy_class_remains_readable
         ; Alcotest.test_case
             "exception message does not infer failure_class"
             `Quick

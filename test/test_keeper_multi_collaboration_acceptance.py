@@ -115,7 +115,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
     def test_catalog_has_exact_rw19_persistence_projection_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        self.assertEqual(len(catalog["missions"]), 22)
+        self.assertEqual(len(catalog["missions"]), 23)
         self.assertEqual(catalog["missions"][18]["id"], "RW19")
         self.assertEqual(
             catalog["missions"][18]["assertions"],
@@ -158,6 +158,28 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertIn("tool_execute", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_claim", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_done", catalog["keeper_required_tools"])
+
+    def test_catalog_has_exact_rw23_goal_verifier_mission(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+
+        goal_verifier = catalog["missions"][22]
+        self.assertEqual(goal_verifier["id"], "RW23")
+        self.assertEqual(
+            goal_verifier["assertions"],
+            [
+                "goal_verifier_refutation_observed",
+                "goal_verifier_reentry_proven",
+                "goal_verifier_dashboard_browser_observed",
+            ],
+        )
+        self.assertIn("Goal", goal_verifier["capabilities"])
+        self.assertIn("Browser", goal_verifier["capabilities"])
+        self.assertIn("masc_goal_transition", catalog["operator_required_tools"])
+        self.assertTrue(catalog["approaches_apply_to_each_mission"])
+        self.assertEqual(
+            [approach["id"] for approach in catalog["execution_approaches"]],
+            ["A", "B", "C"],
+        )
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}

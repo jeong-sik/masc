@@ -63,6 +63,16 @@ export {
   fetchVerificationRuns,
 } from './dashboard-verification-runs'
 export type {
+  GoalVerificationReviewKind,
+  GoalVerificationRunStatus,
+  GoalVerificationRunRecord,
+  DashboardGoalVerificationRunsResponse,
+} from './dashboard-goal-verification-runs'
+export {
+  parseGoalVerificationRunsResponse,
+  fetchGoalVerificationRuns,
+} from './dashboard-goal-verification-runs'
+export type {
   KeeperFeatureProofStatus,
   KeeperPersistenceTierId,
   KeeperPersistenceEvidenceKind,

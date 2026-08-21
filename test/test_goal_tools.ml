@@ -335,6 +335,7 @@ let prove_complete config goal_id =
        ~start_time:0.
        config
        ~goal_id
+       ~verification_run_id:"goal-verifier-test-run"
        ~decision:Workspace_goals.Proof_proven
        ~evidence:"observed by the test verifier")
 ;;

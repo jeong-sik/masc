@@ -425,11 +425,17 @@ let test_goal_proof_reads_linked_task_producer_artifact () =
       | Goal_verification_run_registry.Criterion -> false)
   in
   match proof_runs with
-  | [ { Goal_verification_run_registry.status =
+  | [ { Goal_verification_run_registry.run_id
+      ; status =
           Goal_verification_run_registry.Completed
             { outcome = Goal_verification_run_registry.Committed; tools; _ }
       ; _
       } ] ->
+    (match (ledger_record config goal_id).completion with
+     | Goal_verification.Proof_proven verdict ->
+       check string "ledger verdict joins the exact Dashboard run" run_id
+         verdict.Goal_verification.verification_run_id
+     | _ -> fail "Goal proof ledger did not retain a proven verdict");
     check bool "Dashboard run retains the artifact read" true
       (List.exists
          (fun (tool : Verification_run_registry.tool_observation) ->
@@ -676,6 +682,91 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
   | _ -> fail "ledger must hold the proven verdict"
 ;;
 
+let set_up_committed_proof_crash config ~outcome ~evidence =
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Crash-between-writes goal" in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (recording_reviewer (ref []) [ "verifier-a", Stub_approve "criterion viable" ])
+    (fun () -> drain config);
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let verdict : Goal_verification.verdict =
+    { outcome
+    ; verification_run_id = "goal-run-before-crash"
+    ; authority =
+        Masc_domain.System_llm_agent { agent_run_id = "verifier_exact" }
+    ; evidence
+    ; recorded_at = Masc_domain.now_iso ()
+    }
+  in
+  (match Goal_verification.record_proof_verdict config ~goal_id verdict with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  check string "test setup leaves the phase write missing" "verifying"
+    (stored_phase config goal_id);
+  goal_id
+;;
+
+let has_completion_work goal_id work =
+  List.exists
+    (fun item ->
+       String.equal item.Agent.goal_id goal_id
+       && item.kind = Agent.Completion_proof)
+    work
+;;
+
+let test_committed_proven_proof_reconciles_without_review () =
+  with_workspace
+  @@ fun config ->
+  let goal_id =
+    set_up_committed_proof_crash
+      config
+      ~outcome:Goal_verification.Proven
+      ~evidence:"artifact was inspected before the crash"
+  in
+  let work =
+    match Agent.collect_pending config with
+    | Ok work -> work
+    | Error msg -> fail msg
+  in
+  check bool "reconciliation does not call the model again" false
+    (has_completion_work goal_id work);
+  check string "proven verdict converges to completed" "completed"
+    (stored_phase config goal_id);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven verdict ->
+    check string "the exact run survives reconciliation" "goal-run-before-crash"
+      verdict.Goal_verification.verification_run_id
+  | _ -> fail "reconciliation rewrote the proven ledger state"
+;;
+
+let test_committed_refuted_proof_reconciles_without_rearm () =
+  with_workspace
+  @@ fun config ->
+  let goal_id =
+    set_up_committed_proof_crash
+      config
+      ~outcome:(Goal_verification.Refuted { reason = "artifact contradicts claim" })
+      ~evidence:"artifact contradicts claim"
+  in
+  let work =
+    match Agent.collect_pending config with
+    | Ok work -> work
+    | Error msg -> fail msg
+  in
+  check bool "refutation is not overwritten by a re-armed request" false
+    (has_completion_work goal_id work);
+  check string "refuted verdict converges to executing" "executing"
+    (stored_phase config goal_id);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_refuted verdict ->
+    check string "the exact refutation run survives" "goal-run-before-crash"
+      verdict.Goal_verification.verification_run_id
+  | _ -> fail "reconciliation overwrote the refuted ledger state"
+;;
+
 let () =
   configure_prompt_registry ();
   run
@@ -709,7 +800,15 @@ let () =
             test_group_pending_orders_criterion_before_proof
         ] )
     ; ( "re-arm"
-      , [ test_case "verifying goal with a missing request is rearmed and drained"
+      , [ test_case
+            "committed proven proof reconciles without review"
+            `Quick
+            test_committed_proven_proof_reconciles_without_review
+        ; test_case
+            "committed refuted proof reconciles without re-arm"
+            `Quick
+            test_committed_refuted_proof_reconciles_without_rearm
+        ; test_case "verifying goal with a missing request is rearmed and drained"
             `Quick
             test_verifying_goal_with_a_missing_request_is_rearmed_and_drained
         ] )

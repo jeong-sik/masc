@@ -283,11 +283,20 @@ describe('parseKeeperCompositeSnapshot', () => {
           degraded_retry_runtime: null,
           fallback_reason: 'stale_turn_timeout',
         },
+        claim_attempt: {
+          present: false,
+          source: 'keeper_task_claim_tool_call',
+          status: 'not_observed',
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
+        },
       },
     })
 
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
+    expect(result.execution?.claim_attempt.present).toBe(false)
     expect(result.execution?.error?.message_preview).toContain('fallback_runtime')
   })
 

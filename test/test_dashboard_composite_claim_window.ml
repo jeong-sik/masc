@@ -44,7 +44,7 @@ let eio_test name fn =
     with_tmp_log fn)
 ;;
 
-(* The payload shape [composite_claim_scope_json] decodes: the tool call's
+(* The payload shape [composite_claim_attempt_json] decodes: the tool call's
    output text is itself a JSON document carrying the claimed task. *)
 let claim_output ~task_id ~goal_id =
   `Assoc
@@ -80,7 +80,7 @@ let log_noise ~keeper ~n =
 
 let claimed_task_id ~claim_window ~keeper =
   match
-    Server_dashboard_http_composite_claims.composite_claim_scope_json
+    Server_dashboard_http_composite_claims.composite_claim_attempt_json
       ~claim_window
       ~keeper_name:keeper
   with
@@ -93,7 +93,7 @@ let claimed_task_id ~claim_window ~keeper =
 
 let claim_present ~claim_window ~keeper =
   match
-    Server_dashboard_http_composite_claims.composite_claim_scope_json
+    Server_dashboard_http_composite_claims.composite_claim_attempt_json
       ~claim_window
       ~keeper_name:keeper
   with

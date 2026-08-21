@@ -625,6 +625,14 @@ describe('RuntimeLensSection', () => {
         duration_ms: 16000,
         error: null,
         runtime: null,
+        claim_attempt: {
+          present: false,
+          source: 'keeper_task_claim_tool_call',
+          status: 'not_observed',
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
+        },
       },
       runtime_attention: {
         state: 'blocked',

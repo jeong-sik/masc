@@ -134,6 +134,7 @@ interface FusionRunView {
   usage: FusionUsage
   preset: string | null
   params: FusionRunParams
+  startedAt: number
   createdAt: string
   updatedAt: string
 }
@@ -353,6 +354,11 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   const judges = normalizeFusionJudgeNodes(meta.judges)
   const usage = normalizeUsage(meta, panel)
   const params = normalizeParams(meta)
+  // A fusion run is identified on the list by its start coordinate; board
+  // evidence without a finite non-negative `started_at` is not a run row.
+  const rawStartedAt = firstNumber(meta, ['started_at'])
+  if (rawStartedAt === null || !Number.isFinite(rawStartedAt) || rawStartedAt < 0) return null
+  const startedAt = rawStartedAt
   const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
   const status = statusFor(judge, panel)
   const tone = toneFor(status, judge.decision)
@@ -371,17 +377,13 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
     usage,
     preset: null,
     params,
+    startedAt,
     createdAt: post.created_at,
     updatedAt: post.updated_at || post.created_at,
   }
 }
 
-function timeValue(iso: string): number {
-  const parsed = Date.parse(iso)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-// No sort here: ordering is owned exclusively by buildMergedRuns (creation/
+// No sort here: ordering is owned exclusively by buildMergedRuns (durable
 // start axis). A second, different sort key at this layer is exactly the
 // mixed-axis bug this file just removed.
 function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
@@ -411,13 +413,10 @@ const FUSION_LIST_PAGE_SIZE = 30
 
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Ordering uses
-// one visible policy — newest first — on a SINGLE stable axis per row kind:
-// board post creation (createdAt ISO — the post lands when the deliberation
-// completes) and registry start (startedAt unix seconds), both normalized to ms.
-// The two kinds approximate different moments of a run's life, but each is
-// immutable, which is the property that matters: sorting board rows by
-// updatedAt let an old run leapfrog newer ones whenever its post was touched,
-// which read as a jumbled list (38-bug campaign #34).
+// one visible policy — newest first — on a SINGLE axis for every row: the run's
+// START time, which both board evidence (`started_at`) and the registry persist.
+// Sorting board rows by createdAt and registry rows by startedAt was the mixed
+// axis this list must not reintroduce (38-bug campaign #34 follow-up).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
@@ -427,7 +426,7 @@ function buildMergedRuns(
     ...boardRuns.map((view): MergedRun => ({
       kind: 'board',
       runId: view.runId,
-      sortTime: timeValue(view.createdAt),
+      sortTime: view.startedAt * 1000,
       view,
     })),
     ...registryRuns
@@ -925,9 +924,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
   `
 }
 
-// Row timestamp renders createdAt to match the list's sort axis: showing
-// updatedAt made an edited old post wear a fresher timestamp than the rows
-// above it, reproducing the jumbled impression the sort fix removed.
+// Row timestamp renders the same durable start coordinate used for sorting.
 function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
   const dec = decisionSpecFor(run.judge.decision)
   return html`
@@ -940,7 +937,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       <span class="fus-row-h">
         <${FusionStatusGlyph} status=${run.status} />
         <span class="fus-run-id mono">${run.runId}</span>
-        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.createdAt} /></span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.startedAt} /></span>
       </span>
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
       <span class="fus-row-f">

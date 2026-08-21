@@ -43,7 +43,7 @@ let review () =
 
 (* A reviewer that answers per slot and records the attempt order. *)
 let recording_reviewer calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
     | Some behavior -> behavior
@@ -155,6 +155,34 @@ let test_exhaustion_preserves_any_retryable_attempt () =
          (Some true)
          result.evaluator_error_retryable;
        Alcotest.(check bool) "no fabricated verdict" true (Option.is_none result.verdict))
+;;
+
+let test_nested_runtime_retryable_attempt_survives_terminal_error () =
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "slot-a" ])
+    ~reviewer:
+      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_
+           ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+           ~on_runtime_attempt_error () ->
+         on_runtime_attempt_error
+           ~runtime_id:"glm.test-model"
+           ~attempt:0
+           (Agent_core.Error.Api
+              (Agent_core.Error.Retry.RateLimited
+                 { retry_after = None; message = "rate limited" }));
+         budget_refusal)
+    (fun () ->
+       let result = review () in
+       Alcotest.(check (option bool))
+         "a nested transient candidate is not masked by its terminal fallback"
+         (Some true)
+         result.evaluator_error_retryable;
+       Alcotest.(check string)
+         "terminal fallback remains the reported reason"
+         (match budget_refusal with
+          | Error error -> Agent_core.Error.to_string error
+          | Ok _ -> Alcotest.fail "budget refusal fixture must be an error")
+         (Option.value result.fallback_reason ~default:""))
 ;;
 
 let test_exhaustion_reports_all_nonretryable_attempts () =
@@ -340,6 +368,10 @@ let () =
             "exhaustion reports all non-retryable attempts"
             `Quick
             test_exhaustion_reports_all_nonretryable_attempts
+        ; Alcotest.test_case
+            "nested runtime retryable attempt survives terminal error"
+            `Quick
+            test_nested_runtime_retryable_attempt_survives_terminal_error
         ; Alcotest.test_case
             "unconfigured lane is unavailable, not rerouted"
             `Quick

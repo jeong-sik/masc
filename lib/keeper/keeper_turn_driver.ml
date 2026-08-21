@@ -211,6 +211,7 @@ let attempt_runtime_candidates
       true)
     ?lane_id
     ?(on_retry_deferred = fun _ -> ())
+    ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ _error -> ())
     ?quota_scope_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
@@ -308,6 +309,10 @@ let attempt_runtime_candidates
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
            Keeper_runtime_manifest.Runtime_failed;
+         on_attempt_error
+           ~runtime_id:attempt_runtime_id
+           ~attempt:idx
+           error;
          (* A hard-quota rejection with a provider-stated reset time is an
             account-scoped fact; remember it so later lane ordering stops
             re-dispatching into the exhausted window (RFC-0370 §3.3). The
@@ -576,6 +581,7 @@ let run_named
     ?runtime_manifest_append
     ?deferred_runtime_lane
     ?on_runtime_retry_deferred
+    ?on_runtime_attempt_error
     ?on_deferred_runtime_consumed
     ?provider_config_transform
     ?sw
@@ -842,6 +848,7 @@ let run_named
     ~pre_tool_rejects
     ?lane_id:lane_id_opt
     ?on_retry_deferred:on_runtime_retry_deferred
+    ?on_attempt_error:on_runtime_attempt_error
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed

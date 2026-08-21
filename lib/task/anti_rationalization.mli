@@ -139,6 +139,8 @@ val run_llm_reviewer_fn
       -> report_tool_schema:Types_core.tool_schema
       -> lookup:lookup_surface
       -> on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
+      -> on_runtime_attempt_error:
+        (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit)
       -> unit
       -> (verdict option, Agent_core.Error.t) result)
        Atomic.t

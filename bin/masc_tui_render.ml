@@ -893,7 +893,7 @@ let render_keeper_detail (state : state) =
     (* Current work section *)
     add_section "Current Work";
     add_row "Task:" (Option.value ~default:"-" k.k_current_task_id);
-    add_row "Last Blocker:" (Option.value ~default:"-" k.k_last_blocker);
+    add_row "Last Blocker:" (Tui_decode.keeper_blocker_for_terminal k);
     add_empty ();
 
     (* Live Context section (Phase 2) *)

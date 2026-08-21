@@ -81,7 +81,7 @@ let test_active_tasks_of_domain_filters_and_sorts () =
     (List.map (fun (task : Tui_decode.task) -> task.id) active)
 
 let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
-    ?(current_task_id = None) () =
+    ?(current_task_id = None) ?(blocker_detail = "queue full") () =
   let optional_field key = function
     | Some value -> [ (key, value) ]
     | None -> []
@@ -105,7 +105,7 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
        ; ("last_proactive_outcome", `String "tool_use")
        ; ( "last_blocker"
          , Keeper_meta_contract.(
-             blocker_info_of_class ~detail:"queue full" Capacity_backpressure
+             blocker_info_of_class ~detail:blocker_detail Capacity_backpressure
              |> blocker_info_to_json) )
        ; ("created_at", `String "2026-08-20T01:02:03Z")
        ; ("updated_at", `String "2026-08-21T04:05:06Z")
@@ -172,6 +172,38 @@ let test_decode_keeper_zero_last_turn_is_empty () =
       Alcotest.(check string) "zero timestamp becomes empty" ""
         keeper.k_last_turn_ts
   | Error err -> Alcotest.fail err
+
+let test_terminal_text_escapes_control_sequences () =
+  let payload = "safe\027]0;owned\007\n\t\194\128done" in
+  Alcotest.(check string)
+    "C0, ESC, OSC terminator, and UTF-8 C1 are rendered inert"
+    "safe\\x1B]0;owned\\x07\\x0A\\x09\\u0080done"
+    (Tui_decode.sanitize_terminal_text payload)
+
+let test_terminal_text_preserves_printable_utf8 () =
+  Alcotest.(check string)
+    "printable UTF-8 survives"
+    "정상 blocker — café"
+    (Tui_decode.sanitize_terminal_text "정상 blocker — café")
+
+let test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe () =
+  let detail = "queue\027]8;;https://attacker.invalid\007owned\027]8;;\007" in
+  match Tui_decode.decode_keeper (current_keeper_json ~blocker_detail:detail ()) with
+  | Error error -> Alcotest.fail error
+  | Ok keeper ->
+    Alcotest.(check bool)
+      "typed decode retains the raw diagnostic"
+      true
+      (Option.exists (fun raw -> String.contains raw '\027') keeper.k_last_blocker);
+    let rendered = Tui_decode.keeper_blocker_for_terminal keeper in
+    Alcotest.(check bool)
+      "terminal projection contains no ESC byte"
+      false
+      (String.contains rendered '\027');
+    Alcotest.(check bool)
+      "terminal projection exposes escaped control evidence"
+      true
+      (String_util.contains_substring rendered "\\x1B]8;;")
 
 let test_decode_keeper_rejects_retired_fields () =
   List.iter
@@ -477,6 +509,14 @@ let () =
           test_decode_planning_snapshot_current_contract;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
+      ] );
+    ( "terminal_text",
+      [ Alcotest.test_case "escapes control sequences" `Quick
+          test_terminal_text_escapes_control_sequences
+      ; Alcotest.test_case "preserves printable UTF-8" `Quick
+          test_terminal_text_preserves_printable_utf8
+      ; Alcotest.test_case "keeper blocker keeps raw and renders safe" `Quick
+          test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe
       ] );
     ( "parse_log_entry",
       [

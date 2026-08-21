@@ -146,6 +146,7 @@ type owner_initialization_error =
   | Readiness_publication_failed of
       { observed_phase : Server_startup_state.phase
       }
+  | Embedded_prompts_unregistered of { keys : string list }
 
 exception Owner_initialization_failed of owner_initialization_error
 

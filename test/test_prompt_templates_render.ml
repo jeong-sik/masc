@@ -82,6 +82,32 @@ let test_every_prompt_renders () =
     prompts
 ;;
 
+(* Same invariant the boot gate enforces, decided here instead of at the first
+   start after a release: every prompt markdown file the repo ships registers as
+   a key. A file the loader skipped — unreadable, or with frontmatter it could
+   not parse — otherwise becomes a prompt nobody notices is gone, because the
+   only symptom is a shorter prompt. *)
+let test_every_prompt_file_registers () =
+  load ();
+  let dir = prompt_dir () in
+  let files =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".md")
+    |> List.sort String.compare
+  in
+  check bool "the prompt directory ships markdown" true (files <> []);
+  List.iter
+    (fun file ->
+       let key = Filename.remove_extension file in
+       check
+         bool
+         (file ^ ": registers as key " ^ key)
+         true
+         (not (String.equal (Prompt_registry.prompt_source key) "missing")))
+    files
+;;
+
 let test_no_template_uses_an_undeclared_variable () =
   load ();
   match Prompt_registry.validate_prompt_templates () with
@@ -106,6 +132,10 @@ let () =
             "no template uses an undeclared variable"
             `Quick
             test_no_template_uses_an_undeclared_variable
+        ; test_case
+            "every prompt file registers as a key"
+            `Quick
+            test_every_prompt_file_registers
         ] )
     ]
 ;;

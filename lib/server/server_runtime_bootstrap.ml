@@ -659,6 +659,7 @@ type owner_initialization_error =
   | Readiness_publication_failed of
       { observed_phase : Server_startup_state.phase
       }
+  | Embedded_prompts_unregistered of { keys : string list }
 
 exception Owner_initialization_failed of owner_initialization_error
 
@@ -710,6 +711,10 @@ let owner_initialization_error_to_string = function
     Printf.sprintf
       "owner readiness publication failed (observed_phase=%s)"
       (Server_startup_state.phase_to_string observed_phase)
+  | Embedded_prompts_unregistered { keys } ->
+    Printf.sprintf
+      "prompts embedded in this binary did not register: %s"
+      (String.concat ", " keys)
 
 let initialize_owner_state_blocking
       ~sw
@@ -1113,29 +1118,56 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
       ~workspace_path:config.workspace_path
       ~base_path:config.base_path
   in
-  let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
-  if prompt_markdown_dir <> expected_prompt_dir then
-    Log.Misc.warn
-      "prompt markdown dir diverges from resolved config root: %s (expected %s)"
-      prompt_markdown_dir expected_prompt_dir;
-  let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
-  if missing_prompt_files <> [] then
-    begin
-    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
-    Log.Misc.error "required prompt files missing: %s"
-      (missing_prompt_files
-      |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
-      |> String.concat ", ");
-  end;
-  let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
-  if invalid_prompt_templates <> [] then
-    begin
-    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
-    Log.Misc.error "prompt templates use unknown variables: %s"
-      (invalid_prompt_templates
-      |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
-      |> String.concat ", ")
-  end
+  (* Three checks used to stand here and none of them gated anything.
+     One compared [prompt_markdown_dir] against [Config_dir_resolver.prompts_dir
+     ()] — the value it was built from, so the branch was unreachable. One asked
+     whether every registered prompt still had a file, but registration comes
+     from scanning that directory a few lines earlier, so it re-asserted a
+     post-condition of the step that produced it, and the failure it was meant
+     to catch — a file that never landed — is filtered out before it runs,
+     because an unread file is never registered. One reported templates using
+     undeclared variables, which [test_prompt_templates_render] now decides in
+     CI over the whole directory. All three logged and continued, so a boot with
+     silently shorter prompts looked exactly like a healthy one.
+
+     What can actually be wrong is the gap between what the binary carries and
+     what registered: a sync that failed on disk, a file renamed on one side
+     only. That is checked here, and it is fatal. A Keeper running on a prompt
+     the operator never saw is worse than a server that refuses to start. *)
+  ignore (prompt_markdown_dir : string);
+  let embedded_prompt_keys =
+    Embedded_config.file_list
+    |> List.filter_map (fun path ->
+      match Filename.chop_suffix_opt ~suffix:".md" path with
+      | None -> None
+      | Some without_extension ->
+        let prefix = "prompts/" in
+        let prefix_length = String.length prefix in
+        if String.starts_with ~prefix without_extension
+           && String.length without_extension > prefix_length
+        then
+          Some
+            (String.sub
+               without_extension
+               prefix_length
+               (String.length without_extension - prefix_length))
+        else None)
+  in
+  let unregistered =
+    embedded_prompt_keys
+    |> List.filter (fun key -> String.equal (Prompt_registry.prompt_source key) "missing")
+    |> List.sort_uniq String.compare
+  in
+  if unregistered <> []
+  then (
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_error_events
+      ~labels:[ "type", Error_event_type.(to_label Missing_config) ]
+      ();
+    Log.Misc.error
+      "prompts embedded in this binary did not register: %s"
+      (String.concat ", " unregistered);
+    raise (Owner_initialization_failed (Embedded_prompts_unregistered { keys = unregistered })))
 
 let start_owner_lazy_tasks ~sw state =
   let run_lazy_task (task_name, task_fn) =

@@ -196,11 +196,5 @@
       "description": "반드시 처리 — 지금 제품 약속을 깨고 있다"
     }
   },
-  "standalone_labels": {
-    "epic": {
-      "label": "epic",
-      "color": "0e4b99",
-      "description": "상위 추적 이슈"
-    }
-  }
+  "standalone_labels": {}
 }

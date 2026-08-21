@@ -223,6 +223,7 @@ normal_targets=(
   @test/runtest-test_http_server_eio
   @test/runtest-test_verification
   @test/runtest-test_review_prompt_sections_reach_the_model
+  @test/runtest-test_prompt_templates_render
   @test/runtest-test_dashboard_verification
   @test/runtest-test_tool_schema_constraint_enforcement
   @test/runtest-test_keeper_artifact_read_request

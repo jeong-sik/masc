@@ -1186,7 +1186,8 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_goal_phase_all \
             @test/runtest-test_goal_verification_gate \
-            @test/runtest-test_goal_verification_agent
+            @test/runtest-test_goal_verification_agent \
+            @test/runtest-test_goal_verification_run_registry
 
       - name: Run metric zero-cell declaration suite
         # A counter emitted as a bare string still compiles and still counts;

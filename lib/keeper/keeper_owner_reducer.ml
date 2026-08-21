@@ -57,9 +57,7 @@ type identity_handoff =
   ; updated_at : string
   }
 
-type shutdown_latch =
-  | Operator_stopped
-  | Dead_tombstone
+type shutdown_latch = Operator_stopped
 
 type profile_update =
   { instructions : string
@@ -584,16 +582,12 @@ let apply_existing (state : state) meta command =
          state
          { meta with paused = false; latched_reason = None; runtime; updated_at })
   | Retain_shutdown_latch { latch; updated_at } ->
-    let latched_reason, runtime =
-      match latch with
-      | Operator_stopped ->
-        ( Keeper_latched_reason.Operator_paused
-            { operator_actor = Keeper_latched_reason.operator_actor_keeper_down }
-        , meta.runtime )
-      | Dead_tombstone ->
-        Keeper_latched_reason.Dead_tombstone,
-        { meta.runtime with last_blocker = None }
+    let (Operator_stopped : shutdown_latch) = latch in
+    let latched_reason =
+      Keeper_latched_reason.Operator_paused
+        { operator_actor = Keeper_latched_reason.operator_actor_keeper_down }
     in
+    let runtime = meta.runtime in
     Ok
       (with_meta
          state
@@ -615,8 +609,6 @@ let apply_existing (state : state) meta command =
          ~paused:meta.paused
          ~latched_reason:meta.latched_reason
      with
-     | Keeper_lifecycle_admission.Dead_tombstone ->
-       Ok (publish_transition state No_persistence)
      | Keeper_lifecycle_admission.Active
      | Keeper_lifecycle_admission.Paused _ ->
        Ok

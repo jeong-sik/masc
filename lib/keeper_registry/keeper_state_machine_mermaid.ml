@@ -22,7 +22,6 @@ let phase_to_mermaid_id = function
   | Stopped -> "Stopped"
   | Crashed -> "Crashed"
   | Restarting -> "Restarting"
-  | Dead -> "Dead"
 ;;
 
 let phase_to_mermaid ~(current : phase) : string =
@@ -66,21 +65,18 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Paused --> Stopped : stop requested\n";
   p "    Paused --> Crashed : fiber death\n";
   p "    Crashed --> Restarting : backoff elapsed\n";
-  p "    Crashed --> Dead : explicit durable tombstone\n";
   p "    Restarting --> Running : fiber started\n";
   p "    Restarting --> Crashed : launch fail\n";
-  p "    Restarting --> Dead : explicit durable tombstone\n";
   p "    Restarting --> Draining : stop requested\n";
   p "    Restarting --> Paused : operator pause\n";
   p "    Stopped --> [*]\n";
-  p "    Dead --> [*]\n";
   (* Highlight current phase with classDef *)
   p "\n";
   p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
   p "    classDef terminal fill:#6b7280,stroke:#4b5563,color:#fff\n";
   p "    classDef buffer fill:#f59e0b,stroke:#d97706,color:#fff\n";
   (match current with
-   | Stopped | Dead ->
+   | Stopped ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
    | Failing | Overflowed | Compacting | HandingOff | Draining | Restarting | Crashed ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)

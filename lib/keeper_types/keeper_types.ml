@@ -28,7 +28,6 @@ type keeper_health =
   | KH_stale (** Last observed signal is outside the health projection window *)
   | KH_degraded (** agent status file unreadable or undecodable *)
   | KH_zombie (** Fiber terminated but registry entry exists *)
-  | KH_dead (** Explicit durable Dead tombstone *)
 
 (** Keeper continuity state — derived from health + keepalive status. *)
 type keeper_continuity =

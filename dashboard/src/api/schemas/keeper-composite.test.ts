@@ -86,13 +86,13 @@ describe('parseKeeperCompositeSnapshot', () => {
   })
 
   // Every phase string the backend can emit, per
-  // `Keeper_state_machine.phase_to_string` (13 ctors, lowercase
+  // `Keeper_state_machine.phase_to_string` (11 ctors, lowercase
   // snake_case). The schema must round-trip each one verbatim.
   it('round-trips every phase the backend can emit', () => {
     for (const phase of [
       'offline', 'running', 'failing', 'overflowed', 'compacting',
       'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-      'restarting', 'dead',
+      'restarting',
     ]) {
       const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, phase })
       expect(result.phase).toBe(phase)
@@ -415,7 +415,7 @@ describe('parseKeeperCompositeSnapshot', () => {
 
   it('parses collapsed_from when Stable hides a raw keeper phase', () => {
     // `Stable` is the TLA+ composite projection of seven raw keeper phases
-    // (Offline/Paused/Stopped/Crashed/Restarting/Dead). The runtime
+    // (Offline/Paused/Stopped/Crashed/Restarting). The runtime
     // observer does not emit it today; the schema supports it for a planned
     // backend that surfaces the collapse with the raw phase in `collapsed_from`.
     const result = parseKeeperCompositeSnapshot({

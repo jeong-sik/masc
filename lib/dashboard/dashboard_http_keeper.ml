@@ -618,7 +618,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                     match entry.last_failure_reason with
                     | Some r -> `String (Keeper_registry.failure_reason_to_string r)
                     | None -> `Null);
-                  ("dead_since", Json_util.float_opt_to_json entry.dead_since_ts);
                 ], List.length combined_log)
             | None ->
                 (`Assoc [

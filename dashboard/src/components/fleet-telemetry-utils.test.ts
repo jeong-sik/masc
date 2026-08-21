@@ -287,7 +287,6 @@ describe('fleetBand', () => {
   })
 
   it('classifies offline for dead/stopped/crashed status', () => {
-    expect(fleetBand(makeRow({ status: 'dead' }))).toBe('offline')
     expect(fleetBand(makeRow({ status: 'stopped' }))).toBe('offline')
     expect(fleetBand(makeRow({ status: 'crashed' }))).toBe('offline')
   })
@@ -426,7 +425,6 @@ describe('statusClass', () => {
   it.each([
     'offline',
     'unbooted',
-    'dead',
     'crashed',
   ])('returns bad-light for status=%s', (status) => {
     expect(statusClass(makeRow({ status }))).toContain('var(--bad-light)')

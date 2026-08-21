@@ -282,8 +282,6 @@ function keeperLifecycleStatus(
       return 'crashed'
     case 'Restarting':
       return 'restarting'
-    case 'Dead':
-      return 'dead'
     default:
       return null
   }

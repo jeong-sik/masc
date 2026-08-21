@@ -121,9 +121,9 @@ describe('keeperDisplayStatus', () => {
       const keeper = makeKeeper({
         status: 'active',
         phase: 'Running',
-        lifecycle_phase: 'Dead',
+        lifecycle_phase: 'Stopped',
       })
-      expect(keeperDisplayStatus(keeper)).toBe('dead')
+      expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
   })
 })

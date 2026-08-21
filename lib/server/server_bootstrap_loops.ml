@@ -48,8 +48,7 @@ let keeper_agent_status_of_phase = function
   | Keeper_state_machine.Restarting -> Masc_domain.Busy
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Dead -> Masc_domain.Inactive
+  | Keeper_state_machine.Crashed -> Masc_domain.Inactive
 ;;
 
 let keeper_registry_agent ~now (entry : Keeper_registry.registry_entry) : Masc_domain.agent =
@@ -1154,8 +1153,8 @@ let start_keeper_loops_owned
   (* [claimed_persistence] can only be constructed by the typed one-shot claim
      boundary before readiness publication. No late exception can turn an
      already-visible HTTP state into a degraded bootstrap. *)
-  (* Completion recovery can publish [Dead_cleaned] and invoke
-     [Tombstone_reaped]. Install the production hook before any durable
+  (* Completion recovery can publish [Supervisor_cleaned] and invoke
+     [Supervisor_cleaned]. Install the production hook before any durable
      receipt is replayed. *)
   Keeper_subprocess_registry.register_default_cleanup_hook ();
   Keeper_shutdown_finalize.register_completion_handler
@@ -1298,7 +1297,7 @@ let start_keeper_loops_owned
     Runtime_event_bus.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Replay durable completion receipts only after the MASC event bus has its
      SSE/metrics subscribers and lifecycle hooks are installed. Otherwise a
-     boot-time [Dead_cleaned] publish can return successfully while every
+     boot-time [Supervisor_cleaned] publish can return successfully while every
      process-local sink is still absent. *)
   fork_subsystem "keeper_shutdown_recovery" (fun () ->
     let restored = claimed_persistence.claimed_report.shutdown in

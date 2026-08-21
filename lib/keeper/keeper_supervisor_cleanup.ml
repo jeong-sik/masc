@@ -1,53 +1,11 @@
-(** Dead-tombstone cleanup admission and completion delivery.
+(** Cleanup completion delivery.
 
-    The supervisor only submits an exact-lane durable shutdown operation.
     Meta mutation, lane join, registry removal, and accumulator removal are
-    owned by [Keeper_shutdown_finalize]. [Dead_cleaned] and
-    [Tombstone_reaped] are delivered from the durable completion receipt after
+    owned by [Keeper_shutdown_finalize]. The [Supervisor_cleaned] lifecycle
+    event and hook are delivered from the durable completion receipt after
     finalization, never from the sweep that observed the old entry. *)
 
 open Keeper_shutdown_types
-
-let cleanup_intent : Keeper_shutdown_types.cleanup_intent =
-  { reason = Dead_tombstone_cleanup
-  ; remove_session = false
-  }
-;;
-
-let record_submission_failure keeper_name =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string SupervisorCleanupFailures)
-    ~labels:
-      [ "keeper", keeper_name
-      ; ( "site"
-        , Keeper_supervisor_cleanup_failure_site.(
-            to_label Dead_tombstone_submission) )
-      ]
-    ()
-;;
-
-let cleanup_dead_tombstone
-    (ctx : _ Keeper_types_profile.context)
-    (entry : Keeper_registry.registry_entry)
-  =
-  let request : Keeper_shutdown_prepare_join.request =
-    { actor = ctx.agent_name
-    ; cleanup_intent
-    }
-  in
-  match Keeper_shutdown_runtime.submit ~config:ctx.config ~entry ~request with
-  | Ok operation ->
-    Log.Keeper.info
-      "%s: dead tombstone finalization accepted operation=%s"
-      entry.name
-      (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-  | Error error ->
-    record_submission_failure entry.name;
-    Log.Keeper.error
-      "%s: dead tombstone finalization submission failed: %s"
-      entry.name
-      (Keeper_shutdown_runtime.submit_error_to_string error)
-;;
 
 let completion_meta_for_coverage config operation =
   match Keeper_meta_store.read_meta config operation.Keeper_shutdown_types.keeper_name with
@@ -78,7 +36,7 @@ let lifecycle_event_bus_ready () =
   | Some _ -> Ok ()
 ;;
 
-let dead_tombstone_sinks_ready () =
+let cleanup_sinks_ready () =
   match lifecycle_event_bus_ready () with
   | Error _ as error -> error
   | Ok () when not (Keeper_subprocess_registry.default_cleanup_hook_registered ()) ->
@@ -87,8 +45,8 @@ let dead_tombstone_sinks_ready () =
 ;;
 
 let handle_completion config operation = function
-  | Keeper_shutdown_types.Dead_tombstone_reaped ->
-    (match dead_tombstone_sinks_ready () with
+  | Keeper_shutdown_types.Supervisor_cleaned ->
+    (match cleanup_sinks_ready () with
      | Error _ as error -> error
      | Ok () ->
        let operation_id =
@@ -97,7 +55,7 @@ let handle_completion config operation = function
        Keeper_supervisor_publish_lifecycle.publish_lifecycle
          ~event:
            (Keeper_lifecycle_events.Custom_event
-              { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+              { verb = Keeper_lifecycle_events.Supervisor_cleaned; phase = None })
          operation.keeper_name
          ("shutdown_operation=" ^ operation_id)
          ();
@@ -106,7 +64,7 @@ let handle_completion config operation = function
          ~base_dir:(Workspace.masc_root_dir config)
          ?meta
          ~keeper_id:operation.keeper_name
-         Keeper_lifecycle_hooks.Tombstone_reaped;
+         Keeper_lifecycle_hooks.Supervisor_cleaned;
        Log.Keeper.info
          "%s: dead tombstone finalization delivered operation=%s"
          operation.keeper_name

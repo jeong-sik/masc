@@ -24,7 +24,7 @@ describe('isSemanticTone (pure)', () => {
 })
 
 describe('keeperStateTone (pure)', () => {
-  it('maps the 12 keeper FSM states per Anyang Sleepers spec', () => {
+  it('maps the 11 keeper FSM states per Anyang Sleepers spec', () => {
     expect(keeperStateTone('running')).toBe('ok')
     expect(keeperStateTone('compacting')).toBe('info')
     expect(keeperStateTone('handing_off')).toBe('info')
@@ -34,7 +34,6 @@ describe('keeperStateTone (pure)', () => {
     expect(keeperStateTone('restarting')).toBe('warn')
     expect(keeperStateTone('paused')).toBe('paused')
     expect(keeperStateTone('crashed')).toBe('bad')
-    expect(keeperStateTone('dead')).toBe('bad')
     expect(keeperStateTone('stopped')).toBe('neutral')
     expect(keeperStateTone('offline')).toBe('neutral')
   })

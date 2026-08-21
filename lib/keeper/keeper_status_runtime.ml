@@ -53,8 +53,7 @@ let keeper_metric_producer_active ~base_path =
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
        | Keeper_state_machine.Crashed
-       | Keeper_state_machine.Restarting
-       | Keeper_state_machine.Dead -> false)
+       | Keeper_state_machine.Restarting -> false)
 ;;
 
 let unknown_model_label =
@@ -88,7 +87,6 @@ let keeper_health_to_string = function
   | KH_stale -> "stale"
   | KH_degraded -> "degraded"
   | KH_zombie -> "zombie"
-  | KH_dead -> "dead"
 
 (** Issue #8670: strict parser returning [None] on unknown strings so
     drift (producer typo, future variant) is visible to callers instead
@@ -101,7 +99,6 @@ let keeper_health_of_string_opt = function
   | "stale" -> Some KH_stale
   | "degraded" -> Some KH_degraded
   | "zombie" -> Some KH_zombie
-  | "dead" -> Some KH_dead
   | _ -> None
 
 let keeper_health_or_offline ~source s =
@@ -340,7 +337,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   (* Supervisor-level health takes priority *)
   match fiber_health with
   | Fiber_zombie -> KH_zombie
-  | Fiber_dead -> KH_dead
+  | Fiber_dead -> KH_zombie
   | Fiber_alive | Fiber_unknown ->
   let agent_runtime_status = agent_runtime_status_opt agent_status in
   let agent_registry_status_present = Option.is_some agent_runtime_status in
@@ -382,7 +379,6 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
 let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
   | KH_zombie -> "auto_restart"
-  | KH_dead -> "manual_restart"
   | KH_offline | KH_stale | KH_degraded -> "recover"
   | KH_healthy | KH_idle -> (
       match quiet_reason with
@@ -397,8 +393,6 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
   match health_state with
   | KH_zombie ->
       "Keeper fiber has terminated but registry entry persists. Supervisor will auto-restart."
-  | KH_dead ->
-      "Keeper has an explicit durable Dead tombstone. Operator lifecycle action is required."
   | KH_offline | KH_stale | KH_degraded ->
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | KH_healthy | KH_idle -> (
@@ -421,7 +415,9 @@ let keeper_continuity_state
     ~(health_state : keeper_health)
     ~(now_ts : float) : keeper_continuity =
   let healthy_like =
-    match health_state with KH_healthy | KH_idle -> true | KH_offline | KH_stale | KH_degraded | KH_zombie | KH_dead -> false
+    match health_state with
+    | KH_healthy | KH_idle -> true
+    | KH_offline | KH_stale | KH_degraded | KH_zombie -> false
   in
   let recently_started =
     match keepalive_started_at with
@@ -544,7 +540,7 @@ let keeper_surface_status
         | Some Masc_domain.Inactive -> Surface_offline
         | None -> Surface_active)
     | KH_idle -> Surface_idle
-    | KH_stale | KH_degraded | KH_zombie | KH_dead -> Surface_inactive
+    | KH_stale | KH_degraded | KH_zombie -> Surface_inactive
     | KH_offline -> Surface_offline
   in
   surface_status_to_string surface
@@ -637,7 +633,6 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Stopped -> "offline"
   | Keeper_state_machine.Crashed -> "crashed"
   | Keeper_state_machine.Restarting -> "restarting"
-  | Keeper_state_machine.Dead -> "offline"
 
 (** Explain the lossy [pipeline_stage] label without changing its wire value.
     Consumers that need exact lifecycle authority should read [lifecycle_phase];
@@ -657,4 +652,3 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Stopped -> "clean_stop_terminal"
   | Keeper_state_machine.Crashed -> "crashed_restart_candidate"
   | Keeper_state_machine.Restarting -> "supervisor_restart_requested"
-  | Keeper_state_machine.Dead -> "dead_tombstone_terminal"

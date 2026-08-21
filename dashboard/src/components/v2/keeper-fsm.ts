@@ -48,10 +48,9 @@ export const FSM_STATES = [
   'Paused',
   'Stopped',
   'Crashed',
-  'Dead',
 ] as const
 
-// phase → status-dot tone (12 phases collapse into 5 buckets).
+// phase → status-dot tone (11 phases collapse into 5 buckets).
 const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   Running: 'ok',
   Paused: 'warn',
@@ -62,7 +61,6 @@ const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   Failing: 'bad',
   Overflowed: 'bad',
   Crashed: 'bad',
-  Dead: 'bad',
   Stopped: 'idle',
   Offline: 'idle',
 }
@@ -79,7 +77,6 @@ const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Draining: false,
   Overflowed: false,
   Crashed: false,
-  Dead: false,
   Stopped: false,
   Offline: false,
 }
@@ -97,14 +94,13 @@ const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
   Paused: '슈퍼바이저가 일시정지함',
   Stopped: '중지됨',
   Crashed: '비정상 종료',
-  Dead: '복구 불가 — 종료됨',
 }
 
 // Reusable action literals (shared across phases keeps the table honest).
 const A_STOP: FsmAction = { id: 'stop', label: '중지', glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료 (Drain → Stopped)' }
 
 // phase → ordered operator actions. Phases absent here (Compacting,
-// HandingOff, Draining, Restarting, Dead) expose no action — they are
+// HandingOff, Draining, Restarting) expose no action — they are
 // transient or terminal.
 const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> = {
   Running: [
@@ -189,6 +185,5 @@ const KEEPER_PHASE_REGISTRY: Readonly<Record<string, true>> = Object.freeze(
     Paused: true,
     Stopped: true,
     Crashed: true,
-    Dead: true,
   } as Record<string, true>),
 )

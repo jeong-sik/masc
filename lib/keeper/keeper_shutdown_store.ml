@@ -305,8 +305,8 @@ let cleanup_reason_to_json = function
     `Assoc [ "kind", `String "operator_stop_retain_meta" ]
   | Operator_stop_remove_meta ->
     `Assoc [ "kind", `String "operator_stop_remove_meta" ]
-  | Dead_tombstone_cleanup ->
-    `Assoc [ "kind", `String "dead_tombstone_cleanup" ]
+  | Supervisor_cleanup ->
+    `Assoc [ "kind", `String "supervisor_cleanup" ]
   | Dashboard_keeper_purge context ->
     `Assoc
       [ "kind", `String "dashboard_keeper_purge"
@@ -698,7 +698,7 @@ let cleanup_reason_of_json json =
   match kind with
   | "operator_stop_retain_meta" -> Ok Operator_stop_retain_meta
   | "operator_stop_remove_meta" -> Ok Operator_stop_remove_meta
-  | "dead_tombstone_cleanup" -> Ok Dead_tombstone_cleanup
+  | "supervisor_cleanup" -> Ok Supervisor_cleanup
   | "dashboard_keeper_purge" ->
     let* requested_name = string "requested_name" json in
     let* agent_name = string "agent_name" json in

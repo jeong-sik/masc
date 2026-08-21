@@ -18,13 +18,11 @@ include Keeper_supervisor_launch
 type sweep_acc =
   { to_restart : (Keeper_registry.registry_entry * string) list
   ; to_unregister : Keeper_registry.registry_entry list
-  ; to_cleanup_dead : Keeper_registry.registry_entry list
   }
 
 let empty_sweep_acc =
   { to_restart = []
   ; to_unregister = []
-  ; to_cleanup_dead = []
   }
 ;;
 
@@ -52,7 +50,6 @@ let pending_hitl_approval_keeper_names config =
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
   =
   let now = Time_compat.now () in
-  let dead_ttl_sec = Runtime_params.get Runtime_settings.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* HITL requests are observable inputs, not Keeper-lane ownership. *)
   (match pending_hitl_approval_counts ctx.config with
@@ -118,11 +115,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
      yield meter still protects unusually large cohorts or non-default sizes. *)
   let process_entry (acc : sweep_acc) (entry : Keeper_registry.registry_entry) =
     match entry.phase with
-    | Keeper_state_machine.Dead ->
-      (match entry.dead_since_ts with
-       | Some dead_since when now -. dead_since >= dead_ttl_sec ->
-         { acc with to_cleanup_dead = entry :: acc.to_cleanup_dead }
-       | _ -> acc)
     | Keeper_state_machine.Stopped ->
       if Keeper_registry.lane_has_exited entry
       then { acc with to_unregister = entry :: acc.to_unregister }
@@ -190,12 +182,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
           sweep must not drop the accumulator of a newer same-name lane. *)
        unregister_exact_and_drop entry)
     final_acc.to_unregister;
-  (* Submit exact-lane durable finalization. [Dead_cleaned] and
-     [Tombstone_reaped] are emitted only by the completion receipt handler. *)
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
-       cleanup_dead_tombstone ctx entry)
-    final_acc.to_cleanup_dead;
   let restart_list = final_acc.to_restart in
   (* Restart crashed keepers *)
   List.iter
@@ -213,10 +199,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             let reason =
               Keeper_lifecycle_admission.autonomous_denial_to_wire denial
             in
-            (match denial with
-             | Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
-               Keeper_registry.mark_dead ~base_path old_entry.name ~at:now
-             | Keeper_lifecycle_admission.Autonomous_paused _ -> ());
             let denial_phase =
               match Keeper_registry.get ~base_path old_entry.name with
               | Some entry -> Some entry.phase
@@ -302,7 +284,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                         { current with
                           restart_count = attempt
                         ; last_restart_ts = now
-                        ; dead_since_ts = None
                         ; crash_log = keep_last_n 5 (now, crash_msg) old_crash_log
                         ; last_failure_reason = None
                         })

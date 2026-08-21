@@ -2676,7 +2676,6 @@ let current_lifecycle_events =
         Keeper_state_machine.Running;
         Keeper_state_machine.Stopped;
         Keeper_state_machine.Crashed;
-        Keeper_state_machine.Dead;
       ]
 
 let test_lifecycle_event_wire_roundtrip () =
@@ -2757,8 +2756,6 @@ let test_lifecycle_event_display_values () =
         false, "stopped", "offline", None );
       ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Crashed,
         false, "crashed", "crashed", Some false );
-      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Dead,
-        false, "dead", "offline", Some false );
     ]
   in
   List.iter

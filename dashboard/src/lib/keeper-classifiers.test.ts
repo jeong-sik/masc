@@ -17,7 +17,7 @@ describe('keeperPriority', () => {
     expect(keeperPriority(status)).toBe<KeeperPriority>(1)
   })
 
-  it.each(['offline', 'inactive', 'stopped', 'dead'] as const)
+  it.each(['offline', 'inactive', 'stopped'] as const)
   ('returns 3 for terminal status: %s', (status) => {
     expect(keeperPriority(status)).toBe<KeeperPriority>(3)
   })
@@ -36,7 +36,7 @@ describe('keeperPriority', () => {
 })
 
 describe('isOfflineStatus', () => {
-  it.each(['offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped'])
+  it.each(['offline', 'inactive', 'crashed', 'unbooted', 'stopped'])
   ('returns true for %s', (status) => {
     expect(isOfflineStatus(status)).toBe(true)
   })

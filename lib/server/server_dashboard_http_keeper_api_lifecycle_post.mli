@@ -10,8 +10,7 @@ val handle_keeper_lifecycle_post :
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Generic handler for boot / shutdown / reset / clear posts; the [action]
     parameter selects the keeper FSM event. Boot rejects an ordinary paused
-    owner instead of implicitly resuming it; Dead-tombstone revival remains a
-    separate boot transaction. *)
+    owner instead of implicitly resuming it. *)
 
 val refresh_keeper_execution_surfaces :
   config:Workspace.config ->

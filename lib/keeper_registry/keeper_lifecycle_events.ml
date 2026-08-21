@@ -7,7 +7,7 @@
     of them, so operators reading the doc subscribed to the
     phase-derived events ([started] / [stopped] / [crashed] /
     [restarted] / [dead]) and silently missed the cleanup /
-    recovery events ([reconciled] / [dead_cleaned] /
+    recovery events ([reconciled] / [supervisor_cleaned] /
     [admission_denied]) — exactly
     the events that signal supervisor recovery actions where
     observability matters most.
@@ -16,7 +16,7 @@
     Variant covers verbs that do not map 1:1 to a phase; the
     phase-derived event names come from
     {!Keeper_state_machine.phase_to_string} on the four lifecycle
-    phases that fire a wire event ([Stopped] / [Crashed] / [Dead] /
+    phases that fire a wire event ([Stopped] / [Crashed] /
     [Running]).
 
     NOTE (#22071): a previously-cited emit-site coverage test
@@ -32,14 +32,14 @@
     - [Started]            : keeper began executing (Running phase as side-effect)
     - [Reconciled]         : durable keeper re-picked up after restart
     - [Restarted]          : supervisor relaunched a crashed lane
-    - [Dead_cleaned]       : explicit durable tombstone cleanup
+    - [Supervisor_cleaned] : supervisor removed an absent Keeper's metadata
     - [Purged]             : dashboard purge completed all durable artifacts
     - [Admission_denied]   : spawn/admission guard refused to launch a keeper *)
 type t =
   | Started
   | Reconciled
   | Restarted
-  | Dead_cleaned
+  | Supervisor_cleaned
   | Purged
   | Admission_denied
 
@@ -47,7 +47,7 @@ let to_string = function
   | Started -> "started"
   | Reconciled -> "reconciled"
   | Restarted -> "restarted"
-  | Dead_cleaned -> "dead_cleaned"
+  | Supervisor_cleaned -> "supervisor_cleaned"
   | Purged -> "purged"
   | Admission_denied -> "admission_denied"
 
@@ -60,13 +60,13 @@ let event_of_string = function
   | "started" -> Some Started
   | "reconciled" -> Some Reconciled
   | "restarted" -> Some Restarted
-  | "dead_cleaned" -> Some Dead_cleaned
+  | "supervisor_cleaned" -> Some Supervisor_cleaned
   | "purged" -> Some Purged
   | "admission_denied" -> Some Admission_denied
   | _ -> None
 
 let all_custom_events : t list =
-  [ Started; Reconciled; Restarted; Dead_cleaned; Purged; Admission_denied ]
+  [ Started; Reconciled; Restarted; Supervisor_cleaned; Purged; Admission_denied ]
 
 let valid_custom_event_strings : string list =
   List.map to_string all_custom_events

@@ -4,7 +4,6 @@
     Sites under test:
     - gRPC pause directive -> Owner [Pause]
     - keeper_down retain -> Owner [Retain_shutdown_latch Operator_stopped]
-    - durable dead-tombstone -> Owner [Retain_shutdown_latch Dead_tombstone]
 
     Observability only: these tests assert the {i reason} annotation, not
     any change to the pause/resume decision (which stays carried by
@@ -62,8 +61,6 @@ let wire_keeper_down =
     (Keeper_latched_reason.Operator_paused
        { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
 
-let wire_dead_tombstone = Keeper_latched_reason.to_wire Keeper_latched_reason.Dead_tombstone
-
 (* ── Serialization + merge durability ───────────────────────── *)
 
 let test_latched_reason_survives_serialization () =
@@ -86,8 +83,7 @@ let test_latched_reason_survives_serialization () =
          (label ^ ": latched_reason survives")
          (Some (Keeper_latched_reason.to_wire reason))
          (latched_reason_wire reparsed))
-    [ "dead tombstone", Keeper_latched_reason.Dead_tombstone
-    ; ( "operator paused"
+    [ ( "operator paused"
       , Keeper_latched_reason.Operator_paused
           { operator_actor = Keeper_latched_reason.operator_actor_keeper_down } )
     ]
@@ -221,7 +217,7 @@ let test_pause_directive_leaves_an_existing_latch_intact () =
        let meta =
          { (make_meta keeper_name) with
            paused = true
-         ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+         ; latched_reason = Some Keeper_latched_reason.Transcript_corruption_reset_required
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
@@ -241,7 +237,8 @@ let test_pause_directive_leaves_an_existing_latch_intact () =
          check
            (option string)
            "the terminal latch survives a reflected pause directive"
-           (Some wire_dead_tombstone)
+           (Some (Keeper_latched_reason.to_wire
+                    Keeper_latched_reason.Transcript_corruption_reset_required))
            (latched_reason_wire entry.meta)
        | None -> fail "expected registered keeper after pause directive")
 
@@ -309,39 +306,6 @@ let test_keeper_down_retain_records_reason () =
 
 (* ── Site 1: dead-tombstone cleanup ─────────────────────────── *)
 
-let test_dead_tombstone_final_meta_records_reason () =
-  let timeout_blocker =
-    Keeper_meta_contract.blocker_info_of_class
-      ~detail:"stale pause before durable dead finalization"
-      Keeper_meta_contract.Stale_turn_timeout
-  in
-  let input =
-    { (make_meta "dead-tombstone-final-meta") with
-      paused = true
-    ; latched_reason =
-        Some
-          (Keeper_latched_reason.Operator_paused
-             { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-    ; runtime =
-        { (make_meta "dead-tombstone-final-meta").runtime with
-          last_blocker = Some timeout_blocker
-        }
-    }
-  in
-  let finalized =
-    apply_reducer_command
-      input
-      (Keeper_owner_reducer.Retain_shutdown_latch
-         { latch = Keeper_owner_reducer.Dead_tombstone; updated_at = "dead" })
-  in
-  check bool "dead final meta remains paused" true finalized.paused;
-  check
-    (option string)
-    "dead final meta records Dead_tombstone"
-    (Some wire_dead_tombstone)
-    (latched_reason_wire finalized);
-  check bool "dead final meta clears stale blocker" true
-    (Option.is_none finalized.runtime.last_blocker)
 
 let () =
   run
@@ -361,8 +325,6 @@ let () =
             test_grpc_pause_directive_records_reason
         ; test_case "keeper_down retain records keeper_down reason" `Quick
             test_keeper_down_retain_records_reason
-        ; test_case "dead final meta records terminal tombstone reason" `Quick
-            test_dead_tombstone_final_meta_records_reason
         ; test_case "reflected pause leaves an existing latch intact" `Quick
             test_pause_directive_leaves_an_existing_latch_intact
         ; test_case "reflected operator pause reconciles registry phase" `Quick

@@ -31,7 +31,6 @@ type pause_kind = Keeper_activation_readiness.pause_kind =
   | Active
   | Operator_paused
   | Unclassified_paused
-  | Dead_tombstone
   | Transcript_corruption_reset_required
 
 let pause_kind = Keeper_activation_readiness.pause_kind
@@ -77,8 +76,7 @@ let running_keeper_names ?base_path () =
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
        | Keeper_state_machine.Crashed
-       | Keeper_state_machine.Restarting
-       | Keeper_state_machine.Dead -> None)
+       | Keeper_state_machine.Restarting -> None)
   |> sorted_unique_strings
 
 let durable_paused_keeper_scan config =
@@ -368,7 +366,6 @@ type keeper_phase_detail =
   ; last_failure_reason : string option
   ; last_error : string option
   ; restart_count : int
-  ; dead_since_ts : float option
   ; latest_crash_at : float option
   ; latest_crash_reason : string option
   }
@@ -393,7 +390,6 @@ let keeper_phase_detail_of_entry (entry : Keeper_registry.registry_entry) =
       Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason;
     last_error = entry.last_error;
     restart_count = entry.restart_count;
-    dead_since_ts = entry.dead_since_ts;
     latest_crash_at;
     latest_crash_reason;
   }
@@ -455,8 +451,7 @@ let keeper_phase_snapshot ?base_path () =
           | Keeper_state_machine.Paused
           | Keeper_state_machine.Stopped
           | Keeper_state_machine.Crashed
-          | Keeper_state_machine.Restarting
-          | Keeper_state_machine.Dead ->
+          | Keeper_state_machine.Restarting ->
             acc)
        {
          counts = empty_keeper_phase_counts;
@@ -786,7 +781,6 @@ type blocked_keeper_operator_action =
   | Add_sandbox_profile_to_keeper_toml
   | Inspect_keeper_autoboot_logs
   | Enable_keeper_bootstrap_or_start_manually
-  | Inspect_dead_keeper_root_cause
   | Restart_or_disable_stopped_keeper
   | Start_or_recover_keeper
   | Inspect_capacity_accounting
@@ -811,7 +805,6 @@ let blocked_keeper_operator_action_to_string = function
   | Inspect_keeper_autoboot_logs -> "inspect_keeper_autoboot_logs"
   | Enable_keeper_bootstrap_or_start_manually ->
       "enable_keeper_bootstrap_or_start_manually"
-  | Inspect_dead_keeper_root_cause -> "inspect_dead_keeper_root_cause"
   | Restart_or_disable_stopped_keeper -> "restart_or_disable_stopped_keeper"
   | Start_or_recover_keeper -> "start_or_recover_keeper"
   | Inspect_capacity_accounting -> "inspect_capacity_accounting"
@@ -838,7 +831,6 @@ let blocked_keeper_action = function
   | Boot_failure Keeper_runtime.Materialization_failed ->
       Inspect_keeper_autoboot_logs
   | Bootstrap_disabled -> Enable_keeper_bootstrap_or_start_manually
-  | Phase Keeper_state_machine.Dead -> Inspect_dead_keeper_root_cause
   | Phase Keeper_state_machine.Stopped -> Restart_or_disable_stopped_keeper
   | Phase Keeper_state_machine.Paused -> Resume_or_leave_paused
   | Phase Keeper_state_machine.Offline -> Start_or_recover_keeper
@@ -865,8 +857,7 @@ let blocked_keeper_operator_action = function
   | Phase
       ( Keeper_state_machine.Failing
       | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Restarting
-      | Keeper_state_machine.Dead ) ->
+      | Keeper_state_machine.Restarting ) ->
       List.find_opt
         (fun (action : Operator_pending_confirm.available_action) ->
           String.equal action.action_type Operator_action_constants.keeper_recover)
@@ -924,8 +915,7 @@ let latest_crash_log_reason crash_log =
 
 let phase_supports_crash_log_failure_reason = function
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Dead ->
+  | Keeper_state_machine.Crashed ->
       true
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Running
@@ -1123,7 +1113,6 @@ let blocked_keeper_detail_json
           , Json_util.string_opt_to_json registry_last_failure_reason );
           ("last_error", `Null);
           ("restart_count", `Null);
-          ("dead_since_ts", `Null);
           ("latest_crash_at", `Null);
           ("latest_crash_reason", `Null);
         ]
@@ -1138,7 +1127,6 @@ let blocked_keeper_detail_json
           , Json_util.string_opt_to_json last_failure_reason );
           ("last_error", Json_util.string_opt_to_json (Option.map diagnostic_preview detail.last_error));
           ("restart_count", `Int detail.restart_count);
-          ("dead_since_ts", Json_util.float_opt_to_json detail.dead_since_ts);
           ("latest_crash_at", Json_util.float_opt_to_json detail.latest_crash_at);
           ( "latest_crash_reason"
           , Json_util.string_opt_to_json

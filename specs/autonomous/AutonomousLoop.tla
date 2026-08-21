@@ -14,7 +14,7 @@ CONSTANTS
 KeeperPhases == {
     "Offline", "Running", "Failing", "Overflowed", "Compacting",
     "HandingOff", "Draining", "Paused", "Stopped", "Crashed",
-    "Restarting", "Dead"
+    "Restarting"
 }
 
 WorkCapable == {

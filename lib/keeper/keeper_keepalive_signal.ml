@@ -858,7 +858,7 @@ let stage_timing_to_json ~ring ~count =
 let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string) =
   match Keeper_registry.get_phase ~base_path:ctx.config.base_path keeper_name with
   | None -> true
-  | Some (Keeper_state_machine.Stopped | Keeper_state_machine.Dead) -> false
+  | Some Keeper_state_machine.Stopped -> false
   | Some _ -> true
 
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =

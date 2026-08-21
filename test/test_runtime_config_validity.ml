@@ -1481,19 +1481,6 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
            lane.slot_ids)
       config.exact_output_lane_decls
 
-let test_toml_catalog_resolves_lifecycle_keys () =
-  let doc =
-    parse_or_fail
-      "[lifecycle]\n\
-       dead_ttl_sec = 86400\n"
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied lifecycle overrides" 1 count;
-  check (option string) "dead ttl" (Some "86400")
-    (List.assoc_opt "MASC_KEEPER_DEAD_TTL_SEC" overrides)
-
 let test_toml_catalog_resolves_web_search_keys () =
   let doc =
     parse_or_fail
@@ -3990,9 +3977,6 @@ let () =
           test_case
             "save_config_text commits exact registry with runtime state"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
-          test_case
-            "lifecycle TOML keys resolve through the declarative catalog"
-            `Quick test_toml_catalog_resolves_lifecycle_keys;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_web_search_keys;

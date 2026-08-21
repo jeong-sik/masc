@@ -54,9 +54,7 @@ let resume_operator_pause
              Error "explicit keeper up committed but pause remained set"
            | Ok { meta = Some resumed; _ } -> Ok resumed)))
   | false, _
-  | true, Some
-      ( Keeper_latched_reason.Dead_tombstone
-      | Keeper_latched_reason.Transcript_corruption_reset_required ) ->
+  | true, Some Keeper_latched_reason.Transcript_corruption_reset_required ->
     Ok old
 ;;
 
@@ -177,24 +175,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
   match resume_operator_pause ctx old with
   | Error message -> tool_result_error message
   | Ok old ->
-  match old.latched_reason with
-  | Some Keeper_latched_reason.Dead_tombstone ->
-    tool_result_error_data
-      ~class_:Tool_result.Workflow_rejection
-      (`Assoc
-         [ "error", `String "keeper_recreate_required"
-         ; "keeper", `String old.name
-         ; "lifecycle", `String "dead_tombstone"
-         ; ( "message"
-           , `String
-               "This Keeper identity is terminal. Delete the tombstone and \
-                create a fresh Keeper; automatic identity revival is not \
-                supported." )
-         ])
-  | Some
-      ( Keeper_latched_reason.Operator_paused _
-      | Keeper_latched_reason.Transcript_corruption_reset_required )
-  | None ->
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
   | Ok active_goal_ids ->

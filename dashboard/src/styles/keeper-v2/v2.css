@@ -1628,7 +1628,7 @@
 .kp-menu-sep { height: 1px; background: var(--border-soft); margin: 4px 0; }
 .kp-menu-note { padding: 8px 10px; font-size: var(--fs-11); color: var(--text-dim); line-height: 1.4; }
 
-/* header lifecycle: quiet label when no action is legal (transient/Dead) */
+/* header lifecycle: quiet label when no action is legal (transient/Stopped) */
 .act-quiet { font-family: var(--font-ui); font-size: var(--fs-11); color: var(--text-dim); padding: 0 6px; white-space: nowrap; }
 
 /* mobile chat-header overflow (lifecycle actions live here when chat-actions are hidden) */

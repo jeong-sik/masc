@@ -215,16 +215,6 @@ let keeper_keepalive_interval_sec =
       }
     ()
 
-let keeper_dead_ttl_sec =
-  register_float
-    ~key:"keeper.dead_ttl_sec"
-    ~default:(fun () -> Env_config_keeper.KeeperSupervisor.dead_ttl_sec)
-    ~min:60.0 ~max:Masc_time_constants.day
-    ~meta:{ description = "Dead 상태 유지 시간(초)";
-            value_type = "float";
-            min_value = Some (`Float 60.0); max_value = Some (`Float Masc_time_constants.day) }
-    ()
-
 (* ── keeper_diagnostics surface ───────────────────────────────── *)
 
 let keeper_snapshot_sec =
@@ -273,7 +263,6 @@ let surfaces =
       param_keys = [
         "keeper.supervisor_sweep_sec";
         "keeper.keepalive_interval_sec";
-        "keeper.dead_ttl_sec";
       ];
     };
     {

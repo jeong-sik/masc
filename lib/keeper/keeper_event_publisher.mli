@@ -38,7 +38,7 @@ val publish_keeper_lifecycle :
     Subscribe to {!Keeper_lifecycle_events.all_event_names} to
     receive the full stream.  Issue #8575: prior docstring
     listed only five names, so operators silently missed
-    cleanup / recovery events ([reconciled], [dead_cleaned]) —
+    cleanup / recovery events ([reconciled], [supervisor_cleaned]) —
     exactly the events that signal supervisor recovery actions
     where observability matters most. *)
 

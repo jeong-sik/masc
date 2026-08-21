@@ -28,13 +28,13 @@ let masc_publish event =
     Event names are pinned by
     {!Keeper_lifecycle_events.all_event_names}, which covers both the
     custom verbs (\[started\] / \[reconciled\] / \[restarted\] /
-    \[dead_cleaned\] / \[purged\] / \[admission_denied\]) and
+    \[supervisor_cleaned\] / \[purged\] / \[admission_denied\]) and
     the phase-derived names (\[stopped\] / \[crashed\] / \[dead\] /
     \[running\]).
 
     Issue #8575: the previous docstring listed only five names, so
     operators silently missed the cleanup and recovery events
-    (\[reconciled\] / \[dead_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
+    (\[reconciled\] / \[supervisor_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
     recovery actions where observability matters most. Subscribe to
     {!Keeper_lifecycle_events.all_event_names} to receive the full
     stream.  A sync test asserting every literal emitted by

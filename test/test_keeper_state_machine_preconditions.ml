@@ -253,9 +253,6 @@ let test_attribution_gate_and_origin_invariant () =
       , Error
           (SM.Invalid_transition
              { from_phase = SM.Running; to_phase = SM.Compacting; reason = "test" }) )
-    ; ( SM.Heartbeat_ok
-      , Error (SM.Terminal_state { current = SM.Dead; attempted_event = "Heartbeat_ok" })
-      )
     ]
   in
   List.iter
@@ -358,10 +355,6 @@ let test_snapshot_stopped_requires_drain () =
   assert_snapshot_fails ~property:"StoppedRequiresDrain" SM.Stopped c
 ;;
 
-let test_snapshot_dead_requires_tombstone () =
-  let c = { running_conditions with fiber_alive = false } in
-  assert_snapshot_fails ~property:"DeadRequiresTombstone" SM.Dead c
-;;
 
 let test_snapshot_derive_disagreement () =
   let c = SM.default_conditions in

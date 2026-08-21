@@ -84,7 +84,6 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Stopped: phaseMetaFromToken('Stopped', 'stopped'),
   Crashed: phaseMetaFromToken('Crashed', 'crashed'),
   Restarting: phaseMetaFromToken('Restarting', 'restarting'),
-  Dead: phaseMetaFromToken('Dead', 'dead'),
   // `active` / `busy` are wire synonyms of `running` (see
   // KEEPER_STATUS_ALIASES in fleet-tone.ts) — same word, same sentence.
   active: phaseMetaFromToken('active', 'running'),
@@ -339,9 +338,7 @@ function agentBand(status: string | undefined | null): RuntimeBand {
   // Active|Busy|Listening|Inactive, plus `dashboard_mission_agents.ml:206-207`
   // adds `"offline" | "unknown"` via typed-union bypass.
   //
-  // Wire-format audit 2026-05-20: `rg -n '"dead"|"left"' lib/` returned
-  // zero hits in the `agent.status` slot — `"dead"` belongs to
-  // `Fiber_dead`/`KH_dead`/`subsystem_health`, `"left"` belongs to
+  // Wire-format audit 2026-05-20: `"left"` belongs to
   // `Span_left` (different axis vocabularies). Defensive arms for
   // those tokens dropped.
   //

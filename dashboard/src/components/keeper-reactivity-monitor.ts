@@ -179,7 +179,7 @@ const DEFAULT_REACTIVITY_VIEW: ReactivityView = 'health'
 const VIEW_CHIPS: Array<{ key: ReactivityView; label: string; title?: string }> = [
   { key: DEFAULT_REACTIVITY_VIEW, label: '상태 그리드',     title: '전체 키퍼 phase/활동 빠른 뷰' },
   { key: 'lifecycle',        label: '상태 전환',       title: '키퍼 FSM 전환 타임라인' },
-  { key: 'events', label: '생명주기 이벤트', title: '수퍼바이저 생명주기 이벤트 (Started, Restarted, Dead_cleaned 등)' },
+  { key: 'events', label: '생명주기 이벤트', title: '수퍼바이저 생명주기 이벤트 (Started, Restarted, Supervisor_cleaned 등)' },
   { key: 'pause',            label: '일시정지',        title: '현재 일시정지된 키퍼' },
 ]
 

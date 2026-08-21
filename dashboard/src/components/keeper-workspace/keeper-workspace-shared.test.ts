@@ -45,7 +45,6 @@ describe('keeperStatusTone', () => {
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Failing' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Overflowed' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Crashed' }))).toBe('bad')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Dead' }))).toBe('bad')
   })
   it('maps transient phases to busy (working-through, not paused)', () => {
     // Fleet SSOT PHASE_TONE (lib/fleet-tone.ts) classifies the transient

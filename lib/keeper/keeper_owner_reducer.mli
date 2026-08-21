@@ -63,9 +63,7 @@ type identity_handoff =
   ; updated_at : string
   }
 
-type shutdown_latch =
-  | Operator_stopped
-  | Dead_tombstone
+type shutdown_latch = Operator_stopped
 
 type profile_update =
   { instructions : string

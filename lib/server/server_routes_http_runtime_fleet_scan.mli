@@ -17,7 +17,6 @@ type pause_kind = Keeper_activation_readiness.pause_kind =
   | Active
   | Operator_paused
   | Unclassified_paused
-  | Dead_tombstone
   | Transcript_corruption_reset_required
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
@@ -85,7 +84,6 @@ type keeper_phase_detail = {
   last_failure_reason : string option;
   last_error : string option;
   restart_count : int;
-  dead_since_ts : float option;
   latest_crash_at : float option;
   latest_crash_reason : string option;
 }

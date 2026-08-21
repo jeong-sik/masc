@@ -601,7 +601,6 @@ describe('RuntimeLensSection', () => {
           handoff_active: false,
           operator_paused: false,
           stop_requested: false,
-          dead_tombstone_latched: false,
           restart_requested: false,
           drain_complete: false,
           credential_archived: false,

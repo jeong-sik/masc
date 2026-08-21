@@ -37,10 +37,6 @@ let check_history_free_invariants
       (Printf.sprintf "phase=Stopped but stop_requested=%b, drain_complete=%b"
          conditions.stop_requested conditions.drain_complete);
 
-  (* Dead is authorized only by an explicit durable tombstone. *)
-  if phase = SM.Dead && not conditions.dead_tombstone_latched then
-    fail "DeadRequiresTombstone" "phase=Dead but dead_tombstone_latched=false";
-
   (* 9. DerivePhaseAgreement — derive_phase must agree with recorded phase *)
   let derived = SM.derive_phase conditions in
   if derived <> phase then
@@ -63,11 +59,6 @@ let check_step_invariants
   in
 
   (* History-dependent invariants require prev-state. *)
-
-  (* 2. DeadIsForever — Dead in prev implies Dead in new *)
-  if prev_phase = SM.Dead && new_phase <> SM.Dead then
-    fail "DeadIsForever"
-      (Printf.sprintf "was Dead, became %s" (SM.phase_to_string new_phase));
 
   (* 3. StoppedIsForever — Stopped in prev implies Stopped in new *)
   if prev_phase = SM.Stopped && new_phase <> SM.Stopped then

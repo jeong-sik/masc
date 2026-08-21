@@ -26,7 +26,6 @@ type phase =
   | Stopped
   | Crashed
   | Restarting
-  | Dead
 
 let phase_to_string = function
   | Offline -> "offline"
@@ -40,7 +39,6 @@ let phase_to_string = function
   | Stopped -> "stopped"
   | Crashed -> "crashed"
   | Restarting -> "restarting"
-  | Dead -> "dead"
 ;;
 
 let phase_of_string = function
@@ -55,7 +53,6 @@ let phase_of_string = function
   | "stopped" -> Some Stopped
   | "crashed" -> Some Crashed
   | "restarting" -> Some Restarting
-  | "dead" -> Some Dead
   | _ -> None
 ;;
 
@@ -71,6 +68,5 @@ let all_phases =
   ; Stopped
   ; Crashed
   ; Restarting
-  ; Dead
   ]
 ;;

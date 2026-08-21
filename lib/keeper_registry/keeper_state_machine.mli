@@ -18,7 +18,7 @@
     Key invariant: given the same [conditions] and [event], [apply_event]
     always produces the same [transition_result]. *)
 
-(** {1 Phase (13-State Enum)} *)
+(** {1 Phase (11-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
     Buffer states ([Failing], [Overflowed], [Compacting], [HandingOff],
@@ -39,13 +39,12 @@ type phase =
   | Stopped       (** Clean exit, terminal *)
   | Crashed       (** Unrecoverable error, restart candidate *)
   | Restarting    (** Supervisor backoff wait before re-launch *)
-  | Dead          (** Explicit durable tombstone, terminal *)
 
 val phase_to_string : phase -> string
 val phase_of_string : string -> phase option
 val all_phases : phase list
 
-(** [is_terminal phase] is true for Stopped/Dead — phases with no
+(** [is_terminal phase] is true for Stopped — a phase with no
     outgoing transition (see {!can_transition}). Shared by health surfaces
     and the mermaid renderer so the terminal triple is defined once in the
     FSM instead of re-matched at each consumer. *)
@@ -74,8 +73,6 @@ type conditions = {
   (** [meta.paused = true] *)
   stop_requested : bool;
   (** [Atomic.get fiber_stop = true] *)
-  dead_tombstone_latched : bool;
-  (** Explicit durable Dead tombstone observed by lifecycle admission. *)
   restart_requested : bool;
   (** Supervisor has requested immediate restart of a stopped fiber. *)
   drain_complete : bool;
@@ -187,7 +184,6 @@ type entry_action =
   | Start_drain
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
-  | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
   | Cancel_pending_agent_core
@@ -222,7 +218,6 @@ val transition_error_to_string : transition_error -> string
 
     Priority (first match wins) — mirrors the [DerivePhase] action in
     [specs/keeper-state-machine/KeeperStateMachine.tla]:
-    1.  Dead (explicit durable [dead_tombstone_latched])
     2.  Stopped (stop_requested + drain_complete + ~compaction_active +
                  ~handoff_active)
         -- Checked first because a clean drain wins even if the fiber
@@ -241,10 +236,8 @@ val transition_error_to_string : transition_error -> string
     12. Running (fiber_alive)
     13. Offline (default fallback for inconsistent zero-state)
 
-    Drift note: prior to this revision the docstring listed Dead as
-    priority 1; the actual implementation has always checked Stopped
-    first (the TLA+ spec agrees).  The order above is the ground truth
-    enforced by [keeper_state_machine.ml] and TLC. *)
+    The order above is the ground truth enforced by
+    [keeper_state_machine.ml] and TLC. *)
 val derive_phase : conditions -> phase
 
 (** Pure condition updater: given current conditions and an event,
@@ -253,7 +246,7 @@ val derive_phase : conditions -> phase
 val update_conditions : conditions -> event -> conditions
 
 (** Apply an event to the current state: update conditions, derive new phase.
-    Returns [Error] for events on terminal states (Stopped, Dead).
+    Returns [Error] for events on the terminal state (Stopped).
     Pure function — no I/O, no clock. [now] is passed as argument. *)
 val apply_event :
   current_phase:phase ->

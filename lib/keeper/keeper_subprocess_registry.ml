@@ -132,12 +132,12 @@ let drain ~keeper_id ~grace_ms : drain_result =
     }
   end
 
-(* Default cleanup hook: on Tombstone_reaped, drain pids for that
+(* Default cleanup hook: on Supervisor_cleaned, drain pids for that
    keeper. Logs the result; never raises. *)
 let default_hook : Keeper_lifecycle_hooks.hook =
  fun ~keeper_id ev ->
   match ev with
-  | Keeper_lifecycle_hooks.Tombstone_reaped ->
+  | Keeper_lifecycle_hooks.Supervisor_cleaned ->
     let r = drain ~keeper_id ~grace_ms:5000 in
     if r.inspected > 0 then
       Log.Keeper.info

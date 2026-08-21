@@ -554,32 +554,6 @@ let test_resume_owner_commits_for_unregistered_durable_lane () =
          (Queue.to_list (State.pending queue_state) = [ source ]))
 ;;
 
-let test_resume_owner_rejects_dead_tombstone_without_receipt () =
-  with_seeded_owner
-    ~registered:false
-    ~latched_reason:Keeper_latched_reason.Dead_tombstone
-    ~paused:true
-    ~generation:24
-    (fun config keeper_name _source ->
-       let request = resume_request 24 "operator-resume-dead" in
-       (match Resume_transaction.resume config ~keeper_name request with
-        | Error
-            { Resume_transaction.cause = Resume_transaction.Durable_owner_dead_tombstone
-            ; reservation_release = Some release
-            } ->
-          check_resume_released release
-        | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
-        | Ok _ -> Alcotest.fail "Resume_owner revived a Dead tombstone");
-       match
-         Disposition_receipt.load
-           config
-           ~keeper_name
-           ~operator_operation_id:request.operator_operation_id
-       with
-       | Ok None -> ()
-       | Ok (Some _) -> Alcotest.fail "Dead Resume_owner persisted a receipt"
-       | Error detail -> Alcotest.fail detail)
-;;
 
 
 (* Why the recovery commits Pause and not Reset_latch. Both clear the
@@ -732,10 +706,6 @@ let () =
             "Resume_owner commits for unregistered durable lane"
             `Quick
             test_resume_owner_commits_for_unregistered_durable_lane
-        ; Alcotest.test_case
-            "Resume_owner rejects Dead tombstone without receipt"
-            `Quick
-            test_resume_owner_rejects_dead_tombstone_without_receipt
         ; Alcotest.test_case
             "Resume_owner rejects transcript reset without receipt"
             `Quick

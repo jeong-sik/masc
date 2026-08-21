@@ -493,7 +493,6 @@ let register_with_state_result
     ; done_r
     ; restart_count = 0
     ; last_restart_ts = 0.0
-    ; dead_since_ts = None
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = None
@@ -735,7 +734,6 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; done_r
     ; restart_count = 0
     ; last_restart_ts = 0.0
-    ; dead_since_ts = None
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = None
@@ -1032,15 +1030,6 @@ let all ?base_path () =
 ;;
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
-
-let mark_dead ~base_path name ~at =
-  Error_tracking.mark_dead
-    ~base_path
-    name
-    ~at
-    ~decr_running_count_clamped
-    ~update_entry:update_entry_unit
-;;
 
 let record_restart ~base_path name =
   Error_tracking.record_restart ~base_path name ~update_entry:update_entry_unit

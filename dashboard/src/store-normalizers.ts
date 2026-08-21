@@ -52,7 +52,7 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   // Backend aliases that normalize to canonical AgentStatus tokens.
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
-  if (raw === 'dead' || raw === 'left') return 'offline'
+  if (raw === 'left') return 'offline'
   // Canonical tokens — validated by parseAgentStatus SSOT.
   return parseAgentStatus(raw) ?? undefined
 }

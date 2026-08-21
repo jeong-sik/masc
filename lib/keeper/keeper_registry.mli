@@ -66,8 +66,8 @@ type register_restarting_error =
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the
-    replacement fiber launches. Durable pause or Dead-tombstone admission is
-    checked by the caller before this registration CAS. *)
+    replacement fiber launches. Durable pause admission is checked by the
+    caller before this registration CAS. *)
 val register_restarting :
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result
@@ -387,13 +387,8 @@ val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 val is_running : base_path:string -> string -> bool
 
 (** Check if a keeper has ANY registry entry (regardless of state).
-    Used by reconcile to skip Crashed/Dead keepers. *)
+    Used by reconcile to skip keepers already owned by the registry. *)
 val is_registered : base_path:string -> string -> bool
-
-(** Restore an already-authoritative durable Dead tombstone into the in-memory
-    registry. Runtime failures, cancellation, retry exhaustion, and resource
-    observations must never call this function. *)
-val mark_dead : base_path:string -> string -> at:float -> unit
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option

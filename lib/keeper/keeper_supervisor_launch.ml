@@ -727,7 +727,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
 (* ── Sweep and recover ───────────────────────────────────── *)
 
 (** Reconcile only orphaned or cleanly stopped durable keepers.
-    Running/Paused/Crashed/Dead entries are actively managed by sweep
+    Running/Paused/Crashed entries are actively managed by sweep
     and must NOT be re-launched by reconcile. Stopped entries with
     unresolved fibers (done_p = None) are also skipped — sweep will
     handle them once the fiber terminates. *)
@@ -741,12 +741,6 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
     ~supervise_keepalive
     ~load_or_materialize_keeper_meta
     ctx
-;;
-
-(* Dead-tombstone cleanup submits a durable exact-lane finalization operation;
-   completion events/hooks are delivered from its durable receipt. *)
-let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_entry) =
-  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone ctx entry
 ;;
 
 (** Cohort key from structured failure_reason ADT.

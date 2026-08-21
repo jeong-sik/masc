@@ -423,7 +423,7 @@ let test_predicate_rejects_retain_meta_intents () =
            (owner_not_found label))
     in
     check_reason "ownerless-retain-operator" Operator_stop_retain_meta;
-    check_reason "ownerless-retain-tombstone" Dead_tombstone_cleanup)
+    check_reason "ownerless-retain-tombstone" Supervisor_cleanup)
 ;;
 
 (* The cases above enter through [recover_operation_with_corrupt_owner_fence].
@@ -497,11 +497,6 @@ let test_boot_recovery_rejects_ownerless_operator_retain () =
     Operator_stop_retain_meta
 ;;
 
-let test_boot_recovery_rejects_ownerless_dead_tombstone () =
-  check_boot_recovery_rejects_ownerless_retain_intent
-    "ownerless-blocked-dead-tombstone"
-    Dead_tombstone_cleanup
-;;
 
 let check_corrupt_sibling_does_not_hide_ownerless_retain label reason =
   with_workspace (fun ~config ->
@@ -554,11 +549,6 @@ let test_corrupt_sibling_does_not_hide_ownerless_operator_retain () =
     Operator_stop_retain_meta
 ;;
 
-let test_corrupt_sibling_does_not_hide_ownerless_dead_tombstone () =
-  check_corrupt_sibling_does_not_hide_ownerless_retain
-    "ownerless-corrupt-dead-tombstone"
-    Dead_tombstone_cleanup
-;;
 
 let pending_completion_operation name =
   let evidence = finalized_after_removal_evidence name in
@@ -661,10 +651,6 @@ let () =
             `Quick
             test_boot_recovery_rejects_ownerless_operator_retain
         ; Alcotest.test_case
-            "ownerless dead-tombstone inconsistency fails boot recovery"
-            `Quick
-            test_boot_recovery_rejects_ownerless_dead_tombstone
-        ; Alcotest.test_case
             "failed pending completion keeps admission fenced"
             `Quick
             test_boot_recovery_keeps_failed_pending_completion_fenced
@@ -700,10 +686,6 @@ let () =
             "corrupt sibling does not hide ownerless operator-retain"
             `Quick
             test_corrupt_sibling_does_not_hide_ownerless_operator_retain
-        ; Alcotest.test_case
-            "corrupt sibling does not hide ownerless dead-tombstone"
-            `Quick
-            test_corrupt_sibling_does_not_hide_ownerless_dead_tombstone
         ] )
     ]
 ;;

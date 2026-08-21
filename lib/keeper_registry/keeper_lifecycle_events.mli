@@ -6,7 +6,7 @@ type t =
   | Started
   | Reconciled
   | Restarted
-  | Dead_cleaned
+  | Supervisor_cleaned
   | Purged
   | Admission_denied
 

@@ -46,7 +46,7 @@ val list
   -> filter:annotation_filter
   -> unit
   -> annotation list
-(** Read all annotations for the codebase. Tombstoned entries
+(** Read all annotations for the codebase. Deleted entries
     are excluded. Sorted by [created_at_ms] descending (newest first). *)
 
 val delete
@@ -57,7 +57,7 @@ val delete
   -> ?expected_version:int64
   -> unit
   -> (unit, string) result
-(** Soft-delete: append a tombstone record. Only the original
+(** Soft-delete: append a deletion record. Only the original
     [keeper_id] may delete its own annotation. The [codebase] must
     match the one the annotation was created under.
 
@@ -69,7 +69,7 @@ val delete
 
 val compact : base_dir:string -> codebase:string -> unit -> unit
 (** Append a compaction snapshot marker that lets readers ignore earlier
-    tombstoned state while replaying records written during the compaction
+    deleted_ids state while replaying records written during the compaction
     window. *)
 
 val annotation_kind_of_string : string -> annotation_kind option

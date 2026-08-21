@@ -421,9 +421,7 @@ let () =
     let entries = Runtime_params.registry () in
     let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
     Alcotest.(check bool) "keeper.keepalive_interval_sec"
-      true (has "keeper.keepalive_interval_sec");
-    Alcotest.(check bool) "keeper.dead_ttl_sec"
-      true (has "keeper.dead_ttl_sec")
+      true (has "keeper.keepalive_interval_sec")
   in
 
   let test_keeper_lifecycle_surface () =
@@ -436,7 +434,7 @@ let () =
     match keeper_surface with
     | None -> Alcotest.fail "keeper_lifecycle surface not found"
     | Some s ->
-        Alcotest.(check int) "param count" 3 (List.length s.param_keys);
+        Alcotest.(check int) "param count" 2 (List.length s.param_keys);
         Alcotest.(check bool) "has supervisor_sweep_sec"
           true (List.mem "keeper.supervisor_sweep_sec" s.param_keys)
   in

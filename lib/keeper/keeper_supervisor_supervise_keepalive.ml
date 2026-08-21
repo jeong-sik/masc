@@ -321,8 +321,7 @@ let supervise_keepalive
         | Keeper_state_machine.Paused
         | Keeper_state_machine.Stopped
         | Keeper_state_machine.Crashed
-        | Keeper_state_machine.Restarting
-        | Keeper_state_machine.Dead ->
+        | Keeper_state_machine.Restarting ->
           Log.Keeper.debug
             "%s: supervisor keepalive retained existing %s owner for lifecycle sweep"
             meta.name

@@ -59,7 +59,6 @@ export type KeeperPhaseToken =
   | 'stopped'
   | 'unbooted'
   | 'crashed'
-  | 'dead'
   | 'idle'
   | 'listening'
   | 'offline'
@@ -104,7 +103,6 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
       stopped: 'idle',
       unbooted: 'idle',
       crashed: 'bad',
-      dead: 'bad',
       // Alive between turns. `ROSTER_BAND_TONE.active = 'ok'`
       // (`agent-roster.ts`) already routes this band to `ok`; matching it
       // keeps the dot colour of an idle keeper the same on both surfaces.
@@ -139,7 +137,6 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
       stopped: '중지',
       unbooted: '미기동',
       crashed: '비정상 종료',
-      dead: '종료됨',
       // Words taken from the existing `statusLabel` SSOT
       // (`lib/status-label.ts`) rather than coined here, so the generic
       // status vocabulary and the keeper vocabulary agree on these keys.
@@ -177,7 +174,6 @@ export const PHASE_DESCRIPTION_KO: Readonly<Record<KeeperPhaseToken, string>> =
       stopped: '정상 정지된 런타임입니다.',
       unbooted: '등록만 되어 있고 아직 부팅되지 않았습니다.',
       crashed: 'fiber가 비정상적으로 종료되었습니다.',
-      dead: '명시적인 tombstone으로 종료된 상태입니다.',
       idle: '프로세스는 살아 있지만 현재 턴 작업 없음',
       listening: '프로세스는 살아 있고 입력을 기다리고 있습니다.',
       offline: '런타임 연결을 확인하지 못했습니다.',

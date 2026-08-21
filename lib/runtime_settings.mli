@@ -28,9 +28,6 @@ val keeper_keepalive_interval_sec : int Runtime_params.param
 (** Heartbeat interval (seconds). Any positive value is accepted without an
     implicit upper bound. *)
 
-val keeper_dead_ttl_sec : float Runtime_params.param
-(** Dead-state retention (seconds).  Range \[60.0, 1 day\]. *)
-
 (** {1 Keeper diagnostics} *)
 
 val keeper_snapshot_sec : int Runtime_params.param

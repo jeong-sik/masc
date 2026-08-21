@@ -93,7 +93,6 @@ const KeeperPhaseDiagnosisSchema = object({
     handoff_active: boolean(),
     operator_paused: boolean(),
     stop_requested: boolean(),
-    dead_tombstone_latched: boolean(),
     restart_requested: boolean(),
     drain_complete: boolean(),
     credential_archived: boolean(),

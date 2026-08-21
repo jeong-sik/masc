@@ -78,7 +78,7 @@ let notes ~base_dir ~keeper_name : (string * string) list =
     try
       (* Latest row wins per speaker; insertion order of first
          appearance is irrelevant to callers (roster sorts on its own
-         keys). Blank note = tombstone. *)
+         keys). A blank note deletes the entry. *)
       let tbl : (string, string) Hashtbl.t = Hashtbl.create 8 in
       let (), _boundary =
         Fs_compat.fold_appended_lines ~path ~from:0 ~init:()

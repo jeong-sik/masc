@@ -138,13 +138,59 @@ API 응답의 `cancelled: true` 는 **턴이 종료됐다**로 읽힌다.
 4. `KeeperTurnFSM.tla` 에 `ToolTimeout` 액션 추가, buggy 모델로 검증
    (clean spec 은 liveness 통과, `NextBuggy` 는 위반해야 유효)
 
+## 4-bis. 실측 보강 (2026-08-21) — 기존 타임아웃은 idle 만 재고, 총 시간은 아무도 재지 않는다
+
+초판은 `awaiting_tool` 만 다뤘다. 같은 날 관측에서 **`streaming` 도 같은 구멍을 공유한다**는 것이 드러났고,
+`turn-timeout-s` 가 왜 이 문제를 잡지 못하는지도 확인됐다.
+
+### `turn-timeout-s` 는 line-idle 이지 wall-clock 이 아니다
+
+`[models.gemini-3-6-flash-high]` 에 `turn-timeout-s = 600.0` 이 선언돼 있고, 코드도 이를 읽는다
+(`runtime_toml` → `Runtime.turn_timeout_s_of_runtime_id` → `Runtime_inference.resolve_turn_timeout_s`).
+적용 지점은 `runtime_antigravity.ml:708`:
+
+```ocaml
+while Option.is_none !state.result do
+  let timeout_s = timeout_s_for_phase config ~turn_admitted:(Option.is_some !state.init) in
+  let line = with_optional_timeout clock timeout_s (fun () -> Eio.Buf_read.line reader) in
+  ...
+done
+```
+
+**타임아웃은 "한 줄 읽기" 에 걸린다.** 600 초 동안 아무 줄도 오지 않으면 끊는다. 소스 주석도 그렇게 말한다 —
+*"the deadline exists to notice a client that has gone silent, not to cap how long legitimate work may take"*.
+
+즉 클라이언트가 조금씩이라도 계속 뱉으면 **몇 시간이 걸려도 발동하지 않는다.** 설계대로다.
+
+### 실측: 6시간 15분 턴
+
+```
+02:56:34  taskmaster  awaiting_tool -> streaming  action=ToolReturned   (도구 5개 모두 통과)
+09:11:07  taskmaster  streaming -> failed:provider_error                 (6시간 15분 후)
+```
+
+`turn-timeout-s = 600` 이 걸려 있는 런타임에서 나온 값이다. line-idle 은 한 번도 발동하지 않았고,
+턴은 결국 provider 오류로 끝났다. 그 사이 이 keeper 의 이벤트 큐 pending 은 88 -> 93 으로 늘었다.
+
+### 그래서 범위가 넓어진다
+
+| 상태 | 기존 수단 | 갭 |
+|---|---|---|
+| `awaiting_tool` | 없음 | 도구가 반환하지 않으면 영구 (초판 §2.1) |
+| `streaming` | `turn-timeout-s` (**line-idle**) | 조금씩 계속 오면 총 시간 무제한 |
+
+**둘은 다른 상태지만 같은 뿌리다 — 턴 전체의 wall-clock 상한이 어디에도 없다.**
+`stale_turn_timeout` 이 이름만 있고 배선이 없다는 초판의 관측이 여기에도 그대로 적용된다.
+
+따라서 이 RFC 의 대상은 "`awaiting_tool` 탈출구" 보다 넓게 **턴의 wall-clock liveness** 로 읽는 것이 정확하다.
+
 ## 5. 결정이 필요한 항목
 
 이 RFC 가 정하지 않고 남기는 것들이다.
 
 | # | 항목 | 제약 |
 |---|---|---|
-| D1 | `ToolTimeout` 값 | **하한은 45분** — masc#29052 에 45분 정상 장기 턴 사례가 있다. 짧게 잡으면 정상 턴을 죽인다. 관측된 hang 은 63분+ 이므로 그 사이 또는 그 이상 |
+| D1 | wall-clock 상한 값 | **하한 45분** (masc#29052 정상 장기 턴). **관측 상한 6시간 15분** (2026-08-21 taskmaster, §4-bis) — 이 턴은 provider 오류로 끝났을 뿐 타임아웃에 걸린 것이 아니다. 45분과 6시간 사이에서 정해야 하며, 짧으면 정상 턴을 죽이고 길면 이번 사례를 못 잡는다 |
 | D2 | 만료 기록 형식 | `outcome=receipt_cancelled` 선례에 맞출지, 별도 `receipt_timed_out` 을 둘지 |
 | D3 | `interrupt` 응답 스키마 | `cancelled` 의미를 바꿀지(계약 변경), 필드를 추가할지(하위 호환). 대시보드 소비자 확인 필요 |
 | D4 | 만료된 도구 호출의 처리 | 결과를 버릴지, 늦게 도착하면 무시할지 |

@@ -132,14 +132,14 @@ jobs:
               'Find the offending commit with `git log --oneline` and revert or fix forward.',
               '',
               'This issue is auto-created so a broken main does not stay invisible.',
-                          '',
+              '',
               '```masc-triage',
               'kind: defect',
               'area: ci',
               'impact: internal',
               'must-do: true',
               '```',
-].join('\n');
+            ].join('\n');
 
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner,

@@ -15,7 +15,7 @@ This RFC separates two conflated concepts — a **tuned per-provider timeout** (
 - `keeper_agent_run.ml:498-509`: comment states agent_core `stream_idle_timeout_s` "bounds inter-line idle on HTTP streams", and "`[None]` is carried unchanged: neither MASC nor agent_core may infer a provider/model default." The value is `Keeper_runtime_resolved.stream_idle_timeout_sec () : float option` (`:503-504`), passed at `:597` as `?stream_idle_timeout_s`.
 - `env_config_keeper.ml:559-570`: `stream_idle_timeout_sec ()` reads `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC`; absent → `None`.
 - Consequence: with the env var unset (the default deployment posture), a provider stream that stalls after emitting partial output is never cancelled. The keeper's turn fiber blocks on the stream read; the chat lane makes no further progress until an external restart. `body_timeout_s` (`body_timeout_override_sec`) is likewise opt-in and does not bound *inter-chunk* idle.
-- #25128 (created 2026-07-18, label `triage-required`) records the 30+ minute freeze. The team treats it as a bug, not intended behavior.
+- #25128 (created 2026-07-18) records the 30+ minute freeze. The team treats it as a bug, not intended behavior.
 
 The tension: the "no inferred default" rule exists so masc/agent_core never silently truncate a **slow-but-alive** stream (a provider legitimately pausing between tokens) by guessing a provider-tuned value. That rationale is sound. But it currently also permits the **degenerate** case (never-progressing stream) to hang forever.
 

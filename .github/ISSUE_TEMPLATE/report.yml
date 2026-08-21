@@ -1,0 +1,55 @@
+name: File an issue
+description: Humans and keepers file in the same shape.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Classification comes from the declaration block below and nothing else.
+        The vocabulary SSOT is [`.github/issue-taxonomy.json`](https://github.com/jeong-sik/masc/blob/main/.github/issue-taxonomy.json);
+        the `Issue Taxonomy` workflow reads the block and applies the labels. Do not set labels by hand.
+
+        Filing with `gh issue create`? Put the same fenced `masc-triage` block in the body.
+
+  - type: textarea
+    id: taxonomy
+    attributes:
+      label: Taxonomy declaration
+      description: |
+        kind: defect | gap | capability | erosion | inquiry
+        area: turn | continuity | collab | goal-task | verification | tools | runtime | transport | dashboard | connector | observability | persistence | ci
+        impact: breaks-continuity | breaks-collab | blinds-operator | degrades | internal
+        root: optional, comma separated - ssot | silent | string | variant | boundary | telemetry | det | ndt
+        must-do: true when this breaks the product promise right now
+      render: masc-triage
+      value: |
+        kind:
+        area:
+        impact:
+        root:
+        must-do: false
+    validations:
+      required: true
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: What happens. Observed behavior only.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Command, environment, input. Say so if it was not reproduced.
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: file:line, logs, PR numbers. Separate what was observed from what is inferred.
+    validations:
+      required: false

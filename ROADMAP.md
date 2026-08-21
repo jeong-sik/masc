@@ -27,7 +27,7 @@ Scope levels:
 | GitHub planning hygiene | Make issues, PRs, and releases reflect product reality instead of drifting | `type:*` exists, but `target:*` and release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
 | Scope hardening | Tighten the parts of the product users actually depend on first | CI truth, transport truth, config visibility, and release truth are blocking trust | `CHANGELOG.md`, `docs/spec/SPEC-INDEX.md`, open issues below |
 
-## target:now
+## Now
 
 Items that directly affect the current product scope:
 
@@ -45,7 +45,7 @@ Items that directly affect the current product scope:
   - README / roadmap / changelog alignment
   - issue / PR / release hygiene automation
 
-## target:next
+## Next
 
 Items that improve advanced workflows after the front-door scope is cleaner:
 
@@ -55,7 +55,7 @@ Items that improve advanced workflows after the front-door scope is cleaner:
   - clearer runtime / model visibility in proof
 - richer operator diagnosis bundles and deeper read confidence
 
-## target:later
+## Later
 
 Important work that stays visible but does not drive the next 6-8 weeks:
 
@@ -79,7 +79,7 @@ Important work that stays visible but does not drive the next 6-8 weeks:
 - Historical `v2.*` tags remain audit history only; they do not define the active SemVer policy.
 - Do not tag a release while `release-blocker` issues remain open.
 - Do not tag a release while version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
-- Prefer `target:now`, `target:next`, and `target:later` over vague backlog buckets.
+- Order the backlog by `impact/*`, which is ranked by which product failure the issue causes.
 
 ## Completed Reference Points
 

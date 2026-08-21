@@ -1,0 +1,206 @@
+{
+  "$comment": "이슈 분류 어휘의 SSOT. 라벨과 게이트는 전부 이 파일에서 파생된다. 여기 없는 값은 존재하지 않는다.",
+  "declaration_block_language": "masc-triage",
+  "axes": {
+    "kind": {
+      "values": {
+        "defect": {
+          "label": "kind/defect",
+          "color": "1d76db",
+          "description": "[kind] 구현이 계약을 어긴다 — 동작이 틀리거나 회귀"
+        },
+        "gap": {
+          "label": "kind/gap",
+          "color": "1d76db",
+          "description": "[kind] 계약·배선이 없다 — 이름만 있고 연결 안 됨, 미구현"
+        },
+        "capability": {
+          "label": "kind/capability",
+          "color": "1d76db",
+          "description": "[kind] 새 표면·기능 요구"
+        },
+        "erosion": {
+          "label": "kind/erosion",
+          "color": "1d76db",
+          "description": "[kind] 죽은 코드·실험 잔재·틀린 문서 — 지울 것"
+        },
+        "inquiry": {
+          "label": "kind/inquiry",
+          "color": "1d76db",
+          "description": "[kind] 결함 여부 미확정 — 조사·실측 필요"
+        }
+      },
+      "required": true,
+      "cardinality": "one"
+    },
+    "area": {
+      "values": {
+        "turn": {
+          "label": "area/turn",
+          "color": "5319e7",
+          "description": "[area] 턴 진행·스케줄러·DrainQueue·자율 루프"
+        },
+        "continuity": {
+          "label": "area/continuity",
+          "color": "5319e7",
+          "description": "[area] 컨텍스트·컴팩션·메모리·회상"
+        },
+        "collab": {
+          "label": "area/collab",
+          "color": "5319e7",
+          "description": "[area] Keeper 간 통신·Broadcast·Board·Comment"
+        },
+        "goal-task": {
+          "label": "area/goal-task",
+          "color": "5319e7",
+          "description": "[area] Goal·Task·Plan 도메인"
+        },
+        "verification": {
+          "label": "area/verification",
+          "color": "5319e7",
+          "description": "[area] Verifier·Judge·Judge-of-Judge·Fusion·교차검증"
+        },
+        "tools": {
+          "label": "area/tools",
+          "color": "5319e7",
+          "description": "[area] 도구 카탈로그·Multi/Async/Batch·Sandbox·MCP"
+        },
+        "runtime": {
+          "label": "area/runtime",
+          "color": "5319e7",
+          "description": "[area] 프로바이더·모델·런타임 페일오버"
+        },
+        "transport": {
+          "label": "area/transport",
+          "color": "5319e7",
+          "description": "[area] auth·health·프로토콜·전송 계층"
+        },
+        "dashboard": {
+          "label": "area/dashboard",
+          "color": "5319e7",
+          "description": "[area] 대시보드·읽기 모델·뷰어"
+        },
+        "connector": {
+          "label": "area/connector",
+          "color": "5319e7",
+          "description": "[area] Slack·Discord 등 외부 출력 경로"
+        },
+        "observability": {
+          "label": "area/observability",
+          "color": "5319e7",
+          "description": "[area] 로그·메트릭·트레이스·스트리밍 관측"
+        },
+        "persistence": {
+          "label": "area/persistence",
+          "color": "5319e7",
+          "description": "[area] 저장소·원장·체크포인트·파일시스템"
+        },
+        "ci": {
+          "label": "area/ci",
+          "color": "5319e7",
+          "description": "[area] CI·빌드·릴리스·ratchet"
+        }
+      },
+      "required": true,
+      "cardinality": "one"
+    },
+    "impact": {
+      "values": {
+        "breaks-continuity": {
+          "label": "impact/breaks-continuity",
+          "color": "b60205",
+          "description": "[impact 1] 턴이 끊기거나 기억이 안 이어진다 — 제품 정의상 실패"
+        },
+        "breaks-collab": {
+          "label": "impact/breaks-collab",
+          "color": "d93f0b",
+          "description": "[impact 2] Keeper 간 소통이 끊긴다"
+        },
+        "blinds-operator": {
+          "label": "impact/blinds-operator",
+          "color": "e99695",
+          "description": "[impact 3] 돌긴 도는데 보이지 않는다"
+        },
+        "degrades": {
+          "label": "impact/degrades",
+          "color": "fbca04",
+          "description": "[impact 4] 마찰·성능·정확도 저하"
+        },
+        "internal": {
+          "label": "impact/internal",
+          "color": "c5c5c5",
+          "description": "[impact 5] 개발 흐름에만 영향"
+        }
+      },
+      "required": true,
+      "cardinality": "one",
+      "severity_order": [
+        "breaks-continuity",
+        "breaks-collab",
+        "blinds-operator",
+        "degrades",
+        "internal"
+      ]
+    },
+    "root": {
+      "values": {
+        "ssot": {
+          "label": "root/ssot",
+          "color": "d4a017",
+          "description": "[root] 같은 진실이 여러 곳에 — SSOT 위반"
+        },
+        "silent": {
+          "label": "root/silent",
+          "color": "d4a017",
+          "description": "[root] Silent failure — 실패를 기본값·fail-open 으로 삼킴"
+        },
+        "string": {
+          "label": "root/string",
+          "color": "d4a017",
+          "description": "[root] 문자열·정규식 비교로 분기 — 구조적 파싱 부재"
+        },
+        "variant": {
+          "label": "root/variant",
+          "color": "d4a017",
+          "description": "[root] 와일드카드가 분기를 삼킴 — 비망라 매치"
+        },
+        "boundary": {
+          "label": "root/boundary",
+          "color": "d4a017",
+          "description": "[root] 경계 위반 — 의존성 역방향, 책임 침범"
+        },
+        "telemetry": {
+          "label": "root/telemetry",
+          "color": "d4a017",
+          "description": "[root] 관측 공백 — 메트릭·스팬·상관관계 누락"
+        },
+        "det": {
+          "label": "root/det",
+          "color": "d4a017",
+          "description": "[root] 결정론 가정 — 단일 입력 모양 가정, 경쟁 미모델링"
+        },
+        "ndt": {
+          "label": "root/ndt",
+          "color": "d4a017",
+          "description": "[root] 비결정론 미수용 — 재시도·폴백·지터 부재"
+        }
+      },
+      "required": false,
+      "cardinality": "many"
+    }
+  },
+  "flags": {
+    "must-do": {
+      "label": "must-do",
+      "color": "000000",
+      "description": "반드시 처리 — 지금 제품 약속을 깨고 있다"
+    }
+  },
+  "standalone_labels": {
+    "epic": {
+      "label": "epic",
+      "color": "0e4b99",
+      "description": "상위 추적 이슈"
+    }
+  }
+}

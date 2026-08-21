@@ -2,11 +2,6 @@ type capability = Invoke_turn
 
 type target = Keeper of Keeper_id.Keeper_name.t
 
-(* [capability] is validated on the way in by [optional_capability_of_json]
-   and was then stored and never read. The validation stays -- an explicit
-   wrong value is still refused -- but a field with one legal value that
-   nothing consults is a menu with no dishes. A second capability would add it
-   back together with the code that reads it. *)
 type request =
   { target : target
   ; prompt : string
@@ -207,8 +202,8 @@ let request_of_json json =
   in
   let* target_json = required_field ~field:"delegate" "target" fields in
   let* target = target_of_json target_json in
-  (* Validated and discarded: an explicit wrong value is still refused here,
-     which is the whole of what the field does. *)
+  (* The wire field is validated and not carried: an explicit wrong value is
+     refused here. *)
   let* (Invoke_turn : capability) =
     optional_capability_of_json
       ~field:"delegate.capability"

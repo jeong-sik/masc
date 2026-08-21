@@ -136,9 +136,8 @@ module Lease = struct
       Held.remove held token)
 end
 
-(* The open file is not carried here. [Eio.Path.open_out ~sw] gives the
-   switch ownership of the descriptor and of the lock held on it, so a second
-   reference in this record kept nothing alive and nothing read it. *)
+(* [Eio.Path.open_out ~sw] gives the switch ownership of the descriptor and
+   of the lock held on it. *)
 type lock_handle =
   { path : Eio.Fs.dir_ty Eio.Path.t
   ; stat : Eio.File.Stat.t

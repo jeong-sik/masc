@@ -1489,10 +1489,8 @@ type ledger_stat_key =
   ; stat_size : int
   }
 
-(* Compared field by field rather than with [=]: the record carries a float,
-   and polymorphic compare on a float is the one case where two values that
-   should match do not. Reading each field is also what tells the compiler
-   these are used. *)
+(* Compared field by field rather than with [=], so each field has a named
+   reader the compiler can see. *)
 let ledger_stat_key_equal left right =
   Int.equal left.stat_dev right.stat_dev
   && Int.equal left.stat_ino right.stat_ino

@@ -8,10 +8,8 @@ type target_ref = Target_ref of string
 type catalog_generation = Catalog_generation of string
 type catalog_evidence = Catalog_evidence of string
 
-(* [identity_fingerprint] already hashes the provider id, model id, base url
-   and request path along with the rest of the binding, and it is the only
-   thing read back out. Keeping the four beside their own hash stored the same
-   facts twice with nothing to keep the copies honest. *)
+(* [identity_fingerprint] hashes the provider id, model id, base url and
+   request path along with the rest of the binding. *)
 type target_identity =
   { target_ref : target_ref
   ; fingerprint : string

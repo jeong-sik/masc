@@ -1,9 +1,7 @@
 module Exec = Exact_output_execution
 
 (* Everything the trace attests to is folded into [payload] and hashed into
-   [fingerprint], which is the only thing read: [equal] compares fingerprints
-   and the .mli exposes nothing else. The components were stored a second time
-   beside the hash of themselves. *)
+   [fingerprint]; [equal] compares fingerprints. *)
 type t = { fingerprint : string }
 
 type raw_response =

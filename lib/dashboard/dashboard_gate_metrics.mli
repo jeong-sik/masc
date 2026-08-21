@@ -3,7 +3,7 @@
 
     Two ingestion paths backing the public surface:
     - In-memory ring of recent tool-skip events fed by
-      {!record_tool_skipped} (called from [Keeper_hooks_agent_core]).
+      {!record_tool_skipped} (the [Keeper_keepalive_signal] callback).
     - Workspace-scoped durable approval queue reads.
 
     The ring buffer, rejection event record, and supporting helpers

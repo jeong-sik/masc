@@ -18,13 +18,10 @@
 ;
 ; Warning 69 (unused record field) joins it for the same reason, one level
 ; down: 32 stops a value that lost its last caller, 69 stops a field that lost
-; its last reader. The sweep that turned it on found 14 fields nothing read --
-; nine of them a hash's own ingredients stored beside the hash, and one
-; holding tool output measured at 624 KB -- and four records whose fields were
-; only ever compared with polymorphic [=] or hashed by the generic table.
-; That second group is why this is worth a build error rather than a report:
-; [=] and [Hashtbl.hash] do not read fields, they read memory, and every one
-; of those four carried a float, where that difference is a real one.
+; its last reader. A field that only ever meets polymorphic [=] or
+; [Hashtbl.hash] counts as unread, because neither names the field; the
+; compiler cannot see that participation, so such records compare field by
+; field.
 (env
  (dev
   (flags

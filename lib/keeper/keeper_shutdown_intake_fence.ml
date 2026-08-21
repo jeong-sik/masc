@@ -33,8 +33,6 @@ type 'a transfer_intake_result =
   | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
-(* The Hashtbl key is already [registry_key ~base_path keeper_name], so a slot
-   carrying them again stored the key twice and read neither copy. *)
 type slot =
   { intake_mu : Eio.Mutex.t
   ; state_mu : Stdlib.Mutex.t

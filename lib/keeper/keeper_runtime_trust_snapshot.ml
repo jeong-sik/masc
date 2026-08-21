@@ -35,12 +35,14 @@ module Snapshot_cache = struct
       && Int.equal left.approval_queue_revision right.approval_queue_revision
     ;;
 
+    (* [Float.equal] treats -0. and 0. as equal and NaN as equal to itself;
+       [Hashtbl.hash] normalises both the same way, so equal keys hash alike. *)
     let hash key =
       Hashtbl.hash
         ( key.base_path
         , key.keeper_name
         , key.generation
-        , Int64.bits_of_float key.last_turn_ts
+        , key.last_turn_ts
         , key.approval_queue_revision )
     ;;
   end

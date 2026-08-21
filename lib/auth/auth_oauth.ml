@@ -180,8 +180,6 @@ type pending_grant =
   ; agent_name : string
   ; bootstrap_token_hash : string
   ; role : agent_role
-  (* [issued_at_unix] lived here beside the expiry it was only ever used to
-     compute; the grant is judged by [expires_at_unix] alone. *)
   ; expires_at_unix : float
   }
 

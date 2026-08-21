@@ -3,9 +3,10 @@
 
     Two data sources:
     1. In-memory ring of recent tool-skip events recorded via
-       [record_tool_skipped]. Called from [Keeper_hooks_agent_core.broadcast_tool_skipped]
-       to capture the same (tool_name, reason_code) emitted on SSE. The ring
-       gives operators a "last N minutes" view without tailing JSONL.
+       [record_tool_skipped], registered at module initialisation as the
+       [Keeper_keepalive_signal.record_tool_skipped] callback so the ring
+       carries the same (tool_name, reason_code) the SSE stream emits. The
+       ring gives operators a "last N minutes" view without tailing JSONL.
     2. Live approval queue state returned by
        [Keeper_approval_queue.list_pending_entries_for_workspace]. Approval queue metrics
        are computed from the current pending set; this module does not parse
@@ -24,10 +25,6 @@ type rejection_event = {
   tool_name : string;
   reason_code : string;
 }
-(* The ring's contract is (tool_name, reason_code), the pair the SSE stream
-   carries. [keeper_name] was threaded from every caller into this record and
-   read by nothing -- a breakdown axis nobody ever grouped by. *)
-
 let max_ring_size = 43200
 (** Bounded ring buffer to prevent unbounded memory growth.
     43200 events at ~1 skip/sec sustained covers 12 hours, matching
@@ -79,8 +76,9 @@ let record_tool_skipped_with_append ~append ~tool_name ~reason_code =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> record_tool_skipped_failure exn
 
-(** Record a tool-skip event. Called from [Keeper_hooks_agent_core.broadcast_tool_skipped]
-    so the in-memory ring stays in sync with the SSE event stream. *)
+(** Record a tool-skip event. Installed as the
+    [Keeper_keepalive_signal.record_tool_skipped] callback so the in-memory
+    ring stays in sync with the SSE event stream. *)
 let record_tool_skipped ~tool_name ~reason_code =
   record_tool_skipped_with_append ~append:append_rejection_event ~tool_name ~reason_code
 

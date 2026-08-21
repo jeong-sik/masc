@@ -10,12 +10,6 @@
     2. Railway proxy (ELEVENLABS_PROXY_URL)
     3. Voice MCP session endpoint (HTTP /mcp)
     4. text_fallback (silent)
-
-    Eio Migration Notes:
-    - Direct style (no monads)
-    - Cohttp_eio.Client for HTTP
-    - Eio.Time.sleep for delays
-    - Eio.Fiber.first for timeouts
 *)
 
 (** ============================================
@@ -251,11 +245,8 @@ let audio_duration_seconds ~audio_file =
     - [`Skipped reason] if playback was intentionally skipped.
     - [`Failed reason] if playback was requested but unavailable or failed.
     - [`Opened dur] if playback was handed off to macOS [open(1)].
-    - [`Played dur] if playback succeeded with the given duration.
-
-    When [message] is [None] the dedup re-check is skipped (legacy callers that
-    do not propagate the message string). *)
-let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
+    - [`Played dur] if playback succeeded with the given duration. *)
+let run_local_playback ~sw:_ ~agent_id ~message ~audio_file () =
   match load_voice_config () with
   | Error e ->
     Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id e;
@@ -280,11 +271,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             ~duration_sec:(audio_duration_seconds ~audio_file)
         in
         File_lock_eio.with_lock (playback_lock_path ()) (fun () ->
-          let dedup_hit =
-            match message with
-            | Some m -> is_dedup_hit ~agent_id ~message:m
-            | None -> false
-          in
+          let dedup_hit = is_dedup_hit ~agent_id ~message in
           if dedup_hit then begin
             log_info (Printf.sprintf
               "voice dedup skip inside mutex: agent=%s (same message within %.0fs window)"
@@ -294,9 +281,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
           else begin
             (* Record BEFORE playing so concurrent callers waiting on this mutex
                will observe the in-flight playback when they acquire it. *)
-            (match message with
-             | Some m -> record_playback ~agent_id ~message:m
-             | None -> ());
+            record_playback ~agent_id ~message;
             let rec try_candidates failures = function
               | [] ->
                 let reason =
@@ -406,15 +391,6 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             try_candidates [] candidates
           end)
 
-let start_local_playback ~sw ~agent_id ~audio_file =
-  ignore
-    (run_local_playback ~sw ~agent_id ~audio_file ()
-      : [ `Dedup_hit
-        | `Failed of string
-        | `Opened of float
-        | `Played of float
-        | `Skipped of string
-        ])
 
 (** Voice used when [load_voice_config ()] itself fails. This is the
     only remaining hardcoded fallback; the normal "agent not listed"

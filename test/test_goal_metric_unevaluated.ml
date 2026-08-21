@@ -296,7 +296,7 @@ let cancelled_task id ~reason : MD.task =
   { (make_done_task id) with
     task_status =
       MD.Cancelled
-        { cancelled_by = "keeper-rondo-agent"; cancelled_at = iso_now (); reason }
+        { cancelled_by = "keeper-beta-agent"; cancelled_at = iso_now (); reason }
   }
 
 let tree_field name json =
@@ -312,7 +312,7 @@ let cancelled_with_handoff id ~handoff_reason ~summary : MD.task =
   { (make_done_task id) with
     task_status =
       MD.Cancelled
-        { cancelled_by = "keeper-rondo-agent"; cancelled_at = iso_now (); reason = None }
+        { cancelled_by = "keeper-beta-agent"; cancelled_at = iso_now (); reason = None }
   ; handoff_context =
       Some
         { MD.summary
@@ -349,7 +349,7 @@ let test_tree_task_falls_through_to_the_handoff_summary () =
 
 let test_tree_task_carries_the_cancellation_actor_and_reason () =
   let json = Timeline.task_to_tree_json (cancelled_task "task-aged" ~reason:(Some "superseded by G-2")) in
-  check (option string) "the canceller is projected" (Some "keeper-rondo-agent")
+  check (option string) "the canceller is projected" (Some "keeper-beta-agent")
     (match tree_field "cancelled_by" json with Some (`String v) -> Some v | _ -> None);
   check (option string) "the reason is projected" (Some "superseded by G-2")
     (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)

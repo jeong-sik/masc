@@ -159,6 +159,5 @@ val agent_failed_payload
   -> error:string
   -> error_domain:string
   -> error_code:string
-  -> error_retryable:bool
   -> error_detail:Yojson.Safe.t
   -> Yojson.Safe.t

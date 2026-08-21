@@ -302,7 +302,6 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
         ~error:projection.error
         ~error_domain:projection.error_domain
         ~error_code:projection.error_code
-        ~error_retryable:projection.error_retryable
         ~error_detail:projection.error_detail
     in
     Some

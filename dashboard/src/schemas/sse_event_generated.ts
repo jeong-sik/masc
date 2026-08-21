@@ -125,7 +125,6 @@ export type AgentFailedPayload = {
   error: string;
   error_domain: string;
   error_code: string;
-  error_retryable: boolean;
   error_detail: JsonValue;
 }
 
@@ -413,7 +412,6 @@ export function writeAgentFailedPayload(x: AgentFailedPayload, context: any = x)
     'error': _atd_write_required_field('AgentFailedPayload', 'error', _atd_write_string, x.error, x),
     'error_domain': _atd_write_required_field('AgentFailedPayload', 'error_domain', _atd_write_string, x.error_domain, x),
     'error_code': _atd_write_required_field('AgentFailedPayload', 'error_code', _atd_write_string, x.error_code, x),
-    'error_retryable': _atd_write_required_field('AgentFailedPayload', 'error_retryable', _atd_write_bool, x.error_retryable, x),
     'error_detail': _atd_write_required_field('AgentFailedPayload', 'error_detail', writeJsonValue, x.error_detail, x),
   };
 }
@@ -426,7 +424,6 @@ export function readAgentFailedPayload(x: any, context: any = x): AgentFailedPay
     error: _atd_read_required_field('AgentFailedPayload', 'error', _atd_read_string, x['error'], x),
     error_domain: _atd_read_required_field('AgentFailedPayload', 'error_domain', _atd_read_string, x['error_domain'], x),
     error_code: _atd_read_required_field('AgentFailedPayload', 'error_code', _atd_read_string, x['error_code'], x),
-    error_retryable: _atd_read_required_field('AgentFailedPayload', 'error_retryable', _atd_read_bool, x['error_retryable'], x),
     error_detail: _atd_read_required_field('AgentFailedPayload', 'error_detail', readJsonValue, x['error_detail'], x),
   };
 }
@@ -798,4 +795,3 @@ function _atd_write_field_with_default<T>(
   const value = (x === undefined || x === null) ? default_ : x
   return write_elt(value, context)
 }
-

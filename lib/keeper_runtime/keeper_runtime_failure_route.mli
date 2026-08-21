@@ -6,10 +6,7 @@
     deadline.
 
     Route semantics:
-    - [Retry_after_observed] — a typed provider/infrastructure failure was
-      observed. Carries the provider's exact [retry_after] hint when one
-      exists, but does not synthesize or enforce a delay.
-    - [Rotate_now] — a different runtime may succeed immediately
+    - [Rotate_now] — a different configured runtime may be selected
       (credentials, model availability, no-progress recovery hints).
     - [Exhausted_visible_alive] — deterministic failure: mechanical retry or
       rotation cannot change the outcome. The keeper keeps running and exposes
@@ -24,16 +21,6 @@
     [HardQuota] constructors. Rate-limit messages and status prose are never
     reclassified. *)
 
-(** Typed class of the observed retryable provider/runtime failure. *)
-type retry_class =
-  | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
-  | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
-  | Capacity_backpressure
-      (** typed provider overload / capacity-exhausted pools *)
-  | Server_error  (** typed server failure / provider unavailable *)
-  | Network_transient  (** transport-level network failure *)
-  | Provider_timeout  (** provider or transport deadline expiry *)
-
 val core_error_is_hard_quota : Agent_core.Error.t -> bool
 (** True only for the typed [PaymentRequired] and provider [HardQuota]
     constructors. Free-form messages and numeric status codes are ignored. *)
@@ -47,6 +34,12 @@ type rotate_class =
   | Resumable_cli_session  (** CLI session can resume on a recovery lane *)
   | Candidates_filtered  (** candidate set emptied after cycles *)
   | Runtime_exhausted  (** generic whole-runtime exhaustion *)
+  | Rate_window_unavailable
+  | Account_quota_unavailable
+  | Capacity_unavailable
+  | Provider_service_unavailable
+  | Network_unavailable
+  | Provider_timeout
   | No_progress_empty
   | No_progress_thinking_only
       (** accept-rejections carrying an explicit no-progress recovery hint:
@@ -96,12 +89,6 @@ type error_boundary =
     such as [Config] and [Internal] do not carry their own origin. *)
 
 type route =
-  | Retry_after_observed of
-      { retry_class : retry_class
-      ; retry_after : float option
-        (** typed provider hint, seconds; [None] when the provider gave
-            none. The value is preserved rather than clamped or replaced. *)
-      }
   | Rotate_now of { rotate : rotate_class }
   | Exhausted_visible_alive of
       { terminal : terminal_class
@@ -118,15 +105,11 @@ val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
     crosses the live AGENT_CORE tool boundary and is therefore decoded at either
     boundary. No arm returns "no route". *)
 
-val retry_after_of_route : route -> float option
-(** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
-
 val route_kind_label : route -> string
-(** Stable telemetry label: ["retry_after_observed" | "rotate_now" |
+(** Stable telemetry label: ["rotate_now" |
     "exhausted_visible_alive"]. *)
 
-val retry_class_label : retry_class -> string
 val rotate_class_label : rotate_class -> string
 val route_class_label : route -> string
-(** The route's class label ([retry_class_label] / [rotate_class_label] /
-    [terminal_class_label] respectively). *)
+(** The route's class label ([rotate_class_label] / [terminal_class_label]
+    respectively). *)

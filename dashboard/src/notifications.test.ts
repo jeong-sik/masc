@@ -187,7 +187,6 @@ describe('event -> notification delivery (exhaustive over NotifyEventKind)', () 
         error: 'boom',
         error_domain: 'api',
         error_code: 'rate_limited',
-        error_retryable: true,
         error_detail: { variant: 'rate_limited', message: 'slow down' },
       },
     })

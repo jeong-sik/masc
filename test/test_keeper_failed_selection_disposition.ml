@@ -3,8 +3,8 @@
 
     With automatic overflow-compaction recovery removed, the heartbeat owns
     typed liveness disposition for a failed turn holding a pending Event Queue
-    selection: a frozen successor preserves it, transient failure rotates it
-    behind independent work, deterministic failure quarantines only the source,
+    selection: a frozen successor preserves it; without a successor every
+    failed source receives a terminal observation,
     an effect-fenced provider failure quarantines that source even if a stale
     successor exists, and transcript corruption alone pauses the Keeper. *)
 
@@ -52,7 +52,6 @@ let test_overflow_without_successor_terminalizes () =
   | Loop.Quarantine_source { detail } ->
     check bool "detail is non-empty" true (String.length detail > 0)
   | Loop.Preserve_for_deferred_runtime
-  | Loop.Defer_to_queue_tail
   | Loop.Pause_keeper_for_integrity _ ->
     fail
       "context overflow with no recovery successor must terminalize the \
@@ -67,7 +66,6 @@ let test_overflow_with_deferred_lane_preserves () =
          (overflow_failure ~deferred_runtime_lane:deferred_lane ())
      with
      | Loop.Preserve_for_deferred_runtime -> true
-     | Loop.Defer_to_queue_tail
      | Loop.Quarantine_source _
      | Loop.Pause_keeper_for_integrity _ ->
        false)
@@ -97,7 +95,6 @@ let test_effect_fenced_failure_terminalizes_exact_source () =
   | Loop.Quarantine_source { detail } ->
     check bool "detail is non-empty" true (String.length detail > 0)
   | Loop.Preserve_for_deferred_runtime
-  | Loop.Defer_to_queue_tail
   | Loop.Pause_keeper_for_integrity _ ->
     fail
       "effect-fenced failure must terminalize the exact failed source instead \
@@ -134,7 +131,6 @@ let test_other_terminal_classes_quarantine_source () =
           with
           | Loop.Quarantine_source { detail } -> String.length detail > 0
           | Loop.Preserve_for_deferred_runtime
-          | Loop.Defer_to_queue_tail
           | Loop.Pause_keeper_for_integrity _ ->
             false))
     preserving_terminal_classes
@@ -166,18 +162,16 @@ let test_exhausted_configuration_classes_quarantine_source () =
           with
           | Loop.Quarantine_source _ -> true
           | Loop.Preserve_for_deferred_runtime
-          | Loop.Defer_to_queue_tail
           | Loop.Pause_keeper_for_integrity _ ->
             false))
     exhausted_configuration_classes
 ;;
 
-let test_retryable_route_defers_to_queue_tail () =
+let test_unavailable_runtime_without_successor_terminalizes () =
   let route =
-    KFR.Retry_after_observed
-      { retry_class = KFR.Network_transient; retry_after = None }
+    KFR.Rotate_now { rotate = KFR.Network_unavailable }
   in
-  check bool "retryable route yields to independent work" true
+  check bool "no successor means no implicit re-entry" true
     (match
        Loop.failed_source_disposition
          (failure
@@ -185,9 +179,8 @@ let test_retryable_route_defers_to_queue_tail () =
             ~source_disposition:Turn.Follow_failure_route
             overflow_error)
      with
-     | Loop.Defer_to_queue_tail -> true
+     | Loop.Quarantine_source _ -> true
      | Loop.Preserve_for_deferred_runtime
-     | Loop.Quarantine_source _
      | Loop.Pause_keeper_for_integrity _ ->
        false)
 ;;
@@ -208,7 +201,6 @@ let test_transcript_corruption_pauses_keeper () =
      | Loop.Pause_keeper_for_integrity { detail } ->
        String.equal detail "corrupt"
      | Loop.Preserve_for_deferred_runtime
-     | Loop.Defer_to_queue_tail
      | Loop.Quarantine_source _ ->
        false)
 ;;
@@ -275,9 +267,9 @@ let () =
             `Quick
             test_exhausted_configuration_classes_quarantine_source
         ; test_case
-            "retryable route defers to queue tail"
+            "unavailable runtime without successor terminalizes"
             `Quick
-            test_retryable_route_defers_to_queue_tail
+            test_unavailable_runtime_without_successor_terminalizes
         ; test_case
             "transcript corruption pauses Keeper"
             `Quick

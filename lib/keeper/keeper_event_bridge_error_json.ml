@@ -480,7 +480,6 @@ let core_error_json error =
   `Assoc
     ([ "domain", `String domain
      ; "code", `String code
-     ; "retryable", `Bool (Agent_core.Error.is_retryable error)
      ]
      @ core_error_detail_fields error)
 ;;
@@ -489,7 +488,6 @@ type agent_failed_error_projection =
   { error : string
   ; error_domain : string
   ; error_code : string
-  ; error_retryable : bool
   ; error_detail : Yojson.Safe.t
   }
 
@@ -499,7 +497,6 @@ let agent_failed_error_projection error =
   ; error_code =
       (Keeper_agent_error.terminal_reason_code_of_core_error_typed error
        |> Keeper_turn_terminal_code.to_wire)
-  ; error_retryable = Agent_core.Error.is_retryable error
   ; error_detail = core_error_json error
   }
 ;;
@@ -509,7 +506,6 @@ let agent_failed_error_fields error =
   [ "error", `String projection.error
   ; "error_domain", `String projection.error_domain
   ; "error_code", `String projection.error_code
-  ; "error_retryable", `Bool projection.error_retryable
   ; "error_detail", projection.error_detail
   ]
 ;;

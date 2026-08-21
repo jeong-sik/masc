@@ -63,7 +63,6 @@ const ALL_PAYLOAD_CASES: TypedAgentCorePayload[] = [
       error: 'boom',
       error_domain: 'api',
       error_code: 'rate_limited',
-      error_retryable: true,
       error_detail: { variant: 'rate_limited', message: 'slow down' },
     },
   },
@@ -267,7 +266,6 @@ describe('parseAgentCorePayload', () => {
       error: 'boom',
       error_domain: 'api',
       error_code: 'rate_limited',
-      error_retryable: true,
       error_detail: { variant: 'rate_limited', message: 'slow down' },
     })
     expect(result.success).toBe(true)
@@ -279,7 +277,6 @@ describe('parseAgentCorePayload', () => {
     expect(data.payload.error).toBe('boom')
     expect(data.payload.error_domain).toBe('api')
     expect(data.payload.error_code).toBe('rate_limited')
-    expect(data.payload.error_retryable).toBe(true)
     expect(data.payload.error_detail).toEqual({
       variant: 'rate_limited',
       message: 'slow down',

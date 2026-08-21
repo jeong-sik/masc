@@ -637,7 +637,6 @@ let agent_failed_error : string =
 
 let agent_failed_error_domain : string = "agent"
 let agent_failed_error_code : string = "hook_execution_failed"
-let agent_failed_error_retryable : bool = false
 
 let agent_failed_error_detail : Yojson.Safe.t =
   `Assoc
@@ -651,7 +650,6 @@ let agent_failed_error_fields_sample : (string * Yojson.Safe.t) list =
   [ "error", `String agent_failed_error
   ; "error_domain", `String agent_failed_error_domain
   ; "error_code", `String agent_failed_error_code
-  ; "error_retryable", `Bool agent_failed_error_retryable
   ; "error_detail", agent_failed_error_detail
   ]
 ;;
@@ -726,7 +724,6 @@ let test_agent_failed_payload_byte_equal () =
          ~error:agent_failed_error
          ~error_domain:agent_failed_error_domain
          ~error_code:agent_failed_error_code
-         ~error_retryable:agent_failed_error_retryable
          ~error_detail:agent_failed_error_detail)
   in
   Alcotest.(check string) "agent_failed typed == baseline" baseline typed

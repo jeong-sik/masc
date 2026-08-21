@@ -477,7 +477,6 @@ let test_authorization_errors_have_typed_projection () =
   let check_projection label expected_domain error =
     let projection = Error_json.agent_failed_error_projection error in
     check string (label ^ " domain") expected_domain projection.error_domain;
-    check bool (label ^ " non-retryable") false projection.error_retryable;
     check (option string)
       (label ^ " variant")
       (Some "authorization_error")

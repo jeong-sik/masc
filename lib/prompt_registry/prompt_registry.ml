@@ -592,18 +592,6 @@ let clear_prompt_override key =
 (** Get source of current value *)
 let prompt_source key = (resolve_prompt key).source
 
-let validate_required_prompt_files () =
-  with_mutex (fun () ->
-      Hashtbl.fold
-        (fun key meta acc ->
-          if not meta.required_file then acc
-          else
-            match prompt_markdown_path key with
-            | Some path when Sys.file_exists path && not (Sys.is_directory path) -> acc
-            | Some path -> (key, path) :: acc
-            | None -> (key, "<invalid-key>") :: acc)
-        meta_tbl [] |> List.sort compare)
-
 (* [validate_prompt_templates] was doing [read_file_if_exists] inside
    the [with_mutex] fold via [resolve_prompt_unlocked], holding the
    registry mutex across every markdown file read.  Two-phase:

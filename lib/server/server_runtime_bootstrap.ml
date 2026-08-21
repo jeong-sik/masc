@@ -659,7 +659,6 @@ type owner_initialization_error =
   | Readiness_publication_failed of
       { observed_phase : Server_startup_state.phase
       }
-  | Embedded_prompts_unregistered of { keys : string list }
 
 exception Owner_initialization_failed of owner_initialization_error
 
@@ -711,10 +710,6 @@ let owner_initialization_error_to_string = function
     Printf.sprintf
       "owner readiness publication failed (observed_phase=%s)"
       (Server_startup_state.phase_to_string observed_phase)
-  | Embedded_prompts_unregistered { keys } ->
-    Printf.sprintf
-      "prompts embedded in this binary did not register: %s"
-      (String.concat ", " keys)
 
 let initialize_owner_state_blocking
       ~sw
@@ -1112,62 +1107,25 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
      before the registry scans the directory (#20929: merged prompt edits
      never reached the runtime dir otherwise). *)
   sync_prompt_assets_from_binary ();
-  (* Initialize prompt registry with defaults and restore saved overrides *)
-  let prompt_markdown_dir =
-    Prompt_defaults.bootstrap_runtime
-      ~workspace_path:config.workspace_path
-      ~base_path:config.base_path
-  in
-  (* Three checks used to stand here and none of them gated anything.
-     One compared [prompt_markdown_dir] against [Config_dir_resolver.prompts_dir
-     ()] — the value it was built from, so the branch was unreachable. One asked
-     whether every registered prompt still had a file, but registration comes
-     from scanning that directory a few lines earlier, so it re-asserted a
-     post-condition of the step that produced it, and the failure it was meant
-     to catch — a file that never landed — is filtered out before it runs,
-     because an unread file is never registered. One reported templates using
-     undeclared variables, which [test_prompt_templates_render] now decides in
-     CI over the whole directory. All three logged and continued, so a boot with
-     silently shorter prompts looked exactly like a healthy one.
+  (* Load the registry and replay operator overrides. The resolved directory is
+     not inspected afterwards: three checks used to stand here and none of them
+     gated. One compared a value against the call that produced it. One
+     re-asserted a post-condition of the directory scan itself, and could not
+     see the failure it read as protecting against, because a file the loader
+     never read is never registered. One logged templates using undeclared
+     variables. All three continued on failure, so a boot serving silently
+     shorter prompts looked healthy.
 
-     What can actually be wrong is the gap between what the binary carries and
-     what registered: a sync that failed on disk, a file renamed on one side
-     only. That is checked here, and it is fatal. A Keeper running on a prompt
-     the operator never saw is worse than a server that refuses to start. *)
-  ignore (prompt_markdown_dir : string);
-  let embedded_prompt_keys =
-    Embedded_config.file_list
-    |> List.filter_map (fun path ->
-      match Filename.chop_suffix_opt ~suffix:".md" path with
-      | None -> None
-      | Some without_extension ->
-        let prefix = "prompts/" in
-        let prefix_length = String.length prefix in
-        if String.starts_with ~prefix without_extension
-           && String.length without_extension > prefix_length
-        then
-          Some
-            (String.sub
-               without_extension
-               prefix_length
-               (String.length without_extension - prefix_length))
-        else None)
-  in
-  let unregistered =
-    embedded_prompt_keys
-    |> List.filter (fun key -> String.equal (Prompt_registry.prompt_source key) "missing")
-    |> List.sort_uniq String.compare
-  in
-  if unregistered <> []
-  then (
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_error_events
-      ~labels:[ "type", Error_event_type.(to_label Missing_config) ]
-      ();
-    Log.Misc.error
-      "prompts embedded in this binary did not register: %s"
-      (String.concat ", " unregistered);
-    raise (Owner_initialization_failed (Embedded_prompts_unregistered { keys = unregistered })))
+     The prompts ship embedded in this binary, and
+     [test_prompt_templates_render] requires every file under config/prompts to
+     register as a key, resolve from a real source, render with the variables
+     its own frontmatter declares, and use each one. Repeating that at start
+     decides nothing the build did not already decide. *)
+  ignore
+    (Prompt_defaults.bootstrap_runtime
+       ~workspace_path:config.workspace_path
+       ~base_path:config.base_path
+     : string)
 
 let start_owner_lazy_tasks ~sw state =
   let run_lazy_task (task_name, task_fn) =

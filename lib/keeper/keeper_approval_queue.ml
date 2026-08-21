@@ -301,7 +301,12 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 8
+(* Bumped to 9 by the goal_ids removal: #29256 dropped the field from the entry
+   contract without moving the version, so an installed v8 store failed the
+   field check with "contains unsupported field goal_ids" instead of the version
+   check that tells an operator what to do about it. A format change the version
+   does not record is a format change nobody can diagnose. *)
+let pending_store_version = 9
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"

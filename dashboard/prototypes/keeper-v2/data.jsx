@@ -54,31 +54,31 @@ const phaseStatus = (phase) =>
 //   danger — destructive (red affordance)
 const FSM_ACTIONS = {
   Running: [
-    { id: 'pause',   label: '일시정지', glyph: '⏸', to: 'Paused',  hint: '슈퍼바이저가 잠시 멈춤 — 컨텍스트·소유 태스크 보존, 즉시 재개 가능' },
-    { id: 'compact', label: '컴팩션',   glyph: '◉', via: 'Compacting', to: 'Running', ms: 1700, hint: '컨텍스트를 지금 압축하고 실행 복귀' },
-    { id: 'handoff', label: '핸드오프', glyph: '⇄', via: 'HandingOff', to: 'Stopped', ms: 1700, hint: '소유 태스크를 인계하고 이 세션 정리' },
-    { id: 'stop',    label: '중지',     glyph: '⏹', via: 'Draining',  to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료 (Drain → Stopped)' },
+    { id: 'pause',   label: '일시정지', glyph: '\u23F8', to: 'Paused',  hint: '슈퍼바이저가 잠시 멈춤 — 컨텍스트·소유 태스크 보존, 즉시 재개 가능' },
+    { id: 'compact', label: '컴팩션',   glyph: '\u25C9', via: 'Compacting', to: 'Running', ms: 1700, hint: '컨텍스트를 지금 압축하고 실행 복귀' },
+    { id: 'handoff', label: '핸드오프', glyph: '\u21C4', via: 'HandingOff', to: 'Stopped', ms: 1700, hint: '소유 태스크를 인계하고 이 세션 정리' },
+    { id: 'stop',    label: '중지',     glyph: '\u23F9', via: 'Draining',  to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료 (Drain → Stopped)' },
   ],
   Paused: [
-    { id: 'resume', label: '재개', glyph: '▶', to: 'Running', hint: '멈춘 지점부터 다시 실행' },
-    { id: 'stop',   label: '중지', glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료' },
+    { id: 'resume', label: '재개', glyph: '\u25B6', to: 'Running', hint: '멈춘 지점부터 다시 실행' },
+    { id: 'stop',   label: '중지', glyph: '\u23F9', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료' },
   ],
   Overflowed: [
-    { id: 'compact', label: '컴팩션', glyph: '◉', via: 'Compacting', to: 'Running', ms: 2000, hint: '윈도우 초과 — 압축으로 복구' },
-    { id: 'stop',    label: '중지',   glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '복구 대신 종료' },
+    { id: 'compact', label: '컴팩션', glyph: '\u25C9', via: 'Compacting', to: 'Running', ms: 2000, hint: '윈도우 초과 — 압축으로 복구' },
+    { id: 'stop',    label: '중지',   glyph: '\u23F9', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '복구 대신 종료' },
   ],
   Failing: [
-    { id: 'restart', label: '재시작', glyph: '↻', via: 'Restarting', to: 'Running', ms: 1700, hint: '실패 처리 후 재시작' },
-    { id: 'stop',    label: '중지',   glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '종료' },
+    { id: 'restart', label: '재시작', glyph: '\u21BB', via: 'Restarting', to: 'Running', ms: 1700, hint: '실패 처리 후 재시작' },
+    { id: 'stop',    label: '중지',   glyph: '\u23F9', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '종료' },
   ],
   Crashed: [
-    { id: 'restart', label: '재시작', glyph: '↻', via: 'Restarting', to: 'Running', ms: 1800, hint: '비정상 종료 — 재시작 시도' },
+    { id: 'restart', label: '재시작', glyph: '\u21BB', via: 'Restarting', to: 'Running', ms: 1800, hint: '비정상 종료 — 재시작 시도' },
   ],
   Stopped: [
-    { id: 'start', label: '시작', glyph: '▶', via: 'Restarting', to: 'Running', ms: 1500, hint: '중지된 keeper 새로 시작' },
+    { id: 'start', label: '시작', glyph: '\u25B6', via: 'Restarting', to: 'Running', ms: 1500, hint: '중지된 keeper 새로 시작' },
   ],
   Offline: [
-    { id: 'start', label: '시작', glyph: '▶', via: 'Restarting', to: 'Running', ms: 1500, hint: '오프라인 keeper 시작' },
+    { id: 'start', label: '시작', glyph: '\u25B6', via: 'Restarting', to: 'Running', ms: 1500, hint: '오프라인 keeper 시작' },
   ],
   // transient + terminal phases take no operator action
   Compacting: [], HandingOff: [], Draining: [], Restarting: [], Dead: [],
@@ -86,18 +86,18 @@ const FSM_ACTIONS = {
 
 // keeper_id → { slot, sigil }, mirrors KEEPER_REGISTRY anchors in keeper-badge.ts
 const KEEPERS = [
-  { id: 'masc-improver', kr: '미소',   sigil: 'MS', slot: 6,  role: 'keeper', status: 'run',   phase: 'Running',    model: 'deepseek-v4-flash', runtime: 'ollama_cloud.deepseek-v4-flash', ns: 'lib/trace-store', att: 0, uptime: '4h 12m', last: '41분', ctx: 0.62, traces: 318, tasks: 2, tps: 64, portrait: 'miso' },
-  { id: 'nick0cave',     kr: '닉케이브', sigil: 'NK', slot: 3,  role: 'keeper',  status: 'run',   phase: 'Compacting', model: 'deepseek-v4-pro',   runtime: 'deepseek.deepseek-v4-pro', ns: 'core/scheduler',     att: 2, uptime: '11h 03m', last: '3분',  ctx: 0.91, traces: 540, tasks: 4, tps: 31, portrait: 'grimja' },
-  { id: 'sangsu',        kr: '상수',   sigil: 'SS', slot: 9,  role: 'keeper',  status: 'run',   phase: 'Running',    model: 'gemma4-26b-a4b-qat', runtime: 'ollama.gemma4-26b-a4b-qat', ns: 'core/runtime',       att: 0, uptime: '2h 47m', last: '방금', ctx: 0.44, traces: 210, tasks: 3, tps: 88, portrait: 'iron' },
-  { id: 'qa-king',       kr: 'QA킹',  sigil: 'QA', slot: 2,  role: 'keeper',  status: 'run',   phase: 'HandingOff', model: 'deepseek-v4-flash',  runtime: 'ollama_cloud.deepseek-v4-flash', ns: 'docs/site',          att: 1, uptime: '58m',    last: '8분',  ctx: 0.71, traces: 97,  tasks: 1, tps: 142, portrait: 'luna' },
-  { id: 'rama',          kr: '라마',   sigil: 'RM', slot: 11, role: 'keeper',  status: 'pause', phase: 'Paused',     model: 'deepseek-v4-pro', runtime: 'deepseek.deepseek-v4-pro', ns: 'core/scheduler',     att: 0, uptime: '22m',    last: '22분', ctx: 0.33, traces: 154, tasks: 2, tps: 0, portrait: 'cedric' },
-  { id: 'scholar',       kr: '스콜라', sigil: 'SC', slot: 5,  role: 'keeper',  status: 'pause', phase: 'Draining',   model: 'gemma4-26b-a4b-qat',  runtime: 'ollama.gemma4-26b-a4b-qat', ns: 'infra/deploy',       att: 0, uptime: '1h 09m', last: '17분', ctx: 0.58, traces: 73,  tasks: 1, tps: 0, portrait: 'dara' },
-  { id: 'analyst',       kr: '애널리스트', sigil: 'AN', slot: 7, role: 'keeper', status: 'pause', phase: 'Paused',    model: 'deepseek-v4-flash', runtime: 'ollama_cloud.deepseek-v4-flash', ns: 'search/index',       att: 3, uptime: '34m',    last: '34분', ctx: 0.80, traces: 289, tasks: 2, tps: 0, portrait: 'brenna' },
-  { id: 'reviewer',      kr: '리뷰어', sigil: 'RV', slot: 10, role: 'keeper',  status: 'pause', phase: 'Paused',     model: 'gemma4-26b-a4b-qat',  runtime: 'ollama.gemma4-26b-a4b-qat', ns: 'observatory',        att: 0, uptime: '51m',    last: '51분', ctx: 0.21, traces: 44,  tasks: 0, tps: 0, portrait: 'moth' },
-  { id: 'herald',        kr: '헤럴드', sigil: 'HD', slot: 1,  role: 'keeper',  status: 'off',   phase: 'Stopped',    model: 'deepseek-v4-flash',  runtime: '—',           ns: 'connectors/slack',   att: 0, uptime: '—',      last: '2시간', ctx: 0.0, traces: 12,  tasks: 0, tps: 0, portrait: null },
-  { id: 'drifter',       kr: '드리프터', sigil: 'DF', slot: 12, role: 'keeper', status: 'off',   phase: 'Overflowed', model: 'deepseek-v4-pro', runtime: 'deepseek.deepseek-v4-pro', ns: 'core/runtime',       att: 5, uptime: '—',      last: '3시간', ctx: 1.0, traces: 401, tasks: 1, tps: 0, portrait: 'dust' },
-  { id: 'marshal',       kr: '마샬',   sigil: 'MA', slot: 4,  role: 'keeper',  status: 'off',   phase: 'Crashed',    model: 'deepseek-v4-flash', runtime: '—',           ns: 'infra/deploy',       att: 0, uptime: '—',      last: '5시간', ctx: 0.0, traces: 188, tasks: 0, tps: 0, portrait: null },
-  { id: 'revenant',      kr: '레버넌트', sigil: 'RN', slot: 8, role: 'keeper',  status: 'off',   phase: 'Dead',       model: 'deepseek-v4-flash', runtime: '—',           ns: 'archive',            att: 0, uptime: '—',      last: '1일',  ctx: 0.0, traces: 920, tasks: 0, tps: 0, portrait: 'songarak' },
+  { id: 'masc-improver', sigil: 'MS', slot: 6,  role: 'keeper', status: 'run',   phase: 'Running',    model: 'deepseek-v4-flash', runtime: 'ollama_cloud.deepseek-v4-flash', ns: 'lib/trace-store', att: 0, uptime: '4h 12m', last: '41분', ctx: 0.62, traces: 318, tasks: 2, tps: 64, portrait: 'miso' },
+  { id: 'nick0cave',     sigil: 'NK', slot: 3,  role: 'keeper',  status: 'run',   phase: 'Compacting', model: 'deepseek-v4-pro',   runtime: 'deepseek.deepseek-v4-pro', ns: 'core/scheduler',     att: 2, uptime: '11h 03m', last: '3분',  ctx: 0.91, traces: 540, tasks: 4, tps: 31, portrait: 'grimja' },
+  { id: 'sangsu',        sigil: 'SS', slot: 9,  role: 'keeper',  status: 'run',   phase: 'Running',    model: 'gemma4-26b-a4b-qat', runtime: 'ollama.gemma4-26b-a4b-qat', ns: 'core/runtime',       att: 0, uptime: '2h 47m', last: '방금', ctx: 0.44, traces: 210, tasks: 3, tps: 88, portrait: 'iron' },
+  { id: 'qa-king',       sigil: 'QA', slot: 2,  role: 'keeper',  status: 'run',   phase: 'HandingOff', model: 'deepseek-v4-flash',  runtime: 'ollama_cloud.deepseek-v4-flash', ns: 'docs/site',          att: 1, uptime: '58m',    last: '8분',  ctx: 0.71, traces: 97,  tasks: 1, tps: 142, portrait: 'luna' },
+  { id: 'rama',          sigil: 'RM', slot: 11, role: 'keeper',  status: 'pause', phase: 'Paused',     model: 'deepseek-v4-pro', runtime: 'deepseek.deepseek-v4-pro', ns: 'core/scheduler',     att: 0, uptime: '22m',    last: '22분', ctx: 0.33, traces: 154, tasks: 2, tps: 0, portrait: 'cedric' },
+  { id: 'scholar',       sigil: 'SC', slot: 5,  role: 'keeper',  status: 'pause', phase: 'Draining',   model: 'gemma4-26b-a4b-qat',  runtime: 'ollama.gemma4-26b-a4b-qat', ns: 'infra/deploy',       att: 0, uptime: '1h 09m', last: '17분', ctx: 0.58, traces: 73,  tasks: 1, tps: 0, portrait: 'dara' },
+  { id: 'analyst',       sigil: 'AN', slot: 7, role: 'keeper', status: 'pause', phase: 'Paused',    model: 'deepseek-v4-flash', runtime: 'ollama_cloud.deepseek-v4-flash', ns: 'search/index',       att: 3, uptime: '34m',    last: '34분', ctx: 0.80, traces: 289, tasks: 2, tps: 0, portrait: 'brenna' },
+  { id: 'reviewer',      sigil: 'RV', slot: 10, role: 'keeper',  status: 'pause', phase: 'Paused',     model: 'gemma4-26b-a4b-qat',  runtime: 'ollama.gemma4-26b-a4b-qat', ns: 'observatory',        att: 0, uptime: '51m',    last: '51분', ctx: 0.21, traces: 44,  tasks: 0, tps: 0, portrait: 'moth' },
+  { id: 'herald',        sigil: 'HD', slot: 1,  role: 'keeper',  status: 'off',   phase: 'Stopped',    model: 'deepseek-v4-flash',  runtime: '—',           ns: 'connectors/slack',   att: 0, uptime: '—',      last: '2시간', ctx: 0.0, traces: 12,  tasks: 0, tps: 0, portrait: null },
+  { id: 'drifter',       sigil: 'DF', slot: 12, role: 'keeper', status: 'off',   phase: 'Overflowed', model: 'deepseek-v4-pro', runtime: 'deepseek.deepseek-v4-pro', ns: 'core/runtime',       att: 5, uptime: '—',      last: '3시간', ctx: 1.0, traces: 401, tasks: 1, tps: 0, portrait: 'dust' },
+  { id: 'marshal',       sigil: 'MA', slot: 4,  role: 'keeper',  status: 'off',   phase: 'Crashed',    model: 'deepseek-v4-flash', runtime: '—',           ns: 'infra/deploy',       att: 0, uptime: '—',      last: '5시간', ctx: 0.0, traces: 188, tasks: 0, tps: 0, portrait: null },
+  { id: 'revenant',      sigil: 'RN', slot: 8, role: 'keeper',  status: 'off',   phase: 'Dead',       model: 'deepseek-v4-flash', runtime: '—',           ns: 'archive',            att: 0, uptime: '—',      last: '1일',  ctx: 0.0, traces: 920, tasks: 0, tps: 0, portrait: 'songarak' },
 ];
 
 // keeper 는 namespace 를 소유하지 않는다 — 각자 격리된 worktree basepath 만 가진다.
@@ -147,7 +147,7 @@ const THREAD_IMPROVER = [
     ],
   },
   {
-    id: 'm3', role: 'user', source: 'discord', who: '@sangsu', nick: '상수', ts: '14:05',
+    id: 'm3', role: 'user', source: 'discord', who: '@sangsu', nick: 'sangsu', ts: '14:05',
     ctxFrom: { channel: '#core-eng', guild: 'masc', msgs: 9, range: '13:50–14:05', via: 'discord-gate',
       preview: [
         ['13:50', '@sangsu', 'writer fd 누수 건 보고 있는데, Switch.run 로 감싸는 게 맞지?'],
@@ -164,7 +164,7 @@ const THREAD_IMPROVER = [
         ['13:58', '@operator', 'keeper drain 때 fiber 취소가 핵심이라 그게 맞아요.'],
         ['14:05', '@sangsu', 'ok 그럼 호출부도 내가 같이 정리할게요.'],
       ] },
-    blocks: [{ t: 'p', html: '맞습니다 — <code>Switch.run</code> 블록을 벗어나면 그 안에서 연 flow는 <code>cancel</code> 시 자동 해제됩니다. 호출부 정리는 상수님이 맡아주시면, 저는 회귀 테스트(<code>open_fds</code> 불변)부터 올려둘게요.' }],
+    blocks: [{ t: 'p', html: '맞습니다 — <code>Switch.run</code> 블록을 벗어나면 그 안에서 연 flow는 <code>cancel</code> 시 자동 해제됩니다. 호출부 정리는 sangsu님이 맡아주시면, 저는 회귀 테스트(<code>open_fds</code> 불변)부터 올려둘게요.' }],
     suggestions: ['회귀 테스트 PR 열기', 'open_fds 메트릭 대시보드에 추가'],
   },
   {
@@ -258,7 +258,7 @@ const THREAD_NICK = [
     blocks: [
       { t: 'voice', secs: 14, size: '47 KB', via: 'iMessage 음성 메모',
         wave: [0.3, 0.55, 0.8, 0.45, 0.7, 0.92, 0.4, 0.6, 0.85, 0.5, 0.3, 0.72, 0.95, 0.6, 0.4, 0.82, 0.5, 0.68, 0.6, 0.34, 0.55, 0.8, 0.45, 0.62, 0.3, 0.7, 0.5, 0.88, 0.42, 0.6],
-        transcript: '닉, 방금 그 1.2초 스파이크 말인데 — compact 도는 타이밍이랑 겹치는 거 확실하면 바로 상수한테 핸드오프 걸어. 나 이동 중이라 음성으로 남긴다.' },
+        transcript: '닉, 방금 그 1.2초 스파이크 말인데 — compact 도는 타이밍이랑 겹치는 거 확실하면 바로 sangsu한테 핸드오프 걸어. 나 이동 중이라 음성으로 남긴다.' },
     ] },
   { id: 'g6', role: 'assistant', source: 'dashboard', ts: '13:54', verified: true,
     trace: [
@@ -268,7 +268,7 @@ const THREAD_NICK = [
       { kind: 'think', text: '음성 지시 = 조건부 핸드오프. 조건(타이밍 겹침)은 trace·이미지로 이미 확정됨 → 바로 실행.' },
     ],
     blocks: [
-      { t: 'p', html: '음성 메모 받아 처리했습니다 (신뢰도 0.96). 조건 "compact 타이밍 겹침"은 trace·캡처로 이미 확정돼서, 바로 핸드오프 걸었어요.' },
+      { t: 'p', html: '음성 메모 받아 처리했습니다 (신뢰도 0.96). 조건 “compact 타이밍 겹침”은 trace·캡처로 이미 확정돼서, 바로 핸드오프 걸었어요.' },
       { t: 'callout', html: '<strong>핸드오프 실행</strong> — <code>T-3902</code> compact lock 재진입 수정을 <code>sangsu</code> 에게 인계. 근거(trace 윈도우 + Grafana 캡처 + 음성 지시)를 컨텍스트로 함께 전달했습니다.' },
     ],
     suggestions: ['핸드오프 상태 보기', 'core/scheduler 에 브로드캐스트', '음성 원본 다시 듣기'] },
@@ -357,7 +357,7 @@ const PERSONAS = {
 };
 const DEFAULT_PERSONA = { persona: '기본 keeper 성격. 작업에 충실하고 trace를 남긴다.', instructions: '담당 namespace의 작업을 수행하고 모든 행동을 trace로 기록한다.', traits: ['기본'] };
 
-// Goal store — core.ts Goal{horizon,priority(num),status,phase,
+// Goal store — core.ts Goal{horizon,priority(num),status,phase,parent_goal_id,
 //   require_completion_approval,verifier_policy} → Task{status(6-state),assignee,
 //   goal_id,contract,gate,handoff_context}. Task.status ∈ todo|claimed|in_progress|
 //   awaiting_verification|done|cancelled. todo + no assignee = claimable backlog.
@@ -570,12 +570,12 @@ runtime · model : {{runtime}} · {{model}}
 // HITL 은 nonblocking: 요청을 그대로 영속하고 결정이 오면 그 keeper 레인만 깨운다.
 // kind: 행동 종류 · opened: 큐에 머문 초 · req: keeper가 청한 한 줄. (위험 등급 sev 는 소스에서 제거됨)
 const APPROVAL_KIND = {
-  'tool-grant':     { lbl: '도구 권한',   glyph: '⚿' },  // ⚿
-  'destructive-fs': { lbl: '파괴적 쓰기', glyph: '⚠' },  // ⚠
-  'handoff':        { lbl: '핸드오프',    glyph: '⇄' },  // ⇄
-  'spend':          { lbl: '예산',        glyph: '◷' },  // ◷
-  'model-switch':   { lbl: '모델 교체',   glyph: '⟳' },  // ⟳
-  'restart':        { lbl: '재시작',      glyph: '↻' },  // ↻
+  'tool-grant':     { lbl: '도구 권한',   glyph: '\u26BF' },  // ⚿
+  'destructive-fs': { lbl: '파괴적 쓰기', glyph: '\u26A0' },  // ⚠
+  'handoff':        { lbl: '핸드오프',    glyph: '\u21C4' },  // ⇄
+  'spend':          { lbl: '예산',        glyph: '\u25F7' },  // ◷
+  'model-switch':   { lbl: '모델 교체',   glyph: '\u27F3' },  // ⟳
+  'restart':        { lbl: '재시작',      glyph: '\u21BB' },  // ↻
 };
 // masc_* 도구 카탈로그 — 서버가 /mcp 로 노출하는 도구(operator 설정 · MCP)와 동일 집합.
 // risk: read(읽기 전용) · write(쓰기) · lifecycle(keeper 수명 조작) — risky 호출은 승인 정책에 따라 HILT 큐로 간다.
@@ -630,7 +630,7 @@ const APPROVALS = [
     req: 'center_type 정규화가 색인 실패로 막혀 있습니다. 재색인 권한을 주시면 백필까지 한 번에 끝냅니다.',
     tool: 'tool_execute' },
   { id: 'H-039', kind: 'handoff', keeper: 'qa-king', goal: 'G-04', job: null, opened: 503, origin: 'discord',
-    title: '핸드오프 · qa-king → sangsu',
+    title: '핸드오프 · qa-king \u2192 sangsu',
     detail: 'docs/site 소유 태스크 1건 인계 — 8분째 인계 응답 대기. 승인 시 sangsu 가 즉시 이어받음.',
     req: 'docs/site 우선순위가 낮아 sangsu 에게 넘기려 합니다. 인계 승인 부탁드립니다.',
     tool: 'masc_transition' },

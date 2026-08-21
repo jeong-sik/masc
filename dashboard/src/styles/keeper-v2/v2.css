@@ -2026,3 +2026,6 @@ textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; bo
   /* KPI strips: 2 across on phones (work surface forces 5 inline → override) */
   .ov-kpis { grid-template-columns: repeat(2, 1fr) !important; }
 }
+
+.rp-name-row{display:flex;align-items:baseline;gap:8px;min-width:0}
+.rp-path{font-size:10.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

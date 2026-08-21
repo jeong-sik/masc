@@ -33,7 +33,6 @@ let keeper_toml_fields =
   ; "sandbox_image", Field_string
   ; "network_mode", Field_string
   ; "multimodal_policy", Field_string
-  ; "active_goal_ids", Field_string_array
   ; "max_context_override", Field_int
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
@@ -231,10 +230,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         multimodal_policy =
           Option.bind (str "multimodal_policy") multimodal_policy_of_string;
         autonomous_wake_prompt;
-        active_goal_ids =
-          if has "active_goal_ids" then
-            Some (normalize_name_list (strs "active_goal_ids"))
-          else None;
         max_context_override;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
@@ -281,7 +276,6 @@ let merge_keeper_profile_defaults
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
     multimodal_policy = prefer overlay.multimodal_policy base.multimodal_policy;
-    active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     max_context_override =
       prefer overlay.max_context_override base.max_context_override;
     telemetry_feedback_enabled =

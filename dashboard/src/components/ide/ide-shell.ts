@@ -583,7 +583,7 @@ function IdeDashboardConnectionChip({
     : 'Dashboard event transport is not live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
   return html`
     <span
-      class=${`chip sm is-${tone}`}
+      class=${`tag-chip sm is-${tone}`}
       data-testid="ide-dashboard-connection"
       title=${title}
       aria-label=${`${label}; ${title}`}
@@ -726,7 +726,7 @@ function IdeCursorRailPanel() {
       </div>
       ${overlay.stream ? html`
         <div
-          class=${`ide-cursor-stream-status chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
+          class=${`ide-cursor-stream-status tag-chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
           data-testid="ide-cursor-stream-status"
           data-state=${overlay.stream.status}
           role="status"
@@ -1308,7 +1308,7 @@ export function IdeShell() {
           aria-label="IDE operational status"
         >
           <summary
-            class="chip sm is-warn"
+            class="tag-chip sm is-warn"
             data-testid="ide-readiness-notice"
             title="IDE shell is observational; LSP, overlay, and shell flows are not a verified execution boundary."
           >
@@ -1324,7 +1324,7 @@ export function IdeShell() {
             aria-label="IDE operational status"
           >
             <span
-              class="chip sm is-brass"
+              class="tag-chip sm is-brass"
               data-testid="ide-statusbar-workspace"
               title=${statusbar.workspaceBasePath
                 ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
@@ -1333,7 +1333,7 @@ export function IdeShell() {
             ${statusbar.chips.map(chip => html`
               <span
                 key=${chip.id}
-                class=${`chip sm is-${chip.tone}`}
+                class=${`tag-chip sm is-${chip.tone}`}
                 title=${chip.title}
                 data-testid=${`ide-statusbar-chip-${chip.id}`}
               >${chip.label}</span>

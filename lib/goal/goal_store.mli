@@ -7,7 +7,10 @@
 
     - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
       [Completed] / [Paused] / [Dropped]) — the only persisted
-      lifecycle representation.  ["status"] is not an accepted field:
+      lifecycle representation.  The retired ["owner"] field is accepted
+      and discarded on read so pre-cut stores remain available, but it is
+      never written and does not re-enter the runtime model.  ["status"] is
+      not an accepted field:
       a row carrying it fails to decode, and {!read_state} then applies
       the corrupt-store policy (recovery mirror if usable, otherwise an
       empty state plus a warning).  A store written before the field was

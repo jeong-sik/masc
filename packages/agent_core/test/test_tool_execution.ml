@@ -742,7 +742,9 @@ let test_block_is_deterministic_failure () =
   | _ -> fail "expected exactly one result"
 ;;
 
-let test_unknown_tool_is_uniform_validation_with_full_diagnostics () =
+let test_unknown_tool_is_uniform_validation_without_the_catalog () =
+  (* Fourteen names so a regression that reinstates the catalog cannot hide
+     behind a short list. *)
   let names = List.init 14 (fun index -> Printf.sprintf "tool_%02d" index) in
   let run tools =
     match
@@ -766,15 +768,16 @@ let test_unknown_tool_is_uniform_validation_with_full_diagnostics () =
   check_validation "empty catalog" without_registered_tools;
   check
     string
-    "empty catalog diagnostic"
-    "Tool not found: Missing. Available tools: (none)"
+    "an empty registry is stated, because the model cannot read absence off its \
+     own request"
+    "Tool not found: Missing. No tools are registered"
     without_registered_tools.content;
   let with_registered_tools = run (List.map make_echo_tool names) in
   check_validation "populated catalog" with_registered_tools;
   check
     string
-    "all available names are rendered without truncation"
-    ("Tool not found: Missing. Available tools: " ^ String.concat "," names)
+    "a populated registry stays out of the result the model reads back"
+    "Tool not found: Missing"
     with_registered_tools.content
 ;;
 
@@ -782,8 +785,9 @@ let test_unknown_tool_is_uniform_validation_with_full_diagnostics () =
    ([Execute["argv"]], live rondo shape) or typo a name. Lookup stays
    exact; the reject message must name the received shape and the
    nearest registered name so the model can repair the call instead of
-   resending the same broken string. A bare unknown identifier with no
-   near miss keeps the exact legacy message (pinned above). *)
+   resending the same broken string. Both are short and specific to the
+   failed call, which is why they stay in the result while the registry
+   listing does not. *)
 let run_unknown_name ~tools name =
   match
     run_execute_with_tools
@@ -812,7 +816,7 @@ let test_fused_name_reject_names_the_registered_prefix () =
   check
     string
     "fused name reject quotes the registered prefix and the repair"
-    ("Tool not found: Execute[\"argv\"]. Available tools: Execute. "
+    ("Tool not found: Execute[\"argv\"]. "
      ^ "The name carries extra characters after \"Execute\"; send the tool name "
      ^ "alone and put arguments in the input object.")
     result.content
@@ -828,9 +832,7 @@ let test_typo_name_reject_suggests_closest_registered () =
   check
     string
     "typo reject suggests the closest registered name"
-    ("Tool not found: keeper_broadcst. Available tools: "
-     ^ "keeper_broadcast,keeper_tasks_list. Closest registered name: "
-     ^ "keeper_broadcast.")
+    "Tool not found: keeper_broadcst. Closest registered name: keeper_broadcast."
     result.content
 ;;
 
@@ -842,7 +844,7 @@ let test_fused_typo_prefix_reject_suggests_closest_registered () =
   check
     string
     "fused typo reject pairs the shape note with the closest name"
-    ("Tool not found: Exceute[\"x\"]. Available tools: Execute. "
+    ("Tool not found: Exceute[\"x\"]. "
      ^ "The name is not a bare identifier (closest registered name: Execute); "
      ^ "send the registered tool name alone and put arguments in the input object.")
     result.content
@@ -1554,9 +1556,9 @@ let () =
         ] )
     ; ( "routing"
       , [ test_case
-            "unknown tools are uniform validation failures with full diagnostics"
+            "unknown tools are uniform validation failures without the registry listing"
             `Quick
-            test_unknown_tool_is_uniform_validation_with_full_diagnostics
+            test_unknown_tool_is_uniform_validation_without_the_catalog
         ; test_case
             "fused name reject names the registered prefix"
             `Quick

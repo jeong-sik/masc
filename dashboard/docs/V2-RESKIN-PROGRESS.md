@@ -6,12 +6,18 @@ SSOT CSS, production-grade, no stub/hardcode/silent-failure.
 
 ## Ground truth (prototype)
 - Source: the keeper-v2 design prototype is now IN-REPO at
-  `dashboard/prototypes/keeper-v2/` (v3 export, #29046) — `$KEEPER_V2_PROTO`
+  `dashboard/prototypes/keeper-v2/` (v5 export, 2026-08-22) — `$KEEPER_V2_PROTO`
   indirection is no longer needed. The vendored SSOT copy of its CSS lives in
   `src/styles/keeper-v2/` (the in-repo source of truth for the skin).
-- Standalone (rendered target): `Keeper Agent v3.html` from that directory,
-  served locally (`?surface=<id>` deep-links) — e.g.
+- Standalone (rendered target): `Keeper Agent v5.html` from that directory —
+  the `data-tone="tempered"` entry point, which is the tone the dashboard runs.
+  Served locally (`?surface=<id>` deep-links) — e.g.
   `python3 -m http.server` inside `dashboard/prototypes/keeper-v2/`.
+- **Measured, not eyeballed:** `docs/DESIGN-PARITY.md` describes the harness that
+  renders the prototype's own DOM under the dashboard's stylesheets, so the SSIM
+  between the two is skin drift with the data variable removed. It also carries
+  the divergence ledger — every surface still short of parity, what holds it
+  there, and what closing it would cost.
 - Maps (transient investigation output, regenerable, not committed):
   proto-data-contract, proto-keepers-dom, proto-css-tokens, live-store-mapping,
   current-shell-inventory.

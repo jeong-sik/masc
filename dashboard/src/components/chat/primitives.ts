@@ -11,7 +11,7 @@ import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ArrowRight, ExternalLink, Mic, ShieldCheck, Square } from 'lucide-preact'
-import { prettyJson } from '../tool-call-shared'
+import { normalizeToolName, prettyJson, toolSubject } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
@@ -1666,6 +1666,9 @@ function ChatTraceStep({
   }
 
   const statusUi = traceToolStatusUi(step.status)
+  // The name alone repeats: six `Execute` rows read identically. The subject is
+  // the argument that tells them apart, and it is already on the step.
+  const subject = toolSubject(step.args)
 
   return html`
     <div
@@ -1686,6 +1689,9 @@ function ChatTraceStep({
           <span class="chat-block-tstep-kind">Tool</span>
           <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${step.name}</span>
+          ${subject
+            ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+            : null}
           <span
             class="chat-block-tstep-status ${statusUi.className}"
             title=${statusUi.title}
@@ -3064,6 +3070,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const toolCallId = toolCallIdFromToolEntryId(entry.id)
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  // Same reason as the trace-step row: the name repeats, the subject does not.
+  const subject = isEmptyArgs ? null : toolSubject(displayArgs)
 
   // Tool results never travel on the chat stream — they are joined here from
   // the tool-call output store by this row's id (`tool-<tool_use_id>`). Null
@@ -3113,6 +3121,9 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       >
         <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-mono font-bold text-[var(--color-fg-secondary)]">T</span>
         <span class="font-mono text-sm font-semibold text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        ${subject
+          ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+          : null}
         <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]">입력</span>
         ${outputEntry
           ? html`<span
@@ -3255,6 +3266,8 @@ function ToolTraceStep({
   const callId = toolTraceCallId(entry, traceStep)
   const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  // Same reason as the trace-step row: the name repeats, the subject does not.
+  const subject = isEmptyArgs ? null : toolSubject(displayArgs)
   const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep)
   const sourceBadge = structuralSummary
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
@@ -3308,6 +3321,9 @@ function ToolTraceStep({
           <span class="chat-block-tstep-kind">Tool</span>
           <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${name}</span>
+          ${subject
+            ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+            : null}
           <span
             class="chat-block-tstep-status ${status}"
             title=${TOOL_STATUS_TITLE[status]}
@@ -3747,6 +3763,44 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
 // transcript stops yanking the viewport while old messages are read.
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80
 
+const AUTONOMOUS_SUMMARY_MAX_GROUPS = 4
+// A run can hold hundreds of turns; the header is a glance, not an audit. The
+// scan stops here and says so with a trailing ellipsis rather than paying for
+// the whole run on every render.
+const AUTONOMOUS_SUMMARY_SCAN_LIMIT = 2000
+
+/** Which tools a collapsed run of autonomous turns ran, in the order it ran
+ *  them, consecutive repeats folded into a count. A header reading only
+ *  "자율턴 145개" says how many times the keeper woke, not what any wake did,
+ *  so the run stays closed and the reader still cannot tell a fetch from a
+ *  rewrite. Returns null for a run that called no tools. */
+export function autonomousToolSummary(entries: KeeperConversationEntry[]): string | null {
+  const groups: { name: string; count: number }[] = []
+  let scanned = 0
+  let truncated = false
+  for (const entry of entries) {
+    for (const step of entry.traceSteps ?? []) {
+      if (step.kind !== 'tool') continue
+      if (scanned >= AUTONOMOUS_SUMMARY_SCAN_LIMIT) {
+        truncated = true
+        break
+      }
+      scanned++
+      const name = normalizeToolName(step.name)
+      const last = groups[groups.length - 1]
+      if (last && last.name === name) last.count++
+      else groups.push({ name, count: 1 })
+    }
+    if (truncated) break
+  }
+  if (groups.length === 0) return null
+  const shown = groups.slice(0, AUTONOMOUS_SUMMARY_MAX_GROUPS)
+  const text = shown.map((g) => (g.count > 1 ? `${g.name}×${g.count}` : g.name)).join(' ')
+  const rest = groups.length - shown.length
+  const more = rest > 0 ? ` +${rest}` : ''
+  return truncated ? `${text}${more}…` : `${text}${more}`
+}
+
 /** One autonomous turn, collapsed into a single row. Starts closed: the turn is
  *  the keeper working on its own, and the transcript's subject is the
  *  conversation around it. Expanding renders the exact turn's final text and
@@ -3772,6 +3826,7 @@ function AutonomousTurnGroup({
 }) {
   const [open, setOpen] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
+  const toolSummary = useMemo(() => autonomousToolSummary([entry]), [entry])
   return html`
     <div class="chat-block-trace ${open ? 'open' : ''}">
       <button
@@ -3783,6 +3838,9 @@ function AutonomousTurnGroup({
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
         <span class="chat-block-trace-count">1개</span>
+        ${toolSummary
+          ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
+          : null}
         ${timestamp ? html`<span class="chat-block-trace-meta">${timestamp}</span>` : null}
       </button>
       ${open
@@ -3874,6 +3932,7 @@ function AutonomousTurnRun({
   // Both ends or neither: a half range would read as a single point in time.
   const range = first && last ? (first === last ? first : `${first} ~ ${last}`) : null
   const drawn = autonomousRunWindow(entries.length, headCount)
+  const toolSummary = useMemo(() => autonomousToolSummary(entries), [entries])
   const turn = (entry: KeeperConversationEntry) => html`<${AutonomousTurnGroup}
     key=${entry.id}
     entry=${entry}
@@ -3896,6 +3955,9 @@ function AutonomousTurnRun({
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
         <span class="chat-block-trace-count">${entries.length}개</span>
+        ${toolSummary
+          ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
+          : null}
         ${range ? html`<span class="chat-block-trace-meta">${range}</span>` : null}
       </button>
       ${open

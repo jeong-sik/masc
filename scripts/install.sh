@@ -2,11 +2,10 @@
 # masc installer — download prebuilt binary, seed runtime config/catalog, smoke-check.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh -o /tmp/masc-install.sh
+#   TAG=vX.Y.Z
+#   curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
 #   less /tmp/masc-install.sh
-#   bash /tmp/masc-install.sh --version <release-tag>
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash -s -- --version <release-tag> --prefix /usr/local/bin
+#   bash /tmp/masc-install.sh --version "$TAG"
 #
 # Flags:
 #   --version vX.Y.Z   Pin a specific release (default: latest)
@@ -1053,6 +1052,9 @@ Next:
   ${c_dim}# load provider key${c_off}
   $source_hint
 
+  ${c_dim}# mint a worker bearer in this shell for your MCP client${c_off}
+  eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
+
   ${c_dim}# start server (loopback only)${c_off}
   $start_env $DEST --base-path "$BASE_PATH"
 
@@ -1063,7 +1065,7 @@ Next:
   ${c_dim}# sanity check${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
-  ${c_dim}# wire up your MCP client (local agent)${c_off}
+  ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup
 
 EOF

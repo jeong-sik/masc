@@ -30,16 +30,20 @@ Keeper가 없어도 됩니다.
 
 ### 로컬 소스에서 실행
 
-기본 실행 스크립트는 `config/runtime.toml`에 지정된 기본 런타임을 사용합니다.
-`classic` Keeper 네 명을 추가하고 서버를 시작한 뒤 대시보드를 엽니다. 이 경로를
-사용하려면 OCaml 의존성이 먼저 설치되어 있어야 합니다.
+OCaml 의존성을 한 번 설치한 뒤 작업 공간 서버를 실행합니다. 기본 quickstart는
+Keeper를 시작하지 않으며 모델 프로바이더 키도 요구하지 않습니다.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
 
-export OLLAMA_CLOUD_API_KEY=...
+scripts/opam-pin-external-deps.sh --install
+opam install . --deps-only
 ./quickstart.sh
+
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+curl http://127.0.0.1:8935/health
 ```
 
 기본값은 다음과 같습니다.
@@ -48,34 +52,22 @@ export OLLAMA_CLOUD_API_KEY=...
 - HTTP 포트: `8935`
 - 대시보드: `http://127.0.0.1:8935/dashboard/`
 - MCP 주소: `http://127.0.0.1:8935/mcp`
-- Keeper 구성: `classic`
+- Keeper 구성: 없음
 - 런타임: `config/runtime.toml`의 현재 `[runtime].default`
+- MCP bearer export: `~/masc-quickstart/.masc/config/mcp-client.env`
 
 `--base-path`, `--team`, `--port`, `--no-open`, `--no-start` 옵션은
 `./quickstart.sh --help`에서 확인할 수 있습니다.
 
-`./quickstart.sh --docker`는 소스에서 완결된 컨테이너 이미지를 만듭니다.
-컨테이너는 네트워크 주소에 바인딩되므로 대시보드 데이터를 읽으려면 인증
-토큰이 필요합니다. 대시보드를 간단히 확인하려면 loopback에 바인딩되는 기본
-실행이 낫습니다.
-
-### 소스에서 직접 빌드
-
-필요한 OCaml과 Dune 버전은 `dune-project`에 적혀 있습니다.
+`classic` Keeper 구성을 함께 시작하려면 첫 실행 때 모델 키를 제공합니다.
 
 ```bash
-scripts/opam-pin-external-deps.sh --install
-opam install . --deps-only
-scripts/dune-local.sh build @default
-
 export OLLAMA_CLOUD_API_KEY=...
-./start-masc.sh --http --base-path "$PWD" --port 8935
-curl http://127.0.0.1:8935/health
+./quickstart.sh --team classic
 ```
 
-`start-masc.sh`는 대시보드 소스가 저장된 결과물보다 새로우면 대시보드도
-빌드합니다. Vite로 대시보드를 개발할 때만 `cd dashboard && pnpm dev`를 따로
-실행하면 됩니다.
+필요한 OCaml과 Dune 버전은 `dune-project`에 적혀 있습니다. 첫 소스 실행은
+OCaml 서버와 대시보드를 빌드하므로 몇 분 걸릴 수 있습니다.
 
 ### 공개 바이너리 설치
 
@@ -95,22 +87,27 @@ bash /tmp/masc-install.sh --version "$TAG"
 설치 방식은 선택한 태그에 따라 달라집니다. 최근 릴리스의 스크립트는
 `SHA256SUMS`가 있으면 내려받은 파일을 검증하고, 필요한 파일이 없으면 설치를
 중단합니다. 지원 플랫폼은 각 릴리스에 첨부된 파일을 기준으로 확인하세요. 설치가
-끝나면 스크립트가 출력한 명령으로 서버를 시작합니다.
+끝나면 스크립트가 출력한 login과 시작 명령을 따릅니다. login 명령은 MCP
+클라이언트용 worker bearer를 만듭니다. 기본 설정의 MCP endpoint는 인증 없는
+클라이언트를 받지 않습니다.
 
 ## MCP 클라이언트 연결
 
-공개 MCP 경로는 HTTP입니다. 사용하는 MCP 클라이언트 설정에 아래 항목을
-합치면 됩니다.
+공개 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를 현재
+셸에 읽습니다.
 
-```json
-{
-  "mcpServers": {
-    "masc": {
-      "type": "http",
-      "url": "http://127.0.0.1:8935/mcp"
-    }
-  }
-}
+```bash
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+```
+
+bearer 환경 변수를 지원하는 클라이언트에는 다음 형태로 등록합니다.
+
+```toml
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+bearer_token_env_var = "MASC_TOKEN"
+http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
 클라이언트가 연결되면 아래 두 호출로 첫 작업을 시작할 수 있습니다.
@@ -124,11 +121,11 @@ masc_status()
 전달하면 새 작업을 만들고 자신이 맡습니다. 이후 MASC 도구를 통해 목표, 작업,
 보드 글, 상태 변경을 다른 에이전트와 공유합니다.
 
-loopback 개발 환경에서 토큰 없이 연결할 수 있는지는 현재 인증 설정에 따라
-달라집니다. loopback이 아닌 주소에 바인딩하거나 인증을 엄격하게 설정하면
-토큰이 필요합니다. 자세한 설정은 [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md)와
-[`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)를
-참고하세요.
+기본 로컬 인증에서는 URL만 등록하면 `401 Unauthorized`가 납니다. 다른
+클라이언트 형식, initialize 직접 확인, 수동 bearer 생성은
+[`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md)를 참고하세요. admin 전용 대시보드
+작업은 [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)에
+정리돼 있습니다.
 
 ## 현재 범위
 

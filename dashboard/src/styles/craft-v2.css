@@ -31,6 +31,53 @@
   font-size: calc(var(--twk-font-scale, 100) * 1%);
 }
 
+/* ── Button leading ───────────────────────────────────────────── */
+/* The prototype ships no CSS reset, so its <button>s keep the UA metrics
+   (`line-height: normal`) while body copy runs at 1.55. Every dense chrome the
+   design builds out of buttons — log rows, nav items, stat chips, kanban cards
+   — is sized by that tight leading. The dashboard's Tailwind preflight makes
+   `button { font: inherit }`, so the same elements inherit 1.55 and every row
+   grows ~10% (a log row measured 41.7px against the design's 38.0px, and the
+   drift compounds down a list). Restoring proportional leading on the v2 shell's
+   buttons is what makes the row pitch match. It sits in a layer because the rule
+   it needs is "unless a component says otherwise", and specificity cannot say
+   that: at (0,1,1) it overrode the kit's own `.fl-act { line-height: 12px }`,
+   and at (0,0,1) it lost to whichever unlayered sheet happened to load later.
+   Layered rules always yield to unlayered ones, so a component that states its
+   leading keeps it and everything else takes proportional leading. Scoped to
+   `.v2-app`; other surfaces untouched. */
+@layer v2-button-leading {
+  .v2-app button {
+    line-height: normal;
+  }
+}
+
+/* ── Square edges the design gets from the UA ─────────────────── */
+/* `tokens.css` gives every button a 3px radius so an unstyled one still looks
+   like a control, and 1,309 of the dashboard's 1,783 buttons take it. These do
+   not: in the design they are rows and segments inside a container that already
+   owns the corner — a log line, a goal header, a segment in a pill — and the
+   prototype leaves them square because a bare <button> has no radius. The
+   dashboard's default rounds them, which reads as a second corner inside the
+   first. Stated per component rather than by dropping the default, which the
+   other 1,309 rely on. */
+.v2-app :is(
+  .ap-klink, .ap-viewbtn, .cn-bind-row, .fus-rich-more, .fus-sink-to, .fus-who,
+  .ide-remote, .lg-line, .ov-dlink, .ov-link, .sch-sig-id, .sch-viewbtn, .wk-goal-h
+) {
+  border-radius: 0;
+}
+
+/* ── Surface subtitle spacing ─────────────────────────────────── */
+/* `.ov-sub` is a <p> in the design, where the UA's 1em bottom margin puts 12px
+   between the surface subtitle and the first band. The dashboard's reset zeroes
+   that margin, so every surface header sat 12px tighter than the design and the
+   header block measured 87px against the design's 99px. Stated explicitly here
+   rather than left to a UA default. */
+.v2-app .ov-sub {
+  margin-bottom: 12px;
+}
+
 /* ── Density ──────────────────────────────────────────────────── */
 .v2-app[data-density="spacious"] {
   --twk-pad-surface: 32px 42px 60px;
@@ -58,8 +105,25 @@
   padding: var(--twk-pad-surface);
 }
 
-.v2-app[data-density] .card,
-.v2-app[data-density] [class*="-card"]:not(.twk-panel):not(.twk-panel *) {
+/* Density card padding — the card set is enumerated, not matched by substring.
+   `[class*="-card"]` also matched every element whose class merely CONTAINS
+   "-card": the `.ov-card-h` card headers, `.set-card-b-wide`, and — through the
+   Tailwind utility `rounded-card` — all ~100 chat avatars, each of which took on
+   card padding it was never meant to have. Its `:not(.twk-panel)` pair also
+   pushed it to (0,5,0), outranking the prototype's own density rules, so
+   `.ctx-card` rendered at 16px/18px where the design specifies 14px/15px.
+   The list holds only cards nothing else pads: a component that states its own
+   padding keeps it (the design gives `.rtc-card` 10px/12px and `.ctx-card`
+   14px/15px), and the four the design deliberately leaves unpadded —
+   `.ap-card`, `.cn-card`, `.ia-card`, `.sch-card`, whose inner sections carry
+   the padding — stay out. Guarded by craft-v2-card-density.test.ts: a new
+   `*-card` class either joins this list or states its own padding. */
+.v2-app[data-density] :is(
+  .card, .agent-card, .ap-auto-card, .cmd-card, .focus-agent-card, .mission-activity-card,
+  .mission-crew-card, .ops-card, .prompt-preset-card, .ss-card, .v2-command-card,
+  .v2-ide-card, .v2-lab-card, .v2-monitoring-card, .v2-overview-ticker-card,
+  .v2-workspace-card
+) {
   padding: var(--twk-pad-card);
 }
 
@@ -208,8 +272,12 @@
   --lift: -3px;
 }
 
-.v2-app[data-motion="lively"] .card:hover,
-.v2-app[data-motion="lively"] [class*="-card"]:not(.twk-panel):not(.twk-panel *):hover,
+.v2-app[data-motion="lively"] :is(
+  .card, .agent-card, .ap-auto-card, .cmd-card, .focus-agent-card, .mission-activity-card,
+  .mission-crew-card, .ops-card, .prompt-preset-card, .ss-card, .v2-command-card,
+  .v2-ide-card, .v2-lab-card, .v2-monitoring-card, .v2-overview-ticker-card,
+  .v2-workspace-card
+):hover,
 .v2-app[data-motion="lively"] .ov-keeper:hover,
 .v2-app[data-motion="lively"] .cp-route:hover,
 .v2-app[data-motion="lively"] .cn-card:hover,

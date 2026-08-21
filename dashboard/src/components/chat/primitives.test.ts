@@ -12,6 +12,7 @@ import {
   ChatComposer,
   ChatTranscript,
   THINKING_TRACE_PREVIEW_CHARS,
+  autonomousToolSummary,
   _resetTraceCardOpenChoicesForTests,
   type ChatComposerSendPayload,
 } from './primitives'
@@ -4032,5 +4033,62 @@ describe('ChatComposer v2 prototype surface', () => {
     fireEvent.dragOver(composer)
     const textareaAfterDrag = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
     expect(textareaAfterDrag.placeholder).toBe(CHAT_COMPOSER_DROP_PLACEHOLDER)
+  })
+})
+
+// ================================================================
+// autonomousToolSummary
+// ================================================================
+// A collapsed run's header is the only thing a reader sees without clicking, so
+// it has to say what the run did, not just how many wakes it held.
+
+describe('autonomousToolSummary', () => {
+  const withTools = (id: string, names: string[]): KeeperConversationEntry =>
+    entry({
+      id,
+      text: '',
+      traceSteps: names.map((name) => ({ kind: 'tool' as const, name })),
+    })
+
+  it('returns null when the run called no tools', () => {
+    expect(autonomousToolSummary([entry({ id: 'a', text: 'hi' })])).toBeNull()
+    expect(
+      autonomousToolSummary([
+        entry({ id: 'b', text: '', traceSteps: [{ kind: 'think', text: 'thinking' }] }),
+      ]),
+    ).toBeNull()
+    expect(autonomousToolSummary([])).toBeNull()
+  })
+
+  it('folds consecutive repeats into a count', () => {
+    expect(autonomousToolSummary([withTools('a', ['Execute', 'Execute', 'Execute'])]))
+      .toBe('Execute×3')
+  })
+
+  it('keeps the order the tools ran in', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read', 'Execute', 'Execute', 'Read'])]))
+      .toBe('Read Execute×2 Read')
+  })
+
+  it('spans every turn in the run', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read']), withTools('b', ['Grep'])]))
+      .toBe('Read Grep')
+  })
+
+  it('strips the keeper_ and masc_ prefixes the rows already hide', () => {
+    expect(autonomousToolSummary([withTools('a', ['keeper_tasks_list', 'masc_board_search'])]))
+      .toBe('tasks_list board_search')
+  })
+
+  it('counts the groups it did not show', () => {
+    const out = autonomousToolSummary([withTools('a', ['A', 'B', 'C', 'D', 'E', 'F'])])
+    expect(out).toBe('A B C D +2')
+  })
+
+  it('marks a scan it cut short rather than reporting a short run', () => {
+    const many = Array.from({ length: 2100 }, (_, i) => (i % 2 === 0 ? 'Read' : 'Execute'))
+    const out = autonomousToolSummary([withTools('a', many)])
+    expect(out).not.toBeNull()
+    expect(out!.endsWith('…')).toBe(true)
   })
 })

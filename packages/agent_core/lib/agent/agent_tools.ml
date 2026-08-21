@@ -130,9 +130,18 @@ let closest_registered ~requested ~available =
 ;;
 
 let unknown_tool_failure ~requested ~available =
-  let available_preview = render_tool_names available in
+  (* The catalog does not belong in the result the model reads back. Every
+     request already carries the tool schemas, and the operator copy is logged
+     beside this call, so listing the names here only sends the surface back
+     into the conversation on each miss. Measured 2026-08-21 with 101 tools
+     registered: 1,915 of the message's 1,975 bytes were the list, and one turn
+     missed 88 times in a row, so a model already failing under tool-surface
+     pressure was handed 170 KB more of it. What it cannot derive is which name
+     failed and how that name was malformed; those stay. *)
   let base =
-    Printf.sprintf "Tool not found: %s. Available tools: %s" requested available_preview
+    match available with
+    | [] -> Printf.sprintf "Tool not found: %s. No tools are registered" requested
+    | _ :: _ -> Printf.sprintf "Tool not found: %s" requested
   in
   let extras =
     match identifier_prefix requested with

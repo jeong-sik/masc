@@ -46,42 +46,13 @@
 .sch-payload-row { border: 1px solid var(--border-main); border-radius: var(--radius-pill); background: var(--bg-sunken); color: var(--text-mid); cursor: pointer; font-size: var(--fs-10); padding: 2px 8px; }
 .sch-payload-row:hover { border-color: var(--volt-dim); color: var(--volt); }
 
-/* ── cadence axis ── */
-.sch-cad { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.02em; padding: 1px 8px; border-radius: var(--radius-pill); white-space: nowrap; color: var(--tone, var(--text-dim)); border: 1px solid color-mix(in oklab, var(--tone, var(--text-dim)) 34%, transparent); background: color-mix(in oklab, var(--tone, var(--text-dim)) 9%, transparent); }
-.sch-cad.ok { --tone: var(--status-ok); }
-.sch-cad.info { --tone: var(--info); }
-.sch-cad.volt { --tone: var(--volt-strong); }
-.sch-cad.warn { --tone: var(--status-warn); }
-.sch-cad.dim { --tone: var(--text-dim); }
-.sch-cadsum { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 12px; }
-.sch-cadsum-i { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 10px; border-radius: var(--radius-sm); border: 1px solid color-mix(in oklab, var(--tone) 28%, transparent); background: color-mix(in oklab, var(--tone) 6%, transparent); color: var(--text-mid); cursor: pointer; transition: 0.14s; --tone: var(--text-dim); }
-.sch-cadsum-i.ok { --tone: var(--status-ok); }
-.sch-cadsum-i.info { --tone: var(--info); }
-.sch-cadsum-i.volt { --tone: var(--volt-strong); }
-.sch-cadsum-i.warn { --tone: var(--status-warn); }
-.sch-cadsum-i.dim { --tone: var(--text-dim); }
-.sch-cadsum-i:hover { border-color: color-mix(in oklab, var(--tone) 55%, transparent); }
-.sch-cadsum-i.on { background: color-mix(in oklab, var(--tone) 15%, transparent); border-color: var(--tone); color: var(--text-bright); }
-.sch-cadsum-i.off { opacity: 0.5; }
-.sch-cadsum-gl { color: var(--tone); font-size: var(--fs-12); }
-.sch-cadsum-n { font-size: var(--fs-13); color: var(--tone); }
-.sch-cadsum-l { font-size: var(--fs-11); }
-.sch-poll { margin: 0 0 14px; padding: 14px; border: 1px solid var(--border-main); border-radius: var(--radius-md); background: color-mix(in oklab, var(--volt-strong) 4%, var(--bg-card)); }
-.sch-poll-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-.sch-poll-sub { font-size: var(--fs-11); color: var(--text-dim); }
-.sch-poll-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-.sch-poll-card { text-align: left; display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; border: 1px solid var(--border-main); border-left: 3px solid var(--tone, var(--volt-strong)); border-radius: var(--radius-sm); background: var(--bg-card); cursor: pointer; transition: 0.14s; --tone: var(--border-highlight); }
-.sch-poll-card.st-ok { --tone: var(--status-ok); }
-.sch-poll-card.st-warn { --tone: var(--status-warn); }
-.sch-poll-card.st-bad { --tone: var(--status-bad); }
-.sch-poll-card.st-info { --tone: var(--info); }
-.sch-poll-card.st-dim { --tone: var(--border-highlight); }
-.sch-poll-card:hover { border-color: var(--border-highlight); border-left-color: var(--tone); }
-.sch-poll-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.sch-poll-int { font-size: var(--fs-11); color: var(--volt-strong); }
-.sch-poll-title { font-size: 12.5px; line-height: 1.45; color: var(--text-primary); text-wrap: pretty; }
-.sch-poll-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.sch-poll-next { margin-left: auto; font-size: 10.5px; color: var(--text-dim); }
+/* The cadence axis, the cadence summary and the polling strip are defined
+   once, below, from the prototype. An earlier hand-port of the same block
+   sat here and lost only on the properties the later copy restates: its
+   `.sch-cadsum { margin: 14px 0 12px }` survived the design's
+   `margin-left: auto`, so the view bar measured 56px against the design's
+   31px and every row below the toggle sat 25px low. These four variants had
+   no counterpart in the later copy, so they move up to it. */
 
 /* ── schedule cards ── */
 .sch-list { display: flex; flex-direction: column; gap: 11px; }
@@ -199,6 +170,11 @@
 .sch-poll-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sch-poll-by { font-size: var(--fs-11); color: var(--text-mid); }
 .sch-poll-next { margin-left: auto; font-size: 10.5px; color: var(--text-dim); }
+
+.sch-cad.warn { --tone: var(--status-warn); }
+.sch-cad.dim { --tone: var(--text-dim); }
+.sch-cadsum-i.warn { --tone: var(--status-warn); }
+.sch-poll-card.st-dim { --tone: var(--border-highlight); }
 
 /* ── 캘린더 아젠다 (daily · cron · oneshot) ── */
 .sch-agenda { display: flex; flex-direction: column; }

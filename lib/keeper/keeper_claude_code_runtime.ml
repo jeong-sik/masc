@@ -368,7 +368,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       prepared.system_prompt :: system_messages
       |> List.filter (fun text -> String.trim text <> "")
       |> String.concat "\n\n"
-      |> String_util.trim_to_option
+      |> String_util.trim_nonempty
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path

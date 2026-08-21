@@ -22,7 +22,7 @@ let string_list_of_json json =
   | `List items ->
       items
       |> List.filter_map (function
-             | `String value -> String_util.trim_to_option value
+             | `String value -> String_util.trim_nonempty value
              | _ -> None)
   | _ -> []
 

@@ -54,6 +54,33 @@ let test_resolve_commit_details_marks_repo_head_fallback () =
   Alcotest.(check (option string)) "repo head source"
     (Some "runtime_repo_head") details.repo_head_commit_source
 
+let test_binary_identity_ignores_mismatched_ambient_checkout () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~embedded:(Some "canary-build-source")
+      ~probe:(fun () -> Some "ambient-checkout-head")
+  in
+  Alcotest.(check (option string))
+    "canary identity remains its build source"
+    (Some "canary-build-source")
+    details.binary_commit;
+  Alcotest.(check (option string))
+    "ambient checkout remains separately observable"
+    (Some "ambient-checkout-head")
+    details.repo_head_commit
+
+let test_binary_identity_survives_without_checkout () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~embedded:(Some "packaged-canary-source")
+      ~probe:(fun () -> None)
+  in
+  Alcotest.(check (option string))
+    "packaged canary keeps its build source"
+    (Some "packaged-canary-source")
+    details.binary_commit;
+  Alcotest.(check (option string)) "no ambient checkout" None details.repo_head_commit
+
 let test_current_started_at_is_stable () =
   let first = Build_identity.current () in
   Unix.sleepf 0.01;
@@ -210,6 +237,12 @@ let () =
           Alcotest.test_case
             "resolve commit details marks repo head fallback" `Quick
             test_resolve_commit_details_marks_repo_head_fallback;
+          Alcotest.test_case
+            "binary identity ignores mismatched ambient checkout" `Quick
+            test_binary_identity_ignores_mismatched_ambient_checkout;
+          Alcotest.test_case
+            "binary identity survives without checkout" `Quick
+            test_binary_identity_survives_without_checkout;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
           Alcotest.test_case "runtime cwd snapshot is resolver backed" `Quick

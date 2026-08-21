@@ -1106,20 +1106,81 @@ let optional_string_of_yojson ~context = function
     Ok ()
 ;;
 
+let keeper_context_current_fields =
+  [ "lane_keeper_name"
+  ; "agent_name"
+  ; "keeper_record_id"
+  ; "keeper_runtime_uid"
+  ; "instructions"
+  ; "current_task_id"
+  ; "mention_keeper_ids"
+  ]
+;;
+
+(* [active_goal_ids] was emitted by early v4 writers before Goal ownership
+   moved to the canonical Goal/Task stores. Keep this tombstone normalization
+   on the v4 ledger read boundary only: in-memory candidates and every current
+   write still have to satisfy the exact seven-field schema below. *)
+let normalize_legacy_v4_keeper_context json =
+  let context = "candidate.judgment_request.keeper_context" in
+  let* fields = assoc ~context json in
+  let retired_fields =
+    List.filter
+      (fun (name, _) -> String.equal name "active_goal_ids")
+      fields
+  in
+  match retired_fields with
+  | [] -> Ok json
+  | [ (_, active_goal_ids) ] ->
+    let* () =
+      exact_fields
+        ~context
+        ("active_goal_ids" :: keeper_context_current_fields)
+        fields
+    in
+    let* () =
+      string_list_of_yojson
+        ~context:(context ^ ".active_goal_ids")
+        active_goal_ids
+    in
+    Ok
+      (`Assoc
+         (List.filter
+            (fun (name, _) -> not (String.equal name "active_goal_ids"))
+            fields))
+  | _ -> Error (context ^ ".active_goal_ids must occur exactly once")
+;;
+
+let normalize_legacy_v4_judgment_request json =
+  let context = "candidate.judgment_request" in
+  let* fields = assoc ~context json in
+  let keeper_contexts =
+    List.filter_map
+      (fun (name, value) ->
+         if String.equal name "keeper_context" then Some value else None)
+      fields
+  in
+  match keeper_contexts with
+  | [ keeper_context ] ->
+    let* normalized = normalize_legacy_v4_keeper_context keeper_context in
+    Ok
+      (`Assoc
+         (List.map
+            (fun (name, value) ->
+               if String.equal name "keeper_context"
+               then name, normalized
+               else name, value)
+            fields))
+  | [] | _ :: _ :: _ -> Ok json
+;;
+
 let validate_keeper_context ~keeper_name json =
   let context = "candidate.judgment_request.keeper_context" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
       ~context
-      [ "lane_keeper_name"
-      ; "agent_name"
-      ; "keeper_record_id"
-      ; "keeper_runtime_uid"
-      ; "instructions"
-      ; "current_task_id"
-      ; "mention_keeper_ids"
-      ]
+      keeper_context_current_fields
       fields
   in
   let* lane_keeper_name_json = field ~context "lane_keeper_name" fields in
@@ -1319,7 +1380,10 @@ let candidate_of_json json =
     then Ok ()
     else Error "candidate_id does not match the exact Keeper and Board signal identity"
   in
-  let* judgment_request = field ~context "judgment_request" fields in
+  let* judgment_request_json = field ~context "judgment_request" fields in
+  let* judgment_request =
+    normalize_legacy_v4_judgment_request judgment_request_json
+  in
   let* recorded_at_json = field ~context "recorded_at" fields in
   let* recorded_at =
     finite_float_json ~context:(context ^ ".recorded_at") recorded_at_json

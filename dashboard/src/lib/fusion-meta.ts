@@ -6,15 +6,6 @@ import { isRecord } from './type-guards'
 import { asRecord, asString, asBoolean } from './json-coerce'
 import type { BoardPostOrigin } from '../types'
 
-function decodeOcamlStringLiteral(value: string): string {
-  return value
-    .replace(/\\\\/g, '\u0000')
-    .replace(/\\"/g, '"')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\u0000/g, '\\')
-}
-
 function normalizeProviderAttribution(model: string, reason: string): string {
   const unknownPrefix = "Provider 'unknown'"
   if (model === '?' || !reason.startsWith(unknownPrefix)) return reason
@@ -22,30 +13,13 @@ function normalizeProviderAttribution(model: string, reason: string): string {
 }
 
 /**
- * Normalize panel failure reasons. Current `fusion_sink.ml` emits structured
- * `reason_code`/`reason_detail`; the OCaml constructor parsing below is a
- * legacy fallback for older board/meta payloads and direct show-derived
- * fixtures.
+ * Normalize panel failure reasons. `fusion_sink.ml` writes reason_code /
+ * reason_detail / reason, and reason carries `panel_failure_text` prose --
+ * never the OCaml constructor syntax this used to reparse.
  */
 export function normalizeFusionPanelReason(model: string, reason: string | undefined): string | undefined {
   if (!reason) return undefined
-  const trimmed = reason.trim()
-  const providerMatch = trimmed.match(/^\(?\s*Fusion_types\.Provider_error\s+"([\s\S]*)"\s*\)?$/)
-  if (providerMatch) {
-    return normalizeProviderAttribution(model, decodeOcamlStringLiteral(providerMatch[1] ?? '').trim())
-  }
-  if (/^\(?\s*Fusion_types\.Timeout\s*\)?$/.test(trimmed)) return 'timeout'
-  const emptyMatch = trimmed.match(/^\(?\s*Fusion_types\.Empty_response(?:\s+"([\s\S]*)")?\s*\)?$/)
-  if (emptyMatch) {
-    return decodeOcamlStringLiteral(emptyMatch[1] ?? '').trim() || 'empty response'
-  }
-  const invalidMaxOutputTokensMatch = trimmed.match(
-    /^\(?\s*Fusion_types\.Invalid_max_output_tokens\s+(-?\d+)\s*\)?$/,
-  )
-  if (invalidMaxOutputTokensMatch) {
-    return `invalid max_output_tokens ${invalidMaxOutputTokensMatch[1]}`
-  }
-  return normalizeProviderAttribution(model, trimmed)
+  return normalizeProviderAttribution(model, reason.trim())
 }
 
 // ---------------------------------------------------------------------------

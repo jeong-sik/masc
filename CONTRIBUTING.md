@@ -176,7 +176,7 @@ Axes:
 - `area` (required, exactly one) - `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime`
   `transport` `dashboard` `connector` `observability` `persistence` `ci`
 - `impact` (required, exactly one) - this order *is* the priority order.
-  `breaks-continuity` turns stop or memory does not carry across them, `breaks-collab` keepers stop reaching each other,
+  `breaks-continuity` turns stop or memory does not carry across them, `breaks-collab` keepers stop reaching each other, or output lands where nobody reads it,
   `blinds-operator` it runs but nobody can see it, `degrades` friction, performance, or accuracy, `internal` development flow only
 - `root` (optional, zero or more) - `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt`
 - `must-do` (optional) - `true` when this breaks the product promise right now

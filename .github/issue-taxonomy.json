@@ -114,7 +114,7 @@
         "breaks-collab": {
           "label": "impact/breaks-collab",
           "color": "d93f0b",
-          "description": "[impact 2] Keeper 간 소통이 끊긴다"
+          "description": "[impact 2] Keeper 간 소통이 끊기거나, 출력이 맥락에 맞지 않는 곳에 도착한다"
         },
         "blinds-operator": {
           "label": "impact/blinds-operator",

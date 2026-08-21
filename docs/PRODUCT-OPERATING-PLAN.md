@@ -88,7 +88,7 @@ if the repository drifts from the SSOT the run fails and names the missing label
 `impact` is ordered, and that order is the priority order:
 
 1. `breaks-continuity` - turns stop, or a keeper cannot recall its own last ten turns
-2. `breaks-collab` - keepers stop reaching each other
+2. `breaks-collab` - keepers stop reaching each other, or output lands where nobody reads it
 3. `blinds-operator` - it runs, but nobody can see it
 4. `degrades` - friction, performance, or accuracy
 5. `internal` - development flow only

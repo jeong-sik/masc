@@ -70,6 +70,18 @@ describe('parseGoalVerificationRunsResponse', () => {
     })
   })
 
+  it('keeps a crash-replayable reviewed run with its tool evidence', () => {
+    const parsed = parseGoalVerificationRunsResponse({
+      generated_at: '2026-08-21T00:00:00Z',
+      count: 1,
+      runs: [row({ status: 'reviewed' })],
+    })
+    expect(parsed.runs[0]).toMatchObject({
+      status: 'reviewed',
+      tools: [{ toolName: 'verification_read_file' }],
+    })
+  })
+
   it('rejects an unknown review kind and outcome-specific field drift', () => {
     expect(() => parseGoalVerificationRunsResponse({
       generated_at: 'now',

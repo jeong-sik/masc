@@ -30,6 +30,7 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  verification_run_id : string;
   authority : Masc_domain.completion_authority;
   evidence : string;
   recorded_at : string;
@@ -46,11 +47,6 @@ type completion_state =
   | Proof_pending of { requested_at : string }
   | Proof_proven of verdict
   | Proof_refuted of verdict
-  | Human_confirmed of {
-      proof : verdict;
-      confirmed_by : string;
-      confirmed_at : string;
-    }
 
 type record = {
   goal_id : string;
@@ -107,7 +103,8 @@ let verdict_to_yojson (v : verdict) =
   in
   `Assoc
     (outcome_fields
-     @ [ "authority", authority_to_yojson v.authority
+     @ [ "verification_run_id", `String v.verification_run_id
+       ; "authority", authority_to_yojson v.authority
        ; "evidence", `String v.evidence
        ; "recorded_at", `String v.recorded_at
        ])
@@ -119,7 +116,13 @@ let verdict_of_yojson = function
           (fun (field, _) ->
             (* strict wire-boundary decoder: rejects unknown fields. STR-OK *)
             if List.mem field
-                 [ "outcome"; "reason"; "authority"; "evidence"; "recorded_at" ]
+                 [ "outcome"
+                 ; "reason"
+                 ; "verification_run_id"
+                 ; "authority"
+                 ; "evidence"
+                 ; "recorded_at"
+                 ]
             then None
             else Some field)
           fields
@@ -133,21 +136,37 @@ let verdict_of_yojson = function
           let json = `Assoc fields in
           match
             ( Json_util.assoc_member_opt "outcome" json
+            , Json_util.get_string json "verification_run_id"
             , Json_util.get_string json "evidence"
             , Json_util.assoc_member_opt "recorded_at" json )
           with
-          | Some (`String outcome), Some evidence, Some (`String recorded_at) -> (
+          | ( Some (`String outcome)
+            , Some verification_run_id
+            , Some evidence
+            , Some (`String recorded_at) ) -> (
+              if String.trim verification_run_id = ""
+              then
+                Error
+                  "goal_verification.verdict_of_yojson: verification_run_id is blank"
+              else
               match authority_of_yojson (Yojson.Safe.Util.member "authority" json) with
               | Error _ as error -> error
               | Ok authority -> (
                   match outcome with
                   | "proven" ->
-                      Ok { outcome = Proven; authority; evidence; recorded_at }
+                      Ok
+                        { outcome = Proven
+                        ; verification_run_id
+                        ; authority
+                        ; evidence
+                        ; recorded_at
+                        }
                   | "refuted" -> (
                       match Json_util.get_string json "reason" with
                       | Some reason ->
                           Ok
                             { outcome = Refuted { reason }
+                            ; verification_run_id
                             ; authority
                             ; evidence
                             ; recorded_at
@@ -162,8 +181,8 @@ let verdict_of_yojson = function
                          ^ other)))
           | _ ->
               Error
-                "goal_verification.verdict_of_yojson: outcome, evidence and \
-                 recorded_at are required"))
+                "goal_verification.verdict_of_yojson: outcome, \
+                 verification_run_id, evidence and recorded_at are required"))
   | json ->
       Error ("goal_verification.verdict_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -210,13 +229,6 @@ let completion_state_to_yojson = function
   | Proof_refuted verdict ->
       `Assoc
         [ "state", `String "proof_refuted"; "verdict", verdict_to_yojson verdict ]
-  | Human_confirmed { proof; confirmed_by; confirmed_at } ->
-      `Assoc
-        [ "state", `String "human_confirmed"
-        ; "proof", verdict_to_yojson proof
-        ; "confirmed_by", `String confirmed_by
-        ; "confirmed_at", `String confirmed_at
-        ]
 
 let completion_state_of_yojson json =
   match Json_util.assoc_member_opt "state" json with
@@ -233,19 +245,6 @@ let completion_state_of_yojson json =
       match verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) with
       | Ok verdict -> Ok (Proof_refuted verdict)
       | Error _ as error -> error)
-  | Some (`String "human_confirmed") -> (
-      match
-        ( verdict_of_yojson (Yojson.Safe.Util.member "proof" json)
-        , Json_util.get_string json "confirmed_by"
-        , Json_util.assoc_member_opt "confirmed_at" json )
-      with
-      | Ok proof, Some confirmed_by, Some (`String confirmed_at) ->
-          Ok (Human_confirmed { proof; confirmed_by; confirmed_at })
-      | Error _ as error, _, _ -> error
-      | _ ->
-          Error
-            "goal_verification: human_confirmed needs proof, confirmed_by and \
-             confirmed_at")
   | Some (`String other) ->
       Error ("goal_verification: unknown completion state " ^ other)
   | _ -> Error "goal_verification: completion state missing"
@@ -555,7 +554,7 @@ let mark_proof_pending config ~goal_id =
             { current with
               completion = Proof_pending { requested_at = current.updated_at }
             }
-      | Proof_proven _ | Human_confirmed _ ->
+      | Proof_proven _ ->
           Error
             (Printf.sprintf
                "goal_verification: proof for %s is already proven; refusing \
@@ -579,8 +578,7 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
         | Proof_refuted _, Refuted _ -> true
         | ( Proof_proven _, Refuted _ )
         | ( Proof_refuted _, Proven )
-        | ( Completion_idle, _ )
-        | ( Human_confirmed _, _ ) -> false
+        | Completion_idle, _ -> false
       in
       if not committable
       then
@@ -606,26 +604,3 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
              "goal_verification: proof verdict for %s requires a viable \
               criterion"
              goal_id))
-
-let record_human_confirmation config ~goal_id ~confirmed_by =
-  update_record config ~goal_id (fun current ->
-      (* [Human_confirmed] is accepted alongside [Proof_proven]: the same
-         crash-between-writes recovery as [record_proof_verdict] — the ledger
-         committed but the phase write did not, and the stage-2 retried
-         confirm must reconcile rather than wedge the goal. *)
-      match current.completion with
-      | Proof_proven proof | Human_confirmed { proof; _ } ->
-          Ok
-            { current with
-              completion =
-                Human_confirmed
-                  { proof
-                  ; confirmed_by
-                  ; confirmed_at = current.updated_at
-                  }
-            }
-      | Completion_idle | Proof_pending _ | Proof_refuted _ ->
-          Error
-            (Printf.sprintf
-               "goal_verification: human confirmation for %s needs a proven proof"
-               goal_id))

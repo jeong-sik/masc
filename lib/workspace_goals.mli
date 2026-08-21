@@ -57,6 +57,11 @@ type verifier_decision =
   | Proof_proven
   | Proof_refuted of { reason : string }
 
+type proof_reconciliation =
+  | No_committed_proof
+  | Reconciled of Goal_phase.t
+  | Reconciliation_not_needed of Goal_phase.t
+
 (** Commit one verdict from the application-owned Goal verifier. The fixed
     [verifier_exact] authority is constructed inside this boundary; callers
     cannot supply or impersonate it. The ledger commit precedes any phase
@@ -66,6 +71,15 @@ val commit_verifier_decision
   -> start_time:float
   -> Workspace_utils_backend_setup.config
   -> goal_id:string
+  -> verification_run_id:string
   -> decision:verifier_decision
   -> evidence:string
   -> Tool_result.result
+
+val reconcile_committed_proof :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  (proof_reconciliation, string) result
+(** Converges the Goal phase after a crash between the durable proof verdict
+    write and the phase/event write. The existing verdict is reused without a
+    model call or ledger rewrite. *)

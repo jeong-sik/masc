@@ -376,19 +376,6 @@ let required_int_field json key =
   | `Null -> missing_field key
   | bad -> field_type_error key "an int" bad
 
-let required_int_any_field json keys =
-  let rec loop = function
-    | [] ->
-        Error
-          (Printf.sprintf "missing required field '%s'"
-             (String.concat "' or '" keys))
-    | key :: rest -> (
-        match member key json with
-        | `Null -> loop rest
-        | _ -> required_int_field json key)
-  in
-  loop keys
-
 let int_field_or json key ~default =
   match member key json with
   | `Null -> Ok default

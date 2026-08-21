@@ -79,6 +79,9 @@ const payloadWithCoverageGap = {
       stale_reason: 'append_failed',
       trace_id: 'trace-quality-gap',
       error: 'disk full',
+      // The backend writes error_class (RFC-0154 PR-2). The hint used to be
+      // recovered by matching 'disk full' in the error text instead.
+      error_class: 'disk_exhaustion',
     },
   ],
 }

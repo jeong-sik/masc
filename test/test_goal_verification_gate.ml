@@ -515,6 +515,17 @@ let transition ctx goal_id ?note ?evidence action =
   dispatch ctx ~name:"masc_goal_transition" args
 ;;
 
+let mark_criterion_viable ctx goal_id =
+  ignore
+    (must_succeed
+       "record_criterion_viable"
+       (transition
+          ctx
+          goal_id
+          ~evidence:"criterion is measurable"
+          "record_criterion_viable"))
+;;
+
 let stored_phase config goal_id =
   match Goal_store.get_goal config ~goal_id with
   | Some goal -> Goal_phase.to_string goal.Goal_store.phase
@@ -579,6 +590,7 @@ let test_proof_proven_completes_with_authority_and_evidence () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Proof-gated goal" in
+  mark_criterion_viable ctx goal_id;
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   (* Evidence is mandatory: absent and blank are the same validation error. *)
   let missing =
@@ -626,6 +638,7 @@ let test_proof_refuted_returns_to_executing_with_reason () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Refutable goal" in
+  mark_criterion_viable ctx goal_id;
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let refuted =
     must_succeed "record_proof_refuted"
@@ -670,6 +683,7 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Wedged goal" in
+  mark_criterion_viable ctx goal_id;
   (* Simulate the crash window: the phase is Verifying but the ledger never
      recorded the proof request. *)
   (match

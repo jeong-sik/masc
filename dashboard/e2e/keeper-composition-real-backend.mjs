@@ -42,8 +42,34 @@ if (health?.dashboard_surface?.status !== 'ok') {
 }
 
 const browser = await chromium.launch({ headless: true })
+// Run 32444698841 timed out on the composer with the page showing
+// "Client WS · disconnected" and a registry stuck on "loading": auth had
+// passed and the route had selected the keeper, so the failure was the socket,
+// not the locator. The screenshot said which subsystem; it could not say why.
+// Console lines and failed requests name the cause, and both have to be
+// subscribed before the first navigation to catch anything.
+const consoleLines = []
+const failedRequests = []
+const CAPTURE_LIMIT = 400
 try {
   const page = await browser.newPage({ viewport })
+  page.on('console', message => {
+    if (consoleLines.length < CAPTURE_LIMIT) {
+      consoleLines.push(`[${message.type()}] ${message.text()}`)
+    }
+  })
+  page.on('pageerror', error => {
+    if (consoleLines.length < CAPTURE_LIMIT) {
+      consoleLines.push(`[pageerror] ${error.message}`)
+    }
+  })
+  page.on('requestfailed', request => {
+    if (failedRequests.length < CAPTURE_LIMIT) {
+      failedRequests.push(
+        `${request.method()} ${request.url()} — ${request.failure()?.errorText ?? 'unknown'}`,
+      )
+    }
+  })
   const route = new URL(dashboardUrl)
   route.searchParams.set('agent', 'dashboard')
   route.searchParams.set('token', token)
@@ -261,6 +287,8 @@ try {
             url: page.url(),
             title: await page.title(),
             body_text: (await page.locator('body').innerText()).slice(0, 20000),
+            console_lines: consoleLines,
+            failed_requests: failedRequests,
           },
           null,
           2,

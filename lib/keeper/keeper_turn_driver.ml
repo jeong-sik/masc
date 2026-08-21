@@ -229,16 +229,7 @@ let attempt_runtime_candidates
      overflow and let it represent a naturally exhausted lane. A lane that
      stops on a non-recoverable error keeps that error: it is the immediate
      operator signal, and the overflow will be observed again on the next
-     cycle.
-
-     Retryability is also a lane-wide fact once every declared candidate has
-     been attempted without crossing an effect boundary.  A transient failure
-     on an earlier candidate must not be masked by a statically unavailable
-     terminal fallback: the earlier provider may recover on the next worker
-     cycle even though the fallback cannot.  Keep the first actual retryable
-     error as the exhausted lane's representative; every candidate-specific
-     failure, including the terminal fallback, remains in the runtime
-     manifest.  This does not override a mid-walk terminal or an effect fence. *)
+     cycle. *)
   let quota_scope_of =
     match quota_scope_of with
     | Some quota_scope_of -> quota_scope_of
@@ -274,19 +265,16 @@ let attempt_runtime_candidates
       dispatchable
     @ undispatchable
   in
-  let rec loop ~observed_overflow ~observed_retryable_error idx = function
+  let rec loop ~observed_overflow idx = function
     | [] ->
       (match observed_overflow with
        | Some overflow_error -> Error overflow_error
        | None ->
-         (match observed_retryable_error with
-          | Some retryable_error -> Error retryable_error
-          | None ->
-            Error
-              (Agent_core.Error.Internal
-                 (Printf.sprintf
-                    "runtime lane %S exhausted all candidates"
-                    runtime_id))))
+         Error
+           (Agent_core.Error.Internal
+              (Printf.sprintf
+                 "runtime lane %S exhausted all candidates"
+                 runtime_id)))
     | candidate :: rest ->
       let is_last = rest = [] in
       let attempt_runtime_id = runtime_id_of candidate in
@@ -402,12 +390,6 @@ let attempt_runtime_candidates
              ~allow_accept_no_progress_retry
              error
          in
-         let observed_retryable_error =
-           match observed_retryable_error with
-           | Some _ -> observed_retryable_error
-           | None ->
-             if Agent_core.Error.is_retryable error then Some error else None
-         in
          let observed_overflow =
            match observed_overflow with
            | Some _ -> observed_overflow
@@ -421,26 +403,16 @@ let attempt_runtime_candidates
          if not effect_retry_admitted
          then Error terminal_error
          else if retry_admitted && error_is_retryable
-         then
-           loop
-             ~observed_overflow
-             ~observed_retryable_error
-             (idx + 1)
-             rest
+         then loop ~observed_overflow (idx + 1) rest
          else if is_last
          then (
            (* Lane fully exhausted: an overflow seen anywhere in the rotation
               outranks the last candidate's error so the failure route and
-              blocker report the deterministic capacity bound. Otherwise an
-              earlier retryable error keeps the lane eligible for a later
-              worker cycle instead of letting a terminal fallback mask it.
-              Cascade telemetry already published each candidate's own error. *)
+              blocker report the deterministic capacity bound. Cascade
+              telemetry already published each candidate's own error. *)
            match observed_overflow with
            | Some overflow_error -> Error overflow_error
-           | None ->
-             (match observed_retryable_error with
-              | Some retryable_error -> Error retryable_error
-              | None -> Error error))
+           | None -> Error error)
          else (
            (match error_is_retryable, effect_retry_admitted, rest with
             | true, true, next :: later ->
@@ -454,7 +426,7 @@ let attempt_runtime_candidates
             | false, _, _ | true, false, _ | true, true, [] -> ());
            Error terminal_error))
   in
-  loop ~observed_overflow:None ~observed_retryable_error:None 0 candidates
+  loop ~observed_overflow:None 0 candidates
 
 let runtime_candidate_missing_error id =
   Agent_core.Error.Internal

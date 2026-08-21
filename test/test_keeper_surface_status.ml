@@ -1,20 +1,19 @@
 (* RFC-0089 (String Classifier to Typed Variant) — keeper surface_status.
 
-   keeper_surface_status derives a display status from (keeper_health x
-   agent_status) and emits it as a string; the operator align step and the
-   server row patcher re-classify that string by literal. These tests pin:
+   keeper_surface_status derives a display status from keeper_health and emits
+   it as a string; the server row patcher re-classifies that string. These
+   tests pin:
    (1) surface_status_of_string_opt parses the six labels and rejects values
        outside the domain ("paused" override, drift, garbage),
    (2) to_string is the inverse on the closed domain,
    (3) keeper_surface_status produces the expected wire string for each
-       (keeper_health x agent_status) combination — behavior preserved. *)
+       keeper-health state. *)
 
 module K = Masc.Keeper_status_runtime
 open Alcotest
 
 let blob pairs : Yojson.Safe.t = `Assoc pairs
 let diag h = blob [ ("health_state", `String h) ]
-let status s = blob [ ("status", `String s) ]
 
 let test_of_string_known () =
   let one label ctor =
@@ -59,27 +58,14 @@ let test_to_string_inverse () =
     ]
 
 let test_producer_behavior () =
-  let surface ~health ~agent_status =
-    K.keeper_surface_status ~agent_status ~diagnostic:(diag health)
-  in
-  (* KH_healthy maps agent_status through *)
-  check string "healthy+active -> active" "active"
-    (surface ~health:"healthy" ~agent_status:(status "active"));
-  check string "healthy+busy -> busy" "busy"
-    (surface ~health:"healthy" ~agent_status:(status "busy"));
-  check string "healthy+listening -> listening" "listening"
-    (surface ~health:"healthy" ~agent_status:(status "listening"));
-  check string "healthy+inactive -> offline" "offline"
-    (surface ~health:"healthy" ~agent_status:(status "inactive"));
-  check string "healthy+unknown -> active (default)" "active"
-    (surface ~health:"healthy" ~agent_status:(status "idle"));
-  (* keeper_health drives the rest regardless of agent_status *)
+  let surface health = K.keeper_surface_status ~diagnostic:(diag health) in
+  check string "healthy -> active" "active" (surface "healthy");
   check string "idle health -> idle" "idle"
-    (surface ~health:"idle" ~agent_status:(status "active"));
+    (surface "idle");
   check string "stale health -> inactive" "inactive"
-    (surface ~health:"stale" ~agent_status:(status "active"));
+    (surface "stale");
   check string "offline health -> offline" "offline"
-    (surface ~health:"offline" ~agent_status:(status "active"))
+    (surface "offline")
 
 let () =
   run "keeper_surface_status"

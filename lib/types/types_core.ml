@@ -174,11 +174,8 @@ let agent_of_yojson json =
              this codec: truncated, hand-edited, or an older schema. Keeping
              the record is still right (#9751) — it is rebuilt on the next
              heartbeat — but the filler must not claim liveness. The epoch
-             makes [parse_agent_status] treat the timestamp as absent, so the
-             derived age is omitted and consumers fall back to their
-             [max_float] "infinitely stale" default. A [now ()] filler
-             inverted that: a corrupt record read as "seen just now" and
-             satisfied every downstream liveness check. *)
+             keeps downstream timestamp readers from treating a corrupt record
+             as "seen just now". *)
           let no_evidence_iso () = `String (iso8601_of_unix_seconds 0.0) in
           let normalized_last_seen =
             match last_seen_raw with

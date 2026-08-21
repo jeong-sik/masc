@@ -9,7 +9,6 @@ let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
   `Assoc
     [
       ("name", `String "executor");
-      ("agent", `Assoc [ ("last_seen", `String "") ]);
       ("agent_name", `String "executor");
       ("keeper_id", `String "k-executor");
       ("status", `String status);

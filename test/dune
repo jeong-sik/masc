@@ -1847,7 +1847,6 @@
 
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 
-(include stanzas/test_keeper_agent_runtime_status.inc)
 
 (include stanzas/test_keeper_autoboot_single_owner.inc)
 

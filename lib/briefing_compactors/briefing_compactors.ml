@@ -4,7 +4,6 @@ open Briefing_json_helpers
 
 let compact_keeper_json keeper_json =
   let diagnostic = member_assoc "diagnostic" keeper_json in
-  let agent = member_assoc "agent" keeper_json in
   `Assoc
     [
       ("name", string_json_opt (member_assoc "name" keeper_json));
@@ -15,7 +14,8 @@ let compact_keeper_json keeper_json =
       ("last_turn_ago_s", float_json (member_assoc "last_turn_ago_s" keeper_json));
       ("compaction_count", int_json (member_assoc "compaction_count" keeper_json));
       ("handoff_count_total", int_json (member_assoc "handoff_count_total" keeper_json));
-      ("current_task", string_json_opt ~max_len:160 (member_assoc "current_task" agent));
+      ( "current_task"
+      , string_json_opt ~max_len:160 (member_assoc "current_task_id" keeper_json) );
       ("last_reply_status", string_json_opt (member_assoc "last_reply_status" diagnostic));
       ("last_reply_preview", string_json_opt ~max_len:160 (member_assoc "last_reply_preview" diagnostic));
       ("active_goal_ids", string_list_json (member_assoc "active_goal_ids" keeper_json));

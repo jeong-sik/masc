@@ -82,7 +82,7 @@ let test_reviewed_observation_survives_replay () =
   with_path
   @@ fun path ->
   let registry = R.create ~path () in
-  let run_id = Random_id.uuid_v7 () in
+  let run_id = "goal-run-reviewed" in
   R.register_running
     registry
     ~run_id

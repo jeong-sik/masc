@@ -305,12 +305,13 @@ let goal_owner_name (goal : Goal_store.goal) =
 let single_producer_lookup config ~producer =
   let open Result.Syntax in
   let* tools = Verification_authority_tools.create ~config ~producer in
+  let* root_layout = Verification_authority_tools.root_layout tools in
   Ok
     (Task.Anti_rationalization.Lookup_tools
        { schemas = Verification_authority_tools.schemas tools
        ; dispatch = Verification_authority_tools.dispatch tools
        ; scope = Task.Anti_rationalization.Producer_tree
-       ; root_layout = Verification_authority_tools.root_layout tools
+       ; root_layout
        })
 ;;
 
@@ -340,12 +341,13 @@ let linked_task_lookup config tasks =
   let* tools =
     Verification_authority_tools.create_forest ~config ~producers
   in
+  let* root_layout = Verification_authority_tools.forest_root_layout tools in
   Ok
     (Task.Anti_rationalization.Lookup_tools
        { schemas = Verification_authority_tools.forest_schemas tools
        ; dispatch = Verification_authority_tools.dispatch_forest tools
        ; scope = Task.Anti_rationalization.Producer_forest { producers }
-       ; root_layout = Verification_authority_tools.forest_root_layout tools
+       ; root_layout
        })
 ;;
 

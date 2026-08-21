@@ -75,6 +75,11 @@ let with_forest producers f =
   | Ok forest -> f config forest
 ;;
 
+let require_layout = function
+  | Ok layout -> layout
+  | Error detail -> Alcotest.failf "root layout unavailable: %s" detail
+;;
+
 (* Create the producer playground used to resolve relative tool paths. *)
 let producer_playground (config : Workspace_core.config) producer_name =
   let path =
@@ -350,6 +355,67 @@ let make_checkout root relative =
   mkdir (Filename.concat checkout ".git")
 ;;
 
+let test_root_layout_fails_closed_when_discovery_is_unavailable () =
+  with_surface (fun _config surface ->
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "missing producer root was presented as a usable layout: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "unavailable discovery remains an error"
+        true
+        (Astring.String.is_infix ~affix:"workspace root" detail
+         || Astring.String.is_infix ~affix:"verification root" detail))
+;;
+
+let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
+      make_checkout root (Printf.sprintf "checkout-%02d" index)
+    done;
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "partial checkout discovery was presented as complete: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "partial discovery names its limit"
+        true
+        (Astring.String.is_infix ~affix:"checkout discovery is partial" detail))
+;;
+
+let test_forest_layout_reserves_each_producer () =
+  let producers = List.init 9 (fun index -> Printf.sprintf "producer-%02d" index) in
+  with_forest producers (fun config forest ->
+    List.iter
+      (fun producer_name ->
+         let root = producer_playground config producer_name in
+         for index = 0 to 19 do
+           Unix.mkdir (Filename.concat root (Printf.sprintf "entry-%02d" index)) 0o755
+         done)
+      producers;
+    let layout = VAT.forest_root_layout forest |> require_layout in
+    List.iter
+      (fun producer_name ->
+         Alcotest.(check bool)
+           (producer_name ^ " retains a reserved layout slice")
+           true
+           (List.exists
+              (Astring.String.is_infix ~affix:(producer_name ^ ":"))
+              layout))
+      producers;
+    Alcotest.(check bool)
+      "the last producer retains entries beyond the old global prefix cap"
+      true
+      (List.exists
+         (Astring.String.is_infix ~affix:"producer-08: entry-19")
+         layout))
+;;
+
 let test_root_layout_reports_entries_and_discovered_checkouts () =
   with_surface (fun config surface ->
     let root = producer_playground config producer in
@@ -358,7 +424,7 @@ let test_root_layout_reports_entries_and_discovered_checkouts () =
     (* A checkout the conventional prefix would miss entirely. *)
     make_checkout root "scratch-tree";
     mkdir (Filename.concat root "artifacts");
-    let layout = VAT.root_layout surface in
+    let layout = VAT.root_layout surface |> require_layout in
     let holds affix =
       List.exists (fun entry -> Astring.String.is_infix ~affix entry) layout
     in
@@ -401,7 +467,7 @@ let test_prompt_states_the_root_and_not_a_repository () =
                { schemas = VAT.schemas surface
                ; dispatch = VAT.dispatch surface
                ; scope = AR.Producer_tree
-               ; root_layout = VAT.root_layout surface
+               ; root_layout = VAT.root_layout surface |> require_layout
                })
           request
       with
@@ -423,7 +489,8 @@ let test_prompt_states_the_root_and_not_a_repository () =
 ;;
 
 let test_prompt_states_the_available_surface () =
-  with_surface (fun _config surface ->
+  with_surface (fun config surface ->
+    ignore (producer_playground config producer);
     let request : AR.review_request =
       { agent_name = producer
       ; task_title = "t"
@@ -445,7 +512,7 @@ let test_prompt_states_the_available_surface () =
            { schemas = VAT.schemas surface
            ; dispatch = VAT.dispatch surface
            ; scope = AR.Producer_tree
-           ; root_layout = VAT.root_layout surface
+           ; root_layout = VAT.root_layout surface |> require_layout
            })
     in
     Alcotest.(check bool)
@@ -562,6 +629,18 @@ let () =
             "root_layout reports entries and discovered checkouts"
             `Quick
             test_root_layout_reports_entries_and_discovered_checkouts
+        ; Alcotest.test_case
+            "root_layout fails closed when discovery is unavailable"
+            `Quick
+            test_root_layout_fails_closed_when_discovery_is_unavailable
+        ; Alcotest.test_case
+            "root_layout fails closed when checkout discovery is partial"
+            `Quick
+            test_root_layout_fails_closed_when_checkout_discovery_is_partial
+        ; Alcotest.test_case
+            "forest layout reserves each producer"
+            `Quick
+            test_forest_layout_reserves_each_producer
         ; Alcotest.test_case
             "prompt states the root instead of implying a repository"
             `Quick

@@ -77,6 +77,22 @@ let ensure_keeper_meta config name =
   | Error detail -> Alcotest.failf "write keeper meta failed: %s" detail
 ;;
 
+let ensure_producer_playground (config : Workspace_core.config) producer =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path
+;;
+
 let test_verdict_event_preserves_typed_authority () =
   let event =
     VP.For_testing.verdict_event_json
@@ -812,6 +828,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           in
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "system-test-worker"));
+          ensure_producer_playground config "system-test-worker";
           ignore
             (W.add_task
                config
@@ -1035,6 +1052,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "snapshot-test-worker"));
           ensure_keeper_meta config "snapshot-test-worker";
+          ensure_producer_playground config "snapshot-test-worker";
           ignore
             (W.add_task
                config

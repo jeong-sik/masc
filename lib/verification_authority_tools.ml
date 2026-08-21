@@ -123,39 +123,40 @@ let create ~config ~producer =
    valid, and a fourth hardcoded scan here would miss it. *)
 let root_entry_cap = 32
 
-(* [None] is "this path did not answer as a directory" — absent, a regular
-   file, or unreadable. The listing is prompt context, so none of those is
-   worth failing a review over. Cancellation is not one of them and travels
-   on. *)
 let children path =
-  try Some (Fs_compat.read_dir path) with
+  try Ok (Fs_compat.read_dir path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> None
+  | Sys_error detail -> Error detail
+  | Unix.Unix_error (code, operation, _) ->
+    Error (Printf.sprintf "%s: %s" operation (Unix.error_message code))
 ;;
 
 let checkout_lines root =
   match Keeper_playground_checkouts.discover ~root with
-  | Error _ -> []
-  | Ok discovery ->
+  | Error error ->
+    Error (Keeper_playground_checkouts.scan_error_to_string error)
+  | Ok (Keeper_playground_checkouts.Partial { limit; _ }) ->
+    Error
+      (Printf.sprintf
+         "checkout discovery is partial: %s"
+         (Keeper_playground_checkouts.limit_to_string limit))
+  | Ok (Keeper_playground_checkouts.Complete checkouts) ->
     let describe (checkout : Keeper_playground_checkouts.checkout) =
       Printf.sprintf
         "  %s/    (git checkout — a repository-relative path is rooted here)"
         checkout.relative_path
     in
-    (match discovery with
-     | Keeper_playground_checkouts.Complete checkouts -> List.map describe checkouts
-     | Keeper_playground_checkouts.Partial { found; limit = _ } ->
-       (* The contract is explicit that a partial list must not be presented as
-          complete: an evaluator told these are all the checkouts would read a
-          path's absence from the list as the work's absence. *)
-       List.map describe found
-       @ [ "  (this listing is partial — more checkouts exist than are shown)" ])
+    Ok (List.map describe checkouts)
 ;;
 
 let root_layout t =
-  match children t.ownership_root with
-  | None -> []
-  | Some entries ->
+  let open Result.Syntax in
+  let* entries =
+    children t.ownership_root
+    |> Result.map_error (fun detail ->
+      Printf.sprintf "verification root unreadable: %s" detail)
+  in
+  let* checkout_lines = checkout_lines t.ownership_root in
     let shown = List.filteri (fun index _ -> index < root_entry_cap) entries in
     let omitted = List.length entries - List.length shown in
     let entry_lines = List.map (fun entry -> "  " ^ entry) shown in
@@ -164,7 +165,7 @@ let root_layout t =
       then entry_lines
       else entry_lines @ [ Printf.sprintf "  ... and %d more" omitted ]
     in
-    entry_lines @ checkout_lines t.ownership_root
+    Ok (entry_lines @ checkout_lines)
 ;;
 
 (* ================================================================ *)
@@ -459,28 +460,25 @@ let create_forest ~config ~producers =
 ;;
 
 (* A forest has one root per producer, so every line has to name the producer
-   it belongs to: the forest dispatcher requires an exact producer argument,
-   and a bare path would not tell the evaluator which one to pass. The joined
-   listing carries its own bound because the producer count is not fixed. *)
-let forest_root_entry_cap = 96
+   it belongs to. [root_layout] is already bounded per producer; applying a
+   second global prefix cap lets a noisy first producer erase every later
+   producer and turns omission into false evidence. *)
 
 let forest_root_layout forest =
-  let rendered =
-    List.concat_map
-      (fun (producer, tools) ->
-         match root_layout tools with
-         | [] -> [ "  " ^ producer ^ ": root could not be read" ]
-         | entries ->
-           List.map
-             (fun entry -> "  " ^ producer ^ ": " ^ String.trim entry)
-             entries)
-      forest.bindings
+  let render_producer producer entries =
+    let entries = match entries with [] -> [ "root is empty" ] | _ -> entries in
+    List.map
+      (fun entry -> "  " ^ producer ^ ": " ^ String.trim entry)
+      entries
   in
-  let shown = List.filteri (fun index _ -> index < forest_root_entry_cap) rendered in
-  let omitted = List.length rendered - List.length shown in
-  if omitted <= 0
-  then shown
-  else shown @ [ Printf.sprintf "  ... and %d more" omitted ]
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc |> List.concat)
+    | (producer, tools) :: rest ->
+      (match root_layout tools with
+       | Error detail -> Error (Printf.sprintf "producer %s: %s" producer detail)
+       | Ok entries -> collect (render_producer producer entries :: acc) rest)
+  in
+  collect [] forest.bindings
 ;;
 
 let forest_schemas forest = List.map snd forest.forest_tools

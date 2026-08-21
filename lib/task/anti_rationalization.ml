@@ -138,11 +138,11 @@ let evidence_section ~required_evidence =
       [ "evidence_items", numbered items ]
 ;;
 
-(* The listing is data, so an unreadable root is reported as data too: the
-   template's prose covers both a listing and its absence, which keeps the
-   branch out of this module. *)
+(* Unavailable or partial roots are rejected while constructing the lookup
+   surface. Reaching this renderer with no entries therefore means the
+   authority measured a readable, empty root. *)
 let root_layout_lines = function
-  | [] -> "  (this root could not be read)"
+  | [] -> "  (this root is empty)"
   | entries -> entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n"
 ;;
 

@@ -83,9 +83,7 @@ let parse_arg_check json =
         (match Eval_tool_selector.of_yojson value with
          | Ok selector -> Ok selector
          | Error msg -> errorf "invalid arg_check selector: %s" msg)
-    | None ->
-        let* tool_name = required_string_field json "tool_name" in
-        Ok (Eval_tool_selector.Tool_name tool_name)
+    | None -> errorf "arg_check requires a selector"
   in
   let* path = required_string_field json "path" in
   Ok {
@@ -162,10 +160,7 @@ let benchmark_case_of_yojson json =
 
 let tool_call_of_yojson json =
   {
-    tool_name =
-      (match Json_util.get_string json "tool_name" with
-       | Some value -> value
-       | None -> Json_util.get_string_with_default json ~key:"tool" ~default:"");
+    tool_name = Json_util.get_string_with_default json ~key:"tool_name" ~default:"";
     success = Json_util.get_bool json "success" |> Option.value ~default:false;
     input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
     output = member_opt "output" json;

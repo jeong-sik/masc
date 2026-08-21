@@ -55,6 +55,17 @@ let with_workspace f =
        f config)
 ;;
 
+let with_verification_persistence f =
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  Atomic.set
+    Workspace_hooks.verification_submit_request_fn
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.verification_submit_request_fn previous)
+    f
+;;
+
 let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;
@@ -94,6 +105,78 @@ let create_goal ctx title =
          ])
   in
   json_state created [ "goal_id" ]
+;;
+
+let producer_playground (config : Workspace.config) producer =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path;
+  path
+;;
+
+let add_linked_task_with_evidence config ~goal_id ~producer ~evidence_ref =
+  let created =
+    match
+      Workspace.add_task_with_result
+        config
+        ~goal_id
+        ~created_by:producer
+        ~title:"Linked proof task"
+        ~priority:1
+        ~description:"Produce the Goal proof artifact"
+    with
+    | Ok created -> created
+    | Error error ->
+      fail
+        ("add linked task: " ^ Workspace.add_task_error_to_string error)
+  in
+  (match Workspace.claim_task_r config ~agent_name:producer ~task_id:created.task_id () with
+   | Ok _ -> ()
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  let handoff_context : Masc_domain.task_handoff_context =
+    { summary = "proof artifact is ready"
+    ; reason = None
+    ; next_step = None
+    ; failure_mode = None
+    ; reclaim_policy = None
+    ; evidence_refs = [ evidence_ref ]
+    ; updated_at = None
+    ; updated_by = Some producer
+    }
+  in
+  (match
+     Workspace.transition_task_r
+       config
+       ~agent_name:producer
+       ~task_id:created.task_id
+       ~action:Masc_domain.Start
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  (match
+     Workspace.transition_task_r
+       config
+       ~agent_name:producer
+       ~task_id:created.task_id
+       ~action:Masc_domain.Submit_for_verification
+       ~notes:"artifact ready for Goal verification"
+       ~handoff_context
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  created.task_id
 ;;
 
 let transition ctx goal_id ?note ?evidence action =
@@ -191,6 +274,61 @@ let recording_reviewer calls behaviors =
       Error (Agent_core.Error.Internal ("unexpected evaluator slot " ^ evaluator_runtime))
 ;;
 
+let inspecting_goal_reviewer ~producer ~file_name ~expected ~forest_reads =
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_
+      ~lookup ~on_tool_result () ->
+    let report reason =
+      let input =
+        `Assoc [ "verdict", `String "APPROVE"; "reason", `String reason ]
+      in
+      on_tool_result
+        ~input
+        (Tool_result.ok
+           ~tool_name:"report_review_verdict"
+           ~start_time:0.0
+           "recorded");
+      Ok (Some AR.Approve)
+    in
+    match lookup with
+    | AR.No_lookup_surface -> fail "Goal verifier received no lookup surface"
+    | AR.Lookup_tools { scope = AR.Producer_tree; _ } ->
+      report "criterion is measurable"
+    | AR.Lookup_tools
+        { schemas
+        ; dispatch
+        ; scope = AR.Producer_forest { producers }
+        } ->
+      check (list string) "closed producer set" [ producer ] producers;
+      check bool "rollup identifies the evidence producer" true
+        (String_util.contains_substring
+           prompt
+           (Printf.sprintf "\"producer\": \"%s\"" producer));
+      check bool "forest read tool is advertised" true
+        (List.exists
+           (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name "verification_read_file")
+           schemas);
+      let input =
+        `Assoc
+          [ "producer", `String producer
+          ; "file_path", `String file_name
+          ]
+      in
+      (match dispatch ~name:"verification_read_file" ~args:input with
+       | Error detail -> fail ("Goal proof lookup failed: " ^ detail)
+       | Ok output ->
+         check bool "Goal verifier read the linked producer artifact" true
+           (String_util.contains_substring output expected);
+         forest_reads := !forest_reads + 1;
+         on_tool_result
+           ~input
+           (Tool_result.ok
+              ~tool_name:"verification_read_file"
+              ~start_time:0.0
+              output));
+      report "linked producer artifact was inspected"
+;;
+
 let with_lane_and_reviewer ~slots ~reviewer f =
   let saved_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn in
   let saved_reviewer = Atomic.get AR.run_llm_reviewer_fn in
@@ -239,6 +377,43 @@ let test_proof_pending_drains_to_completed () =
     check string "authority kind is the system-llm slot" "system_llm_agent"
       (Masc_domain.completion_authority_kind verdict.Goal_verification.authority)
   | _ -> fail "ledger must hold the proven verdict"
+;;
+
+let test_goal_proof_reads_linked_task_producer_artifact () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Artifact-inspected goal" in
+  let producer = "builder" in
+  let file_name = "artifacts/goal-proof.txt" in
+  let playground = producer_playground config producer in
+  let artifact_path = Filename.concat playground file_name in
+  let artifact_dir = Filename.dirname artifact_path in
+  if not (Sys.file_exists artifact_dir) then Unix.mkdir artifact_dir 0o755;
+  Out_channel.with_open_text artifact_path (fun channel ->
+    output_string channel "three services verified by isolated run\n");
+  ignore
+    (with_verification_persistence (fun () ->
+       add_linked_task_with_evidence
+         config
+         ~goal_id
+         ~producer
+         ~evidence_ref:("artifact:" ^ file_name)));
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let forest_reads = ref 0 in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (inspecting_goal_reviewer
+         ~producer
+         ~file_name
+         ~expected:"three services verified"
+         ~forest_reads)
+    (fun () -> drain config);
+  check int "the proof review performed one linked-tree read" 1 !forest_reads;
+  check string "inspected proof completed the Goal" "completed"
+    (stored_phase config goal_id)
 ;;
 
 (* (b) A refuted proof returns the goal to Executing; the reason is preserved
@@ -486,6 +661,10 @@ let () =
     [ ( "drain"
       , [ test_case "proof pending drains to completed" `Quick
             test_proof_pending_drains_to_completed
+        ; test_case
+            "Goal proof reads linked Task producer artifact"
+            `Quick
+            test_goal_proof_reads_linked_task_producer_artifact
         ; test_case "refuted proof returns to executing with reason" `Quick
             test_refuted_proof_returns_to_executing
         ; test_case "criterion pending drains to viable" `Quick

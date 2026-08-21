@@ -18,6 +18,7 @@ type error =
   | Supersession_phase_mismatch of Keeper_shutdown_types.t
   | Supersession_intent_mismatch of Keeper_shutdown_types.t
   | Invalid_supersession_actor of string
+  | Invalid_supersession_reason of string
 
 type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
@@ -90,6 +91,20 @@ val supersession_token_operation_id :
 val supersede_blocked_operator_stop :
   config:Workspace.config ->
   token:operator_metadata_supersession_token ->
+  now:(unit -> string) ->
+  (supersede_blocked_result, error) result
+
+(** CAS one exact [Blocked] dashboard purge to its typed operator release.
+    The command is idempotent only when actor, reason, and the originally
+    observed revision all match the persisted supersession. Other cleanup
+    intents and phases fail closed. *)
+val release_blocked_dashboard_purge :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  expected_revision:int ->
+  actor:string ->
+  reason:string ->
   now:(unit -> string) ->
   (supersede_blocked_result, error) result
 

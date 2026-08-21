@@ -4,4 +4,4 @@
 (test
  (name test_keeper_shutdown_blocked_purge_release)
  (modules test_keeper_shutdown_blocked_purge_release)
- (libraries masc_test_deps))
+ (libraries masc_test_deps bigstringaf))

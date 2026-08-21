@@ -16,6 +16,7 @@ type error =
   | Supersession_phase_mismatch of Keeper_shutdown_types.t
   | Supersession_intent_mismatch of Keeper_shutdown_types.t
   | Invalid_supersession_actor of string
+  | Invalid_supersession_reason of string
 
 type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
@@ -110,6 +111,8 @@ let error_to_string = function
       (cleanup_reason_label operation.cleanup_intent.reason)
   | Invalid_supersession_actor detail ->
     Printf.sprintf "shutdown supersession actor is invalid: %s" detail
+  | Invalid_supersession_reason detail ->
+    Printf.sprintf "shutdown supersession reason is invalid: %s" detail
 ;;
 
 type lock_access =
@@ -279,10 +282,12 @@ let finalization_evidence_to_json evidence =
 ;;
 
 let supersession_to_json = function
-  | Operator_blocked_purge_released { actor } ->
+  | Operator_blocked_purge_released { actor; reason; expected_revision } ->
     `Assoc
       [ "kind", `String "operator_blocked_purge_released"
       ; "actor", `String actor
+      ; "reason", `String reason
+      ; "expected_revision", `Int expected_revision
       ]
   | Operator_metadata_update { actor } ->
     `Assoc
@@ -600,7 +605,9 @@ let supersession_of_json json =
   match kind with
   | "operator_blocked_purge_released" ->
     let* actor = string "actor" json in
-    Ok (Operator_blocked_purge_released { actor })
+    let* reason = string "reason" json in
+    let* expected_revision = int "expected_revision" json in
+    Ok (Operator_blocked_purge_released { actor; reason; expected_revision })
   | "operator_metadata_update" ->
     let* actor = string "actor" json in
     Ok (Operator_metadata_update { actor })
@@ -792,7 +799,8 @@ let contextualize_error operation_path = function
     | Revision_conflict _
     | Supersession_phase_mismatch _
     | Supersession_intent_mismatch _
-    | Invalid_supersession_actor _ ) as error ->
+    | Invalid_supersession_actor _
+    | Invalid_supersession_reason _ ) as error ->
     error
 ;;
 
@@ -1051,7 +1059,11 @@ let supersede_blocked_operator_stop ~config ~token ~now =
                | Blocked_operator_stop ->
                  Operator_metadata_update { actor = token.actor }
                | Blocked_dashboard_purge ->
-                 Operator_blocked_purge_released { actor = token.actor }
+                 Operator_blocked_purge_released
+                   { actor = token.actor
+                   ; reason = "operator released blocked dashboard purge"
+                   ; expected_revision = token.expected_revision
+                   }
                | Unreconciled_turn unreconciled_turn ->
                  Operator_reconciliation_accepted
                    { actor = token.actor; unreconciled_turn }
@@ -1060,6 +1072,79 @@ let supersede_blocked_operator_stop ~config ~token ~now =
                { existing with
                  revision = existing.revision + 1
                ; phase = Superseded supersession
+               ; updated_at = now ()
+               }
+             in
+             Keeper_fs.save_json_atomic operation_path (to_json superseded)
+             |> Result.map_error (fun detail -> Io_error detail)
+             |> Result.map (fun () -> Superseded_persisted superseded)
+         | Ok ({ phase = Blocked _; _ } as existing) ->
+           Error (Supersession_intent_mismatch existing)
+         | Ok existing -> Error (Supersession_phase_mismatch existing)))
+;;
+
+let release_blocked_dashboard_purge
+      ~config
+      ~keeper_name
+      ~operation_id
+      ~expected_revision
+      ~actor
+      ~reason
+      ~now
+  =
+  let* actor =
+    Workspace.validate_agent_name actor
+    |> Result.map_error (fun detail -> Invalid_supersession_actor detail)
+  in
+  let reason = String.trim reason in
+  let* () =
+    if String.equal reason ""
+    then Error (Invalid_supersession_reason "reason must be non-empty")
+    else Ok ()
+  in
+  let* operation_path = path ~config ~keeper_name operation_id in
+  with_keeper_inventory_lock
+    ~access:Write
+    ~config
+    ~keeper_name
+    (fun () ->
+       with_operation_lock ~access:Write operation_path (fun () ->
+         match
+           load_path_unlocked ~operation_path ~keeper_name ~operation_id
+         with
+         | Error _ as error -> error
+         | Ok
+             ({ phase =
+                  Superseded
+                    (Operator_blocked_purge_released
+                       { actor = persisted_actor
+                       ; reason = persisted_reason
+                       ; expected_revision = persisted_revision
+                       })
+              ; _ } as existing)
+           when String.equal actor persisted_actor
+                && String.equal reason persisted_reason
+                && Int.equal expected_revision persisted_revision ->
+           Ok (Superseded_already_persisted existing)
+         | Ok ({ phase = Superseded (Operator_blocked_purge_released _); _ } as existing) ->
+           Error (Supersession_phase_mismatch existing)
+         | Ok
+             ({ phase = Blocked _
+              ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
+              ; _ } as existing) ->
+           if not (Int.equal existing.revision expected_revision)
+           then
+             Error
+               (Revision_conflict
+                  { expected = expected_revision; actual = existing.revision })
+           else
+             let superseded =
+               { existing with
+                 revision = existing.revision + 1
+               ; phase =
+                   Superseded
+                     (Operator_blocked_purge_released
+                        { actor; reason; expected_revision })
                ; updated_at = now ()
                }
              in

@@ -547,6 +547,28 @@ let keeper_purge_submit_status = function
   | Existing_operation_intent_mismatch _ -> `Conflict
 ;;
 
+let blocked_purge_release_status =
+  let open Keeper_shutdown_blocked_purge_release in
+  function
+  | Keeper_shutdown_blocked_purge_release.Store_release_failed
+      (Keeper_shutdown_store.Not_found _) -> `Not_found
+  | Store_release_failed
+      ( Keeper_shutdown_store.Revision_conflict _
+      | Supersession_phase_mismatch _
+      | Supersession_intent_mismatch _ )
+  | Admission_reserved_by_other _ -> `Conflict
+  | Store_release_failed
+      ( Keeper_shutdown_store.Already_exists _
+      | Io_error _
+      | Decode_error _
+      | Invalid_operation _
+      | Identity_mismatch _
+      | Invalid_supersession_actor _
+      | Invalid_supersession_reason _ )
+  | Successor_lookup_failed _
+  | Admission_release_failed _ -> `Internal_server_error
+;;
+
 let respond_keeper_purge_operation_accepted ~request reqd operation =
   match operation.Keeper_shutdown_types.cleanup_intent.reason with
   | Keeper_shutdown_types.Dashboard_keeper_purge context ->
@@ -721,6 +743,65 @@ let add_delete_action_routes router =
              respond_error ~request:req reqd (invalid_request "goal_id")
          )
        ) request reqd)
+
+  |> Http.Router.post "/api/v1/dashboard/agents/purge/release" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let config = Mcp_server.workspace_config state in
+           try
+             let json = Yojson.Safe.from_string body_str in
+             (match Keeper_shutdown_blocked_purge_release.parse_command json with
+              | Error error ->
+                Http.Response.json_value
+                  ~status:`Bad_request
+                  ~request:req
+                  (Keeper_shutdown_blocked_purge_release.input_error_to_json error)
+                  reqd
+              | Ok command ->
+                (match
+                   Keeper_shutdown_blocked_purge_release.execute
+                     ~config
+                     ~actor
+                     command
+                 with
+                 | Ok released ->
+                   let audit =
+                     Keeper_shutdown_blocked_purge_release.audit
+                       config
+                       ~actor
+                       command
+                       ~outcome:Audit_log.Success
+                     |> Audit_log.write_result_to_json
+                   in
+                   Http.Response.json_value
+                     ~compress:true
+                     ~request:req
+                     (Keeper_shutdown_blocked_purge_release.success_json
+                        ~audit
+                        command
+                        released)
+                     reqd
+                 | Error error ->
+                   let audit =
+                     Keeper_shutdown_blocked_purge_release.audit
+                       config
+                       ~actor
+                       command
+                       ~outcome:
+                         (Audit_log.Failure
+                            (Keeper_shutdown_blocked_purge_release.error_to_string error))
+                     |> Audit_log.write_result_to_json
+                   in
+                   Http.Response.json_value
+                     ~status:(blocked_purge_release_status error)
+                     ~request:req
+                     (Keeper_shutdown_blocked_purge_release.error_json ~audit error)
+                     reqd))
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd "invalid JSON body"))
+       request
+       reqd)
 
   |> Http.Router.post "/api/v1/dashboard/agents/purge" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

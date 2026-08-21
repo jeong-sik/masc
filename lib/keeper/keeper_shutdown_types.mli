@@ -124,13 +124,19 @@ type finalization_evidence =
   }
 
 type supersession =
-  | Operator_blocked_purge_released of { actor : string }
+  | Operator_blocked_purge_released of
+      { actor : string
+      ; reason : string
+      ; expected_revision : int
+      }
       (** The operator released a [Blocked] dashboard purge whose worker died
           before it finished. Like {!Operator_metadata_update} this carries no
           effect-duplication risk -- the work failed -- but it is not a
           metadata update: a purge leaves no metadata to update, and the
           admission fence it holds is what stops the purge being reissued.
           Kept apart so the durable record says which release was signed off.
+          [expected_revision] and [reason] are the operator's exact CAS input,
+          not values inferred after the mutation.
 
           Without this the pair ([Blocked], [Dashboard_keeper_purge]) had no
           exit: the fence blocks meta materialization, {!val:resolve} needs

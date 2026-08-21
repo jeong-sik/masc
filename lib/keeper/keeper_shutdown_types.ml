@@ -141,7 +141,11 @@ type finalization_evidence =
   }
 
 type supersession =
-  | Operator_blocked_purge_released of { actor : string }
+  | Operator_blocked_purge_released of
+      { actor : string
+      ; reason : string
+      ; expected_revision : int
+      }
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string

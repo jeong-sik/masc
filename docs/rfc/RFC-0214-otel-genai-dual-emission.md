@@ -137,7 +137,7 @@ Why OTel-backed migration:
 
 ```
                     ┌─────────────────┐
-                    │  OAS Callbacks   │
+                    │  agent_core Callbacks   │
                     │  (on_token_usage, │
                     │   on_error, etc)  │
                     └────────┬─────────┘

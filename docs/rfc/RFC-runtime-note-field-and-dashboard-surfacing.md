@@ -31,7 +31,7 @@ Two structural causes, grounded:
 | Cause | Evidence |
 |---|---|
 | No typed rationale field exists | `dashboard/src/lib/runtime-toml-config.ts` parses `RuntimeTomlProvider`/`Model`/`Binding`; `rg note` → 0 hits. The only optional string is `displayName` (parsed by the same helper in `runtime-toml-config.ts` at anchor commit `6c9029bcbf`). |
-| Dashboard runtime detail surfaces no rationale | `RuntimePanel` (`런타임` tab) = "OAS health chip + runtime monitor only" (operational); the `runtime.toml` tab = a **raw textarea** in `RuntimeTomlEditor`. The rationale exists only as raw-text comments visible in that textarea — there is no structured per-runtime rationale surface in the `런타임`/`전체` views, so an operator scanning the structured runtime list cannot see "why this default" without dropping into raw text. |
+| Dashboard runtime detail surfaces no rationale | `RuntimePanel` (`런타임` tab) = "agent_core health chip + runtime monitor only" (operational); the `runtime.toml` tab = a **raw textarea** in `RuntimeTomlEditor`. The rationale exists only as raw-text comments visible in that textarea — there is no structured per-runtime rationale surface in the `런타임`/`전체` views, so an operator scanning the structured runtime list cannot see "why this default" without dropping into raw text. |
 
 ## 2. Boundary & invariants
 
@@ -50,9 +50,9 @@ Two structural causes, grounded:
 
 Spec §7.3.1 (`masc-mcp/docs/spec/14-configuration.md`) already defines `keeper-assignable` — a typed `bool` metadata field on `tier`/`runtime` consumed by the dashboard/runtime manager, ignored by the dispatch parser. `note` follows the identical pattern: typed, optional, dashboard-consumed, dispatch-ignored. We are extending an established metadata lane, not inventing one.
 
-### 2.3 OAS boundary
+### 2.3 agent_core boundary
 
-Untouched. OAS owns provider/model/transport/turn-lifecycle. `note` never crosses into OAS — it is not in `Runtime_schema.config`.
+Untouched. agent_core owns provider/model/transport/turn-lifecycle. `note` never crosses into agent_core — it is not in `Runtime_schema.config`.
 
 ### 2.4 No second SSOT
 

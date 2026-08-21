@@ -143,7 +143,7 @@ and connector_attention =
 
 ## 8. 경계
 
-- **MASC 전용** — OAS 무관.
+- **MASC 전용** — agent_core 무관.
 - **LLM 경계** = 재개 턴에서 무엇을 말할지. 라우팅(어디로)은 typed channel로 결정론적. 커넥터를 LLM/문자열로 추론하지 않음.
 - **No fabrication** — 커넥터 미상은 `Unrouted`. 편의 기본값(예: 항상 Dashboard) 금지.
 - **Keeper Gate와 직교** — continuation은 Channel provenance이고 Gate는 외부 효과 결정을 소유한다. 둘을 합친 permission envelope를 만들지 않는다.

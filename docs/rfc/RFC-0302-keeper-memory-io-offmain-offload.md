@@ -39,7 +39,7 @@ Eio는 **단일 도메인 cooperative 스케줄러**다. main 도메인에서 �
 
 ## 2. 경계 분석
 
-이건 **MASC-internal**이다. OAS 무관(OAS는 single-provider completion만; 파일 저장/메모리는 MASC 소유). MASC↔OAS 경계 변경 없음. 대상은 `lib/keeper/keeper_memory_os_io.ml`(781줄) 및 동일 패턴의 `Skill_candidate_store`/`Keeper_memory_recall`(후속).
+이건 **MASC-internal**이다. agent_core 무관(agent_core는 single-provider completion만; 파일 저장/메모리는 MASC 소유). MASC↔agent_core 경계 변경 없음. 대상은 `lib/keeper/keeper_memory_os_io.ml`(781줄) 및 동일 패턴의 `Skill_candidate_store`/`Keeper_memory_recall`(후속).
 
 ## 3. 근본 원인
 

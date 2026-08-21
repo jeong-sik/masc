@@ -116,10 +116,16 @@ val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].
     Reads [{"name": "<keeper>"}], validates the keeper is registered, and
-    asks {!Keeper_registry.interrupt_current_turn} to cancel the in-flight
-    turn's switch. Returns [{cancelled, turn_id}] on success or
-    [{cancelled:false, reason:"no_in_flight_turn"}] when there is nothing
-    to interrupt. *)
+    asks {!Keeper_registry.interrupt_current_turn} to fail the in-flight
+    turn's switch. Returns [{signalled:true, turn_id}] when the switch was
+    failed, [{signalled:false, reason:"no_in_flight_turn"}] when there was
+    no turn, and [{signalled:false, reason:"cancel_failed", detail}] when
+    the attempt itself failed.
+
+    [signalled] is not a completed cancellation: the signal still has to
+    reach the running fiber, and a fiber parked in an uncancellable section
+    keeps running. The turn state, not this response, says whether the turn
+    ended. *)
 
 (** {1 SSE handler} *)
 

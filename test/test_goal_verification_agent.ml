@@ -290,9 +290,15 @@ let inspecting_goal_reviewer ~producer ~file_name ~expected ~forest_reads =
       Ok (Some AR.Approve)
     in
     match lookup with
-    | AR.No_lookup_surface -> fail "Goal verifier received no lookup surface"
+    (* The creation-time criterion review gets no tree: it judges the declared
+       success condition, and at creation nobody has produced anything for it.
+       A Goal names no responsible keeper, so there is no single producer whose
+       tree could stand in. *)
+    | AR.No_lookup_surface -> report "criterion is measurable"
     | AR.Lookup_tools { scope = AR.Producer_tree; _ } ->
-      report "criterion is measurable"
+      fail
+        "Goal review was handed a single-producer tree; a Goal has no single \
+         producer"
     | AR.Lookup_tools
         { schemas
         ; dispatch

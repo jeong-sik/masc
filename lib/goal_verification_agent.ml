@@ -304,17 +304,6 @@ let linked_task_rollup config ~goal_id
    surface -- it only tells the judge there is no single author to attribute. *)
 let goal_producer_name = "no single producer (shared Goal)"
 
-let single_producer_lookup config ~producer =
-  let open Result.Syntax in
-  let* tools = Verification_authority_tools.create ~config ~producer in
-  Ok
-    (Task.Anti_rationalization.Lookup_tools
-       { schemas = Verification_authority_tools.schemas tools
-       ; dispatch = Verification_authority_tools.dispatch tools
-       ; scope = Task.Anti_rationalization.Producer_tree
-       })
-;;
-
 let task_producer (task : Masc_domain.task) =
   match Masc_domain.task_performer_of_status task.task_status with
   | Some producer when not (String.equal (String.trim producer) "") -> Ok producer
@@ -367,28 +356,33 @@ let build_review_request config (goal : Goal_store.goal) kind
   in
   match kind with
   | Criterion_check ->
-    let open Result.Syntax in
-    let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
+    (* The creation-time check judges the declared success condition itself --
+       whether it names something a verifier could later measure. No tree
+       answers that, and there is no producer to name: nobody has done work on
+       a Goal that was just created. [No_lookup_surface] states that the
+       criterion text is the whole of what was checked. *)
     Ok
       ( { base with
           Task.Anti_rationalization.completion_notes =
             Yojson.Safe.pretty_to_string (Goal_store.goal_to_yojson goal)
         }
       , Prompt_names.goal_verification_criterion
-      , lookup )
+      , Task.Anti_rationalization.No_lookup_surface )
   | Completion_proof ->
     (match linked_task_rollup config ~goal_id:goal.id with
      | Error _ as error -> error
+     (* No linked Task means no producer: nothing was claimed, so there is no
+        owned tree the judge could open. Naming one anyway would hand the judge
+        somebody's playground as if it were this Goal's evidence. The rollup and
+        the submitted references are the upper bound of what can be checked. *)
      | Ok (rollup, evidence_refs, []) ->
-       let open Result.Syntax in
-       let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
        Ok
          ( { base with
              Task.Anti_rationalization.completion_notes = rollup
            ; evidence_refs
            }
          , Prompt_names.goal_verification_proof
-         , lookup )
+         , Task.Anti_rationalization.No_lookup_surface )
      | Ok (rollup, evidence_refs, tasks) ->
        let open Result.Syntax in
        let* lookup = linked_task_lookup config tasks in

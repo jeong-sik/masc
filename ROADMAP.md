@@ -77,7 +77,7 @@ Important work that stays visible but does not drive the next 6-8 weeks:
 - The active release line is pre-1.0: `0.y.0` opens a user-visible train and `0.y.z` stabilizes it.
 - Do not open `1.0.0` until repo workspace collaboration, release truth, and the core operator path are trustworthy without caveats.
 - Historical `v2.*` tags remain audit history only; they do not define the active SemVer policy.
-- Do not tag a release while `release-blocker` issues remain open.
+- Do not tag a release while `must-do` issues remain open.
 - Do not tag a release while version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
 - Order the backlog by `impact/*`, which is ranked by which product failure the issue causes.
 

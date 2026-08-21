@@ -130,7 +130,7 @@ Each PR should link at least one issue and state which promise it affects:
 - while pre-1.0, `0.y.0` carries one promise train
 - `0.y.z` releases stabilize the current promise only
 - `1.0.0` stays reserved until the front-door promise is trustworthy without release-truth caveats
-- do not tag with open `release-blocker`
+- do not tag with open `must-do` issues
 - do not tag if version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`
 
 ## 6-8 Week Tracks

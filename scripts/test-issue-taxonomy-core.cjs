@@ -38,15 +38,7 @@ assert.match(
 
 const managedLabel = [...taxonomy.knownLabels][0]
 const orphanedManagedLabel = `${Object.keys(ssot.axes)[0]}/removed-value`
-const foreignLabels = [
-  'dependencies',
-  'github-actions',
-  'release-blocker',
-  'main-health',
-  'priority:high',
-  'docs',
-  'enhancement',
-]
+const foreignLabels = ['dependencies', 'github-actions', 'main-health']
 const current = [managedLabel, orphanedManagedLabel, ...foreignLabels]
 const cleared = taxonomy.reconciliationPlan(current, [])
 assert.deepEqual(cleared.toRemove.sort(), [managedLabel, orphanedManagedLabel].sort())

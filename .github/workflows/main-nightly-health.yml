@@ -58,6 +58,13 @@ jobs:
               '',
               'This issue is auto-created so a broken main does not stay invisible.',
               'Close manually after merging the fix; the workflow will not reopen unless it fails again.',
+              '',
+              '```masc-triage',
+              'kind: defect',
+              'area: ci',
+              'impact: internal',
+              'must-do: true',
+              '```',
             ].join('\n');
 
             const existing = await github.rest.issues.listForRepo({
@@ -81,7 +88,7 @@ jobs:
                 repo: context.repo.repo,
                 title,
                 body,
-                labels: ['main-health', 'priority:high'],
+                labels: ['main-health'],
               });
             }
 
@@ -125,7 +132,14 @@ jobs:
               'Find the offending commit with `git log --oneline` and revert or fix forward.',
               '',
               'This issue is auto-created so a broken main does not stay invisible.',
-            ].join('\n');
+                          '',
+              '```masc-triage',
+              'kind: defect',
+              'area: ci',
+              'impact: internal',
+              'must-do: true',
+              '```',
+].join('\n');
 
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
@@ -148,6 +162,6 @@ jobs:
                 repo: context.repo.repo,
                 title,
                 body,
-                labels: ['main-health', 'priority:high'],
+                labels: ['main-health'],
               });
             }

@@ -23,8 +23,10 @@ for doc in "${DOCS[@]}"; do
   while IFS= read -r v; do
     [ -n "$v" ] || continue
     name="${v##*/}"
-    grep -qF -- "$name" "$doc" || {
-      echo "::error file=${doc#"$ROOT/"}::'$v' is in the taxonomy SSOT but '$name' is not named here" >&2
+    # The docs name values as backtick tokens (`turn`) or as axis/value
+    # (`area/turn`); prose that merely contains the letters does not count.
+    grep -qE -- "\`(${v}|${name})\`" "$doc" || {
+      echo "::error file=${doc#"$ROOT/"}::'$v' is in the taxonomy SSOT but \`$name\` is not named here" >&2
       fail=1
     }
   done <<<"$values"

@@ -829,6 +829,39 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
     (json_state completed [ "goal"; "phase" ])
 ;;
 
+let test_verifying_repeat_reconciles_a_committed_proof () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Proof committed before crash" in
+  mark_criterion_viable ctx goal_id;
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  (match
+     Goal_verification.record_proof_verdict
+       config
+       ~goal_id
+       (verdict ~evidence:"artifact inspected before crash" Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  check string "phase write is the simulated missing effect" "verifying"
+    (stored_phase config goal_id);
+  let answered =
+    must_succeed "repeated request reconciles proof"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "response exposes recovery" true
+    (json_bool answered [ "reconciled" ]);
+  check string "the committed proof converges to completed" "completed"
+    (json_state answered [ "goal"; "phase" ]);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven proof ->
+    check string "recovery preserves the original proof run"
+      "goal-verifier-test-run" proof.verification_run_id
+  | _ -> fail "recovery rewrote the committed proof"
+;;
+
 (* (e) A criterion judged unreachable blocks the completion request with a
    typed conflict; the criterion commit itself is phase-neutral. *)
 let test_unreachable_criterion_blocks_request_complete () =
@@ -1003,6 +1036,8 @@ let () =
             test_proof_refuted_returns_to_executing_with_reason
         ; test_case "verifying repeat re-arms a missing proof request" `Quick
             test_verifying_repeat_rearms_a_missing_proof_request
+        ; test_case "verifying repeat reconciles a committed proof" `Quick
+            test_verifying_repeat_reconciles_a_committed_proof
         ; test_case "unreachable criterion blocks request_complete" `Quick
             test_unreachable_criterion_blocks_request_complete
         ; test_case "creation writes criterion pending" `Quick

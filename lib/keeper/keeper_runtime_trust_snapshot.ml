@@ -58,11 +58,7 @@ module Completion_contract_result = Keeper_completion_contract_result_label
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
-  | _ ->
-      Option.map
-        (fun code ->
-          Keeper_turn_terminal.of_code ~source:"decision_log" code)
-        (json_string_opt_member "terminal_reason_code" json)
+  | _ -> None
 
 let terminal_reason_from_receipt receipt =
   Option.map

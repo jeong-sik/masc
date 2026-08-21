@@ -6,10 +6,6 @@
 let runtime_warning_ctx_ratio =
   Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
 
-(* RFC-0149 §3.3 — typed Result resolver for dashboard call sites.  The
-   legacy live runtime-id facade + its silent-fallback carrier
-   ([Keeper_runtime_profile.resolve_live]) were removed in the §3.3
-   sunset closeout. *)
 let live_keeper_runtime_id_result (raw : string) :
     (string, [ `Unresolved of string ]) result =
   let trimmed = String.trim raw in
@@ -32,13 +28,10 @@ let last_latency_ms_json latency_ms =
   if latency_ms <= 0 then `Null else `Int latency_ms
 
 let terminal_reason_code_of_decision_json json =
-  match Json_util.assoc_string_opt "terminal_reason_code" json with
-  | Some _ as value -> value
-  | None ->
-    (match Json_util.assoc_member_opt "terminal_reason" json with
-     | Some (`Assoc _ as terminal_reason) ->
-       Json_util.assoc_string_opt "code" terminal_reason
-     | _ -> None)
+  match Json_util.assoc_member_opt "terminal_reason" json with
+  | Some (`Assoc _ as terminal_reason) ->
+    Option.map Keeper_turn_terminal.code (Keeper_turn_terminal.of_json terminal_reason)
+  | Some _ | None -> None
 
 let execution_trust_source = "execution_receipt"
 let execution_trust_producer = "keeper_agent_run.execution_receipt"

@@ -1750,7 +1750,10 @@ jobs:
           done
 
       - name: Build macOS arm64 runtime
-        run: opam exec -- dune build --release bin/main_eio.exe
+        run: >-
+          opam exec -- dune build --release
+          bin/main_eio.exe
+          bin/keeper_canary_run.exe
 
       - name: Verify architecture, dylibs, and runtime smoke
         env:
@@ -1758,6 +1761,7 @@ jobs:
         run: |
           set -euo pipefail
           binary=_build/default/bin/main_eio.exe
+          canary_binary=_build/default/bin/keeper_canary_run.exe
           if [ "$RUNNER_OS" != "macOS" ]; then
             echo "expected macOS runner, got $RUNNER_OS" >&2
             exit 1
@@ -1781,6 +1785,35 @@ jobs:
             echo "expected only arm64 architecture, got: $lipo_archs" >&2
             exit 1
           fi
+          canary_file_output="$(file "$canary_binary")"
+          printf '%s\n' "$canary_file_output"
+          case "$canary_file_output" in
+            *"Mach-O 64-bit executable arm64"*) ;;
+            *)
+              echo "canary runner is not a Mach-O arm64 executable" >&2
+              exit 1
+              ;;
+          esac
+          canary_lipo_archs="$(lipo -archs "$canary_binary")"
+          if [ "$canary_lipo_archs" != "arm64" ]; then
+            echo "expected only arm64 canary architecture, got: $canary_lipo_archs" >&2
+            exit 1
+          fi
+          set +e
+          canary_usage="$($canary_binary 2>&1)"
+          canary_usage_status=$?
+          set -e
+          if [ "$canary_usage_status" -ne 2 ]; then
+            echo "expected canary usage exit 2, got $canary_usage_status" >&2
+            exit 1
+          fi
+          case "$canary_usage" in
+            *"usage: keeper_canary_run"*) ;;
+            *)
+              echo "canary runner did not expose its CLI contract" >&2
+              exit 1
+              ;;
+          esac
           otool -L "$binary" | tee "$RUNNER_TEMP/masc-runtime-otool.txt"
           while IFS= read -r dylib; do
             case "$dylib" in
@@ -1860,8 +1893,14 @@ jobs:
           runtime_dir=trusted-macos-arm64-runtime
           mkdir -p "$runtime_dir"
           cp _build/default/bin/main_eio.exe "$runtime_dir/masc"
-          chmod +x "$runtime_dir/masc"
+          cp _build/default/bin/keeper_canary_run.exe \
+            "$runtime_dir/keeper_canary_run"
+          chmod +x "$runtime_dir/masc" "$runtime_dir/keeper_canary_run"
           binary_sha256="$(scripts/lib/runtime-artifact-contract.sh hash "$runtime_dir/masc")"
+          canary_binary_sha256="$(
+            scripts/lib/runtime-artifact-contract.sh hash \
+              "$runtime_dir/keeper_canary_run"
+          )"
           actual_source_sha="$(git rev-parse HEAD)"
           linked_dylibs_json="$(
             awk 'NR > 1 { print $1 }' "$RUNNER_TEMP/masc-runtime-otool.txt" \
@@ -1881,6 +1920,7 @@ jobs:
             --arg target_arch "arm64" \
             --arg binary_format "mach-o" \
             --arg binary_sha256 "$binary_sha256" \
+            --arg canary_binary_sha256 "$canary_binary_sha256" \
             --argjson linked_dylibs "$linked_dylibs_json" \
             '{
               schema: $schema,
@@ -1896,6 +1936,12 @@ jobs:
               target_arch: $target_arch,
               binary_format: $binary_format,
               binary_sha256: $binary_sha256,
+              companion_binaries: {
+                keeper_canary_run: {
+                  path: "keeper_canary_run",
+                  sha256: $canary_binary_sha256
+                }
+              },
               linked_dylibs: $linked_dylibs,
               supported_homebrew_prefixes: [
                 "/opt/homebrew/opt/gmp/",
@@ -1908,6 +1954,7 @@ jobs:
             --arg source_sha "$EXPECTED_SOURCE_SHA" \
             --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
             --arg binary_sha256 "$binary_sha256" \
+            --arg canary_binary_sha256 "$canary_binary_sha256" \
             '.schema == "masc.trusted_runtime.v1" and
              .source_sha == $source_sha and
              .workflow_sha == $workflow_sha and
@@ -1917,6 +1964,8 @@ jobs:
              .target_arch == "arm64" and
              .binary_format == "mach-o" and
              .binary_sha256 == $binary_sha256 and
+             .companion_binaries.keeper_canary_run.path == "keeper_canary_run" and
+             .companion_binaries.keeper_canary_run.sha256 == $canary_binary_sha256 and
              (.linked_dylibs | type == "array" and length > 0)' \
             "$runtime_dir/manifest.json" >/dev/null
 

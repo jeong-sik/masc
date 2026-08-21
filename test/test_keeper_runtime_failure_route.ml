@@ -208,7 +208,6 @@ let test_masc_internal_backpressure_hint () =
          ; source = Keeper_internal_error.Provider_capacity
          ; detail = "429 burst"
          ; retry_after = Keeper_internal_error.Explicit 45.0
-         ; cooldown_cause = None
          })
   in
   check_masc_route

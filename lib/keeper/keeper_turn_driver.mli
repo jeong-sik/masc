@@ -28,8 +28,6 @@ include
       Keeper_internal_error.accept_rejection_kind
      and type accept_response_shape =
       Keeper_internal_error.accept_response_shape
-     and type provider_cooldown_cause =
-      Keeper_internal_error.provider_cooldown_cause
      and type transcript_quarantine_reason =
       Keeper_internal_error.transcript_quarantine_reason
      and type gate_replay_repair_stage =

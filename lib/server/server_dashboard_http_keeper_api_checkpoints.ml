@@ -32,7 +32,7 @@ let agent_core_checkpoint_summary_json
     ; ( "system_prompt_present"
       , `Bool
           (match checkpoint.system_prompt with
-           | Some prompt -> Option.is_some (String_util.trim_to_option prompt)
+           | Some prompt -> Option.is_some (String_util.trim_nonempty prompt)
            | None -> false) )
     ; ( "latest_preview", Json_util.string_opt_to_json (latest_preview_of_messages messages) )
     ; "file_stat", stat_json_of_path path

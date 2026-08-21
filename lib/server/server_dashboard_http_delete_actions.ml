@@ -139,7 +139,7 @@ let validate_agent_alias alias =
 let exact_agent_aliases agent_names =
   let aliases =
     agent_names
-    |> List.filter_map String_util.trim_to_option
+    |> List.filter_map String_util.trim_nonempty
     |> List.sort_uniq String.compare
   in
   let rec validate acc = function

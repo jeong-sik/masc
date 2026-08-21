@@ -320,7 +320,7 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
   else
     let trace_id_query =
       match trace_id with
-      | Some value -> String_util.trim_to_option value
+      | Some value -> String_util.trim_nonempty value
       | _ -> None
     in
     let missing_trace_id_json =
@@ -561,7 +561,6 @@ let dashboard_config_bool_fields =
 
 let dashboard_config_string_list_fields =
   [
-    "active_goal_ids";
     "mention_targets";
     "allowed_paths";
   ]

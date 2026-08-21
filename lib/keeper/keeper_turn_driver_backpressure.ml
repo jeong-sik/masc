@@ -45,7 +45,6 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
               | None -> No_retry_hint);
            (* Genuine upstream capacity exhaustion, not a pre-dispatch health
               cooldown block — no arming cause to carry.  #23438. *)
-           cooldown_cause = None;
          })
   | Some
       (Llm_provider.Http_client.NetworkError
@@ -60,7 +59,6 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            source = Option.value source ~default:Runtime_slot;
            detail = message;
            retry_after = No_retry_hint;
-           cooldown_cause = None;
          })
   | Some
       (Llm_provider.Http_client.HttpError _
@@ -81,7 +79,6 @@ let capacity_backpressure_of_pending ~runtime_id = function
            source;
            detail;
            retry_after;
-           cooldown_cause = None;
          })
   | None -> None
 
@@ -90,5 +87,4 @@ let capacity_backpressure_of_pending ~runtime_id = function
    match ([message_looks_like_capacity_backpressure]) — a string classifier that
    laundered opaque internal errors into the permanently-transient (auto-
    recoverable, not-counting-toward-crash) class, the same failure mode that
-   made deterministic cooldowns oscillate.  The typed [cooldown_cause] on the
-   pre-dispatch gate replaces it; the function had no live callers. *)
+   made deterministic cooldowns oscillate.  The function had no live callers. *)

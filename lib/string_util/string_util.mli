@@ -115,10 +115,6 @@ val trim_nonempty : string -> string option
 (** [trim_nonempty s] trims whitespace and returns [Some s] if non-empty,
     [None] otherwise. SSOT for the per-module [trim_nonempty] helpers. *)
 
-val trim_to_option : string -> string option
-(** [trim_to_option s] is an alias for [trim_nonempty]. Both are identical;
-    [trim_to_option] is kept for migration compatibility. *)
-
 val option_trim : string option -> string option
 (** [option_trim opt] maps [trim_nonempty] over an option.
     [None] stays [None]; [Some s] becomes [None] if all whitespace. *)

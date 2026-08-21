@@ -935,7 +935,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
        ^ Keeper_turn_outcome.decode_error_to_string error)
   | Ok turn_outcome ->
     (match
-       turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks
+       turn_outcome, String_util.trim_nonempty visible_reply, has_visible_blocks
      with
      | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
      | Keeper_turn_outcome.External_effect_completed, _, _ -> None
@@ -1546,7 +1546,7 @@ let process_single_turn ~user_row_origin ~submission
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
-                   match turn_outcome, String_util.trim_to_option visible_reply with
+                   match turn_outcome, String_util.trim_nonempty visible_reply with
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                        (* [persisted_reply_blocks] always returns [Some _] for
                           [Continuation_checkpoint] (a typed status block), so

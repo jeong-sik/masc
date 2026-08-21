@@ -49,9 +49,8 @@ type failure_reason =
           (** Typed runtime-exhaustion reason, [Some] only on the
               runtime-exhausted construction path
               ([keeper_unified_turn_types.runtime_exhausted_failure_reason_of_raw_error]).
-              Lets the supervisor decide retryability via
-              [Keeper_meta_contract.runtime_exhaustion_reason_retryable]
-              instead of reparsing [code]. [None] for non-exhaustion
+              Lets the supervisor inspect the exact reason instead of
+              reparsing [code]. [None] for non-exhaustion
               provider/runtime errors. *)
       }
   | Fiber_unresolved of fiber_drop_cause

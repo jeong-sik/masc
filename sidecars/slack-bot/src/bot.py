@@ -38,6 +38,18 @@ logging.basicConfig(
 logger = logging.getLogger("slack-gate-bot")
 
 
+def button_content(action_id: str, value: str = "") -> str:
+    """Build the keeper message text for a Block Kit button press.
+
+    Pure helper so the interactive routing logic is unit-testable without a
+    live Slack socket.
+    """
+    content = f"[button] {action_id}"
+    if value:
+        content += f" value={value}"
+    return content
+
+
 class SlackGateBot:
     """Slack bot that routes messages to gate-backed keepers."""
 
@@ -186,6 +198,57 @@ class SlackGateBot:
                     username=user_id,
                     channel_id=channel_id,
                     message_ts=ts,
+                )
+            )
+
+            self._handle_response(response, say, app, channel_id, thinking_ts)
+
+        @app.action(".*")
+        def handle_block_action(ack: Any, body: dict[str, Any], say: Any) -> None:
+            """Handle Block Kit button interactions (block_actions).
+
+            Socket Mode delivers interactive payloads over the same socket, so
+            no public Request URL is needed. Each button press is routed to the
+            bound keeper as a ``[button] <action_id> value=<value>`` message so
+            the keeper can act on it.
+            """
+            import asyncio
+
+            ack()
+            actions = body.get("actions") or []
+            if not actions:
+                return
+            action = actions[0]
+            action_id = str(action.get("action_id", "")).strip()
+            value = str(action.get("value", "")).strip()
+            user = body.get("user") or {}
+            user_id = str(user.get("id", ""))
+            username = str(user.get("username", "")) or user_id
+            channel = body.get("channel") or {}
+            channel_id = str(channel.get("id", ""))
+            container = body.get("container") or {}
+            message_ts = str(container.get("message_ts", ""))
+
+            if not action_id:
+                return
+
+            content = f"[button] {action_id}"
+            if value:
+                content += f" value={value}"
+
+            keeper = self._resolve_keeper(channel_id)
+
+            result = say("...")
+            thinking_ts = result.get("ts", "") if isinstance(result, dict) else ""
+
+            response = asyncio.run(
+                self.gate.send_slack_message(
+                    keeper_name=keeper,
+                    content=content,
+                    user_id=user_id,
+                    username=username,
+                    channel_id=channel_id,
+                    message_ts=message_ts,
                 )
             )
 

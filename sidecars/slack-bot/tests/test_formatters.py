@@ -224,3 +224,32 @@ class TestStructuredResponseBlocks:
         assert "*Audio (tts):*" in blocks[6]["text"]["text"]
         assert "Attachment (video)" in blocks[7]["text"]["text"]
         assert "*Video:* Demo" in blocks[8]["text"]["text"]
+
+    def test_projects_button_block(self) -> None:
+        blocks = structured_response_blocks(
+            {
+                "blocks": [
+                    {
+                        "t": "button",
+                        "label": "Approve",
+                        "action_id": "approve_123",
+                        "value": "task-123",
+                        "style": "primary",
+                    }
+                ]
+            }
+        )
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "actions"
+        element = blocks[0]["elements"][0]
+        assert element["type"] == "button"
+        assert element["text"]["text"] == "Approve"
+        assert element["action_id"] == "approve_123"
+        assert element["value"] == "task-123"
+        assert element["style"] == "primary"
+
+    def test_button_block_missing_fields_falls_back(self) -> None:
+        # Missing action_id -> button block dropped, no crash.
+        assert structured_response_blocks({"blocks": [{"t": "button", "label": "X"}]}) == []
+        # Missing label -> dropped.
+        assert structured_response_blocks({"blocks": [{"t": "button", "action_id": "a"}]}) == []

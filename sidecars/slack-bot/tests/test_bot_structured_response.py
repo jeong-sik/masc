@@ -34,7 +34,7 @@ _config = types.ModuleType("src.config")
 setattr(_config, "get_config", lambda: types.SimpleNamespace())
 sys.modules.setdefault("src.config", _config)
 
-from src.bot import SlackGateBot  # noqa: E402
+from src.bot import SlackGateBot, button_content  # noqa: E402
 from src.gate_client import GateResponse  # noqa: E402
 
 
@@ -86,3 +86,15 @@ def test_handle_response_sends_structured_only_success() -> None:
     assert app.client.updates[0]["text"] == "approved"
     assert app.client.updates[0]["blocks"][0]["text"]["text"] == "approved"
     assert bot._messages_processed == 1
+
+
+def test_button_content_with_value() -> None:
+    assert button_content("approve_123", "task-123") == "[button] approve_123 value=task-123"
+
+
+def test_button_content_without_value() -> None:
+    assert button_content("approve_123") == "[button] approve_123"
+
+
+def test_button_content_empty_value() -> None:
+    assert button_content("approve_123", "") == "[button] approve_123"

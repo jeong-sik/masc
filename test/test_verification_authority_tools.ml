@@ -59,6 +59,22 @@ let with_surface f =
   | Ok surface -> f config surface
 ;;
 
+let with_forest producers f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  List.iter (ensure_producer config) producers;
+  match VAT.create_forest ~config ~producers with
+  | Error reason -> Alcotest.failf "forest creation failed: %s" reason
+  | Ok forest -> f config forest
+;;
+
 (* Create the producer playground used to resolve relative tool paths. *)
 let producer_playground (config : Workspace_core.config) producer_name =
   let path =
@@ -254,6 +270,60 @@ let test_workspace_producer_gets_owned_read_surface () =
          (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
 ;;
 
+let test_forest_requires_and_enforces_exact_producer () =
+  let producer_a = "producer-a" in
+  let producer_b = "producer-b" in
+  with_forest [ producer_a; producer_b ] (fun config forest ->
+    let file_name = "proof.txt" in
+    Out_channel.with_open_text
+      (Filename.concat (producer_playground config producer_a) file_name)
+      (fun channel -> output_string channel "proof from producer-a\n");
+    Out_channel.with_open_text
+      (Filename.concat (producer_playground config producer_b) file_name)
+      (fun channel -> output_string channel "proof from producer-b\n");
+    let schemas = VAT.forest_schemas forest in
+    Alcotest.(check (list string))
+      "forest surface"
+      [ "verification_read_file"; "verification_search_files"; "masc_web_fetch" ]
+      (List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas);
+    let read producer =
+      VAT.dispatch_forest
+        forest
+        ~name:"verification_read_file"
+        ~args:
+          (`Assoc
+            [ "producer", `String producer
+            ; "file_path", `String file_name
+            ])
+    in
+    (match read producer_b with
+     | Error detail -> Alcotest.failf "producer-b read failed: %s" detail
+     | Ok output ->
+       Alcotest.(check bool)
+         "the selected tree supplied the bytes"
+         true
+         (Astring.String.is_infix ~affix:"proof from producer-b" output));
+    (match read "producer-c" with
+     | Ok output -> Alcotest.failf "unadmitted producer read succeeded: %s" output
+     | Error detail ->
+       Alcotest.(check bool)
+         "refusal lists the closed set"
+         true
+         (Astring.String.is_infix ~affix:"producer-a, producer-b" detail));
+    match
+      VAT.dispatch_forest
+        forest
+        ~name:"verification_read_file"
+        ~args:(`Assoc [ "file_path", `String file_name ])
+    with
+    | Ok output -> Alcotest.failf "producer-free read succeeded: %s" output
+    | Error detail ->
+      Alcotest.(check bool)
+        "producer is mandatory"
+        true
+        (Astring.String.is_infix ~affix:"producer is required" detail))
+;;
+
 (* The prompt states the exact tools attached to the review request. *)
 let test_prompt_states_the_available_surface () =
   with_surface (fun _config surface ->
@@ -275,7 +345,10 @@ let test_prompt_states_the_available_surface () =
     let with_tools =
       render
         (AR.Lookup_tools
-           { schemas = VAT.schemas surface; dispatch = VAT.dispatch surface })
+           { schemas = VAT.schemas surface
+           ; dispatch = VAT.dispatch surface
+           ; scope = AR.Producer_tree
+           })
     in
     Alcotest.(check bool)
       "toolless prompt says the snapshot is the only proof"
@@ -296,9 +369,9 @@ let test_prompt_states_the_available_surface () =
          ~affix:"You have no tool that opens anything else"
          with_tools);
     Alcotest.(check bool)
-      "tool prompt forbids repairing the work under review"
+      "tool prompt states the read-only boundary"
       true
-      (Astring.String.is_infix ~affix:"do not repair what you are judging" with_tools))
+      (Astring.String.is_infix ~affix:"verifier surface is read-only" with_tools))
 ;;
 
 
@@ -371,6 +444,10 @@ let () =
             `Quick test_search_refuses_a_call_without_its_required_pattern
         ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
             test_workspace_producer_gets_owned_read_surface
+        ; Alcotest.test_case
+            "forest requires and enforces exact producer"
+            `Quick
+            test_forest_requires_and_enforces_exact_producer
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick

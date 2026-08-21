@@ -88,7 +88,7 @@ type surface =
 | 데이터 | 경로 |
 |---|---|
 | agents | `.masc/agents/*.json` |
-| tasks | `.masc/tasks/*.json` |
+| tasks | `.masc/tasks/backlog.json` |
 | keepers | `.masc/keepers/*.json` |
 | keeper metrics | `.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl` |
 | board posts | `.masc/board_posts.jsonl` |

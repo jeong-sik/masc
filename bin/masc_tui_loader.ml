@@ -1,5 +1,9 @@
 (** TUI data loading functions — split from masc_tui.ml (#3808) *)
 
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_types_support = Masc.Keeper_types_support
+module Keeper_types_profile = Masc.Keeper_types_profile
+
 open Masc_tui_types
 open Tui_decode
 open Masc_tui_http
@@ -7,41 +11,64 @@ open Masc_tui_http
 let report path err =
   Printf.eprintf "[masc-tui] decode failed for %s: %s\n%!" path err
 
-(** Load keepers from .masc/keepers/ *)
-let load_keepers (base_path : string) : keeper list =
-  let keepers_dir = Filename.concat (Filename.concat base_path Common.masc_dirname) Common.keepers_runtime_dirname in
-  if Sys.file_exists keepers_dir && Sys.is_directory keepers_dir then
-    Sys.readdir keepers_dir
-    |> Array.to_list
-    |> List.filter (fun f ->
-         Filename.check_suffix f ".json"
-         && not (String.contains f '.'))  (* This won't work, use different filter *)
-    |> (fun _ ->
-         (* Re-filter: only files that are exactly <name>.json, not <name>.reward-model.json *)
-         Sys.readdir keepers_dir
-         |> Array.to_list
-         |> List.filter (fun f ->
-              Filename.check_suffix f ".json"
-              && (let base = Filename.chop_suffix f ".json" in
-                  not (String.contains base '.'))))
-    |> List.filter_map (fun f ->
-         try
-           let path = Filename.concat keepers_dir f in
-           let json = Yojson.Safe.from_file path in
-           match Tui_decode.decode_keeper ~filename:f json with
-           | Ok keeper -> Some keeper
-           | Error err ->
-               report path err;
-               None
-         with Yojson.Json_error err ->
-           report (Filename.concat keepers_dir f) ("invalid JSON: " ^ err);
-           None
-         | Sys_error err ->
-           report (Filename.concat keepers_dir f) err;
-           None
-       )
-    |> List.sort (fun a b -> String.compare a.k_name b.k_name)
-  else []
+let summarize_errors label errors =
+  match List.rev errors with
+  | [] -> None
+  | first :: rest ->
+      let suffix =
+        match rest with
+        | [] -> ""
+        | _ -> Printf.sprintf " (+%d more)" (List.length rest)
+      in
+      Some (Printf.sprintf "%s: %s%s" label first suffix)
+
+(** Load keepers through the canonical metadata classifier and typed store.
+    The classifier preserves valid dotted names and excludes sidecars. *)
+let load_keepers (base_path : string) : keeper list * string option =
+  let config = Workspace_core.default_config base_path in
+  match Keeper_meta_store.persisted_keeper_names_result config with
+  | Error err ->
+      report (Keeper_types_profile.keeper_dir config) err;
+      [], Some ("keeper metadata unavailable: " ^ err)
+  | Ok names ->
+      let keepers, errors =
+        List.fold_left
+          (fun (keepers, errors) name ->
+             let path = Keeper_types_profile.keeper_meta_path config name in
+             match Keeper_meta_store.read_meta config name with
+             | Ok (Some meta) ->
+                 Tui_decode.keeper_of_meta meta :: keepers, errors
+             | Ok None ->
+                 let err = "metadata disappeared during refresh" in
+                 report path err;
+                 keepers, (Printf.sprintf "%s: %s" name err :: errors)
+             | Error err ->
+                 report path err;
+                 keepers, (Printf.sprintf "%s: %s" name err :: errors))
+          ([], []) names
+      in
+      ( List.sort (fun a b -> String.compare a.k_name b.k_name) keepers
+      , summarize_errors "keeper metadata read failed" errors )
+
+(** Load active tasks from the canonical workspace backlog. Terminal tasks
+    remain available in Planning rollups but do not occupy the Overview list. *)
+let load_active_tasks (base_path : string) : task list * string option =
+  let config = Workspace_core.default_config base_path in
+  let path = Workspace_backlog.backlog_path config in
+  match Workspace_backlog.read_backlog_observation_with_source_r config with
+  | Error err ->
+      report path err;
+      [], Some ("task backlog unavailable: " ^ err)
+  | Ok observation ->
+      let recovery_error =
+        match observation.recovered_from with
+        | None -> None
+        | Some recovery ->
+            report path recovery.primary_error;
+            Some ("task backlog recovered from backup: " ^ recovery.primary_error)
+      in
+      ( Tui_decode.active_tasks_of_domain observation.observed_backlog.tasks
+      , recovery_error )
 
 (** Read the last N lines from a file (tail) *)
 let read_last_lines path n =
@@ -72,11 +99,8 @@ let parse_log_entry (line : string) : log_entry option =
 
 (** Find the most recent metrics file for a keeper *)
 let find_metrics_files (base_path : string) (keeper_name : string) : string list =
-  let metrics_dir = Filename.concat
-    (Filename.concat
-       (Filename.concat base_path Common.masc_dirname)
-       "keepers")
-    (Filename.concat keeper_name "metrics") in
+  let config = Workspace_core.default_config base_path in
+  let metrics_dir = Keeper_types_support.keeper_metrics_dir config keeper_name in
   if not (Sys.file_exists metrics_dir && Sys.is_directory metrics_dir) then []
   else begin
     (* List year-month directories, pick the most recent *)
@@ -178,35 +202,15 @@ let load_from_masc_dir (state : state) (base_path : string) =
     else []
   );
 
-  (* Load tasks *)
-  let tasks_dir = Filename.concat masc_dir "tasks" in
-  state.tasks <- (
-    if Sys.file_exists tasks_dir && Sys.is_directory tasks_dir then
-      Sys.readdir tasks_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-           try
-             let path = Filename.concat tasks_dir f in
-             let json = Yojson.Safe.from_file path in
-             match Tui_decode.decode_task json with
-             | Ok task -> Some task
-             | Error err ->
-                 report path err;
-                 None
-           with Yojson.Json_error err ->
-             report (Filename.concat tasks_dir f) ("invalid JSON: " ^ err);
-             None
-           | Sys_error err ->
-             report (Filename.concat tasks_dir f) err;
-             None
-         )
-      |> List.sort (fun a b -> compare a.priority b.priority)
-    else []
-  );
+  (* Load tasks from their single durable source. *)
+  let tasks, tasks_error = load_active_tasks base_path in
+  state.tasks <- tasks;
+  state.tasks_error <- tasks_error;
 
   (* Load keepers *)
-  state.keepers <- load_keepers base_path;
+  let keepers, keepers_error = load_keepers base_path in
+  state.keepers <- keepers;
+  state.keepers_error <- keepers_error;
 
   (* Clamp cursor if keepers changed *)
   if state.keeper_cursor >= List.length state.keepers then
@@ -442,75 +446,9 @@ let load_overview ~(host : string) ~(port : int) :
           ov_generated_at;
         }
 
-let decode_planning_goal json =
-  let* pg_id = required_string_field json "id" in
-  let* pg_title = required_string_field json "title" in
-  let* raw_status = required_string_field json "status" in
-  let* pg_status =
-    match String.lowercase_ascii raw_status with
-    | "active" -> Ok Planning_goal_active
-    | "paused" -> Ok Planning_goal_paused
-    | "done" -> Ok Planning_goal_done
-    | "dropped" -> Ok Planning_goal_dropped
-    | other ->
-        Error
-          (Printf.sprintf
-             "unknown planning goal status %S (normalized %S)"
-             raw_status
-             other)
-  in
-  let* pg_phase = required_string_field json "phase" in
-  let* pg_priority = required_int_field json "priority" in
-  let* pg_due_date = optional_string_field json "due_date" in
-  let* pg_metric = optional_string_field json "metric" in
-  let* pg_target_value = optional_string_field json "target_value" in
-  Ok
-    {
-      pg_id;
-      pg_title;
-      pg_status;
-      pg_phase;
-      pg_priority;
-      pg_due_date;
-      pg_metric;
-      pg_target_value;
-    }
-
-let decode_planning_goals json_list =
-  decode_list "goals" decode_planning_goal json_list
-
-let decode_planning_rollup json =
-  let* pr_active = required_int_field json "active_count" in
-  let* pr_paused = required_int_field json "paused_count" in
-  let* pr_done = required_int_field json "done_count" in
-  let* pr_dropped = required_int_field json "dropped_count" in
-  Ok { pr_active; pr_paused; pr_done; pr_dropped }
-
-let decode_planning_backlog json =
-  let* pb_todo = required_int_field json "todo" in
-  let* pb_claimed = required_int_field json "claimed" in
-  let* pb_running = required_int_any_field json [ "in_progress"; "running" ] in
-  let* pb_done = required_int_field json "done" in
-  let* pb_cancelled = required_int_field json "cancelled" in
-  Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
-
 (** Load planning snapshot from /api/v1/dashboard/planning *)
 let load_planning ~(host : string) ~(port : int) :
     (planning_snapshot, string) result =
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
-  | Ok json ->
-      let* goals_json = required_list_field json "goals" in
-      let* goals = decode_planning_goals goals_json in
-      let* rollup_json = required_object_field json "rollup" in
-      let* rollup = decode_planning_rollup rollup_json in
-      let* backlog_json = required_object_field json "task_backlog" in
-      let* backlog = decode_planning_backlog backlog_json in
-      let* generated_at = required_string_field json "generated_at" in
-      Ok
-        {
-          pl_goals = goals;
-          pl_rollup = rollup;
-          pl_backlog = backlog;
-          pl_generated_at = generated_at;
-        }
+  | Ok json -> Tui_decode.decode_planning_snapshot json

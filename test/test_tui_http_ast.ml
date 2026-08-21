@@ -64,28 +64,94 @@ let test_planning_constructors_do_not_collide () =
     (List.mem "Planning" surface_constructors)
 ;;
 
-let test_planning_status_is_closed_sum () =
-  let constructors =
-    Ast_grep.constructor_names_of_type
-      ~module_path:"bin/masc_tui_types.ml"
-      ~type_name:"planning_goal_status"
-  in
-  check (list string) "planning status constructors"
-    [
-      "Planning_goal_active";
-      "Planning_goal_paused";
-      "Planning_goal_done";
-      "Planning_goal_dropped";
-    ]
-    constructors;
+let test_planning_phase_uses_goal_ssot () =
+  check bool "projection parses the canonical goal phase" true
+    (Ast_grep.count_calls
+       ~module_path:"lib/tui_decode.ml"
+       ~callee:"Goal_phase.parse"
+     >= 1);
+  check bool "loader uses the behavioral planning decoder" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Tui_decode.decode_planning_snapshot"
+     >= 1);
+  check bool "renderer labels the canonical goal phase" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"Goal_phase.to_string"
+     >= 1);
   check int "renderer does not lowercase planning status strings" 0
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui_render.ml"
        ~callee:"String.lowercase_ascii");
-  check int "loader has an explicit unknown-status decode error" 1
+  check int "projection rejects an unknown canonical phase" 1
     (Ast_grep.count_string_literals
+       ~module_path:"lib/tui_decode.ml"
+       ~needle:"unknown planning goal phase")
+;;
+
+let test_tui_current_projection_wiring () =
+  check int "task loader is a named canonical-backlog projection" 1
+    (Ast_grep.count_value_bindings
        ~module_path:"bin/masc_tui_loader.ml"
-       ~needle:"unknown planning goal status")
+       ~name:"load_active_tasks");
+  check bool "task loader uses the canonical backlog observation" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Workspace_backlog.read_backlog_observation_with_source_r"
+     >= 1);
+  check bool "loader uses the behavior-tested active task projection" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Tui_decode.active_tasks_of_domain"
+     >= 1);
+  check int "task row projection has one domain boundary" 1
+    (Ast_grep.count_value_bindings
+       ~module_path:"lib/tui_decode.ml"
+       ~name:"task_of_domain");
+  check bool "keeper loader uses canonical persisted-name classification" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Keeper_meta_store.persisted_keeper_names_result"
+     >= 1);
+  check bool "keeper loader uses the typed current-schema store" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Keeper_meta_store.read_meta"
+     >= 1);
+  check bool "keeper loader projects typed metadata" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Tui_decode.keeper_of_meta"
+     >= 1);
+  check bool "keeper metrics use the cluster-aware canonical path" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Keeper_types_support.keeper_metrics_dir"
+     >= 1);
+  check int "retired planning running alias absent" 0
+    (Ast_grep.count_string_literals
+       ~module_path:"lib/tui_decode.ml"
+       ~needle:"running");
+  check int "verify appears only inside verifying_count" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"lib/tui_decode.ml"
+       ~needle:"verify");
+  List.iter
+    (fun retired ->
+       check int ("retired keeper field absent: " ^ retired) 0
+         (Ast_grep.count_string_literals
+            ~module_path:"lib/tui_decode.ml"
+            ~needle:retired))
+    [ "active_goal_ids"
+    ; "active_model"
+    ; "models"
+    ; "proactive_enabled"
+    ; "initiative_enabled"
+    ; "trigger_mode"
+    ; "context_budget"
+    ; "drift_enabled"
+    ]
 ;;
 
 let test_overview_state_domains_are_closed_sum () =
@@ -177,10 +243,10 @@ let () =
           "planning constructors do not collide"
           `Quick
           test_planning_constructors_do_not_collide;
-        test_case
-          "planning status is closed-sum"
-          `Quick
-          test_planning_status_is_closed_sum;
+        test_case "planning phase uses goal SSOT" `Quick
+          test_planning_phase_uses_goal_ssot;
+        test_case "current projection wiring" `Quick
+          test_tui_current_projection_wiring;
         test_case
           "overview state domains are closed-sum"
           `Quick

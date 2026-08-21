@@ -267,7 +267,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     in
     Option.bind agent_opt (fun (agent : Masc_domain.agent) -> agent.current_task)
   in
-  let _ = Workspace.init config ~agent_name:(Some "taskmaster") in
+  let _ = Workspace.init config ~agent_name:(Some "fixture-keeper") in
   let _ = Workspace.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
   let _ = Workspace.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
   (match
@@ -299,7 +299,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     |> List.fold_left (fun acc msg -> max acc msg.Masc_domain.seq) 0
   in
   let result =
-    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"taskmaster-jade-heron" ~content:stale_message
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"fixture-keeper-jade-heron" ~content:stale_message
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -316,7 +316,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     result.mention;
   Alcotest.(check string)
     "delivery exposes the canonical persisted sender"
-    "taskmaster-jade-heron"
+    "fixture-keeper-jade-heron"
     result.from_agent;
   let messages = Workspace.get_all_messages_raw config ~since_seq in
   (match messages with
@@ -340,7 +340,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     "Normal update: blocked by task-001 while I wait for review context."
   in
   let normal_result =
-    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"taskmaster-jade-heron" ~content:normal_update
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"fixture-keeper-jade-heron" ~content:normal_update
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -352,8 +352,8 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     |> Result.get_ok
   in
   Alcotest.(check bool)
-    "non-taskmaster stale-looking prose is not invalidated"
-    false
+    "sender identity does not bypass terminal-task truth"
+    true
     (str_contains operator_result.rendered "[cache_invalidated]");
 
   let _ = Workspace.reset config in

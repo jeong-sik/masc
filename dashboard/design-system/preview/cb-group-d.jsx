@@ -269,7 +269,7 @@ function TaskStaleAlert() {
       <ZoneHeader
         title="TASK · STALE CLAIMS"
         branch="main"
-        keepers={["taskmaster","velvet-hammer"]}
+        keepers={["fixture-keeper","velvet-hammer"]}
         meta={`${stale.length} need attention · check age > 10m or drift=true`}
         right={<span className="meta" role="status" aria-live="polite" style={{color:'var(--err-fg)'}}><span aria-hidden="true">● </span>action required</span>}
       />
@@ -298,7 +298,7 @@ function TaskStaleAlert() {
           ))}
         </div>
         <div role="note" style={{marginTop:8, padding:'6px 8px', borderTop:'1px dashed var(--color-border-strong)', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)'}}>
-          taskmaster cannot force-release others' claims · operator nudge channel: <span style={{color:'var(--color-accent-fg)'}}>hint</span>
+          fixture-keeper cannot force-release others' claims · operator nudge channel: <span style={{color:'var(--color-accent-fg)'}}>hint</span>
         </div>
       </div>
     </section>
@@ -361,7 +361,7 @@ function AccountabilityLedger() {
       <ZoneHeader
         title="ACCOUNTABILITY · DAILY LEDGER"
         branch="main"
-        keepers={["nick0cave","sangsu","velvet-hammer","taskmaster"]}
+        keepers={["nick0cave","sangsu","velvet-hammer","fixture-keeper"]}
         meta="2026-04-25 · 7 verdicts"
         right={<span className="meta">approved 3 · flagged 2 · rejected 1 · deferred 1</span>}
       />

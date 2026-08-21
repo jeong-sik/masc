@@ -8,7 +8,7 @@ window.MASC_DATA = (function () {
     { id: "qa-king",        role: "QA",         color: "var(--err-fg)",     dotVar: "err",      status: "fail",     task: "t-2e88", tool: "suite.run" },
     { id: "rama",           role: "Researcher", color: "var(--stalled-fg)", dotVar: "stalled",  status: "stalled",  task: "t-d551", tool: "(await analyst)" },
     { id: "scholar",        role: "Scholar",    color: "var(--color-fg-secondary)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
-    { id: "taskmaster",     role: "Orchestr.",  color: "var(--color-fg-secondary)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
+    { id: "fixture-keeper",     role: "Orchestr.",  color: "var(--color-fg-secondary)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
     { id: "velvet-hammer",  role: "Gatekeep.",  color: "var(--color-fg-secondary)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
   ];
 

@@ -180,8 +180,8 @@ describe('KeeperTurnInspectorPanel', () => {
     const { rerender } = render(html`<${KeeperTurnInspectorPanel} keepers=${[]} />`)
     expect(screen.getByText('관측된 keeper 없음')).toBeTruthy()
 
-    rerender(html`<${KeeperTurnInspectorPanel} keepers=${['taskmaster']} />`)
+    rerender(html`<${KeeperTurnInspectorPanel} keepers=${['fixture-keeper']} />`)
     await waitFor(() => expect(api.fetchKeeperRawTraces).toHaveBeenCalledWith(
-      'taskmaster', 50, expect.anything()))
+      'fixture-keeper', 50, expect.anything()))
   })
 })

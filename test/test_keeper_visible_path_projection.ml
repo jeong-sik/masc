@@ -459,7 +459,7 @@ let test_repo_prefixed_missing_read_preserves_exact_input () =
 
 (* A keeper that guesses the host layout and one whose repos were never
    materialized both got "directory does not exist", and the two need opposite
-   responses. Live taskmaster asked for
+   responses. Live fixture-keeper asked for
    [workspace/yousleepwhen/masc] and retried (#23442).
 
    The hint enumerates the playground's own [repos/]; it does not infer which

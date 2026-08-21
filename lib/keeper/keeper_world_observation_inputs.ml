@@ -50,7 +50,7 @@ let rec tasks_with_identities = function
    Without this, a Keeper whose response to "an unclaimed task exists" is to
    create a routing/report task produces a closed positive feedback loop: the
    new task is itself an unclaimed Todo authored by the same keeper, so it
-   re-satisfies the trigger on the next observation. Live evidence: taskmaster
+   re-satisfies the trigger on the next observation. In the live incident, one Keeper
    authored 367 of the active tasks, 272 of them the same four "Route g0700 #N"
    templates re-emitted once per iteration (#28..#90), none ever claimed.
 

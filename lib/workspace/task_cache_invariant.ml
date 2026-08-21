@@ -152,7 +152,7 @@ let clear_stale_agent_task_for_task
     Returns [None] when the task is not found (treat as unknown; caller decides).
 
     @param module_name  Short ASCII label for the diagnostic log,
-    e.g. ["taskmaster.broadcast"] or ["mention_tracker.emit"]. *)
+    e.g. ["workspace.broadcast"] or ["mention_tracker.emit"]. *)
 let with_fresh_task_status
       config
       ~(agent_name : string)

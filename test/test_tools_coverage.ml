@@ -432,7 +432,23 @@ let test_masc_goal_transition_schema () =
           Alcotest.(check bool) "actor is authenticated context, not input" false
             (List.mem_assoc "actor" props);
           Alcotest.(check bool) "has note" true
-            (List.mem_assoc "note" props)
+            (List.mem_assoc "note" props);
+          Alcotest.(check bool) "verifier evidence is not public input" false
+            (List.mem_assoc "evidence" props);
+          (match List.assoc_opt "action" props with
+           | Some action_schema ->
+             Alcotest.(check (list string))
+               "only lifecycle actions are public"
+               [ "request_complete"; "pause"; "resume"; "block"; "unblock"; "drop"; "reopen" ]
+               (match get_json_list "enum" action_schema with
+                | Some values ->
+                  List.map
+                    (function
+                      | `String value -> value
+                      | json -> Alcotest.fail ("non-string action enum: " ^ Yojson.Safe.to_string json))
+                    values
+                | None -> Alcotest.fail "masc_goal_transition action enum missing")
+           | None -> Alcotest.fail "masc_goal_transition action missing")
       | None -> Alcotest.fail "masc_goal_transition missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->

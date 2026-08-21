@@ -1,6 +1,6 @@
-(* RFC-0089 — Goal_phase.all / all_actions are the SSOT for the MCP goal schema
-   enums and the workspace_goals validator, both built as
-   [List.map to_string all]. This guards those lists: every entry round-trips
+(* RFC-0089 — Goal_phase.all / Public_action.all are the SSOT for the MCP goal
+   schema enums and the workspace_goals validator. Internal [all_actions]
+   additionally covers verifier commits. This guards those lists: every entry round-trips
    through of_string, the derived string set has no duplicates, and it matches
    the expected set AND order (so deriving does not silently change the
    advertised enum order). to_string / action_to_string are the exhaustive
@@ -65,6 +65,26 @@ let test_action_set () =
       "record_criterion_unreachable";
     ]
     strs
+
+let test_public_action_set () =
+  let module PA = GP.Public_action in
+  let strs = List.map PA.to_string PA.all in
+  check int "public action count" 7 (List.length PA.all);
+  check int "no duplicate public action strings"
+    (List.length strs)
+    (List.length (List.sort_uniq String.compare strs));
+  check (list string) "public action set and order"
+    [ "request_complete"; "pause"; "resume"; "block"; "unblock"; "drop"; "reopen" ]
+    strs;
+  List.iter
+    (fun action ->
+      check bool
+        (Printf.sprintf "public action %s round-trips" (PA.to_string action))
+        true
+        (PA.of_string (PA.to_string action) = Some action))
+    PA.all;
+  check bool "verifier action is not public" true
+    (Option.is_none (PA.parse "record_proof_proven"))
 
 (* The 6x11 matrix in [decide_transition] had no behavioural test. Its comment
    says the compiler "refuses a matrix with a hole in it", and that is true --
@@ -217,6 +237,8 @@ let () =
         [
           test_case "round-trip" `Quick test_action_roundtrip;
           test_case "set and order" `Quick test_action_set;
+          test_case "public set excludes verifier commits" `Quick
+            test_public_action_set;
         ] );
       ( "transition matrix",
         [

@@ -3,8 +3,8 @@
     The lane drains the ledger's durable pending requests
     ([Criterion_pending] / [Proof_pending]) through
     [Task.Anti_rationalization.review] on the stubbed verifier_exact lane and
-    commits verdicts via the [masc_goal_transition] handler path, under the
-    fixed identity [verifier_exact]. Typed non-verdicts (evaluator
+    commits verdicts via the application-owned typed boundary, under the fixed
+    identity [verifier_exact]. Typed non-verdicts (evaluator
     unavailable, malformed replies after all slots failed, a verdict without
     a stated reason) leave the pending row durable and schedule a retry —
     failure never consumes a pending row. *)

@@ -293,36 +293,21 @@ let build_review_request config (goal : Goal_store.goal) kind
 
 (* {1 Verdict commit}
 
-   The commit rides the MCP handler itself — FSM decide, ledger commit, phase
-   write, event — with the lane's fixed identity as the session name. The
-   action strings come from {!Goal_phase.action_to_string}; nothing here
-   matches on them. *)
+   The application-owned worker crosses a typed internal boundary. Public MCP
+   callers can request lifecycle changes but cannot name verifier verdicts or
+   impersonate the fixed verifier authority. *)
 
-let commit_gate_verdict config ~goal_id ~action ~evidence ~note
+let commit_gate_verdict config ~goal_id ~decision ~evidence
   : (unit, string) result
   =
-  let ctx : Workspace_types.context =
-    { config
-    ; agent_name = Task.Anti_rationalization.verifier_exact_lane_id
-    }
-  in
-  let args =
-    `Assoc
-      ([ "goal_id", `String goal_id
-       ; "action", `String (Goal_phase.action_to_string action)
-       ; "evidence", `String evidence
-       ]
-       @
-       match note with
-       | Some note -> [ "note", `String note ]
-       | None -> [])
-  in
   let result =
-    Workspace_goals.handle_goal_transition
-      ~tool_name:"masc_goal_transition"
+    Workspace_goals.commit_verifier_decision
+      ~tool_name:"goal_verifier_commit"
       ~start_time:(Time_compat.now ())
-      ctx
-      args
+      config
+      ~goal_id
+      ~decision
+      ~evidence
   in
   if Tool_result.is_success result
   then Ok ()
@@ -437,24 +422,23 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
              in
              (match evidence with
               | Some evidence when String.trim evidence <> "" ->
-                let action, note =
+                let decision =
                   match work.kind, review_verdict with
                   | Completion_proof, Task.Anti_rationalization.Approve ->
-                    Goal_phase.Record_proof_proven, None
+                    Workspace_goals.Proof_proven
                   | Completion_proof, Task.Anti_rationalization.Reject reason ->
-                    Goal_phase.Record_proof_refuted, Some reason
+                    Workspace_goals.Proof_refuted { reason }
                   | Criterion_check, Task.Anti_rationalization.Approve ->
-                    Goal_phase.Record_criterion_viable, None
+                    Workspace_goals.Criterion_viable
                   | Criterion_check, Task.Anti_rationalization.Reject reason ->
-                    Goal_phase.Record_criterion_unreachable, Some reason
+                    Workspace_goals.Criterion_unreachable { reason }
                 in
                 (match
                    commit_gate_verdict
                      config
                      ~goal_id:work.goal_id
-                     ~action
+                     ~decision
                      ~evidence
-                     ~note
                  with
                  | Ok () ->
                    Log.Misc.info

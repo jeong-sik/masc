@@ -119,6 +119,46 @@ let action_of_string = function
 let parse_action s =
   String.trim s |> String.lowercase_ascii |> action_of_string
 
+module Public_action = struct
+  type t =
+    | Request_complete
+    | Pause
+    | Resume
+    | Block
+    | Unblock
+    | Drop
+    | Reopen
+
+  let to_action : t -> action = function
+    | Request_complete -> (Request_complete : action)
+    | Pause -> (Pause : action)
+    | Resume -> (Resume : action)
+    | Block -> (Block : action)
+    | Unblock -> (Unblock : action)
+    | Drop -> (Drop : action)
+    | Reopen -> (Reopen : action)
+  ;;
+
+  let to_string action = action_to_string (to_action action)
+
+  let of_string = function
+    | "request_complete" -> Some Request_complete
+    | "pause" -> Some Pause
+    | "resume" -> Some Resume
+    | "block" -> Some Block
+    | "unblock" -> Some Unblock
+    | "drop" -> Some Drop
+    | "reopen" -> Some Reopen
+    | _ -> None
+  ;;
+
+  let parse raw =
+    String.trim raw |> String.lowercase_ascii |> of_string
+  ;;
+
+  let all = [ Request_complete; Pause; Resume; Block; Unblock; Drop; Reopen ]
+end
+
 
 type outcome =
   | Move_to of t

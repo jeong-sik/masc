@@ -433,6 +433,34 @@ let test_planning_cursor_uses_visible_goal_order () =
      >= 2)
 ;;
 
+let test_render_loop_uses_monotonic_dirty_schedule () =
+  let main_path = "bin/masc_tui.ml" in
+  check bool "main loop reads a monotonic clock" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
+     >= 3);
+  check int "main loop has no wall-clock refresh deadline" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Unix.gettimeofday");
+  check bool "context bar width is total" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_ansi.ml"
+       ~binding_name:"ctx_bar"
+       ~callee:"Masc_tui_render_schedule.nonnegative_width"
+     = 1);
+  check bool "keeper detail clamps its derived bar width" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_detail"
+       ~callee:"Masc_tui_render_schedule.keeper_context_bar_width"
+     = 1);
+  check bool "interrupted input uses the deadline-aware retry contract" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"read_byte_unix"
+       ~callee:"Render_schedule.Input_wait.await"
+     = 1)
+;;
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -467,6 +495,10 @@ let () =
           "planning cursor uses visible goal order"
           `Quick
           test_planning_cursor_uses_visible_goal_order;
+        test_case
+          "render loop uses monotonic dirty scheduling"
+          `Quick
+          test_render_loop_uses_monotonic_dirty_schedule;
       ]
     )
   ]

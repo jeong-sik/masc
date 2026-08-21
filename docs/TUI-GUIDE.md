@@ -159,6 +159,10 @@ Only a request-correlated terminal Keeper result is shown as a reply. Interrupte
 | `r` | All (except message) | Force refresh |
 | `q` | All (except message) | Quit |
 
+The TUI renders only after input, an applied refresh/result, or a terminal
+resize. Background changes are coalesced into a 16 ms frame window, while an
+idle TUI neither redraws nor reruns the terminal-size probe.
+
 ## View Navigation
 
 ```

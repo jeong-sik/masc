@@ -242,6 +242,11 @@
   yojson
   unix))
 
+(library
+ (name masc_tui_render_schedule)
+ (wrapped false)
+ (modules masc_tui_render_schedule))
+
 (executable
  (name masc_tui)
  (modules
@@ -259,6 +264,7 @@
   masc_tui_keeper_chat_recovery
   masc_tui_message_layout
   masc_tui_operator_projection
+  masc_tui_render_schedule
   masc.dashboard
   masc.server
   masc.config
@@ -282,6 +288,7 @@
   str
   eio_main
   eio
+  mtime.clock.os
   httpun
   cohttp
   cohttp-eio

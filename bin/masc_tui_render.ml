@@ -961,7 +961,9 @@ let render_keeper_detail (state : state) =
     add_section "Live Context";
     if state.live_context_max > 0 then begin
       let pct = state.live_context_ratio *. 100.0 in
-      let bar_width = min 30 (inner - 40) in
+      let bar_width =
+        Masc_tui_render_schedule.keeper_context_bar_width ~inner_width:inner
+      in
       add_row "Context:" (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
         (ctx_color state.live_context_ratio) pct Ansi.reset
         (ctx_bar state.live_context_ratio bar_width)

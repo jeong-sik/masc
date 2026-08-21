@@ -40,10 +40,10 @@ let build_attention_queue incidents =
          if kind = "" || summary = "" then None
          else
            let target_type = string_field "target_type" incident in
-           let target_id = String_util.trim_to_option (string_field "target_id" incident) in
+           let target_id = String_util.trim_nonempty (string_field "target_id" incident) in
            let related_agent_names =
              dedup_strings
-               (match String_util.trim_to_option (string_field "actor" incident) with
+               (match String_util.trim_nonempty (string_field "actor" incident) with
                | Some actor -> [ actor ]
                | None -> [])
            in

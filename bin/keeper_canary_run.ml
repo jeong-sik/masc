@@ -234,25 +234,11 @@ let iso8601_now () =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
-(* With_process.with_process_args_in gives exact argv control (no shell
-   string parsing, unlike Unix.open_process_in) and guarantees the
-   subprocess is reaped on every exit path. The exit status is consumed:
-   a captured line is only trusted when git actually reported success —
-   e.g. a detached-HEAD-less checkout can print nothing on stdout while
-   still exiting 0, and a failing invocation must not be read as "no
-   commit" the same way a genuinely commit-less checkout would be. *)
-let git_commit_opt () =
-  try
-    let lines, status =
-      With_process.with_process_args_in
-        "git"
-        [| "git"; "rev-parse"; "HEAD" |]
-        With_process.drain_lines
-    in
-    match status, lines with
-    | Unix.WEXITED 0, line :: _ -> Some (String.trim line)
-    | _ -> None
-  with _ -> None
+(* This must testify to the canary executable that is running, not to an
+   arbitrary checkout it happens to be launched from.  The trusted runtime
+   manifest binds the companion binary digest to the same build source SHA;
+   [binary_commit] is that SHA embedded by the Dune build rule. *)
+let build_commit_opt () = (Masc.Build_identity.current ()).binary_commit
 
 let sha256_hex text = Digestif.SHA256.(to_hex (digest_string text))
 
@@ -987,7 +973,7 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
     in
     Ok
       { Keeper_canary_evidence.captured_at = iso8601_now ()
-      ; harness_git_commit = git_commit_opt ()
+      ; harness_git_commit = build_commit_opt ()
       ; run_id = args.run_id
       ; keeper_name = args.keeper
       ; runtime = args.runtime

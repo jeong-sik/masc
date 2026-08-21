@@ -54,18 +54,15 @@ let with_sidecar_paths prefix dir f =
     with_envs (env_names "_BINDING_STORE_PATH") (Some binding_path) (fun () ->
       with_envs (env_names "_BINDING_AUDIT_PATH") (Some audit_path) f))
 
-let test_resolve_connector_status_name_prefers_explicit_name () =
-  check (option string) "name wins and normalizes" (Some "discord")
-    (Routes.resolve_connector_status_name ~name:"  Discord  "
-       ~channel:"telegram" ())
-
-let test_resolve_connector_status_name_normalizes_legacy_channel () =
-  check (option string) "legacy channel lowercased" (Some "discord")
-    (Routes.resolve_connector_status_name ~channel:"  DISCORD  " ())
+let test_resolve_connector_status_name_trims_and_lowercases () =
+  check (option string) "name is trimmed and lowercased" (Some "discord")
+    (Routes.resolve_connector_status_name ~name:"  Discord  " ())
 
 let test_resolve_connector_status_name_ignores_blank_inputs () =
-  check (option string) "blank query params ignored" None
-    (Routes.resolve_connector_status_name ~name:"   " ~channel:"   " ())
+  check (option string) "blank name ignored" None
+    (Routes.resolve_connector_status_name ~name:"   " ());
+  check (option string) "absent name ignored" None
+    (Routes.resolve_connector_status_name ())
 
 let python_utc_iso_now () =
   let z = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -277,11 +274,9 @@ let () =
 
       ( "resolve_connector_status_name",
         [
-          test_case "prefers explicit name" `Quick
-            test_resolve_connector_status_name_prefers_explicit_name;
-          test_case "normalizes legacy channel" `Quick
-            test_resolve_connector_status_name_normalizes_legacy_channel;
-          test_case "ignores blank inputs" `Quick
+          test_case "trims and lowercases the name" `Quick
+            test_resolve_connector_status_name_trims_and_lowercases;
+          test_case "ignores blank and absent input" `Quick
             test_resolve_connector_status_name_ignores_blank_inputs;
         ] );
       ( "sidecar_connector_state",

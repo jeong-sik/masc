@@ -29,7 +29,7 @@ let test_completed_run_replays_with_tool_evidence () =
   with_path
   @@ fun path ->
   let registry = R.create ~path () in
-  let run_id = Random_id.uuid_v7 () in
+  let run_id = "goal-run-completed" in
   R.register_running
     registry
     ~run_id
@@ -69,7 +69,7 @@ let test_running_attempt_is_not_claimed_after_restart () =
   let registry = R.create ~path () in
   R.register_running
     registry
-    ~run_id:(Random_id.uuid_v7 ())
+    ~run_id:"goal-run-interrupted"
     ~goal_id:"goal-interrupted"
     ~review_kind:R.Criterion
     ~authority_actor:"verifier_exact"

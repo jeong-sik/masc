@@ -16,6 +16,7 @@ import { SubBoardSurface } from './board/sub-board-surface'
 import { PlanningPanel } from './planning-panel'
 import { VerificationRequestsPanel } from './verification-requests-panel'
 import { VerificationRunsPanel } from './verification-runs-panel'
+import { GoalVerificationRunsPanel } from './goal-verification-runs-panel'
 import { KeeperPersistenceProofPanel } from './keeper-persistence-proof-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
@@ -1654,6 +1655,7 @@ export function Work() {
               <${KeeperPersistenceProofPanel} />
               <${VerificationRequestsPanel} />
               <${VerificationRunsPanel} />
+              <${GoalVerificationRunsPanel} />
             </div>
           `
         }

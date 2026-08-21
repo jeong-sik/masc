@@ -77,7 +77,7 @@ let completed_outcome ~addressed meta : Keeper_heartbeat_loop_cycle.cycle_outcom
     }
 ;;
 
-let failed_outcome ~source_disposition ~route ~deferred_runtime_lane meta
+let failed_outcome ~source_disposition ~route meta
   : Keeper_heartbeat_loop_cycle.cycle_outcome
   =
   Keeper_heartbeat_loop_cycle.Failed
@@ -87,7 +87,6 @@ let failed_outcome ~source_disposition ~route ~deferred_runtime_lane meta
         ; runtime_id = "test-runtime"
         ; route
         ; source_disposition
-        ; deferred_runtime_lane
         }
     }
 ;;
@@ -277,7 +276,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
           (failed_outcome
              ~source_disposition:Keeper_unified_turn.Follow_failure_route
              ~route:unavailable_runtime_route
-             ~deferred_runtime_lane:None
              meta))
    with
    | Keeper_heartbeat_loop.Batch_quarantine
@@ -291,7 +289,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
           (failed_outcome
              ~source_disposition:Keeper_unified_turn.Follow_failure_route
              ~route:(deterministic_route ~detail:"deterministic rejection")
-             ~deferred_runtime_lane:None
              meta))
    with
    | Keeper_heartbeat_loop.Batch_quarantine { detail = "deterministic rejection" } -> ()
@@ -307,7 +304,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
                (Keeper_unified_turn.Pause_after_transcript_corruption
                   { detail = "corrupt transcript" })
              ~route:unavailable_runtime_route
-             ~deferred_runtime_lane:None
              meta))
    with
    | Keeper_heartbeat_loop.Batch_preserve

@@ -68,24 +68,6 @@ val provider_attempt_finished_decision :
 
 (** {1 Named runtime execution} *)
 
-type deferred_runtime_lane = private
-  { assignment_id : string
-  ; failed_runtime_id : string
-  ; next_runtime_id : string
-  ; later_runtime_ids : string list
-  ; failure : Agent_core.Error.t
-  }
-
-val deferred_runtime_ids : deferred_runtime_lane -> string list
-val quota_ordered_deferred_runtime_lane :
-  now:float -> deferred_runtime_lane -> deferred_runtime_lane
-(** Apply active quota-window ordering to a frozen deferred suffix while
-    preserving its assignment and failure evidence. Call once before building
-    pre-dispatch execution so prompt shaping and dispatch consume the same
-    selected runtime. *)
-val equal_deferred_runtime_lane :
-  deferred_runtime_lane -> deferred_runtime_lane -> bool
-
 type candidate_transition_permission =
   | Candidate_transition_allowed
   | Candidate_transition_denied
@@ -151,8 +133,6 @@ val run_named :
      -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
-  ?deferred_runtime_lane:deferred_runtime_lane ->
-  ?on_deferred_runtime_consumed:(unit -> unit) ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_core.Error.t) result) ->
@@ -172,14 +152,6 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
-  val make_deferred_runtime_lane :
-    assignment_id:string ->
-    failed_runtime_id:string ->
-    next_runtime_id:string ->
-    later_runtime_ids:string list ->
-    failure:Agent_core.Error.t ->
-    deferred_runtime_lane
-
   type provider_attempt_outcomes
 
   val project_provider_attempt_result :

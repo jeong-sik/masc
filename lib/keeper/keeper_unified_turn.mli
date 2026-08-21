@@ -111,7 +111,6 @@ type turn_failure =
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_disposition : source_disposition
-  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   }
 (** Exact execution identity and typed disposition route for a failed turn.
     The heartbeat queue transitions from this value; it must not reconstruct a
@@ -179,8 +178,6 @@ val hitl_replay_yield_request
 
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)
-  -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
-  -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery_provider:

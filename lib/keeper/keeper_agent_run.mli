@@ -204,8 +204,6 @@ val run_turn
   -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
   -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
-  -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
-  -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?is_retry:bool
   -> ?shared_context:Agent_core.Context.t
   -> ?event_bus:Agent_core.Event_bus.t

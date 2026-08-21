@@ -96,22 +96,12 @@ let manual_compaction_followup_failure = function
     None
 ;;
 
-let rec deferred_runtime_lane = function
-  | Failed { failure; _ } -> failure.Keeper_unified_turn.deferred_runtime_lane
-  | Manual_compaction_applied { followup; _ } -> deferred_runtime_lane followup
-  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
-  | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
-    None
-;;
-
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
    Keeper Owner child. The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
       ~before_dispatch_authority
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
       ~ctx
@@ -127,8 +117,6 @@ let run_keeper_cycle_admitted
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       Keeper_unified_turn.run_keeper_cycle
         ~before_dispatch_authority
-        ?deferred_runtime_lane
-        ?on_deferred_runtime_consumed
         ~config:ctx.config
         ~meta:meta_after_triage
         ~publication_recovery_provider:ctx.publication_recovery_provider
@@ -212,8 +200,6 @@ let run_keeper_cycle_admitted
 let run_keeper_cycle_with
       ~run_manual_compaction
       ~admission_token
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
       ~ctx
@@ -230,8 +216,6 @@ let run_keeper_cycle_with
     run_keeper_cycle_admitted
       ~before_dispatch_authority:
         (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
       ~ctx
       ~meta_after_triage
       ~stop
@@ -279,8 +263,6 @@ let run_keeper_cycle_with
 
 let run_keeper_cycle
       ~admission_token
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
       ~ctx
@@ -309,8 +291,6 @@ run_keeper_cycle_with
          ~meta
          ())
     ~admission_token
-    ?deferred_runtime_lane
-    ?on_deferred_runtime_consumed
     ?event_bus
     ?hitl_resolution
     ~ctx

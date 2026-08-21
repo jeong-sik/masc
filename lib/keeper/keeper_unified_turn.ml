@@ -27,7 +27,6 @@ type turn_failure =
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_disposition : source_disposition
-  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   }
 
 exception Owner_meta_commit_failed of string
@@ -55,12 +54,11 @@ let turn_failure_of_error
       ~runtime_id
       ~fallback_boundary
       ~exact_failure_execution
-      ~deferred_runtime_lane
       error
   =
   match exact_failure_execution with
   | Some (runtime_id, route, source_disposition) ->
-    { error; runtime_id; route; source_disposition; deferred_runtime_lane }
+    { error; runtime_id; route; source_disposition }
   | None ->
     { error
     ; runtime_id
@@ -69,7 +67,6 @@ let turn_failure_of_error
           ~boundary:fallback_boundary
           error
     ; source_disposition = Follow_failure_route
-    ; deferred_runtime_lane
     }
 ;;
 
@@ -404,8 +401,6 @@ let continuation_channel_of_wake = function
 
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(publication_recovery_provider :
@@ -443,7 +438,6 @@ let run_keeper_cycle
             ~boundary:Keeper_runtime_failure_route.Masc_execution
             error
       ; source_disposition = Follow_failure_route
-      ; deferred_runtime_lane = None
       }
   | Ok { entry; publication_recovery } ->
   let meta = entry.meta in
@@ -458,15 +452,6 @@ let run_keeper_cycle
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
-  (* Quota expiry is wall-clock provider evidence. Freeze this observation so
-     shaping and dispatch share one ordered runtime suffix. NDT-OK. *)
-  let quota_snapshot_now = Unix.gettimeofday () in
-  let deferred_runtime_lane =
-    Option.map
-      (Keeper_turn_driver.quota_ordered_deferred_runtime_lane
-         ~now:quota_snapshot_now)
-      deferred_runtime_lane
-  in
   (* Decide turn_id at function entry so phase-gate and runtime-routing
      terminal paths can include it in the receipt and observability stream. *)
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
@@ -480,28 +465,11 @@ let run_keeper_cycle
   in
   let turn_start = Mtime_clock.now () in
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
-    let degraded_retry_info =
-      Option.map
-        (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-           let fallback_reason =
-             match
-               Keeper_error_classify.recoverable_runtime_failure_reason
-                 hint.failure
-             with
-             | Some reason -> reason
-             | None -> Keeper_error_classify.Deferred_runtime_lane
-           in
-           { Keeper_error_classify.next_runtime = hint.next_runtime_id
-           ; fallback_reason
-           })
-        deferred_runtime_lane
-    in
     { cycle_completed = false
     ; manifest_seq = 0
     ; current_turn_blocker_info = None
     ; last_execution = None
-    ; degraded_retry_info
-    ; deferred_runtime_lane = None
+    ; degraded_retry_info = None
     ; runtime_rotation_attempts = []
     ; failure_reason = None
     ; retry_phase_started_at = None
@@ -546,11 +514,7 @@ let run_keeper_cycle
     : (turn_success, Agent_core.Error.t) result
       * Keeper_unified_turn_execution.turn_state
     =
-      let effective_runtime_id =
-        match deferred_runtime_lane with
-        | Some hint -> hint.Keeper_turn_driver.next_runtime_id
-        | None -> Keeper_meta_contract.runtime_id_of_meta meta
-      in
+      let effective_runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
       let source =
         match Runtime.runtime_id_for_keeper meta.name with
         | Some id when String.trim id <> "" -> "assigned"
@@ -599,12 +563,6 @@ let run_keeper_cycle
          (match profile_and_execution
           with
           | Error err ->
-            Option.iter
-              (fun _ ->
-                 Option.iter
-                   (fun consume -> consume ())
-                   on_deferred_runtime_consumed)
-              deferred_runtime_lane;
             let terminal_reason_code =
               Printf.sprintf
                 "pre_dispatch_%s"
@@ -896,8 +854,6 @@ let run_keeper_cycle
                            ; shared_context
                            ; trajectory_acc
                            ; turn_id = keeper_turn_id
-                           ; deferred_runtime_lane
-                           ; on_deferred_runtime_consumed
                            }
                            ~autonomous_yield_requested:
                              (autonomous_yield_request_for_wake
@@ -1055,34 +1011,14 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
-                  (* masc#28762: [final_execution.runtime_id] names the
-                     deferred-lane assignment this cycle was budgeted under,
-                     not necessarily the concrete candidate
-                     [attempt_runtime_candidates] actually dispatched —
-                     [Runtime_lane_preference] sticky ordering can route a
-                     lane keyed by one runtime id to a different candidate
-                     first (observed 2026-08-15T11:49Z: the lane-entry
-                     runtime was consistently logged while a
-                     sticky-reordered sibling candidate actually dispatched,
-                     so this log named the untried lane key instead of the
-                     runtime that actually errored).
-                     [keeper_cycle_failed_runtime_attribution] reports the
-                     dispatched candidate's own id when a same-turn
-                     deferral hint is available. *)
-                  let runtime_attribution =
-                    keeper_cycle_failed_runtime_attribution
-                      ~deferred_runtime_lane:turn_state.deferred_runtime_lane
-                      ~execution_runtime_id:final_execution.runtime_id
-                  in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
-                    "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
+                    "%s: keeper cycle FAILED runtime=%s \
                      max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \
                      latency=%dms%s error=%s"
                     meta.name
-                    runtime_attribution.reported_runtime_id
-                    runtime_attribution.deferred_next_runtime_id
+                    final_execution.runtime_id
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget
@@ -1303,12 +1239,11 @@ let run_keeper_cycle
       ~turn_state
       ~registry_base_path
   in
-  let failure_of_error ?deferred_runtime_lane error =
+  let failure_of_error error =
     turn_failure_of_error
       ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
       ~fallback_boundary:Keeper_runtime_failure_route.Masc_execution
       ~exact_failure_execution:!exact_failure_execution
-      ~deferred_runtime_lane
       error
   in
   match phase_gate_outcome with
@@ -1322,9 +1257,5 @@ let run_keeper_cycle
     let result, turn_state = main_path turn_state in
     (match result with
      | Ok success -> Ok success
-     | Error error ->
-       Error
-         (failure_of_error
-            ?deferred_runtime_lane:turn_state.deferred_runtime_lane
-            error))
+     | Error error -> Error (failure_of_error error))
 ;;

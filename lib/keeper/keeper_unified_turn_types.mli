@@ -14,7 +14,6 @@ type turn_state =
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   ; degraded_retry_info : Keeper_error_classify.degraded_retry option
-  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; retry_phase_started_at : float option
@@ -24,35 +23,6 @@ val require_last_execution_for_finalize :
   keeper_name:string ->
   turn_state ->
   (Keeper_turn_runtime_budget.runtime_execution, Agent_core.Error.t) result
-
-(** Which runtime a "keeper cycle FAILED" report should name, and what the
-    (possibly different) next-attempt hint is. See
-    [keeper_cycle_failed_runtime_attribution] (masc#28762). *)
-type keeper_cycle_failed_runtime_attribution =
-  { reported_runtime_id : string
-    (** The runtime that actually dispatched and failed this cycle. *)
-  ; deferred_next_runtime_id : string
-    (** The runtime a same-turn deferral queued for the *next* cycle, or
-        ["none"] when no deferral occurred. Distinct fact from
-        [reported_runtime_id]; never conflate the two into one field. *)
-  }
-
-(** [keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane
-    ~execution_runtime_id] resolves the runtime a failure report should
-    name. [execution_runtime_id] (typically [execution.runtime_id]) names
-    the deferred-lane assignment this cycle was budgeted under, not
-    necessarily the concrete candidate [attempt_runtime_candidates] actually
-    dispatched: [Runtime_lane_preference] sticky ordering can route a lane
-    keyed by one runtime id to a different candidate first. When
-    [deferred_runtime_lane] is [Some hint] (a same-turn deferral was
-    recorded), [hint.failed_runtime_id] is the dispatched candidate's own id
-    and is reported as [reported_runtime_id]; otherwise
-    [execution_runtime_id] is used as-is (no rotation occurred, so it is
-    already the dispatched candidate). *)
-val keeper_cycle_failed_runtime_attribution :
-  deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
-  execution_runtime_id:string ->
-  keeper_cycle_failed_runtime_attribution
 
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t

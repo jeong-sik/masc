@@ -616,16 +616,18 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
   let key = { task_id = task.id; verification_id } in
   if claim_review runtime key
   then (
-    let outcome =
+    (* The outcome is already durable where it belongs: the run registry, and
+       for a review that committed no verdict the Board post as well. Nothing
+       here re-arms a timer — that outcome is a fact for the producer Keeper
+       to act on, and its resubmission is what rescans the backlog. The
+       annotated binding keeps that discard deliberate: a future outcome the
+       caller must handle changes this line's type. *)
+    let (_ : process_outcome) =
       Fun.protect
         ~finally:(fun () -> release_review runtime key)
         (fun () -> process_task_once runtime task ~assignee ~verification_id)
     in
-    (* The outcome is recorded in the run registry and, when no verdict was
-       committed, posted to the Board. Nothing here re-arms a timer: a review
-       that produced no verdict is a fact for the producer Keeper to act on,
-       and its resubmission is what rescans the backlog. *)
-    ignore (outcome : process_outcome))
+    ())
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"

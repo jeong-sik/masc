@@ -112,10 +112,14 @@ let create ~config ~producer =
    review prompt out of the context window. *)
 let root_layout_depth_2_entry_cap = 64
 
+(* [None] is "this path did not answer as a directory" — absent, a regular
+   file, or unreadable. The listing is prompt context, so none of those is
+   worth failing a review over. Cancellation is not one of them and travels
+   on. *)
 let children path =
-  match Fs_compat.read_dir path with
-  | entries -> Some entries
-  | exception _ -> None
+  try Some (Fs_compat.read_dir path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> None
 ;;
 
 let root_layout t =

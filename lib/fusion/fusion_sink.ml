@@ -419,26 +419,14 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
-  let persisted_board_started_at () =
-    match Board.find_post_by_run_id (Board.global ()) ~run_id with
-    | Some { meta_json = Some (`Assoc fields); _ } ->
-      (match List.assoc_opt "started_at" fields with
-       | Some (`Float value) -> Some value
-       | Some (`Int value) -> Some (Float.of_int value)
-       | Some _ | None -> None)
-    | Some _ | None -> None
-  in
+  (* The projector registers the run as running before the orchestrator
+     reaches this point, and running entries are never trimmed, so the
+     registry is the single source of the start coordinate. *)
   let* started_at =
     match Fusion_run_registry.get registry ~run_id with
     | Some run -> Ok run.started_at
     | None ->
-      (match persisted_board_started_at () with
-       | Some started_at -> Ok started_at
-       | None ->
-         Error
-           (Printf.sprintf
-              "Fusion run %s has no durable start time in the registry or existing board evidence"
-              run_id))
+      Error (Printf.sprintf "Fusion run %s is not registered" run_id)
   in
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만

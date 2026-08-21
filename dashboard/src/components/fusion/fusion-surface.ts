@@ -134,7 +134,7 @@ interface FusionRunView {
   usage: FusionUsage
   preset: string | null
   params: FusionRunParams
-  startedAt: number | null
+  startedAt: number
   createdAt: string
   updatedAt: string
 }
@@ -354,11 +354,11 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   const judges = normalizeFusionJudgeNodes(meta.judges)
   const usage = normalizeUsage(meta, panel)
   const params = normalizeParams(meta)
+  // A fusion run is identified on the list by its start coordinate; board
+  // evidence without a finite non-negative `started_at` is not a run row.
   const rawStartedAt = firstNumber(meta, ['started_at'])
-  const startedAt =
-    rawStartedAt !== null && Number.isFinite(rawStartedAt) && rawStartedAt >= 0
-      ? rawStartedAt
-      : null
+  if (rawStartedAt === null || !Number.isFinite(rawStartedAt) || rawStartedAt < 0) return null
+  const startedAt = rawStartedAt
   const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
   const status = statusFor(judge, panel)
   const tone = toneFor(status, judge.decision)
@@ -414,12 +414,9 @@ const FUSION_LIST_PAGE_SIZE = 30
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Ordering uses
 // one visible policy — newest first — on a SINGLE axis for every row: the run's
-// START time. New board evidence persists started_at, so completed rows do not
-// depend on the bounded registry. Legacy board evidence has no honest start
-// coordinate: keep it after every known-start row instead of disguising board
-// creation/completion as a start time. Sorting board rows by createdAt and
-// registry rows by startedAt was the mixed axis this list must not reintroduce
-// (38-bug campaign #34 follow-up).
+// START time, which both board evidence (`started_at`) and the registry persist.
+// Sorting board rows by createdAt and registry rows by startedAt was the mixed
+// axis this list must not reintroduce (38-bug campaign #34 follow-up).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
@@ -429,7 +426,7 @@ function buildMergedRuns(
     ...boardRuns.map((view): MergedRun => ({
       kind: 'board',
       runId: view.runId,
-      sortTime: view.startedAt === null ? Number.NEGATIVE_INFINITY : view.startedAt * 1000,
+      sortTime: view.startedAt * 1000,
       view,
     })),
     ...registryRuns
@@ -928,8 +925,6 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
 }
 
 // Row timestamp renders the same durable start coordinate used for sorting.
-// Legacy rows explicitly admit that the start is unknown; showing createdAt
-// would relabel completion/Board creation as a start timestamp.
 function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
   const dec = decisionSpecFor(run.judge.decision)
   return html`
@@ -942,11 +937,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       <span class="fus-row-h">
         <${FusionStatusGlyph} status=${run.status} />
         <span class="fus-run-id mono">${run.runId}</span>
-        <span class="fus-row-ts">
-          ${run.startedAt === null
-            ? html`<span title="Legacy board evidence has no persisted run start">시작 미상</span>`
-            : html`<${TimeAgo} timestamp=${run.startedAt} />`}
-        </span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.startedAt} /></span>
       </span>
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
       <span class="fus-row-f">

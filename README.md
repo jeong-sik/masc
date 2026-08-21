@@ -29,6 +29,11 @@ vocabulary, not an architecture claim.
 
 ---
 
+![MASC dashboard overview](docs/screenshots/dashboard/2026-08-21/01-overview.png)
+
+Live local dashboard capture from `0.23.0`; operational identifiers are
+redacted. See the [24-screen dashboard inventory](docs/screenshots/dashboard/2026-08-21/README.md).
+
 ## What you can do with MASC
 
 - **Run shared Goals and Tasks through MCP tools.** Keep task ownership, status transitions, and verification evidence in one local workspace.
@@ -319,29 +324,49 @@ masc/
 
 ## Dashboard
 
-The dashboard is a web panel that exposes surfaces through a hash-based router (`dashboard#<tab>?section=<section>`). The canonical definitions of surfaces and sections are in `dashboard/src/config/navigation.ts` (`DASHBOARD_SURFACES` and `DASHBOARD_SECTION_ITEMS`); items marked `hidden: true` (e.g., cockpit) are not exposed in the UI.
+The dashboard is a hash-routed web UI served at `/dashboard/`. Its navigation
+SSOT is `dashboard/src/config/navigation.ts`; entries marked `hidden: true` are
+not shown in the UI.
 
 Surfaces pinned to the main navigation rail (`V2_PRIMARY_SURFACE_IDS`):
 
 | Surface | Description |
 |---|---|
 | Overview | Quick signals and briefing summary |
-| Workspace | Work goals, plans, repositories, verification |
 | Keepers | Keeper roster, conversations, context workspace |
-| Board | Human / agent / automation / system posts |
+| Registry | Keeper instances, instructions, and runtime bindings |
+| Monitor | Keeper fleet, internal agents, tool health, runtime, and observatory |
+| Work | Goals, plans, repositories, and verification |
+| Gate | Nonblocking Keeper HITL queue and exact Always rules |
 | Schedule | Scheduled Keeper automations and wake signals |
-| Approvals | Keeper HITL approval queue (tool-call gate) |
+| Board | Human / agent / automation / system posts |
 | Fusion | masc_fusion panel and judge deliberation |
-| Code | Experimental CODE/IDE shell; not usable for real coding workflows yet |
-| Connectors | Channel sidecars and Keeper bindings |
-| Settings | Keeper settings operations console |
 | Logs | System execution logs |
+| IDE | Experimental collaboration shell; not usable for real coding workflows yet |
+| Connectors | Channel sidecars and Keeper bindings |
+| Settings | Operator configuration console |
 
-Additional surfaces reachable outside the rail: Monitor (keeper fleet, tool monitor, runtime, observatory), Command (intervention / Gate / approvals), Lab (tool diagnostics, safety harness, performance, Memory OS, keeper memory state).
+Visible second-level routes:
 
-Route examples: `dashboard#monitoring?section=agents`, `dashboard#monitoring?section=journey`, `dashboard#command?section=operations`, `dashboard#connectors?section=connector-status`, `dashboard#lab?section=memory-subsystems`, `dashboard#workspace?section=verification`.
+| Surface | Sections |
+|---|---|
+| Monitor | `agents`, `internal-agents`, `fleet-health`, `runtime`, `observatory` |
+| Work | `work`, `planning`, `repositories`, `verification` |
+| Connectors | `connector-status` |
+| IDE | `ide-shell` |
+| Lab | `tools`, `harness`, `performance`, `keeper-memory-health` |
 
-(Some diagnostic views such as `monitoring?section=journey` are provided by a route-only mapping in `dashboard/src/components/status.ts` rather than a rail surface — reachable by route but not by rail label.)
+`Lab` and `Command` are route-accessible surfaces but are not pinned to the
+primary rail. Hidden diagnostics remain implementation routes and are not part
+of the user-visible navigation contract.
+
+Route examples: `/dashboard/#monitoring?section=runtime`,
+`/dashboard/#workspace?section=verification`, and
+`/dashboard/#lab?section=keeper-memory-health`.
+
+The [dashboard screenshot inventory](docs/screenshots/dashboard/2026-08-21/README.md)
+contains the 13 primary screens plus visible Monitor, Work, and Lab sections
+captured from a live loopback runtime.
 
 ---
 

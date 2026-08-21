@@ -105,6 +105,42 @@ let create ~config ~producer =
   Ok { ownership_root; config; producer_scope; tools }
 ;;
 
+(* Two levels, because a checkout root sits one level below the sandbox root
+   ([repos/<name>/]) and that second level is the prefix an evaluator needs in
+   order to open anything the submitter described relative to a checkout. The
+   cap keeps a producer with many working trees from crowding the rest of the
+   review prompt out of the context window. *)
+let root_layout_depth_2_entry_cap = 64
+
+let children path =
+  match Fs_compat.read_dir path with
+  | entries -> Some entries
+  | exception _ -> None
+;;
+
+let root_layout t =
+  match children t.ownership_root with
+  | None -> []
+  | Some top ->
+    let rendered =
+      List.concat_map
+        (fun entry ->
+           let entry_path = Filename.concat t.ownership_root entry in
+           match children entry_path with
+           | None -> [ entry ]
+           | Some [] -> [ entry ^ "/  (empty)" ]
+           | Some nested ->
+             (entry ^ "/")
+             :: List.map (fun nested_entry -> entry ^ "/" ^ nested_entry) nested)
+        top
+    in
+    let shown = List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered in
+    let omitted = List.length rendered - List.length shown in
+    if omitted <= 0
+    then shown
+    else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
+;;
+
 (* ================================================================ *)
 (* Schemas                                                          *)
 (* ================================================================ *)
@@ -394,6 +430,28 @@ let create_forest ~config ~producers =
   in
   let* forest_tools = build forest_tool_kinds in
   Ok { bindings; forest_tools }
+;;
+
+(* A forest has one root per producer, so the listing has to say which
+   producer each path belongs to: the forest dispatcher requires an exact
+   producer argument, and a bare path would not tell the evaluator which one
+   to pass. The same cap applies to the joined listing. *)
+let forest_root_layout forest =
+  let rendered =
+    List.concat_map
+      (fun (producer, tools) ->
+         match root_layout tools with
+         | [] -> [ producer ^ ": root could not be listed" ]
+         | entries -> List.map (fun entry -> producer ^ ": " ^ entry) entries)
+      forest.bindings
+  in
+  let shown =
+    List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered
+  in
+  let omitted = List.length rendered - List.length shown in
+  if omitted <= 0
+  then shown
+  else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
 ;;
 
 let forest_schemas forest = List.map snd forest.forest_tools

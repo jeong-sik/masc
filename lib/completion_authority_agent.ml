@@ -518,6 +518,7 @@ let process_task_once
              { schemas = Verification_authority_tools.schemas lookup_tools
              ; dispatch = Verification_authority_tools.dispatch lookup_tools
              ; scope = Task.Anti_rationalization.Producer_tree
+             ; root_layout = Verification_authority_tools.root_layout lookup_tools
              }
          in
          let result =

@@ -33,6 +33,7 @@ type lookup_surface =
       { schemas : Types_core.tool_schema list
       ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
       ; scope : lookup_scope
+      ; root_layout : string list
       }
 
 type verdict =
@@ -84,7 +85,7 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
-  ; retryable : bool
+  ; evaluator_error_retryable : bool option
   }
 
 (* ================================================================ *)
@@ -149,6 +150,28 @@ let evidence_section ~required_evidence ~verify_gate_evidence =
    toolless evaluator to go look produces an approval justified by a check it
    never ran, and telling a tool-carrying one that the snapshot is all there is
    reproduces the gap this surface was added to close. *)
+(* The tools resolve every path against one root, and that root is a sandbox
+   root: it holds a producer's checkouts under [repos/] alongside [artifacts/]
+   and the rest, not a repository. An evaluator told only that it holds "the
+   producer's tools" reads that as a repository and opens [dune-project],
+   [.git], [lib/] and [README.md] — 77 consecutive failed reads and no verdict
+   on masc task-403 (vrf-8bac5f46, 2026-08-21). The listing is a fact
+   available at review time, so it is stated. *)
+let root_layout_section = function
+  | [] ->
+    "The root these tools resolve against could not be listed, so its shape is \
+     unknown to you here. Establish it with a lookup before concluding that a \
+     path is absent.\n\n"
+  | entries ->
+    sprintf
+      "Every path you give them resolves against that root, which is a sandbox \
+       root and not a repository. These paths exist under it right now:\n%s\n\
+       A path the submitter wrote relative to a checkout therefore needs that \
+       checkout's prefix here. \"file is missing\" answers the path you asked \
+       for, not the question of whether the work exists.\n\n"
+      (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
+;;
+
 let lookup_section = function
   | No_lookup_surface ->
     "\n\
@@ -156,13 +179,14 @@ let lookup_section = function
      snapshot inside `completion_notes`. You have no tool that opens anything \
      else, so a reference you cannot read there is a reference you cannot \
      verify.\n"
-  | Lookup_tools { schemas; dispatch = _; scope = Producer_tree } ->
+  | Lookup_tools { schemas; dispatch = _; scope = Producer_tree; root_layout } ->
     sprintf
       "\n\
        <live_lookup>\n\
-       You hold the producer's own tools, pointed at the producer's tree: %s. \
-       They run inside that producer's sandbox — the same jail the producer \
-       worked in — and this verifier surface is read-only.\n\n\
+       You hold the producer's own tools, pointed at the producer's sandbox \
+       root: %s. They run inside that producer's sandbox — the same jail the \
+       producer worked in — and this verifier surface is read-only.\n\n\
+       %s\
        The snapshot is what was true when the work was submitted. A lookup is what \
        is true now. Both are evidence, and disagreement between them is also \
        evidence: a file the snapshot shows and the tree no longer contains was \
@@ -179,10 +203,12 @@ let lookup_section = function
       (schemas
        |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
        |> String.concat ", ")
+      (root_layout_section root_layout)
   | Lookup_tools
       { schemas
       ; dispatch = _
       ; scope = Producer_forest { producers }
+      ; root_layout
       } ->
     sprintf
       "\n\
@@ -191,6 +217,7 @@ let lookup_section = function
        The closed producer set is: %s. Filesystem calls require one producer \
        from that set; selecting a producer does not grant access to any other \
        tree. The available tools are: %s.\n\n\
+       %s\
        Read the linked-task rollup first, then inspect the submitted artifact \
        in the tree of the Task performer that supplied it. A reference, a Task \
        completion state, or another verifier's verdict is not a substitute for \
@@ -204,6 +231,7 @@ let lookup_section = function
       (schemas
        |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
        |> String.concat ", ")
+      (root_layout_section root_layout)
 ;;
 
 let build_prompt ?(few_shot_block = "") ?completion_contract
@@ -382,7 +410,7 @@ let review
       ; generator_runtime
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
-      ; retryable = true
+      ; evaluator_error_retryable = None
       }
   | Ok [] ->
     (* [resolve_evaluator_slots] never yields an empty list; this arm keeps the
@@ -398,7 +426,7 @@ let review
       ; generator_runtime
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
-      ; retryable = true
+      ; evaluator_error_retryable = None
       }
   | Ok (first_slot :: rest_slots) ->
     (match
@@ -425,7 +453,7 @@ let review
          ; generator_runtime
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
-         ; retryable = true
+         ; evaluator_error_retryable = None
          }
      | Ok prompt ->
        (match generator_runtime with
@@ -479,7 +507,7 @@ let review
              ; generator_runtime
              ; gate = Structured_tool
              ; fallback_reason = None
-             ; retryable = true
+             ; evaluator_error_retryable = None
              }
          | Ok None ->
            let detail =
@@ -504,7 +532,7 @@ let review
                 ; generator_runtime
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
-                ; retryable = true
+                ; evaluator_error_retryable = None
                 })
          | Error error ->
            let detail = Agent_core.Error.to_string error in
@@ -533,7 +561,7 @@ let review
                 ; generator_runtime
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
-                ; retryable
+                ; evaluator_error_retryable = Some retryable
                 })
        in
        attempt first_slot rest_slots)

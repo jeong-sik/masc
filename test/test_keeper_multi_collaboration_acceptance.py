@@ -197,21 +197,33 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         expected = {"coordinator": "runtime-c", "reviewer": "runtime-r"}
         with tempfile.TemporaryDirectory() as tmp_name:
             base_path = Path(tmp_name)
+            cursors = acceptance.capture_runtime_manifest_line_cursors(
+                base_path=base_path, keepers_by_role=keepers
+            )
             self.write_runtime_receipts(
                 base_path,
                 "keeper-c",
-                [self.runtime_receipt("runtime-c", fallback=False)],
+                [
+                    self.runtime_receipt(
+                        "runtime-c", keeper_name="keeper-c", fallback=False
+                    )
+                ],
             )
             self.write_runtime_receipts(
                 base_path,
                 "keeper-r",
-                [self.runtime_receipt("runtime-fallback", fallback=True)],
+                [
+                    self.runtime_receipt(
+                        "runtime-fallback", keeper_name="keeper-r", fallback=True
+                    )
+                ],
             )
 
             failed = acceptance.collect_runtime_serving_evidence(
                 base_path=base_path,
                 keepers_by_role=keepers,
                 expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
             )
             self.assertEqual(failed["status"], "failed")
             self.assertEqual(failed["served_role_count"], 1)
@@ -223,18 +235,107 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 base_path,
                 "keeper-r",
                 [
-                    self.runtime_receipt("runtime-fallback", fallback=True),
-                    self.runtime_receipt("runtime-r", fallback=False),
+                    self.runtime_receipt(
+                        "runtime-fallback", keeper_name="keeper-r", fallback=True
+                    ),
+                    self.runtime_receipt(
+                        "runtime-r", keeper_name="keeper-r", fallback=False
+                    ),
                 ],
             )
             passed = acceptance.collect_runtime_serving_evidence(
                 base_path=base_path,
                 keepers_by_role=keepers,
                 expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
             )
             self.assertEqual(passed["status"], "passed")
             self.assertEqual(passed["served_role_count"], 2)
             self.assertEqual(passed["distinct_served_runtime_count"], 2)
+
+    def test_campaign_identity_slug_keeps_seconds_in_identity(self):
+        first = acceptance.campaign_identity_slug("rw-20260821-090001", 16)
+        second = acceptance.campaign_identity_slug("rw-20260821-090059", 16)
+
+        self.assertNotEqual(first, second)
+        self.assertLessEqual(len(first), 16)
+        self.assertLessEqual(len(second), 16)
+
+    def test_runtime_serving_evidence_rejects_stale_exact_receipt(self):
+        keepers = {"coordinator": "keeper-c"}
+        expected = {"coordinator": "runtime-c"}
+        with tempfile.TemporaryDirectory() as tmp_name:
+            base_path = Path(tmp_name)
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-c",
+                [
+                    self.runtime_receipt(
+                        "runtime-c", keeper_name="keeper-c", fallback=False
+                    )
+                ],
+            )
+            cursors = acceptance.capture_runtime_manifest_line_cursors(
+                base_path=base_path, keepers_by_role=keepers
+            )
+            self.append_runtime_receipts(
+                base_path,
+                "keeper-c",
+                [
+                    self.runtime_receipt(
+                        "runtime-fallback", keeper_name="keeper-c", fallback=True
+                    )
+                ],
+            )
+
+            failed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
+            )
+
+            self.assertEqual(failed["status"], "failed")
+            role = failed["roles"]["coordinator"]
+            self.assertEqual(role["baseline_manifest_line_count"], 1)
+            self.assertEqual(role["current_run_receipt_row_count"], 1)
+            self.assertEqual(role["exact_success_count"], 0)
+            self.assertEqual(role["fallback_receipt_count"], 1)
+
+    def test_runtime_serving_evidence_rejects_malformed_receipt_identity(self):
+        keepers = {"coordinator": "keeper-c"}
+        expected = {"coordinator": "runtime-c"}
+        with tempfile.TemporaryDirectory() as tmp_name:
+            base_path = Path(tmp_name)
+            cursors = acceptance.capture_runtime_manifest_line_cursors(
+                base_path=base_path, keepers_by_role=keepers
+            )
+            malformed = self.runtime_receipt(
+                "runtime-c", keeper_name="wrong-keeper", fallback=False
+            )
+            malformed["runtime_id"] = "different-top-level-runtime"
+            self.write_runtime_receipts(base_path, "keeper-c", [malformed])
+
+            failed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
+            )
+
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(
+                failed["roles"]["coordinator"]["exact_success_count"], 0
+            )
+            self.assertTrue(
+                any("keeper_name mismatch" in error for error in failed["parse_errors"])
+            )
+            self.assertTrue(
+                any(
+                    "top-level runtime_id does not match decision" in error
+                    for error in failed["parse_errors"]
+                )
+            )
 
     def test_rw23_task_is_not_exposed_to_autonomous_work_before_refutation(self):
         setup_source = inspect.getsource(acceptance.MissionRun.setup_product_state)
@@ -322,10 +423,11 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         }
 
     @staticmethod
-    def runtime_receipt(runtime_id, *, fallback):
+    def runtime_receipt(runtime_id, *, keeper_name, fallback):
         return {
             "schema_version": 1,
             "ts": "2026-08-21T09:00:00Z",
+            "keeper_name": keeper_name,
             "trace_id": f"trace-{runtime_id}",
             "keeper_turn_id": 1,
             "event": "receipt_appended",
@@ -350,6 +452,19 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             "".join(json.dumps(row) + "\n" for row in rows),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def append_runtime_receipts(base_path, keeper, rows):
+        manifest_path = (
+            base_path
+            / ".masc"
+            / "keepers"
+            / keeper
+            / "runtime-manifests"
+            / "trace.jsonl"
+        )
+        with manifest_path.open("a", encoding="utf-8") as handle:
+            handle.write("".join(json.dumps(row) + "\n" for row in rows))
 
 
 if __name__ == "__main__":

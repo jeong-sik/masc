@@ -106,6 +106,14 @@ describe('fsm-hub derived state', () => {
         degraded_retry_runtime: 'runtime.b',
         fallback_reason: 'deferred_runtime_lane',
       },
+      claim_attempt: {
+        present: false,
+        source: 'keeper_task_claim_tool_call',
+        status: 'not_observed',
+        result: null,
+        claimed_task_id: null,
+        claimed_goal_id: null,
+      },
     } as KeeperCompositeSnapshot['execution']
 
     expect(executionReceiptLabel(execution)).toContain('retry queued -> runtime.b')

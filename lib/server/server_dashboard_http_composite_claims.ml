@@ -49,17 +49,12 @@ let claim_status_of_output output =
   | None -> "observed"
 ;;
 
-let composite_claim_scope_absent =
+let composite_claim_attempt_absent =
   `Assoc
     [ "present", `Bool false
     ; "source", `String "keeper_task_claim_tool_call"
     ; "status", `String "not_observed"
     ; "result", `Null
-    ; "mode", `Null
-    ; "scoped", `Null
-    ; "active_goal_ids", `List []
-    ; "effective_goal_ids", `List []
-    ; "excluded_count", `Null
     ; "claimed_task_id", `Null
     ; "claimed_goal_id", `Null
     ]
@@ -79,7 +74,7 @@ let claim_window_rows =
 (* One fleet-wide tail of tool-call rows, read once and shared by every keeper
    in the same composite envelope.
 
-   [composite_claim_scope_json] used to read its own window per keeper. Every
+   [composite_claim_attempt_json] used to read its own window per keeper. Every
    such read pulls [claim_window_rows] rows from the single shared tool-call
    store, so the fleet envelope — which calls this once per keeper — read and
    parsed the same rows once per keeper: identical bytes, identical parse
@@ -137,19 +132,14 @@ let latest_task_claim_row (Claim_window rows) ~keeper_name =
        None
 ;;
 
-let composite_claim_scope_json ~claim_window ~keeper_name =
+let composite_claim_attempt_json ~claim_window ~keeper_name =
   match latest_task_claim_row claim_window ~keeper_name with
-  | None -> composite_claim_scope_absent
+  | None -> composite_claim_attempt_absent
   | Some call ->
     let output =
       match parse_tool_call_output call with
       | Some (`Assoc _ as output) -> output
       | _ -> `Assoc []
-    in
-    let claim_scope =
-      match json_assoc "claim_scope" output with
-      | Some value -> value
-      | None -> `Assoc []
     in
     let claimed_task = json_assoc "claimed_task" output in
     `Assoc
@@ -157,19 +147,6 @@ let composite_claim_scope_json ~claim_window ~keeper_name =
       ; "source", `String "keeper_task_claim_tool_call"
       ; "status", `String (claim_status_of_output output)
       ; "result", Json_util.string_opt_to_json (json_string "result" output)
-      ; "mode", Json_util.string_opt_to_json (json_string "mode" claim_scope)
-      ; ( "scoped",
-          match json_bool "scoped" claim_scope with
-          | Some value -> `Bool value
-          | None -> `Null )
-      ; ( "active_goal_ids",
-          Json_util.json_string_list
-            (Json_util.get_string_list claim_scope "active_goal_ids") )
-      ; ( "effective_goal_ids",
-          Json_util.json_string_list
-            (Json_util.get_string_list claim_scope "effective_goal_ids") )
-      ; ( "excluded_count",
-          Json_util.int_opt_to_json (json_int "excluded_count" claim_scope) )
       ; ( "claimed_task_id",
           match claimed_task with
           | Some task -> Json_util.string_opt_to_json (json_string "task_id" task)
@@ -237,7 +214,7 @@ let composite_config_drift_json ~config ~keeper_name =
 ;;
 
 let composite_execution_receipt_json ~(config : Workspace.config) ~claim_window ~keeper_name =
-  let claim_scope = composite_claim_scope_json ~claim_window ~keeper_name in
+  let claim_attempt = composite_claim_attempt_json ~claim_window ~keeper_name in
   let config_drift = composite_config_drift_json ~config ~keeper_name in
   match Keeper_execution_receipt.latest_json config keeper_name with
   | None ->
@@ -254,7 +231,7 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~claim_window 
       ; "duration_ms", `Null
       ; "error", `Null
       ; "runtime", `Null
-      ; "claim_scope", claim_scope
+      ; "claim_attempt", claim_attempt
       ; "config_drift", config_drift
       ]
   | Some receipt ->
@@ -278,7 +255,7 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~claim_window 
         , Json_util.float_opt_to_json (json_float "duration_ms" action_radius) )
       ; "error", compact_receipt_error_json receipt
       ; "runtime", compact_receipt_runtime_json receipt
-      ; "claim_scope", claim_scope
+      ; "claim_attempt", claim_attempt
       ; "config_drift", config_drift
       ]
 ;;
@@ -345,9 +322,9 @@ let composite_execution_config_blocked execution =
 ;;
 
 let composite_execution_claim_no_eligible execution =
-  match json_member "claim_scope" execution with
-  | `Assoc _ as claim_scope ->
-    string_opt_is_any (json_string "status" claim_scope) [ "no_eligible" ]
+  match json_member "claim_attempt" execution with
+  | `Assoc _ as claim_attempt ->
+    string_opt_is_any (json_string "status" claim_attempt) [ "no_eligible" ]
   | _ -> false
 ;;
 
@@ -460,7 +437,7 @@ let composite_runtime_attention ~snapshot ~execution =
     if not execution_current
     then None
     else if composite_execution_claim_no_eligible execution
-    then Some "claim_scope_no_eligible"
+    then Some "claim_no_eligible"
     else if not blocked
     then None
     else

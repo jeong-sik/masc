@@ -443,21 +443,6 @@ describe('RuntimeLensSection', () => {
           source_clock: {
             counts: {},
           },
-          claim_scope: {
-            present: false,
-            source: 'tool_call_log',
-            status: 'not_observed',
-            result: null,
-            mode: null,
-            scoped: null,
-            active_goal_ids: [],
-            effective_goal_ids: [],
-            fallback_reason: null,
-            matched_goal_id: null,
-            excluded_count: null,
-            claimed_task_id: null,
-            claimed_goal_id: null,
-          },
           config_drift: {
             present: false,
             status: 'ok',
@@ -640,6 +625,14 @@ describe('RuntimeLensSection', () => {
         duration_ms: 16000,
         error: null,
         runtime: null,
+        claim_attempt: {
+          present: false,
+          source: 'keeper_task_claim_tool_call',
+          status: 'not_observed',
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
+        },
       },
       runtime_attention: {
         state: 'blocked',

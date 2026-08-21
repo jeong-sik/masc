@@ -156,7 +156,7 @@ let comment_of_signal (signal : Board_dispatch.board_signal) : Board.comment =
 
 let candidate post_id : Candidate.candidate =
   let signal = signal post_id in
-  let keeper_name = "sangsu" in
+  let keeper_name = "alpha" in
   let candidate_id = Candidate.candidate_id_of_signal ~keeper_name signal in
   { candidate_id
   ; keeper_name
@@ -170,7 +170,7 @@ let candidate post_id : Candidate.candidate =
         ; ( "keeper_context"
           , `Assoc
               [ "lane_keeper_name", `String keeper_name
-              ; "agent_name", `String "sangsu-agent"
+              ; "agent_name", `String "alpha-agent"
               ; "keeper_record_id", `Null
               ; "keeper_runtime_uid", `Null
               ; "instructions", `String "continue"

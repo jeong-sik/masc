@@ -277,7 +277,7 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
-      write_keeper_toml ~keepers_dir ~name:"sangsu";
+      write_keeper_toml ~keepers_dir ~name:"alpha";
       with_runtime_default_for_tests dir @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -298,15 +298,15 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
         ignore (Lib.Workspace.init config ~agent_name:None);
         ignore
           (Lib.Workspace.bind_session config
-             ~agent_name:"keeper-sangsu-agent"
+             ~agent_name:"keeper-alpha-agent"
              ~agent_type_override:(Some "keeper")
              ~capabilities:["keeper"]
              ());
         Fun.protect
           ~finally:(fun () ->
-            Lib.Keeper_keepalive.stop_keepalive "sangsu")
+            Lib.Keeper_keepalive.stop_keepalive "alpha")
           (fun () ->
-            create_keeper env sw state "sangsu";
+            create_keeper env sw state "alpha";
             warm_execution_cache ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -332,7 +332,7 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
-      write_keeper_toml ~keepers_dir ~name:"sangsu";
+      write_keeper_toml ~keepers_dir ~name:"alpha";
       with_runtime_default_for_tests dir @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -359,15 +359,15 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
              ());
         ignore
           (Lib.Workspace.bind_session config
-             ~agent_name:"keeper-sangsu-agent"
+             ~agent_name:"keeper-alpha-agent"
              ~agent_type_override:(Some "keeper")
              ~capabilities:["keeper"]
              ());
         Fun.protect
           ~finally:(fun () ->
-            Lib.Keeper_keepalive.stop_keepalive "sangsu")
+            Lib.Keeper_keepalive.stop_keepalive "alpha")
           (fun () ->
-            create_keeper env sw state "sangsu";
+            create_keeper env sw state "alpha";
             warm_execution_cache ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json

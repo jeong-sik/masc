@@ -115,7 +115,7 @@ let make_doc_artifact id : A.doc A.t =
     kind = A.Doc;
     payload = P.Blob_ref (Aid.to_string id ^ "-blob");
     metadata = `Null;
-    provenance = Pr.provenance_empty ~created_by:"executor" ~created_at:1.0;
+    provenance = Pr.provenance_empty ~created_by:"omega" ~created_at:1.0;
   }
 [@@warning "-37"]
 

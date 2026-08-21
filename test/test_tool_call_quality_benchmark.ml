@@ -123,18 +123,18 @@ let test_summary_rollups_and_stability () =
   check int "scored runs" 6 summary.scored_runs;
   check int "unsupported runs" 1 summary.unsupported_runs;
   check int "runtime unreachable runs" 0 summary.runtime_unreachable_runs;
-  let analyst_row =
+  let delta_row =
     find_row
       ~provider:(Some "openai")
       ~model:(Some "gpt-5.4")
-      ~keeper:(Some "bench-analyst")
+      ~keeper:(Some "bench-delta")
       summary.grouped_by_provider_model_keeper
   in
-  check int "analyst unique cases" 2 analyst_row.cases_total;
-  check int "analyst passed cases" 2 analyst_row.cases_passed;
-  check (option (float 0.0001)) "analyst stability score" (Some 1.0)
-    analyst_row.stability_score;
-  check int "analyst repeated groups" 1 analyst_row.repeated_case_groups;
+  check int "delta unique cases" 2 delta_row.cases_total;
+  check int "delta passed cases" 2 delta_row.cases_passed;
+  check (option (float 0.0001)) "delta stability score" (Some 1.0)
+    delta_row.stability_score;
+  check int "delta repeated groups" 1 delta_row.repeated_case_groups;
   let executor_row =
     find_row
       ~provider:(Some "openai")
@@ -180,8 +180,8 @@ let test_csv_render_has_headers () =
   in
   check bool "csv header includes stability column" true
     (String_util.contains_substring csv "stability_score");
-  check bool "csv contains analyst keeper row" true
-    (String_util.contains_substring csv "bench-analyst")
+  check bool "csv contains delta keeper row" true
+    (String_util.contains_substring csv "bench-delta")
 
 let test_forbidden_selector_matches_descriptor_evidence () =
   let route_evidence =

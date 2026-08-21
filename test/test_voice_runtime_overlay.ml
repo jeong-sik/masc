@@ -1029,7 +1029,7 @@ let test_playback_open_fallback_reports_handoff () =
     match
       Voice_bridge_core.run_local_playback
         ~sw
-        ~agent_id:"sangsu"
+        ~agent_id:"alpha"
         ~message:"open fallback regression"
         ~audio_file
         ()

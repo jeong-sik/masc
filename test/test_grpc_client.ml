@@ -54,7 +54,7 @@ let test_tool_call_error_response_roundtrip () =
 
 let test_heartbeat_ping_roundtrip () =
   let ping = T.HeartbeatPing.{
-    agent_name = "keeper-sangsu";
+    agent_name = "keeper-alpha";
     session_id = "sess-42";
     timestamp_ms = 1700000000000L;
     current_task_id = "T-99";

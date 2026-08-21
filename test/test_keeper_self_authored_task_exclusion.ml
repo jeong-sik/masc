@@ -62,7 +62,7 @@ let test_other_keeper_task_is_not_self_authored () =
     false
     (WOI.task_is_self_authored_todo
        ~meta
-       (task ~created_by:"executor" "task-2"))
+       (task ~created_by:"omega" "task-2"))
 ;;
 
 (* An unattributed task has no known author, so it must stay claimable rather
@@ -92,7 +92,7 @@ let test_self_authored_verification_remains_eligible () =
   let meta = make_meta "taskmaster" in
   let task_status =
     Masc_domain.AwaitingVerification
-      { assignee = "executor"
+      { assignee = "omega"
       ; started_at = "2026-07-20T00:00:00Z"
       ; submitted_at = "2026-07-20T01:00:00Z"
       ; verification_id = "verification-1"

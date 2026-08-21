@@ -17,7 +17,7 @@ let author_raw_agent_name_meta_key = raw_agent_name_meta_key ~field:"author"
    [Time_compat.now ()] inside functions whose signatures promised a pure
    [float -> string]: the clock was a hidden second input. A re-listed post
    therefore drifted "7m ago" -> "8m ago" while nothing about the post changed.
-   Measured on one rondo turn: 42 [masc_board_list] calls returning the same
+   Measured on one live Keeper turn: 42 [masc_board_list] calls returning the same
    878B of board state split across three distinct byte sequences, purely
    because the minute counter advanced.
 
@@ -447,7 +447,7 @@ let provenance_arg args =
     Convert a stray [Yojson.Safe.Util.Type_error] from a board-tool
     handler into a structured [Tool_result.error] so the MCP transport
     sees a typed message rather than an opaque exception payload (cf.
-    task-213 board post p-1efba4b2311478dff37fff9fdbfea483, sangsu
+    task-213 board post p-1efba4b2311478dff37fff9fdbfea483, example-keeper
     broadcast 2026-05-15T10:51:20Z). Diagnostic, not a workaround: the
     offending value field points the next triager at the failing
     field. *)

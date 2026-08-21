@@ -536,7 +536,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        conversation is not held here and cannot be measured from this process.
        What this process does send every turn - the prompt, the system prompt
        and the tool declarations - is measurable, and a live refusal says that
-       part alone is the problem: analyst was told the request is ~2,226,104
+       part alone is the problem: a live Keeper was told the request is ~2,226,104
        tokens against a 1,000,000 limit while "this conversation is only
        ~1,094,432 tokens - the rest is system prompt, tool definitions, and
        attachment content" (#27427). Recording the half this process controls

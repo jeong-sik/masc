@@ -74,7 +74,7 @@ let test_read_state_drops_legacy_active_agent_objects () =
                 [
                   `Assoc [ ("name", `String "codex-swift-fox") ];
                   `String "gemini-brave-bear";
-                  `Assoc [ ("agent_name", `String "keeper-sangsu-agent") ];
+                  `Assoc [ ("agent_name", `String "keeper-alpha-agent") ];
                   `Assoc [ ("id", `String "ignored") ];
                 ] );
           ]
@@ -132,7 +132,7 @@ let test_agent_of_yojson_accepts_numeric_last_seen () =
   let json =
     `Assoc
       [
-        ("name", `String "keeper-sangsu-agent");
+        ("name", `String "keeper-alpha-agent");
         ("agent_type", `String "keeper");
         ("status", `String "active");
         ("capabilities", `List []);
@@ -143,7 +143,7 @@ let test_agent_of_yojson_accepts_numeric_last_seen () =
   in
   match Masc_domain.agent_of_yojson json with
   | Ok agent ->
-      check string "agent parsed" "keeper-sangsu-agent" agent.name;
+      check string "agent parsed" "keeper-alpha-agent" agent.name;
       check bool "last_seen normalized to ISO" true
         (String.length agent.last_seen > 0 && String.contains agent.last_seen 'T')
   | Error msg -> fail ("expected numeric last_seen compatibility: " ^ msg)
@@ -285,7 +285,7 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
       let legacy_agent_json =
         `Assoc
           [
-            ("name", `String "keeper-sangsu-agent");
+            ("name", `String "keeper-alpha-agent");
             ("agent_type", `String "keeper");
             ("status", `String "active");
             ("capabilities", `List [ `String "heartbeat" ]);
@@ -294,13 +294,13 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
             ("last_seen", `Int 1711411200);
           ]
       in
-      write_text_file (agent_path config "keeper-sangsu-agent")
+      write_text_file (agent_path config "keeper-alpha-agent")
         (Yojson.Safe.to_string legacy_agent_json);
 
-      ignore (Workspace.heartbeat config ~agent_name:"keeper-sangsu-agent");
+      ignore (Workspace.heartbeat config ~agent_name:"keeper-alpha-agent");
 
       let repaired_json =
-        match Safe_ops.read_file_safe (agent_path config "keeper-sangsu-agent") with
+        match Safe_ops.read_file_safe (agent_path config "keeper-alpha-agent") with
         | Error error -> fail error
         | Ok raw ->
             raw

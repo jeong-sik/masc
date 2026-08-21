@@ -232,8 +232,8 @@ let metric_tool_keeper_cache_ttl_parse_failures =
    view of allowed sandbox roots (for example [(roots=[<list>])]
    and [(sandbox roots: [<list>])]) to the LLM.  Combined with
    the keeper identity drift documented in the issue (turn 433:
-   contract emitted [masc-improver/Docker] while the resolver
-   enumerated [analyst]'s sandbox), the error became a
+   contract emitted a stale Keeper/sandbox pair while the resolver
+   enumerated another Keeper's sandbox), the error became a
    side-channel oracle for sibling sandboxes.
 
    The leak lives strictly in the user-visible string; the

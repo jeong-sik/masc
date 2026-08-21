@@ -333,7 +333,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; output =
         `Assoc [ "secret_output", `String "must not be duplicated" ]
     ; criteria = [ "secret criterion should stay in the audit store" ]
-    ; worker = "keeper-executor-agent"
+    ; worker = "keeper-omega-agent"
     ; created_at = 1234.5
     }
   in
@@ -468,7 +468,7 @@ let test_unreadable_evidence_uses_structured_current_contract () =
   let request : VS.request_header =
     { id = "vrf-structured-reason"
     ; task_id = "task-structured-reason"
-    ; worker = "keeper-executor-agent"
+    ; worker = "keeper-omega-agent"
     ; created_at = 1.0
     }
   in
@@ -527,7 +527,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
          ~task_id:"task-001"
          ~output
          ~criteria:[]
-         ~worker:"keeper-executor-agent"
+         ~worker:"keeper-omega-agent"
          ()
      with
      | Ok _ -> ()
@@ -537,7 +537,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-executor-agent"
+        ~task_worker:"keeper-omega-agent"
         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
     with
     | VS.Evidence_unavailable { reason = VS.Evidence_snapshot_invalid detail; _ } ->
@@ -631,8 +631,8 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
 let test_system_llm_rejection_prefers_registered_producer_binding () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let keeper_name = "keeper-executor-agent" in
-    let producer = "keeper-executor-agent-agent" in
+    let keeper_name = "keeper-omega-agent" in
+    let producer = "keeper-omega-agent-agent" in
     let meta_json =
       `Assoc
         [ "name", `String keeper_name
@@ -710,7 +710,7 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
 let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let producer = "keeper-executor-agent-agent" in
+    let producer = "keeper-omega-agent-agent" in
     Masc.Keeper_registry.For_testing.clear ();
     Fun.protect
       ~finally:Masc.Keeper_registry.For_testing.clear
@@ -1616,7 +1616,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
   let profile_path =
     Keeper_sandbox_config.keeper_toml_path
       ~base_path
-      ~agent_name:"keeper-executor-agent"
+      ~agent_name:"keeper-omega-agent"
   in
   Fs_compat.mkdir_p (Filename.dirname profile_path);
   Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
@@ -1626,15 +1626,15 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
         ~base_path
         ~abs_path:artifact_path
     with
-    | Some { keeper_name = "executor"; relative_path } ->
-      [ "artifact:" ^ relative_path; "note:executor summary" ]
+    | Some { keeper_name = "omega"; relative_path } ->
+      [ "artifact:" ^ relative_path; "note:producer summary" ]
     | Some _ | None ->
-      [ "artifact:../outside-worker-playground"; "note:executor summary" ]
+      [ "artifact:../outside-worker-playground"; "note:producer summary" ]
   in
   let evidence_snapshot =
     VS.snapshot_submitted_evidence_json
       ~base_path
-      ~worker:"keeper-executor-agent"
+      ~worker:"keeper-omega-agent"
       submitted_evidence
   in
   match
@@ -1646,7 +1646,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
         (`Assoc
             [ "submitted_evidence", evidence_snapshot ])
       ~criteria:[ "inspect artifact" ]
-      ~worker:"keeper-executor-agent"
+      ~worker:"keeper-omega-agent"
       ()
   with
   | Ok request -> request
@@ -1682,7 +1682,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
      VP.create_submit_request
        ~config
        ~task
-       ~assignee:"keeper-executor-agent"
+       ~assignee:"keeper-omega-agent"
        ~verification_id:request_id
        ~evidence_refs
    with
@@ -1691,7 +1691,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
   task
 
 let inspect_evidence ?(task_id = "task-001")
-    ?(task_worker = "keeper-executor-agent") ~base_path ~request_id
+    ?(task_worker = "keeper-omega-agent") ~base_path ~request_id
     () =
   VS.inspect_submitted_evidence_for_authority
     ~base_path
@@ -1705,7 +1705,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
@@ -1721,7 +1721,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
      | VS.Evidence_available
          { items =
              VS.Evidence_artifact { content; truncated = false; _ }
-             :: VS.Evidence_note "executor summary"
+             :: VS.Evidence_note "producer summary"
              :: []
          ; _
          } ->
@@ -1735,7 +1735,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-executor-agent"
+        ~task_worker:"keeper-omega-agent"
         ~authority:(Masc_domain.Human_operator { operator_id = "" })
     with
     | VS.Evidence_unavailable _ -> ()
@@ -1745,13 +1745,13 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-executor-agent")
+           ~agent_name:"keeper-omega-agent")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1764,7 +1764,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
         ~base_path
         ~request_id
         ~evidence_refs:
-          [ "artifact:artifacts/proof.txt"; "note:executor summary" ]
+          [ "artifact:artifacts/proof.txt"; "note:producer summary" ]
     in
     match
       inspect_evidence
@@ -1777,7 +1777,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
         { items =
             VS.Evidence_artifact
               { reference = "artifact:artifacts/proof.txt"; content; _ }
-            :: VS.Evidence_note "executor summary"
+            :: VS.Evidence_note "producer summary"
             :: []
         ; _
         } ->
@@ -1814,13 +1814,13 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-executor-agent")
+           ~agent_name:"keeper-omega-agent")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1886,12 +1886,12 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     let artifact_dir = Filename.concat producer_root "artifacts" in
     Fs_compat.mkdir_p artifact_dir;
@@ -1938,12 +1938,12 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     Fs_compat.mkdir_p producer_root;
     let absolute_path = Filename.concat producer_root "absolute.txt" in
@@ -1952,7 +1952,7 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
     let snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-executor-agent"
+        ~worker:"keeper-omega-agent"
         [ "artifacts/bare.txt"; absolute_path ]
     in
     let persisted_snapshot = Yojson.Safe.to_string snapshot in
@@ -1969,7 +1969,7 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
            ~task_id:"task-001"
            ~output:(`Assoc [ "submitted_evidence", snapshot ])
            ~criteria:[ "inspect explicit refs" ]
-           ~worker:"keeper-executor-agent"
+           ~worker:"keeper-omega-agent"
            ()
        with
        | Ok request -> request
@@ -2024,7 +2024,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
     let profile_path =
       Keeper_sandbox_config.keeper_toml_path
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     Fs_compat.mkdir_p (Filename.dirname profile_path);
     Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
@@ -2040,7 +2040,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
             ; "truncated", `Bool false
             ; "unexpected_field", `String "not part of the current contract"
             ]
-        ; `Assoc [ "kind", `String "note"; "content", `String "executor summary" ]
+        ; `Assoc [ "kind", `String "note"; "content", `String "producer summary" ]
         ]
     in
     (match
@@ -2050,7 +2050,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
          ~task_id:"task-001"
          ~output:(`Assoc [ "submitted_evidence", snapshot ])
          ~criteria:[ "inspect artifact" ]
-         ~worker:"keeper-executor-agent"
+         ~worker:"keeper-omega-agent"
          ()
      with
      | Ok _ -> ()
@@ -2072,7 +2072,7 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
@@ -2107,7 +2107,7 @@ let test_submitted_evidence_rejects_malformed_utf8 () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "malformed.txt" in
@@ -2135,7 +2135,7 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let outside_path = Filename.concat base_path "outside-secret.txt" in
@@ -2200,7 +2200,7 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "assignment.txt" in
@@ -2217,11 +2217,11 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
                 [ ( "submitted_evidence"
                   , VS.snapshot_submitted_evidence_json
                       ~base_path
-                      ~worker:"keeper-executor-agent"
+                      ~worker:"keeper-omega-agent"
                       [ "artifact:assignment.txt" ] )
                 ])
           ~criteria:[ "inspect artifact" ]
-          ~worker:"keeper-executor-agent"
+          ~worker:"keeper-omega-agent"
           ()
       with
       | Ok request -> request
@@ -2267,7 +2267,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
@@ -2281,7 +2281,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
            { task with
              task_status =
                Masc_domain.AwaitingVerification
-                 { assignee = "keeper-executor-agent"
+                 { assignee = "keeper-omega-agent"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
@@ -2301,17 +2301,17 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
       false
       (String_util.contains_substring projection "ACTION:");
     (match
-       W.claim_task_r config ~agent_name:"keeper-executor-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-omega-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "producer must not claim its pending obligation");
     (match
-       W.claim_task_r config ~agent_name:"keeper-verifier-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-fixture-reviewer-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "no Keeper may claim a pending obligation");
     (match
-       W.claim_task_r config ~agent_name:"keeper-sangsu-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-alpha-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "another Keeper claimed the pending obligation");

@@ -628,7 +628,7 @@ let test_records_mcp_server_operation_duration_metric () =
 
 let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   let base_path = temp_dir () in
-  let keeper_name = "sangsu-context" in
+  let keeper_name = "alpha-context" in
   let meta =
     make_keeper_meta
       ~current_task_id:"task-123"
@@ -677,7 +677,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let keeper_name = "sangsu-task-contract" in
+  let keeper_name = "alpha-task-contract" in
   let config = Masc.Workspace.default_config base_path in
   ignore (Masc.Workspace.init config ~agent_name:(Some keeper_name));
   let contract = empty_contract in
@@ -717,7 +717,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let keeper_name = "sangsu-runtime-mcp" in
+  let keeper_name = "alpha-runtime-mcp" in
   let meta =
     make_keeper_meta
       ~current_task_id:"task-456"

@@ -726,7 +726,7 @@ let test_goal_reconciliation_targets_exact_producer
        let completing_agent_name =
          if producer_persisted_only
          then Masc.Keeper_identity.keeper_agent_name producer_name
-         else "keeper-executor-agent-agent"
+         else "keeper-omega-agent-agent"
        in
        ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
        let producer_meta =

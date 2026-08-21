@@ -457,7 +457,7 @@ let test_closed_board_audience_routes_only_its_authority () =
     (match classified inherited_reaction with
      | KBA.Thread_participants -> true
      | _ -> false);
-  let unsupported = audience_signal ~author:"external-author" "@@analyst inspect" in
+  let unsupported = audience_signal ~author:"external-author" "@@delta inspect" in
   check bool "unsupported broadcast fails closed" true
     (match KBA.classify ~visibility:Board.Internal unsupported with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
@@ -466,7 +466,7 @@ let test_closed_board_audience_routes_only_its_authority () =
     (match KBA.classify ~visibility:Board.Direct discoverable with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
-  let mixed = audience_signal ~author:"external-author" "@alpha @@analyst inspect" in
+  let mixed = audience_signal ~author:"external-author" "@alpha @@delta inspect" in
   check bool "mixed direct target and unsupported selector fails closed" true
     (match KBA.classify ~visibility:Board.Internal mixed with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
@@ -603,7 +603,7 @@ let test_mixed_address_signal_is_dropped_at_routing () =
        (match
           Board_dispatch.create_post
             ~author:"external-author"
-            ~content:"@alpha @@analyst inspect"
+            ~content:"@alpha @@delta inspect"
             ~title:"mixed address"
             ~post_kind:Board.Human_post
             ~visibility:Board.Internal

@@ -114,10 +114,10 @@ let comment_of_signal
   }
 ;;
 
-let keeper_context ?(mention_keeper_ids = [ "sangsu" ]) () =
+let keeper_context ?(mention_keeper_ids = [ "alpha" ]) () =
   `Assoc
-    [ "lane_keeper_name", `String "sangsu"
-    ; "agent_name", `String "sangsu-agent"
+    [ "lane_keeper_name", `String "alpha"
+    ; "agent_name", `String "alpha-agent"
     ; "keeper_record_id", `Null
     ; "keeper_runtime_uid", `Null
     ; "instructions", `String "continue"
@@ -149,7 +149,7 @@ let render_row_with_non_finite ~field ~literal json =
 let candidate ?(context = keeper_context ()) signal :
   A.candidate
   =
-  let keeper_name = "sangsu" in
+  let keeper_name = "alpha" in
   let candidate_id = A.candidate_id_of_signal ~keeper_name signal in
   { candidate_id
   ; keeper_name
@@ -245,7 +245,7 @@ let record ~base_path candidate =
 ;;
 
 let load_one ~base_path =
-  match ok "load candidate" (A.load_candidates ~base_path ~keeper_name:"sangsu") with
+  match ok "load candidate" (A.load_candidates ~base_path ~keeper_name:"alpha") with
   | [ candidate ] -> candidate
   | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
 ;;
@@ -707,7 +707,7 @@ let test_non_finite_lifecycle_times_are_rejected () =
       (Filename.concat
          (Common.masc_dir_from_base_path ~base_path)
          "board_attention_candidates")
-      "sangsu.jsonl"
+      "alpha.jsonl"
   in
   let non_finite_row =
     render_row_with_non_finite
@@ -909,7 +909,7 @@ let test_record_requests_worker_without_invoking_judgment () =
   Eio.Switch.run @@ fun sw ->
   with_temp_base "board-attention-candidate-wake" @@ fun base_path ->
   let registration =
-    ok "register worker" (Wake.register ~sw ~base_path ~keeper_name:"sangsu")
+    ok "register worker" (Wake.register ~sw ~base_path ~keeper_name:"alpha")
   in
   let original = candidate (signal "post-wake") in
   let accepted =

@@ -173,7 +173,7 @@ let gunzip payload =
 let sample_json =
   "[" ^ String.concat ","
     (List.init 400 (fun i ->
-       Printf.sprintf {|{"i":%d,"keeper":"sangsu","ts":1786500000.0}|} i))
+       Printf.sprintf {|{"i":%d,"keeper":"alpha","ts":1786500000.0}|} i))
   ^ "]"
 
 let test_gzip_round_trips () =

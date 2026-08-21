@@ -779,7 +779,7 @@ let test_unknown_tool_is_uniform_validation_with_full_diagnostics () =
 ;;
 
 (* masc#29008: the model can fuse arguments into the name slot
-   ([Execute["argv"]], live rondo shape) or typo a name. Lookup stays
+   ([Execute["argv"]], live Keeper shape) or typo a name. Lookup stays
    exact; the reject message must name the received shape and the
    nearest registered name so the model can repair the call instead of
    resending the same broken string. A bare unknown identifier with no

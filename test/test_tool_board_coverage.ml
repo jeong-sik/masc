@@ -275,15 +275,15 @@ let test_board_actor_identity_canonicalizes_keeper_alias () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let json = Server_utils.board_actor_identity_json "keeper-analyst-agent" in
+  let json = Server_utils.board_actor_identity_json "keeper-delta-agent" in
   Alcotest.(check string) "kind" "keeper" (json_member_string json "kind");
-  Alcotest.(check string) "id" "analyst" (json_member_string json "id");
-  Alcotest.(check string) "key" "keeper:analyst" (json_member_string json "key");
-  Alcotest.(check string) "raw" "keeper-analyst-agent"
+  Alcotest.(check string) "id" "delta" (json_member_string json "id");
+  Alcotest.(check string) "key" "keeper:delta" (json_member_string json "key");
+  Alcotest.(check string) "raw" "keeper-delta-agent"
     (json_member_string json "raw");
   Alcotest.(check string) "source" "keeper_alias_contract"
     (json_member_string json "source");
-  Alcotest.(check string) "runtime agent" "keeper-analyst-agent"
+  Alcotest.(check string) "runtime agent" "keeper-delta-agent"
     (json_member_string json "runtime_agent_name")
 
 let test_board_actor_identity_keeps_non_keeper_agent () =
@@ -513,20 +513,20 @@ let test_inline_board_post_author_rewrites_caller_claim () =
     make_args
       [
         ("content", `String "ctx-owned post");
-        ("author", `String "analyst");
+        ("author", `String "delta");
         ("meta", `Assoc [ ("trace", `String "probe-10297") ]);
       ]
   in
   let normalized =
     Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"keeper-velvet-hammer-agent" args
+      ~agent_name:"keeper-xi-hammer-agent" args
   in
-  Alcotest.(check string) "author from ctx" "velvet-hammer"
+  Alcotest.(check string) "author from ctx" "xi-hammer"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
-  Alcotest.(check string) "caller claim preserved" "analyst"
+  Alcotest.(check string) "caller claim preserved" "delta"
     Yojson.Safe.Util.(
       normalized |> member "meta" |> member "author_caller_claim" |> to_string);
-  Alcotest.(check string) "raw ctx agent preserved" "keeper-velvet-hammer-agent"
+  Alcotest.(check string) "raw ctx agent preserved" "keeper-xi-hammer-agent"
     Yojson.Safe.Util.(
       normalized
       |> member "meta"
@@ -540,14 +540,14 @@ let test_inline_board_post_author_accepts_matching_alias () =
     make_args
       [
         ("content", `String "ctx-owned post");
-        ("author", `String "keeper-analyst-agent");
+        ("author", `String "keeper-delta-agent");
       ]
   in
   let normalized =
     Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"keeper-analyst-agent" args
+      ~agent_name:"keeper-delta-agent" args
   in
-  Alcotest.(check string) "author canonical" "analyst"
+  Alcotest.(check string) "author canonical" "delta"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
   Alcotest.(check bool) "no mismatch claim" true
     Yojson.Safe.Util.(
@@ -615,7 +615,7 @@ let test_post_create_metadata_payload () =
        [
          ("title", `String "Why");
          ("content", `String "Visible answer\n\nSupporting detail");
-         ("author", `String "sangsu");
+         ("author", `String "alpha");
          ("meta", `Assoc [ ("source", `String "keeper_autonomy") ]);
        ])
   in
@@ -1952,9 +1952,9 @@ let test_a_named_broadcast_selector_is_still_refused () =
 
 let test_a_well_shaped_name_is_still_a_target () =
   Alcotest.(check string) "plain name" "targets"
-    (label_of (comment_audience "@analyst please look"));
+    (label_of (comment_audience "@delta please look"));
   Alcotest.(check string) "namespaced name" "targets"
-    (label_of (comment_audience "@keeper:analyst please look"))
+    (label_of (comment_audience "@keeper:delta please look"))
 
 let () =
   Eio_main.run @@ fun env ->

@@ -420,7 +420,7 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
 
 let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
-  match Board_dispatch.create_post ~author:"sangsu"
+  match Board_dispatch.create_post ~author:"alpha"
           ~title:"Explicit title"
           ~content:"Visible line\n\nSupporting detail"
           ~post_kind:Board.Automation_post

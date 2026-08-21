@@ -1,5 +1,6 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
+module Metrics_tail = Masc_tui_metrics_tail
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)
 
@@ -234,6 +235,7 @@ type state = {
   mutable view: view_mode;
   mutable keeper_cursor: int;
   mutable log_entries: log_entry list;
+  mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
   mutable live_context: Tui_decode.context_observation option;
   mutable live_context_error: string option;
@@ -280,6 +282,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   view = Overview;
   keeper_cursor = 0;
   log_entries = [];
+  log_error = None;
   log_scroll = 0;
   live_context = None;
   live_context_error = None;

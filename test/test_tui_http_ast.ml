@@ -244,10 +244,48 @@ let test_tui_current_projection_wiring () =
        ~callee:"Tui_decode.keeper_of_meta"
      >= 1);
   check bool "keeper metrics use the cluster-aware canonical path" true
-    (Ast_grep.count_calls
+    (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml"
-       ~callee:"Keeper_types_support.keeper_metrics_dir"
+       ~binding_name:"load_selected_keeper_logs"
+       ~callee:"Keeper_types_support.keeper_metrics_store"
+     = 1);
+  check bool "keeper metrics use the strict bounded physical tail" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_metrics_tail.ml" ~binding_name:"load"
+       ~callee:"Dated_jsonl.read_recent_result"
+     = 1);
+  check bool "all log interactions use the selected Keeper loader" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"load_selected_keeper_logs"
+     >= 3);
+  check bool "metadata refresh reconciles the selected log identity" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"load_from_masc_dir"
+       ~callee:"Metrics_tail.reconcile_selection"
+     = 1);
+  check bool "metrics diagnostics are terminal-safe before rendering" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Keeper_chat.terminal_safe_text"
      >= 1);
+  check bool "log input uses viewport-bounded scrolling" true
+    (Ast_grep.count_calls_across_files
+       ~module_paths:[ "bin/masc_tui.ml" ]
+       ~callee:"Metrics_tail.scroll_up"
+     = 1
+     && Ast_grep.count_calls_across_files
+          ~module_paths:[ "bin/masc_tui.ml" ]
+          ~callee:"Metrics_tail.scroll_down"
+        = 1);
+  List.iter
+    (fun retired ->
+      check int ("retired raw metrics helper absent: " ^ retired) 0
+        (Ast_grep.count_value_bindings
+           ~module_path:"bin/masc_tui_loader.ml" ~name:retired))
+    [ "read_last_lines"; "parse_log_entry"; "find_metrics_files"; "load_keeper_logs" ];
   check bool "Keeper log rows use the current typed discriminator" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"lib/tui_decode.ml" ~binding_name:"decode_log_entry"
@@ -264,10 +302,18 @@ let test_tui_current_projection_wiring () =
        ~binding_name:"load_selected_live_context"
        ~callee:"Context_state.for_selection"
      = 1);
-  check int "live context never tails the metrics ledger" 0
+  check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_live_context"
-       ~callee:"read_last_lines");
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Metrics_tail.error_to_string"
+     = 1);
+  check bool "log empty copy distinguishes typed outcomes" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Metrics_tail.empty_message"
+     = 1);
   check int "retired planning running alias absent" 0
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"

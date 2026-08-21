@@ -224,6 +224,12 @@
  (libraries masc.masc_core))
 
 (library
+ (name masc_tui_metrics_tail)
+ (wrapped false)
+ (modules masc_tui_metrics_tail)
+ (libraries masc dated_jsonl))
+
+(library
  (name masc_tui_context_state)
  (wrapped false)
  (modules masc_tui_context_state)
@@ -256,6 +262,7 @@
   masc_tui_context_state
   masc_tui_keeper_chat_projection
   masc_tui_message_layout
+  masc_tui_metrics_tail
   masc_tui_observation_layout
   masc_tui_operator_projection
   masc_tui_render_schedule

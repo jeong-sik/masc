@@ -170,7 +170,7 @@ scope가 결합된 서버 계약이므로 파일시스템이나 briefing을 대�
 
 - List: name, generation, runtime lane, composite phase, goal
 - Detail: identity, live context, runtime lane, runtime stats, behavior, timestamps
-- Logs: exact `keeper.metrics.v1` Turn/Heartbeat tail; context occupancy is not a metrics-ledger field
+- Logs: strict newest-200 physical-row tail across dated months/rotations; malformed, invalid current-schema, and storage failures remain explicit. Valid Turn/Heartbeat rows stay chronological, and context occupancy is not a metrics-ledger field.
 - Message: request-correlated asynchronous chat stream. The TUI creates one durable UUIDv7 request ID per send, accepts only the current Keeper SSE contract, and applies a completion only when both request and Keeper identities match. Partial text, interrupted streams, and terminal outcomes without a visible reply are explicit status/error values rather than successful replies.
 
 강화: 24h bucket 요약, tool call 카운트, composite phase (`Stable <- paused`)

@@ -101,7 +101,12 @@ Keeper: sangsu
 
 ### Keeper Log View
 
-Press `l` from detail view. Shows recent heartbeat/metrics entries from `<name>/metrics/YYYY-MM/DD.jsonl`.
+Press `l` from detail view. Shows the newest 200 physical rows from the
+Keeper's canonical dated metrics store, spanning month boundaries and rotated
+day segments. Reads are tail-bounded by row count rather than file size.
+Malformed JSON, current-schema decode failures, and storage/layout failures are
+shown explicitly; rejected rows consume the 200-row window and are never
+silently backfilled with older data.
 
 ```
 Keeper Logs: sangsu  (85 entries)
@@ -185,7 +190,7 @@ Dashboard <--Tab--> Keeper List
 | Active task list | `.masc/tasks/backlog.json` | No |
 | Keeper list/detail | current-schema `.masc/keepers/*.json` | No |
 | Live context status | `<name>/turn-records/YYYY-MM/DD.jsonl` (strict newest trace-matched row) | No |
-| Keeper logs | `<name>/metrics/YYYY-MM/DD.jsonl` (last 200 entries) | No |
+| Keeper logs | canonical `<name>/metrics/` dated store (newest 200 physical rows) | No |
 | Goal planning | `GET /api/v1/dashboard/planning` | Yes |
 | Actor-scoped approvals | `GET /api/v1/operator?view=summary&include_messages=0&include_keepers=0` | Yes |
 | Send messages | request-correlated `POST /api/v1/keepers/chat/stream` SSE | Yes |

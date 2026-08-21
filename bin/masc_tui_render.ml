@@ -5,6 +5,7 @@ open Tui_decode
 open Masc_tui_ansi
 
 module Message_layout = Masc_tui_message_layout
+module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
 module Keeper_chat = Masc_tui_keeper_chat_projection
 
@@ -1090,12 +1091,35 @@ let render_keeper_logs (state : state) =
     box_line_styled buf cols ~style:Ansi.dim col_hdr;
     box_divider buf cols;
 
+    (match state.log_error with
+      | None -> ()
+      | Some error ->
+          let style =
+            match error with
+            | Metrics_tail.Storage_error _ -> Ansi.red
+            | Metrics_tail.Row_errors _ -> Ansi.yellow
+          in
+          let diagnostic =
+            Keeper_chat.terminal_safe_text
+              (Metrics_tail.error_to_string error)
+          in
+          box_line_styled buf cols ~style
+            ("  " ^ diagnostic);
+          box_divider buf cols);
+
     (* Content area *)
-    let content_height = rows - 8 in
-    let scroll = min state.log_scroll (max 0 (total_entries - content_height)) in
+    let content_height =
+      Metrics_tail.content_height ~terminal_rows:rows ~error:state.log_error
+    in
+    let scroll =
+      Metrics_tail.normalize_scroll ~entry_count:total_entries ~content_height
+        state.log_scroll
+    in
+    state.log_scroll <- scroll;
 
     if total_entries = 0 then begin
-      box_line_styled buf cols ~style:Ansi.dim "  (no log entries found)";
+      box_line_styled buf cols ~style:Ansi.dim
+        ("  " ^ Metrics_tail.empty_message state.log_error);
       for _ = 1 to content_height - 1 do
         box_empty buf cols
       done

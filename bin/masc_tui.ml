@@ -5,6 +5,7 @@ open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Metrics_tail = Masc_tui_metrics_tail
 module Render_schedule = Masc_tui_render_schedule
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
@@ -15,6 +16,10 @@ exception Break
 let frame_interval_ns = 16_000_000L
 let maximum_input_wait_seconds = 0.016
 let nanoseconds_per_second = 1_000_000_000.0
+
+let keeper_log_content_height (state : state) =
+  let rows, _columns = get_terminal_size () in
+  Metrics_tail.content_height ~terminal_rows:rows ~error:state.log_error
 
 (** Read a single byte from stdin, returning Some char or None. *)
 let read_byte_unix ?(timeout = 0.1) () : char option =
@@ -941,10 +946,8 @@ let main () =
            (* Also reload logs / board / planning detail if viewing them *)
            (match state.view with
             | Keepers Keeper_logs ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.log_entries <- load_keeper_logs base_path k.k_name 200
-                 | None -> ())
+                load_selected_keeper_logs state base_path 200
+                  (List.nth_opt state.keepers state.keeper_cursor)
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
@@ -1013,7 +1016,11 @@ let main () =
             | Keepers Keeper_detail ->
                 state.detail_scroll <- state.detail_scroll + 1
             | Keepers Keeper_logs ->
-                state.log_scroll <- state.log_scroll + 1
+                state.log_scroll <-
+                  Metrics_tail.scroll_down
+                    ~entry_count:(List.length state.log_entries)
+                    ~content_height:(keeper_log_content_height state)
+                    state.log_scroll
             | Approvals ->
                 let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -1053,8 +1060,11 @@ let main () =
                 if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
             | Keepers Keeper_logs ->
-                if state.log_scroll > 0 then
-                  state.log_scroll <- state.log_scroll - 1
+                state.log_scroll <-
+                  Metrics_tail.scroll_up
+                    ~entry_count:(List.length state.log_entries)
+                    ~content_height:(keeper_log_content_height state)
+                    state.log_scroll
             | Approvals ->
                 if state.approval_cursor > 0 then begin
                   state.pending_approval_action <- None;
@@ -1122,10 +1132,16 @@ let main () =
            (* L opens log view from detail *)
            (match state.view with
             | Keepers Keeper_detail ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.log_entries <- load_keeper_logs base_path k.k_name 200;
-                     state.log_scroll <- max 0 (List.length state.log_entries - 1);
+                let keeper =
+                  List.nth_opt state.keepers state.keeper_cursor
+                in
+                load_selected_keeper_logs state base_path 200 keeper;
+                (match keeper with
+                 | Some _ ->
+                     state.log_scroll <-
+                       Metrics_tail.maximum_scroll
+                         ~entry_count:(List.length state.log_entries)
+                         ~content_height:(keeper_log_content_height state);
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
@@ -1162,10 +1178,8 @@ let main () =
         (* Also refresh logs / board / planning detail if viewing them *)
         (match state.view with
          | Keepers Keeper_logs ->
-             (match List.nth_opt state.keepers state.keeper_cursor with
-              | Some k ->
-                  state.log_entries <- load_keeper_logs base_path k.k_name 200
-              | None -> ())
+             load_selected_keeper_logs state base_path 200
+               (List.nth_opt state.keepers state.keeper_cursor)
          | Board ->
              (match state.board_mode with
               | Board_read post_id ->

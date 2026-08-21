@@ -176,33 +176,8 @@ let report_telemetry_drop ~reason ~path ~detail =
 
 (* Per-row decode. Reporting a drop only logs and bumps a counter, with no
    quota or early stop, so this is safe to run under a newest-first scan. *)
-let normalize_legacy_tool_failure_class = function
-  | `Assoc record_fields ->
-    let normalize_event = function
-      | `List [ `String "Tool_called"; `Assoc tool_fields ] ->
-        let tool_fields =
-          List.map
-            (function
-              | ( "failure_class"
-                , `List [ `String "Transient_error" ] ) ->
-                "failure_class", `List [ `String "Dependency_unavailable" ]
-              | field -> field)
-            tool_fields
-        in
-        `List [ `String "Tool_called"; `Assoc tool_fields ]
-      | event -> event
-    in
-    `Assoc
-      (List.map
-         (function
-           | "event", event -> "event", normalize_event event
-           | field -> field)
-         record_fields)
-  | json -> json
-;;
-
 let parse_event_record (json : Yojson.Safe.t) : event_record option =
-  match event_record_of_yojson (normalize_legacy_tool_failure_class json) with
+  match event_record_of_yojson json with
   | Ok record -> Some record
   | Error msg ->
       report_telemetry_drop

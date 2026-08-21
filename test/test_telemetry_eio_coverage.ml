@@ -263,7 +263,22 @@ let test_parse_event_records_legacy_transient_failure_class () =
     Alcotest.(check (option string))
       "legacy constructor is preserved as dependency_unavailable"
       (Some "dependency_unavailable")
-      (Option.map Tool_result.tool_failure_class_to_string event.failure_class)
+      (Option.map Tool_result.tool_failure_class_to_string event.failure_class);
+    let canonical = Telemetry_eio.event_to_json (Telemetry_eio.Tool_called event) in
+    let failure_class =
+      let open Yojson.Safe.Util in
+      canonical |> member "event" |> index 1 |> member "failure_class"
+    in
+    Alcotest.(check string)
+      "rewritten row uses the canonical derived constructor"
+      {|["Dependency_unavailable"]|}
+      (Yojson.Safe.to_string failure_class);
+    (match Telemetry_eio.parse_event_records [ canonical ] with
+     | [ { event = Telemetry_eio.Tool_called _; _ } ] -> ()
+     | records ->
+       Alcotest.failf
+         "expected canonical round-trip row, got %d"
+         (List.length records))
   | records ->
     Alcotest.failf
       "expected one legacy Tool_called record, got %d"

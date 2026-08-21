@@ -11,6 +11,13 @@ type tool_failure_class =
       (** An operator interrupted the work (#28810). *)
 [@@deriving yojson, show]
 
+let derived_tool_failure_class_of_yojson = tool_failure_class_of_yojson
+
+let tool_failure_class_of_yojson = function
+  | `List [ `String "Transient_error" ] -> Ok Dependency_unavailable
+  | json -> derived_tool_failure_class_of_yojson json
+;;
+
 type failure_effect_disposition =
   | Proven_pre_effect
   | Proven_post_effect

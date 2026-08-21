@@ -242,7 +242,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let noop_turn_count = int_field_default "noop_turn_count" keeper in
   let turn_count = int_field_default "turn_count" keeper in
   let generation = int_field_default "generation" keeper in
-  let goal_count = List.length (list_field "active_goal_ids" keeper) in
   (* Operator observation publishes a pause override in the same [status] field as
      the surface status, so this classifies the published vocabulary rather than
      the surface subset. A paused keeper is neither offline nor running: it is
@@ -310,13 +309,13 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             (Exec_healthy, Tone_ok, "정상 동작 중")
   in
   let continuity =
-    Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d · Goals %d"
-      generation turn_count autonomous_turn_count autonomous_action_count goal_count
+    Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d"
+      generation turn_count autonomous_turn_count autonomous_action_count
   in
   let focus =
-    match string_list_of_field "active_goal_ids" keeper with
-    | goal_id :: _ -> goal_id
-    | [] -> "현재 활성 Goal 없음"
+    match String_util.trim_nonempty (string_field "current_task_id" keeper) with
+    | Some task_id -> task_id
+    | None -> "현재 작업 없음"
   in
   let recent_input_preview =
     String_util.trim_nonempty (string_field "recent_input_preview" keeper)

@@ -72,10 +72,10 @@ const ADMISSION_LANES = [
 // is being flushed while the keeper is in Draining (drained, not re-admitted).
 const EVENT_KIND = {
   mention: { lbl: 'mention', glyph: '@' },
-  board:   { lbl: 'board',   glyph: '▤' },  // ▤
-  gate:    { lbl: 'gate',    glyph: '⚿' },  // ⚿
-  wake:    { lbl: 'wake',    glyph: '○' },  // ○
-  handoff: { lbl: 'handoff', glyph: '⇄' },  // ⇄
+  board:   { lbl: 'board',   glyph: '\u25A4' },  // ▤
+  gate:    { lbl: 'gate',    glyph: '\u26BF' },  // ⚿
+  wake:    { lbl: 'wake',    glyph: '\u25CB' },  // ○
+  handoff: { lbl: 'handoff', glyph: '\u21C4' },  // ⇄
 };
 const KEEPER_QUEUE = {
   'nick0cave': { admitted: 1, deferred: 3, dropped: 1, retained: 8, pending: [

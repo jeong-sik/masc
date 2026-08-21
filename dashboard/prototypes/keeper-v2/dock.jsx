@@ -148,7 +148,7 @@ function DockMsg({ m, keeper, onPick }) {
         <div className={`dbubble ${isUser ? 'user' : ''}`}><Para text={m.text} /></div>
         {!isUser && m.sug && (
           <div className="dsug">
-            {m.sug.map((s, i) => <button key={i} onClick={() => onPick(s)}><span className="pre">{'›'}</span>{s}</button>)}
+            {m.sug.map((s, i) => <button key={i} onClick={() => onPick(s)}><span className="pre">{'\u203A'}</span>{s}</button>)}
           </div>
         )}
       </div>
@@ -209,8 +209,8 @@ function CopilotDock({ dock, ctx, docked }) {
       <div className={`dock-head ${docked ? '' : 'drag'}`} onMouseDown={docked ? undefined : drag}>
         <div className="dock-title"><span className="dock-spark">{SPARK}</span>Chat</div>
         <div className="spacer"></div>
-        <button className="dock-iconbtn" title={docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'} onMouseDown={e => e.stopPropagation()} onClick={() => dock.setMode(docked ? 'float' : 'dock')}>{docked ? '⧉' : '❐'}</button>
-        <button className="dock-iconbtn" title="닫기 (Esc)" onMouseDown={e => e.stopPropagation()} onClick={dock.close}>{'✕'}</button>
+        <button className="dock-iconbtn" title={docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'} onMouseDown={e => e.stopPropagation()} onClick={() => dock.setMode(docked ? 'float' : 'dock')}>{docked ? '\u29C9' : '\u2750'}</button>
+        <button className="dock-iconbtn" title="닫기 (Esc)" onMouseDown={e => e.stopPropagation()} onClick={dock.close}>{'\u2715'}</button>
       </div>
 
       <div className="dock-idrow">
@@ -218,7 +218,7 @@ function CopilotDock({ dock, ctx, docked }) {
           <button className="dock-picker-btn" onMouseDown={e => e.stopPropagation()} onClick={() => setPickOpen(o => !o)}>
             <SigilBadge k={keeper} size={20} beat={keeper.status === 'run'} />
             <span className="nm">{keeper.kr}</span>
-            <span className="cv">{'▾'}</span>
+            <span className="cv">{'\u25BE'}</span>
           </button>
           {pickOpen && (
             <div className="dock-menu" onMouseDown={e => e.stopPropagation()}>
@@ -251,12 +251,12 @@ function CopilotDock({ dock, ctx, docked }) {
       <div className="dock-thread" ref={threadRef}>
         {msgs.length === 0 && !streaming ? (
           <div className="dock-empty">
-            <div className="ico">{'◈'}</div>
+            <div className="ico">{'\u25C8'}</div>
             <div className="t">{ctx.label}</div>
             <div className="s">이 화면에 대해 {keeper.kr}에게 바로 물어보세요. 같은 맥락을 보고 답합니다.</div>
             <div className="dsug" style={{ width: '100%' }}>
               {(DOCK_STARTERS[ctx.route] || ['이 화면 요약해줘', '다음 액션 추천']).map((s, i) => (
-                <button key={i} onClick={() => doSend(s)}><span className="pre">{'›'}</span>{s}</button>
+                <button key={i} onClick={() => doSend(s)}><span className="pre">{'\u203A'}</span>{s}</button>
               ))}
             </div>
           </div>
@@ -280,11 +280,11 @@ function CopilotDock({ dock, ctx, docked }) {
         <div className={`dock-comp-box ${focus ? 'focus' : ''}`}>
           <textarea ref={taRef} rows={1} value={val} placeholder={`${keeper.kr}에게… (이 화면 기준)`}
             onChange={grow} onKeyDown={onKey} onFocus={() => setFocus(true)} onBlur={() => setFocus(false)} onMouseDown={e => e.stopPropagation()} />
-          <button className="dock-send" disabled={!val.trim() || !!dock.streaming} onClick={() => doSend()}>{'↑'}</button>
+          <button className="dock-send" disabled={!val.trim() || !!dock.streaming} onClick={() => doSend()}>{'\u2191'}</button>
         </div>
         <div className="dock-foot">
           <span>발신 <b>@operator</b></span>
-          <span style={{ marginLeft: 'auto' }}><kbd>{'↵'}</kbd> 전송 · <kbd>Esc</kbd> 닫기</span>
+          <span style={{ marginLeft: 'auto' }}><kbd>{'\u21B5'}</kbd> 전송 · <kbd>Esc</kbd> 닫기</span>
         </div>
       </div>
     </aside>

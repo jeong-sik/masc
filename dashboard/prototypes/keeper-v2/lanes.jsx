@@ -52,7 +52,7 @@ const WAIT_INVENTORY = {
       rows: [
         { source: 'chat_operation_running', waiting_on: 'op_7c19 · keeper_chat', what: '운영자와 진행 중인 대화', wake: 'chat_operation_store', since: 2, next: 'await_turn_finalize', detail: { operation_id: 'op_7c19', turn: 41 } },
         { source: 'event_queue_pending', waiting_on: 'masc.task_assigned', what: '새로 배정된 작업 (T-3880)', wake: 'keeper_event_queue', since: 11, next: 'keeper_process_event', detail: { event_id: 'evt-3f0a', task: 'T-3880' } },
-        { source: 'workspace_message', waiting_on: 'workspace-message:wmsg-1f4c', what: '닉케이브가 보낸 메시지 (즉시)', wake: 'keeper_event_queue', since: 4, next: 'keeper_process_event', detail: { payload_kind: 'workspace_message', message_request_id: 'wmsg-1f4c', message_from: 'nick0cave', urgency: 'immediate' } },
+        { source: 'workspace_message', waiting_on: 'workspace-message:wmsg-1f4c', what: 'nick0cave가 보낸 메시지 (즉시)', wake: 'keeper_event_queue', since: 4, next: 'keeper_process_event', detail: { payload_kind: 'workspace_message', message_request_id: 'wmsg-1f4c', message_from: 'nick0cave', urgency: 'immediate' } },
       ] },
     sangsu: { state: 'waiting', waiting_count: 64, waiting_count_truncated: true, sources: { external_attention: 62, schedule_waiting: 1, hitl_pending: 1 }, truncated_sources: { external_attention: true },
       rows: [
@@ -64,7 +64,7 @@ const WAIT_INVENTORY = {
     nick0cave: { state: 'deferred', waiting_count: 2, sources: { fusion_running: 1, operator_pending_confirm: 1 },
       rows: [
         { source: 'fusion_running', waiting_on: 'fus_2b71 · panel 3 · judge', what: 'Fusion 판정 · 패널 3', wake: 'fusion_runner', since: 4, next: 'await_fusion_verdict', detail: { run_id: 'fus_2b71', panel: 3 } },
-        { source: 'operator_pending_confirm', waiting_on: 'handoff → sangsu', what: '상수에게 넘기기 확인', wake: 'operator_console', since: 19, next: 'await_operator_confirm', detail: { intent: 'handoff', to: 'sangsu' } },
+        { source: 'operator_pending_confirm', waiting_on: 'handoff → sangsu', what: 'sangsu에게 넘기기 확인', wake: 'operator_console', since: 19, next: 'await_operator_confirm', detail: { intent: 'handoff', to: 'sangsu' } },
       ] },
     scholar: { state: 'waiting', waiting_count: 1, sources: { owner_shutdown: 1 },
       rows: [{ source: 'owner_shutdown', waiting_on: 'drain · 소유 태스크 2건', what: '맡은 작업 2건 마무리', wake: 'keeper_supervisor', since: 3, next: 'drain_then_stop', detail: { owned: 2, phase: 'Draining' } }] },
@@ -73,7 +73,7 @@ const WAIT_INVENTORY = {
   },
 };
 function laneEntry(id) { return WAIT_INVENTORY.keepers[id] || null; }
-function bounded(n, t) { return t ? '≥' + n : String(n); }
+function bounded(n, t) { return t ? '\u2265' + n : String(n); }
 function agoTxt(m) { return m == null ? '시각 미기록' : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.floor(m / 60)}시간 전` : `${Math.floor(m / 1440)}일 전`; }
 function untilTxt(m) { return m < 60 ? `${m}분 후` : m < 1440 ? `${Math.floor(m / 60)}시간 후` : `${Math.floor(m / 1440)}일 후`; }
 function secTxt(s) { return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${(s / 3600).toFixed(1)}h`; }
@@ -240,7 +240,7 @@ function Pipeline({ entry }) {
         const items = byStage[st] || [];
         return (
           <React.Fragment key={st}>
-            {i > 0 && <span className={`pl-arrow ${items.length ? 'on' : ''}`} aria-hidden="true">{'→'}</span>}
+            {i > 0 && <span className={`pl-arrow ${items.length ? 'on' : ''}`} aria-hidden="true">{'\u2192'}</span>}
             <div className={`pl-stage ${items.length ? 'on' : ''}`}>
               <div className="pl-stage-h"><b>{STAGE[st].lbl}</b>{dev && <span className="mono">{STAGE[st].sub}</span>}</div>
               {items.length

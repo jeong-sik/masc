@@ -171,7 +171,7 @@ function RuntimeEditor({ onClose }) {
             <h1>{(RT_SECS.find(s => s[0] === sec) || [])[1]}</h1>
             <div className="rt-head-actions">
               <button className="rt-save">변경사항 저장</button>
-              <button className="rt-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+              <button className="rt-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
             </div>
           </header>
 

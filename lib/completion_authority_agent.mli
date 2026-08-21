@@ -31,8 +31,15 @@ module For_testing : sig
 
   (** How one review attempt ended. [Deferred] carries no payload: a review
       that did not commit a verdict is reported to the Board and the producer
-      Keeper chooses what happens next. *)
+      Keeper chooses what happens next. [Retryable_deferred] means the typed
+      evaluator error was retryable and the application-owned lane must
+      re-arm its maintenance scan while the Task stays awaiting verification. *)
   type process_outcome =
     | Committed
     | Deferred
+    | Retryable_deferred
+
+  val process_outcome_of_evaluator_retryable : bool option -> process_outcome
+  (** [Some true] is the only automatic-retry authority. [Some false] and
+      [None] preserve the producer/operator action contract. *)
 end

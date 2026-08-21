@@ -871,6 +871,11 @@ let test_post_effect_transport_enters_recovery () =
                    (Keeper_internal_error.Provider_attempt_effect_fenced
                       { effect_disposition; _ }) ->
                  check
+                   string
+                   "the fence observed the transport interruption (fail-closed Observation_unavailable)"
+                   "observation_unavailable"
+                   (Keeper_provider_attempt_effect.to_string effect_disposition);
+                 check
                    bool
                    "post-effect failure is fenced against same-turn retry"
                    false

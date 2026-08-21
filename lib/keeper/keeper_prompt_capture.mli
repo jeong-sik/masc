@@ -7,7 +7,7 @@
     {1 Why the last turn is the preview}
 
     The blocks are stable across turns — measured on a live fleet, the same
-    keeper renders identical persona, recall, and dynamic-context bytes turn
+    keeper renders identical system-prompt, recall, and dynamic-context bytes
     after turn while only the conversation grows. The assembled context of the
     turn that just ran is therefore what the next turn will assemble, minus the
     conversation. That is why this store needs no arming step: capturing every
@@ -21,8 +21,8 @@
 
     {1 What is not here}
 
-    The base system prompt (persona) is assembled on a different path and is not
-    part of this capture. This store holds the extra system context: the typed
+    The base system prompt is assembled on a different path and is not part of
+    this capture. This store holds the extra system context: the typed
     blocks appended to that base. *)
 
 type block =

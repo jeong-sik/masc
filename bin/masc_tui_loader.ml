@@ -3,6 +3,7 @@
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Context_state = Masc_tui_context_state
 
 open Masc_tui_types
 open Tui_decode
@@ -141,36 +142,20 @@ let load_keeper_logs (base_path : string) (keeper_name : string) (max_entries : 
   if len <= max_entries then all
   else List.filteri (fun i _ -> i >= len - max_entries) all
 
-(** Load live context status from the latest metrics entry *)
-let load_live_context (state : state) (base_path : string) (keeper_name : string) =
-  let files = find_metrics_files base_path keeper_name in
-  match files with
-  | [] ->
-    state.live_context_ratio <- 0.0;
-    state.live_context_tokens <- 0;
-    state.live_context_max <- 0;
-    state.live_message_count <- 0
-  | latest_file :: _ ->
-    (* Read just the last line *)
-    let lines = read_last_lines latest_file 1 in
-    (match lines with
-     | [] ->
-       state.live_context_ratio <- 0.0;
-       state.live_context_tokens <- 0;
-       state.live_context_max <- 0;
-       state.live_message_count <- 0
-     | line :: _ ->
-       match parse_log_entry line with
-       | None ->
-         state.live_context_ratio <- 0.0;
-         state.live_context_tokens <- 0;
-         state.live_context_max <- 0;
-         state.live_message_count <- 0
-       | Some e ->
-         state.live_context_ratio <- e.le_context_ratio;
-         state.live_context_tokens <- e.le_context_tokens;
-         state.live_context_max <- e.le_context_max;
-         state.live_message_count <- e.le_message_count)
+(** Apply one exclusive context projection to the mutable screen state. *)
+let apply_live_context_state (state : state) (context_state : Context_state.t) =
+  state.live_context <- context_state.observation;
+  state.live_context_error <- context_state.error
+
+(** Load trace-scoped context occupancy from its current TurnRecord SSOT. *)
+let load_selected_live_context (state : state) (base_path : string)
+    (keeper : keeper option) =
+  let config = Workspace_core.default_config base_path in
+  Context_state.for_selection ~load:(Context_state.load ~config) keeper
+  |> apply_live_context_state state
+
+let load_live_context state base_path keeper =
+  load_selected_live_context state base_path (Some keeper)
 
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
@@ -232,10 +217,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
      | None -> min state.keeper_cursor (max 0 (List.length state.keepers - 1)));
 
   (* Load live context for selected keeper *)
-  if state.keeper_cursor < List.length state.keepers then begin
-    let k = List.nth state.keepers state.keeper_cursor in
-    load_live_context state base_path k.k_name
-  end;
+  load_selected_live_context state base_path
+    (List.nth_opt state.keepers state.keeper_cursor);
 
   state.last_refresh <- Unix.gettimeofday ()
 

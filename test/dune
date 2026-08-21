@@ -2596,6 +2596,16 @@
  (libraries alcotest masc_tui_message_layout))
 
 (test
+ (name test_tui_observation_layout)
+ (modules test_tui_observation_layout)
+ (libraries alcotest masc_tui_observation_layout masc))
+
+(test
+ (name test_tui_context_state)
+ (modules test_tui_context_state)
+ (libraries alcotest masc_tui_context_state masc))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))

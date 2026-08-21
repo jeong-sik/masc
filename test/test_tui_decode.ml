@@ -124,6 +124,8 @@ let test_decode_keeper_projects_current_schema () =
   with
   | Ok keeper ->
       Alcotest.(check string) "name" "keeper-main" keeper.k_name;
+      Alcotest.(check bool) "trace identity is projected" true
+        (String.trim keeper.k_trace_id <> "");
       Alcotest.(check int) "generation" 2 keeper.k_generation;
       Alcotest.(check bool) "paused" true keeper.k_paused;
       Alcotest.(check (option string)) "current task" (Some "task-42")
@@ -311,76 +313,462 @@ let test_decode_planning_snapshot_rejects_running_alias () =
        (Tui_decode.decode_planning_snapshot
           (planning_snapshot_json ~running_key:"running" ())))
 
-let test_parse_log_entry_success () =
-  let line =
-    Yojson.Safe.to_string
-      (`Assoc [
-         ("ts", `String "2026-03-31T12:00:00Z");
-         ("channel", `String "hb");
-         ("context_ratio", `Float 0.55);
-         ("context_tokens", `Int 100);
-         ("context_max", `Int 200);
-         ("message_count", `Int 4);
-         ("usage", `Assoc [("input_tokens", `Int 10); ("output_tokens", `Int 12)]);
-         ("work_kind", `String "heartbeat");
-       ])
+let metrics_common_fields ~kind ~channel =
+  [ "schema", `String Keeper_metrics_record.schema
+  ; "record_kind", `String kind
+  ; "ts", `String "2026-08-21T12:00:00Z"
+  ; "ts_unix", `Float 1787313600.0
+  ; "channel", `String channel
+  ; "name", `String "keeper-main"
+  ; "agent_name", `String "codex"
+  ; "trace_id", `String "trace-current"
+  ; "generation", `Int 4
+  ]
+
+type usage_fixture =
+  | Usage_trusted
+  | Usage_untrusted
+  | Usage_missing
+  | Usage_mixed
+  | Usage_bad_total
+
+let usage_fields = function
+  | Usage_trusted ->
+      ( `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Int 12
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 22
+          ; "usage_trust", `String "trusted"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Float 0.0
+      , "trusted"
+      , [] )
+  | Usage_untrusted ->
+      let reasons = [ `String "negative_input_tokens" ] in
+      ( `Assoc
+          [ "input_tokens", `Int (-10)
+          ; "output_tokens", `Int 12
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 2
+          ; "usage_trust", `String "untrusted"
+          ; "usage_anomaly", `Bool true
+          ; "usage_anomaly_reasons", `List reasons
+          ]
+      , `Float 0.25
+      , "untrusted"
+      , reasons )
+  | Usage_missing ->
+      ( `Assoc
+          [ "input_tokens", `Null
+          ; "output_tokens", `Null
+          ; "cache_creation_tokens", `Null
+          ; "cache_read_tokens", `Null
+          ; "total_tokens", `Null
+          ; "usage_trust", `String "missing"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Null
+      , "missing"
+      , [] )
+  | Usage_mixed ->
+      ( `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Null
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 17
+          ; "usage_trust", `String "trusted"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Float 0.25
+      , "trusted"
+      , [] )
+  | Usage_bad_total ->
+      ( `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Int 12
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 29
+          ; "usage_trust", `String "trusted"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Float 0.0
+      , "trusted"
+      , [] )
+
+let current_turn_metrics ?(channel = "turn") ?(turn_mode = "tool_use")
+    ?(usage = Usage_trusted) ?tools_used ?tool_call_count () =
+  let usage_json, cost_json, usage_trust, usage_anomaly_reasons =
+    usage_fields usage
   in
-  match Tui_decode.parse_log_entry line with
+  let tools_used =
+    Option.value tools_used
+      ~default:
+        (if String.equal turn_mode "tool_use" then [ "masc_task_claim" ]
+         else [])
+  in
+  let tool_call_count =
+    Option.value tool_call_count ~default:(List.length tools_used)
+  in
+  `Assoc
+    (metrics_common_fields ~kind:"turn" ~channel
+    @ [ "message_count", `Int 7
+      ; "usage", usage_json
+      ; "usage_trust", `String usage_trust
+      ; "usage_anomaly_reasons", `List usage_anomaly_reasons
+      ; "latency_ms", `Int 0
+      ; "cost_usd", cost_json
+      ; "turn_mode", `String turn_mode
+      ; "tool_call_count", `Int tool_call_count
+      ; "tools_used", `List (List.map (fun name -> `String name) tools_used)
+      ])
+
+let set_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> Alcotest.failf "cannot set field %s on a non-object" key
+
+let remove_field key = function
+  | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+  | _ -> Alcotest.failf "cannot remove field %s from a non-object" key
+
+let update_field key update = function
+  | `Assoc fields as json -> (
+      match List.assoc_opt key fields with
+      | Some value -> set_field key (update value) json
+      | None -> Alcotest.failf "fixture has no field %s" key)
+  | _ -> Alcotest.failf "cannot update field %s on a non-object" key
+
+let update_usage update = update_field "usage" update
+
+let current_heartbeat_metrics ?(channel = "heartbeat") ?(message_count = `Null)
+    () =
+  `Assoc
+    (metrics_common_fields ~kind:"heartbeat" ~channel
+    @ [ "message_count", message_count ])
+
+let test_decode_current_turn_metrics () =
+  match Tui_decode.decode_log_entry (current_turn_metrics ()) with
   | Ok entry ->
-      Alcotest.(check (option int)) "input tokens" (Some 10) entry.le_input_tokens;
-      Alcotest.(check (option string)) "work kind" (Some "heartbeat") entry.le_work_kind
+      Alcotest.(check bool) "turn kind" true
+        (entry.le_kind = Tui_decode.Log_turn);
+      Alcotest.(check bool) "canonical channel" true
+        (entry.le_channel = Tui_decode.Log_channel_turn);
+      Alcotest.(check (option int)) "message count" (Some 7)
+        entry.le_message_count;
+      Alcotest.(check (option int)) "input tokens" (Some 10)
+        entry.le_input_tokens;
+      Alcotest.(check (option int)) "output tokens" (Some 12)
+        entry.le_output_tokens;
+      Alcotest.(check (option int)) "zero latency remains observed" (Some 0)
+        entry.le_latency_ms;
+      Alcotest.(check (option (float 0.001))) "zero cost remains observed"
+        (Some 0.0) entry.le_cost_usd;
+      Alcotest.(check (option string)) "derived work kind" (Some "tool_use")
+        entry.le_work_kind
   | Error err -> Alcotest.fail err
 
-let test_parse_log_entry_missing_required_field_fails () =
-  let line =
-    Yojson.Safe.to_string
-      (`Assoc [
-         ("ts", `String "2026-03-31T12:00:00Z");
-         ("channel", `String "hb");
-         ("context_ratio", `Float 0.55);
-         ("context_max", `Int 200);
-         ("message_count", `Int 4);
-       ])
-  in
-  Alcotest.(check bool) "missing context_tokens rejected" true
-    (Result.is_error (Tui_decode.parse_log_entry line))
-
-let test_parse_log_entry_partial_usage_is_allowed () =
-  let line =
-    Yojson.Safe.to_string
-      (`Assoc [
-         ("ts", `String "2026-03-31T12:00:00Z");
-         ("channel", `String "hb");
-         ("context_ratio", `Float 0.55);
-         ("context_tokens", `Int 100);
-         ("context_max", `Int 200);
-         ("message_count", `Int 4);
-         ("usage", `Assoc [("input_tokens", `Int 10)]);
-       ])
-  in
-  match Tui_decode.parse_log_entry line with
+let test_decode_current_turn_variants () =
+  List.iter
+    (fun (channel, expected_channel) ->
+      List.iter
+        (fun (mode, expected_work_kind) ->
+          match
+            Tui_decode.decode_log_entry
+              (current_turn_metrics ~channel ~turn_mode:mode ())
+          with
+          | Ok entry ->
+              Alcotest.(check bool) (channel ^ " channel") true
+                (entry.le_channel = expected_channel);
+              Alcotest.(check (option string)) (mode ^ " work kind")
+                (Some expected_work_kind) entry.le_work_kind
+          | Error err -> Alcotest.failf "%s/%s: %s" channel mode err)
+        [ "tool_use", "tool_use"
+        ; "text_response", "text_turn"
+        ; "skip_text", "text_turn"
+        ; "noop", "noop"
+        ])
+    [ "turn", Tui_decode.Log_channel_turn
+    ; ( "scheduled_autonomous"
+      , Tui_decode.Log_channel_scheduled_autonomous )
+    ];
+  (match
+     Tui_decode.decode_log_entry
+       (current_turn_metrics ~usage:Usage_missing ())
+   with
+   | Ok entry ->
+       Alcotest.(check (option int)) "missing input usage" None
+         entry.le_input_tokens;
+       Alcotest.(check (option int)) "missing output usage" None
+         entry.le_output_tokens;
+       Alcotest.(check (option (float 0.001))) "missing cost" None
+         entry.le_cost_usd
+   | Error err -> Alcotest.fail err);
+  match
+    Tui_decode.decode_log_entry
+      (current_turn_metrics ~usage:Usage_untrusted ())
+  with
   | Ok entry ->
-      Alcotest.(check (option int)) "input tokens" (Some 10) entry.le_input_tokens;
-      Alcotest.(check (option int)) "missing output tokens" None entry.le_output_tokens
+      Alcotest.(check (option int)) "untrusted negative input remains observed"
+        (Some (-10)) entry.le_input_tokens;
+      Alcotest.(check (option int)) "untrusted output remains observed"
+        (Some 12) entry.le_output_tokens
   | Error err -> Alcotest.fail err
 
-let test_parse_log_entry_missing_usage_is_allowed () =
-  let line =
-    Yojson.Safe.to_string
-      (`Assoc [
-         ("ts", `String "2026-03-31T12:00:00Z");
-         ("channel", `String "hb");
-         ("context_ratio", `Float 0.55);
-         ("context_tokens", `Int 100);
-         ("context_max", `Int 200);
-         ("message_count", `Int 4);
-       ])
-  in
-  match Tui_decode.parse_log_entry line with
+let test_decode_current_heartbeat_metrics () =
+  match Tui_decode.decode_log_entry (current_heartbeat_metrics ()) with
   | Ok entry ->
-      Alcotest.(check (option int)) "missing input tokens" None entry.le_input_tokens;
-      Alcotest.(check (option int)) "missing output tokens" None entry.le_output_tokens
+      Alcotest.(check bool) "heartbeat kind" true
+        (entry.le_kind = Tui_decode.Log_heartbeat);
+      Alcotest.(check bool) "heartbeat channel" true
+        (entry.le_channel = Tui_decode.Log_channel_heartbeat);
+      Alcotest.(check (option int)) "unknown message count" None
+        entry.le_message_count;
+      Alcotest.(check (option int)) "heartbeat has no turn usage" None
+        entry.le_input_tokens;
+      (match
+         Tui_decode.decode_log_entry
+           (current_heartbeat_metrics ~message_count:(`Int 9) ())
+       with
+       | Ok counted ->
+           Alcotest.(check (option int)) "observed message count" (Some 9)
+             counted.le_message_count
+       | Error err -> Alcotest.fail err)
   | Error err -> Alcotest.fail err
+
+let test_metrics_contract_rejects_retired_or_unknown_rows () =
+  let versionless =
+    match current_turn_metrics () with
+    | `Assoc fields -> `Assoc (List.remove_assoc "schema" fields)
+    | _ -> Alcotest.fail "turn fixture must be an object"
+  in
+  let missing_usage_field =
+    current_turn_metrics ~usage:Usage_missing ()
+    |> update_usage (remove_field "input_tokens")
+  in
+  let anomaly_flag_mismatch =
+    current_turn_metrics ~usage:Usage_untrusted ()
+    |> update_usage (set_field "usage_anomaly" (`Bool false))
+  in
+  let anomaly_reasons_mismatch =
+    current_turn_metrics ~usage:Usage_untrusted ()
+    |> set_field "usage_anomaly_reasons" (`List [])
+  in
+  let cases =
+    [ "versionless", versionless
+    ; "mixed usage observation", current_turn_metrics ~usage:Usage_mixed ()
+    ; "incorrect usage total", current_turn_metrics ~usage:Usage_bad_total ()
+    ; "missing explicit-null usage field", missing_usage_field
+    ; "usage anomaly flag mismatch", anomaly_flag_mismatch
+    ; "usage anomaly reasons mismatch", anomaly_reasons_mismatch
+    ; "unknown turn channel", current_turn_metrics ~channel:"reactive" ()
+    ; "unknown turn mode", current_turn_metrics ~turn_mode:"text" ()
+    ; ( "non-tool mode with tool calls"
+      , current_turn_metrics ~turn_mode:"noop"
+          ~tools_used:[ "masc_task_claim" ] ~tool_call_count:1 () )
+    ; ( "tool call count mismatch"
+      , current_turn_metrics ~tool_call_count:2 () )
+    ; ( "missing tool call count"
+      , current_turn_metrics () |> remove_field "tool_call_count" )
+    ; ( "negative turn message count"
+      , current_turn_metrics () |> set_field "message_count" (`Int (-1)) )
+    ; ( "negative turn latency"
+      , current_turn_metrics () |> set_field "latency_ms" (`Int (-1)) )
+    ; "heartbeat channel mismatch", current_heartbeat_metrics ~channel:"hb" ()
+    ; ( "negative heartbeat message count"
+      , current_heartbeat_metrics ~message_count:(`Int (-1)) () )
+    ; ( "heartbeat missing nullable message count"
+      , current_heartbeat_metrics () |> remove_field "message_count" )
+    ]
+  in
+  List.iter
+    (fun (label, json) ->
+      Alcotest.(check bool) label true
+        (Result.is_error (Tui_decode.decode_log_entry json)))
+    cases
+
+let observed_context ?(ratio = `Float 0.5) ?(maximum = `Int 200)
+    ?(absolute_turn = 4) ?(request_body_bytes = `Int 4096) () =
+  `Assoc
+    [ "context_ratio", ratio
+    ; "context_tokens", `Int 100
+    ; "context_max", maximum
+    ; "context_source", `String "turn_record"
+    ; "context_metrics_unavailable", `Null
+    ; ( "context"
+      , `Assoc
+          [ "source", `String "turn_record"
+          ; "context_ratio", ratio
+          ; "context_tokens", `Int 100
+          ; "context_max", maximum
+          ; "observed_at", `String "2026-08-21T12:00:00Z"
+          ; "turn_ref", `String "trace-current#4"
+          ; "absolute_turn", `Int absolute_turn
+          ; "request_body_bytes", request_body_bytes
+          ; "metrics_unavailable", `Null
+          ] )
+    ]
+
+let unavailable_context ?(reverse_nested_payload = false) reason =
+  let unavailable_fields =
+    [ "kind", `String "not_observed"; "reason", `String reason ]
+  in
+  let unavailable = `Assoc unavailable_fields in
+  let nested_unavailable =
+    `Assoc
+      (if reverse_nested_payload then List.rev unavailable_fields
+       else unavailable_fields)
+  in
+  `Assoc
+    [ "context_ratio", `Null
+    ; "context_tokens", `Null
+    ; "context_max", `Null
+    ; "context_source", `Null
+    ; "context_metrics_unavailable", unavailable
+    ; ( "context"
+      , `Assoc
+          [ "source", `Null
+          ; "context_ratio", `Null
+          ; "context_tokens", `Null
+          ; "context_max", `Null
+          ; "metrics_unavailable", nested_unavailable
+          ] )
+    ]
+
+let test_decode_context_observation () =
+  (match
+     Tui_decode.decode_context_observation ~expected_trace_id:"trace-current"
+       (observed_context ())
+   with
+   | Ok (Tui_decode.Context_observed observation) ->
+       Alcotest.(check (option (float 0.001))) "ratio" (Some 0.5)
+         observation.ratio;
+       Alcotest.(check int) "tokens" 100 observation.tokens;
+       Alcotest.(check (option int)) "maximum" (Some 200)
+         observation.maximum;
+       Alcotest.(check string) "turn ref" "trace-current#4"
+         observation.turn_ref
+   | Ok (Tui_decode.Context_unavailable _) ->
+       Alcotest.fail "observed context decoded as unavailable"
+   | Error err -> Alcotest.fail err);
+  match
+    Tui_decode.decode_context_observation ~expected_trace_id:"trace-current"
+      (observed_context ~ratio:`Null ~maximum:`Null ())
+  with
+  | Ok (Tui_decode.Context_observed observation) ->
+      Alcotest.(check (option (float 0.001))) "missing ratio is preserved" None
+        observation.ratio;
+      Alcotest.(check (option int)) "missing window is preserved" None
+        observation.maximum
+  | Ok (Tui_decode.Context_unavailable _) ->
+      Alcotest.fail "partial observation decoded as unavailable"
+  | Error err -> Alcotest.fail err
+
+let test_decode_context_unavailable_reasons () =
+  let reasons =
+    [ "context_measurement_missing"
+    ; "turn_record_undecodable"
+    ; "turn_record_read_failed"
+    ; "turn_record_without_usage"
+    ; "turn_record_trace_mismatch"
+    ]
+  in
+  List.iter
+    (fun reason ->
+      let json =
+        unavailable_context
+          ~reverse_nested_payload:
+            (String.equal reason "context_measurement_missing")
+          reason
+      in
+      match
+        Tui_decode.decode_context_observation
+          ~expected_trace_id:"trace-current" json
+      with
+      | Ok (Tui_decode.Context_unavailable _) -> ()
+      | Ok (Tui_decode.Context_observed _) ->
+          Alcotest.failf "%s decoded as observed" reason
+      | Error err -> Alcotest.failf "%s: %s" reason err)
+    reasons;
+  let unknown =
+    `Assoc
+      [ ( "context_metrics_unavailable"
+        , `Assoc
+            [ "kind", `String "not_observed"; "reason", `String "unknown" ] )
+      ]
+  in
+  Alcotest.(check bool) "unknown unavailable reason rejected" true
+    (Result.is_error
+       (Tui_decode.decode_context_observation
+          ~expected_trace_id:"trace-current" unknown))
+
+let test_context_observation_rejects_hybrids_and_prior_trace () =
+  let prior_trace =
+    match observed_context () with
+    | `Assoc fields ->
+        let context =
+          match List.assoc "context" fields with
+          | `Assoc nested ->
+              `Assoc
+                (("turn_ref", `String "trace-prior#4")
+                :: List.remove_assoc "turn_ref" nested)
+          | _ -> Alcotest.fail "observed context fixture must be an object"
+        in
+        `Assoc (("context", context) :: List.remove_assoc "context" fields)
+    | _ -> Alcotest.fail "observed context fixture must be an object"
+  in
+  let hybrid =
+    `Assoc
+      [ "context_ratio", `Float 0.5
+      ; "context_tokens", `Int 100
+      ; "context_max", `Int 200
+      ; "context_source", `String "turn_record"
+      ; ( "context_metrics_unavailable"
+        , `Assoc
+            [ "kind", `String "not_observed"
+            ; "reason", `String "context_measurement_missing"
+            ] )
+      ]
+  in
+  let missing_observed_nullable =
+    observed_context () |> remove_field "context_ratio"
+  in
+  let missing_observed_provenance =
+    observed_context ()
+    |> update_field "context" (remove_field "request_body_bytes")
+  in
+  let missing_unavailable_nullable =
+    unavailable_context "context_measurement_missing"
+    |> remove_field "context_tokens"
+  in
+  let absolute_turn_mismatch = observed_context ~absolute_turn:5 () in
+  let negative_request_bytes =
+    observed_context ~request_body_bytes:(`Int (-1)) ()
+  in
+  let ratio_mismatch = observed_context ~ratio:(`Float 0.75) () in
+  List.iter
+    (fun (label, json) ->
+      Alcotest.(check bool) label true
+        (Result.is_error
+           (Tui_decode.decode_context_observation
+              ~expected_trace_id:"trace-current" json)))
+    [ "prior trace rejected", prior_trace
+    ; "hybrid rejected", hybrid
+    ; "missing observed nullable field rejected", missing_observed_nullable
+    ; "missing observed provenance rejected", missing_observed_provenance
+    ; "missing unavailable nullable field rejected", missing_unavailable_nullable
+    ; "absolute turn mismatch rejected", absolute_turn_mismatch
+    ; "negative request bytes rejected", negative_request_bytes
+    ; "ratio mismatch rejected", ratio_mismatch
+    ]
 
 let test_parse_keeper_chat_response_sse_delta () =
   let response =
@@ -520,13 +908,23 @@ let () =
       ] );
     ( "parse_log_entry",
       [
-        Alcotest.test_case "success" `Quick test_parse_log_entry_success;
-        Alcotest.test_case "missing required field fails" `Quick
-          test_parse_log_entry_missing_required_field_fails;
-        Alcotest.test_case "partial usage is allowed" `Quick
-          test_parse_log_entry_partial_usage_is_allowed;
-        Alcotest.test_case "missing usage is allowed" `Quick
-          test_parse_log_entry_missing_usage_is_allowed;
+        Alcotest.test_case "current turn contract" `Quick
+          test_decode_current_turn_metrics;
+        Alcotest.test_case "all current turn variants" `Quick
+          test_decode_current_turn_variants;
+        Alcotest.test_case "current heartbeat contract" `Quick
+          test_decode_current_heartbeat_metrics;
+        Alcotest.test_case "retired and unknown rows fail closed" `Quick
+          test_metrics_contract_rejects_retired_or_unknown_rows;
+      ] );
+    ( "context_observation",
+      [
+        Alcotest.test_case "observed and partial current context" `Quick
+          test_decode_context_observation;
+        Alcotest.test_case "closed unavailable reasons" `Quick
+          test_decode_context_unavailable_reasons;
+        Alcotest.test_case "hybrid and prior trace fail closed" `Quick
+          test_context_observation_rejects_hybrids_and_prior_trace;
       ] );
     ( "parse_keeper_chat_response",
       [

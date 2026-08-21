@@ -400,9 +400,12 @@ operator_targets=(
 )
 
 sse_targets=(
+  @test/runtest-test_tui_context_state
+  @test/runtest-test_tui_decode
   @test/runtest-test_tui_keeper_chat_projection
   @test/runtest-test_tui_keeper_chat_recovery
   @test/runtest-test_tui_message_layout
+  @test/runtest-test_tui_observation_layout
   @test/runtest-test_tui_http_ast
   @test/runtest-test_tui_render_schedule
   @test/runtest-test_sse_coverage

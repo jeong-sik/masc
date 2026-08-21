@@ -14,6 +14,7 @@ type task = {
 
 type keeper = {
   k_name : string;
+  k_trace_id : string;
   k_generation : int;
   k_paused : bool;
   k_current_task_id : string option;
@@ -77,22 +78,44 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
+type log_kind =
+  | Log_turn
+  | Log_heartbeat
+
+type log_channel =
+  | Log_channel_turn
+  | Log_channel_scheduled_autonomous
+  | Log_channel_heartbeat
+
 type log_entry = {
+  le_kind : log_kind;
   le_ts : string;
-  le_channel : string;
-  le_context_ratio : float;
-  le_context_tokens : int;
-  le_context_max : int;
-  le_message_count : int;
-  le_model_used : string option;
+  le_channel : log_channel;
+  le_message_count : int option;
   le_input_tokens : int option;
   le_output_tokens : int option;
   le_latency_ms : int option;
   le_cost_usd : float option;
   le_work_kind : string option;
   le_tools_used : string list;
-  le_compacted : bool option;
 }
+
+type context_unavailable_reason =
+  | Context_measurement_missing
+  | Context_turn_record_undecodable
+  | Context_turn_record_read_failed
+  | Context_turn_record_without_usage
+  | Context_turn_record_trace_mismatch
+
+type context_observation =
+  | Context_observed of {
+      ratio : float option;
+      tokens : int;
+      maximum : int option;
+      observed_at : string;
+      turn_ref : string;
+    }
+  | Context_unavailable of context_unavailable_reason
 
 val decode_agent : Yojson.Safe.t -> (agent, string) result
 val task_of_domain : Masc_domain.task -> task
@@ -103,6 +126,12 @@ val decode_keeper : Yojson.Safe.t -> (keeper, string) result
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result
 val parse_log_entry : string -> (log_entry, string) result
+val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
+val decode_context_observation :
+  expected_trace_id:string ->
+  Yojson.Safe.t ->
+  (context_observation, string) result
+val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
 val http_status_error : status_code:int -> body:string -> string
 val decode_json_response_body :

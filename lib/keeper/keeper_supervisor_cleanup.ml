@@ -14,17 +14,17 @@ let completion_meta_for_coverage config operation =
          && Int.equal meta.runtime.nonce operation.generation -> Some meta
   | Ok (Some _) ->
     Log.Keeper.warn
-      "%s: dead tombstone completion coverage meta identity changed"
+      "%s: supervisor cleanup completion coverage meta identity changed"
       operation.keeper_name;
     None
   | Ok None ->
     Log.Keeper.warn
-      "%s: dead tombstone completion coverage meta is absent"
+      "%s: supervisor cleanup completion coverage meta is absent"
       operation.keeper_name;
     None
   | Error detail ->
     Log.Keeper.warn
-      "%s: dead tombstone completion coverage meta read failed: %s"
+      "%s: supervisor cleanup completion coverage meta read failed: %s"
       operation.keeper_name
       detail;
     None
@@ -66,7 +66,7 @@ let handle_completion config operation = function
          ~keeper_id:operation.keeper_name
          Keeper_lifecycle_hooks.Supervisor_cleaned;
        Log.Keeper.info
-         "%s: dead tombstone finalization delivered operation=%s"
+         "%s: supervisor cleanup finalization delivered operation=%s"
          operation.keeper_name
        operation_id;
        Ok ())

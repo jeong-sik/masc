@@ -37,7 +37,7 @@ type event =
           phase changes after the registry write commits. Hooks observe an
           applied transition; they cannot veto. *)
   | Supervisor_cleaned
-      (** Fired by the durable dead-tombstone completion handler after exact
+      (** Fired by the durable supervisor cleanup completion handler after exact
           registry unregister and finalization persistence. The keeper is
           fully gone from in-process state at this point. *)
 

@@ -17,9 +17,6 @@ val resolve_active_goal_ids :
 (** Update an existing keeper's meta record. Validates tool-access
     transitions, resolves active goals, applies parsed-arg overrides,
     persists the new meta, and broadcasts state-machine events.
-    A terminal dead tombstone is rejected before any mutation with the stable
-    [keeper_recreate_required] error; callers must delete it and create a fresh
-    Keeper identity.
     Returns structured {!Keeper_types_profile.tool_result}; failures carry their
     message on the typed error payload. *)
 val update_keeper :

@@ -1,7 +1,7 @@
 (** Typed persisted lifecycle latch.
 
-    Explicit operator pauses, terminal dead tombstones, and structural
-    transcript corruption own the durable paused axis. Ordinary
+    Explicit operator pauses and structural transcript corruption own the
+    durable paused axis. Ordinary
     turn/provider/task failures remain observations and cannot manufacture a
     lifecycle state. *)
 

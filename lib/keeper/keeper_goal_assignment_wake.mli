@@ -22,6 +22,6 @@ val enqueue_goal_assigned_wakes :
 (** Enqueue one [Goal_assigned] stimulus per added goal (title resolved from
     Goal_store at enqueue time; a goal deleted between validation and
     enqueue falls back to its id as the label). The durable queue append
-    precedes the Running-lane wake hint; inactive, paused, and dead-tombstone
-    lanes retain the queued entry without receiving the hint. Returns the added
+    precedes the Running-lane wake hint; inactive and paused lanes retain the
+    queued entry without receiving the hint. Returns the added
     goal ids. *)

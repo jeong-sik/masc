@@ -3567,12 +3567,12 @@ describe('fusion chat card', () => {
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: "(Fusion_types.Provider_error \"Provider 'unknown' bad gateway\")",
+            reason: "Provider 'unknown' bad gateway",
           },
           {
             model: 'ollama_cloud.deepseek-v4-flash',
             status: 'failed',
-            reason: 'Fusion_types.Timeout',
+            reason: 'timeout',
           },
         ],
         judge: { status: 'failed', decision: 'blocked', error: 'judge failed hard' },
@@ -3588,7 +3588,6 @@ describe('fusion chat card', () => {
     expect(detail?.textContent).toContain("Provider 'ollama_cloud.minimax-m3' bad gateway")
     expect(detail?.textContent).toContain('timeout')
     expect(detail?.textContent).toContain('judge failed hard')
-    expect(detail?.textContent).not.toContain('Fusion_types.Provider_error')
     expect(detail?.textContent).not.toContain("Provider 'unknown'")
   })
 

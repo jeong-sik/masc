@@ -192,7 +192,11 @@ let test_terminal_text_escapes_malformed_utf8_bytes () =
   [ ( "isolated illegal bytes"
     , "\128\160\192\193\194\245\255"
     , "\\x80\\xA0\\xC0\\xC1\\xC2\\xF5\\xFF" )
+  ; ("overlong two-byte sequence", "\192\128", "\\xC0\\x80")
   ; ("overlong three-byte sequence", "\224\128\128", "\\xE0\\x80\\x80")
+  ; ( "overlong four-byte sequence"
+    , "\240\128\128\128"
+    , "\\xF0\\x80\\x80\\x80" )
   ; ("UTF-16 surrogate", "\237\160\128", "\\xED\\xA0\\x80")
   ; ( "code point above U+10FFFF"
     , "\244\144\128\128"

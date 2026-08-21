@@ -342,12 +342,19 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"
        ~callee:"Yojson.Safe.to_string");
-  check int "dashboard event text crosses the terminal boundary" 1
+  (* Four, not one: besides the event content this binding also crosses
+     [state.workspace] and each agent's [name] / [status]. They are all values
+     the renderer received from outside, so each one goes through the boundary
+     rather than reaching [fit_width] raw. *)
+  check int "dashboard event text crosses the terminal boundary" 4
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_dashboard"
        ~callee:"Terminal_text.single_line");
-  check int "overview event text crosses the terminal boundary" 1
+  (* Five: [state.workspace], each row's [ov_cluster] / [ov_project], the
+     agent [ai_summary], and the event content. Every one arrives from outside
+     the renderer. *)
+  check int "overview event text crosses the terminal boundary" 5
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_overview"
@@ -822,6 +829,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Terminal_text.single_lines"
     ; "Terminal_text.short_timestamp"
     ; "Terminal_text.clock_timestamp"
+      (* Not a [Terminal_text] name, but it is a boundary crossing all the
+         same: it serializes the approval payload and hands the result to
+         [Masc.Tui_decode.sanitize_terminal_text] before returning
+         (masc_tui_operator_projection.ml). This list matches on the call
+         site's spelling, so a wrapper that sanitizes internally has to be
+         named here or the guard reads it as a raw access. *)
+    ; "Masc_tui_operator_projection.approval_payload_for_terminal"
     ]
   in
   let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in
@@ -946,6 +960,20 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   ; "clock_timestamp"
   ]
   |> List.iter (check_binding ansi_path);
+  let check_direct_result binding callee =
+    check bool (binding ^ " returns its trusted projection directly") true
+      (Ast_grep.direct_call_sequence_matches_in_value_binding
+         ~module_path:ansi_path ~binding_name:binding ~callees:[ callee ])
+  in
+  check_direct_result "single_line"
+    "Masc.Tui_decode.sanitize_terminal_text";
+  check_direct_result "optional_single_line" "Option.map";
+  check_direct_result "single_line_or" "Option.value";
+  check_direct_result "single_lines" "List.map";
+  check_direct_result "short_timestamp"
+    "Masc.Tui_decode.short_timestamp_for_terminal";
+  check_direct_result "clock_timestamp"
+    "Masc.Tui_decode.clock_timestamp_for_terminal";
   check int "shared terminal boundary delegates to the typed sanitizer" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:ansi_path ~binding_name:"single_line"
@@ -975,6 +1003,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   [ "short_timestamp_for_terminal"; "clock_timestamp_for_terminal" ]
   |> List.iter (fun binding ->
        check_binding decode_path binding;
+       check bool (binding ^ " returns the final sanitizer result") true
+         (Ast_grep.direct_call_sequence_matches_in_value_binding
+            ~module_path:decode_path ~binding_name:binding
+            ~callees:[ "sanitize_terminal_text" ]);
        check int (binding ^ " has one final sanitizer") 1
          (Ast_grep.count_calls_in_value_binding ~module_path:decode_path
             ~binding_name:binding ~callee:"sanitize_terminal_text");

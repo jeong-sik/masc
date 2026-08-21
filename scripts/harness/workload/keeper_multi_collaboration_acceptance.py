@@ -1416,7 +1416,13 @@ class MissionRun:
         while time.monotonic() < down_deadline:
             status = self.read_status("coordinator", "down-poll")
             if isinstance(status, dict) and not status.get("keepalive_running", False):
-                if status.get("shutdown_admission_fence") is False:
+                runtime_surface = status.get("runtime")
+                fence = (
+                    runtime_surface.get("shutdown_admission_fence")
+                    if isinstance(runtime_surface, dict)
+                    else None
+                )
+                if fence is False:
                     break
             time.sleep(1.0)
         else:

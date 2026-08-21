@@ -881,8 +881,13 @@ let canonical_reply_payload_of_body ~redact_text body =
     | None -> Error Invalid_turn_ref
   in
   let* external_effect_target =
-    (* Absent on legacy payloads that predate the field; present means the
-       producer serialized a typed delivery target and it must decode. *)
+    (* Absent means the turn recorded no surface-post receipt, which is the
+       live shape for every outcome except External_effect_completed. That
+       outcome and the receipt are decided from the same
+       [terminal_effect_state] (keeper_agent_run.ml:1064-1076), so a completed
+       external effect always serializes its target. A payload claiming the
+       outcome without one predates the field, and is rejected rather than
+       projected downstream as a null destination. *)
     match
       List.filter_map
         (fun (key, value) ->
@@ -891,7 +896,14 @@ let canonical_reply_payload_of_body ~redact_text body =
            else None)
         fields
     with
-    | [] -> Ok None
+    | [] ->
+      if
+        Keeper_turn_outcome.equal turn_outcome
+          Keeper_turn_outcome.External_effect_completed
+      then
+        Error
+          (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
+      else Ok None
     | [ value ] ->
       (match Keeper_surface_post.delivery_target_of_yojson value with
        | Ok target -> Ok (Some target)

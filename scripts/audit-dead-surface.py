@@ -561,7 +561,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # (measured 2026-08-20: 539). The one count of slack predates this change;
 # goal_verification's exports all have callers (dashboard joins + tests), so
 # the ledger added none.
-DEAD_EXPORT_BASELINE = 537
+DEAD_EXPORT_BASELINE = 536
 
 
 def run_ratchet(count: int) -> int:

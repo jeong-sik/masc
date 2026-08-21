@@ -183,6 +183,18 @@ let test_legacy_tombstone_does_not_weaken_closed_schema () =
         :: fields))
 ;;
 
+let test_legacy_tombstone_rejects_wrong_payload_shapes () =
+  [ "scalar", `String "goal-a"
+  ; "null", `Null
+  ; "object", `Assoc [ "goal", `String "goal-a" ]
+  ; "mixed element", `List [ `String "goal-a"; `Int 7 ]
+  ]
+  |> List.iter (fun (label, payload) ->
+    expect_rejected
+      ("legacy tombstone " ^ label)
+      (current_json () |> replace_field "active_goal_ids" payload))
+;;
+
 let test_retired_compaction_failure_authority_requires_reset () =
   expect_rejected
     "retired compaction failure authority"
@@ -210,6 +222,8 @@ let () =
             test_legacy_active_goal_ids_is_read_only_tombstone
         ; test_case "legacy tombstone keeps the remaining schema closed" `Quick
             test_legacy_tombstone_does_not_weaken_closed_schema
+        ; test_case "legacy tombstone rejects wrong payload shapes" `Quick
+            test_legacy_tombstone_rejects_wrong_payload_shapes
         ; test_case
             "retired compaction failure authority requires reset"
             `Quick

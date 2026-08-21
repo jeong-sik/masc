@@ -25,7 +25,7 @@ let malformed_payload_error =
 ;;
 
 (** Mirrors the real incident (masc#28761/#28762, 2026-08-15T11:49:38Z,
-    keeper=alpha, turn=6595): the cycle's [execution.runtime_id] is the
+    turn=6595): the cycle's [execution.runtime_id] is the
     lane assignment "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
     but the candidate that was actually dispatched and failed is
     "glm-coding.glm-5-turbo". *)

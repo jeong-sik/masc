@@ -62,7 +62,6 @@ type runtime_exhaustion_reason =
   | Capacity_exhausted
   | Other_detail of string
 
-val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 
 val runtime_exhaustion_reason_to_label : runtime_exhaustion_reason -> string
 (** Human-readable label carrying the [detail]/[message] payload inline,

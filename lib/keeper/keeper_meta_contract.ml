@@ -76,22 +76,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | Capacity_exhausted
   | Other_detail of string
 
-(** Total typed retryability for a runtime-exhaustion reason.
-
-    Replaces a former string-prefix reparse in
-    [keeper_supervisor_pause_policy] that matched on the wire form of
-    [runtime_exhaustion_reason_code] and biased every unlisted reason to
-    non-retryable via a [_ -> false] catch-all.  That polarity was wrong
-    for transient/connectivity faults (Connection_refused, Dns_failure,
-    No_providers_available, All_providers_failed), which the supervisor should retry.
-
-    Exhaustive match: adding a new [runtime_exhaustion_reason] variant
-    fails compilation here, forcing an explicit retryability decision
-    rather than silently defaulting. *)
-let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : bool =
-  Keeper_internal_error.runtime_exhaustion_reason_retryable reason
-;;
-
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure

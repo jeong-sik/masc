@@ -45,7 +45,6 @@ type grader =
 (** {1 Scenario types} *)
 
 type tool_expectation = {
-  tool_name : string;
   selector : Eval_tool_selector.t;
   required : bool;
   max_calls : int option;

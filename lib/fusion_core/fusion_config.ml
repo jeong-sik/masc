@@ -92,9 +92,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
   in
-  let fallback_judge_model =
-    Otoml.find_opt tbl Otoml.get_string [ "fallback_judge_model" ]
-  in
   (* 런타임 quorum. 미설정 시 [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행).
      허용 범위는 1 이상 패널 모델 총합 이하; 검증 SSOT는 Validated_preset.of_preset. *)
   Result.bind (parse_min_answered name tbl) (fun min_answered ->
@@ -107,7 +104,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
       ; judge_timeout_s
       ; judges
       ; min_answered
-      ; fallback_judge_model
       }
     in
     (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset

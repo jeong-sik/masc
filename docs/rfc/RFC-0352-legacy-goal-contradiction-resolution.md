@@ -3,7 +3,7 @@
 - Status: **Accepted — Path B (오너 결정 2026-07-21)**
 - Decision: §4의 1문항에 오너가 **(a) Goal은 1급 엔티티** 로 답함 → Path B 채택. RFC-0000 §3.2 카드 재작성·§11 D10 DECIDED 처리는 본 RFC와 같은 PR에서 집행됨.
 - Date: 2026-07-21
-- Evidence: 2026-07-21 dead-surface 적대적 감사 (`~/me/reports/masc-oas-dead-surface-adversarial-audit-2026-07-21.md`, 판정 4건: `retired/legacy-goal-*` 전부 **ALIVE**, `spec-map/goal-loop-spec-self-conflict` **ALIVE**)
+- Evidence: 2026-07-21 dead-surface 적대적 감사 (`~/me/reports/masc-agent_core-dead-surface-adversarial-audit-2026-07-21.md`, 판정 4건: `retired/legacy-goal-*` 전부 **ALIVE**, `spec-map/goal-loop-spec-self-conflict` **ALIVE**)
 - Blocks: goal 일가족 정리 (감사 Tier B 최대 항목, 합계 ~13k LoC 규모)
 - Non-blocking: goal_loop 스크립트 10개+Python 테스트 8개(4,844 LoC)는 **어느 결정과도 양립하는 삭제**라 본 RFC와 무관하게 진행 가능 (RFC-0000:781 KILL 행, 자동 호출자 0 확인)
 

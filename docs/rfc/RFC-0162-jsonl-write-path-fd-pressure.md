@@ -274,7 +274,7 @@ let append_jsonl path json =
 **fd budget 분석**:
 
 - macOS default `RLIMIT_NOFILE` = 256 (soft) / unlimited (hard). masc 가 256 root 안에서 운영.
-- 4 writer (system_log / trajectory / oas-events / reaction-ledger) × 평균 1 active path = 4 fd baseline.
+- 4 writer (system_log / trajectory / agent-core-events / reaction-ledger) × 평균 1 active path = 4 fd baseline.
 - Day rollover 시 어제 path 도 evict 전까지 남음 → 최대 8 fd.
 - Dashboard read-side, network connection 등 합쳐 ~30 fd. fd_cache_max=32 는 safe margin.
 - RFC-0108 §3.3 의 "N≤64" budget 안 *충분히 들어옴*.

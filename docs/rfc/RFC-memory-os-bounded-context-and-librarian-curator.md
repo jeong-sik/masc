@@ -118,7 +118,7 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 2. **PR-B** keeper 변수 주입 (§3.4) — 계약 불변, 템플릿+변수.
 3. **PR-C** exact 실패 타이핑 + compaction terminal phase (§3.6 이행기, #26533과 정합).
 4. curator ops 계약 교체 (§3.3) — 스키마·파서·검증·템플릿. 하네스로 준수율 측정 동반.
-5. 전송 계약 (§3.1) — K/M 결정(선행 측정: OAS checkpoint JSON에서 tool result 비중 실측), elision, archive 조회 도구.
+5. 전송 계약 (§3.1) — K/M 결정(선행 측정: agent_core checkpoint JSON에서 tool result 비중 실측), elision, archive 조회 도구.
 6. 숙청 — compaction_exact lane, 화석 템플릿 2종(`memory_consolidation`, `episode_extraction`), request-body cap 재평가(§3.1이 상한을 구성으로 보장하면 거절 cap은 중복 gate).
 
 ## 5. 비제안

@@ -70,6 +70,8 @@ let append_rejection_event event =
         })
 
 let record_tool_skipped_with_append ~append ~tool_name ~reason_code =
+  (* NDT-OK: observation boundary. The ring stamps when the skip was seen; no
+     branch reads [ts] back, only the window filter in the projection does. *)
   let event = { ts = Unix.gettimeofday (); tool_name; reason_code } in
   try
     append event
@@ -253,8 +255,4 @@ let gate_tool_events_json ~base_path ~window_minutes () : Yojson.Safe.t =
 let gate_tool_events_json_with_pending_result_for_testing =
   gate_tool_events_json_with_pending_result
 
-let () =
-  Keeper_keepalive_signal.register_record_tool_skipped (fun ~tool_name ~reason_code ->
-    ignore (record_tool_skipped ~tool_name ~reason_code)
-  )
-;;
+let () = Keeper_keepalive_signal.register_record_tool_skipped record_tool_skipped

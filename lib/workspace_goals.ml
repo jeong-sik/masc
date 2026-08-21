@@ -719,6 +719,13 @@ let reconcile_committed_proof config ~goal_id =
          | Goal_verification.Proof_refuted
              ({ outcome = Goal_verification.Refuted { reason }; _ } as verdict) ->
            Some (Goal_phase.Record_proof_refuted, verdict, Some reason)
+         | Goal_verification.Proof_proven
+             { outcome = Goal_verification.Refuted _; _ }
+         | Goal_verification.Proof_refuted
+             { outcome = Goal_verification.Proven; _ } ->
+           (* Rejected by the explicit malformed-ledger guards above. This
+              arm keeps the closed sum exhaustive at the use site. *)
+           None
          | Goal_verification.Completion_idle
          | Goal_verification.Proof_pending _ -> None
        in
@@ -730,7 +737,7 @@ let reconcile_committed_proof config ~goal_id =
           | Ok (Goal_phase.Already _) ->
             Error "committed proof reconciliation did not name a phase transition"
           | Ok (Goal_phase.Move_to phase) ->
-            let update current =
+            let update (current : Goal_store.goal) =
               let last_review_note, last_review_at =
                 match note with
                 | Some note -> Some note, Some (Masc_domain.now_iso ())

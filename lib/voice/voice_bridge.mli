@@ -20,7 +20,13 @@ type mcp_call_error =
       }
   | Malformed_body of string
 
+type effect_disposition =
+  | Proven_pre_effect
+  | Outcome_unknown
+
 val mcp_call_error_to_string : mcp_call_error -> string
+val mcp_call_effect_disposition : mcp_call_error -> effect_disposition
+(** Voice MCP failures do not prove that remote playback did not happen. *)
 
 type agent_speak_completion =
   | Spoken

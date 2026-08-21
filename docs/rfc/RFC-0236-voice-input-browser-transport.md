@@ -47,12 +47,14 @@ contract.
 "stt": { "default_model": "scribe_v2", "endpoints": [
   { "id": "elevenlabs-stt", "kind": "elevenlabs_direct",
     "api_key_env": "ELEVENLABS_API_KEY", "enabled": true,
-    "timeout_seconds": 35.0, "max_retries": 2 }] }
+    "timeout_seconds": 35.0 }] }
 ```
 
 `scribe_v2` is a valid ElevenLabs `model_id` (official API reference: only `scribe_v1`
 and `scribe_v2` are accepted). So transcription is already provisioned end to end —
-only the browser→server upload half is missing. **No config change is part of this RFC.**
+only the browser→server upload half is missing. **No config change is required by
+this RFC.** Older files containing the removed `max_retries` key remain readable;
+the key is ignored and has no runtime effect.
 
 ### 1.3 keeper_voice_listen is a different path, not this
 

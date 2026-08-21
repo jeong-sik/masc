@@ -17,8 +17,29 @@ let test_rendering_is_stable () =
     (Voice.mcp_call_error_to_string (Voice.Malformed_body "unexpected token"))
 ;;
 
+let test_voice_mcp_failures_do_not_authorize_failover () =
+  List.iter
+    (fun (label, error) ->
+       check bool
+         label
+         true
+         (Voice.mcp_call_effect_disposition error = Voice.Outcome_unknown))
+    [ "timeout", Voice.Timed_out 30.0
+    ; "connection", Voice.Connection_failed "econnrefused"
+    ; "http", Voice.Http_status { code = 503; body = "unavailable" }
+    ; "malformed", Voice.Malformed_body "unexpected token"
+    ]
+;;
+
 let () =
   Alcotest.run
     "Voice bridge errors"
-    [ "typed observation", [ test_case "rendering is stable" `Quick test_rendering_is_stable ] ]
+    [ ( "typed observation"
+      , [ test_case "rendering is stable" `Quick test_rendering_is_stable
+        ; test_case
+            "failure does not authorize endpoint failover"
+            `Quick
+            test_voice_mcp_failures_do_not_authorize_failover
+        ] )
+    ]
 ;;

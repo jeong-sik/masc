@@ -225,6 +225,15 @@ type mcp_call_error =
       }
   | Malformed_body of string
 
+type effect_disposition =
+  | Proven_pre_effect
+  | Outcome_unknown
+
+let mcp_call_effect_disposition = function
+  | Timed_out _ | Connection_failed _ | Http_status _ | Malformed_body _ ->
+    Outcome_unknown
+;;
+
 let mcp_call_error_to_string = function
   | Timed_out seconds -> Printf.sprintf "Request timeout after %.1fs" seconds
   | Connection_failed detail -> Printf.sprintf "Connection error: %s" detail
@@ -333,7 +342,7 @@ let call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments =
     with_timeout ~clock ~timeout (fun () ->
       single_voice_mcp_call ~net ~uri ~headers_list ~body_str)
   in
-  operation () |> Result.map_error mcp_call_error_to_string
+  operation ()
 ;;
 
 let attempt_tts_endpoint
@@ -438,7 +447,7 @@ let attempt_tts_endpoint
      | Error error ->
        (try Sys.remove audio_file with
         | Sys_error _ -> ());
-       Error error)
+       Error (`Proven_pre_effect error))
   | Voice_runtime_overlay.Voice_mcp ->
     let args =
       `Assoc
@@ -449,42 +458,51 @@ let attempt_tts_endpoint
         ]
     in
     with_voice_output_turn ~agent_id (fun () ->
-      let* json =
+      match
         call_voice_mcp_endpoint
           ~clock
           ~net
           ~endpoint
           ~tool_name:"agent_speak"
           ~arguments:args
-      in
-      let* data = extract_mcp_result json in
-      (* Voice_mcp plays audio locally but does not expose a file for the
-         dashboard. Try to synthesize a parallel HTTP TTS clip so the
-         browser can also play it. *)
-      let data =
-        match
-          try_http_tts_for_dashboard
-            ~config
-            ~agent_id
-            ~message
-            ~voice
-            ~model
-            ~audio_device
-            ()
-        with
-        | Some (audio_file, file_size) ->
-          let audio_fields =
-            [ "audio_file", `String audio_file
-            ; "audio_size", `Int file_size
-            ]
-            @ audio_payload_fields ~audio_file ~audio_device
-          in
-          (match data with
-           | `Assoc fields -> `Assoc (fields @ audio_fields)
-           | other -> other)
-        | None -> data
-      in
-      Ok (append_provider_metadata data endpoint))
+      with
+      | Error error ->
+        (match mcp_call_effect_disposition error with
+         | Proven_pre_effect ->
+           Error (`Proven_pre_effect (mcp_call_error_to_string error))
+         | Outcome_unknown ->
+           Error (`Outcome_unknown (mcp_call_error_to_string error)))
+      | Ok json ->
+        (match extract_mcp_result json with
+         | Error error -> Error (`Outcome_unknown error)
+         | Ok data ->
+           (* Voice_mcp plays audio locally but does not expose a file for the
+              dashboard. Try to synthesize a parallel HTTP TTS clip so the
+              browser can also play it. *)
+           let data =
+             match
+               try_http_tts_for_dashboard
+                 ~config
+                 ~agent_id
+                 ~message
+                 ~voice
+                 ~model
+                 ~audio_device
+                 ()
+             with
+             | Some (audio_file, file_size) ->
+               let audio_fields =
+                 [ "audio_file", `String audio_file
+                 ; "audio_size", `Int file_size
+                 ]
+                 @ audio_payload_fields ~audio_file ~audio_device
+               in
+               (match data with
+                | `Assoc fields -> `Assoc (fields @ audio_fields)
+                | other -> other)
+             | None -> data
+           in
+           Ok (append_provider_metadata data endpoint)))
 ;;
 
 (** Try HTTP TTS endpoints to synthesize a browser-playable MP3 clip.
@@ -619,7 +637,7 @@ let agent_speak_json
                endpoint
            with
            | Ok _ as ok -> ok
-           | Error error ->
+           | Error (`Proven_pre_effect error) ->
              let attempt = Printf.sprintf "%s: %s" endpoint.id error in
              (if rest <> []
               then
@@ -628,7 +646,13 @@ let agent_speak_json
                      "TTS endpoint %s failed; trying next endpoint: %s"
                      endpoint.id
                      error));
-             try_endpoints (attempt :: attempted) rest)
+             try_endpoints (attempt :: attempted) rest
+           | Error (`Outcome_unknown error) ->
+             Error
+               (Printf.sprintf
+                  "TTS endpoint %s outcome is unknown; failover stopped: %s"
+                  endpoint.id
+                  error))
       in
       if endpoints = []
       then Error "no configured TTS endpoint"

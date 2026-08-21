@@ -146,12 +146,8 @@ let string_of_endpoint_kind = function
 
 let parse_endpoint ~ctx json =
   let open Result in
-  let* () =
-    match json with
-    | `Assoc fields when List.mem_assoc "max_retries" fields ->
-      Error (Printf.sprintf "%s.max_retries is no longer supported" ctx)
-    | _ -> Ok ()
-  in
+  (* Read compatibility only: old deployments may still carry the removed
+     field.  It has no runtime meaning and is never projected back out. *)
   let* id = require_string ~ctx ~field:"id" json in
   let* kind_raw = require_string ~ctx ~field:"kind" json in
   let* kind = endpoint_kind_of_string kind_raw in

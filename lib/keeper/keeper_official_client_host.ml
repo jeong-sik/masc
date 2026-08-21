@@ -535,7 +535,7 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
           active
           ~final_text:
             (Agent_core.Types.text_of_response result.response
-             |> String_util.trim_to_option)
+             |> String_util.trim_nonempty)
           ~stop_reason:
             (Some
                (Agent_core.Types.stop_reason_to_string

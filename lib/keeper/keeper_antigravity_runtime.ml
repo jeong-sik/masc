@@ -194,15 +194,15 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
     let* context =
       prepared.messages |> extra_system_context_messages |> render_messages
     in
-    match String_util.trim_to_option context with
+    match String_util.trim_nonempty context with
     | None -> Ok goal
     | Some context -> Ok (context ^ prompt_section_separator ^ goal))
   else
     let* history = render_messages prepared.messages in
     Ok
-      ([ String_util.trim_to_option prepared.system_prompt
+      ([ String_util.trim_nonempty prepared.system_prompt
          |> Option.map (fun value -> system_instructions_label ^ value)
-      ; String_util.trim_to_option history
+      ; String_util.trim_nonempty history
       ; Some (current_goal_label ^ goal)
       ]
       |> List.filter_map Fun.id

@@ -88,7 +88,7 @@ let git_probe_from_root repo_root =
       Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
       None
   in
-  Option.bind output String_util.trim_to_option
+  Option.bind output String_util.trim_nonempty
 ;;
 
 let observe_probe_failure ~site exn =
@@ -141,7 +141,7 @@ let parse_dune_project_version raw =
         line
         (String.length prefix)
         (String.length line - String.length prefix - String.length ")")
-      |> String_util.trim_to_option
+      |> String_util.trim_nonempty
     else None)
 ;;
 
@@ -174,7 +174,7 @@ let decimal_digits_only s =
 let max_reasonable_commit_unix_ts = 4_102_444_800L
 
 let parse_commit_unix_ts_output raw =
-  match String_util.trim_to_option raw with
+  match String_util.trim_nonempty raw with
   | None -> None
   | Some s when not (decimal_digits_only s) -> None
   | Some s ->
@@ -250,7 +250,7 @@ let probe_commit_unix_ts commit_hash_opt =
 ;;
 
 let resolve_commit ~embedded ~probe =
-  match Option.bind embedded String_util.trim_to_option with
+  match Option.bind embedded String_util.trim_nonempty with
   | Some commit -> Some commit
   | None -> probe ()
 ;;
@@ -273,7 +273,7 @@ let resolve_commit_details ~embedded ~probe =
      describes the source tree next to the process, which moves
      independently of the binary. *)
   let binary_commit, binary_commit_source =
-    match Option.bind embedded String_util.trim_to_option with
+    match Option.bind embedded String_util.trim_nonempty with
     | Some commit -> Some commit, Some embedded_commit_source
     | None -> None, None
   in

@@ -269,7 +269,7 @@ let git_rev_parse_short_probe dir =
          ~timeout_sec:git_rev_parse_short_probe_timeout_sec
          argv
      with
-     | Unix.WEXITED 0, output -> String_util.trim_to_option output
+     | Unix.WEXITED 0, output -> String_util.trim_nonempty output
      | _ -> None)
 ;;
 
@@ -305,7 +305,7 @@ let maybe_refresh_git_rev_parse_short_in_background dir =
 ;;
 
 let git_rev_parse_short path =
-  match String_util.trim_to_option path with
+  match String_util.trim_nonempty path with
   | None -> None
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
@@ -363,7 +363,7 @@ let git_probe_trimmed dir args =
       ~timeout_sec:git_rev_parse_short_probe_timeout_sec
       argv
   with
-  | Unix.WEXITED 0, output -> String_util.trim_to_option output
+  | Unix.WEXITED 0, output -> String_util.trim_nonempty output
   | _ -> None
 ;;
 
@@ -373,7 +373,7 @@ let parse_ahead_behind raw =
     |> String.trim
     |> String.split_on_char '\t'
     |> List.concat_map (String.split_on_char ' ')
-    |> List.filter_map String_util.trim_to_option
+    |> List.filter_map String_util.trim_nonempty
   with
   | [ ahead; behind ] ->
     (match int_of_string_opt ahead, int_of_string_opt behind with
@@ -460,7 +460,7 @@ let maybe_refresh_git_upstream_status_in_background dir =
 ;;
 
 let git_upstream_status path =
-  match String_util.trim_to_option path with
+  match String_util.trim_nonempty path with
   | None -> None
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
@@ -633,7 +633,7 @@ let path_item_json ~source path =
 ;;
 
 let normalized_path_opt path =
-  match String_util.trim_to_option path with
+  match String_util.trim_nonempty path with
   | None -> None
   | Some path ->
     let normalized =
@@ -817,19 +817,19 @@ let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
 
 let dashboard_runtime_credential_value = function
   | Runtime_schema.Env key ->
-    (match Option.bind (Sys.getenv_opt key) String_util.trim_to_option with
+    (match Option.bind (Sys.getenv_opt key) String_util.trim_nonempty with
      | Some value -> Ok value
      | None -> Error (Printf.sprintf "env credential %s is empty or unset" key))
   | Runtime_schema.File path ->
     (try
-       match Fs_compat.load_file path |> String_util.trim_to_option with
+       match Fs_compat.load_file path |> String_util.trim_nonempty with
        | Some value -> Ok value
        | None -> Error (Printf.sprintf "credential file %s is empty" path)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn -> Error (Printf.sprintf "credential file %s: %s" path (Printexc.to_string exn)))
   | Runtime_schema.Inline value ->
-    (match String_util.trim_to_option value with
+    (match String_util.trim_nonempty value with
      | Some value -> Ok value
      | None -> Error "inline credential is empty")
 ;;

@@ -55,6 +55,17 @@ let with_workspace f =
        f config)
 ;;
 
+let with_verification_persistence f =
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  Atomic.set
+    Workspace_hooks.verification_submit_request_fn
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.verification_submit_request_fn previous)
+    f
+;;
+
 let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;
@@ -382,11 +393,12 @@ let test_goal_proof_reads_linked_task_producer_artifact () =
   Out_channel.with_open_text artifact_path (fun channel ->
     output_string channel "three services verified by isolated run\n");
   ignore
-    (add_linked_task_with_evidence
-       config
-       ~goal_id
-       ~producer
-       ~evidence_ref:("artifact:" ^ file_name));
+    (with_verification_persistence (fun () ->
+       add_linked_task_with_evidence
+         config
+         ~goal_id
+         ~producer
+         ~evidence_ref:("artifact:" ^ file_name)));
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let forest_reads = ref 0 in

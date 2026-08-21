@@ -210,9 +210,14 @@ let render_overview (state : state) =
     | Some o, None ->
         let health_color = workspace_health_color o.ov_workspace_health in
         let health_label = workspace_health_label o.ov_workspace_health in
-        Printf.sprintf "  Health: %s%s%s  Agents: %d  Approvals: %d  Incidents: %d"
+        let approval_count =
+          match state.approval_snapshot, state.approvals_error with
+          | Some snapshot, None -> string_of_int snapshot.aps_visible_count
+          | None, _ | Some _, Some _ -> "?"
+        in
+        Printf.sprintf "  Health: %s%s%s  Agents: %d  Approvals: %s  Incidents: %d"
           health_color health_label Ansi.reset
-          o.ov_active_agents o.ov_pending_approvals o.ov_incident_count
+          o.ov_active_agents approval_count o.ov_incident_count
   in
   box_line buf cols summary_line;
 
@@ -320,37 +325,55 @@ let render_approvals (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let approvals =
-    match state.overview with
-    | None -> []
-    | Some o -> o.ov_pending_confirms
+  let approvals = approval_items state in
+  let scope, visible_count, total_count, hidden_count =
+    match state.approval_snapshot with
+    | None -> "-", "?", "?", "?"
+    | Some snapshot ->
+        ( (if snapshot.aps_filter_active then
+             Option.value ~default:"?" snapshot.aps_actor_filter
+           else "all")
+        , string_of_int snapshot.aps_visible_count
+        , string_of_int snapshot.aps_total_count
+        , string_of_int snapshot.aps_hidden_count )
   in
   let count = List.length approvals in
-  let header = Printf.sprintf " MASC Approvals (%d)  %s  %s"
-    count timestamp
-    (connection_badge state.connection_status) in
+  let action_inflight =
+    Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
+  in
+  let action_badge = if action_inflight then "  [submitting]" else "" in
+  let header =
+    Printf.sprintf
+      " MASC Approvals (%s/%s, hidden %s, actor %s)  %s  %s%s"
+      visible_count total_count hidden_count scope timestamp
+      (connection_badge state.connection_status) action_badge
+  in
 
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
 
   if count = 0 then begin
-    (match state.overview_error with
-     | Some err ->
+    (match state.approval_snapshot, state.approvals_error with
+     | _, Some err ->
          box_line buf cols
            (Ansi.red ^ "  (data unreliable: "
            ^ fit_width err (cols - 24)
            ^ ")" ^ Ansi.reset)
-     | None ->
+     | None, None ->
+         box_line buf cols
+           (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
+           ^ Ansi.reset)
+     | Some _, None ->
          box_line buf cols
            (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset));
-    for _ = 1 to rows - 8 do
+    for _ = 1 to rows - 10 do
       box_empty buf cols
     done
   end else begin
-    let content_height = rows - 8 in
+    let content_height = max 0 (rows - 10) in
     let scroll_offset =
-      if state.approval_cursor >= content_height then
+      if content_height > 0 && state.approval_cursor >= content_height then
         state.approval_cursor - content_height + 1
       else 0
     in
@@ -384,7 +407,11 @@ let render_approvals (state : state) =
   let detail_line =
     if state.approval_cursor < count then
       let a = List.nth approvals state.approval_cursor in
-      match state.pending_approval_action with
+      if action_inflight then
+        Printf.sprintf "  %sApproval request in progress…%s" Ansi.yellow
+          Ansi.reset
+      else
+        match state.pending_approval_action with
       | Some { paa_token; paa_decision }
         when String.equal paa_token a.ap_token ->
           let key =
@@ -403,8 +430,25 @@ let render_approvals (state : state) =
   in
   Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  y:confirm  n:deny  r:refresh  Tab:next  | Port: %d%s\n"
-    Ansi.dim state.port Ansi.reset);
+  let metadata_line, payload_line =
+    match List.nth_opt approvals state.approval_cursor with
+    | None -> "", ""
+    | Some approval ->
+        let expires = Option.value ~default:"-" approval.ap_expires_at in
+        let payload = Yojson.Safe.to_string approval.ap_payload in
+        ( Printf.sprintf "  %strace=%s  created=%s  expires=%s%s" Ansi.dim
+            (fit_width approval.ap_trace_id 18)
+            approval.ap_created_at expires Ansi.reset
+        , Printf.sprintf "  %spayload=%s%s" Ansi.dim
+            (fit_width payload (max 8 (cols - 12)))
+            Ansi.reset )
+  in
+  Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
+
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
 
   print_string (Buffer.contents buf);
   flush stdout

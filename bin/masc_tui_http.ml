@@ -95,14 +95,28 @@ let post_raw_json ~(host : string) ~(port : int) ~(path : string) ~(body : strin
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/briefing"
 
+(** Fetch the actor-scoped operator summary that owns pending confirmations. *)
+let fetch_operator_snapshot ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
+
 (** POST /api/v1/operator/confirm to approve/deny a pending confirmation. *)
-let operator_confirm_body ~(token : string) ~(decision : string) =
+let operator_confirm_body ~(token : string)
+    ~(decision : Masc_tui_operator_projection.approval_decision) =
+  let decision = Masc_tui_operator_projection.approval_decision_wire decision in
   Yojson.Safe.to_string
     (`Assoc [ ("confirm_token", `String token); ("decision", `String decision) ])
 
-let post_operator_confirm ~(host : string) ~(port : int) ~(token : string) ~(decision : string) : (Yojson.Safe.t, string) result =
+let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
+    ~(decision : Masc_tui_operator_projection.approval_decision) :
+    (Masc_tui_operator_projection.confirm_outcome, string) result =
   let body = operator_confirm_body ~token ~decision in
-  post_json ~host ~port ~path:"/api/v1/operator/confirm" ~body
+  match post_json ~host ~port ~path:"/api/v1/operator/confirm" ~body with
+  | Error _ as error -> error
+  | Ok json ->
+      Masc_tui_operator_projection.decode_confirm_response
+        ~expected_token:token ~expected_decision:decision json
 
 (** Fetch /api/v1/board (post list). *)
 let fetch_board ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

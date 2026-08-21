@@ -3,6 +3,8 @@ open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_loader
 
+module Approval = Masc_tui_operator_projection
+
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
@@ -180,10 +182,6 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
       true  (* Consume but ignore other control chars *)
   | _ -> true
 
-let approval_decision_wire = function
-  | Confirm -> "confirm"
-  | Deny -> "deny"
-
 let approval_decision_key = function
   | Confirm -> "y"
   | Deny -> "n"
@@ -192,33 +190,32 @@ let approval_decision_done = function
   | Confirm -> "Confirmed"
   | Deny -> "Denied"
 
-let approval_decision_failed = function
-  | Confirm -> "Confirm failed"
-  | Deny -> "Deny failed"
+let approval_decision_unverified = function
+  | Confirm -> "Confirmation outcome unverified"
+  | Deny -> "Denial outcome unverified"
 
-let pending_approval_matches pending approval decision =
-  match pending with
-  | Some p ->
-      String.equal p.paa_token approval.ap_token && p.paa_decision = decision
-  | None -> false
+type approval_observation = {
+  ao_generation: Approval.Flow.generation;
+  ao_result: (approval_snapshot, string) result;
+}
 
 type http_surface_results = {
   http_overview: (overview_snapshot, string) result;
+  http_approvals: approval_observation option;
   http_board: (board_post list, string) result;
   http_planning: (planning_snapshot, string) result;
 }
 
 type async_msg =
   | Http_refresh_done of http_surface_results
-  | Http_refresh_failed of string
+  | Http_refresh_failed of string * Approval.Flow.generation option
   | Board_post_refresh_done of string * (board_post * board_comment list, string) result
   | Board_post_refresh_failed of string * string
   | Approval_decision_done of
       approval_item
       * approval_decision
-      * (Yojson.Safe.t, string) result
-      * (overview_snapshot, string) result option
-  | Approval_decision_failed of approval_item * approval_decision * string
+      * (Approval.confirm_outcome, string) result
+      * approval_observation
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -243,6 +240,33 @@ let apply_overview_load state = function
         ~current_error:state.overview_error
         ~set_error:(fun value -> state.overview_error <- value)
         err
+
+let apply_approvals_load state = function
+  | Ok snapshot ->
+      state.approval_snapshot <- Some snapshot;
+      state.approvals_error <- None;
+      if state.approval_cursor >= List.length snapshot.aps_items then
+        state.approval_cursor <- max 0 (List.length snapshot.aps_items - 1);
+      (match state.pending_approval_action with
+       | Some pending
+         when not
+                (List.exists
+                   (fun item -> String.equal item.ap_token pending.paa_token)
+                   snapshot.aps_items) ->
+           state.pending_approval_action <- None
+       | Some _ | None -> ())
+  | Error err ->
+      state.approval_snapshot <- None;
+      state.approval_cursor <- 0;
+      state.pending_approval_action <- None;
+      remember_surface_error state ~surface:"approvals"
+        ~current_error:state.approvals_error
+        ~set_error:(fun value -> state.approvals_error <- value)
+        err
+
+let apply_approval_observation state observation =
+  if Approval.Flow.is_current state.approval_flow observation.ao_generation then
+    apply_approvals_load state observation.ao_result
 
 let apply_board_list_load state = function
   | Ok posts ->
@@ -287,19 +311,34 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port =
-  {
-    http_overview = load_overview ~host ~port;
-    http_board = load_board_list ~host ~port;
-    http_planning = load_planning ~host ~port;
-  }
+let load_http_surfaces ~host ~port ~approval_generation =
+  let http_overview = load_overview ~host ~port in
+  let http_approvals =
+    Option.map
+      (fun ao_generation ->
+         { ao_generation; ao_result = load_approvals ~host ~port })
+      approval_generation
+  in
+  let http_board = load_board_list ~host ~port in
+  let http_planning = load_planning ~host ~port in
+  { http_overview; http_approvals; http_board; http_planning }
 
 let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
+  Option.iter (apply_approval_observation state) results.http_approvals;
   apply_board_list_load state results.http_board;
   apply_planning_load state results.http_planning;
+  let approval_status =
+    Option.map
+      (fun observation ->
+         Result.map (fun _ -> ()) observation.ao_result
+         |> Result.map_error (fun _ -> ()))
+      results.http_approvals
+    |> Option.to_list
+  in
   state.connection_status <-
     refresh_status
+      (
       [
         Result.map (fun _ -> ()) results.http_overview
         |> Result.map_error (fun _ -> ());
@@ -307,22 +346,31 @@ let apply_http_surfaces state results =
         |> Result.map_error (fun _ -> ());
         Result.map (fun _ -> ()) results.http_planning
         |> Result.map_error (fun _ -> ());
-      ]
+      ] @ approval_status)
 
 let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
   if not !refresh_inflight then begin
     refresh_inflight := true;
+    let flow, approval_generation =
+      Approval.Flow.reserve_refresh state.approval_flow
+    in
+    state.approval_flow <- flow;
     state.connection_status <-
       (match state.connection_status with
        | Connected | Degraded -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let run_refresh () =
-      try enqueue_async mailbox (Http_refresh_done (load_http_surfaces ~host ~port)) with
+      try
+        enqueue_async mailbox
+          (Http_refresh_done
+             (load_http_surfaces ~host ~port ~approval_generation))
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         enqueue_async mailbox
           (Http_refresh_failed
-             (Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn)))
+             ( Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn)
+             , approval_generation ))
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
@@ -330,7 +378,9 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
     | None ->
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
-          (fun () -> apply_http_surfaces state (load_http_surfaces ~host ~port))
+          (fun () ->
+             apply_http_surfaces state
+               (load_http_surfaces ~host ~port ~approval_generation))
   end
 
 let board_detail_still_current state post_id =
@@ -386,83 +436,110 @@ let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight
               (load_board_post ~host ~port ~post_id))
   end
 
-let apply_approval_decision_result state approval decision overview = function
-  | Ok _ ->
-      add_event state "system"
-        (Printf.sprintf "%s: %s" (approval_decision_done decision)
-           approval.ap_summary);
-      Option.iter (apply_overview_load state) overview;
-      state.approval_cursor <- 0
-  | Error err ->
-      add_event state "error"
-        (Printf.sprintf "%s: %s" (approval_decision_failed decision) err)
+let apply_approval_decision_result state approval decision approvals result =
+  (match result with
+   | Ok (Approval.Completed _) ->
+       add_event state "system"
+         (Printf.sprintf "%s: %s" (approval_decision_done decision)
+            approval.ap_summary)
+   | Ok (Approval.Deferred _) ->
+       add_event state "system"
+         (Printf.sprintf "Confirmation accepted; action deferred: %s"
+            approval.ap_summary)
+   | Ok (Approval.Execution_failed (_, detail)) ->
+       add_event state "error"
+         (Printf.sprintf "Confirmation accepted; action failed: %s" detail)
+   | Error err ->
+       add_event state "error"
+         (Printf.sprintf "%s: %s" (approval_decision_unverified decision) err));
+  apply_approvals_load state approvals
 
-let start_approval_decision state approval decision ~action_inflight ~mailbox =
-  if !action_inflight then
-    add_event state "system" "Approval action already in progress"
-  else
-    let () = action_inflight := true in
+let apply_approval_decision_completion state generation approval decision result
+    approvals =
+  state.pending_approval_action <- None;
+  let flow, owns_action =
+    Approval.Flow.finish_action state.approval_flow generation
+  in
+  state.approval_flow <- flow;
+  if owns_action then
+    apply_approval_decision_result state approval decision approvals result
+
+let start_approval_decision state approval decision ~mailbox =
+  match Approval.Flow.begin_action state.approval_flow with
+  | Error `Already_inflight ->
+      state.pending_approval_action <- None;
+      add_event state "system" "Approval action already in progress"
+  | Ok (flow, generation) ->
+    let () = state.approval_flow <- flow in
     let () = state.pending_approval_action <- None in
     let host = Env_config_core.masc_host () in
     let port = state.port in
-    let decision_wire = approval_decision_wire decision in
-    let clear_inflight () = action_inflight := false in
     let run_action () =
-      try
-        let result =
-          Masc_tui_http.post_operator_confirm ~host ~port ~token:approval.ap_token
-            ~decision:decision_wire
-        in
-        let overview =
-          match result with
-          | Ok _ -> Some (load_overview ~host ~port)
-          | Error _ -> None
-        in
-        enqueue_async mailbox
-          (Approval_decision_done (approval, decision, result, overview))
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        enqueue_async mailbox
-          (Approval_decision_failed
-             (approval, decision, Printexc.to_string exn))
+      let result =
+        try
+          Masc_tui_http.post_operator_confirm ~host ~port
+            ~token:approval.ap_token ~decision
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      let approvals =
+        try load_approvals ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
+      in
+      let approvals = { ao_generation = generation; ao_result = approvals } in
+      enqueue_async mailbox
+        (Approval_decision_done (approval, decision, result, approvals))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_action
     | None ->
-        Fun.protect ~finally:clear_inflight (fun () ->
-            let result =
-              Masc_tui_http.post_operator_confirm ~host ~port
-                ~token:approval.ap_token ~decision:decision_wire
-            in
-            let overview =
-              match result with
-              | Ok _ -> Some (load_overview ~host ~port)
-              | Error _ -> None
-            in
-            apply_approval_decision_result state approval decision overview result)
+        let result =
+          try
+            Masc_tui_http.post_operator_confirm ~host ~port
+              ~token:approval.ap_token ~decision
+          with exn -> Error (Printexc.to_string exn)
+        in
+        let approvals =
+          try load_approvals ~host ~port with
+          | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
+        in
+        apply_approval_decision_completion state generation approval decision
+          result approvals
 
 (* TEL-OK: TUI-local confirmation gate emits user-visible events here; the
    operator confirmation endpoint owns durable approval telemetry. *)
-let handle_approval_decision state approval decision ~action_inflight ~mailbox =
-  if pending_approval_matches state.pending_approval_action approval decision then
-    start_approval_decision state approval decision ~action_inflight ~mailbox
-  else begin
-    state.pending_approval_action <-
-      Some { paa_token = approval.ap_token; paa_decision = decision };
-    add_event state "system"
-      (Printf.sprintf "Press %s again: %s"
-         (approval_decision_key decision)
-         approval.ap_summary)
-  end
+let handle_approval_decision state approval decision ~mailbox =
+  match
+    Approval.approval_gate_transition
+      ~inflight:(Approval.Flow.action_inflight state.approval_flow)
+      ~pending:state.pending_approval_action ~token:approval.ap_token ~decision
+  with
+  | Approval.Gate_blocked_inflight ->
+      state.pending_approval_action <- None;
+      add_event state "system" "Approval action already in progress"
+  | Approval.Gate_submit ->
+      start_approval_decision state approval decision ~mailbox
+  | Approval.Gate_arm pending ->
+      state.pending_approval_action <- Some pending;
+      add_event state "system"
+        (Printf.sprintf "Press %s again: %s"
+           (approval_decision_key decision)
+           approval.ap_summary)
 
 let apply_async_message state ~http_refresh_inflight
-    ~board_post_refresh_inflight ~approval_action_inflight = function
+    ~board_post_refresh_inflight = function
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results
-  | Http_refresh_failed err ->
+  | Http_refresh_failed (err, approval_generation) ->
       http_refresh_inflight := false;
+      Option.iter
+        (fun ao_generation ->
+           apply_approval_observation state
+             { ao_generation; ao_result = Error err })
+        approval_generation;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err
   | Board_post_refresh_done (post_id, result) ->
@@ -477,22 +554,18 @@ let apply_async_message state ~http_refresh_inflight
           ~current_error:state.board_error
           ~set_error:(fun value -> state.board_error <- value)
           err
-  | Approval_decision_done (approval, decision, result, overview) ->
-      approval_action_inflight := false;
-      apply_approval_decision_result state approval decision overview result
-  | Approval_decision_failed (approval, decision, err) ->
-      approval_action_inflight := false;
-      add_event state "error"
-        (Printf.sprintf "%s: %s" (approval_decision_failed decision) err)
+  | Approval_decision_done (approval, decision, result, approvals) ->
+      apply_approval_decision_completion state approvals.ao_generation approval
+        decision result approvals.ao_result
 
 let drain_async_messages state ~http_refresh_inflight
-    ~board_post_refresh_inflight ~approval_action_inflight mailbox =
+    ~board_post_refresh_inflight mailbox =
   let rec loop () =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> ()
     | Some msg ->
         apply_async_message state ~http_refresh_inflight
-          ~board_post_refresh_inflight ~approval_action_inflight msg;
+          ~board_post_refresh_inflight msg;
         loop ()
   in
   loop ()
@@ -524,7 +597,6 @@ let main () =
   let port = state.port in
   let http_refresh_inflight = ref false in
   let board_post_refresh_inflight = ref None in
-  let approval_action_inflight = ref false in
   let async_messages = Eio.Stream.create 32 in
   start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight
     ~mailbox:async_messages;
@@ -535,9 +607,13 @@ let main () =
   try
     while true do
       drain_async_messages state ~http_refresh_inflight
-        ~board_post_refresh_inflight ~approval_action_inflight async_messages;
+        ~board_post_refresh_inflight async_messages;
       (* Check for input *)
       let key = read_key () in
+      (match state.view, key with
+       | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
+       | Approvals, Some _ -> state.pending_approval_action <- None
+       | _ -> ());
       (match key with
        | Some k when state.view = Keepers Keeper_message ->
            let _handled = handle_message_key state base_path k in
@@ -546,28 +622,20 @@ let main () =
        | Some "y" | Some "Y" ->
            (match state.view with
             | Approvals ->
-                (match state.overview with
-                 | None -> ()
-                 | Some o ->
-                     (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
-                      | Some a ->
-                          handle_approval_decision state a Confirm
-                            ~action_inflight:approval_action_inflight
-                            ~mailbox:async_messages
-                      | None -> ()))
+                (match List.nth_opt (approval_items state) state.approval_cursor with
+                 | Some a ->
+                     handle_approval_decision state a Confirm
+                       ~mailbox:async_messages
+                 | None -> ())
             | _ -> ())
        | Some "n" | Some "N" ->
            (match state.view with
             | Approvals ->
-                (match state.overview with
-                 | None -> ()
-                 | Some o ->
-                     (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
-                      | Some a ->
-                          handle_approval_decision state a Deny
-                            ~action_inflight:approval_action_inflight
-                            ~mailbox:async_messages
-                      | None -> ()))
+                (match List.nth_opt (approval_items state) state.approval_cursor with
+                 | Some a ->
+                     handle_approval_decision state a Deny
+                       ~mailbox:async_messages
+                 | None -> ())
             | _ -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
@@ -575,7 +643,8 @@ let main () =
            let host = Env_config_core.masc_host () in
            let port = state.port in
            start_http_refresh state ~host ~port
-             ~refresh_inflight:http_refresh_inflight ~mailbox:async_messages;
+             ~refresh_inflight:http_refresh_inflight
+             ~mailbox:async_messages;
            (* Also reload logs / board / planning detail if viewing them *)
            (match state.view with
             | Keepers Keeper_logs ->
@@ -608,7 +677,9 @@ let main () =
            (match state.view with
             | Overview -> state.view <- Keepers Keeper_list
             | Keepers _ -> state.view <- Approvals
-            | Approvals -> state.view <- Board
+            | Approvals ->
+                state.pending_approval_action <- None;
+                state.view <- Board
             | Board -> state.view <- Planning
             | Planning -> state.view <- Overview)
        | Some "esc" ->
@@ -651,7 +722,7 @@ let main () =
             | Keepers Keeper_logs ->
                 state.log_scroll <- state.log_scroll + 1
             | Approvals ->
-                let count = match state.overview with None -> 0 | Some o -> List.length o.ov_pending_confirms in
+                let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
                   state.pending_approval_action <- None;
                   state.approval_cursor <- state.approval_cursor + 1
@@ -778,7 +849,7 @@ let main () =
 
       Eio.Fiber.yield ();
       drain_async_messages state ~http_refresh_inflight
-        ~board_post_refresh_inflight ~approval_action_inflight async_messages;
+        ~board_post_refresh_inflight async_messages;
 
       (* Periodic refresh *)
       let now = Unix.gettimeofday () in
@@ -788,7 +859,8 @@ let main () =
         let host = Env_config_core.masc_host () in
         let port = state.port in
         start_http_refresh state ~host ~port
-          ~refresh_inflight:http_refresh_inflight ~mailbox:async_messages;
+          ~refresh_inflight:http_refresh_inflight
+          ~mailbox:async_messages;
         (* Also refresh logs / board / planning detail if viewing them *)
         (match state.view with
          | Keepers Keeper_logs ->

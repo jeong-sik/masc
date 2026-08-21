@@ -46,6 +46,81 @@ let test_keeper_chat_omits_removed_model_args () =
        ~needle:"/api/v1/keepers/chat/stream")
 ;;
 
+let test_operator_approvals_use_current_contract () =
+  check int "operator summary endpoint is exact" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui_http.ml"
+       ~needle:
+         "/api/v1/operator?view=summary&include_messages=0&include_keepers=0");
+  check bool "loader uses exact operator projection" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Masc_tui_operator_projection.decode_snapshot"
+     >= 1);
+  check bool "semantic action status is checked" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_http.ml"
+       ~callee:"Masc_tui_operator_projection.decode_confirm_response"
+     >= 1);
+  check bool "submitted token is bound into response validation" true
+    (Ast_grep.count_calls_with_label
+       ~module_path:"bin/masc_tui_http.ml"
+       ~callee:"Masc_tui_operator_projection.decode_confirm_response"
+       ~label:"expected_token"
+     >= 1);
+  check bool "submitted decision is bound into response validation" true
+    (Ast_grep.count_calls_with_label
+       ~module_path:"bin/masc_tui_http.ml"
+       ~callee:"Masc_tui_operator_projection.decode_confirm_response"
+       ~label:"expected_decision"
+     >= 1);
+  check bool "HTTP refresh and action reconciliation reload approvals" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"load_approvals"
+     >= 2);
+  check bool "refreshes reserve an approval generation" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"Approval.Flow.reserve_refresh"
+     >= 1);
+  check bool "actions invalidate older approval generations" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"Approval.Flow.begin_action"
+     >= 1);
+  check bool "only the owning action completion clears inflight state" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"Approval.Flow.finish_action"
+     >= 1);
+  check bool "approval input uses the behavior-tested two-key gate" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"Approval.approval_gate_transition"
+     >= 1);
+  check int "deferred confirmation has truthful operator copy" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui.ml"
+       ~needle:"Confirmation accepted; action deferred: %s");
+  check int "execution failure preserves accepted confirmation" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui.ml"
+       ~needle:"Confirmation accepted; action failed: %s");
+  check int "transport failure remains unverified" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui.ml"
+       ~needle:"Confirmation outcome unverified");
+  check int "payload has its own visible row" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui_render.ml"
+       ~needle:"  %spayload=%s%s");
+  check int "briefing is not an approval source" 0
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~needle:"pending_confirms")
+;;
+
 let test_planning_constructors_do_not_collide () =
   let module_path = "bin/masc_tui_types.ml" in
   let planning_mode_constructors =
@@ -239,6 +314,10 @@ let () =
           "keeper chat omits removed model args"
           `Quick
           test_keeper_chat_omits_removed_model_args;
+        test_case
+          "operator approvals use current contract"
+          `Quick
+          test_operator_approvals_use_current_contract;
         test_case
           "planning constructors do not collide"
           `Quick

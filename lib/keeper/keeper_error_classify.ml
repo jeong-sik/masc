@@ -65,8 +65,7 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _) -> true
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> true
   | Agent_core.Error.Api (Overloaded _) -> true
-  | Agent_core.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
-      transient
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _) -> true
   (* Non-transient API errors. *)
   | Agent_core.Error.Api (ServerError _)
   | Agent_core.Error.Api (RateLimited _)
@@ -486,8 +485,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
              Some Capacity_backpressure
          | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
-         | Agent_core.Error.Provider
-             (Llm_provider.Error.ServerError { transient = true; _ }) ->
+         | Agent_core.Error.Provider (Llm_provider.Error.ServerError _) ->
              Some Server_error
          | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
              Some Server_error
@@ -504,8 +502,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
             boundaries and schedule a second whole-runtime wake for the same
             malformed provider response. *)
          | Agent_core.Error.Provider
-             (Llm_provider.Error.ServerError _
-             | Llm_provider.Error.InvalidConfig _
+             (Llm_provider.Error.InvalidConfig _
              | Llm_provider.Error.InvalidRequest _
              | Llm_provider.Error.NotFound _
              | Llm_provider.Error.NetworkError _

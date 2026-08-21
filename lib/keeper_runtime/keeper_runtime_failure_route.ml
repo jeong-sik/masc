@@ -178,10 +178,7 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.HardQuota _ -> rotate Account_quota_unavailable
   | Llm_provider.Error.CapacityExhausted _ -> rotate Capacity_unavailable
   | Llm_provider.Error.ProviderUnavailable _ -> rotate Provider_service_unavailable
-  | Llm_provider.Error.ServerError { transient = true; _ } ->
-    rotate Provider_service_unavailable
-  | Llm_provider.Error.ServerError { transient = false; _ } ->
-    exhaust_failure Provider_integration
+  | Llm_provider.Error.ServerError _ -> rotate Provider_service_unavailable
   | Llm_provider.Error.NetworkError _ -> rotate Network_unavailable
   | Llm_provider.Error.Timeout _ -> rotate Provider_timeout
   | Llm_provider.Error.AuthError _

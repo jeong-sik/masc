@@ -1289,21 +1289,6 @@ let test_error_domain_with_stage () =
      && String.sub s 0 (String.length prefix) = prefix)
 ;;
 
-let test_error_domain_is_retryable () =
-  Alcotest.(check bool)
-    "rate limited is retryable"
-    true
-    (Error_domain.is_retryable (`Rate_limited (Some 1.0, "slow down")));
-  Alcotest.(check bool)
-    "internal not retryable"
-    false
-    (Error_domain.is_retryable (`Internal "nope"));
-  Alcotest.(check bool)
-    "network error retryable"
-    true
-    (Error_domain.is_retryable (`Network_error "timeout"))
-;;
-
 let test_error_domain_provider_errors () =
   let errs : Error_domain.core_error_poly list =
     [ `Auth_error "bad key"
@@ -2693,7 +2678,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
             | Error
                 (Error.Agent
                    (Error.TerminalToolDurabilityFailed
-                      { invocation; effect_disposition; detail }) as error) ->
+                      { invocation; effect_disposition; detail })) ->
               let schedule = Tool_contract.Invocation.schedule invocation in
               Alcotest.(check string)
                 "exact invocation"
@@ -2715,11 +2700,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
                 true
                 (Error.terminal_effect_disposition effect_disposition
                  = Tool_contract.Proven_post_effect);
-              Alcotest.(check string) "exact durability detail" expected_detail detail;
-              Alcotest.(check bool)
-                "terminal durability failure is not retryable"
-                false
-                (Error.is_retryable error)
+              Alcotest.(check string) "exact durability detail" expected_detail detail
             | Error error -> Alcotest.fail ("unexpected error: " ^ Error.to_string error)
             | Ok _ -> Alcotest.fail "terminal durability failure unexpectedly succeeded");
            Alcotest.(check int) "provider called once" 1 !provider_calls;
@@ -3761,7 +3742,6 @@ let () =
       , [ Alcotest.test_case "of_core_error" `Quick test_error_domain_of_core_error
         ; Alcotest.test_case "roundtrip" `Quick test_error_domain_roundtrip
         ; Alcotest.test_case "with_stage" `Quick test_error_domain_with_stage
-        ; Alcotest.test_case "is_retryable" `Quick test_error_domain_is_retryable
         ; Alcotest.test_case "provider errors" `Quick test_error_domain_provider_errors
         ; Alcotest.test_case
             "durable event: persistence not Api"

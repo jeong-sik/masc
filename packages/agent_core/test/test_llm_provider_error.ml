@@ -113,10 +113,10 @@ let test_server_error () =
   check
     string
     "ServerError format"
-    "Provider 'openai' server error 503 (transient=true): down"
+    "Provider 'openai' server error 503: down"
     (Error.to_string
        (Error.ServerError
-          { provider = "openai"; code = 503; transient = true; detail = "down" }))
+          { provider = "openai"; code = 503; detail = "down" }))
 ;;
 
 let test_network_error () =
@@ -289,10 +289,9 @@ let test_http_server_error_mapping () =
       (Http_client.HttpError { code = 503; body = "down"; retry_after_header = None })
   in
   match err with
-  | Error.ServerError { provider; code; transient; detail } ->
+  | Error.ServerError { provider; code; detail } ->
     check string "provider" "openai" provider;
     check int "code" 503 code;
-    check bool "transient" true transient;
     check string "detail" "down" detail
   | _ -> fail "expected ServerError"
 ;;
@@ -604,53 +603,6 @@ let test_http_boundary_remaining_variants_mapping () =
   | _ -> fail "expected ProviderTerminal Other"
 ;;
 
-let test_is_retryable_matrix () =
-  let retryable err = check bool (Error.to_string err) true (Error.is_retryable err) in
-  let not_retryable err =
-    check bool (Error.to_string err) false (Error.is_retryable err)
-  in
-  retryable (Error.RateLimit { provider = "p"; retry_after = None; detail = "burst" });
-  retryable
-    (Error.CapacityExhausted
-       { scope = Error.CapacityProvider
-       ; affected = [ "p" ]
-       ; retry_after = None
-       ; detail = "busy"
-       });
-  retryable
-    (Error.ServerError { provider = "p"; code = 503; transient = true; detail = "down" });
-  not_retryable
-    (Error.ServerError { provider = "p"; code = 500; transient = false; detail = "fatal" });
-  retryable
-    (Error.NetworkError
-       { provider = "p"
-       ; kind = Http_client.Connection_refused
-       ; timeout_phase = None
-       ; detail = "refused"
-       });
-  not_retryable
-    (Error.NetworkError
-       { provider = "p"
-       ; kind = Http_client.Tls_error
-       ; timeout_phase = None
-       ; detail = "tls"
-       });
-  not_retryable
-    (Error.NetworkError
-       { provider = "p"
-       ; kind = Http_client.Local_resource_exhaustion
-       ; timeout_phase = None
-       ; detail = "fd"
-       });
-  retryable (Error.Timeout { provider = "p"; timeout_phase = None; detail = "slow" });
-  not_retryable
-    (Error.HardQuota { provider = "p"; retry_after = None; detail = "billing" });
-  not_retryable (Error.ProviderUnavailable { provider = "p"; detail = "missing" });
-  not_retryable (Error.AuthError { provider = "p"; detail = "bad key" });
-  not_retryable (Error.AuthorizationError { provider = "p"; detail = "forbidden" });
-  not_retryable (Error.NotFound { provider = "p"; detail = "model" })
-;;
-
 let test_empty_completion_overflow_maps_to_invalid_request () =
   let err =
     Error.of_http_error
@@ -755,7 +707,6 @@ let () =
             "HTTP boundary remaining variants"
             `Quick
             test_http_boundary_remaining_variants_mapping
-        ; test_case "is_retryable matrix" `Quick test_is_retryable_matrix
         ] )
     ]
 ;;

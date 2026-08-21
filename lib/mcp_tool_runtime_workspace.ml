@@ -194,9 +194,13 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
           with
           | Error error ->
             let failure_class =
-              if Masc_domain.is_retryable error
-              then Tool_result.Transient_error
-              else Tool_result.Workflow_rejection
+              match error with
+              | Masc_domain.Task _ | Masc_domain.Agent _ ->
+                Tool_result.Workflow_rejection
+              | Masc_domain.Auth _ | Masc_domain.RateLimitExceeded _ ->
+                Tool_result.Policy_rejection
+              | Masc_domain.System _ | Masc_domain.CacheError _ ->
+                Tool_result.Runtime_failure
             in
             Some
               (Tool_result.make_err

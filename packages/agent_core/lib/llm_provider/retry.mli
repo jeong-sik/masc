@@ -74,7 +74,6 @@ type api_error =
 
 (** {1 Error classification} *)
 
-val is_retryable : api_error -> bool
 val error_message : api_error -> string
 
 (** Verdict for a provider turn that produced no content blocks.

@@ -90,7 +90,6 @@ let provider_server_error_transient =
     (Llm_provider.Error.ServerError
        { provider = "ollama_cloud"
        ; code = 503
-       ; transient = true
        ; detail = "upstream unavailable"
        })
 

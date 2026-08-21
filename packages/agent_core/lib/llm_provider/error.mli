@@ -64,7 +64,6 @@ type provider_error =
   | ServerError of
       { provider : string
       ; code : int
-      ; transient : bool
       ; detail : string
       }
   | NetworkError of
@@ -100,7 +99,6 @@ and capacity_scope =
   | CapacityUnknown
 
 val to_string : provider_error -> string
-val is_retryable : provider_error -> bool
 val capacity_scope_to_string : capacity_scope -> string
 val of_retry_api_error : ?provider:string -> Retry.api_error -> provider_error
 val of_http_error : ?provider:string -> Http_client.http_error -> provider_error

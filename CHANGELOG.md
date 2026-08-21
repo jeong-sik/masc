@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+## [0.24.0] - 2026-08-22
+
+- **Goal completion passes through verification** (RFC-0387, #29152 → #29258):
+  a Goal must declare a success condition, `request_complete` moves
+  `executing -> verifying` instead of completing, and the verifier agent reads
+  the durable verification ledger, inspects the linked task artifacts before a
+  verdict, and records each run as an observation the dashboard API projects.
+  The dashboard renders the `verifying` phase and the Work goal detail is built
+  around the completion criteria; attainment is no longer derived from the
+  lifecycle phase.
+- **Tools compose and run in parallel**: tool kind is a closed sum type
+  (RFC-0386, #29148); audited read-only descriptors declare composable output
+  schemas and run as `Concurrent` batches (#29012, #29017, #29146); and
+  `keeper_plan_execute` (#29021) lets the model define a typed DAG of tool
+  nodes in its turn with the same vocabulary as `tool-compositions.toml`.
+  Rejections carry the composable tool list so the model can correct itself.
+- **No duplicated streaming text** (constitution B5, #29149): OpenAI-compatible
+  servers that resend the accumulated text on every chunk are deduplicated at
+  the stream bridge; the Anthropic and Responses paths were already
+  incremental.
+- **A dashboard purge that died mid-way has an exit** (#29295): three Keepers
+  sat half-removed for three days while reconcile retried about 238 times an
+  hour. The blocked purge is now a typed operation with a release path; the
+  dashboard refuses a purge while the Keeper is still executing and shows an
+  asynchronous purge as in progress.
+- **Channel-aware autonomous instructions**: `autonomous_instructions` flow
+  through turn-up and the `Update_profile` reducer and select the prompt
+  channel for `Scheduled_autonomous` turns.
+- **Keeper runtime projections**: the shutdown operation phase and admission
+  fence are visible on `keeper_status`; runtime serving receipts are verified;
+  the compaction saving reaches the owner projection; autonomous turns are not
+  replayed as conversation (RFC-0385 §5.1).
+- **Legacy readers are gone**: the first purge sweep removed readers, default
+  values and converters kept for earlier on-disk shapes across 61 files
+  (#29379), `active_goal_ids` and its surfaces are removed (#29374), and the
+  `Dead` phase, tombstone latch and `Keeper_measurement` are deleted. Stores
+  written by earlier versions are not migrated; the decoders reject them.
+- **Issue triage is declarative** (#29309): the issue body's `masc-triage`
+  block is the single source of labels, the vocabulary is four closed axes
+  (`kind`, `area`, `impact`, `root`) plus `must-do`, and the `impact` order is
+  the priority order.
+- **The quickstart and release path run as documented** (#29302): the source
+  quickstart starts the workspace server without Keepers or a provider key and
+  reaches an authenticated MCP initialize; the stale Homebrew formula and the
+  duplicate quick-start document are removed.
+- **Dashboard**: global autonomous-turn expand toggle, runtime observables in
+  the Monitor lane, recorded tool-call evidence decoded with the composition
+  tree, a Keeper can be removed from the screen with its chat store swept, and
+  `pnpm lint` runs in CI.
+- **Build**: warning 69 (unused record field) is a build error alongside 32;
+  the dead-export ratchet and the changed-files `ocamlformat` check run on every
+  PR.
+
 ## [0.23.0] - 2026-08-16
 
 - **Keeper broadcasts reach the other Keepers' prompts**: projecting a fleet

@@ -278,76 +278,128 @@
   gap: 2px;
 }
 
-.wk-note {
-  font-size: var(--fs-12);
-  color: var(--text-mid);
-  line-height: 1.5;
-  padding: 2px 0 10px;
+/* ── Goal detail panel (expanded goal card body) ───────────────────────────
+   Two-column label/value grid. The previous chip-row layout put every field —
+   identity, completion criteria, activity — into one undifferentiated strip of
+   mono pills, so the panel had no reading order and the completion criteria
+   were indistinguishable from projection bookkeeping. */
+.wk-dossier {
+  display: grid;
+  gap: 12px;
+  padding: 2px 0 12px;
   border-bottom: 1px dashed var(--border-soft);
   margin-bottom: 8px;
 }
 
-.wk-dossier {
+.wk-dossier-sec {
   display: grid;
-  gap: 6px;
-  padding: 2px 0 10px;
-  border-bottom: 1px dashed var(--border-soft);
-  margin-bottom: 8px;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Section headings mix Korean with product nouns ("이 Goal 은"). base.css puts
+   every h1-h4 in the Cinzel display face, which has no lowercase glyphs and so
+   renders "Goal" as "GOAL" while leaving the Korean alone — the UI face keeps
+   both halves in one voice. No uppercase transform either, for the same
+   reason. */
+.wk-dossier-h {
+  margin: 0 0 3px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-dim);
 }
 
 .wk-dossier-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
   min-width: 0;
 }
 
 .wk-dossier-k {
-  flex: 0 0 78px;
   font-size: var(--fs-10);
   color: var(--text-dim);
-  text-transform: uppercase;
-  font-weight: 700;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.wk-dossier-chip {
-  max-width: 100%;
+.wk-dossier-v {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
+  font-size: var(--fs-11);
+  color: var(--text-mid);
+  line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.wk-dossier-row.ok .wk-dossier-v { color: var(--status-ok); }
+.wk-dossier-row.warn .wk-dossier-v { color: var(--status-warn); }
+.wk-dossier-row.bad .wk-dossier-v { color: var(--status-bad); }
+
+.wk-dossier-strong {
+  font-weight: 700;
+  color: inherit;
+}
+
+.wk-dossier-sub {
+  font-size: var(--fs-10);
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.wk-dossier-sub.warn { color: var(--status-warn); }
+.wk-dossier-sub.bad { color: var(--status-bad); }
+.wk-dossier-sub.ok { color: var(--status-ok); }
+
+.wk-dossier-callout {
+  grid-column: 1 / -1;
+  margin: 2px 0 4px;
+  padding: 5px 8px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-10);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.wk-dossier-callout.warn {
+  color: var(--status-warn);
+  border: 1px solid color-mix(in oklab, var(--status-warn) 32%, transparent);
+  background: color-mix(in oklab, var(--status-warn) 9%, transparent);
+}
+
+.wk-dossier-link {
+  display: inline-flex;
+  align-items: center;
   font-size: var(--fs-10);
   color: var(--text-mid);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xs);
   padding: 1px 6px;
   background: var(--surface-1);
+  cursor: pointer;
 }
 
-.wk-dossier-chip.ok {
-  color: var(--status-ok);
-  border-color: color-mix(in oklab, var(--status-ok) 30%, transparent);
-  background: color-mix(in oklab, var(--status-ok) 8%, transparent);
-}
-
-.wk-dossier-chip.warn {
-  color: var(--status-warn);
-  border-color: color-mix(in oklab, var(--status-warn) 32%, transparent);
-  background: color-mix(in oklab, var(--status-warn) 9%, transparent);
-}
-
-.wk-dossier-chip.bad {
-  color: var(--status-bad);
-  border-color: color-mix(in oklab, var(--status-bad) 32%, transparent);
-  background: color-mix(in oklab, var(--status-bad) 8%, transparent);
+.wk-dossier-link:hover {
+  color: var(--text-strong);
+  border-color: var(--border-strong);
 }
 
 .wk-dossier-text {
+  margin: 0;
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
   font-size: var(--fs-11);
   color: var(--text-mid);
-  line-height: 1.4;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .wk-verifier {
@@ -1776,8 +1828,14 @@
   .wk-viewseg button,
   .wk-newgoal,
   .wk-task-claim,
-  .wk-task-kp {
+  .wk-task-kp,
+  .wk-dossier-link {
     min-height: var(--mobile-touch-target-min);
+  }
+
+  .wk-dossier-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 
   .wk-metric {

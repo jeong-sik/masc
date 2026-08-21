@@ -269,7 +269,6 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
          ; ( "keeper_runtime_uid"
            , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )
          ; "instructions", `String meta.instructions
-         ; "active_goal_ids", json_string_list meta.active_goal_ids
          ; ( "current_task_id"
            , Json_util.option_to_yojson
                (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))

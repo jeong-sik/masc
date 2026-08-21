@@ -89,7 +89,6 @@ let degraded_keeper_dashboard_row
      ; ("current_task_id",
         Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id))
-     ; ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids))
      ; ("created_at", `String m.created_at)
      ; ("updated_at", `String m.updated_at)
      ; ("phase", `String "degraded")
@@ -747,17 +746,18 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ( "current_task_id",
                 Json_util.string_opt_to_json
                   (Option.map Keeper_id.Task_id.to_string m.current_task_id) );
-              ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
               ("trace_history_count", `Int trace_history_count);
-              ("active_goal_ids",
-                `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
               ( "active_goals_tree",
-                if (not compact) && include_goals && m.active_goal_ids <> [] then
+                if (not compact) && include_goals then
                   let all_goals = Goal_store.list_goals config () in
-                  let linked = List.filter (fun (g : Goal_store.goal) ->
-                    List.mem g.id m.active_goal_ids) all_goals in
+                  let linked =
+                    List.filter
+                      (fun (g : Goal_store.goal) ->
+                         Goal_phase.admits_self_directed_progress g.phase)
+                      all_goals
+                  in
                   let tasks = Workspace.get_tasks_safe config in
                   (match
                      Keeper_approval_queue
@@ -1041,8 +1041,6 @@ let execution_trust_row_of_meta
     ; ( "current_task_id"
       , Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id) )
-    ; ( "active_goal_ids"
-      , `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids) )
     ; ("trust", keeper_trust_json ~include_receipt:false config m)
     ]
 

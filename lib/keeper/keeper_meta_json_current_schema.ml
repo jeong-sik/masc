@@ -51,7 +51,6 @@ type field =
   | Consecutive_noop_count
   | Last_compaction_check_ts
   | Last_compaction_decision
-  | Active_goal_ids
   | Last_autonomous_action_at
   | Autonomous_action_count
   | Autonomous_turn_count
@@ -106,7 +105,6 @@ let all_fields =
   ; Consecutive_noop_count
   ; Last_compaction_check_ts
   ; Last_compaction_decision
-  ; Active_goal_ids
   ; Last_autonomous_action_at
   ; Autonomous_action_count
   ; Autonomous_turn_count
@@ -162,7 +160,6 @@ let field_name = function
   | Consecutive_noop_count -> "consecutive_noop_count"
   | Last_compaction_check_ts -> "last_compaction_check_ts"
   | Last_compaction_decision -> "last_compaction_decision"
-  | Active_goal_ids -> "active_goal_ids"
   | Last_autonomous_action_at -> "last_autonomous_action_at"
   | Autonomous_action_count -> "autonomous_action_count"
   | Autonomous_turn_count -> "autonomous_turn_count"

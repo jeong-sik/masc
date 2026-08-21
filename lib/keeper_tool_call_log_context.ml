@@ -19,7 +19,6 @@ type turn_context =
   ; turn : int option
   ; keeper_turn_id : int option
   ; task_id : string option
-  ; goal_ids : string list option
   ; sandbox_profile : string option
   ; sandbox_root : string option
   ; allowed_paths : string list option
@@ -41,7 +40,6 @@ let empty_turn_context =
   ; turn = None
   ; keeper_turn_id = None
   ; task_id = None
-  ; goal_ids = None
   ; sandbox_profile = None
   ; sandbox_root = None
   ; allowed_paths = None
@@ -69,7 +67,6 @@ let set_turn_context
       ?turn
       ?keeper_turn_id
       ?task_id
-      ?goal_ids
       ?sandbox_profile
       ?sandbox_root
       ?allowed_paths
@@ -91,7 +88,6 @@ let set_turn_context
      ; turn
      ; keeper_turn_id
      ; task_id
-     ; goal_ids
      ; sandbox_profile
      ; sandbox_root
      ; allowed_paths
@@ -114,7 +110,6 @@ let get_turn_context ~cell () =
   , ctx.turn
   , ctx.keeper_turn_id
   , ctx.task_id
-  , ctx.goal_ids
   , ctx.sandbox_profile
   , ctx.network_mode )
 ;;
@@ -129,7 +124,6 @@ let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
     ?generation:ctx.generation
     ?keeper_turn_id:ctx.keeper_turn_id
     ?task_id:ctx.task_id
-    ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
     ?allowed_paths:ctx.allowed_paths

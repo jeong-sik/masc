@@ -512,7 +512,6 @@ let test_turn_context_fields_stored () =
       ~turn:7
       ~keeper_turn_id:7
       ~task_id:"task-runtime-trust"
-      ~goal_ids:["goal-short"; "goal-long"]
       ~sandbox_profile:"docker"
       ~sandbox_root:"/tmp/k-sandbox"
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
@@ -535,7 +534,7 @@ let test_turn_context_fields_stored () =
       ?trace_id:tctx.trace_id ?session_id:tctx.session_id
       ?generation:tctx.generation
       ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
-      ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+      ?task_id:tctx.task_id
       ?sandbox_profile:tctx.sandbox_profile
       ?sandbox_root:tctx.sandbox_root
       ?allowed_paths:tctx.allowed_paths

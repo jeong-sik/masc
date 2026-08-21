@@ -75,7 +75,6 @@ type profile_update =
   ; mention_targets : string list
   ; proactive_enabled : bool
   ; max_context_override : int option
-  ; active_goal_ids : string list
   ; autoboot_enabled : bool
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option

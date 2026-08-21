@@ -534,7 +534,7 @@ let make_hooks
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id
-             ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+             ?task_id:tctx.task_id
              ?sandbox_profile:tctx.sandbox_profile
              ?sandbox_root:tctx.sandbox_root
              ?allowed_paths:tctx.allowed_paths
@@ -730,7 +730,7 @@ let make_hooks
                 ?trace_id:tctx.trace_id ?session_id:tctx.session_id
                 ?generation:tctx.generation
                 ?keeper_turn_id:tctx.keeper_turn_id
-                ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+                ?task_id:tctx.task_id
                 ~result_bytes:(String.length error)
                 ()
             with

@@ -1687,7 +1687,7 @@ let keeper_meta_for_self_filter agent_name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> { meta with active_goal_ids = [] }
+  | Ok meta -> meta
   | Error err -> Alcotest.fail ("keeper_meta_for_self_filter failed: " ^ err)
 
 (* Same canonical-name requirement as [keeper_meta_for_self_filter]. *)
@@ -1702,8 +1702,6 @@ let keeper_meta_for_goal_filter agent_name active_goal_ids =
       [ ("name", `String name)
       ; ("agent_name", `String agent_name)
       ; ("trace_id", `String "trace-goal-filter")
-      ; ( "active_goal_ids"
-        , `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

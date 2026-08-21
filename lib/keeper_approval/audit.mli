@@ -69,7 +69,6 @@ val record :
   ?turn_id:int ->
   ?task_id:string ->
   ?goal_id:string ->
-  ?goal_ids:string list ->
   ?rule_match:rule_match ->
   ?source_approval_id:string ->
   ?actor:string ->

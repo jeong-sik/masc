@@ -155,7 +155,6 @@ type t =
   ; turn_count : int option
   ; agent_core_turn_count : int option
   ; current_task_id : string option
-  ; goal_ids : string list
   ; outcome : outcome_kind
   ; terminal_reason_code : string
   ; response_text_present : bool

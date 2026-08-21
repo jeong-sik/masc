@@ -832,14 +832,7 @@ let prevalidate_config_update
       ( Keeper_latched_reason.Operator_paused _
       | Keeper_latched_reason.Transcript_corruption_reset_required )
   | None ->
-    (match
-       Keeper_turn_up_update.resolve_active_goal_ids
-         config
-         parsed
-         old.active_goal_ids
-     with
-     | Error _ as error -> error
-     | Ok _ ->
+    (
        let allowed_paths =
          match parsed.allowed_paths_opt with
          | Some allowed_paths -> allowed_paths

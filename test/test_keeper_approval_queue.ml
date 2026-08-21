@@ -116,7 +116,6 @@ let submit_submission_with_context
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ~base_path
       ~keeper_name
@@ -133,7 +132,6 @@ let submit_submission_with_context
       ?request_context
       ?task_id
       ?goal_id
-      ~goal_ids
       ?continuation_channel
       ()
   with
@@ -146,7 +144,6 @@ let submit_with_context
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ~base_path
       ~keeper_name
@@ -158,7 +155,6 @@ let submit_with_context
      ?request_context
      ?task_id
      ?goal_id
-     ~goal_ids
      ?continuation_channel
      ~base_path
      ~keeper_name
@@ -252,7 +248,6 @@ let test_dedup_never_merges_distinct_origins () =
        let first =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -262,7 +257,6 @@ let test_dedup_never_merges_distinct_origins () =
        let same =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -278,7 +272,6 @@ let test_dedup_never_merges_distinct_origins () =
        let retried_next_turn =
          submit_with_context
            ~turn_id:2
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -292,7 +285,6 @@ let test_dedup_never_merges_distinct_origins () =
        let another_channel =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_b
            ~base_path
            ~keeper_name
@@ -302,7 +294,6 @@ let test_dedup_never_merges_distinct_origins () =
        let another_goal_context =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-b" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -1548,7 +1539,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          submit_with_context
            ~turn_id:17
            ~task_id:"task-origin"
-           ~goal_ids:[ "goal-origin" ]
            ~continuation_channel
            ~base_path
            ~keeper_name
@@ -1594,7 +1584,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          ; causal_context =
              Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
          ; task_id
-         ; goal_ids
          ; continuation_channel = None
          }
        in
@@ -3687,7 +3676,6 @@ let test_default_auto_judge_defers_without_blocking () =
          ; causal_context =
              Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
          ; task_id = Some "task-auto-judge"
-         ; goal_ids = [ "goal-auto-judge" ]
          ; continuation_channel = None
          }
        in
@@ -3759,7 +3747,6 @@ let test_unavailable_cycle_grant_never_falls_through () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -3848,7 +3835,6 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -3987,7 +3973,6 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -4099,7 +4084,6 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in

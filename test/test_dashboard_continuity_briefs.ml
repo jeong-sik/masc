@@ -19,7 +19,6 @@ let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
       ("autonomous_turn_count", `Int autonomous_turn_count);
       ("autonomous_action_count", `Int 0);
       ("noop_turn_count", `Int 0);
-      ("active_goal_ids", `List []);
       ("last_autonomous_action_at", `String last_autonomous_action_at);
       ("updated_at", `String updated_at);
       ("tool_audit_at", `String "");

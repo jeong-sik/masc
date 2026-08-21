@@ -107,7 +107,6 @@ type pending_approval =
   ; request_context : Yojson.Safe.t option
   ; task_id : string option
   ; goal_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; summary_status : summary_status

@@ -15,68 +15,6 @@ type reconciliation_summary = {
   failed_count : int;
 }
 
-type keeper_target_resolution =
-  | Assigned_keeper of string
-  | No_assigned_keeper
-  | Ambiguous_assigned_keepers of string list
-  | Assigned_keeper_lookup_failed of string
-
-type durable_assignment_scan = {
-  keeper_names : string list;
-  errors : string list;
-}
-
-let registered_assigned_keepers ~base_path goal_id =
-  Keeper_registry.all ~base_path ()
-  |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-       if List.mem goal_id entry.meta.active_goal_ids then Some entry.name
-       else None)
-  |> List.sort_uniq String.compare
-;;
-
-let durable_assigned_keepers config goal_id =
-  let rec collect keeper_names errors = function
-    | [] ->
-      { keeper_names = List.sort_uniq String.compare keeper_names
-      ; errors = List.rev errors
-      }
-    | keeper_name :: rest ->
-      (match Keeper_meta_store.read_effective_meta_resolved config keeper_name with
-       | Error detail ->
-         collect
-           keeper_names
-           (Printf.sprintf "keeper=%s: %s" keeper_name detail :: errors)
-           rest
-       | Ok None -> collect keeper_names errors rest
-       | Ok (Some (canonical_keeper_name, meta)) ->
-         if List.mem goal_id meta.active_goal_ids
-         then collect (canonical_keeper_name :: keeper_names) errors rest
-         else collect keeper_names errors rest)
-  in
-  match Keeper_meta_store.persisted_keeper_names_result config with
-  | Error detail -> { keeper_names = []; errors = [ detail ] }
-  | Ok keeper_names -> collect [] [] keeper_names
-;;
-
-let assigned_keeper_resolution ~(config : Workspace.config) goal_id =
-  let registered =
-    registered_assigned_keepers ~base_path:config.Workspace.base_path goal_id
-  in
-  let durable = durable_assigned_keepers config goal_id in
-  if durable.errors <> []
-  then (
-    Log.Keeper.error
-      "goal reconciliation Keeper assignment scan incomplete goal_id=%s errors=%s"
-      goal_id
-      (String.concat "; " durable.errors);
-    Assigned_keeper_lookup_failed (String.concat "; " durable.errors))
-  else
-    match List.sort_uniq String.compare (registered @ durable.keeper_names) with
-    | [ keeper_name ] -> Assigned_keeper keeper_name
-    | [] -> No_assigned_keeper
-    | keeper_names -> Ambiguous_assigned_keepers keeper_names
-;;
-
 let exact_producer_keeper_name ~config ~completing_agent_name =
   match
     Keeper_identity_binding.resolve
@@ -101,17 +39,14 @@ let exact_producer_keeper_name ~config ~completing_agent_name =
    of them hears. Nothing narrows the list: narrowing would need a declared
    responsible keeper, and a Goal names none. *)
 
+(* A Goal names no keeper, so the wake goes to whoever just finished the Task
+   that moved it. That is the one identity the event actually carries. *)
 let target_keeper_names ~config ~completing_agent_name ~goal_id =
-  match assigned_keeper_resolution ~config goal_id with
-  | Assigned_keeper keeper_name -> Ok [ keeper_name ]
-  | Ambiguous_assigned_keepers keeper_names ->
-    Ok keeper_names
-  | Assigned_keeper_lookup_failed detail -> Error detail
-  | No_assigned_keeper ->
-    (match exact_producer_keeper_name ~config ~completing_agent_name with
-     | Ok (Some keeper_name) -> Ok [ keeper_name ]
-     | Ok None -> Ok []
-     | Error detail -> Error detail)
+  ignore goal_id;
+  match exact_producer_keeper_name ~config ~completing_agent_name with
+  | Ok (Some keeper_name) -> Ok [ keeper_name ]
+  | Ok None -> Ok []
+  | Error detail -> Error detail
 
 let wake_keeper ~base_path keeper_name goal_id =
   match

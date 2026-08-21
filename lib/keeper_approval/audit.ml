@@ -364,7 +364,6 @@ let record
       ?turn_id
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?rule_match
       ?source_approval_id
       ?actor
@@ -409,7 +408,6 @@ let record
          ; "turn_id", Json_util.int_opt_to_json turn_id
          ; "task_id", Json_util.string_opt_to_json task_id
          ; "goal_id", Json_util.string_opt_to_json goal_id
-         ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
          ; "actor", Json_util.string_opt_to_json actor
          ; ( "decision_source"
            , match decision_source with
@@ -612,20 +610,6 @@ let required_finite_timestamp ~surface key fields =
   | None -> Error (Printf.sprintf "%s.%s is required" surface key)
 ;;
 
-let required_string_list_json ~surface key fields =
-  match List.assoc_opt key fields with
-  | Some (`List values) ->
-    let rec loop acc = function
-      | [] -> Ok (`List (List.rev acc))
-      | `String value :: rest when String.trim value <> "" ->
-        loop (`String value :: acc) rest
-      | _ -> Error (Printf.sprintf "%s.%s must contain non-blank strings" surface key)
-    in
-    loop [] values
-  | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface key)
-  | None -> Error (Printf.sprintf "%s.%s is required" surface key)
-;;
-
 let resolved_approval_json_of_audit_event json =
   let ( let* ) = Result.bind in
   let surface = "resolved_approval_audit" in
@@ -665,7 +649,6 @@ let resolved_approval_json_of_audit_event json =
     let* turn_id = required_nullable_nonnegative_int ~surface "turn_id" fields in
     let* task_id = required_nullable_string ~surface "task_id" fields in
     let* goal_id = required_nullable_string ~surface "goal_id" fields in
-    let* goal_ids = required_string_list_json ~surface "goal_ids" fields in
     let* actor = required_nullable_string ~surface "actor" fields in
     let* decision_source_raw = required_nonblank_string ~surface "decision_source" fields in
     let* () =
@@ -701,7 +684,6 @@ let resolved_approval_json_of_audit_event json =
           ; "turn_id", turn_id
           ; "task_id", nullable_string_json task_id
           ; "goal_id", nullable_string_json goal_id
-          ; "goal_ids", goal_ids
           ; "actor", nullable_string_json actor
           ; "decision_source", `String decision_source_raw
           ; "summary_status", summary_status

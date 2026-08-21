@@ -222,7 +222,6 @@ let record_pre_dispatch_terminal_observation
          | None -> Some meta.runtime.usage.total_turns)
     ; agent_core_turn_count = None
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-    ; goal_ids = meta.active_goal_ids
     ; outcome
     ; terminal_reason_code
     ; response_text_present = false

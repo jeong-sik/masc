@@ -1,18 +1,5 @@
 val current_task_id_opt : Keeper_meta_contract.keeper_meta -> string option
-val primary_goal_id_opt : Keeper_meta_contract.keeper_meta -> string option
-
-val validate_active_goal_ids :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  unit ->
-  string list
-(** Cross-check [meta.active_goal_ids] against the live MASC goal store.
-    Returns only goal IDs that actually exist. Logs pruned IDs at warn level. *)
-
 val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
-val task_is_linked_to_keeper_goals :
-  ?task_goal_index:(string, string list) Hashtbl.t -> string list -> Masc_domain.task -> bool
-
 val runtime_contract_json :
   config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Keeper-visible runtime contract. Backend implementation details such as

@@ -105,17 +105,14 @@ type goal_summary = {
   summary_phase : Goal_phase.t option;
 }
 
-val active_goal_summaries :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  goal_summary list
-(** Resolve the active goal ids a keeper can still progress, for the stable
-    prompt contract. [meta.active_goal_ids] records assignment and is never
-    cleared when a goal reaches a terminal phase, so ids whose stored phase
-    fails {!Goal_phase.admits_self_directed_progress} are dropped rather than
-    announced as available work. Unknown ids remain present with an empty title
-    so every entrypoint renders the same bare-id fallback: an assigned goal that
-    no longer exists is a different fault and stays visible. *)
+val active_goal_summaries_of_store :
+  config:Workspace.config -> goal_summary list
+(** The Goals still open enough to progress, read straight from the store.
+
+    A Goal is shared intent and names no keeper, so this is the same list for
+    everyone. {!Goal_phase.admits_self_directed_progress} decides membership --
+    [Verifying] stays in (the gate holds the phase, not the work) and terminal
+    phases drop out. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->

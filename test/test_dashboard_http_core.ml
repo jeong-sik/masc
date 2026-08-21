@@ -1593,8 +1593,7 @@ max-concurrent = 1
 |}
 
 let execution_trust_keeper_row_keys =
-  [ "active_goal_ids"
-  ; "agent_name"
+  [ "agent_name"
   ; "current_task_id"
   ; "generation"
   ; "keeper_id"
@@ -1627,7 +1626,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | Ok meta ->
       { meta with
         runtime = { meta.runtime with nonce = 17 }
-      ; active_goal_ids = [ "goal-narrow-1" ]
       }
     | Error error -> failf "meta fixture: %s" error
   in
@@ -2937,7 +2935,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "autonomous_turn_count", `Int 1
            ; "autonomous_action_count", `Int 1
            ; "noop_turn_count", `Int 0
-           ; "active_goal_ids", `List []
            ; "last_autonomous_action_at", `String now
            ; "updated_at", `String now
            ; "tool_audit_at", `String ""

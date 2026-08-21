@@ -309,7 +309,6 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; mention_targets = [ "profile-target" ]
     ; proactive_enabled = true
     ; max_context_override = Some 32_000
-    ; active_goal_ids = [ "goal-profile" ]
     ; autoboot_enabled = true
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 24

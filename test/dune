@@ -194,7 +194,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -500,7 +499,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch

@@ -428,7 +428,6 @@ let decode_current_meta fields =
   let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
   let* last_compaction_check_ts = float_field fields "last_compaction_check_ts" in
   let* last_compaction_decision_raw = string_field fields "last_compaction_decision" in
-  let* active_goal_ids = string_list_field fields "active_goal_ids" in
   let* last_autonomous_action_at = string_field fields "last_autonomous_action_at" in
   let* autonomous_action_count = int_field fields "autonomous_action_count" in
   let* autonomous_turn_count = int_field fields "autonomous_turn_count" in
@@ -538,7 +537,6 @@ let decode_current_meta fields =
       ; always_allow = None
       ; created_at
       ; updated_at
-      ; active_goal_ids
       ; paused
       ; latched_reason
       ; autoboot_enabled = true

@@ -306,7 +306,6 @@ val submit_pending :
   ?request_context:Yojson.Safe.t ->
   ?task_id:string ->
   ?goal_id:string ->
-  ?goal_ids:string list ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   (pending_submission, storage_error) result

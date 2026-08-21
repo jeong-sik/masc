@@ -6,7 +6,7 @@
     Dropped goal stays on the list indefinitely.
 
     Two prompt surfaces read that list: [<available_goals>] in the system prompt
-    (via {!Keeper_unified_prompt.active_goal_summaries}) and [### Active Goals]
+    (via {!Keeper_unified_prompt.active_goal_summaries_of_store}) and [### Active Goals]
     in the per-turn world state (via [world_observation.active_goals]). Both
     announced terminal goals as this keeper's work, on every turn, under
     headings that call them available.
@@ -80,7 +80,6 @@ let meta_with_goals ids =
       (`Assoc
          [ "name", `String "goal-phase-keeper"
          ; "trace_id", `String "test-trace-goal-phase"
-         ; "active_goal_ids", `List (List.map (fun id -> `String id) ids)
          ])
   with
   | Ok m -> m
@@ -117,8 +116,8 @@ let summary_title_opt goal_id summaries =
 let test_system_prompt_surface_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals all_ids in
-  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
+  let _meta = meta_with_goals all_ids in
+  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
   check (list string) "only progressable goals are offered"
     [ "goal-executing"; "goal-verifying" ]
     (summary_ids summaries);
@@ -145,8 +144,8 @@ let test_unresolved_goal_id_stays_visible () =
      silent one, so it keeps its bare-id rendering. *)
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals [ "goal-completed"; "goal-vanished" ] in
-  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
+  let _meta = meta_with_goals [ "goal-completed"; "goal-vanished" ] in
+  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
   check (list string) "the terminal goal goes, the unknown id stays"
     [ "goal-vanished" ] (summary_ids summaries);
   check (option string) "unknown id renders with no title" (Some "")
@@ -156,9 +155,10 @@ let test_unresolved_goal_id_stays_visible () =
 let test_no_goals_surface_when_all_are_terminal () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals [ "goal-completed"; "goal-dropped" ] in
+  let _meta = meta_with_goals [ "goal-completed"; "goal-dropped" ] in
+  let meta = meta_with_goals [] in
   check (list string) "no goal block rather than an empty-looking one" []
-    (summary_ids (Keeper_unified_prompt.active_goal_summaries ~config ~meta));
+    (summary_ids (Keeper_unified_prompt.active_goal_summaries_of_store ~config));
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta

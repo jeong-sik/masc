@@ -854,29 +854,18 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
    phase rides along so the Active Goals block can annotate a [Verifying] goal
    (RFC-0387 stage 2: the gate must not make the goal read as ordinary open
    work, nor disappear — review P0-1). *)
-let active_goal_summaries
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-  =
+let active_goal_summaries_of_store ~(config : Workspace.config) =
   List.filter_map
-    (fun goal_id ->
-       match Goal_store.get_goal config ~goal_id with
-       | Some { Goal_store.title; phase; _ } ->
-         if Goal_phase.admits_self_directed_progress phase
-         then
-           Some
-             { summary_goal_id = goal_id
-             ; summary_title = title
-             ; summary_phase = Some phase
-             }
-         else None
-       | None ->
+    (fun (goal : Goal_store.goal) ->
+       if Goal_phase.admits_self_directed_progress goal.phase
+       then
          Some
-           { summary_goal_id = goal_id
-           ; summary_title = ""
-           ; summary_phase = None
-           })
-    meta.active_goal_ids
+           { summary_goal_id = goal.id
+           ; summary_title = goal.title
+           ; summary_phase = Some goal.phase
+           }
+       else None)
+    (Goal_store.list_goals config ())
 ;;
 
 (* A Goal still executing with no Task linked to it is a fact every Keeper is
@@ -930,14 +919,7 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     List.map
       (fun (s : goal_summary) -> s.summary_goal_id, s.summary_title)
       (Option.value
-         ~default:
-           (List.map
-              (fun goal_id ->
-                 { summary_goal_id = goal_id
-                 ; summary_title = ""
-                 ; summary_phase = None
-                 })
-              meta.active_goal_ids)
+         ~default:(active_goal_summaries_of_store ~config)
          active_goal_summaries)
   in
   let base_system_prompt =

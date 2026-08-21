@@ -25,13 +25,11 @@ type context = {
 type task_owner_hooks =
   { is_keeper_agent_identity : Workspace.config -> agent_name:string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
 
 let default_task_owner_hooks =
   { is_keeper_agent_identity = (fun _ ~agent_name:_ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
 ;;
 
@@ -403,50 +401,17 @@ let handle_claim ~tool_name ~start_time ctx args =
    | Error e -> task_log_warn ~task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   result_to_response ~tool_name ~start_time result
 
-(* Look up the current Goal_store phase for each goal id in the agent's
-   active_goal_ids. Returns a list of "<goal_id>=<phase>" strings, e.g.
-   ["goal-1777967605002-004b=executing"; "goal-other=completed"].
-
-   This is consumed only by [format_no_eligible] below, to give the LLM
-   the *current* goal phase instead of letting it infer "completed goal"
-   from the bare excluded_count. See PR body for the velvet-hammer
-   misdiagnosis that motivated this surface. *)
-let active_goal_phases_for_agent ctx =
-  (current_task_owner_hooks ()).active_goal_phases_for_agent
-    ctx.config
-    ~agent_name:ctx.agent_name
-
 let no_eligible_diagnostics_json =
   Tool_task_no_eligible.no_eligible_diagnostics_json
 let no_eligible_exclusion_summary =
   Tool_task_no_eligible.no_eligible_exclusion_summary
 
-let format_no_eligible
-      ctx
-      ~excluded_count
-      ~scope_excluded_count
-  =
-  let diagnostics =
-    no_eligible_exclusion_summary ~scope_excluded_count
-  in
-  match active_goal_phases_for_agent ctx with
-  | [] ->
-      Printf.sprintf
-        "No eligible tasks available (blocked/excluded: %d). This agent has no \
-         active_goal_ids — every open task is out of scope. Operator should \
-         configure active_goal_ids via the owner runtime. %s"
-        excluded_count
-        diagnostics
-  | phases ->
-      Printf.sprintf
-        "No eligible tasks available (blocked/excluded: %d). active goal \
-         phases: [%s]. NOTE: excluded ≠ completed. If every phase above is \
-         'executing', the cause is goal-scope mismatch — open tasks are \
-         scoped to a goal not in this agent's active_goal_ids — not goal \
-         completion. %s"
-        excluded_count
-        (String.concat ", " phases)
-        diagnostics
+let format_no_eligible ctx ~excluded_count ~scope_excluded_count =
+  ignore ctx;
+  Printf.sprintf
+    "No eligible tasks available (blocked/excluded: %d). %s"
+    excluded_count
+    (no_eligible_exclusion_summary ~scope_excluded_count)
 
 let handle_claim_next ~tool_name ~start_time ctx _args =
   (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as

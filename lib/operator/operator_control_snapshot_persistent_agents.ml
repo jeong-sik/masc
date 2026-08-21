@@ -127,10 +127,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "last_model_used", `Null
                     ; "active_model", `Null
                     ; "next_model_hint", `Null
-                    ; ( "active_goal_ids"
-                      , `List
-                          (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-                      )
                     ; ( "last_autonomous_action_at"
                       , if String.trim meta.runtime.last_autonomous_action_at = ""
                         then `Null

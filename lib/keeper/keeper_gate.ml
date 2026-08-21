@@ -10,7 +10,6 @@ type request =
   ; base_path : string
   ; causal_context : causal_context option
   ; task_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t option
   }
 
@@ -396,7 +395,6 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
     ~tool_name:request.operation
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
     ?rule_match
     ?source_approval_id
     ?decision_source
@@ -412,7 +410,6 @@ let submit request =
     ?turn_id:(request_turn_id request)
     ?request_context:(Option.map (fun context -> context.snapshot) request.causal_context)
     ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
     ?continuation_channel:request.continuation_channel
     ()
 ;;
@@ -1228,7 +1225,6 @@ let observe_recovered_work kind (entry : Keeper_approval_queue_rules_types.pendi
        ?turn_id:entry.turn_id
        ?task_id:entry.task_id
        ?goal_id:entry.goal_id
-       ~goal_ids:entry.goal_ids
        ())
 ;;
 
@@ -1290,7 +1286,6 @@ let retry_blocked_auto_judge
             ?turn_id:entry.turn_id
             ?task_id:entry.task_id
             ?goal_id:entry.goal_id
-            ~goal_ids:entry.goal_ids
             ~actor:requested_by
             ());
        Ok ()))
@@ -1586,7 +1581,6 @@ let observe_exact_rule_store_degraded (request : request) error =
        ~tool_name:request.operation
        ?turn_id:(request_turn_id request)
        ?task_id:request.task_id
-       ~goal_ids:request.goal_ids
        ())
 ;;
 
@@ -1608,7 +1602,6 @@ let observe_exact_rule_expired
        ~tool_name:request.operation
        ?turn_id:(request_turn_id request)
        ?task_id:request.task_id
-       ~goal_ids:request.goal_ids
        ~rule_match
        ())
 ;;
@@ -1710,7 +1703,6 @@ let decide ?cycle_grant ~keeper_always_allow request =
          ~tool_name:request.operation
          ?turn_id:(request_turn_id request)
          ?task_id:request.task_id
-         ~goal_ids:request.goal_ids
          ~source_approval_id:approval_id
          ());
     Otel_metric_store.inc_counter

@@ -629,7 +629,6 @@ let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
          latest_receipt)
   in
   let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-  let goal_ids = meta.active_goal_ids in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   [
     terminal_reason_timeline_event ~latest_decision ~latest_receipt;
@@ -639,7 +638,7 @@ let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
     Option.bind latest_approval_audit approval_event_timeline_event;
     blocker_timeline_event ~ts_unix:blocker_ts_unix
       ~observed_at_unix:blocker_ts_unix
-      ~runtime_blocker_fields ?task_id ~goal_ids
+      ~runtime_blocker_fields ?task_id
       ~trace_id ~next_human_action
       ~observation_only:blocker_observation_only ();
   ]
@@ -824,7 +823,6 @@ let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
   in
   let blocker_events =
     let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-    let goal_ids = meta.active_goal_ids in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let blocker_ts_unix =
       runtime_blocker_timeline_ts ~observed_at_unix ~meta
@@ -838,7 +836,7 @@ let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
     [
       blocker_timeline_event ~ts_unix:blocker_ts_unix
         ~observed_at_unix:blocker_ts_unix
-        ~runtime_blocker_fields ?task_id ~goal_ids
+        ~runtime_blocker_fields ?task_id
         ~trace_id ~next_human_action
         ~observation_only:blocker_observation_only ()
     ]
@@ -1002,11 +1000,6 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
      ; ( "current_task_id"
        , Json_util.string_opt_to_json
            (Keeper_runtime_contract.current_task_id_opt meta) )
-     ; ( "goal_id"
-       , Json_util.string_opt_to_json
-           (Keeper_runtime_contract.primary_goal_id_opt meta) )
-     ; ( "goal_ids"
-       , `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) )
      ; ("active_model", Json_util.string_opt_to_json selected_model)
      ; ("selected_model", Json_util.string_opt_to_json selected_model)
      ; ("runtime_contract", raw.runtime_contract)

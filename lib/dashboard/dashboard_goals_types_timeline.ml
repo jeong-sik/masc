@@ -189,8 +189,6 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
         match meta.current_task_id with
         | Some task_id -> `String (Keeper_id.Task_id.to_string task_id)
         | None -> `Null );
-      ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) );
       ( "sandbox_profile",
         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) );
       ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));

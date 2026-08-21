@@ -128,12 +128,7 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
   match Safe_ops.json_string_opt "goal_id" args with
   | Some s when String.trim s <> "" ->
       validate_goal_id config (String.trim s) |> Result.map Option.some
-  | _ ->
-      (match meta.active_goal_ids with
-       | [] -> Ok None
-       | [ goal_id ] ->
-           validate_goal_id config goal_id |> Result.map Option.some
-       | _ :: _ :: _ -> Ok None)
+  | _ -> Ok None
 ;;
 
 let no_eligible_exclusion_summary =
@@ -595,16 +590,7 @@ let handle_keeper_task_tool_with_outcome
     (match result with
      | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
-       (* Make the scope override visible: this is a claim outside the keeper's
-          active_goal_ids, taken because no in-scope task was eligible
-          (schedule-level fallback). Silent widening would let operators misread
-          the keeper's scope. *)
-       if scope_widened then
-         Log.Keeper.info ~keeper_name:meta.name
-           "goal-scope widened to all_tasks for claim of %s: no in-scope task was \
-            eligible (active_goal_ids=[%s])"
-           task_id
-           (String.concat ", " meta.active_goal_ids);
+       ignore scope_widened;
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
           (task_state_schedule.ml:302). When the task is already InProgress,
           dispatching Start produces an InvalidState transition error every

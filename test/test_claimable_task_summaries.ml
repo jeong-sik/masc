@@ -33,7 +33,6 @@ let make_meta () =
       (`Assoc
          [ "name", `String "claimable-probe"
          ; "trace_id", `String "test-trace-claimable"
-         ; "active_goal_ids", `List []
          ])
   with
   | Ok m -> m

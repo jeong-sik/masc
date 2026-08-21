@@ -58,27 +58,6 @@ let resume_operator_pause
     Ok old
 ;;
 
-let resolve_active_goal_ids config p old_ids =
-  let active_goal_ids =
-    match p.active_goal_ids_opt with
-    | Some ids -> ids
-    | None ->
-        Option.value ~default:old_ids p.profile_defaults.active_goal_ids
-  in
-  match p.active_goal_ids_opt with
-  | None -> Ok active_goal_ids
-  | Some _ ->
-      let missing =
-        List.filter
-          (fun goal_id -> Option.is_none (Goal_store.get_goal config ~goal_id))
-          active_goal_ids
-      in
-      if missing = [] then Ok active_goal_ids
-      else
-        Error
-          (Printf.sprintf "unknown active_goal_ids: %s"
-             (String.concat ", " missing))
-
 let turn_in_flight_rejection ~keeper_name
     (info : Keeper_owner.turn_in_flight) : tool_result =
   tool_result_error_data
@@ -175,9 +154,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
   match resume_operator_pause ctx old with
   | Error message -> tool_result_error message
   | Ok old ->
-  match resolve_active_goal_ids ctx.config p old.active_goal_ids with
-  | Error msg -> tool_result_error msg
-  | Ok active_goal_ids ->
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
@@ -237,7 +213,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
     sandbox_profile;
     network_mode;
     autoboot_enabled;
-    active_goal_ids;
     paused = old.paused;
     latched_reason = source_meta.latched_reason;
     runtime = source_meta.runtime;
@@ -331,18 +306,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                tool_result_error
                  (Printf.sprintf "declarative keeper config write failed: %s" e)
               | Ok _ ->
-            let enqueue_goal_assignment_wakes (meta : keeper_meta) =
-              let (_ : string list) =
-                Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
-                  ~config:ctx.config
-                  ~keeper_name:meta.name
-                  ~assigned_by:"keeper_up"
-                  ~old_ids:old.active_goal_ids
-                  ~new_ids:meta.active_goal_ids
-                  ()
-              in
-              ()
-            in
             (match
                Keeper_owner_registry.apply_meta
                  ~base_path:ctx.config.base_path
@@ -357,7 +320,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                     ; mention_targets = updated.mention_targets
                     ; proactive_enabled = updated.proactive.enabled
                     ; max_context_override = updated.max_context_override
-                    ; active_goal_ids = updated.active_goal_ids
                     ; autoboot_enabled = updated.autoboot_enabled
                     ; telemetry_feedback_enabled = updated.telemetry_feedback_enabled
                     ; telemetry_feedback_window_hours =
@@ -392,7 +354,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   wake the keeper once at the assignment edge. Enqueue is
                   durable, so the keepalive restart below delivers it on the
                   new fiber's first cycle. Removals never wake. *)
-               enqueue_goal_assignment_wakes updated;
                (match swap_keepalive_lane_fenced ctx updated with
                 | Error rejection -> rejection
                 | Ok (stop_outcome, launch_outcome) ->

@@ -263,9 +263,6 @@ let keeper_meta_overlay_drift_categories
   List.filter_map Fun.id
     [
       drift_if "proactive" (current.proactive <> target.proactive);
-      drift_if "active_goal_ids"
-        (Option.is_some defaults.active_goal_ids
-         && current.active_goal_ids <> target.active_goal_ids);
       drift_if "autoboot_enabled"
         (current.autoboot_enabled <> target.autoboot_enabled);
       drift_if "mention_targets"
@@ -332,8 +329,6 @@ let ensure_keeper_meta_with_cause config name =
       apply_default defaults.autoboot_enabled meta.autoboot_enabled in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
-    let target_active_goal_ids =
-      apply_default defaults.active_goal_ids meta.active_goal_ids in
     (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
        declared. The previous behaviour silently fell through to
        [default_sandbox_profile = Local] when TOML omitted the key,
@@ -392,7 +387,6 @@ let ensure_keeper_meta_with_cause config name =
         autonomous_instructions = target_autonomous_instructions;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
-        active_goal_ids = target_active_goal_ids;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
@@ -432,14 +426,7 @@ let ensure_keeper_meta_with_cause config name =
         meta.name;
       let updated_at = now_iso () in
       let effective_updated = { overlayed with updated_at } in
-      let persisted_updated =
-        { effective_updated with
-          active_goal_ids =
-            (match defaults.active_goal_ids with
-             | Some _ -> []
-             | None -> target_active_goal_ids)
-        }
-      in
+      let persisted_updated = effective_updated in
       match
         Keeper_owner_registry.apply_meta
           ~base_path:config.base_path
@@ -454,7 +441,6 @@ let ensure_keeper_meta_with_cause config name =
              ; mention_targets = persisted_updated.mention_targets
              ; proactive_enabled = persisted_updated.proactive.enabled
              ; max_context_override = persisted_updated.max_context_override
-             ; active_goal_ids = persisted_updated.active_goal_ids
              ; autoboot_enabled = persisted_updated.autoboot_enabled
              ; telemetry_feedback_enabled = persisted_updated.telemetry_feedback_enabled
              ; telemetry_feedback_window_hours =
@@ -465,7 +451,7 @@ let ensure_keeper_meta_with_cause config name =
              })
       with
       | Ok (Some committed) ->
-        Ok { committed with active_goal_ids = target_active_goal_ids }
+        Ok committed
       | Ok None ->
         Error
           (boot_meta_error

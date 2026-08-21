@@ -304,7 +304,7 @@ let test_keeper_down_retain_records_reason () =
     (Some wire_keeper_down)
     (latched_reason_wire retained)
 
-(* ── Site 1: dead-tombstone cleanup ─────────────────────────── *)
+(* ── Site 1: supervisor cleanup ─────────────────────────────── *)
 
 
 let () =

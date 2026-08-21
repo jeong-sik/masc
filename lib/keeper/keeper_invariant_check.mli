@@ -39,7 +39,6 @@ val check_step_invariants :
     1. TypeOK
     6. RunningRequiresFiber
     7. StoppedRequiresDrain
-    8. DeadRequiresTombstone
     9. DerivePhaseAgreement
 
     Suitable for periodic sweep-time scans (e.g. keeper supervisor audit).

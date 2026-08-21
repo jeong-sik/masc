@@ -1018,7 +1018,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
            (Shutdown_store.Invalid_operation
              (Shutdown_types.Finalized_completion_mismatch _)) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
-       | Ok () -> fail "store accepted completion outside dead-tombstone intent");
+       | Ok () -> fail "store accepted completion outside supervisor cleanup intent");
       (match
          operation
          |> unsupported_shutdown_schema_fixture

@@ -25,7 +25,7 @@ type outcome =
   | Author_not_a_keeper of { author : string }
       (** [created_by] resolves to no Keeper lane — an operator or a client id.
           Not an error: there is no lane to wake. A Keeper whose shutdown
-          finalized with a retained dead tombstone still presents a lane here
+          finalized while retaining its meta still presents a lane here
           and is not filtered out: that decision belongs to the durable intake
           gate in {!Keeper_registry_event_queue}, which admits every retention
           other than [Remove_meta] for all stimulus producers alike. *)

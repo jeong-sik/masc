@@ -289,9 +289,8 @@ type keeper_meta = {
   active_goal_ids : string list;
   paused : bool;
   latched_reason : Keeper_latched_reason.t option;
-      (** Typed companion to [paused]. Explicit operator pause, terminal
-          dead-tombstone, and transcript-corruption reset-required paths may
-          write it. [None] while paused is a fail-closed unclassified state
+      (** Typed companion to [paused]. Explicit operator pause and
+          transcript-corruption reset-required paths may write it. [None] while paused is a fail-closed unclassified state
           requiring operator action. *)
   autoboot_enabled : bool;
   current_task_id : Keeper_id.Task_id.t option;

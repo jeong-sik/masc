@@ -399,14 +399,21 @@ let test_predicate_rejects_other_lookup_errors () =
 
 (* Owner absence plus missing metadata is only terminal removal evidence when
    the operation itself promised [Remove_meta]. Retain-meta operations must
-   keep surfacing the inconsistency. *)
-let test_predicate_rejects_retain_meta_intents () =
+   keep surfacing the inconsistency.
+
+   Every [cleanup_reason] is listed so that adding one forces a decision here
+   rather than inheriting whichever answer the new variant happens to fall
+   into. [Supervisor_cleanup] is the case that made this matter: it replaced
+   [Dead_tombstone_cleanup], whose disposition was retain, and moved to
+   [Remove_meta] at the same time. The rename carried the old expectation with
+   it and left main red. *)
+let test_predicate_answers_every_cleanup_reason () =
   with_workspace (fun ~config ->
     let owner_not_found name =
       Keeper_owner_registry.Command_lookup_failed
         (Keeper_owner_registry.Owner_not_found name)
     in
-    let check_reason label reason =
+    let check_reason label reason ~is_removal_evidence =
       let operation =
         make_operation
           ~keeper_name:label
@@ -415,15 +422,35 @@ let test_predicate_rejects_retain_meta_intents () =
       in
       check
         bool
-        (label ^ ": retain-meta intent is not removal evidence")
-        false
+        (label
+         ^ ": "
+         ^ (if is_removal_evidence then "removal" else "retain")
+         ^ " intent decides the admission release")
+        is_removal_evidence
         (Keeper_shutdown_finalize.admission_already_released_by_removal
            ~config
            operation
            (owner_not_found label))
     in
-    check_reason "ownerless-retain-operator" Operator_stop_retain_meta;
-    check_reason "ownerless-retain-tombstone" Supervisor_cleanup)
+    check_reason
+      "ownerless-retain-operator"
+      Operator_stop_retain_meta
+      ~is_removal_evidence:false;
+    check_reason
+      "ownerless-remove-operator"
+      Operator_stop_remove_meta
+      ~is_removal_evidence:true;
+    check_reason
+      "ownerless-supervisor-cleanup"
+      Supervisor_cleanup
+      ~is_removal_evidence:true;
+    check_reason
+      "ownerless-dashboard-purge"
+      (Dashboard_keeper_purge
+         { requested_name = "ownerless-dashboard-purge"
+         ; agent_name = "ownerless-dashboard-purge"
+         })
+      ~is_removal_evidence:true)
 ;;
 
 (* The cases above enter through [recover_operation_with_corrupt_owner_fence].
@@ -679,9 +706,9 @@ let () =
             `Quick
             test_predicate_rejects_other_lookup_errors
         ; Alcotest.test_case
-            "predicate rejects retain-meta intents"
+            "predicate answers every cleanup reason"
             `Quick
-            test_predicate_rejects_retain_meta_intents
+            test_predicate_answers_every_cleanup_reason
         ; Alcotest.test_case
             "corrupt sibling does not hide ownerless operator-retain"
             `Quick

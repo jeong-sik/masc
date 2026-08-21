@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import select
 import signal
 import socket
@@ -27,8 +28,13 @@ WorkspaceSetup = Callable[[str], None]
 WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
 WORKSPACE_RENDERED = b"workspace\\x1B]8;;https://attacker.invalid\\x07owned"
 FRAME_END = b"\x1b[?7h"
+FRAME_START = b"\x1b[?7l"
 FULL_REDRAW = b"\x1b[2J"
 CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
+CURSOR_RE = re.compile(rb"\x1b\[(\d+);(\d+)H\x1b\[\?25h")
+POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
+CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+BOARD_CELL_BODY = ("한" * 20) + " " + ("한" * 20)
 
 
 @contextmanager
@@ -158,6 +164,65 @@ def send_and_wait(
     )
     frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
     return bytes(output[start:frame_end])
+
+
+def fixture_cell_width(text: str) -> int:
+    widths = {"\u0301": 0, "한": 2, "🙂": 2}
+    return sum(widths.get(character, 1) for character in text)
+
+
+def assert_message_input_frame(
+    segment: bytes,
+    *,
+    row: int,
+    columns: int,
+    input_text: str,
+    cursor_column: int,
+) -> None:
+    frame_start = segment.rfind(FRAME_START)
+    if frame_start >= 0:
+        frame = segment[frame_start:]
+    else:
+        frame_start = segment.rfind(FULL_REDRAW)
+        if frame_start >= 0:
+            frame = segment[frame_start:]
+        else:
+            frame = b""
+    if not frame:
+        raise AssertionError(f"message update has no frame boundary: {segment!r}")
+    cursors = list(CURSOR_RE.finditer(frame))
+    if not cursors:
+        raise AssertionError(f"message frame has no visible cursor: {frame!r}")
+    cursor = cursors[-1]
+    actual_cursor = (int(cursor.group(1)), int(cursor.group(2)))
+    if actual_cursor != (row, cursor_column):
+        raise AssertionError(
+            f"message cursor {actual_cursor!r}, expected {(row, cursor_column)!r}: "
+            f"{frame!r}"
+        )
+
+    row_marker = f"\x1b[{row};1H".encode()
+    row_start = frame.rfind(row_marker, 0, cursor.start())
+    if row_start < 0:
+        raise AssertionError(f"message frame has no row {row}: {frame!r}")
+    content_start = row_start + len(row_marker)
+    next_position = POSITION_RE.search(frame, content_start)
+    if next_position is None:
+        raise AssertionError(f"message row {row} has no end boundary: {frame!r}")
+    row_bytes = frame[content_start : next_position.start()]
+    rendered_row = CSI_RE.sub(b"", row_bytes).decode("utf-8").rstrip("\r\n")
+    if f"> {input_text}" not in rendered_row:
+        raise AssertionError(f"message row lost {input_text!r}: {rendered_row!r}")
+    if not rendered_row.endswith("│"):
+        raise AssertionError(f"message row lost its right border: {rendered_row!r}")
+    if "~" in rendered_row and "~" not in input_text:
+        raise AssertionError(f"message row truncated fitting input: {rendered_row!r}")
+    actual_width = fixture_cell_width(rendered_row)
+    if actual_width != columns:
+        raise AssertionError(
+            f"message row uses {actual_width} cells, expected {columns}: "
+            f"{rendered_row!r}"
+        )
 
 
 def wait_for_terminal_input_consumed(slave_fd: int) -> None:
@@ -390,7 +455,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
         "id": "post-1",
         "author": "board-author",
         "title": "Row budget fixture",
-        "body": "board-body",
+        "body": BOARD_CELL_BODY,
         "votes": 1,
         "comment_count": 5,
         "created_at_iso": "2026-08-22T00:00:00Z",
@@ -857,7 +922,7 @@ def assert_row_budgeted_surfaces(
         final_cursor=b"\x1b[?25l",
     )
     for expected in (
-        b"board-body",
+        BOARD_CELL_BODY.encode(),
         b"comment-1",
         b"comment-2",
         b"comment-3",
@@ -912,10 +977,71 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
 
+        ascii_frame = send_and_wait(process, master_fd, output, b"A", b"> A")
+        assert_message_input_frame(
+            ascii_frame,
+            row=25,
+            columns=100,
+            input_text="A",
+            cursor_column=8,
+        )
+        send_and_wait(process, master_fd, output, b"\x15", b"> ")
+
+        combining_text = "e\u0301"
+        combining_frame = send_and_wait(
+            process,
+            master_fd,
+            output,
+            combining_text.encode(),
+            b"> " + combining_text.encode(),
+        )
+        assert_message_input_frame(
+            combining_frame,
+            row=25,
+            columns=100,
+            input_text=combining_text,
+            cursor_column=8,
+        )
+        send_and_wait(process, master_fd, output, b"\x15", b"> ")
+
         typed_frame = send_and_wait(
             process, master_fd, output, expected_bytes, b"> " + expected_bytes
         )
         typed_frame.decode("utf-8")
+        assert_message_input_frame(
+            typed_frame,
+            row=25,
+            columns=100,
+            input_text=expected_text,
+            cursor_column=13,
+        )
+        narrow_frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=16,
+            needle=b"> A",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25h",
+        )
+        assert_message_input_frame(
+            narrow_frame,
+            row=25,
+            columns=16,
+            input_text=expected_text,
+            cursor_column=13,
+        )
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=100,
+            needle=b"> " + expected_bytes,
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25h",
+        )
         backspace_cases = (
             ("> Aé한".encode(), "🙂".encode()),
             ("> Aé".encode(), "한".encode()),

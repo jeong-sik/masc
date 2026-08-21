@@ -202,6 +202,9 @@ let run_durable_intake_for_shutdown
   =
   let slot = slot_for ~base_path ~keeper_name in
   Eio.Mutex.lock slot.intake_mu;
+  (* fun-protect-finally-ok: [Eio.Mutex.unlock] is a non-suspending release;
+     it must run on cancellation so shutdown-owned recovery cannot strand the
+     keeper intake lock. *)
   Fun.protect
     ~finally:(fun () -> Eio.Mutex.unlock slot.intake_mu)
     (fun () ->

@@ -368,9 +368,4 @@ export function isKeeperAssignee(task: Task): boolean {
   return task.assignee ? findKeeper(task.assignee) !== null : false
 }
 
-// -- Goal relationship (keeper's active goals) ----------------------
 
-export function assigneeGoalIds(task: Task): string[] {
-  const keeper = findKeeper(task.assignee)
-  return keeper?.active_goal_ids ?? []
-}

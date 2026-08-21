@@ -317,7 +317,6 @@ describe('FleetTelemetryPanel', () => {
       keepers: [
         {
           ...executionResponse.keepers[0],
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           sandbox_last_error: 'bind EPERM at /var/folders/tmp',
         },

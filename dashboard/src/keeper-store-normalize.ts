@@ -721,14 +721,12 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         next_human_action: nextHumanAction,
         config_error: normalizeKeeperProfileConfigError(row.config_error),
         trust,
-        active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,
         blocked_task_count: asNumber(row.blocked_task_count) ?? null,
         goal_progress: isRecord(row.goal_progress)
           ? {
-              active_goal_count: asNumber(row.goal_progress.active_goal_count) ?? undefined,
               linked_task_count: asNumber(row.goal_progress.linked_task_count) ?? undefined,
               done_task_count: asNumber(row.goal_progress.done_task_count) ?? undefined,
               open_task_count: asNumber(row.goal_progress.open_task_count) ?? undefined,

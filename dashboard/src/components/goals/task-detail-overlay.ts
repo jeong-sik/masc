@@ -22,9 +22,6 @@ import {
   taskEventsError,
   taskEventsSearchQuery,
   filterTaskEvents,
-  goalRelationSearchQuery,
-  filterGoalRelations,
-  assigneeGoalIds,
   activeTab,
   switchToActivityTab,
   activityEvents,
@@ -37,7 +34,7 @@ import {
   type TaskDetailTab,
 } from './task-detail-state'
 import { TaskActivityList } from './task-activity-list'
-import { effectiveTaskPriority, goalById, priorityLabel } from './goal-helpers'
+import { effectiveTaskPriority, priorityLabel } from './goal-helpers'
 import type { Task } from '../../types'
 
 const CARD_BOX = 'v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-3'
@@ -412,54 +409,6 @@ function HandoffSection({ task }: { task: Task }) {
   `
 }
 
-// -- Goal relationship section --------------------------------------
-
-function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
-  if (goalIds.length === 0) return null
-
-  const query = goalRelationSearchQuery.value
-  const visibleIds = filterGoalRelations(goalIds, query)
-  const trimmed = query.trim()
-  const isFiltering = trimmed !== ''
-
-  return html`
-    <div class="v2-workspace-panel flex flex-col gap-2">
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">담당 키퍼의 활성 목표</div>
-        ${goalIds.length > 1 ? html`
-          <${TextInput}
-            type="search"
-            value=${query}
-            placeholder="목표 검색 (title/status/metric)"
-            ariaLabel="목표 검색"
-            onInput=${(e: Event) => { goalRelationSearchQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"
-          />
-          <span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">
-            ${isFiltering
-              ? `${visibleIds.length} / ${goalIds.length}`
-              : `${goalIds.length}개`}
-          </span>
-        ` : null}
-      </div>
-      ${isFiltering && visibleIds.length === 0
-        ? html`<div class="py-3 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${goalIds.length} goals)</div>`
-        : html`
-      <div class="flex flex-col gap-1">
-        ${visibleIds.map(id => {
-          const goal = goalById(id)
-          return html`
-            <div key=${id} class="v2-workspace-row flex items-center gap-2 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] px-3 py-2">
-              <span class="text-xs text-text-body">${goal?.title ?? id}</span>
-              ${goal?.phase ? html`<${StatusBadge} status=${goal.phase} />` : null}
-            </div>
-          `
-        })}
-      </div>
-        `}
-    </div>
-  `
-}
 
 // -- Main overlay ---------------------------------------------------
 
@@ -471,7 +420,6 @@ export function TaskDetailOverlay() {
   const titleId = `task-detail-title-${task.id}`
   const p = effectiveTaskPriority(task)
   const keeper = findKeeper(task.assignee)
-  const goalIds = assigneeGoalIds(task)
   const assigneeKind = keeper ? 'keeper' : null
 
   return html`
@@ -540,7 +488,6 @@ export function TaskDetailOverlay() {
           <${HandoffSection} task=${task} />
 
           ${'' /* Goal relation */}
-          <${GoalRelationSection} goalIds=${goalIds} />
 
           ${'' /* Recent task events */}
           <div>

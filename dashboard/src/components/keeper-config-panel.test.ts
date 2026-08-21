@@ -34,7 +34,6 @@ function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
 function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
-    active_goal_ids: ['goal-runtime'],
     autoboot_enabled: true,
     max_context_override: null,
     autonomous_wake_prompt: null,
@@ -77,12 +76,9 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     workspace: {
       mention_targets: ['sangsu'],
       bound_workspace_ids: ['default'],
-      active_goal_ids: ['goal-runtime'],
       active_goals: [
         { id: 'goal-runtime', title: 'Ship runtime clarity' },
       ],
-      active_goal_count: 1,
-      missing_active_goal_ids: [],
     },
     sources: {
       live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -316,11 +312,6 @@ describe('keeperConfigControlInventory', () => {
       method: 'GET',
       endpoint: '/api/v1/providers',
     })
-    expect(findItem('goals', c, 'kcf-goals-catalog-filter').contracts).toContainEqual({
-      kind: 'api',
-      method: 'GET',
-      endpoint: '/api/v1/dashboard/goals',
-    })
     expect(findItem('health', c, 'kcf-health-directives').contracts).toContainEqual({
       kind: 'api',
       method: 'POST',
@@ -413,7 +404,6 @@ describe('keeperConfigControlInventory', () => {
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   const base: KeeperConfig = {
     name: 'test-keeper',
-    active_goal_ids: [],
     autoboot_enabled: true,
     max_context_override: null,
     autonomous_wake_prompt: null,
@@ -430,10 +420,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     workspace: {
       mention_targets: [],
       bound_workspace_ids: [],
-      active_goal_ids: [],
       active_goals: [],
-      active_goal_count: 0,
-      missing_active_goal_ids: [],
     },
     sources: {} as KeeperConfig['sources'],
     metrics: {} as KeeperConfig['metrics'],
@@ -571,34 +558,13 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.sandbox_profile).toBeUndefined()
   })
 
-  it('emits active_goal_ids when goal bindings change', () => {
-    const c = makeKeeperConfigForSandbox({
-      active_goal_ids: ['goal-a'],
-      workspace: {
-        mention_targets: [],
-        bound_workspace_ids: [],
-        active_goal_ids: ['goal-a'],
-        active_goals: [{ id: 'goal-a', title: 'Goal A' }],
-        active_goal_count: 1,
-        missing_active_goal_ids: [],
-      },
-    })
-    const payload = buildRuntimePayload(draftFrom(c, {
-      active_goal_ids: ['goal-b', 'goal-c'],
-    }), c)
-    expect(payload.active_goal_ids).toEqual(['goal-b', 'goal-c'])
-  })
-
   it('normalizes line-based runtime list drafts through one path', () => {
     const c = makeKeeperConfigForSandbox({
       allowed_paths: ['workspace/masc'],
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
-        active_goal_ids: [],
         active_goals: [],
-        active_goal_count: 0,
-        missing_active_goal_ids: [],
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -615,10 +581,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
-        active_goal_ids: [],
         active_goals: [],
-        active_goal_count: 0,
-        missing_active_goal_ids: [],
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -1062,12 +1025,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('policy')
     expect(container.textContent).toContain('wire:chat_template_kwargs')
     expect(container.textContent).toContain('활성 런타임')
-
-    // goals tab: assigned goal-store bindings.
-    selectKcfTab(container, '목표')
-    await flush()
-    expect(container.textContent).toContain('active_goal_ids')
-    expect(container.textContent).toContain('Ship runtime clarity')
 
     // health tab: runtime liveness / registry diagnostics.
     selectKcfTab(container, '상태·진단')

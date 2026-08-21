@@ -831,7 +831,6 @@ export interface GoalDetailKeeper {
   name: string
   agent_name: string
   current_task_id: string | null
-  active_goal_ids: string[]
   sandbox_profile: string
   network_mode: string
   runtime_id: string

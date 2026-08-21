@@ -126,7 +126,6 @@ export type KcfTabId =
   | 'runtime'
   | 'policy'
   | 'access'
-  | 'goals'
   | 'hooks'
   | 'health'
 
@@ -136,7 +135,6 @@ const KCF_TABS: readonly (readonly [KcfTabId, string, string])[] = [
   ['runtime', '런타임', '◷'],
   ['policy', '실행 정책', '⚖'],
   ['access', '권한·샌드박스', '⚿'],
-  ['goals', '목표', '◎'],
   ['hooks', '훅', '⬡'],
   ['health', '상태·진단', '◉'],
 ]
@@ -322,7 +320,6 @@ export type RuntimeDraft = {
   autoboot_enabled: boolean
   max_context_override: string
   sandbox_profile: SandboxProfile
-  active_goal_ids: string[]
   mention_targets_text: string
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
@@ -483,9 +480,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     autoboot_enabled: c.autoboot_enabled,
     max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
-    active_goal_ids: c.workspace.active_goal_ids.length > 0
-      ? c.workspace.active_goal_ids
-      : c.active_goal_ids,
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
@@ -810,36 +804,6 @@ export function keeperConfigControlInventory(
           ],
         },
       ]
-    case 'goals':
-      return [
-        keeperRuntimeControlItem(
-          c,
-          tab,
-          'kcf-goals-active-bindings',
-          'Active goal bindings',
-          `${configApiSource} workspace.active_goal_ids + GET /api/v1/dashboard/goals`,
-          'PATCH /api/v1/keepers/:name/config active_goal_ids',
-          'active_goal_ids',
-          [
-            'active_goal_ids',
-            'workspace.active_goal_ids',
-            'workspace.active_goals',
-            'workspace.active_goal_count',
-            'workspace.missing_active_goal_ids',
-            'sources.default_manifest_path',
-            'sources.default_source_kind',
-          ],
-        ),
-        {
-          id: 'kcf-goals-catalog-filter',
-          tab,
-          label: 'Goal catalog filter',
-          kind: 'browser-local',
-          source: 'loaded goal tree + goalSearchQuery signal',
-          action: 'client-side title/id filter only',
-          contracts: [apiContract('GET', DASHBOARD_GOALS_API), browserState('goalSearchQuery')],
-        },
-      ]
     case 'hooks':
       return [
         {
@@ -946,9 +910,6 @@ export function buildRuntimePayloadResult(
   const newPaths = listTextToStrings(draft.allowed_paths_text)
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
   const origPaths = orig.allowed_paths ?? []
-  const origActiveGoalIds = orig.workspace.active_goal_ids.length > 0
-    ? orig.workspace.active_goal_ids
-    : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
   if (maxContextOverride.value !== orig.max_context_override) {
@@ -957,7 +918,6 @@ export function buildRuntimePayloadResult(
   if (wakePrompt.value !== (orig.autonomous_wake_prompt ?? null)) {
     payload.autonomous_wake_prompt = wakePrompt.value
   }
-  if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
   if (!sameStringArray(newPaths, origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
@@ -1006,7 +966,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     autonomous_wake_prompt: result.ok
       ? 'autonomous_wake_prompt' in payload
       : rd.autonomous_wake_prompt.trim() !== (c.autonomous_wake_prompt ?? ''),
-    active_goal_ids: 'active_goal_ids' in payload,
     mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
@@ -1082,21 +1041,6 @@ function runtimeCatalogSpecRows(entry: DashboardRuntimeProviderSnapshot): readon
     ['declared', runtimeCatalogDeclaredSpec(entry), true],
     ['policy', runtimeCatalogParameterPolicy(entry), true],
   ]
-}
-
-function updateRuntimeActiveGoalIds(values: readonly string[]) {
-  const d = runtimeDraft.value
-  if (!d) return
-  runtimeDraft.value = { ...d, active_goal_ids: dedupeStrings(values) }
-}
-
-function toggleRuntimeActiveGoal(goalId: string, checked: boolean) {
-  const d = runtimeDraft.value
-  if (!d) return
-  const next = checked
-    ? [...d.active_goal_ids, goalId]
-    : d.active_goal_ids.filter((id) => id !== goalId)
-  updateRuntimeActiveGoalIds(next)
 }
 
 function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
@@ -1963,19 +1907,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         : html`<${LongText} text=${c.prompt.unified_user_message_preview} truncateAt=${null} />`}
   `
 
-  const goalState = goalOptionsState.value
-  const goalOptionsLoaded = goalState.status === 'loaded'
-  const goalOptions: GoalTreeNode[] = goalOptionsLoaded ? goalState.data : []
-  const selectedActiveGoalIds = rd
-    ? rd.active_goal_ids
-    : (c.workspace.active_goal_ids.length > 0 ? c.workspace.active_goal_ids : c.active_goal_ids)
   const currentMentionTargets = rd
     ? listTextToStrings(rd.mention_targets_text)
     : c.workspace.mention_targets
-  const knownGoalIds = new Set(goalOptions.map((goal) => goal.id))
-  const unknownSelectedGoalIds = goalOptionsLoaded
-    ? selectedActiveGoalIds.filter((goalId) => !knownGoalIds.has(goalId))
-    : []
 
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
   // identity ◈ — source provenance
@@ -2200,74 +2134,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   `
 
-  // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
-  const filteredGoalOptions = filterGoalOptions(goalOptions, goalSearchQuery.value)
-  const goalsTab = html`
-    ${runtimeWriteUnsupportedNotice}
-    <${KcfSec}
-      title="배정 목표"
-      desc=${runtimeCanEdit ? 'goal store 카탈로그에서 이 keeper가 소유할 goal을 고릅니다.' : 'goal-store 연결 (읽기 전용)'}
-      right=${html`<span class="kcf-goals-count mono">active_goal_ids · ${selectedActiveGoalIds.length} 배정</span>`}
-    >
-      <div class="kcf-goals">
-        ${goalOptions.length > 0 && rd && runtimeCanEdit ? html`
-          <div class="kcf-goals-bar">
-            <div class="kcf-search">
-              <span class="kcf-search-ic" aria-hidden="true">◌</span>
-              <input
-                type="search"
-                aria-label="goal 검색"
-                value=${goalSearchQuery.value}
-                placeholder="goal 제목·id 검색…"
-                onInput=${(e: Event) => { goalSearchQuery.value = (e.target as HTMLInputElement).value }}
-              />
-            </div>
-            <span class="kcf-goals-count mono">${selectedActiveGoalIds.length} 배정 · ${filteredGoalOptions.length} 표시</span>
-          </div>
-        ` : null}
-        ${goalState.status === 'loading' ? html`
-          <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
-        ` : goalState.status === 'error' ? html`
-          <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
-        ` : goalOptions.length > 0 && rd && runtimeCanEdit ? (
-          filteredGoalOptions.length > 0 ? html`
-          <div class="kcf-goals-list">
-            ${filteredGoalOptions.map((goal) => {
-              const checked = rd.active_goal_ids.includes(goal.id)
-              return html`
-                <button
-                  type="button"
-                  key=${goal.id}
-                  class=${`kcf-goal ${checked ? 'on' : ''}`}
-                  aria-pressed=${checked ? 'true' : 'false'}
-                  onClick=${() => { toggleRuntimeActiveGoal(goal.id, !checked) }}
-                >
-                  <span class="kcf-goal-check">${checked ? '✓' : ''}</span>
-                  <span class="kcf-goal-body">
-                    <span class="kcf-goal-title">${goal.title}</span>
-                    <span class="kcf-goal-id mono">${goal.id}</span>
-                  </span>
-                </button>
-              `
-            })}
-          </div>
-          ` : html`
-          <div class="kcf-goals-empty">검색 결과 없음</div>
-          `
-        ) : selectedActiveGoalIds.length > 0 ? html`
-          <${ModelList} models=${selectedActiveGoalIds} />
-        ` : html`
-          <div class="kcf-goals-empty">활성 목표가 연결되어 있지 않습니다.</div>
-        `}
-        ${unknownSelectedGoalIds.length > 0 ? html`
-          <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
-            Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
-          </div>
-        ` : null}
-      </div>
-    </${KcfSec}>
-  `
-
   // hooks ⬡ — global runtime hook architecture (keeper-agnostic, read-only)
   const hooksTab = c.hooks ? (() => {
     const allEntries: readonly HookSlotEntry[] = Object.entries(c.hooks.slots) as HookSlotEntry[]
@@ -2381,7 +2247,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtime: runtimeTab,
     policy: policyTab,
     access: accessTab,
-    goals: goalsTab,
     hooks: hooksTab,
     health: healthTab,
   }

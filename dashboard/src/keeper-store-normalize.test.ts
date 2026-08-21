@@ -385,7 +385,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         sandbox_target: 'docker',
         blocked_task_count: 2,
         goal_progress: {
-          active_goal_count: 1,
           linked_task_count: 4,
           done_task_count: 1,
           open_task_count: 3,

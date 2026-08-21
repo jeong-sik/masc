@@ -321,7 +321,6 @@ describe('fetchDashboardGoalsTree decoding', () => {
           name: 'keeper-a',
           agent_name: 'agent-a',
           current_task_id: null,
-          active_goal_ids: ['goal-runtime'],
           sandbox_profile: 'workspace',
           network_mode: 'enabled',
           runtime_id: 'runtime-a',

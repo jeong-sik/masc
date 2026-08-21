@@ -2846,7 +2846,6 @@ describe('dashboard goals decoding', () => {
           name: 'keeper-sangsu',
           agent_name: 'sangsu',
           current_task_id: 'task-1',
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
           runtime_id: 'keeper_unified',
@@ -2980,7 +2979,6 @@ describe('dashboard goals decoding', () => {
           name: 'keeper-sangsu',
           agent_name: 'sangsu',
           current_task_id: null,
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
           runtime_id: 'keeper_unified',
@@ -3039,7 +3037,6 @@ describe('fetchKeeperConfig', () => {
   it('normalizes singleton and boolean string fields with a canonical context override', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
-      active_goal_ids: ['goal-runtime'],
       autoboot_enabled: 'false',
       max_context_override: 64_000,
       autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
@@ -3097,12 +3094,9 @@ describe('fetchKeeperConfig', () => {
       workspace: {
         mention_targets: 'sangsu',
         bound_workspace_ids: 'default',
-        active_goal_ids: ['goal-runtime'],
         active_goals: [
           { id: 'goal-runtime', title: 'Ship runtime clarity' },
         ],
-        active_goal_count: '1',
-        missing_active_goal_ids: [],
       },
       sources: {
         live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -3158,8 +3152,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
-    expect(result.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
     expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')

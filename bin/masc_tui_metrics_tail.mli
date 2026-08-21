@@ -30,12 +30,14 @@ val error_to_string : load_error -> string
 (** Operator-facing diagnostic that delegates storage failures to
     [Dated_jsonl.read_error_to_string]. *)
 val resolve_with :
+  expected_keeper:string ->
   read_recent:(int -> (Dated_jsonl.recent_entry list, Dated_jsonl.read_error) result) ->
   limit:int ->
   snapshot
-val load : store:Dated_jsonl.t -> limit:int -> snapshot
+val load : store:Dated_jsonl.t -> expected_keeper:string -> limit:int -> snapshot
 (** Read exactly the newest [limit] physical non-empty rows. Rejected rows
-    consume that bound and are reported; they are never backfilled. *)
+    and rows attributed to a different Keeper consume that bound and are
+    reported; they are never backfilled. *)
 val for_selection : load:('a -> snapshot) -> 'a option -> snapshot
 val reconcile_selection :
   current:snapshot ->

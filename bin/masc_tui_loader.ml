@@ -87,7 +87,9 @@ let load_selected_keeper_logs (state : state) (base_path : string)
   Metrics_tail.for_selection
     ~load:(fun keeper ->
       Keeper_types_support.keeper_metrics_store config keeper.k_name
-      |> fun store -> Metrics_tail.load ~store ~limit:max_entries)
+      |> fun store ->
+      Metrics_tail.load ~store ~expected_keeper:keeper.k_name
+        ~limit:max_entries)
     keeper
   |> apply_keeper_log_snapshot state
 

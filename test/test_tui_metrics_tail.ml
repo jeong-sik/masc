@@ -16,14 +16,15 @@ let tmpdir prefix =
   Fs_compat.mkdir_p path;
   path
 
-let heartbeat ?(timestamp = "2026-08-21T12:00:00Z") count =
+let heartbeat ?(timestamp = "2026-08-21T12:00:00Z")
+    ?(name = "keeper-main") count =
   `Assoc
     [ "schema", `String Masc.Keeper_metrics_record.schema
     ; "record_kind", `String "heartbeat"
     ; "ts", `String timestamp
     ; "ts_unix", `Float 1787313600.0
     ; "channel", `String "heartbeat"
-    ; "name", `String "keeper-main"
+    ; "name", `String name
     ; "agent_name", `String "codex"
     ; "trace_id", `String "trace-current"
     ; "generation", `Int 4
@@ -47,7 +48,8 @@ let test_resolve_is_physical_bounded_and_chronological () =
     ]
   in
   let snapshot =
-    Tail.resolve_with ~limit:4 ~read_recent:(fun limit ->
+    Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:4
+      ~read_recent:(fun limit ->
         seen_limit := Some limit;
         Ok rows)
   in
@@ -76,7 +78,8 @@ let test_storage_error_and_empty_selection_are_explicit () =
       }
   in
   let failed =
-    Tail.resolve_with ~limit:200 ~read_recent:(fun _ -> Error read_error)
+    Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:200
+      ~read_recent:(fun _ -> Error read_error)
   in
   check int "storage failure has no stale entries" 0
     (List.length failed.entries);
@@ -141,6 +144,28 @@ let test_diagnostic_controls_are_terminal_safe () =
   check bool "diagnostic removes escape" false (String.contains safe '\027');
   check bool "diagnostic removes bell" false (String.contains safe '\007')
 
+let test_selected_keeper_rejects_misfiled_current_row () =
+  let snapshot =
+    Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:1
+      ~read_recent:(fun _ -> Ok [ Dated_jsonl.Parsed (heartbeat ~name:"keeper-other" 1) ])
+  in
+  check int "misfiled row is not rendered" 0 (List.length snapshot.entries);
+  match snapshot.error with
+  | Some
+      (Tail.Row_errors
+        { physical_rows = 1;
+          errors = [ Tail.Invalid_metrics_row { physical_index = 1; detail } ];
+        }) ->
+      check bool "mismatch names selected Keeper" true
+        (String.starts_with
+           ~prefix:
+             "metrics Keeper name \"keeper-other\" does not match selected Keeper \"keeper-main\""
+           detail)
+  | Some (Tail.Row_errors { physical_rows; errors }) ->
+      failf "unexpected mismatch summary: rows=%d errors=%d" physical_rows
+        (List.length errors)
+  | Some (Tail.Storage_error _) | None -> fail "misfiled row was not rejected"
+
 let test_scroll_and_empty_copy_follow_viewport_state () =
   let normal_height = Tail.content_height ~terminal_rows:24 ~error:None in
   check int "normal viewport content rows" 16 normal_height;
@@ -201,7 +226,9 @@ let test_load_does_not_backfill_rejected_rows () =
     ; Yojson.Safe.to_string (heartbeat 2)
     ];
   let snapshot =
-    Dated_jsonl.create ~base_dir () |> fun store -> Tail.load ~store ~limit:4
+    Dated_jsonl.create ~base_dir ()
+    |> fun store ->
+    Tail.load ~store ~expected_keeper:"keeper-main" ~limit:4
   in
   check (list (option int)) "older row is not used to backfill rejects"
     [ Some 1; Some 2 ] (message_counts snapshot.entries);
@@ -222,7 +249,9 @@ let test_load_surfaces_malformed_newest_without_backfill () =
   write_raw_lines base_dir "2026-01" "31.jsonl"
     [ Yojson.Safe.to_string (heartbeat 1); "not-json" ];
   let snapshot =
-    Dated_jsonl.create ~base_dir () |> fun store -> Tail.load ~store ~limit:1
+    Dated_jsonl.create ~base_dir ()
+    |> fun store ->
+    Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in
   check int "malformed newest row does not backfill" 0
     (List.length snapshot.entries);
@@ -247,7 +276,9 @@ let test_load_spans_months_and_rotations () =
   write_rows base_dir "2026-02" "01.jsonl" [ heartbeat 5; heartbeat 6 ]
     ~terminate:true;
   let store = Dated_jsonl.create ~base_dir () in
-  let snapshot = Tail.load ~store ~limit:5 in
+  let snapshot =
+    Tail.load ~store ~expected_keeper:"keeper-main" ~limit:5
+  in
   check (list (option int)) "newest physical rows are chronological"
     [ Some 2; Some 3; Some 4; Some 5; Some 6 ]
     (message_counts snapshot.entries);
@@ -258,7 +289,9 @@ let test_load_keeps_unterminated_newest_row () =
   write_rows base_dir "2026-02" "02.jsonl" [ heartbeat 8; heartbeat 9 ]
     ~terminate:false;
   let snapshot =
-    Dated_jsonl.create ~base_dir () |> fun store -> Tail.load ~store ~limit:1
+    Dated_jsonl.create ~base_dir ()
+    |> fun store ->
+    Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in
   check (list (option int)) "unterminated newest row remains visible"
     [ Some 9 ] (message_counts snapshot.entries);
@@ -269,7 +302,9 @@ let test_load_surfaces_invalid_layout () =
   let base_dir = tmpdir "tui_metrics_tail_invalid_layout" in
   Fs_compat.mkdir_p (Filename.concat base_dir "2026-aa");
   let snapshot =
-    Dated_jsonl.create ~base_dir () |> fun store -> Tail.load ~store ~limit:1
+    Dated_jsonl.create ~base_dir ()
+    |> fun store ->
+    Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in
   check int "invalid layout has no entries" 0 (List.length snapshot.entries);
   match snapshot.error with
@@ -303,7 +338,9 @@ let test_load_is_bounded_by_tail_not_file_size () =
   Gc.full_major ();
   let allocated_before = Gc.allocated_bytes () in
   let snapshot =
-    Dated_jsonl.create ~base_dir () |> fun store -> Tail.load ~store ~limit:1
+    Dated_jsonl.create ~base_dir ()
+    |> fun store ->
+    Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in
   let allocated = Gc.allocated_bytes () -. allocated_before in
   check (list (option int)) "sparse newest row is decoded" [ Some 10 ]
@@ -320,6 +357,8 @@ let () =
             test_storage_error_and_empty_selection_are_explicit
         ; test_case "diagnostic control safety" `Quick
             test_diagnostic_controls_are_terminal_safe
+        ; test_case "selected Keeper rejects misfiled row" `Quick
+            test_selected_keeper_rejects_misfiled_current_row
         ; test_case "viewport scroll and empty copy" `Quick
             test_scroll_and_empty_copy_follow_viewport_state
         ; test_case "rejected rows are not backfilled" `Quick

@@ -328,6 +328,13 @@ let optional_date_bound = function
    a caller that filters afterwards has to guess how wide a window its matches
    need — the audit store carries every agent's actions, and one busy agent
    fills any fixed guess. *)
+(* Day-file names sort lexicographically, so these two bound the range from
+   outside: no stored day can precede the first or follow the second. They mean
+   "this side is unbounded", which is why an absent [since]/[until] maps onto
+   them rather than onto a narrower guess. *)
+let earliest_day_bound = "0000-01-01"
+let latest_day_bound = "9999-12-31"
+
 let read_entries_matching ?(n = 10_000) ?since ?until ~keep (config : config)
   : audit_entry list
   =
@@ -349,10 +356,13 @@ let read_entries_matching ?(n = 10_000) ?since ?until ~keep (config : config)
     match optional_date_bound since, optional_date_bound until with
     | Some since_day, Some until_day
       when Option.is_some since_day || Option.is_some until_day ->
+      (* DET-OK: range identities, not a guess at a missing value. *)
+      let since_bound = Option.value ~default:earliest_day_bound since_day in
+      let until_bound = Option.value ~default:latest_day_bound until_day in
       Dated_jsonl.collect_matching_range
         store
-        ~since:(Option.value ~default:"0000-01-01" since_day)
-        ~until:(Option.value ~default:"9999-12-31" until_day)
+        ~since:since_bound
+        ~until:until_bound
         n
         ~f:select
     | Some _, Some _ | None, _ | _, None ->

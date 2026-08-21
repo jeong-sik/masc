@@ -1002,7 +1002,7 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
                                 collected := value :: !collected;
                                 incr count;
                                 if !count >= n then Some () else None
-                              end)))
+                              end))))
              end)
              days
          end

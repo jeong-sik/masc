@@ -4582,11 +4582,6 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               "runtime failure emits no keeper chat broadcast"
               broadcasts_before_runtime_failure
               !chat_broadcast_count;
-            check bool
-              "runtime terminal delivery failure is not auto-recoverable"
-              false
-              (Masc.Keeper_error_classify.is_auto_recoverable_turn_error
-                 runtime_error);
             let exact_route =
               Keeper_runtime_failure_route.route_of_error
                 ~boundary:Keeper_runtime_failure_route.Agent_core_execution

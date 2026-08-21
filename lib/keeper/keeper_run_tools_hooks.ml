@@ -207,7 +207,6 @@ let assemble_hooks
       ~(start_turn_count : int)
       ~(generation : int)
       ~(runtime_id_string : string)
-      ~is_retry:(_ : bool)
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(trajectory_acc : Trajectory.accumulator option)
@@ -569,14 +568,10 @@ let assemble_hooks
                    [decision_stage = Decision_tool_policy_selected],
                    which is only set at this site.  Pre-PR #14153 the
                    Runtime_trying marking lived inside
-                   [Keeper_unified_turn.retry_loop] (line 1138 era),
+                   the former outer runtime runner (line 1138 era),
                    producing an [idle -> trying] jump that bypassed
                    selecting; the move here closes that gap by keeping
-                   the two transitions adjacent.  On retry attempts
-                   the prior runtime state is [Runtime_trying]; the
-                   re-entry sequence becomes [trying -> selecting ->
-                   trying] which is admitted by
-                   [validate_runtime_transition]. *)
+                   the two transitions adjacent. *)
                  Keeper_registry.mark_turn_provider_attempt_started
                    ~base_path:config.base_path
                    meta.name);

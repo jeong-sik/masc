@@ -760,9 +760,9 @@ let test_serving_constraint_uses_exact_provider_count () =
   match rejected with
   | Error
       (Agent_core.Error.Api
-         (Retry.InputCapacity
+         (Api_error.InputCapacity
             { reason =
-                Retry.Serving_constraint_rejected
+                Api_error.Serving_constraint_rejected
                   (Serving_constraint.Input_rejected
                      { input_tokens = 524299
                      ; accepted_through = 524298
@@ -801,9 +801,9 @@ let test_stale_serving_constraint_fails_before_measurement () =
   (match result with
    | Error
        (Agent_core.Error.Api
-          (Retry.InputCapacity
+          (Api_error.InputCapacity
              { reason =
-                 Retry.Serving_constraint_rejected (Serving_constraint.Evidence_expired _)
+                 Api_error.Serving_constraint_rejected (Serving_constraint.Evidence_expired _)
              ; _
              })) -> ()
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -844,7 +844,7 @@ let test_unmeasurable_constraint_fails_typed_without_dispatch () =
   (match result with
    | Error
        (Agent_core.Error.Api
-          (Retry.InputCapacity { reason = Retry.Token_measurement_unavailable _; _ })) ->
+          (Api_error.InputCapacity { reason = Api_error.Token_measurement_unavailable _; _ })) ->
      ()
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok _ -> fail "unmeasurable constrained request was dispatched");
@@ -925,8 +925,8 @@ let test_resolve_before_measure_skips_count_roundtrip_stream () =
 let expect_request_body_rejection label = function
   | Error
       (Agent_core.Error.Api
-         (Retry.InvalidRequest
-            { reason = Retry.Request_body_too_large { actual_bytes; limit_bytes }; _ }))
+         (Api_error.InvalidRequest
+            { reason = Api_error.Request_body_too_large { actual_bytes; limit_bytes }; _ }))
     ->
     check int (label ^ " declared byte limit") 1 limit_bytes;
     check bool (label ^ " exact body exceeds limit") true (actual_bytes > limit_bytes)
@@ -1266,7 +1266,7 @@ let test_agent_overflow_blocks_dispatch () =
     result, !dispatched
   in
   match result with
-  | Error (Agent_core.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
+  | Error (Agent_core.Error.Api (Api_error.ContextOverflow { limit = Some 512; _ })), false ->
     ()
   | Error error, _ -> fail (Agent_core.Error.to_string error)
   | Ok _, _ -> fail "overflowed prepared request must not dispatch"
@@ -1292,7 +1292,7 @@ let test_kimi_agent_overflow_blocks_dispatch () =
     result, !dispatched
   in
   match result with
-  | Error (Agent_core.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
+  | Error (Agent_core.Error.Api (Api_error.ContextOverflow { limit = Some 512; _ })), false ->
     ()
   | Error error, _ -> fail (Agent_core.Error.to_string error)
   | Ok _, _ -> fail "overflowed Kimi request must not dispatch"
@@ -1318,7 +1318,7 @@ let test_invalid_count_response_is_provider_parse_failure () =
   | Error
       { Agent_core.Agent.error =
           Agent_core.Error.Api
-            (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ })
+            (Api_error.InvalidRequest { reason = Api_error.Json_parse_error; _ })
       ; provider_failure =
           Some { Agent_core.Provider_failure_attribution.evidence = Response_parse; _ }
       } -> ()
@@ -1349,7 +1349,7 @@ let test_unsupported_provider_blocks_sync_dispatch () =
   in
   let agent = build_admission_agent ~net ~provider_config ~transport () in
   match Agent_core.Agent.run ~sw agent "require exact fit" with
-  | Error (Agent_core.Error.Api (Retry.InvalidRequest _)) ->
+  | Error (Agent_core.Error.Api (Api_error.InvalidRequest _)) ->
     check bool "unsupported measurement blocks sync dispatch" false !dispatched
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok _ -> fail "unsupported measurement must fail before sync dispatch"
@@ -1377,7 +1377,7 @@ let test_unsupported_provider_blocks_stream_dispatch () =
   in
   let agent = build_admission_agent ~net ~provider_config ~transport () in
   match Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "require exact fit" with
-  | Error (Agent_core.Error.Api (Retry.InvalidRequest _)) ->
+  | Error (Agent_core.Error.Api (Api_error.InvalidRequest _)) ->
     check bool "unsupported measurement blocks stream dispatch" false !dispatched
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok _ -> fail "unsupported measurement must fail before stream dispatch"

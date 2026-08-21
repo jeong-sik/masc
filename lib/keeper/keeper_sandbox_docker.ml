@@ -185,48 +185,23 @@ let cleanup_oneshot_container ~container_name =
   match status with
   | Unix.WEXITED 0 -> ()
   | _ ->
-    let retry_after_failure ?probe_error () =
-      (* The machine-oriented state probe is authoritative. Retry only while
-         the target is still present or its state could not be established. *)
-      (match probe_error with
-       | None ->
-          Log.Keeper.info
-            "docker oneshot cleanup for %s failed (status=%s), retrying once"
-            container_name
-            (Keeper_sandbox_exec_failure.status_label status)
-       | Some probe_error ->
-          Log.Keeper.warn
-            "docker oneshot cleanup state probe failed for %s after rm status=%s: %s; \
-             retrying once"
-            container_name
-            (Keeper_sandbox_exec_failure.status_label status)
-            probe_error);
-      let retry_status, retry_output = run_rm () in
-      match retry_status with
-      | Unix.WEXITED 0 -> ()
-      | _ ->
-        (match cleanup_target_state ~container_name with
-         | Cleanup_target_absent -> ()
-         | Cleanup_target_present ->
-           Log.Keeper.warn
-             "docker oneshot cleanup failed for %s after retry (status=%s, output=%s)"
-             container_name
-             (Keeper_sandbox_exec_failure.status_label retry_status)
-             (Exec_policy.truncate_for_log retry_output)
-         | Cleanup_target_state_unknown probe_error ->
-           Log.Keeper.warn
-             "docker oneshot cleanup failed for %s after retry (status=%s, output=%s, \
-              state_probe_error=%s)"
-             container_name
-             (Keeper_sandbox_exec_failure.status_label retry_status)
-             (Exec_policy.truncate_for_log retry_output)
-             probe_error)
-    in
     (match cleanup_target_state ~container_name with
      | Cleanup_target_absent -> ()
-     | Cleanup_target_present -> retry_after_failure ()
+     | Cleanup_target_present ->
+       Log.Keeper.warn
+         "docker oneshot cleanup failed for %s and container remains present \
+          (status=%s, output=%s)"
+         container_name
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Exec_policy.truncate_for_log output)
      | Cleanup_target_state_unknown probe_error ->
-       retry_after_failure ~probe_error ())
+       Log.Keeper.warn
+         "docker oneshot cleanup failed for %s and target state is unknown \
+          (status=%s, output=%s, state_probe_error=%s)"
+         container_name
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Exec_policy.truncate_for_log output)
+         probe_error)
 ;;
 
 let ensure_docker_shell_image_available ~image ~timeout_sec =

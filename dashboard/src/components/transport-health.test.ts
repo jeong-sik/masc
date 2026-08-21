@@ -54,9 +54,6 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       queue_avg_depth: 0,
       queue_max_depth: 1,
       relay_queue_depth: 0,
-      relay_retry_total: 0,
-      relay_retry_append: 0,
-      relay_retry_broadcast: 0,
       relay_drop_total: 0,
       relay_drop_queue: 0,
       relay_drop_append: 0,
@@ -273,9 +270,6 @@ describe('TransportHealthPanel', () => {
           queue_avg_depth: 0,
           queue_max_depth: 1,
           relay_queue_depth: 3,
-          relay_retry_total: 4,
-          relay_retry_append: 1,
-          relay_retry_broadcast: 3,
           relay_drop_total: 2,
           relay_drop_queue: 1,
           relay_drop_append: 1,
@@ -299,10 +293,8 @@ describe('TransportHealthPanel', () => {
 
     expect(container.textContent).toContain('high')
     expect(container.textContent).toContain('릴레이 큐')
-    expect(container.textContent).toContain('릴레이 재시도')
     expect(container.textContent).toContain('릴레이 드롭')
     expect(container.textContent).toContain('라이프사이클 거부')
-    expect(container.textContent).toContain('append 1 · broadcast 3')
     expect(container.textContent).toContain('queue 1 · append 1 · broadcast 0')
   })
 
@@ -699,7 +691,6 @@ describe('sseTone', () => {
     expect(sseTone(makeData({ sse: { ...makeData().sse, relay_drop_total: 1 } }))).toBe('bad')
   })
   it('is warn when retries or queue depth exist', () => {
-    expect(sseTone(makeData({ sse: { ...makeData().sse, relay_retry_total: 1 } }))).toBe('warn')
     expect(sseTone(makeData({ sse: { ...makeData().sse, relay_queue_depth: 2 } }))).toBe('warn')
   })
   it('falls back to queue pressure tone when no relay issues', () => {
@@ -799,4 +790,3 @@ describe('transportTruthLine', () => {
     expect(transportTruthLine(data)).toBe('cached_surface · cache stale · stale 1234ms')
   })
 })
-

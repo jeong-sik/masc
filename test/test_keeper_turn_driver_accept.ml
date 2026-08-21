@@ -409,10 +409,6 @@ let test_reject_reason_describes_thinking_only_response () =
     true
     (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err);
   Alcotest.(check bool)
-    "no-progress accept rejection is not auto-recoverable"
-    false
-    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error err);
-  Alcotest.(check bool)
     "no-progress accept rejection is not warn-handled"
     false
     (Masc.Keeper_error_classify.should_warn_keeper_cycle_failed err);
@@ -775,10 +771,7 @@ let test_custom_accept_reject_preserves_predicate_reason () =
     "custom predicate rejection is not no-progress"
     false
     (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err);
-  Alcotest.(check bool)
-    "custom predicate rejection is not auto-recoverable"
-    false
-    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error err)
+  ignore err
 
 let test_media_with_tool_result_is_deliverable () =
   let result =
@@ -969,11 +962,6 @@ let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
     "DNS exhaustion is a runtime-exhausted error"
     true
     (Masc.Keeper_error_classify.is_runtime_exhausted_error mapped);
-  Alcotest.(check bool)
-    "DNS exhaustion is not auto-recoverable (counts toward crash threshold, \
-     per record_failure_observation's counts_toward_crash)"
-    false
-    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
   match Keeper_internal_error.classify_masc_internal_error mapped with
   | Some (Keeper_internal_error.Runtime_exhausted { runtime_id; reason }) ->
     Alcotest.(check string) "runtime_id preserved" "runtime.dns-test" runtime_id;
@@ -1023,10 +1011,7 @@ let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
       "reason is Capacity_exhausted"
       true
       (reason = Keeper_internal_error.Capacity_exhausted);
-    Alcotest.(check bool)
-      "capacity exhaustion is auto-recoverable"
-      true
-      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped)
+    ()
   | Some other ->
     Alcotest.failf "expected Runtime_exhausted, got %s"
       (Keeper_internal_error.kind_of_masc_internal_error other)
@@ -1058,10 +1043,7 @@ let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
       true
       (Keeper_internal_error.runtime_exhaustion_reason_of_json encoded
        = Some Keeper_internal_error.Session_conflict);
-    Alcotest.(check bool)
-      "session conflict is not auto-recoverable"
-      false
-      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped)
+    ()
   | Some other ->
     Alcotest.failf "expected Runtime_exhausted, got %s"
       (Keeper_internal_error.kind_of_masc_internal_error other)
@@ -1185,7 +1167,7 @@ let () =
             `Quick
             test_no_candidates_exhaustion_classifies_as_no_providers_available;
           Alcotest.test_case
-            "capacity exhaustion classifies as retryable Runtime_exhausted"
+            "capacity exhaustion classifies as Runtime_exhausted"
             `Quick
             test_capacity_failure_exhaustion_classifies_as_capacity_exhausted;
           Alcotest.test_case

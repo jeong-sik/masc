@@ -900,21 +900,20 @@ let collect_board_events_with_cursor_policy
            recent)
     in
     (* Board-unavailable-result: classify + log + count a failed read
-       encountered mid-scan, without raising. [Permanent] means this one post
+       encountered mid-scan, without raising. [Source_rejected] means this one post
        can never resolve (e.g. swept from the store) — the caller skips it
-       and keeps scanning. [Transient] means the caller stops scanning here
+       and keeps scanning. [Store_io_failed] means the caller stops scanning here
        and returns what it already has, so the cursor is not advanced past
-       the blocked post and the same post is retried next cycle (preserves
-       the pre-existing "retained cursor" semantics, now via Result instead
+       the blocked post (preserves the pre-existing retained-cursor semantics, now via Result instead
        of exception + re-raise). *)
     let log_and_count_unavailable ~context (unavailable : Board_signal.board_unavailable) =
-      let disposition = Board_signal.disposition_of_unavailable unavailable in
+      let read_failure_kind = Board_signal.read_failure_kind_of_unavailable unavailable in
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
         ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
         ();
-      (match disposition with
-       | Board_signal.Permanent ->
+      (match read_failure_kind with
+       | Board_signal.Source_rejected ->
          Log.Keeper.warn
            "board event collection (%s): permanently unavailable, skipping post_id=%s \
             keeper=%s: %s"
@@ -922,7 +921,7 @@ let collect_board_events_with_cursor_policy
            unavailable.Board_signal.post_id
            meta.name
            (Board_signal.unavailable_to_string unavailable)
-       | Board_signal.Transient ->
+       | Board_signal.Store_io_failed ->
          Log.Keeper.warn
            "board event collection (%s): retained cursor (transient unavailable) \
             post_id=%s keeper=%s: %s"
@@ -930,7 +929,7 @@ let collect_board_events_with_cursor_policy
            unavailable.Board_signal.post_id
            meta.name
            (Board_signal.unavailable_to_string unavailable));
-      disposition
+      read_failure_kind
     in
     let rec consume_posts last_cursor acc = function
       | [] -> List.rev acc, last_cursor
@@ -941,8 +940,8 @@ let collect_board_events_with_cursor_policy
         (match comment_status with
          | Board_signal.Unavailable unavailable ->
            (match log_and_count_unavailable ~context:"comment status" unavailable with
-            | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
-            | Board_signal.Transient -> List.rev acc, last_cursor)
+            | Board_signal.Source_rejected -> consume_posts (Some next_cursor) acc rest
+            | Board_signal.Store_io_failed -> List.rev acc, last_cursor)
          | Board_signal.Available `No_new_external ->
            Log.Keeper.debug
              "board dedup: skipping post_id=%s (no new external since my comment)"
@@ -981,9 +980,9 @@ let collect_board_events_with_cursor_policy
                  (match
                     log_and_count_unavailable ~context:"audience" unavailable
                   with
-                  | Board_signal.Permanent ->
+                  | Board_signal.Source_rejected ->
                     consume_posts (Some next_cursor) acc rest
-                  | Board_signal.Transient -> List.rev acc, last_cursor)
+                  | Board_signal.Store_io_failed -> List.rev acc, last_cursor)
                | Board_signal.Available Board_audience.Ignore ->
                  consume_posts (Some next_cursor) acc rest
                | Board_signal.Available Board_audience.Judge_discoverable ->
@@ -1005,9 +1004,9 @@ let collect_board_events_with_cursor_policy
                      (match
                         log_and_count_unavailable ~context:"candidate" unavailable
                       with
-                      | Board_signal.Permanent ->
+                      | Board_signal.Source_rejected ->
                         consume_posts (Some next_cursor) acc rest
-                      | Board_signal.Transient -> List.rev acc, last_cursor)
+                      | Board_signal.Store_io_failed -> List.rev acc, last_cursor)
                    | Board_signal.Available candidate ->
                      (match
                         Keeper_board_attention_candidate.record_and_wake

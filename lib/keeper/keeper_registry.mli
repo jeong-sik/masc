@@ -302,13 +302,6 @@ val validate_compaction_transition :
 val set_turn_selected_model :
   base_path:string -> string -> string option -> unit
 
-(** Reset a live turn into the post-compaction retry posture used by
-    overflow recovery. Preserves the bound measurement, but clears the
-    previous runtime attempt and selected model so the next retry starts
-    from [Prompting + Guard_ok + Runtime_idle]. *)
-val prepare_turn_retry_after_compaction :
-  base_path:string -> string -> unit
-
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
     [runtime.usage.last_turn_ts] for the completed turn. Idempotent —

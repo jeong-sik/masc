@@ -39,10 +39,10 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            source =
              Option.value source ~default:Provider_capacity;
            detail = message;
-           retry_after =
+           provider_reset =
              (match retry_after with
-              | Some s -> Explicit s
-              | None -> No_retry_hint);
+              | Some s -> Provider_reset_after_seconds s
+              | None -> No_provider_reset_evidence);
            (* Genuine upstream capacity exhaustion, not a pre-dispatch health
               cooldown block — no arming cause to carry.  #23438. *)
            cooldown_cause = None;
@@ -59,7 +59,7 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            runtime_id;
            source = Option.value source ~default:Runtime_slot;
            detail = message;
-           retry_after = No_retry_hint;
+           provider_reset = No_provider_reset_evidence;
            cooldown_cause = None;
          })
   | Some
@@ -73,14 +73,14 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
     None
 
 let capacity_backpressure_of_pending ~runtime_id = function
-  | Some (source, detail, retry_after) ->
+  | Some (source, detail, provider_reset) ->
     Some
       (Capacity_backpressure
          {
            runtime_id;
            source;
            detail;
-           retry_after;
+           provider_reset;
            cooldown_cause = None;
          })
   | None -> None

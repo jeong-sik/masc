@@ -36,7 +36,7 @@ let outcome_of_result ~(panelist : string) ~(model : string)
     else
       Fusion_types.Answered
         { model = panelist; answer; usage = Fusion_agent_core.usage_of resp }
-  | Error (Agent_core.Error.Api (Agent_core.Retry.Timeout _)) ->
+  | Error (Agent_core.Error.Api (Agent_core.Api_error.Timeout _)) ->
     (* per-agent HTTP 타임아웃을 typed [Timeout]으로. 이전에는 to_string 직렬화로
        [Provider_error]에 뭉개져, 외곽 붕괴(전 패널 동시 [Timeout])와 개별 HTTP
        타임아웃을 board 증거에서 구분할 수 없었다. [bridge_failure_of_error]·
@@ -45,7 +45,7 @@ let outcome_of_result ~(panelist : string) ~(model : string)
   | Error (Agent_core.Error.Provider (Llm_provider.Error.Timeout _)) ->
     (* provider-level 타임아웃. 비스트리밍 sync 경로의 connect_timeout(기본 60s)이
        응답 본문 전체를 바운드해 발생하며 detail은 "timeout phase=http_operation"으로
-       렌더된다. [Api (Retry.Timeout _)] 외곽 래퍼와 다른 variant라 위 arm이 잡지
+       렌더된다. [Api (Api_error.Timeout _)] 외곽 래퍼와 다른 variant라 위 arm이 잡지
        못하고, 이전에는 [Error e] catch-all에서 [Provider_error]로 오귀속됐다 — 개별
        provider 타임아웃이 provider 실패(연결 거부/5xx 등)와 board 증거에서 구분되지
        않았다. 타임아웃은 타임아웃으로 분류한다 (CLAUDE.md §Unknown→Permissive/
@@ -62,7 +62,7 @@ let outcome_of_result ~(panelist : string) ~(model : string)
 
 let bridge_failure_of_error (error : Agent_core.Error.t) : Fusion_types.panel_failure =
   match error with
-  | Agent_core.Error.Api (Agent_core.Retry.Timeout _)
+  | Agent_core.Error.Api (Agent_core.Api_error.Timeout _)
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
   | _ -> Fusion_types.Bridge_error (Agent_core.Error.to_string error)
 

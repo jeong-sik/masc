@@ -20,12 +20,12 @@ val capacity_backpressure_of_http_error :
 
 (** Build a capacity-backpressure internal error from a pending
     backpressure triple [(source, detail, retry_after)].  The retry-after
-    component is either the provider-supplied [Explicit] value or
-    [No_retry_hint]. No delay is synthesized. *)
+    component is either the provider-supplied [Provider_reset_after_seconds] value or
+    [No_provider_reset_evidence]. No delay is synthesized. *)
 val capacity_backpressure_of_pending :
   runtime_id:string ->
   (Keeper_internal_error.capacity_backpressure_source * string
-   * Keeper_internal_error.capacity_retry_after) option ->
+   * Keeper_internal_error.capacity_reset_evidence) option ->
   Keeper_internal_error.masc_internal_error option
 
 (* [capacity_backpressure_of_core_error] was removed (#23438): a dead substring

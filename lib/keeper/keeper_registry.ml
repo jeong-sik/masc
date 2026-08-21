@@ -85,26 +85,10 @@ let set_turn_selected_model ~base_path name selected_model =
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let prepare_turn_retry_after_compaction ~base_path name =
-  (* Routed through [set_turn_phase_with] so the compaction-retry reset uses
-     the same resolver / guard / broadcast pathway as [set_turn_phase]. *)
-  set_turn_phase_with
-    ~base_path
-    name
-    ~event_kind:"retry_after_compaction"
-    ~target:(Packed Turn_prompting)
-    ~update_obs:(fun obs ->
-      { obs with
-        decision_stage = Packed Decision_guard_ok
-      ; selected_model = None
-      })
-;;
-
 let mark_turn_finished ~base_path name =
   (* Terminal turn lifecycle step: freeze [current_turn_observation] into
      [last_completed_turn] and clear the live observation.  This is
-     intentionally NOT routed through [set_turn_phase_with]: it mutates the
-     turn container (Some -> None) rather than transitioning the turn_phase
+     mutates the turn container (Some -> None) rather than transitioning the turn_phase
      sub-FSM.  It remains a separate, justified channel; the drift audit
      concern is the phase-transition setters that were duplicating resolver
      logic. *)

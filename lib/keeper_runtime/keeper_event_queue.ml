@@ -240,7 +240,7 @@ let identity_payload = function
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | Task_cancelled cancellation ->
     (* The reason is operator-facing prose whose wording can vary between
-       retries of the same cancellation; identity is the task and who ended
+       repeated observations of the same cancellation; identity is the task and who ended
        it. *)
     Task_cancelled { cancellation with tc_reason = None }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _

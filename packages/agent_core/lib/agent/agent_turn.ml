@@ -328,7 +328,7 @@ let[@warning "-32"] mock_result ?(is_error = false) ~id content : Agent_tools.to
       (if is_error
        then
          Tool_failed
-           { failure_kind = Agent_tools.Non_retryable_tool_error
+           { failure_kind = Agent_tools.Tool_error
            ; error_class = Some Types.Unknown
            }
        else Tool_succeeded)

@@ -1067,42 +1067,24 @@ let cleanup (t : t) =
     let st, out =
       run_argv_with_status ~timeout_sec:rm_timeout rm_argv
     in
-    (* First attempt succeeded and container is gone — done. *)
+    (* The cleanup effect is issued once. A failure is observed and surfaced;
+       this boundary never repeats the destructive command automatically. *)
     (match st with
      | Unix.WEXITED 0 when not (still_exists ()) -> ()
      | _ ->
-       (* First attempt failed or container still exists.
-          Retry once — transient daemon issues can resolve within seconds,
-          and a single retry catches the common "docker rm raced with
-          container exit" case without unbounded retries. *)
-       let final_st, final_out =
-         match st with
-         | Unix.WEXITED 0 ->
-           (* rm reported success but container still exists — unlikely
-              but re-probe after a brief yield for daemon state to
-              settle. *)
-           st, out
-         | _ ->
-           Log.Keeper.info
-             "%s: docker rm -f %s failed (status=%s), retrying once"
-             t.meta.name
-             container_name
-             (status_label st);
-           run_argv_with_status ~timeout_sec:rm_timeout rm_argv
-       in
-       let exists_after_final = still_exists () in
-       (match final_st with
-        | Unix.WEXITED 0 when not exists_after_final -> ()
+       let exists_after_command = still_exists () in
+       (match st with
+        | Unix.WEXITED 0 when not exists_after_command -> ()
         | _ ->
-          if exists_after_final
+          if exists_after_command
           then (
             Log.Keeper.warn
-              "%s: docker rm -f %s failed after retry and container still exists \
+              "%s: docker rm -f %s failed and container still exists \
                (status=%s, out=%s)"
               t.meta.name
               container_name
-              (status_label final_st)
-              (Exec_policy.truncate_for_log final_out);
+              (status_label st)
+              (Exec_policy.truncate_for_log out);
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string TurnCleanupFailures)
               ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]

@@ -125,7 +125,7 @@ type health_snapshot =
   ; discovery_row_count : int
   ; discovered_owner_count : int
   ; invalid_owner_name_count : int
-  ; retryable_lane_failure_count : int
+  ; lane_store_failure_count : int
   ; owners : owner_health_counts
   }
 
@@ -192,7 +192,7 @@ type health_counter =
   | Ready_without_obligation_counter
   | Ready_counter
   | Blocked_counter
-  | Retryable_lane_failure_counter
+  | Lane_store_failure_counter
 
 type health_counter_change =
   | Increment_health_counter
@@ -444,7 +444,7 @@ let initial_health_snapshot =
   ; discovery_row_count = 0
   ; discovered_owner_count = 0
   ; invalid_owner_name_count = 0
-  ; retryable_lane_failure_count = 0
+  ; lane_store_failure_count = 0
   ; owners = empty_owner_health_counts
   }
 ;;
@@ -550,12 +550,12 @@ let lane_failure_count_after_transition
   | Some _, Some _ -> count
   | None, Some _ ->
     change_counter
-      ~counter:Retryable_lane_failure_counter
+      ~counter:Lane_store_failure_counter
       ~change:Increment_health_counter
       count
   | Some _, None ->
     change_counter
-      ~counter:Retryable_lane_failure_counter
+      ~counter:Lane_store_failure_counter
       ~change:Decrement_health_counter
       count
 ;;
@@ -566,11 +566,11 @@ let set_lane_store_failure registry key failure =
       let previous =
         Owner_map.find_opt key registry.lane_store_failures
       in
-      let retryable_lane_failure_count =
+      let lane_store_failure_count =
         lane_failure_count_after_transition
           ~previous
           ~next:failure
-          registry.health.retryable_lane_failure_count
+          registry.health.lane_store_failure_count
       in
       registry.lane_store_failures <-
         (match failure with
@@ -578,7 +578,7 @@ let set_lane_store_failure registry key failure =
          | Some failure ->
            Owner_map.add key failure registry.lane_store_failures);
       registry.health <-
-        { registry.health with retryable_lane_failure_count }))
+        { registry.health with lane_store_failure_count }))
 ;;
 
 let open_registry ~sw ~fs ~registry_root =

@@ -1599,12 +1599,12 @@ let test_retryable_lane_store_health_tracks_exact_owner () =
   check int
     "one exact owner failure is aggregated"
     1
-    (Recovery.health_snapshot registry).retryable_lane_failure_count;
+    (Recovery.health_snapshot registry).lane_store_failure_count;
   record_failure ();
   check int
     "retrying the same owner does not double count"
     1
-    (Recovery.health_snapshot registry).retryable_lane_failure_count;
+    (Recovery.health_snapshot registry).lane_store_failure_count;
   (match
      Recovery.For_testing.record_lane_store_open_success
        ~registry
@@ -1615,7 +1615,7 @@ let test_retryable_lane_store_health_tracks_exact_owner () =
   check int
     "successful exact lane open clears its retained failure"
     0
-    (Recovery.health_snapshot registry).retryable_lane_failure_count
+    (Recovery.health_snapshot registry).lane_store_failure_count
 ;;
 
 let test_single_borrow_drains_exactly_once () =

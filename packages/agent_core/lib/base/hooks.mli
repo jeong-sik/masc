@@ -171,7 +171,7 @@ type hook_decision =
       agent core does not coerce it to [Continue]. *)
   | Block of string
   (** PreToolUse only: intentional caller rejection. The host executes no tool
-      and emits an [is_error=true], [Non_retryable_tool_error] tool result whose
+      and emits an [is_error=true], [Tool_error] tool result whose
       content is the string payload verbatim. Distinct from [HookFailed], which
       represents an unintentional hook failure. Legal only at [PreToolUse];
       rejected elsewhere via {!validate_decision}. *)

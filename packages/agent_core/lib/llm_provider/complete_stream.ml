@@ -951,7 +951,7 @@ let complete_stream_http
            glm's structured error envelope. Promote a code-1261 context
            overflow to the typed [ProviderFailure Context_overflow] here, while
            the provider identity is still known — downstream classification
-           ([Retry.classify_error]) is provider-agnostic and would flatten it
+           ([Api_error.classify_error]) is provider-agnostic and would flatten it
            into [InvalidRequest Unknown_invalid_request], cutting consumers off
            from their compaction/shrink recovery. The promotion parses the
            envelope's documented [code] field ([Backend_glm.check_glm_error]),

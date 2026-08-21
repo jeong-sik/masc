@@ -7,16 +7,13 @@
     to use [Keeper_unified_turn.<name>] unchanged. *)
 
 (** Immutable per-turn accumulator that replaces the casual [ref] cells
-    previously threaded through [run_keeper_cycle] and the retry loop. *)
+    previously threaded through [run_keeper_cycle] . *)
 type turn_state =
   { cycle_completed : bool
   ; manifest_seq : int
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
-  ; degraded_retry_info : Keeper_error_classify.degraded_retry option
-  ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
-  ; retry_phase_started_at : float option
   }
 
 val require_last_execution_for_finalize :

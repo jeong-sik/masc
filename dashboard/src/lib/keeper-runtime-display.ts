@@ -305,38 +305,8 @@ function diagnosticStateLabel(keeper: Keeper): string | null {
   return health ?? continuity
 }
 
-function transientProviderRuntimeText(value: string | null | undefined): boolean {
-  const text = value?.trim().toLowerCase()
-  if (!text) return false
-  return (
-    text.includes('tls alert')
-    || text.includes('tls_error')
-    || text.includes('handshake failure')
-    || text.includes('network')
-    || text.includes('connection refused')
-    || text.includes('connection reset')
-    || text.includes('dns')
-    || text.includes('timeout')
-    || text.includes('timed out')
-  )
-}
-
-export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boolean {
-  if (!keeper || !isKeeperPaused(keeper)) return false
-  const blockerClass = keeper.runtime_blocker_class
-  if (blockerClass === 'provider_runtime_error') {
-    return (
-      transientProviderRuntimeText(keeper.runtime_blocker_summary)
-      || transientProviderRuntimeText(keeper.last_blocker)
-      || transientProviderRuntimeText(keeper.attention_reason)
-    )
-  }
-  return false
-}
-
 export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
   if (!isKeeperPaused(keeper)) return null
-  const autoRecover = isKeeperAutoRecoverPause(keeper)
   const trust = keeper.trust
   const blockerLabel = keeperRuntimeBlockerLabel(keeper.runtime_blocker_class)
   const reason =
@@ -358,9 +328,8 @@ export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
   )
   const diagnostic = diagnosticStateLabel(keeper)
   const detail = [
-    autoRecover ? '상태 자동 재시도 대기' : null,
     `원인 ${reason}`,
-    nextAction ? `다음 ${nextAction}` : autoRecover ? '다음 자동 재시도' : null,
+    nextAction ? `다음 ${nextAction}` : null,
     diagnostic ? `진단 ${diagnostic}` : null,
   ].filter((part): part is string => part !== null).join(' · ')
   const title = [
@@ -519,14 +488,11 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
   // The same file already routes the *summary* and *short* axes through
   // isKeeperPaused (L135, L166); the runtime hint had drifted to raw flag.
   const paused = isKeeperPaused(keeper)
-  const autoRecover = isKeeperAutoRecoverPause(keeper)
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   if (runtimeBlocker) {
-    if (paused && autoRecover) return `자동 재시도 대기 · ${runtimeBlocker}`
     return paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
   }
   const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
-  if (paused && autoRecover) return blocker ? `자동 재시도 대기 · ${blocker}` : '자동 재시도 대기'
   if (paused && blocker) return `일시정지 · ${blocker}`
   if (paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'
   if (paused) return '일시정지됨'

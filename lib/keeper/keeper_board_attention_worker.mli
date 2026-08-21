@@ -24,21 +24,21 @@ type step =
       ; reason : Keeper_board_attention_partition.blocked_reason
       }
 
-type retry_reason =
+type reinspection_reason =
   | Exact_claim_contended
   | Selected_generation_changed
 
 type drain_outcome =
   | Drained
-  | Retry_later of
+  | Reinspect_later of
       { contention : contention
-      ; reason : retry_reason
+      ; reason : reinspection_reason
       }
-(** [Drained] clears the contention re-arms; [Retry_later] keeps the durable
+(** [Drained] clears the contention re-arms; [Reinspect_later] keeps the durable
     partition undrained and re-arms the contention timer, so the same worker
     re-inspects it (see [apply_drain_rearm]). A generation that moved under the
-    worker arrives here as [Retry_later { reason = Selected_generation_changed }]
-    and is retried, not abandoned. The ledger stays the work authority in both
+    worker arrives here as [Reinspect_later { reason = Selected_generation_changed }]
+    and is re-inspected, not abandoned. The ledger stays the work authority in both
     cases. *)
 
 type rearm_schedule =
@@ -109,13 +109,13 @@ module For_testing : sig
       standing up the full Eio worker lifecycle. *)
 
   val drain_outcome_label : drain_outcome -> string
-  (** The drain verdict as one token, as logged. Retry_later keeps its reason
+  (** The drain verdict as one token, as logged. Reinspect_later keeps its reason
       so a worker stuck on a moved generation is distinguishable from one
       losing a claim race. *)
 
   val drain_outcome_log_level : drain_outcome -> Log.level
   (** The level the drain line is emitted at, derived from the outcome.
-      [Retry_later] leaves the partition undrained, so it is not routine. *)
+      [Reinspect_later] leaves the partition undrained, so it is not routine. *)
 
   val process_next_exact
     :  clock:_ Eio.Time.clock
@@ -216,7 +216,7 @@ module For_testing : sig
     (drain_outcome, string) result
   (** Drain every currently claimable root. Terminal failures remain Blocked and
       completion durability failures return without re-entering AGENT_CORE. Exact claim
-      contention returns [Retry_later] without recursive same-turn retry. *)
+      contention returns [Reinspect_later] without recursive same-turn claim. *)
 
   val drain_available_with_process :
     yield:(unit -> unit) ->

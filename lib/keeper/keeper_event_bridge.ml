@@ -430,21 +430,18 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     None
 ;;
 
-let relay_max_attempts = 3
-
 type relay_stage =
   | Append
   | Broadcast
 
 type pending_relay =
   { json : Yojson.Safe.t
-  ; attempts : int
   ; appended : bool
   }
 
 type relay_result =
   | Delivered
-  | Retryable_failure of pending_relay * relay_stage * exn
+  | Delivery_failed of pending_relay * relay_stage * exn
 
 let relay_stage_to_string = function
   | Append -> "append"
@@ -468,24 +465,6 @@ let update_relay_queue_depth pending =
   Otel_metric_store.set_gauge
     Otel_metric_store.metric_agent_core_sse_relay_queue_depth
     (float_of_int (List.length pending))
-;;
-
-let emit_relay_retry_log
-      ~(pending : pending_relay)
-      ~(stage : relay_stage)
-      ~(attempt : int)
-      exn
-  =
-  Log.Misc.warn
-    "keeper_event_bridge: retrying event_type=%s stage=%s attempt=%d/%d correlation_id=%s \
-     run_id=%s error=%s"
-    (relay_event_type pending.json)
-    (relay_stage_to_string stage)
-    attempt
-    relay_max_attempts
-    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "correlation_id" pending.json))
-    (Option.value ~default:"<none>" (Json_util.assoc_string_opt "run_id" pending.json))
-    (Printexc.to_string exn)
 ;;
 
 let emit_relay_drop_log
@@ -532,7 +511,7 @@ let broadcast_drop_marker
   | exn ->
     (* P2 silent-failure fix: previously only logged.  The drop
          marker is the operator-visible signal that an AGENT_CORE event was
-         dropped after exhausting retries; if the drop marker also
+         dropped after its delivery failed; if the drop marker also
          fails to broadcast, operators are blind to the drop entirely.
          Counter is distinct from masc_sse_broadcast_failures_total
          (PR-C #11075) so the recovery-path failure rate is visible
@@ -550,10 +529,10 @@ let prepare_pending_event evt =
     (* AGENT_CORE event payloads may carry tool output or user-facing text that
          contains invalid UTF-8 bytes (e.g. truncated multi-byte sequences
          from subprocess captures). Scrub once before the event enters the
-         retry queue so every retry uses the same sanitized payload. *)
+         delivery path so every observer sees the same sanitized payload. *)
     let json = Inference_utils.sanitize_json_utf8 json in
     emit_native_event_log evt json;
-    Some { json; attempts = 0; appended = false }
+    Some { json; appended = false }
 ;;
 
 let deliver_pending_with
@@ -573,7 +552,7 @@ let deliver_pending_with
     Delivered
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Retryable_failure (pending, Broadcast, exn)
+  | exn -> Delivery_failed (pending, Broadcast, exn)
 ;;
 
 let agent_core_event_retention_days_default = 30
@@ -611,15 +590,10 @@ let deliver_pending ?store_ref (pending : pending_relay) =
   in
   try deliver_pending_with ~append_json ~broadcast_json:broadcast_relay_json pending with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Retryable_failure (pending, Append, exn)
+  | exn -> Delivery_failed (pending, Append, exn)
 ;;
 
-let should_drain_subscription pending =
-  (* Do not move new AGENT_CORE bus events into the local retry queue while
-     failed relays are still pending.  The AGENT_CORE subscriber stream is
-     bounded, so leaving it undrained applies publisher backpressure
-     instead of dropping the oldest local relay event. *)
-  pending = []
+let should_drain_subscription _pending = true
 ;;
 
 let prepare_pending_events events = List.filter_map prepare_pending_event events
@@ -629,32 +603,22 @@ let rec process_pending ?store_ref acc = function
   | pending :: rest ->
     (match deliver_pending ?store_ref pending with
      | Delivered -> process_pending ?store_ref acc rest
-     | Retryable_failure (pending, stage, exn) ->
-       let attempt = pending.attempts + 1 in
+     | Delivery_failed (pending, stage, exn) ->
        Keeper_fd_pressure.note_exception ~site:"keeper_event_bridge.relay" exn;
        Keeper_disk_pressure.note_exception ~site:"keeper_event_bridge.relay" exn;
-       if attempt >= relay_max_attempts
-       then (
-         Otel_metric_store.inc_counter
-           Otel_metric_store.metric_agent_core_sse_relay_drops
-           ~labels:[ "stage", relay_stage_to_string stage ]
-           ();
-         emit_relay_drop_log
-           ~pending
-           ~stage_label:(relay_stage_to_string stage)
-           ~attempts:attempt;
-         broadcast_drop_marker
-           ~pending
-           ~stage_label:(relay_stage_to_string stage)
-           ~attempts:attempt;
-         process_pending ?store_ref acc rest)
-       else (
-         Otel_metric_store.inc_counter
-           Otel_metric_store.metric_agent_core_sse_relay_retries
-           ~labels:[ "stage", relay_stage_to_string stage ]
-           ();
-         emit_relay_retry_log ~pending ~stage ~attempt exn;
-         process_pending ?store_ref ({ pending with attempts = attempt } :: acc) rest))
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_agent_core_sse_relay_drops
+         ~labels:[ "stage", relay_stage_to_string stage ]
+         ();
+       emit_relay_drop_log
+         ~pending
+         ~stage_label:(relay_stage_to_string stage)
+         ~attempts:1;
+       broadcast_drop_marker
+         ~pending
+         ~stage_label:(relay_stage_to_string stage)
+         ~attempts:1;
+       process_pending ?store_ref acc rest)
 ;;
 
 let agent_core_event_store ~config =

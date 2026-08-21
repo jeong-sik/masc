@@ -27,7 +27,6 @@
 
 (tests
  (names
-  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
@@ -221,7 +220,6 @@
   test_keeper_unified_context_overflow
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
-  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -328,7 +326,6 @@
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink)
  (modules
-  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
@@ -525,7 +522,6 @@
   test_keeper_unified_context_overflow
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
-  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler

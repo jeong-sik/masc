@@ -26,28 +26,21 @@ val pending_board_event_of_stimulus
   -> Keeper_event_queue.stimulus
   -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
-(** Closed consumption result for an Event-Layer stimulus. A transient Board
-    read cannot be represented as an empty successful rendering: it retains
-    the exact pending queue selection for a later heartbeat. *)
+(** Closed consumption result for an Event-Layer stimulus. A failed Board
+    read cannot be represented as an empty successful rendering. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
-  | Stimulus_retry_later of
+  | Stimulus_read_failed of
       Keeper_world_observation_board_signal.board_unavailable
 
-(** Pure disposition boundary for one rendered Board event. Permanent
-    unavailability is consumed as an empty event; transient unavailability
-    remains a typed retry. *)
+(** Pure result boundary for one rendered Board event. *)
 val classify_pending_board_event_result
   :  (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
   -> stimulus_intake_result
 
 (** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
     [stim] into zero-or-one pending board events. On [Error unavailable] it
-    classifies the failure via
-    {!Keeper_world_observation_board_signal.disposition_of_unavailable},
-    logs and counts it, and returns either [Stimulus_consumed []] for a
-    permanent failure or [Stimulus_retry_later unavailable] for a transient
-    failure. *)
+    logs and counts it, and returns [Stimulus_read_failed unavailable]. *)
 val pending_board_events_of_stimulus_result
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
@@ -55,7 +48,7 @@ val pending_board_events_of_stimulus_result
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
-  | Transient_board_read of
+  | Board_read_failed of
       Keeper_world_observation_board_signal.board_unavailable
 
 (** Map one durable event-queue payload to its typed turn trigger. A payload
@@ -67,9 +60,7 @@ val event_queue_trigger_of_stimulus :
 val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
-(** Only durable selection corruption/read failures count as a crashed cycle.
-    A transient Board read is an expected retry condition: it blocks dispatch
-    and retains the exact source without advancing Keeper failure state. *)
+(** Durable selection and Board read failures count as a crashed cycle. *)
 val event_queue_intake_error_counts_as_cycle_failure :
   event_queue_intake_error -> bool
 
@@ -97,8 +88,8 @@ type heartbeat_event_intake = {
 
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store and logs only after consumption is known.
-    A transient Board read returns [Stimulus_retry_later] without incrementing
-    the consumed counter.
+    A failed Board read returns [Stimulus_read_failed] without incrementing
+    the consumed counter; the heartbeat terminalizes the exact selection.
 
     [?connector_attention_items] (RFC-0377 P1-1): for a [Connector_attention]
     stimulus, a preloaded (event_id, item) association to resolve [stim]'s
@@ -166,7 +157,7 @@ val reconcile_spent_selection
     already accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be selected.
-    A transient Board read returns no consumed stimuli, keeps the exact
+    A Board read failure returns no consumed stimuli, keeps the exact
     [pending_selection], and sets [event_queue_intake_error]; the heartbeat
     loop must not dispatch or acknowledge that selection. *)
 val heartbeat_event_intake
@@ -176,8 +167,6 @@ val heartbeat_event_intake
   -> heartbeat_event_intake
 
 module For_testing : sig
-  (** Force the next [count] Board stimulus reads to report a transient
-      [Io_error], allowing the durable retry path to be exercised without a
-      real store outage. *)
-  val force_transient_board_reads : int -> unit
+  (** Force the next [count] Board stimulus reads to report [Io_error]. *)
+  val force_board_io_failures : int -> unit
 end

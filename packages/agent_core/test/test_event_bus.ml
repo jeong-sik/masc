@@ -494,7 +494,7 @@ let test_tool_completed_preserves_non_retryable_flag () =
   let sub = subscribe_routing ~filter:Event_bus.filter_tools_only bus in
   let tool =
     Tool.create ~name:"fail" ~description:"Always fails" ~parameters:[] (fun _ ->
-      Error { Types.message = "boom"; recoverable = false; error_class = None })
+      Error { Types.message = "boom"; error_class = None })
   in
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -526,12 +526,11 @@ let test_tool_completed_preserves_non_retryable_flag () =
   match Event_bus.drain sub with
   | [ { meta = called_meta; payload = ToolCalled _; _ }
     ; { meta = completed_meta
-      ; payload = ToolCompleted { output = Error { message; recoverable; _ }; _ }
+      ; payload = ToolCompleted { output = Error { message; _ }; _ }
       ; _
       }
     ] ->
     check string "message" "boom" message;
-    check bool "non-retryable preserved" false recoverable;
     check string "tool_called correlation_id" "sess-event" called_meta.correlation_id;
     check string "tool_called run_id" "run-event" called_meta.run_id;
     check
@@ -565,7 +564,7 @@ let test_on_tool_error_hook_fires_on_tool_failure () =
   let bus = Event_bus.create () in
   let tool =
     Tool.create ~name:"fail" ~description:"Always fails" ~parameters:[] (fun _ ->
-      Error { Types.message = "boom"; recoverable = false; error_class = None })
+      Error { Types.message = "boom"; error_class = None })
   in
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -785,15 +784,13 @@ let test_unknown_tool_reports_available_tools_and_retries () =
     (Types.tool_result_outcome_is_error result.outcome);
   check
     (option string)
-    "unknown call is retryable validation"
+    "unknown call is typed validation"
     (Some "validation")
     (match result.outcome with
      | Types.Tool_failed { failure_kind = Agent_tools.Validation_error; _ } ->
        Some "validation"
-     | Types.Tool_failed { failure_kind = Agent_tools.Recoverable_tool_error; _ } ->
-       Some "recoverable"
-     | Types.Tool_failed { failure_kind = Agent_tools.Non_retryable_tool_error; _ } ->
-       Some "non_retryable"
+     | Types.Tool_failed { failure_kind = Agent_tools.Tool_error; _ } ->
+       Some "tool_error"
      | Types.Tool_failed { failure_kind = Agent_tools.Reported_tool_error; _ } ->
        Some "reported"
      | Types.Tool_failed { failure_kind = Agent_tools.Unattributed_tool_error; _ } ->

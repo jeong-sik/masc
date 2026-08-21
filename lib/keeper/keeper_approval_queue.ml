@@ -2661,7 +2661,7 @@ let mark_summary_attempt_pre_worker_unavailable
          | _ -> None)
 ;;
 
-let reserve_summary_attempt_retry
+let reserve_summary_attempt_rerun
       ~base_path
       ~id
       ~input_hash

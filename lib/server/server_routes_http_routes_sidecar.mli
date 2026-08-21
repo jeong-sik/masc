@@ -236,7 +236,7 @@ val write_attempt_record :
 
 (** Backoff duration between reconcile attempts. *)
 
-val retry_backoff_active : now:string -> attempt_record -> bool
+val launch_deferred : now:string -> attempt_record -> bool
 (** [true] when [now] is still inside the backoff window for the
     last attempt. [now] is parsed at the boundary; the deadline comparison
     uses {!Attempt_state.is_backoff_active}. *)
@@ -246,7 +246,7 @@ val retry_backoff_active : now:string -> attempt_record -> bool
 
 val reconcile_desired_once :
   ?now:string ->
-  ?next_retry_at:string ->
+  ?next_launch_not_before:string ->
   ?previous_attempt:attempt_record ->
   ?write_attempt:(attempt_record -> (unit, 'a) result) ->
   current_generation:int ->

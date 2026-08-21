@@ -42,10 +42,6 @@ let test_metric_names_stable () =
     "masc_llm_provider_errors_by_reason_total"
     Metrics.metric_llm_provider_errors_by_reason;
   Alcotest.(check string)
-    "retries metric"
-    "masc_llm_provider_retries_total"
-    Metrics.metric_llm_provider_retries;
-  Alcotest.(check string)
     "input tokens metric"
     "masc_llm_provider_input_tokens_total"
     Metrics.metric_llm_provider_input_tokens;
@@ -112,9 +108,6 @@ let test_sink_records_agent_core_callbacks () =
   let provider = "bridge-test-provider" in
   let model_labels = [ ("model", model_id) ] in
   let provider_model_labels = [ ("provider", provider); ("model", model_id) ] in
-  let retry_labels =
-    [ ("provider", provider); ("model", model_id); ("attempt", "2") ]
-  in
   let provider_key = "bridge-test-provider-key" in
   let circuit_labels =
     [ ("provider", provider); ("model", model_id); ("provider_key", provider_key) ]
@@ -131,7 +124,6 @@ let test_sink_records_agent_core_callbacks () =
   let before_error_reason =
     metric Metrics.metric_llm_provider_errors_by_reason ~labels:error_reason_labels
   in
-  let before_retry = metric Metrics.metric_llm_provider_retries ~labels:retry_labels in
   let before_input =
     metric Metrics.metric_llm_provider_input_tokens ~labels:provider_model_labels
   in
@@ -161,7 +153,6 @@ let test_sink_records_agent_core_callbacks () =
     ~model_id
     ~message:"ignored-freeform-error"
     ~reason:Llm_provider.Metrics.Unknown;
-  sink.on_retry ~provider ~model_id ~attempt:2;
   sink.on_circuit_state ~provider ~model_id ~provider_key
     ~state:Llm_provider.Metrics.Circuit_open;
   sink.on_token_usage
@@ -184,9 +175,6 @@ let test_sink_records_agent_core_callbacks () =
   check_metric_delta "error reason +1"
     Metrics.metric_llm_provider_errors_by_reason
     ~labels:error_reason_labels ~before:before_error_reason ~delta:1.0;
-  check_metric_delta "retry +1"
-    Metrics.metric_llm_provider_retries
-    ~labels:retry_labels ~before:before_retry ~delta:1.0;
   check_metric_delta "input tokens +17"
     Metrics.metric_llm_provider_input_tokens
     ~labels:provider_model_labels ~before:before_input ~delta:17.0;

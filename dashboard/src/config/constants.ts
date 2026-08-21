@@ -31,17 +31,17 @@ export const DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS = 10_000
 // URL before the cache is invalidated and the client falls back to /ws.
 export const DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES = 3
 
-// --- Transport retry defaults (shared by all transport implementations) ---
+// --- Transport reconnect defaults (shared by all transport implementations) ---
 // Exponential backoff for transport-level reconnection.  Distinct from
 // RECONNECT_* (which caps at 60s for SSE/dashboard-WS reconnect storms).
-export const TRANSPORT_RETRY_BASE_MS = 1_000
-export const TRANSPORT_RETRY_MAX_MS = 30_000
-export const TRANSPORT_RETRY_JITTER_MS = 1_000
-export const TRANSPORT_RETRY_MAX_ATTEMPTS = 10
+export const TRANSPORT_RECONNECT_BASE_MS = 1_000
+export const TRANSPORT_RECONNECT_MAX_MS = 30_000
+export const TRANSPORT_RECONNECT_JITTER_MS = 1_000
+export const TRANSPORT_RECONNECT_MAX_ATTEMPTS = 10
 
 // --- Reconnect backoff (dashboard WS) ---
 // Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is
-// degraded; fleets of dashboards retrying every 15s synchronously was
+// degraded; fleets of dashboards reconnecting every 15s synchronously was
 // observed to amplify Executor_pool starvation on cold start.
 export const RECONNECT_MAX_MS = 60_000
 export const RECONNECT_JITTER_MS = 1_000
@@ -67,7 +67,7 @@ export const SSE_DEFAULT_DEBOUNCE_MS = 500
 export const SSE_ACTIVITY_DEBOUNCE_MS = 2_000
 export const SSE_KEEPER_OPERATOR_DEBOUNCE_MS = 600
 export const SSE_KEEPER_THREAD_DEBOUNCE_MS = 800
-export const SSE_RECONNECT_RETRY_MS = 3_000
+export const SSE_RECONNECT_REFRESH_DELAY_MS = 3_000
 export const PERIODIC_REFRESH_DEV_MS = 180_000
 export const PERIODIC_REFRESH_PROD_MS = 120_000
 export const TELEMETRY_AUTO_REFRESH_MS = 30_000

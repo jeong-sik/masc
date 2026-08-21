@@ -50,22 +50,6 @@ let assert_receipt_authoritative ~outcome ~turn_state =
 type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
-(* Terminal classification of a runtime rotation attempt.  Producer-side
-   closed set in [keeper_unified_turn.ml]; JSON wire form is the lowercase
-   string via [runtime_rotation_outcome_to_string].
-
-   This type intentionally has no [@@deriving tla]; following the precedent
-   in [keeper_types_profile.ml], a follow-up can wrap a TLA mirror in a
-   submodule when a spec actually models rotation outcomes. *)
-type runtime_rotation_outcome =
-  | Rotation_setup_failed
-  | Rotation_retry_scheduled
-
-let runtime_rotation_outcome_to_string = function
-  | Rotation_setup_failed -> "setup_failed"
-  | Rotation_retry_scheduled -> "retry_scheduled"
-;;
-
 (* Receipt-level summary of how the in-turn runtime attempt sequence
    ended.  Closed set across two producer paths:
     - [Keeper_agent_error.runtime_outcome_of_observation] — 4 values
@@ -135,18 +119,6 @@ let completion_contract_result_of_string raw =
   |> Option.map completion_contract_result_of_label
 ;;
 
-type runtime_rotation_attempt =
-  { from_runtime : string
-  ; to_runtime : string
-  ; reason : Keeper_error_classify.degraded_retry_reason
-  ; outcome : runtime_rotation_outcome
-  ; productive_phase_elapsed_ms : int option
-  ; retry_phase_elapsed_ms : int option
-  ; error_kind : error_kind option
-  ; error_message : string option
-  ; recorded_at : string
-  }
-
 type t =
   { keeper_name : string
   ; agent_name : string
@@ -173,10 +145,6 @@ type t =
   ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
   ; agent_core_internal_runtime_allowed : bool
-  ; degraded_retry_applied : bool
-  ; degraded_retry_runtime : string option
-  ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
-  ; runtime_rotation_attempts : runtime_rotation_attempt list
   ; stop_reason : Runtime_agent.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option

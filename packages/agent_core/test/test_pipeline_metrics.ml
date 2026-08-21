@@ -17,7 +17,7 @@
       exactly once with matching [latency_ms >= 0]. *)
 
 open Agent_core
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 
 let mk_mock_response () : Types.api_response =
   { id = "test-msg-1"
@@ -231,7 +231,7 @@ let test_core_error_of_http_error_classifies () =
   (* Pure smoke test for the conversion helper introduced in pipeline.ml *)
   let _ : Error.t =
     Error.Api
-      (Retry.classify_error
+      (Api_error.classify_error
          ~retry_after_header:None
          ~status:429
          ~body:{|{"error":{"message":"rate limit"}}|})

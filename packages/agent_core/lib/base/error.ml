@@ -5,14 +5,14 @@
     for a single [(_, t) result] return type across agent core.
 
     Design decisions:
-    - [api_error] is a type alias for {!Retry.api_error} (no duplication).
+    - [api_error] is a type alias for {!Api_error.api_error} (no duplication).
     - [Internal] is reserved for unreachable agent-core invariant failures.
     - [to_string] produces human-readable messages. *)
 
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 
-(** API errors — alias for {!Retry.api_error}. *)
-type api_error = Retry.api_error
+(** API errors — alias for {!Api_error.api_error}. *)
+type api_error = Api_error.api_error
 
 (** Provider/runtime errors — alias for {!Llm_provider.Error.provider_error}. *)
 type provider_error = Llm_provider.Error.provider_error
@@ -268,7 +268,7 @@ let orchestration_error_to_string = function
 ;;
 
 let to_string = function
-  | Api err -> Retry.error_message err
+  | Api err -> Api_error.error_message err
   | Provider err -> Llm_provider.Error.to_string err
   | Agent err -> agent_error_to_string err
   | Mcp err -> mcp_error_to_string err

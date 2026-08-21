@@ -15,7 +15,7 @@ const APPROVAL_AUDIT_EVENTS = new Set<KeeperApprovalAuditEvent>([
   'gate_exact_rule_expired',
   'gate_exact_rule_store_degraded',
   'gate_grant_unavailable',
-  'auto_judge_operator_retry_started',
+  'auto_judge_operator_rerun_started',
   'auto_judge_block_observation_superseded',
   'auto_judge_restart_worker_recovered',
   'auto_judge_restart_judgment_recovered',

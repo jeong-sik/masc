@@ -110,7 +110,7 @@ let test_panel_outcome_rejects_empty_answer () =
 let test_panel_outcome_types_per_agent_timeout () =
   let timeout_error =
     Agent_core.Error.Api
-      (Agent_core.Retry.Timeout { message = "120s"; phase = None })
+      (Agent_core.Api_error.Timeout { message = "120s"; phase = None })
   in
   match
     Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
@@ -123,7 +123,7 @@ let test_panel_outcome_types_per_agent_timeout () =
 
 (* provider-level 타임아웃도 typed [Timeout]으로 분류된다. connect_timeout(비스트리밍 sync
    경로가 본문 전체를 바운드, detail "timeout phase=http_operation")은
-   [Provider (Llm_provider.Error.Timeout _)] variant로 나오는데, [Api (Retry.Timeout _)]
+   [Provider (Llm_provider.Error.Timeout _)] variant로 나오는데, [Api (Api_error.Timeout _)]
    외곽 래퍼와 다른 arm이라 이전엔 [Provider_error] catch-all로 오귀속됐다. reason_code가
    board/대시보드에 "timeout"으로 나가는지 함께 핀한다. *)
 let test_panel_outcome_types_provider_timeout () =
@@ -146,7 +146,7 @@ let test_panel_outcome_types_provider_timeout () =
   | other ->
     fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_outcome other)
 
-(* 심판 분류기도 두 타임아웃 variant([Api (Retry.Timeout _)] 외곽 래퍼 +
+(* 심판 분류기도 두 타임아웃 variant([Api (Api_error.Timeout _)] 외곽 래퍼 +
    [Provider (Llm_provider.Error.Timeout _)] provider-level)를 [Timeout]으로 매핑하고,
    비-타임아웃 provider 오류는 [Provider_error]로 보존한다 —
    [Fusion_panel.outcome_of_result]와 대칭. 과분류(모든 provider 오류를 Timeout으로)를
@@ -157,7 +157,7 @@ let test_judge_failure_classifies_timeouts () =
       ~prefix:"judge run failed: " e
   in
   let api_timeout =
-    Agent_core.Error.Api (Agent_core.Retry.Timeout { message = "120s"; phase = None })
+    Agent_core.Error.Api (Agent_core.Api_error.Timeout { message = "120s"; phase = None })
   in
   let provider_timeout =
     Agent_core.Error.Provider

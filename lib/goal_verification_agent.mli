@@ -9,10 +9,8 @@
     identity [System_llm_agent { agent_run_id = "verifier_exact" }]
     (RFC-0361 D7(b)).
 
-    Typed non-verdicts (evaluator unavailable, malformed reply after all
-    slots failed, verdict without a stated reason, refused commit) leave the
-    pending row durable and schedule a maintenance-pulse retry — a pending
-    row is never consumed on failure, and there is no wall-clock expiry. *)
+    Typed non-verdicts leave the pending row durable. A later explicit ledger
+    wake may inspect it again; the agent owns no timer-based replay. *)
 
 val start :
   sw:Eio.Switch.t ->
@@ -30,18 +28,10 @@ module For_testing : sig
     kind : pending_kind;
   }
 
-  (** How one review ended, decoupled from the Eio scheduling loop so the
-      retry decision is a pure function of it. *)
+  (** How one review ended. *)
   type process_outcome =
     | Committed
-    | Deferred of {
-        retryable : bool;
-        reason : string;
-      }
-
-  val should_schedule_retry : process_outcome -> bool
-  (** Whether the maintenance-pulse retry timer should arm for this outcome.
-      [false] for [Committed] and for non-retryable deferrals. *)
+    | Deferred of { reason : string }
 
   val group_pending_by_goal : pending_work list -> pending_work list list
   (** Stable grouping used by the daemon: criterion work precedes proof work

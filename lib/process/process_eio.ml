@@ -149,11 +149,11 @@ let default_env = function
    mandatory because new exception constructors can never be enumerated.
    RFC-0071 §3.4.1 sanctioned open-variant exemption, not a lazy
    catch-all over a closed sum. *)
-let rec should_retry_unix_fallback = function
+let rec should_use_unix_fallback = function
   | Unix.Unix_error
       ((Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.EACCES | Unix.EPERM), "bind", _) ->
       true
-  | Eio.Cancel.Cancelled exn -> should_retry_unix_fallback exn
+  | Eio.Cancel.Cancelled exn -> should_use_unix_fallback exn
   | _ -> false
 [@@warning "-4"]
 
@@ -746,9 +746,9 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
                   ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
-                if should_retry_unix_fallback exn then (
+                if should_use_unix_fallback exn then (
                   Log.Misc.warn
-                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    "[Process_eio] argv bind error, using Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
                   run_unix_argv_fallback ?timeout_sec ?env argv
                 ) else if is_downstream_pipe_closed exn then (
@@ -799,9 +799,9 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
                   ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
-                if should_retry_unix_fallback exn then (
+                if should_use_unix_fallback exn then (
                   Log.Misc.warn
-                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    "[Process_eio] argv bind error, using Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
                   run_unix_argv_with_stdin_fallback ?timeout_sec ?env ~stdin_content argv
                 ) else if is_downstream_pipe_closed exn then (
@@ -916,9 +916,9 @@ let run_argv_with_stdin_and_status_split
                 (timeout_status, stdout, stderr)
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
-                if should_retry_unix_fallback exn then (
+                if should_use_unix_fallback exn then (
                   Log.Misc.warn
-                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    "[Process_eio] argv bind error, using Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
                   fallback_with_callbacks ()
                 ) else if is_downstream_pipe_closed exn then (
@@ -1007,9 +1007,9 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
                 (timeout_status, stdout, stderr)
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
-                if should_retry_unix_fallback exn then (
+                if should_use_unix_fallback exn then (
                   Log.Misc.warn
-                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    "[Process_eio] argv bind error, using Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
                   run_unix_argv_with_status_split_fallback ?timeout_sec ?env
                     ?cwd argv
@@ -1111,10 +1111,10 @@ let run_argv_with_status_split_streaming
             timeout_status, stdout, stderr
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
-            if should_retry_unix_fallback exn
+            if should_use_unix_fallback exn
             then (
               Log.Misc.warn
-                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                "[Process_eio] argv bind error, using Unix fallback: %s — %s"
                 label (Printexc.to_string exn);
               fallback_with_callbacks ())
             else if is_downstream_pipe_closed exn
@@ -1314,9 +1314,9 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                  (Unix.WEXITED 124, Exec_buffer.render stdout_buf, stderr)
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn ->
-                 if should_retry_unix_fallback exn then (
+                 if should_use_unix_fallback exn then (
                    Log.Misc.warn
-                     "[Process_eio] pipeline bind error, retrying via Unix fallback: %s — %s"
+                     "[Process_eio] pipeline bind error, using Unix fallback: %s — %s"
                      label (Printexc.to_string exn);
                    fallback_buffered ())
                  else (

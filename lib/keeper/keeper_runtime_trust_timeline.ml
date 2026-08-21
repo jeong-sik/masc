@@ -92,7 +92,7 @@ let severity_of_approval_event (event : Keeper_approval.Audit.event)
     decision_kind =
   match event with
   | Gate_allowed | Grant_consumed | Rule_created | Rule_deleted
-  | Auto_judge_operator_retry_started | Summary_updated ->
+  | Auto_judge_operator_rerun_started | Summary_updated ->
       "ok"
   | Pending | Gate_exact_rule_expired | Gate_grant_unavailable
   | Auto_judge_block_observation_superseded
@@ -233,7 +233,7 @@ let approval_event_timeline_event json =
               gate_title,
               "approved grant could not be read back",
               Some "retry_or_rerun" )
-        | Auto_judge_operator_retry_started ->
+        | Auto_judge_operator_rerun_started ->
             ( "approval_judge_retry",
               judge_title,
               "operator restarted the auto judge",

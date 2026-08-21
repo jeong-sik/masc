@@ -29,7 +29,7 @@ const MAX_FINDINGS = 3
 const RECENT_EVENT_LIMIT = 16
 const RECENT_TOOL_LIMIT = 12
 
-// Two repeats are often a normal retry; the third repeat is the first useful loop signal.
+// Three matching calls in the recent window are enough to report repetition.
 const REPEATED_TOOL_THRESHOLD = 3
 // Eight tool calls without a completion marker is enough churn to justify an advisory checkpoint.
 const TOOL_CHURN_THRESHOLD = 8

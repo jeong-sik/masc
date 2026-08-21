@@ -238,7 +238,7 @@ let recover_projected_durable_demand_owner
        in
        (match truth with
         | Keeper_activation_readiness.Executable -> ()
-        | Keeper_activation_readiness.Recoverable ->
+        | Keeper_activation_readiness.No_live_owner ->
           let owner_ctx = { ctx with agent_name = meta.agent_name } in
           Keeper_supervisor.supervise_keepalive
             ~proactive_warmup_sec:0

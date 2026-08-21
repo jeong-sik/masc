@@ -14,12 +14,11 @@ include Keeper_turn_helpers
 include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
-type retry_loop_input =
+type run_input =
   { run_meta : keeper_meta
   ; execution : runtime_execution
   ; run_generation : int
   ; attempt : int
-  ; is_retry : bool
   ; attempted_runtimes : string list
   }
 
@@ -98,7 +97,6 @@ let run (ctx : ctx)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
-      ~(current_turn_phase_elapsed_ms : float option -> int * int option)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
@@ -138,7 +136,6 @@ let run (ctx : ctx)
         ~(execution : runtime_execution)
         ~run_meta
         ~run_generation
-        ~is_retry
         ~(turn_state : turn_state)
     =
     let turn_state =
@@ -154,7 +151,6 @@ let run (ctx : ctx)
         ~generation:run_generation
         ~max_context:execution.max_context
         ~channel:(Keeper_world_observation.channel_to_string channel)
-        ~is_retry
         ~current_task_id:
           (Option.map
              Keeper_id.Task_id.to_string
@@ -199,23 +195,8 @@ let run (ctx : ctx)
                     multi-turn ordering without a separate turn identity. *)
                  ~user_turn_record:Keeper_run_prompt.Record_user_turn
                  ~history_assistant_source:"internal_assistant"
-                 ~degraded_retry_applied:
-                   (Option.is_some turn_state.degraded_retry_info)
-                 ?degraded_retry_runtime:
-                   (Option.map
-                      (fun (retry : EC.degraded_retry) ->
-                         retry.next_runtime)
-                      turn_state.degraded_retry_info)
-                 ?fallback_reason:
-                   (Option.map
-                      (fun (retry : EC.degraded_retry) ->
-                         retry.fallback_reason)
-                      turn_state.degraded_retry_info)
-                 ~runtime_rotation_attempts:
-                   (List.rev turn_state.runtime_rotation_attempts)
                  ~temperature:execution.temperature
                  ~trajectory_acc
-                 ~is_retry
                  ?shared_context
                  ?event_bus
                  ?trace_link:(trace_link ())
@@ -241,12 +222,11 @@ let run (ctx : ctx)
     in
     result, turn_state
   in
-  let retry_loop (input : retry_loop_input) (turn_state : turn_state) =
+  let finish_run (input : run_input) (turn_state : turn_state) =
     let { run_meta
         ; execution
         ; run_generation
         ; attempt
-        ; is_retry
         ; attempted_runtimes
         }
       =
@@ -286,7 +266,6 @@ let run (ctx : ctx)
         ~execution
         ~run_meta
         ~run_generation
-        ~is_retry
         ~turn_state
     in
     match attempt_result with
@@ -307,15 +286,6 @@ let run (ctx : ctx)
     | Error err ->
         (match declared_lane_failure_of_error err with
          | Provider_context_overflow { limit_tokens } ->
-          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-            ~keeper_name:meta.name
-            ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
-            ~reason:"provider_context_overflow"
-            ~next_runtime:None
-            ~attempt
-            ~error_kind:(Some Agent_core.Error.(category err |> category_label))
-            ~error_message:(Some (Agent_core.Error.to_string err));
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
           in
@@ -357,15 +327,6 @@ let run (ctx : ctx)
           mark_terminal_error err;
           Error err, turn_state
          | Declared_runtime_lane_exhausted ->
-          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-            ~keeper_name:meta.name
-            ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
-            ~reason:"declared_runtime_lane_exhausted"
-            ~next_runtime:None
-            ~attempt
-            ~error_kind:(Some Agent_core.Error.(category err |> category_label))
-            ~error_message:(Some (Agent_core.Error.to_string err));
           mark_terminal_error err;
           Error err, turn_state)
   in
@@ -373,15 +334,13 @@ let run (ctx : ctx)
      Long voice/AGENT_CORE turns can keep making stream or tool progress beyond the
      legacy 600s cap. Runaway detection is owned by stream idle, provider
      attempt liveness, tool-level timeouts, max-turn limits, and the optional
-     supervisor stale-turn watchdog. Retry admission must not reintroduce the
-     cumulative wall-clock cap between provider attempts. *)
+     supervisor stale-turn watchdog. *)
   let result, turn_state =
-    retry_loop
+    finish_run
       { run_meta = meta
       ; execution = initial_execution
       ; run_generation = generation
       ; attempt = 1
-      ; is_retry = false
       ; attempted_runtimes =
           [ initial_execution.runtime_id
           ]

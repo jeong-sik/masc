@@ -153,7 +153,7 @@ export type {
 export {
   fetchDashboardGate,
   resolveGateApproval,
-  retryGateAutoJudge,
+  rerunGateAutoJudge,
   deleteGateApprovalRule,
   setGateMode,
 } from './dashboard-gate'

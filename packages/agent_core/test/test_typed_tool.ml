@@ -104,7 +104,7 @@ let test_execute_parse_error () =
   let input = `Assoc [ "name", `Int 42 ] in
   match Tool.execute greet_tool input with
   | Ok _ -> Alcotest.fail "expected parse error"
-  | Error e -> Alcotest.(check bool) "recoverable" true e.recoverable
+  | Error e -> Alcotest.(check bool) "message present" true (e.message <> "")
 ;;
 
 let test_execute_handler_error () =
@@ -112,7 +112,6 @@ let test_execute_handler_error () =
   match Tool.execute greet_tool input with
   | Ok _ -> Alcotest.fail "expected handler error"
   | Error e ->
-    Alcotest.(check bool) "not recoverable" false e.recoverable;
     Alcotest.(check bool)
       "contains 'empty'"
       true
@@ -229,7 +228,7 @@ let test_context_handler_no_context () =
   let input = `Assoc [ "name", `String "Admin" ] in
   match Tool.execute greet_ctx_tool input with
   | Ok _ -> Alcotest.fail "expected error when context missing"
-  | Error e -> Alcotest.(check bool) "not recoverable" false e.recoverable
+  | Error e -> Alcotest.(check bool) "message present" true (e.message <> "")
 ;;
 
 let test_canonical_context_tool () =
@@ -246,7 +245,7 @@ let test_canonical_context_tool () =
 
 let test_null_input_parse () =
   match Tool.execute greet_tool `Null with
-  | Error e -> Alcotest.(check bool) "recoverable" true e.recoverable
+  | Error e -> Alcotest.(check bool) "message present" true (e.message <> "")
   | Ok _ -> Alcotest.fail "expected error on null input"
 ;;
 
@@ -272,9 +271,9 @@ let () =
     [ ( "execute"
       , [ Alcotest.test_case "success" `Quick test_execute_success
         ; Alcotest.test_case "shout mode" `Quick test_execute_shout
-        ; Alcotest.test_case "parse error is recoverable" `Quick test_execute_parse_error
+        ; Alcotest.test_case "parse error is explicit" `Quick test_execute_parse_error
         ; Alcotest.test_case
-            "handler error is not recoverable"
+            "handler error is explicit"
             `Quick
             test_execute_handler_error
         ; Alcotest.test_case "null input" `Quick test_null_input_parse

@@ -85,7 +85,7 @@ let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.mess
 
 let network_unavailable_error message =
   Agent_core.Error.Api
-    (Agent_core.Retry.NetworkError
+    (Agent_core.Api_error.NetworkError
        { message; kind = Llm_provider.Http_client.Unknown })
 
 let attempt_without_effect result checkpoint =
@@ -1298,9 +1298,8 @@ let test_attempt_loop_fails_closed_without_effect_observation () =
     "effect observation unavailable"
     Masc.Keeper_provider_attempt_effect.Observation_unavailable
 
- let test_attempt_loop_blocks_no_progress_when_transition_denied () =
+let test_attempt_loop_terminalizes_no_progress () =
   let attempts = ref [] in
-  let gate_calls = ref [] in
   let events = ref [] in
   let checkpoint_after_primary = checkpoint_with_session_id "after-primary" in
   let primary_error = accept_empty_no_progress_error "primary.test_model" in
@@ -1309,13 +1308,8 @@ let test_attempt_loop_fails_closed_without_effect_observation () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~candidate_transition_permission:(fun ~runtime_id ~attempt error ->
-        gate_calls
-        := ( runtime_id,
-             attempt,
-             Driver.For_testing.accept_no_progress_should_try_next error )
-           :: !gate_calls;
-        Driver.Candidate_transition_denied)
+      ~candidate_transition_permission:(fun ~runtime_id:_ ~attempt:_ _error ->
+        Alcotest.fail "terminal no-progress must not request transition permission")
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -1324,7 +1318,7 @@ let test_attempt_loop_fails_closed_without_effect_observation () =
             (Error primary_error)
             (Some checkpoint_after_primary)
         | "fallback.test_model" ->
-          Alcotest.fail "no-progress retry gate should block fallback candidate"
+          Alcotest.fail "no-progress must not dispatch a fallback candidate"
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -1340,17 +1334,6 @@ let test_attempt_loop_fails_closed_without_effect_observation () =
     "attempted candidates"
     [ "primary.test_model" ]
     !attempts;
-  (match List.rev !gate_calls with
-   | [ (runtime_id, attempt, should_try_next) ] ->
-     Alcotest.(check string) "gate runtime" "primary.test_model" runtime_id;
-     Alcotest.(check int) "gate attempt" 0 attempt;
-     Alcotest.(check bool)
-       "gate sees no-progress error"
-       true
-       should_try_next
-   | calls ->
-     Alcotest.failf "expected one no-progress gate call, got %d"
-       (List.length calls));
   let events = List.rev !events in
   Alcotest.(check (list string))
     "manifest events"
@@ -1594,7 +1577,7 @@ let test_attempt_loop_preserves_last_core_error () =
   in
   (match result with
    | Ok _ -> Alcotest.fail "expected final candidate error"
-   | Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError { message; _ })) ->
+   | Error (Agent_core.Error.Api (Agent_core.Api_error.NetworkError { message; _ })) ->
      Alcotest.(check string)
        "last candidate error preserved"
        "fallback.test_model failed"
@@ -1616,7 +1599,7 @@ let test_attempt_loop_preserves_last_core_error () =
 
 let context_overflow_error message =
   Agent_core.Error.Api
-    (Agent_core.Retry.ContextOverflow { message; limit = Some 32768 })
+    (Agent_core.Api_error.ContextOverflow { message; limit = Some 32768 })
 
 let serving_constraint () =
   Llm_provider.Serving_constraint.make
@@ -1632,7 +1615,7 @@ let serving_constraint () =
 
 let input_capacity_error reason =
   Agent_core.Error.Api
-    (Agent_core.Retry.InputCapacity
+    (Agent_core.Api_error.InputCapacity
        { message = "typed input-capacity admission"
        ; constraint_ = serving_constraint ()
        ; reason
@@ -1652,7 +1635,7 @@ let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
           attempt_without_effect
             (Error
                (input_capacity_error
-                  (Agent_core.Retry.Token_measurement_unavailable
+                  (Agent_core.Api_error.Token_measurement_unavailable
                      Llm_provider.Input_token_count.Anthropic_messages_count_tokens)))
             None
         | other ->
@@ -1662,7 +1645,7 @@ let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
       [ "unmeasurable.test_model"; "measurable.test_model" ]
   in
   (match result with
-   | Error (Agent_core.Error.Api (Agent_core.Retry.InputCapacity _)) -> ()
+   | Error (Agent_core.Error.Api (Agent_core.Api_error.InputCapacity _)) -> ()
    | Error error ->
      Alcotest.failf
        "typed input capacity was not preserved: %s"
@@ -1816,9 +1799,9 @@ let () =
             `Quick
             test_attempt_loop_fails_closed_without_effect_observation;
           Alcotest.test_case
-            "attempt loop blocks no-progress when transition denied"
+            "attempt loop terminalizes no-progress"
             `Quick
-            test_attempt_loop_blocks_no_progress_when_transition_denied;
+            test_attempt_loop_terminalizes_no_progress;
           Alcotest.test_case
             "attempt loop checks permission before network transition"
             `Quick

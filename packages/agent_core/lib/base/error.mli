@@ -6,12 +6,12 @@
     @stability Stable
     @since 0.93.1 *)
 
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 
 (** {1 Domain error types} *)
 
-(** API errors — same type as {!Retry.api_error}. *)
-type api_error = Retry.api_error
+(** API errors — same type as {!Api_error.api_error}. *)
+type api_error = Api_error.api_error
 
 (** Provider/runtime errors — same type as {!Llm_provider.Error.provider_error}. *)
 type provider_error = Llm_provider.Error.provider_error

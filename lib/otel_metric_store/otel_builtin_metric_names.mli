@@ -107,7 +107,7 @@ include module type of Otel_transport_metric_names
 
 (** [masc_keeper_agent_core_run_timeout_total] counter incremented in the
     runtime FSM each time an [Agent.run] / [run_stream] returns
-    [Llm_provider.Retry.Timeout]. The [source] label is typed provider
+    [Llm_provider.Api_error.Timeout]. The [source] label is typed provider
     timeout phase when AGENT_CORE exposes one, otherwise [provider]. Free-form
     timeout messages are not reparsed into [max_execution_time] labels.
 

@@ -29,7 +29,7 @@ let test_simple_handler_error () =
   let tool =
     Tool.create ~name:"fail" ~description:"Always fails" ~parameters:[] (fun _input ->
       Error
-        { Types.message = "intentional error"; recoverable = true; error_class = None })
+        { Types.message = "intentional error"; error_class = None })
   in
   let actual = Tool.execute tool `Null in
   match actual with
@@ -50,7 +50,7 @@ let test_context_handler_receives_context () =
          | Some (`String v) -> Ok { Types.content = v; _meta = None }
          | _ ->
            Error
-             { Types.message = "key not found"; recoverable = true; error_class = None }))
+             { Types.message = "key not found"; error_class = None }))
   in
   let ctx = Context.create_sync () in
   Context.set ctx "key" (`String "ctx_value");
@@ -90,9 +90,8 @@ let test_context_handler_requires_context () =
   in
   let actual = Tool.execute tool `Null in
   match actual with
-  | Error { message; recoverable; error_class } ->
+  | Error { message; error_class } ->
     check string "error message" "context-aware tool requires explicit context" message;
-    check bool "not recoverable" false recoverable;
     check
       bool
       "deterministic"
@@ -106,7 +105,6 @@ let test_context_handler_requires_context () =
 let missing_invocation_error () =
   Error
     { Types.message = "execution environment requires exact invocation"
-    ; recoverable = false
     ; error_class = Some Types.Deterministic
     }
 ;;
@@ -144,7 +142,6 @@ let test_execution_env_handler_receives_context_and_invocation () =
          | None, Some _ ->
            Error
              { Types.message = "execution environment requires context"
-             ; recoverable = false
              ; error_class = Some Types.Deterministic
              })
   in
@@ -182,9 +179,8 @@ let test_execution_env_handler_observes_missing_invocation () =
          | None -> missing_invocation_error ())
   in
   match Tool.execute tool `Null with
-  | Error { message; recoverable; error_class } ->
+  | Error { message; error_class } ->
     check string "error message" "execution environment requires exact invocation" message;
-    check bool "not recoverable" false recoverable;
     check
       bool
       "deterministic"

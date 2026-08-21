@@ -30,7 +30,7 @@ type provider_error =
   | `Provider_timeout of Llm_provider.Http_client.timeout_phase option * string
   | `Streaming_timeout of Llm_provider.Http_client.timeout_phase * string
   | `Overloaded
-  | `Invalid_request of Llm_provider.Retry.invalid_request_reason * string
+  | `Invalid_request of Llm_provider.Api_error.invalid_request_reason * string
     (** Typed reason first, mirroring [`Input_capacity]. The reason used to be
             dropped here while [`Input_capacity] kept its own, so a request refused
             for a declared body-size limit arrived indistinguishable from a JSON
@@ -38,7 +38,7 @@ type provider_error =
   | `Not_found of string
   | `Context_overflow of string * int option
   | `Input_capacity of
-      Llm_provider.Retry.input_capacity_reason
+      Llm_provider.Api_error.input_capacity_reason
       * Llm_provider.Serving_constraint.t
       * string
   | `Provider_wire_error of

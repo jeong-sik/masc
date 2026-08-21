@@ -778,25 +778,23 @@ let create_thread_fixture config ~keeper_name =
   meta, signal
 ;;
 
-(* #25600 regression: a transient store read failure on the
-   [Thread_participants] route must not silently drop the signal — the
-   bounded retry re-reads and the addressed keeper still wakes. *)
-let test_thread_participant_wakes_after_transient_store_read_failure () =
+(* A failed relevance read is one visible failed delivery for the lane. *)
+let test_thread_participant_read_failure_does_not_reenter () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () ->
-      KKS.force_transient_relevance_failures_for_test 0;
+      KKS.force_relevance_read_failures_for_test 0;
       Keeper_registry.For_testing.clear ())
     (fun () ->
        let meta, signal = create_thread_fixture config ~keeper_name:"threadlane" in
-       KKS.force_transient_relevance_failures_for_test 1;
+       KKS.force_relevance_read_failures_for_test 1;
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
-       check int "addressed lane durable queue after transient failure" 1
+       check int "addressed lane is not delivered after read failure" 0
          (board_queue_length config meta.name);
        match Keeper_registry.get ~base_path:config.base_path meta.name with
        | Some entry ->
-         check bool "addressed lane woken after transient failure" true
+         check bool "addressed lane is not woken after read failure" false
            (Atomic.get entry.fiber_wakeup)
        | None -> fail "threadlane registry entry missing")
 ;;
@@ -866,19 +864,17 @@ let test_comment_on_own_post_wakes_the_author () =
        | None -> fail "posterlane registry entry missing")
 ;;
 
-(* #25600 bound pin: the retry is bounded — a store that keeps failing past
-   [board_signal_relevance_max_attempts] still drops the lane (loudly), it
-   does not retry forever. *)
-let test_thread_participant_drop_is_bounded_under_persistent_failure () =
+(* A large forced-failure budget proves one dispatch performs only one read. *)
+let test_thread_participant_read_failure_is_single_attempt () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () ->
-      KKS.force_transient_relevance_failures_for_test 0;
+      KKS.force_relevance_read_failures_for_test 0;
       Keeper_registry.For_testing.clear ())
     (fun () ->
        let meta, signal = create_thread_fixture config ~keeper_name:"boundlane" in
-       KKS.force_transient_relevance_failures_for_test 100;
+       KKS.force_relevance_read_failures_for_test 100;
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
        check int "persistently failing lane stays undelivered" 0
          (board_queue_length config meta.name);
@@ -929,10 +925,10 @@ let () =
             test_restarting_exact_mention_is_durable_with_deferred_wake
         ; test_case "lane metadata failure does not block next durable delivery" `Quick
             test_lane_meta_failure_does_not_block_next_durable_delivery
-        ; test_case "thread participant wakes after transient store read failure" `Quick
-            test_thread_participant_wakes_after_transient_store_read_failure
-        ; test_case "thread participant drop is bounded under persistent failure" `Quick
-            test_thread_participant_drop_is_bounded_under_persistent_failure
+        ; test_case "thread participant read failure does not re-enter" `Quick
+            test_thread_participant_read_failure_does_not_reenter
+        ; test_case "thread participant read failure is one attempt" `Quick
+            test_thread_participant_read_failure_is_single_attempt
         ; test_case "comment on own post wakes the author" `Quick
             test_comment_on_own_post_wakes_the_author
         ] )

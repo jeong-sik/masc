@@ -325,7 +325,6 @@ describe('KeeperDetailPage', () => {
         health_state: 'stale',
         quiet_reason: null,
         next_action_path: 'recover',
-        recoverable: true,
         last_reply_status: 'never',
         last_reply_at: null,
         last_reply_preview: null,

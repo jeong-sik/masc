@@ -117,7 +117,7 @@ const ACTION_PRESENTATION = {
     label: 'Keeper failing',
     tone: 'bad',
     Icon: Wrench,
-    action: 'inspect and recover failing keepers before retrying scheduled activation.',
+    action: 'inspect and recover failing keepers before starting a new scheduled activation.',
   },
   recover_context_overflow: {
     label: 'Keeper context overflowed',

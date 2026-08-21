@@ -31,7 +31,7 @@ let every_event =
   ; Audit.Gate_exact_rule_expired
   ; Audit.Gate_exact_rule_store_degraded
   ; Audit.Gate_grant_unavailable
-  ; Audit.Auto_judge_operator_retry_started
+  ; Audit.Auto_judge_operator_rerun_started
   ; Audit.Auto_judge_block_observation_superseded
   ; Audit.Auto_judge_restart_worker_recovered
   ; Audit.Auto_judge_restart_judgment_recovered

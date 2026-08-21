@@ -156,10 +156,20 @@ let terminal_policy_http_error = function
   | Llm_provider.Http_client.HttpError { code; _ } -> code = 400 || code = 422
   | _ -> false
 
+let route_of_http_error err =
+  Keeper_runtime_failure_route.route_of_error
+    ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.of_http_error ~provider:"vision" err))
+
 let failure_class_of_http_error = function
   | err when terminal_policy_http_error err -> Tool_result.Policy_rejection
-  | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
-  | _ -> Tool_result.Runtime_failure
+  | err ->
+    (match route_of_http_error err with
+     | Keeper_runtime_failure_route.Rotate_now _ ->
+       Tool_result.Dependency_unavailable
+     | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
+       Tool_result.Runtime_failure)
 
 let string_member key json =
   match Yojson.Safe.Util.member key json with
@@ -338,12 +348,6 @@ let run_candidates_outcome
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
              ~config ~messages ()
          with
-       | Error (Llm_provider.Http_client.TimeoutError _) ->
-            record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"error"
-              ~reason:"timeout";
-            continue_with (`Timeout runtime_id)
        | Error err ->
             if terminal_policy_http_error err
             then (
@@ -355,22 +359,26 @@ let run_candidates_outcome
                 { failure_class = failure_class_of_http_error err
                 ; detail = Provider_http_error.to_message err
                 })
-            else if Runtime_attempt_fsm.should_try_next err
-            then (
-              record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"transient_provider_error";
-              continue_with (`Provider_error err))
-            else (
-              record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"runtime_provider_error";
-              Vo_provider
-                { failure_class = failure_class_of_http_error err
-                ; detail = Provider_http_error.to_message err
-                })
+            else
+              (match route_of_http_error err with
+               | Keeper_runtime_failure_route.Rotate_now _ ->
+                 record_vision_candidate_attempt
+                   ~runtime_id
+                   ~result:"error"
+                   ~reason:"declared_candidate_unavailable";
+                 (match err with
+                  | Llm_provider.Http_client.TimeoutError _ ->
+                    continue_with (`Timeout runtime_id)
+                  | _ -> continue_with (`Provider_error err))
+               | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
+                 record_vision_candidate_attempt
+                   ~runtime_id
+                   ~result:"error"
+                   ~reason:"runtime_provider_error";
+                 Vo_provider
+                   { failure_class = failure_class_of_http_error err
+                   ; detail = Provider_http_error.to_message err
+                   })
        | Ok response ->
             record_vision_candidate_attempt
               ~runtime_id

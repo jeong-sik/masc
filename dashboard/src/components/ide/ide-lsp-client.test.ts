@@ -10,8 +10,8 @@ import {
   resolveLspDiagnosticFilePath,
 } from './ide-lsp-client'
 import {
-  TRANSPORT_RETRY_BASE_MS,
-  TRANSPORT_RETRY_MAX_ATTEMPTS,
+  TRANSPORT_RECONNECT_BASE_MS,
+  TRANSPORT_RECONNECT_MAX_ATTEMPTS,
 } from '../../config/constants'
 
 const mockSockets: MockWebSocket[] = []
@@ -293,20 +293,20 @@ describe('LspConnection', () => {
     const firstSocket = mockSockets[0]!
 
     firstSocket.close({ code: 1006, wasClean: false })
-    vi.advanceTimersByTime(TRANSPORT_RETRY_BASE_MS - 1)
+    vi.advanceTimersByTime(TRANSPORT_RECONNECT_BASE_MS - 1)
     expect(mockSockets).toHaveLength(1)
     vi.advanceTimersByTime(1)
     expect(mockSockets).toHaveLength(2)
 
     mockSockets[1]!.close({ code: 1006, wasClean: false })
-    vi.advanceTimersByTime((TRANSPORT_RETRY_BASE_MS * 2) - 1)
+    vi.advanceTimersByTime((TRANSPORT_RECONNECT_BASE_MS * 2) - 1)
     expect(mockSockets).toHaveLength(2)
     vi.advanceTimersByTime(1)
     expect(mockSockets).toHaveLength(3)
     conn.dispose()
   })
 
-  it('stops reconnecting after the retry budget is exhausted', () => {
+  it('stops reconnecting after the reconnect budget is exhausted', () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     installWebSocketMock()
@@ -314,7 +314,7 @@ describe('LspConnection', () => {
     const conn = new LspConnection(() => {}, err => errors.push(err))
     conn.connect()
 
-    for (let attempt = 1; attempt <= TRANSPORT_RETRY_MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= TRANSPORT_RECONNECT_MAX_ATTEMPTS; attempt += 1) {
       mockSockets[mockSockets.length - 1]!.close({ code: 1006, wasClean: false })
       vi.advanceTimersByTime(60_000)
       expect(mockSockets).toHaveLength(attempt + 1)
@@ -323,7 +323,7 @@ describe('LspConnection', () => {
     mockSockets[mockSockets.length - 1]!.close({ code: 1006, wasClean: false })
     vi.advanceTimersByTime(60_000)
 
-    expect(mockSockets).toHaveLength(TRANSPORT_RETRY_MAX_ATTEMPTS + 1)
+    expect(mockSockets).toHaveLength(TRANSPORT_RECONNECT_MAX_ATTEMPTS + 1)
     expect(errors.some(err => err instanceof Error && err.message.includes('exhausted'))).toBe(true)
     conn.dispose()
   })

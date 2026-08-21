@@ -246,27 +246,27 @@ let owner_runtime ~phase ~live_fiber =
 
 let test_owner_execution_requires_live_fiber () =
   without_overrides @@ fun () ->
-  check bool "policy permission without a registered owner is recoverable" true
+  check bool "policy permission without a registered owner is no_live_owner" true
     (match
        Readiness.classify_owner_execution
          ~shutdown_operation_id:None
          ~runtime:Readiness.Owner_unregistered
          (Ok (ready_meta ()))
      with
-     | Readiness.Recoverable -> true
+     | Readiness.No_live_owner -> true
      | Readiness.Executable
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
      | Readiness.Unknown _ -> false);
-  check bool "registered but non-running owner remains recoverable" true
+  check bool "registered but non-running owner remains no_live_owner" true
     (match
        Readiness.classify_owner_execution
          ~shutdown_operation_id:None
          ~runtime:(owner_runtime ~phase:State_machine.Offline ~live_fiber:false)
          (Ok (ready_meta ()))
      with
-     | Readiness.Recoverable -> true
+     | Readiness.No_live_owner -> true
      | Readiness.Executable
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
@@ -280,7 +280,7 @@ let test_owner_execution_requires_live_fiber () =
          (Ok (ready_meta ()))
      with
      | Readiness.Executable -> true
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
@@ -302,7 +302,7 @@ let test_durable_demand_does_not_require_proactive () =
      with
      | Readiness.Retained_disabled Readiness.Retained_proactive_disabled -> true
      | Readiness.Executable
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
@@ -315,7 +315,7 @@ let test_durable_demand_does_not_require_proactive () =
          (Ok proactive_disabled)
      with
      | Readiness.Executable -> true
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
@@ -327,7 +327,7 @@ let test_durable_demand_does_not_require_proactive () =
          ~runtime:Readiness.Owner_unregistered
          (Ok proactive_disabled)
      with
-     | Readiness.Recoverable -> true
+     | Readiness.No_live_owner -> true
      | Readiness.Executable
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
@@ -343,7 +343,7 @@ let test_durable_demand_does_not_require_proactive () =
      with
      | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
      | Readiness.Executable
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
@@ -364,7 +364,7 @@ let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
        classify (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
      with
      | Readiness.Executable -> true
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
@@ -373,7 +373,7 @@ let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
     match classify runtime with
     | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
     | Readiness.Executable
-    | Readiness.Recoverable
+    | Readiness.No_live_owner
     | Readiness.Retained_disabled _
     | Readiness.Paused_dead _
     | Readiness.Shutdown_fenced _
@@ -397,7 +397,7 @@ let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
      | Readiness.Shutdown_fenced actual ->
        Shutdown_types.Operation_id.equal operation_id actual
      | Readiness.Executable
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Unknown _ -> false);
@@ -408,7 +408,7 @@ let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
      with
      | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
      | Readiness.Executable
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
@@ -428,7 +428,7 @@ let test_owner_execution_shutdown_fence_blocks_boot () =
      | Readiness.Shutdown_fenced actual ->
        Shutdown_types.Operation_id.equal operation_id actual
      | Readiness.Executable
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Unknown _ -> false)
@@ -443,7 +443,7 @@ let test_owner_execution_unknown_fails_closed () =
      with
      | Readiness.Unknown "meta unavailable" -> true
      | Readiness.Executable
-     | Readiness.Recoverable
+     | Readiness.No_live_owner
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _

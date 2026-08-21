@@ -1383,7 +1383,7 @@ let age_seconds_json ~now = function
 
 type owner_lifecycle =
   | Runnable
-  | Recoverable
+  | No_live_owner
   | Retained_disabled
   | Paused_dead
   | Shutdown_fenced
@@ -1404,7 +1404,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   let lifecycle_read_errors =
     match owner_lifecycle with
     | Runnable
-    | Recoverable
+    | No_live_owner
     | Retained_disabled
     | Paused_dead
     | Shutdown_fenced -> []
@@ -1441,7 +1441,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
 
 let owner_lifecycle_wire = function
   | Runnable -> "runnable"
-  | Recoverable -> "recoverable"
+  | No_live_owner -> "no_live_owner"
   | Retained_disabled -> "retained_disabled"
   | Paused_dead -> "paused_dead"
   | Shutdown_fenced -> "shutdown_fenced"
@@ -1533,17 +1533,17 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     backlog_summary
       ~matches:(function
         | Runnable -> true
-        | Recoverable
+        | No_live_owner
         | Retained_disabled
         | Paused_dead
         | Shutdown_fenced
         | Lifecycle_unknown _ -> false)
       summaries
   in
-  let recoverable =
+  let no_live_owner =
     backlog_summary
       ~matches:(function
-        | Recoverable -> true
+        | No_live_owner -> true
         | Runnable
         | Retained_disabled
         | Paused_dead
@@ -1556,7 +1556,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
       ~matches:(function
         | Retained_disabled -> true
         | Runnable
-        | Recoverable
+        | No_live_owner
         | Paused_dead
         | Shutdown_fenced
         | Lifecycle_unknown _ -> false)
@@ -1567,7 +1567,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
       ~matches:(function
         | Paused_dead -> true
         | Runnable
-        | Recoverable
+        | No_live_owner
         | Retained_disabled
         | Shutdown_fenced
         | Lifecycle_unknown _ -> false)
@@ -1578,7 +1578,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
       ~matches:(function
         | Shutdown_fenced -> true
         | Runnable
-        | Recoverable
+        | No_live_owner
         | Retained_disabled
         | Paused_dead
         | Lifecycle_unknown _ -> false)
@@ -1589,7 +1589,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
       ~matches:(function
         | Lifecycle_unknown _ -> true
         | Runnable
-        | Recoverable
+        | No_live_owner
         | Retained_disabled
         | Paused_dead
         | Shutdown_fenced -> false)
@@ -1614,7 +1614,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   let operator_action_required =
     read_errors <> []
     || outbox_count > 0
-    || recoverable.pending_count > 0
+    || no_live_owner.pending_count > 0
     || retained_disabled.pending_count > 0
     || paused_dead.pending_count > 0
     || shutdown_fenced.pending_count > 0
@@ -1643,13 +1643,13 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (runnable.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "recoverable_pending_count", `Int recoverable.pending_count
-    ; "recoverable_backlog_count", `Int recoverable.pending_count
-    ; "recoverable_oldest_arrived_at_unix", Json_util.float_opt_to_json recoverable.oldest
-    ; "recoverable_oldest_age_seconds", age_seconds_json ~now recoverable.oldest
-    ; ( "recoverable_by_keeper"
+    ; "no_live_owner_pending_count", `Int no_live_owner.pending_count
+    ; "no_live_owner_backlog_count", `Int no_live_owner.pending_count
+    ; "no_live_owner_oldest_arrived_at_unix", Json_util.float_opt_to_json no_live_owner.oldest
+    ; "no_live_owner_oldest_age_seconds", age_seconds_json ~now no_live_owner.oldest
+    ; ( "no_live_owner_by_keeper"
       , `List
-          (recoverable.keepers
+          (no_live_owner.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "retained_disabled_pending_count", `Int retained_disabled.pending_count

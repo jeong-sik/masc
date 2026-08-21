@@ -1756,7 +1756,7 @@ let context_fit_checkpoint () =
   }
 
 let check_context_fit_overflow = function
-  | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit = Some 512; _ })) ->
+  | Error (Agent_core.Error.Api (Agent_core.Api_error.ContextOverflow { limit = Some 512; _ })) ->
     ()
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok _ -> fail "overflowed request must not reach completion dispatch"

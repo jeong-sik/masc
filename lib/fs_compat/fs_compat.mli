@@ -489,7 +489,7 @@ module Publication_recovery : sig
     ; discovery_row_count : int
     ; discovered_owner_count : int
     ; invalid_owner_name_count : int
-    ; retryable_lane_failure_count : int
+    ; lane_store_failure_count : int
     ; owners : owner_health_counts
     }
 

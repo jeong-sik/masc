@@ -1589,21 +1589,21 @@ let record_provider_trace = Generation_receipt.record_provider_trace
    twelve, and the caller read that [None] as "no status to report" — which is
    how a 429 reached the keeper log as a bare "completion failed" with neither
    its status nor its kind, and why the lane could not advance off it. *)
-let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = function
-  | Retry.InvalidRequest { reason = Retry.Request_body_refused_by_provider _; _ } ->
+let provider_refusal_of_api_error : Api_error.api_error -> provider_refusal = function
+  | Api_error.InvalidRequest { reason = Api_error.Request_body_refused_by_provider _; _ } ->
     Request_body_refused
-  | Retry.InvalidRequest _ -> Invalid_request
-  | Retry.RateLimited _ -> Rate_limited
-  | Retry.Overloaded _ -> Overloaded
-  | Retry.ServerError _ -> Server_error
-  | Retry.AuthError _ -> Auth_failed
-  | Retry.AuthorizationError _ -> Authorization_refused
-  | Retry.PaymentRequired _ -> Payment_required
-  | Retry.NotFound _ -> Not_found
-  | Retry.ContextOverflow _ -> Context_overflow
-  | Retry.InputCapacity _ -> Input_capacity
-  | Retry.NetworkError _ -> Network_error
-  | Retry.Timeout _ -> Timeout
+  | Api_error.InvalidRequest _ -> Invalid_request
+  | Api_error.RateLimited _ -> Rate_limited
+  | Api_error.Overloaded _ -> Overloaded
+  | Api_error.ServerError _ -> Server_error
+  | Api_error.AuthError _ -> Auth_failed
+  | Api_error.AuthorizationError _ -> Authorization_refused
+  | Api_error.PaymentRequired _ -> Payment_required
+  | Api_error.NotFound _ -> Not_found
+  | Api_error.ContextOverflow _ -> Context_overflow
+  | Api_error.InputCapacity _ -> Input_capacity
+  | Api_error.NetworkError _ -> Network_error
+  | Api_error.Timeout _ -> Timeout
 ;;
 
 let execution_error_cause = function
@@ -1614,7 +1614,7 @@ let execution_error_cause = function
       { http_status = code
       ; refusal =
           provider_refusal_of_api_error
-            (Retry.classify_error ~retry_after_header ~status:code ~body)
+            (Api_error.classify_error ~retry_after_header ~status:code ~body)
       }
   (* No HTTP status was produced, so there is no response to classify. *)
   | Exec.Provider_error _ -> Completion_failed

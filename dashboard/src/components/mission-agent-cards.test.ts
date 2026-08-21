@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Keeper } from '../types'
 import {
   keeperDisplayStatus,
-  isKeeperAutoRecoverPause,
   keeperRuntimeBlockerLabel,
   keeperRecentActionLabel,
   keeperRecentHeartbeatLabel,
@@ -58,7 +57,7 @@ describe('mission keeper runtime helpers', () => {
     expect(keeperRuntimeHint(keeper)).toBe('일시정지됨')
   })
 
-  it('labels TLS handshake provider-runtime pauses as auto-retry wait', () => {
+  it('does not infer an automatic recovery policy from provider error prose', () => {
     const keeper = {
       name: 'tls-paused',
       status: 'paused',
@@ -68,9 +67,8 @@ describe('mission keeper runtime helpers', () => {
         'Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
     } as Keeper
 
-    expect(isKeeperAutoRecoverPause(keeper)).toBe(true)
     expect(keeperRuntimeHint(keeper)).toBe(
-      '자동 재시도 대기 · Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
+      '일시정지 원인 · Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
     )
   })
 

@@ -105,7 +105,7 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
     case 'finalizing':
       return '다음 stable state 는 last_outcome 갱신된 idle 이어야 함.'
     case 'exhausted':
-      return 'runtime 가 소진됨. 다음 관측에서 idle 또는 retry 로 전이해야 함.'
+      return 'runtime 가 소진됨. 현재 turn 은 terminal observation 으로 유지되어야 함.'
     default:
       return '다음 meaningful edge 는 다음 관측된 lifecycle event 에서 시작되어야 함.'
   }

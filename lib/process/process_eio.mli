@@ -21,7 +21,7 @@ val get_cwd_default : unit -> (Eio.Fs.dir_ty Eio.Path.t, string) result
 
 (** Return true when an Eio process-spawn exception should retry via the Unix
     fallback path (e.g. bind-related subprocess transport errors on macOS). *)
-val should_retry_unix_fallback : exn -> bool
+val should_use_unix_fallback : exn -> bool
 
 (** {1 Observability hook (#9632)} *)
 

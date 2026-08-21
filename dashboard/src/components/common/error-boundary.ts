@@ -8,13 +8,12 @@ interface ErrorBoundaryInfo {
 
 // Phase 2 spec (`design-system/preview/cb-group-g.jsx:G3`) defines two
 // inline error-banner tones:
-//   - 'recoverable' (warn) + retry — soft amber, retry resets boundary
-//   - 'fatal' (err) + retry + reload — soft red, reload reloads the window
-// Production has historically rendered only the fatal tone with a single
-// retry. Adding `severity` keeps the existing default while letting callers
-// opt into the gentler recoverable framing, and the fatal default now also
+//   - 'resettable' (warn) + component reset
+//   - 'fatal' (err) + component reset + window reload
+// Adding `severity` keeps the existing default while letting callers
+// opt into the gentler resettable framing, and the fatal default now also
 // carries an explicit reload button per spec.
-type ErrorBoundarySeverity = 'recoverable' | 'fatal'
+type ErrorBoundarySeverity = 'resettable' | 'fatal'
 
 interface Props {
   label?: string
@@ -57,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       const severity: ErrorBoundarySeverity = this.props.severity ?? 'fatal'
-      if (severity === 'recoverable') {
+      if (severity === 'resettable') {
         return html`
           <div
             class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--color-status-warn)]/12 px-3.5 py-3 font-mono shadow-[var(--shadow-1)]"
@@ -69,7 +68,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
             <div class="min-w-0 flex-1">
               <h3 class="mb-1 text-xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-status-warn)]">
-                recoverable · ${this.props.label ?? '컴포넌트'}
+                resettable · ${this.props.label ?? '컴포넌트'}
               </h3>
               <pre class="overflow-x-auto whitespace-pre-wrap rounded-[var(--r-1)] bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
               <button
@@ -78,7 +77,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick=${this.reset}
               >
                 <${RefreshCcw} size=${12} />
-                다시 시도
+                컴포넌트 재설정
               </button>
             </div>
           </div>
@@ -105,7 +104,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick=${this.reset}
               >
                 <${RefreshCcw} size=${12} />
-                다시 시도
+                컴포넌트 재설정
               </button>
               <button
                 type="button"

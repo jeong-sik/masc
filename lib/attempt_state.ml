@@ -19,7 +19,7 @@ type t = {
   attempt_number : int;
   attempt_id : string;
   last_result : result;
-  next_retry_unix : float option;
+  next_launch_not_before_unix : float option;
   updated_unix : float;
 }
 
@@ -34,12 +34,12 @@ let make_next ~now ~backoff_seconds ~generation ~last_result ~previous =
     attempt_number;
     attempt_id = Printf.sprintf "%d:%d" generation attempt_number;
     last_result;
-    next_retry_unix = Some (now +. backoff_seconds);
+    next_launch_not_before_unix = Some (now +. backoff_seconds);
     updated_unix = now;
   }
 
 let is_backoff_active ~now t =
-  match t.next_retry_unix with
+  match t.next_launch_not_before_unix with
   | Some deadline -> deadline > now
   | None -> false
 
@@ -49,7 +49,7 @@ let to_json t =
     | Failed { reason } -> `String reason
     | Start_dispatched | Timed_out -> `Null
   in
-  let next_retry = Json_util.float_opt_to_json t.next_retry_unix in
+  let next_launch_not_before = Json_util.float_opt_to_json t.next_launch_not_before_unix in
   `Assoc
     [
       ("generation", `Int t.generation);
@@ -57,7 +57,7 @@ let to_json t =
       ("attempt_id", `String t.attempt_id);
       ("last_result", `String (result_to_string t.last_result));
       ("failure_reason", failure_reason);
-      ("next_retry_unix", next_retry);
+      ("next_launch_not_before_unix", next_launch_not_before);
       ("updated_unix", `Float t.updated_unix);
     ]
 
@@ -105,8 +105,8 @@ let of_json = function
             Failed { reason }
         | Start_dispatched | Timed_out -> last_result_base
       in
-      let* next_retry_unix =
-        match List.assoc_opt "next_retry_unix" fields with
+      let* next_launch_not_before_unix =
+        match List.assoc_opt "next_launch_not_before_unix" fields with
         | Some v -> optional_float_of_json v
         | None -> Some None
       in
@@ -119,7 +119,7 @@ let of_json = function
           attempt_number;
           attempt_id;
           last_result;
-          next_retry_unix;
+          next_launch_not_before_unix;
           updated_unix;
         }
   | _ -> None

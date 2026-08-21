@@ -436,12 +436,12 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
           Error (Gone err)))
 ;;
 
-let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
+let dashboard_gate_rerun_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields =
     match args with
     | `Assoc fields -> Ok fields
-    | _ -> Error "retry request must be an object"
+    | _ -> Error "rerun request must be an object"
   in
   let allowed =
     [ "id"
@@ -458,36 +458,36 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   in
   let* () =
     match duplicate [] fields with
-    | Some field -> Error ("retry request contains duplicate field " ^ field)
+    | Some field -> Error ("rerun request contains duplicate field " ^ field)
     | None ->
       (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
        | Some (field, _) ->
-         Error ("retry request contains unsupported field " ^ field)
+         Error ("rerun request contains unsupported field " ^ field)
        | None -> Ok ())
   in
   let required field =
     match List.assoc_opt field fields with
     | Some value -> Ok value
-    | None -> Error ("retry request." ^ field ^ " is required")
+    | None -> Error ("rerun request." ^ field ^ " is required")
   in
   let* id_json = required "id" in
   let* id =
     match id_json with
     | `String value when String.trim value <> "" -> Ok value
-    | _ -> Error "retry request.id must be a non-blank string"
+    | _ -> Error "rerun request.id must be a non-blank string"
   in
   let* input_hash_json = required "input_hash" in
   let* expected_input_hash =
     match input_hash_json with
     | `String value when Keeper_approval_queue_rules_types.is_lowercase_sha256 value ->
       Ok value
-    | _ -> Error "retry request.input_hash must be a lowercase SHA-256"
+    | _ -> Error "rerun request.input_hash must be a lowercase SHA-256"
   in
   let* sequence_json = required "sequence" in
   let* expected_sequence =
     match sequence_json with
     | `Int value when value > 0 -> Ok value
-    | _ -> Error "retry request.sequence must be a positive integer"
+    | _ -> Error "rerun request.sequence must be a positive integer"
   in
   let* exact_attempt_json = required "exact_attempt" in
   let* expected_exact_attempt =
@@ -506,10 +506,10 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
       Ok ()
     | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable _ ->
       Ok ()
-    | _ -> Error "retry request disposition is not operator-rearmable"
+    | _ -> Error "rerun request disposition is not operator-rearmable"
   in
   match
-    Keeper_gate.retry_blocked_auto_judge
+    Keeper_gate.rerun_blocked_auto_judge
       ~base_path
       ~requested_by
       ~expected_input_hash

@@ -2,7 +2,7 @@
 
 (** Per-turn lane classification.  Closed sum type; the OCaml side
     pins the alphabet emitted by keeper_run_tools
-    ({"text_only", "tool_optional", "tool_disabled", "retry"}).
+    ({"text_only", "tool_optional", "tool_disabled"}).
     Plain to_string/of_string keeps this module from exposing
     additional spec catalog bindings. *)
 type turn_lane =
@@ -14,7 +14,6 @@ type turn_lane =
   | Lane_text_only
   | Lane_tool_optional
   | Lane_tool_disabled
-  | Lane_retry
 
 val turn_lane_to_string : turn_lane -> string
 val turn_lane_of_string : string -> turn_lane option

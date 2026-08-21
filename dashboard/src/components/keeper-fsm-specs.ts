@@ -70,7 +70,7 @@ const TURN_FSM_STATE_ALIASES: Readonly<Record<string, KeeperTurnFsmState>> = {
   awaiting_tool: 'awaiting_tool_result',
 }
 
-// 23 canonical turn_phase transitions. Mirrors the GADT enumeration in
+// 14 canonical turn_phase transitions. Mirrors the GADT enumeration in
 // `lib/keeper/keeper_registry_types.ml:259-291 module Turn_phase_transition`
 // (RFC-0072 Phase 4b/5). Every constructor on the GADT corresponds to one
 // edge here; adding a new constructor in OCaml must be paired with a new
@@ -87,29 +87,19 @@ const TURN_FSM_EDGES: FsmEdge[] = [
   { source: 'prompting', target: 'executing', label: 'SkipRouting' },
   { source: 'prompting', target: 'finalizing', label: 'SkipExecution' },
   { source: 'prompting', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Routing (3): retry-back / dispatch / exhausted.
-  { source: 'routing', target: 'prompting', label: 'Retry' },
+  // From Routing: dispatch / exhausted.
   { source: 'routing', target: 'executing', label: 'RuntimeRouted', type: 'runtime' },
   { source: 'routing', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Executing (5): retry-back / re-entry / compacting / completion / exhausted.
-  { source: 'executing', target: 'prompting', label: 'Retry' },
+  // From Executing: tool re-entry / compacting / completion / exhausted.
   { source: 'executing', target: 'routing', label: 'Retry' },
   { source: 'executing', target: 'compacting', label: 'CompactionGate' },
   { source: 'executing', target: 'finalizing', label: 'Complete' },
   { source: 'executing', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Compacting (3): retry / completion / exhausted.
-  { source: 'compacting', target: 'prompting', label: 'CompactionRetry' },
+  // From Compacting: completion / exhausted.
   { source: 'compacting', target: 'finalizing', label: 'CompactionDone', type: 'recovery' },
   { source: 'compacting', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Finalizing (4): degraded retry across phases / exhausted.
-  { source: 'finalizing', target: 'prompting', label: 'NextTurn' },
-  { source: 'finalizing', target: 'routing', label: 'NextTurnSkip' },
-  { source: 'finalizing', target: 'executing', label: 'NextTurnDirect' },
+  // From Finalizing: terminal escalation only.
   { source: 'finalizing', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Exhausted (3): retry after compaction.
-  { source: 'exhausted', target: 'prompting', label: 'RetryAfterExhausted' },
-  { source: 'exhausted', target: 'routing', label: 'RetryAfterExhausted' },
-  { source: 'exhausted', target: 'executing', label: 'RetryAfterExhausted' },
 ]
 
 function nodeType(stateId: string, activeId: string, tone: 'active' | 'warn' | 'err'): FsmNode['type'] {

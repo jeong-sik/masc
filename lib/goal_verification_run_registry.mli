@@ -10,10 +10,7 @@ type review_kind =
 type outcome =
   | Reviewed
   | Committed
-  | Deferred of
-      { retryable : bool
-      ; detail : string
-      }
+  | Deferred of { detail : string }
   | Raised of { detail : string }
 
 type run_status =

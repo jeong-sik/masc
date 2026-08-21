@@ -53,7 +53,7 @@ let stage_parse = Pipeline_stage_prepare.stage_parse
     now that Sync dispatch routes through {!Llm_provider.Complete.complete}.
 
     HTTP status codes are re-classified via
-    {!Llm_provider.Retry.classify_error} so
+    {!Llm_provider.Api_error.classify_error} so
     ContextOverflow/RateLimited/etc. still map to the same variants. *)
 (** Sync dispatch via {!Llm_provider.Complete.complete}.  Routes all
     provider kinds through the consolidated path so [on_request_end]
@@ -751,7 +751,7 @@ let%test "last_tool_results_from finds tool results in last tool message" =
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "result1"; _meta = _ }
-    ; Error { message = "error msg"; recoverable = false; error_class = None }
+    ; Error { message = "error msg"; error_class = None }
     ] -> true
   | _ -> false
 ;;
@@ -908,7 +908,7 @@ let%test "last_tool_results_from error tool result" =
     ]
   in
   match Agent_turn.last_tool_results_from msgs with
-  | [ Error { message = "fail msg"; recoverable = false; error_class = None } ] -> true
+  | [ Error { message = "fail msg"; error_class = None } ] -> true
   | _ -> false
 ;;
 

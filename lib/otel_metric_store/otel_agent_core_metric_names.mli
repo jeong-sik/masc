@@ -11,7 +11,6 @@ val metric_agent_core_bridge_timeout : string
     domain-local clock exists, or [wall_unavailable] otherwise. *)
 val metric_agent_core_bridge_cancel : string
 
-val metric_agent_core_sse_relay_retries : string
 val metric_agent_core_sse_relay_drops : string
 
 (** Histogram populated from AGENT_CORE [InferenceTelemetry] events that are

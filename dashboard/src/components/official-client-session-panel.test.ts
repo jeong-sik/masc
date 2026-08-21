@@ -89,22 +89,4 @@ describe('OfficialClientSessionPanel', () => {
     })
   })
 
-  it('offers retry without accepting caller-supplied settlement identities', async () => {
-    const view = render(html`<${OfficialClientSessionPanel} />`)
-
-    await waitFor(() => {
-      expect(view.getByTestId('official-client-session-retry-previous')).toBeTruthy()
-    })
-    fireEvent.click(view.getByTestId('official-client-session-retry-previous'))
-
-    await waitFor(() => {
-      expect(apiMocks.resolveOfficialClientSession).toHaveBeenCalledWith(
-        'sangsu',
-        recoveryResponse.session.phase.recovery_id,
-        { resolution: 'retry_previous' },
-      )
-      expect(view.getByTestId('official-client-session-last-resolution').textContent).toContain('dashboard')
-    })
-  })
-
 })

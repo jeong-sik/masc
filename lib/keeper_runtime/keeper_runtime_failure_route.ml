@@ -12,8 +12,6 @@ type rotate_class =
   | Provider_service_unavailable
   | Network_unavailable
   | Provider_timeout
-  | No_progress_empty
-  | No_progress_thinking_only
 
 type terminal_class =
   | Deterministic_request
@@ -58,7 +56,7 @@ type route =
 
 let core_error_is_hard_quota (err : Agent_core.Error.t) =
   match err with
-  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Agent_core.Error.Api (Llm_provider.Api_error.PaymentRequired _)
   | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
     true
   | Agent_core.Error.Api _
@@ -102,10 +100,7 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Keeper_internal_error.Other_detail _ ->
        rotate Runtime_exhausted)
   | Keeper_internal_error.Accept_rejected _ ->
-    (match Keeper_internal_error.accept_no_progress_retry_kind internal with
-     | Some `Empty_no_progress -> rotate No_progress_empty
-     | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
-     | None -> exhaust_failure Internal_opaque)
+    exhaust_failure Internal_opaque
   | Keeper_internal_error.Internal_contract_rejected _
   | Keeper_internal_error.Receipt_persistence_failed _
   | Keeper_internal_error.Gate_replay_repair_required _ ->
@@ -150,22 +145,22 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   | Keeper_internal_error.Internal_bridge_exception _ ->
     exhaust_failure Internal_opaque
 
-let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
+let route_of_api_error ~err (api : Llm_provider.Api_error.api_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
   match api with
-  | Llm_provider.Retry.RateLimited _ -> rotate Rate_window_unavailable
-  | Llm_provider.Retry.PaymentRequired _ -> rotate Account_quota_unavailable
-  | Llm_provider.Retry.Overloaded _ -> rotate Capacity_unavailable
-  | Llm_provider.Retry.ServerError _ -> rotate Provider_service_unavailable
-  | Llm_provider.Retry.AuthError _
-  | Llm_provider.Retry.AuthorizationError _ ->
+  | Llm_provider.Api_error.RateLimited _ -> rotate Rate_window_unavailable
+  | Llm_provider.Api_error.PaymentRequired _ -> rotate Account_quota_unavailable
+  | Llm_provider.Api_error.Overloaded _ -> rotate Capacity_unavailable
+  | Llm_provider.Api_error.ServerError _ -> rotate Provider_service_unavailable
+  | Llm_provider.Api_error.AuthError _
+  | Llm_provider.Api_error.AuthorizationError _ ->
     rotate Auth_failed
-  | Llm_provider.Retry.NotFound _ -> rotate Model_unavailable
-  | Llm_provider.Retry.NetworkError _ -> rotate Network_unavailable
-  | Llm_provider.Retry.Timeout _ -> rotate Provider_timeout
-  | Llm_provider.Retry.InvalidRequest _ -> exhaust_failure Deterministic_request
-  | Llm_provider.Retry.ContextOverflow _ -> exhaust_failure Context_overflow
-  | Llm_provider.Retry.InputCapacity _ -> exhaust_failure Deterministic_request
+  | Llm_provider.Api_error.NotFound _ -> rotate Model_unavailable
+  | Llm_provider.Api_error.NetworkError _ -> rotate Network_unavailable
+  | Llm_provider.Api_error.Timeout _ -> rotate Provider_timeout
+  | Llm_provider.Api_error.InvalidRequest _ -> exhaust_failure Deterministic_request
+  | Llm_provider.Api_error.ContextOverflow _ -> exhaust_failure Context_overflow
+  | Llm_provider.Api_error.InputCapacity _ -> exhaust_failure Deterministic_request
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
@@ -246,8 +241,6 @@ let rotate_class_label = function
   | Provider_service_unavailable -> "provider_service_unavailable"
   | Network_unavailable -> "network_unavailable"
   | Provider_timeout -> "provider_timeout"
-  | No_progress_empty -> "no_progress_empty"
-  | No_progress_thinking_only -> "no_progress_thinking_only"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"

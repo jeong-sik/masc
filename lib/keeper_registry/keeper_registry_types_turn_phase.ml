@@ -82,7 +82,7 @@ let packed_turn_phase_label : packed_turn_phase -> string = function
    [Runtime_transition] shape — idempotent self-loops are NOT represented
    (they are mutator-boundary no-ops; the resolver returns
    [Resolved_idempotent] for them).  This module enumerates the 23 valid
-   cross-state transitions of the 7-variant [turn_phase] FSM.  The 19
+   cross-state transitions of the 7-variant [turn_phase] FSM.  The 28
    forbidden pairs have no constructor and are therefore
    type-unrepresentable.  Adding a new [turn_phase] variant will trigger
    Warning 8 in [to_tag] and in [resolve_turn_phase_transition]. *)
@@ -95,29 +95,19 @@ module Turn_phase_transition = struct
     | Prompting_to_executing : (turn_prompting, turn_executing) t
     | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
     | Prompting_to_exhausted : (turn_prompting, turn_exhausted) t
-    (* From Routing (3): retry-back / dispatch / exhausted. *)
-    | Routing_to_prompting : (turn_routing, turn_prompting) t
+    (* From Routing: dispatch / exhausted. *)
     | Routing_to_executing : (turn_routing, turn_executing) t
     | Routing_to_exhausted : (turn_routing, turn_exhausted) t
-    (* From Executing (5): retry-back / re-entry / compacting / completion. *)
-    | Executing_to_prompting : (turn_executing, turn_prompting) t
+    (* From Executing: tool re-entry / compacting / completion / exhausted. *)
     | Executing_to_routing : (turn_executing, turn_routing) t
     | Executing_to_compacting : (turn_executing, turn_compacting) t
     | Executing_to_finalizing : (turn_executing, turn_finalizing) t
     | Executing_to_exhausted : (turn_executing, turn_exhausted) t
-    (* From Compacting (3): retry / completion / exhausted. *)
-    | Compacting_to_prompting : (turn_compacting, turn_prompting) t
+    (* From Compacting: completion / exhausted. *)
     | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
     | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
-    (* From Finalizing (4): degraded retry across phases. *)
-    | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
-    | Finalizing_to_routing : (turn_finalizing, turn_routing) t
-    | Finalizing_to_executing : (turn_finalizing, turn_executing) t
+    (* From Finalizing: terminal escalation only. *)
     | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
-    (* From Exhausted (3): retry after compaction. *)
-    | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
-    | Exhausted_to_routing : (turn_exhausted, turn_routing) t
-    | Exhausted_to_executing : (turn_exhausted, turn_executing) t
 
   type packed = Packed_transition : ('a, 'b) t -> packed
 
@@ -127,29 +117,20 @@ module Turn_phase_transition = struct
     | Prompting_to_executing -> "prompting->executing"
     | Prompting_to_finalizing -> "prompting->finalizing"
     | Prompting_to_exhausted -> "prompting->exhausted"
-    | Routing_to_prompting -> "routing->prompting"
     | Routing_to_executing -> "routing->executing"
     | Routing_to_exhausted -> "routing->exhausted"
-    | Executing_to_prompting -> "executing->prompting"
     | Executing_to_routing -> "executing->routing"
     | Executing_to_compacting -> "executing->compacting"
     | Executing_to_finalizing -> "executing->finalizing"
     | Executing_to_exhausted -> "executing->exhausted"
-    | Compacting_to_prompting -> "compacting->prompting"
     | Compacting_to_finalizing -> "compacting->finalizing"
     | Compacting_to_exhausted -> "compacting->exhausted"
-    | Finalizing_to_prompting -> "finalizing->prompting"
-    | Finalizing_to_routing -> "finalizing->routing"
-    | Finalizing_to_executing -> "finalizing->executing"
     | Finalizing_to_exhausted -> "finalizing->exhausted"
-    | Exhausted_to_prompting -> "exhausted->prompting"
-    | Exhausted_to_routing -> "exhausted->routing"
-    | Exhausted_to_executing -> "exhausted->executing"
   ;;
 end
 
 (* RFC-0072 Phase 4: typed error for turn_phase transition spec violations.
-   Each of the 19 forbidden pairs has its own constructor; mirrors the
+   Each of the 28 forbidden pairs has its own constructor; mirrors the
    runtime-side [runtime_transition_spec_violation] (PR #14903). *)
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
@@ -160,15 +141,24 @@ type turn_phase_transition_spec_violation =
   | Prompting_to_idle
   | Prompting_to_compacting
   | Routing_to_idle
+  | Routing_to_prompting
   | Routing_to_compacting
   | Routing_to_finalizing
   | Executing_to_idle
+  | Executing_to_prompting
   | Compacting_to_idle
+  | Compacting_to_prompting
   | Compacting_to_routing
   | Compacting_to_executing
   | Finalizing_to_idle
+  | Finalizing_to_prompting
+  | Finalizing_to_routing
+  | Finalizing_to_executing
   | Finalizing_to_compacting
   | Exhausted_to_idle
+  | Exhausted_to_prompting
+  | Exhausted_to_routing
+  | Exhausted_to_executing
   | Exhausted_to_compacting
   | Exhausted_to_finalizing
 
@@ -181,15 +171,24 @@ let turn_phase_transition_spec_violation_to_tag = function
   | Prompting_to_idle -> "prompting->idle"
   | Prompting_to_compacting -> "prompting->compacting"
   | Routing_to_idle -> "routing->idle"
+  | Routing_to_prompting -> "routing->prompting"
   | Routing_to_compacting -> "routing->compacting"
   | Routing_to_finalizing -> "routing->finalizing"
   | Executing_to_idle -> "executing->idle"
+  | Executing_to_prompting -> "executing->prompting"
   | Compacting_to_idle -> "compacting->idle"
+  | Compacting_to_prompting -> "compacting->prompting"
   | Compacting_to_routing -> "compacting->routing"
   | Compacting_to_executing -> "compacting->executing"
   | Finalizing_to_idle -> "finalizing->idle"
+  | Finalizing_to_prompting -> "finalizing->prompting"
+  | Finalizing_to_routing -> "finalizing->routing"
+  | Finalizing_to_executing -> "finalizing->executing"
   | Finalizing_to_compacting -> "finalizing->compacting"
   | Exhausted_to_idle -> "exhausted->idle"
+  | Exhausted_to_prompting -> "exhausted->prompting"
+  | Exhausted_to_routing -> "exhausted->routing"
+  | Exhausted_to_executing -> "exhausted->executing"
   | Exhausted_to_compacting -> "exhausted->compacting"
   | Exhausted_to_finalizing -> "exhausted->finalizing"
 ;;
@@ -249,7 +248,7 @@ let resolve_turn_phase_transition
   | Packed Turn_compacting, Packed Turn_compacting
   | Packed Turn_finalizing, Packed Turn_finalizing
   | Packed Turn_exhausted, Packed Turn_exhausted -> Resolved_turn_idempotent
-  (* Valid cross-state transitions (23). *)
+  (* Valid cross-state transitions (14). *)
   | Packed Turn_idle, Packed Turn_prompting ->
     Resolved_turn_transition (Turn_phase_transition.Packed_transition Idle_to_prompting)
   | Packed Turn_prompting, Packed Turn_routing ->
@@ -264,18 +263,12 @@ let resolve_turn_phase_transition
   | Packed Turn_prompting, Packed Turn_exhausted ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Prompting_to_exhausted)
-  | Packed Turn_routing, Packed Turn_prompting ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Routing_to_prompting)
   | Packed Turn_routing, Packed Turn_executing ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Routing_to_executing)
   | Packed Turn_routing, Packed Turn_exhausted ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Routing_to_exhausted)
-  | Packed Turn_executing, Packed Turn_prompting ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Executing_to_prompting)
   | Packed Turn_executing, Packed Turn_routing ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Executing_to_routing)
@@ -288,36 +281,15 @@ let resolve_turn_phase_transition
   | Packed Turn_executing, Packed Turn_exhausted ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Executing_to_exhausted)
-  | Packed Turn_compacting, Packed Turn_prompting ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Compacting_to_prompting)
   | Packed Turn_compacting, Packed Turn_finalizing ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Compacting_to_finalizing)
   | Packed Turn_compacting, Packed Turn_exhausted ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Compacting_to_exhausted)
-  | Packed Turn_finalizing, Packed Turn_prompting ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Finalizing_to_prompting)
-  | Packed Turn_finalizing, Packed Turn_routing ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Finalizing_to_routing)
-  | Packed Turn_finalizing, Packed Turn_executing ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Finalizing_to_executing)
   | Packed Turn_finalizing, Packed Turn_exhausted ->
     Resolved_turn_transition
       (Turn_phase_transition.Packed_transition Finalizing_to_exhausted)
-  | Packed Turn_exhausted, Packed Turn_prompting ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Exhausted_to_prompting)
-  | Packed Turn_exhausted, Packed Turn_routing ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Exhausted_to_routing)
-  | Packed Turn_exhausted, Packed Turn_executing ->
-    Resolved_turn_transition
-      (Turn_phase_transition.Packed_transition Exhausted_to_executing)
   (* Spec violations (19). *)
   | Packed Turn_idle, Packed Turn_routing -> Resolved_turn_violation Idle_to_routing
   | Packed Turn_idle, Packed Turn_executing -> Resolved_turn_violation Idle_to_executing
@@ -328,20 +300,38 @@ let resolve_turn_phase_transition
   | Packed Turn_prompting, Packed Turn_compacting ->
     Resolved_turn_violation Prompting_to_compacting
   | Packed Turn_routing, Packed Turn_idle -> Resolved_turn_violation Routing_to_idle
+  | Packed Turn_routing, Packed Turn_prompting ->
+    Resolved_turn_violation Routing_to_prompting
   | Packed Turn_routing, Packed Turn_compacting ->
     Resolved_turn_violation Routing_to_compacting
   | Packed Turn_routing, Packed Turn_finalizing ->
     Resolved_turn_violation Routing_to_finalizing
   | Packed Turn_executing, Packed Turn_idle -> Resolved_turn_violation Executing_to_idle
+  | Packed Turn_executing, Packed Turn_prompting ->
+    Resolved_turn_violation Executing_to_prompting
   | Packed Turn_compacting, Packed Turn_idle -> Resolved_turn_violation Compacting_to_idle
+  | Packed Turn_compacting, Packed Turn_prompting ->
+    Resolved_turn_violation Compacting_to_prompting
   | Packed Turn_compacting, Packed Turn_routing ->
     Resolved_turn_violation Compacting_to_routing
   | Packed Turn_compacting, Packed Turn_executing ->
     Resolved_turn_violation Compacting_to_executing
   | Packed Turn_finalizing, Packed Turn_idle -> Resolved_turn_violation Finalizing_to_idle
+  | Packed Turn_finalizing, Packed Turn_prompting ->
+    Resolved_turn_violation Finalizing_to_prompting
+  | Packed Turn_finalizing, Packed Turn_routing ->
+    Resolved_turn_violation Finalizing_to_routing
+  | Packed Turn_finalizing, Packed Turn_executing ->
+    Resolved_turn_violation Finalizing_to_executing
   | Packed Turn_finalizing, Packed Turn_compacting ->
     Resolved_turn_violation Finalizing_to_compacting
   | Packed Turn_exhausted, Packed Turn_idle -> Resolved_turn_violation Exhausted_to_idle
+  | Packed Turn_exhausted, Packed Turn_prompting ->
+    Resolved_turn_violation Exhausted_to_prompting
+  | Packed Turn_exhausted, Packed Turn_routing ->
+    Resolved_turn_violation Exhausted_to_routing
+  | Packed Turn_exhausted, Packed Turn_executing ->
+    Resolved_turn_violation Exhausted_to_executing
   | Packed Turn_exhausted, Packed Turn_compacting ->
     Resolved_turn_violation Exhausted_to_compacting
   | Packed Turn_exhausted, Packed Turn_finalizing ->

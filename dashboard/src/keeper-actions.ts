@@ -322,7 +322,7 @@ export async function hydrateKeeperChatHistory(
     // fetched tool rows from the rail/inspector.
     void hydrateKeeperToolOutputs(keeperName)
   } catch (err) {
-    // Allow a later mount to retry instead of caching the failure.
+    // Allow a later mount to fetch again instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
     const message = err instanceof Error ? err.message : `Failed to load chat history for ${keeperName}`
     console.warn(`[keeper] chat history hydration failed for ${keeperName}:`, message)

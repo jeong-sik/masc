@@ -22,7 +22,7 @@ let test_inner_timeout_observation () =
     Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
       raise Eio.Time.Timeout)
   with
-  | Error (Agent_core.Error.Api (Agent_core.Retry.Timeout _)) -> ()
+  | Error (Agent_core.Error.Api (Agent_core.Api_error.Timeout _)) -> ()
   | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
   | Ok _ -> Alcotest.fail "inner timeout returned success"
 ;;

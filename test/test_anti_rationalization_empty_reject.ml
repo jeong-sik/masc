@@ -121,7 +121,7 @@ let test_rate_limit_failure_is_unavailable () =
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
        Error
          (Agent_core.Error.Api
-            (Agent_core.Error.Retry.RateLimited
+            (Agent_core.Error.Api_error.RateLimited
                { retry_after = None; message = "rate limited" })))
     (fun () ->
        let result = review () in

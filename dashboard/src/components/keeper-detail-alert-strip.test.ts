@@ -67,7 +67,6 @@ describe('KeeperRuntimeAlertStrip', () => {
   it.each([
     ['runtime_exhausted', '런타임 후보 소진'],
     ['unmapped_runtime_state', '매핑되지 않은 runtime 상태'],
-    ['transient_runtime_retry', '일시적 런타임 재시도'],
     ['provider_attempt_effect_fenced', 'Provider 효과 결과 확인 필요'],
   ])('labels receipt-derived attention reason %s distinctly', (reason, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
@@ -102,7 +101,7 @@ describe('KeeperRuntimeAlertStrip', () => {
   // longer folded into runtime_blocked, so the operator sees the specific
   // failure the backend distinguished.
   it.each([
-    ['runtime_attempts_exhausted', '런타임 재시도 소진'],
+    ['runtime_attempts_exhausted', '런타임 후보 소진'],
     ['fiber_unresolved', '미완료 작업(fiber) 정리 필요'],
     ['stale_turn_timeout', '응답 지연(stale) 타임아웃'],
   ])('labels first-class status_bridge reason %s distinctly', (reason, label) => {

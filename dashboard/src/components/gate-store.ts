@@ -10,7 +10,7 @@ export {
 export {
   refreshGate,
   respondToKeeperApproval,
-  retryKeeperAutoJudge,
+  rerunKeeperAutoJudge,
   deleteKeeperApprovalRule,
   setKeeperGateMode,
 } from './gate-actions'

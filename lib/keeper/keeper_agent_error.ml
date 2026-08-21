@@ -77,11 +77,11 @@ let context_overflow_user_message ~limit =
 ;;
 
 let user_message_of_core_error = function
-  | Agent_core.Error.Api (Agent_core.Retry.NetworkError { message; kind }) ->
+  | Agent_core.Error.Api (Agent_core.Api_error.NetworkError { message; kind }) ->
     provider_network_user_message ~kind ~detail:message ()
-  | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit; _ }) ->
+  | Agent_core.Error.Api (Agent_core.Api_error.ContextOverflow { limit; _ }) ->
     context_overflow_user_message ~limit
-  | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _) ->
+  | Agent_core.Error.Api (Agent_core.Api_error.InputCapacity _) ->
     "The runtime flow reported a typed input-capacity failure. MASC did not \
      infer a compaction or select another runtime; the failure is escalated as \
      a deterministic judgment."
@@ -99,7 +99,7 @@ type core_termination_semantics =
   | Core_error_failure
 
 let core_termination_semantics = function
-  | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> Provider_wall_clock_timeout
+  | Agent_core.Error.Api (Agent_core.Api_error.Timeout _) -> Provider_wall_clock_timeout
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
@@ -140,29 +140,27 @@ let core_termination_semantics_to_string = function
    no-collapse-richer-enum-at-sdk-boundary. *)
 let api_error_terminal_reason_code (err : Agent_core.Error.api_error) : string =
   match err with
-  | Agent_core.Retry.RateLimited _ -> "api_error_rate_limited"
-  | Agent_core.Retry.Overloaded _ -> "api_error_overloaded"
-  | Agent_core.Retry.ServerError { status; _ } ->
+  | Agent_core.Api_error.RateLimited _ -> "api_error_rate_limited"
+  | Agent_core.Api_error.Overloaded _ -> "api_error_overloaded"
+  | Agent_core.Api_error.ServerError { status; _ } ->
     Printf.sprintf "api_error_server:%d" status
-  | Agent_core.Retry.AuthError _ -> "api_error_auth"
-  | Agent_core.Retry.AuthorizationError _ -> "api_error_authorization"
-  | Agent_core.Retry.PaymentRequired _ -> "api_error_payment_required"
-  | Agent_core.Retry.InvalidRequest _ -> "api_error_invalid_request"
-  | Agent_core.Retry.NotFound _ -> "api_error_not_found"
-  | Agent_core.Retry.ContextOverflow _ -> "api_error_context_overflow"
-  | Agent_core.Retry.InputCapacity { reason; _ } ->
+  | Agent_core.Api_error.AuthError _ -> "api_error_auth"
+  | Agent_core.Api_error.AuthorizationError _ -> "api_error_authorization"
+  | Agent_core.Api_error.PaymentRequired _ -> "api_error_payment_required"
+  | Agent_core.Api_error.InvalidRequest _ -> "api_error_invalid_request"
+  | Agent_core.Api_error.NotFound _ -> "api_error_not_found"
+  | Agent_core.Api_error.ContextOverflow _ -> "api_error_context_overflow"
+  | Agent_core.Api_error.InputCapacity { reason; _ } ->
     (match reason with
-     | Agent_core.Retry.Serving_constraint_rejected _ ->
+     | Agent_core.Api_error.Serving_constraint_rejected _ ->
        "api_error_input_capacity:serving_constraint_rejected"
-     | Agent_core.Retry.Token_measurement_unavailable _ ->
+     | Agent_core.Api_error.Token_measurement_unavailable _ ->
        "api_error_input_capacity:measurement_unavailable")
-  (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
-     so the consumer-side disposition classifier
-     ([Keeper_terminal_reason.is_transient_provider_runtime_failure]) and this
-     encoder cannot drift. Agent execution observations are represented by the
-     typed Agent error constructors above this API layer. *)
-  | Agent_core.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
-  | Agent_core.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
+  (* SSOT: the two transport wire codes are owned by
+     [Keeper_terminal_reason]. Agent execution observations are represented by
+     the typed Agent error constructors above this API layer. *)
+  | Agent_core.Api_error.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
+  | Agent_core.Api_error.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 
 (* Per-variant terminal_reason_code for Agent_core.Error.Agent.

@@ -156,7 +156,6 @@ type t =
   | RestartOutcomes
   | Agent_coreRunTimeout
   | RuntimeSelected
-  | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
   | ReceiptUnmappedDisposition
@@ -183,7 +182,6 @@ type t =
   | PromptTemplateRenderOutcome
   | ToolCallParamCompleteness
   | KeeperTurnInstructionHash
-  | KeeperToolCallRetryLoop
   | ShellIrEffectTotal
   | RawTraceSinkDegraded
   | RawTraceRetentionDeleted
@@ -203,12 +201,6 @@ type collection =
 val collection : t -> collection
 (** Typed ownership of a metric's exported value. [External_observable]
     metrics must not also be registered in the mutable metric store. *)
-
-val emit_runtime_selected :
-  keeper_name:string -> runtime_id:string -> fallback_reason:string -> unit
-
-val emit_runtime_rotation :
-  keeper_name:string -> from_runtime:string -> to_runtime:string -> reason:string -> unit
 
 (** Every constructor of [t], generated from the type declaration by
     [ppx_enumerate].  Membership is compiler-maintained; list order is not a

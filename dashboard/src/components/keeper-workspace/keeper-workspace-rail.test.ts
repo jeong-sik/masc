@@ -1024,9 +1024,9 @@ describe('KeeperWorkspaceRail', () => {
           saved_tokens: null,
           compaction_id: 'cmp-failed',
           compaction_source: 'provider_overflow',
-          compaction_outcome: 'retry_without_checkpoint',
+          compaction_outcome: 'lifecycle_cleanup_failed_without_checkpoint',
           cause: 'compaction dispatch failed',
-          status: 'retryable_failure',
+          status: 'failed',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
           exact_evidence: null,
           reinjection_observation: {

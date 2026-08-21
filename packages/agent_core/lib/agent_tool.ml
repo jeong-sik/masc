@@ -150,7 +150,7 @@ let make_handler config : Tool.tool_handler =
      [prompt_of_input] (the SSOT) and propagates its [Error] instead of
      silently serializing malformed input as the prompt. *)
   match prompt_of_input input with
-  | Error message -> Error { message; recoverable = false; error_class = None }
+  | Error message -> Error { message; error_class = None }
   | Ok prompt ->
     (match config.runner prompt with
      | Ok response ->
@@ -162,7 +162,7 @@ let make_handler config : Tool.tool_handler =
        in
        Ok { content = output; _meta = None }
      | Error e ->
-       Error { message = Error.to_string e; recoverable = false; error_class = None })
+       Error { message = Error.to_string e; error_class = None })
 ;;
 
 let make_typed_handler config prompt =
@@ -248,7 +248,7 @@ let%test "handler rejects string input outside its schema" =
 let%test "handler propagates error" =
   let tool = create_simple ~name:"t" ~description:"d" failing_runner in
   match Tool.execute tool (`Assoc [ "prompt", `String "test" ]) with
-  | Error { recoverable; _ } -> not recoverable
+  | Error _ -> true
   | Ok _ -> false
 ;;
 

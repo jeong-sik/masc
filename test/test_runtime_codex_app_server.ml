@@ -1541,7 +1541,7 @@ let test_keeper_maps_official_context_error_to_typed_core_error () =
        match run_keeper_turn ~cli_path ~model:"gpt-fixture" () with
        | Error
            (Agent_core.Error.Api
-              (Agent_core.Retry.ContextOverflow
+              (Agent_core.Api_error.ContextOverflow
                  { message = "context is full"; limit = None })) ->
          ()
        | Error error -> fail (Agent_core.Error.to_string error)
@@ -2054,7 +2054,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
           |> member "phase"
           |> member "recovery_id"
           |> to_string);
-       let retry_body =
+       let removed_resolution_body =
          `Assoc
            [ "keeper_name", `String keeper_name
            ; "recovery_id", `String recovery_id
@@ -2066,16 +2066,16 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
           Server_dashboard_official_client_session.resolve_body
             ~config
             ~actor:"dashboard-admin"
-            ~body:retry_body
+            ~body:removed_resolution_body
         with
-        | Error { kind = Conflict; code = "retry_previous_unavailable"; _ } -> ()
+        | Error { kind = Bad_request; code = "request_fields_invalid"; _ } -> ()
         | Error error ->
           fail
             (Printf.sprintf
-               "retry_previous had wrong rejection: %s: %s"
+               "removed resolution had wrong rejection: %s: %s"
                error.code
                error.message)
-        | Ok _ -> fail "retry_previous silently restarted a fresh session");
+        | Ok _ -> fail "removed resolution was still accepted");
        let body =
          `Assoc
            [ "keeper_name", `String keeper_name

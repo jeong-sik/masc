@@ -382,7 +382,7 @@ let test_tool_error_recovery () =
     let url = start_multi ~sw ~net:env#net ~port:21008 responses in
     let tool =
       Tool.create ~name:"bad_tool" ~description:"Fails" ~parameters:[] (fun _input ->
-        Error { Types.message = "broken"; recoverable = true; error_class = None })
+        Error { Types.message = "broken"; error_class = None })
     in
     let agent = make_agent ~net:env#net ~tools:[ tool ] url in
     match Agent.run ~sw agent "fail" with

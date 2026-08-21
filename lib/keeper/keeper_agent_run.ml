@@ -384,9 +384,7 @@ end
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param is_retry When [true], replays the current user message into the
-           working context without persisting it again, so transient retry
-           attempts do not duplicate the user entry in session history *)
+    *)
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -411,11 +409,6 @@ let run_turn
       ?on_event
       ?on_tool_result_ready
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?(degraded_retry_applied = false)
-      ?degraded_retry_runtime
-      ?fallback_reason
-      ?(runtime_rotation_attempts = [])
-      ?(is_retry = false)
       ?shared_context
       ?event_bus
       ?trace_link
@@ -541,7 +534,6 @@ let run_turn
       ~meta
       ~history_user_source
       ~user_turn_record:prompt_user_turn_record
-      ~is_retry
       ~start_turn_count
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
@@ -580,7 +572,6 @@ let run_turn
       ~keeper_turn_id:manifest_keeper_turn_id
       ~turn_kind
       ~runtime_id
-      ~is_retry
       ~config_root
       ~runtime_config_path
       ~trajectory_acc
@@ -1145,10 +1136,6 @@ let run_turn
            ~receipt_started_at
            ~runtime_manifest_context
            ~acc
-           ~degraded_retry_applied
-           ~degraded_retry_runtime
-           ~fallback_reason
-           ~runtime_rotation_attempts
            ~turn_result
            ~receipt_turn_count_ref
            ~receipt_stop_reason_ref

@@ -689,7 +689,7 @@ let test_run_vision_invalid_structured_response_is_typed () =
       assert (String_util.contains_substring detail "JSON parse error")
     | _ -> failwith "expected Vo_invalid_structured_response")
 
-let test_retryable_provider_error_tries_next_runtime () =
+let test_declared_candidate_unavailable_routes_to_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-failover" in
@@ -697,7 +697,7 @@ let test_retryable_provider_error_tries_next_runtime () =
       let transient_labels =
         [ "runtime_id", "p1.vision-a"
         ; "result", "error"
-        ; "reason", "transient_provider_error"
+        ; "reason", "declared_candidate_unavailable"
         ]
       in
       let ok_labels =
@@ -741,7 +741,7 @@ let test_retryable_provider_error_tries_next_runtime () =
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
       assert_metric_increment
-        "vision_candidate transient_provider_error"
+        "vision_candidate declared_candidate_unavailable"
         before_transient
         (metric_value Keeper_metrics.VisionCandidateAttempts
            ~labels:transient_labels);
@@ -782,7 +782,7 @@ let test_candidate_failover_is_not_cut_off_by_local_deadline () =
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "dependency_unavailable")))
 
-let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
+let test_deterministic_request_error_stops_without_candidate_transition () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-nonretryable-stop" in
@@ -794,7 +794,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
           (Llm_provider.Http_client.HttpError
-             { code = 401; body = "bad credentials"; retry_after_header = None })
+             { code = 400; body = "invalid image request"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->
@@ -812,7 +812,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
       assert (!calls = 1);
       assert (List.rev !models = [ "vision-a" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
-      assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
+      assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
 
 let test_accept_rejected_is_policy_rejection_without_failover () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
@@ -1088,9 +1088,9 @@ let () =
   test_uncapped_vision_fallback_rejects_before_provider_call ();
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
-  test_retryable_provider_error_tries_next_runtime ();
+  test_declared_candidate_unavailable_routes_to_next_runtime ();
   test_candidate_failover_is_not_cut_off_by_local_deadline ();
-  test_non_retryable_provider_error_stops_without_trying_next_runtime ();
+  test_deterministic_request_error_stops_without_candidate_transition ();
   test_accept_rejected_is_policy_rejection_without_failover ();
   test_eager_eviction_reason_preserves_typed_outcome ();
   test_delegate_eager_eviction_stores_image_and_removes_inline_block ();

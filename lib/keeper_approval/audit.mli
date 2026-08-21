@@ -24,7 +24,7 @@ type event =
   | Gate_exact_rule_expired
   | Gate_exact_rule_store_degraded
   | Gate_grant_unavailable
-  | Auto_judge_operator_retry_started
+  | Auto_judge_operator_rerun_started
   | Auto_judge_block_observation_superseded
   | Auto_judge_restart_worker_recovered
   | Auto_judge_restart_judgment_recovered

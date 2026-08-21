@@ -32,7 +32,7 @@ let make_attempt_record
       ?(attempt_number = 1)
       ?attempt_id
       ?(last_result = Attempt_state.Start_dispatched)
-      ?next_retry_at
+      ?next_launch_not_before
       ?(operator_next_action = "none")
       ?(updated_at = "2026-01-01T00:00:00Z")
       ()
@@ -40,14 +40,14 @@ let make_attempt_record
   let attempt_id =
     Option.value attempt_id ~default:(Printf.sprintf "%d:%d" generation attempt_number)
   in
-  let next_retry_unix = Option.map unix_of_iso_exn next_retry_at in
+  let next_launch_not_before_unix = Option.map unix_of_iso_exn next_launch_not_before in
   let updated_unix = unix_of_iso_exn updated_at in
   let attempt : Attempt_state.t =
     { generation
     ; attempt_number
     ; attempt_id
     ; last_result
-    ; next_retry_unix
+    ; next_launch_not_before_unix
     ; updated_unix
     }
   in
@@ -58,8 +58,8 @@ let attempt_result_token (record : Routes.attempt_record) =
   Attempt_state.result_to_string record.Routes.attempt.last_result
 ;;
 
-let attempt_next_retry_at (record : Routes.attempt_record) =
-  Option.map Masc_domain.iso8601_of_unix_seconds record.Routes.attempt.next_retry_unix
+let attempt_next_launch_not_before (record : Routes.attempt_record) =
+  Option.map Masc_domain.iso8601_of_unix_seconds record.Routes.attempt.next_launch_not_before_unix
 ;;
 
 ;;
@@ -489,7 +489,7 @@ let test_reconcile_running_unavailable_starts_once () =
   let result =
     Routes.reconcile_desired_once
       ~now:"2026-04-20T00:00:00Z"
-      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~next_launch_not_before:"2099-04-20T00:00:30Z"
       ~current_generation:3
       ~observed_state:Routes.Observed_unavailable
       ~write_attempt:(fun attempt ->
@@ -511,7 +511,7 @@ let test_reconcile_running_unavailable_starts_once () =
       string
       "next retry recorded"
       "2099-04-20T00:00:30Z"
-      (Option.value (attempt_next_retry_at attempt) ~default:"");
+      (Option.value (attempt_next_launch_not_before attempt) ~default:"");
     check
       string
       "next action recorded"
@@ -534,7 +534,7 @@ let test_reconcile_attempt_write_failure_does_not_start () =
   let result =
     Routes.reconcile_desired_once
       ~now:"2026-04-20T00:00:00Z"
-      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~next_launch_not_before:"2099-04-20T00:00:30Z"
       ~current_generation:3
       ~observed_state:Routes.Observed_unavailable
       ~write_attempt:(fun _ -> Error "disk full")
@@ -562,7 +562,7 @@ let test_reconcile_running_unavailable_backoff_noops () =
   let previous_attempt : Routes.attempt_record =
     make_attempt_record
       ~generation:3
-      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~next_launch_not_before:"2099-04-20T00:00:30Z"
       ~operator_next_action:
         "wait for observed status, or open logs if the sidecar remains offline after \
          backoff"
@@ -625,7 +625,7 @@ let test_status_json_includes_lifecycle_shape () =
      | Error msg -> failf "desired write failed: %s" msg);
     let attempt : Routes.attempt_record =
       make_attempt_record
-        ~next_retry_at:"2099-04-20T00:00:30Z"
+        ~next_launch_not_before:"2099-04-20T00:00:30Z"
         ~operator_next_action:
           "wait for observed status, or open logs if the sidecar remains offline after \
            backoff"
@@ -663,9 +663,9 @@ let test_status_json_includes_lifecycle_shape () =
       (lifecycle |> member "last_attempt_result" |> to_string);
     check
       string
-      "next_retry_at"
+      "next_launch_not_before"
       "2099-04-20T00:00:30Z"
-      (lifecycle |> member "next_retry_at" |> to_string);
+      (lifecycle |> member "next_launch_not_before" |> to_string);
     check
       string
       "operator_next_action"
@@ -982,8 +982,8 @@ let test_atomic_write_file_replaces_content () =
 ;;
 
 (* ── ISO format invariants ────────────────────────────────────────────
-   Sidecar lifecycle JSON keeps the existing [next_retry_at]/[updated_at]
-   wire strings, while the in-memory retry state uses [Attempt_state.t]
+   Sidecar lifecycle JSON keeps the existing [next_launch_not_before]/[updated_at]
+   wire strings, while the in-memory launch state uses [Attempt_state.t]
    floats. These tests pin the boundary format so dashboard consumers see
    the same contract. *)
 
@@ -1020,44 +1020,44 @@ let test_isoish_lexical_matches_chronological () =
     (String.compare earlier (Masc_domain.iso8601_of_unix_seconds 1_000_000.0))
 ;;
 
-(* ── retry_backoff_active (#8930 / #22246) ─────────────────────────────
-   [retry_backoff_active] parses [now] at the boundary and delegates the
+(* ── launch_deferred (#8930 / #22246) ─────────────────────────────
+   [launch_deferred] parses [now] at the boundary and delegates the
    deadline check to [Attempt_state.is_backoff_active]. Malformed persisted
-   [next_retry_at] values are rejected by [attempt_record_of_json] instead
+   [next_launch_not_before] values are rejected by [attempt_record_of_json] instead
    of entering the in-memory state. *)
 
-let make_attempt ~next_retry_at =
-  make_attempt_record ?next_retry_at ()
+let make_attempt ~next_launch_not_before =
+  make_attempt_record ?next_launch_not_before ()
 ;;
 
-let test_retry_backoff_active_before_deadline () =
-  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:30Z") in
+let test_launch_deferred_before_deadline () =
+  let attempt = make_attempt ~next_launch_not_before:(Some "2026-01-01T00:00:30Z") in
   check
     bool
-    "now < next_retry_at → backoff active"
+    "now < next_launch_not_before → backoff active"
     true
-    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+    (Routes.launch_deferred ~now:"2026-01-01T00:00:00Z" attempt)
 ;;
 
-let test_retry_backoff_inactive_after_deadline () =
-  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:00Z") in
+let test_launch_deferred_inactive_after_deadline () =
+  let attempt = make_attempt ~next_launch_not_before:(Some "2026-01-01T00:00:00Z") in
   check
     bool
-    "now > next_retry_at → backoff expired"
+    "now > next_launch_not_before → backoff expired"
     false
-    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:30Z" attempt)
+    (Routes.launch_deferred ~now:"2026-01-01T00:00:30Z" attempt)
 ;;
 
-let test_retry_backoff_inactive_when_no_deadline () =
-  let attempt = make_attempt ~next_retry_at:None in
+let test_launch_deferred_inactive_when_no_deadline () =
+  let attempt = make_attempt ~next_launch_not_before:None in
   check
     bool
-    "next_retry_at=None → backoff inactive"
+    "next_launch_not_before=None → backoff inactive"
     false
-    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+    (Routes.launch_deferred ~now:"2026-01-01T00:00:00Z" attempt)
 ;;
 
-let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
+let test_attempt_record_of_json_rejects_malformed_next_launch_not_before () =
   let json =
     `Assoc
       [ "connector_id", `String "discord"
@@ -1065,20 +1065,20 @@ let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
       ; "attempt_id", `String "1:1"
       ; "attempt_number", `Int 1
       ; "last_attempt_result", `String "start_dispatched"
-      ; "next_retry_at", `String "not-an-iso-stamp"
+      ; "next_launch_not_before", `String "not-an-iso-stamp"
       ; "operator_next_action", `String "none"
       ; "updated_at", `String "2026-01-01T00:00:00Z"
       ]
   in
   (match Routes.attempt_record_of_json_result json with
    | Error (Routes.Attempt_record_invalid_timestamp { field; value }) ->
-     check string "field" "next_retry_at" field;
+     check string "field" "next_launch_not_before" field;
      check string "value" "not-an-iso-stamp" value
    | Error error ->
      failf
        "unexpected decode error: %s"
        (Routes.attempt_record_decode_error_to_string error)
-   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary");
+   | Ok _ -> failf "malformed next_launch_not_before should be rejected at boundary");
   check bool "compat option wrapper still rejects" true (Routes.attempt_record_of_json json = None)
 ;;
 
@@ -1087,10 +1087,10 @@ let test_read_attempt_record_result_reports_semantic_corruption () =
     let path = Routes.sidecar_attempt_path ~base_path "discord" in
     write_file
       path
-      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_launch_not_before":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
     match Routes.read_attempt_record_result ~base_path "discord" with
     | Error msg ->
-      check bool "mentions field" true (String_util.contains_substring msg "next_retry_at");
+      check bool "mentions field" true (String_util.contains_substring msg "next_launch_not_before");
       check bool "mentions bad value" true (String_util.contains_substring msg "not-an-iso-stamp")
     | Ok None -> failf "corrupt persisted attempt state must not look absent"
     | Ok (Some _) -> failf "corrupt persisted attempt state should not decode")
@@ -1101,7 +1101,7 @@ let test_status_json_surfaces_invalid_attempt_state () =
     let path = Routes.sidecar_attempt_path ~base_path "discord" in
     write_file
       path
-      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_launch_not_before":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
     let json = Routes.read_status_json ~base_path "discord" in
     let open Yojson.Safe.Util in
     let lifecycle = json |> member "sidecar_lifecycle" in
@@ -1110,17 +1110,17 @@ let test_status_json_surfaces_invalid_attempt_state () =
       | `String msg -> msg
       | other -> failf "expected attempt_read_error string, got %s" (Yojson.Safe.to_string other)
     in
-    check bool "mentions field" true (String_util.contains_substring error "next_retry_at");
+    check bool "mentions field" true (String_util.contains_substring error "next_launch_not_before");
     check bool "mentions bad value" true (String_util.contains_substring error "not-an-iso-stamp"))
 ;;
 
-let test_retry_backoff_fail_closed_on_malformed_now () =
-  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:30Z") in
+let test_launch_deferred_fail_closed_on_malformed_now () =
+  let attempt = make_attempt ~next_launch_not_before:(Some "2026-01-01T00:00:30Z") in
   check
     bool
     "malformed now → fail-closed"
     false
-    (Routes.retry_backoff_active ~now:"not-an-iso-stamp" attempt)
+    (Routes.launch_deferred ~now:"not-an-iso-stamp" attempt)
 ;;
 
 let test_reconcile_invalid_attempt_time_noops_without_exception () =
@@ -1136,7 +1136,7 @@ let test_reconcile_invalid_attempt_time_noops_without_exception () =
   let result =
     Routes.reconcile_desired_once
       ~now:"not-an-iso-stamp"
-      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~next_launch_not_before:"2099-04-20T00:00:30Z"
       ~current_generation:3
       ~observed_state:Routes.Observed_unavailable
       ~start_process:(fun () -> incr process_calls)
@@ -1174,7 +1174,7 @@ let test_reconcile_start_process_exception_propagates () =
     ignore
       (Routes.reconcile_desired_once
          ~now:"2026-04-20T00:00:00Z"
-         ~next_retry_at:"2099-04-20T00:00:30Z"
+         ~next_launch_not_before:"2099-04-20T00:00:30Z"
          ~current_generation:1
          ~observed_state:Routes.Observed_unavailable
          ~write_attempt:(fun _ -> Ok ())
@@ -1375,23 +1375,23 @@ let () =
             `Quick
             test_isoish_lexical_matches_chronological
         ] )
-    ; ( "retry_backoff_active (#8930 phase 3)"
+    ; ( "launch_deferred (#8930 phase 3)"
       , [ test_case
             "now before deadline → active"
             `Quick
-            test_retry_backoff_active_before_deadline
+            test_launch_deferred_before_deadline
         ; test_case
             "now after deadline → inactive"
             `Quick
-            test_retry_backoff_inactive_after_deadline
+            test_launch_deferred_inactive_after_deadline
         ; test_case
             "no deadline → inactive"
             `Quick
-            test_retry_backoff_inactive_when_no_deadline
+            test_launch_deferred_inactive_when_no_deadline
         ; test_case
-            "malformed next_retry_at → rejected at boundary"
+            "malformed next_launch_not_before → rejected at boundary"
             `Quick
-            test_attempt_record_of_json_rejects_malformed_next_retry_at
+            test_attempt_record_of_json_rejects_malformed_next_launch_not_before
         ; test_case
             "malformed persisted attempt → read error"
             `Quick
@@ -1403,7 +1403,7 @@ let () =
         ; test_case
             "malformed now → fail-closed"
             `Quick
-            test_retry_backoff_fail_closed_on_malformed_now
+            test_launch_deferred_fail_closed_on_malformed_now
         ; test_case
             "malformed reconcile time → noop"
             `Quick

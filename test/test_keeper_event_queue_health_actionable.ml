@@ -27,7 +27,7 @@ let queue
     ; "transition_outbox_count", `Int 0
     ; "operator_action_required", `Bool false
     ; "runnable_backlog_count", `Int runnable
-    ; "recoverable_backlog_count", `Int recoverable
+    ; "no_live_owner_backlog_count", `Int recoverable
     ; "retained_disabled_backlog_count", `Int retained_disabled
     ; "paused_dead_backlog_count", `Int paused_dead
     ; "shutdown_fenced_backlog_count", `Int shutdown_fenced
@@ -65,7 +65,7 @@ let test_retained_disabled_is_not_actionable () =
     (bool_field "operator_action_required" fields)
 ;;
 
-let test_recoverable_is_actionable () =
+let test_no_live_owner_is_actionable () =
   let fields = dimensions (queue ~recoverable:1 ()) in
   check bool "a recoverable owner still demands action" true
     (bool_field "operator_action_required" fields)
@@ -97,7 +97,7 @@ let () =
         ; test_case "stays visible" `Quick test_paused_dead_stays_visible
         ] )
     ; ( "actionable"
-      , [ test_case "recoverable" `Quick test_recoverable_is_actionable
+      , [ test_case "recoverable" `Quick test_no_live_owner_is_actionable
         ; test_case "shutdown_fenced" `Quick test_shutdown_fenced_is_actionable
         ; test_case "mixed" `Quick test_mixed_backlog_is_actionable
         ] )

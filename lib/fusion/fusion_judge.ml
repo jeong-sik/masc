@@ -117,7 +117,7 @@ let attach_usage
 
 let core_error_detail (e : Agent_core.Error.t) : string =
   match e with
-  | Agent_core.Error.Api api_error -> Agent_core.Error.Retry.error_message api_error
+  | Agent_core.Error.Api api_error -> Agent_core.Error.Api_error.error_message api_error
   | Agent_core.Error.Provider provider_error ->
     Llm_provider.Error.to_string provider_error
   | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
@@ -126,7 +126,7 @@ let core_error_detail (e : Agent_core.Error.t) : string =
     Agent_core.Error.to_string e
 
 (* [Agent_core.Error.t]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
-   모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
+   모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Api_error.Timeout _)]와
    provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
    connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
    후자는 [Fusion_panel.outcome_of_result]와 대칭으로, 이전에는 [_] catch-all에서
@@ -139,7 +139,7 @@ let core_error_detail (e : Agent_core.Error.t) : string =
 let failure_of_core_error ~runtime_id ~prefix (e : Agent_core.Error.t) :
     Fusion_types.judge_failure =
   match e with
-  | Agent_core.Error.Api (Agent_core.Error.Retry.Timeout _)
+  | Agent_core.Error.Api (Agent_core.Error.Api_error.Timeout _)
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
   | _ ->
     Provider_error

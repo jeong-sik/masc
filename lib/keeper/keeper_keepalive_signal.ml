@@ -442,43 +442,20 @@ let deliver_addressed_board_signal
   | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
 ;;
 
-(* #25600 — a transient board-store read failure must not silently drop the
-   whole signal for a lane.
+let forced_relevance_read_failures_for_test : int Atomic.t = Atomic.make 0
 
-   [Keeper_board_audience.route_for_keeper] only touches the board store on
-   the [Thread_participants] route ([Board_signal.wake_reason] re-reads the
-   post/comment stream); the [Targets]/[Broadcast] routes are payload-only
-   and can never return [Unavailable].  The issue's alternative (a) —
-   falling back to the explicit [@keeper] target in the payload — is
-   therefore dead code here: any lane with an explicit target is routed by
-   the typed [Targets] audience before any store read happens.  The fitting
-   policy is the one the cursor-based replay path
-   ([Keeper_world_observation.collect_board_events]) already uses:
-   [Transient] failures retain the cursor for a later retry while
-   [Permanent] ones are skipped immediately.  This push path has no cursor
-   to retain, so the structural analog is a bounded in-place retry of the
-   relevance read (a pure, idempotent store read).  Exhaustion stays
-   observable: the [Unavailable] branch below logs and counts the drop. *)
-let board_signal_relevance_max_attempts = 3
-
-(* Test hook mirroring
-   [Board_dispatch.force_flusher_start_cas_conflicts_for_test]: forces the
-   next N relevance computations to report a transient board read failure so
-   the bounded-retry path is exercisable without a real store outage. *)
-let forced_transient_relevance_failures_for_test : int Atomic.t = Atomic.make 0
-
-let force_transient_relevance_failures_for_test count =
-  Atomic.set forced_transient_relevance_failures_for_test (Int.max 0 count)
+let force_relevance_read_failures_for_test count =
+  Atomic.set forced_relevance_read_failures_for_test (Int.max 0 count)
 ;;
 
-let consume_forced_transient_relevance_failure_for_test () =
+let consume_forced_relevance_read_failure_for_test () =
   let rec loop () =
-    let remaining = Atomic.get forced_transient_relevance_failures_for_test in
+    let remaining = Atomic.get forced_relevance_read_failures_for_test in
     if remaining <= 0
     then false
     else
       Atomic.compare_and_set
-        forced_transient_relevance_failures_for_test
+        forced_relevance_read_failures_for_test
         remaining
         (remaining - 1)
       || loop ()
@@ -487,38 +464,14 @@ let consume_forced_transient_relevance_failure_for_test () =
 ;;
 
 let board_signal_relevance_route ~audience ~meta (signal : Board_dispatch.board_signal) =
-  if consume_forced_transient_relevance_failure_for_test ()
+  if consume_forced_relevance_read_failure_for_test ()
   then
     Keeper_world_observation_board_signal.Unavailable
       { operation = Keeper_world_observation_board_signal.Get_post
       ; post_id = signal.post_id
-      ; error = Board.Io_error "forced transient relevance read failure (test hook)"
+      ; error = Board.Io_error "forced relevance read failure (test hook)"
       }
   else Keeper_board_audience.route_for_keeper ~audience ~meta ~signal
-;;
-
-let route_for_keeper_with_bounded_retry
-      ~audience
-      ~meta
-      (signal : Board_dispatch.board_signal)
-  =
-  let rec attempt attempts_left =
-    match board_signal_relevance_route ~audience ~meta signal with
-    | Keeper_world_observation_board_signal.Unavailable unavailable
-      when Keeper_world_observation_board_signal.(
-             disposition_of_unavailable unavailable = Transient)
-           && attempts_left > 1 ->
-      Log.Keeper.warn
-        "board signal relevance read transiently unavailable, retrying: keeper=%s \
-         post=%s attempts_left=%d error=%s"
-        meta.Keeper_meta_contract.name
-        signal.post_id
-        (attempts_left - 1)
-        (Keeper_world_observation_board_signal.unavailable_to_string unavailable);
-      attempt (attempts_left - 1)
-    | result -> result
-  in
-  attempt board_signal_relevance_max_attempts
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
@@ -602,7 +555,7 @@ let wakeup_relevant_keeper_for_board_signal
                  "board signal Keeper metadata missing: keeper=%s"
                  entry.name
              | Ok (Some meta) ->
-               (match route_for_keeper_with_bounded_retry ~audience ~meta signal with
+               (match board_signal_relevance_route ~audience ~meta signal with
                 | Keeper_world_observation_board_signal.Available
                     Keeper_board_audience.Judge_discoverable ->
                   record_board_attention_candidate
@@ -671,36 +624,30 @@ let wakeup_relevant_keeper_for_board_signal
             "board signal Keeper metadata missing: keeper=%s"
             entry.name
         | Ok (Some meta) ->
-          (match route_for_keeper_with_bounded_retry ~audience ~meta signal with
+          (match board_signal_relevance_route ~audience ~meta signal with
            | Keeper_world_observation_board_signal.Unavailable unavailable ->
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string KeepaliveSignalFailures)
                ~labels:[ ("keeper", meta.name); ("phase", "board_signal_read") ]
                ();
              (match
-                Keeper_world_observation_board_signal.disposition_of_unavailable
+                Keeper_world_observation_board_signal.read_failure_kind_of_unavailable
                   unavailable
               with
-              | Keeper_world_observation_board_signal.Permanent ->
-                (* Mirrors the replay path: a permanently unavailable read
-                   (e.g. the post was swept from the store) can never resolve,
-                   so the lane is dropped without consuming retry attempts. *)
+              | Keeper_world_observation_board_signal.Source_rejected ->
+                (* The named source is absent or rejected, so this lane is dropped. *)
                 Log.Keeper.warn
-                  "board signal relevance read permanently unavailable, lane dropped: \
+                  "board signal source rejected, lane dropped: \
                    keeper=%s post=%s error=%s"
                   meta.name
                   signal.post_id
                   (Keeper_world_observation_board_signal.unavailable_to_string
                      unavailable)
-              | Keeper_world_observation_board_signal.Transient ->
-                (* Explicit policy (#25600): the signal is dropped for this
-                   lane only after [board_signal_relevance_max_attempts]
-                   attempts; the keeper's own cursor-based replay scan
-                   remains the next-cycle safety net. *)
+              | Keeper_world_observation_board_signal.Store_io_failed ->
+                (* One failed relevance read is one visible lane delivery failure. *)
                 Log.Keeper.error
-                  "board signal relevance read still unavailable after %d attempt(s), \
-                   lane dropped: keeper=%s post=%s error=%s"
-                  board_signal_relevance_max_attempts
+                  "board signal relevance read unavailable, lane dropped: \
+                   keeper=%s post=%s error=%s"
                   meta.name
                   signal.post_id
                   (Keeper_world_observation_board_signal.unavailable_to_string

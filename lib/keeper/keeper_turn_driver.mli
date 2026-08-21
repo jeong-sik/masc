@@ -21,7 +21,7 @@ include
     with type provider_rejection = Keeper_internal_error.provider_rejection
      and type capacity_backpressure_source =
       Keeper_internal_error.capacity_backpressure_source
-     and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
+     and type capacity_reset_evidence = Keeper_internal_error.capacity_reset_evidence
      and type runtime_exhaustion_reason =
       Keeper_internal_error.runtime_exhaustion_reason
      and type accept_rejection_kind =
@@ -260,6 +260,5 @@ module For_testing : sig
 
   val checkpoint_allows_candidate_transition : bool Atomic.t -> bool
 
-  val accept_no_progress_should_try_next : Agent_core.Error.t -> bool
 
 end

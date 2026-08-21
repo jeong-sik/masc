@@ -3,11 +3,11 @@
     literals at [server_bootstrap_loops.ml]:
 
     - line 157  0.25  → lazy_startup_poll_interval_sec
-    - line 240  0.25  → keeper_listener_retry_interval_sec
+    - line 240  0.25  → keeper_listener_reconcile_interval_sec
     - line 482  5.0   → post_startup_settle_sec
 
     The two [0.25] values shared a literal but encode *different*
-    intents (lazy-startup polling vs. listener-retry backoff). The
+    intents (lazy-startup polling vs. listener reconciliation cadence). The
     SSOT keeps them as separate knobs so future operator overrides
     can tune one without affecting the other.
 
@@ -33,10 +33,10 @@ let test_default_lazy_startup_poll () =
     "lazy_startup_poll_interval_sec default (was inline 0.25)"
     0.25 KB.lazy_startup_poll_interval_sec
 
-let test_default_listener_retry () =
+let test_default_listener_reconcile () =
   check approx
-    "keeper_listener_retry_interval_sec default (was inline 0.25)"
-    0.25 KB.keeper_listener_retry_interval_sec
+    "keeper_listener_reconcile_interval_sec default (was inline 0.25)"
+    0.25 KB.keeper_listener_reconcile_interval_sec
 
 let test_default_post_startup_settle () =
   check approx
@@ -50,10 +50,10 @@ let test_polling_floor () =
     true
     (KB.lazy_startup_poll_interval_sec >= 0.05);
   check bool
-    "keeper_listener_retry_interval_sec must satisfy the documented \
+    "keeper_listener_reconcile_interval_sec must satisfy the documented \
      >= 0.05s floor"
     true
-    (KB.keeper_listener_retry_interval_sec >= 0.05)
+    (KB.keeper_listener_reconcile_interval_sec >= 0.05)
 
 let test_autoboot_warmup_jitter_is_bounded_not_linear () =
   let names =
@@ -162,8 +162,8 @@ let () =
         [
           test_case "lazy_startup_poll = 0.25" `Quick
             test_default_lazy_startup_poll;
-          test_case "listener_retry = 0.25" `Quick
-            test_default_listener_retry;
+          test_case "listener_reconcile = 0.25" `Quick
+            test_default_listener_reconcile;
           test_case "post_startup_settle = 5.0" `Quick
             test_default_post_startup_settle;
         ] );

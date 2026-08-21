@@ -230,7 +230,7 @@ describe('keeperRuntimeBlockerHint', () => {
     ).toBe('런타임 호출 경계가 keeper 진행 전에 실패했습니다.')
   })
 
-  it('explains recoverable tool-route failures when no summary is available', () => {
+  it('explains tool-route failures when no summary is available', () => {
     expect(
       keeperRuntimeBlockerHint(makeKeeper({
         runtime_blocker_class: 'runtime_exhausted',

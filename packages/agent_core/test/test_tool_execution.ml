@@ -161,7 +161,7 @@ let test_pre_tool_approval_callback_settles_gate () =
        match rejected with
        | Ok
            { Agent_tools.completed_results =
-               [ { outcome = Tool_failed { failure_kind = Non_retryable_tool_error; _ }
+               [ { outcome = Tool_failed { failure_kind = Tool_error; _ }
                  ; _
                  }
                ]
@@ -536,7 +536,6 @@ let test_error_hooks_run_after_prior_hook_failure () =
     Tool.create ~name:"fails" ~description:"" ~parameters:[] (fun _ ->
       Error
         { Types.message = "tool failed"
-        ; recoverable = false
         ; error_class = Some Types.Deterministic
         })
   in
@@ -735,7 +734,7 @@ let test_block_is_deterministic_failure () =
     check bool "is error" true (tool_result_outcome_is_error result.outcome);
     (match result.outcome with
      | Tool_failed
-         { failure_kind = Agent_tools.Non_retryable_tool_error
+         { failure_kind = Agent_tools.Tool_error
          ; error_class = Some Types.Deterministic
          } -> ()
      | _ -> fail "expected deterministic non-retryable tool error")
@@ -1079,7 +1078,6 @@ let test_dispatch_passes_exact_tool_invocation () =
          | None ->
            Error
              { Types.message = "missing exact invocation"
-             ; recoverable = false
              ; error_class = Some Types.Deterministic
              })
   in
@@ -1180,7 +1178,6 @@ let test_lifecycle_surfaces_share_exact_tool_invocation () =
   let failure =
     Error
       { Types.message = "expected failure"
-      ; recoverable = false
       ; error_class = Some Types.Deterministic
       }
   in
@@ -1281,7 +1278,7 @@ let test_tool_exception_still_publishes_tool_completed () =
     ; ToolCompleted
         { tool_name = "boom"
         ; invocation = completed
-        ; output = Error { message; recoverable = false; error_class = Some Unknown }
+        ; output = Error { message; error_class = Some Unknown }
         ; _
         }
     ] ->

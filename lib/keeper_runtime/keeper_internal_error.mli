@@ -34,9 +34,9 @@ val capacity_backpressure_source_to_string :
 val capacity_backpressure_source_of_string :
   string -> capacity_backpressure_source option
 
-type capacity_retry_after =
-  | Explicit of float
-  | No_retry_hint
+type capacity_reset_evidence =
+  | Provider_reset_after_seconds of float
+  | No_provider_reset_evidence
 
 (** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
     It has no retry, admission, or lifecycle authority. *)
@@ -121,7 +121,7 @@ type masc_internal_error =
       runtime_id : string;
       source : capacity_backpressure_source;
       detail : string;
-      retry_after : capacity_retry_after;
+      provider_reset : capacity_reset_evidence;
       cooldown_cause : provider_cooldown_cause option;
       (** Legacy diagnostic only. Current producers use [None]; decoded values
           never grant retry, admission, or lifecycle authority. *)
@@ -212,12 +212,6 @@ val summary_of_masc_internal_error : masc_internal_error -> string option
 val kind_of_masc_internal_error : masc_internal_error -> string
 
 val runtime_id_of_masc_internal_error : masc_internal_error -> string
-
-val accept_no_progress_retry_kind :
-  masc_internal_error ->
-  [ `Empty_no_progress | `Thinking_only_no_progress ] option
-
-val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 
 val core_error_of_masc_internal_error :
   masc_internal_error -> Agent_core.Error.t

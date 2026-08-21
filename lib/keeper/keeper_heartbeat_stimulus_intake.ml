@@ -22,22 +22,22 @@ let stimulus_urgency_to_string = function
   | Keeper_event_queue.Low -> "low"
 ;;
 
-let forced_transient_board_reads_for_test : int Atomic.t = Atomic.make 0
+let forced_board_io_failures_for_test : int Atomic.t = Atomic.make 0
 
 module For_testing = struct
-  let force_transient_board_reads count =
-    Atomic.set forced_transient_board_reads_for_test (Int.max 0 count)
+  let force_board_io_failures count =
+    Atomic.set forced_board_io_failures_for_test (Int.max 0 count)
   ;;
 end
 
-let consume_forced_transient_board_read () =
+let consume_forced_board_io_failure () =
   let rec loop () =
-    let remaining = Atomic.get forced_transient_board_reads_for_test in
+    let remaining = Atomic.get forced_board_io_failures_for_test in
     if remaining <= 0
     then false
     else
       Atomic.compare_and_set
-        forced_transient_board_reads_for_test
+        forced_board_io_failures_for_test
         remaining
         (remaining - 1)
       || loop ()
@@ -48,12 +48,12 @@ let consume_forced_transient_board_read () =
 let pending_board_event_of_stimulus ~meta_after_triage stim =
   match stim.Keeper_event_queue.payload with
   | (Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _)
-    when consume_forced_transient_board_read () ->
+    when consume_forced_board_io_failure () ->
     Error
       { Keeper_world_observation_board_signal.operation =
           Keeper_world_observation_board_signal.Get_post
       ; post_id = stim.post_id
-      ; error = Board.Io_error "forced transient Board stimulus read failure"
+      ; error = Board.Io_error "forced Board stimulus IO failure"
       }
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
@@ -75,48 +75,40 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
 
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
-  | Stimulus_retry_later of
+  | Stimulus_read_failed of
       Keeper_world_observation_board_signal.board_unavailable
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
-  | Transient_board_read of
+  | Board_read_failed of
       Keeper_world_observation_board_signal.board_unavailable
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
     "event queue pending selection failed: " ^ detail
-  | Transient_board_read unavailable ->
-    "event queue stimulus intake retry: "
+  | Board_read_failed unavailable ->
+    "event queue stimulus read failed: "
     ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
 ;;
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
-  | Transient_board_read _ -> "event_queue_transient_board_read"
+  | Board_read_failed _ -> "event_queue_board_read_failed"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
-  | Transient_board_read _ -> false
+  | Board_read_failed _ -> true
 ;;
 
 let classify_pending_board_event_result = function
   | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
-  | Error
-      (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
-    (match
-       Keeper_world_observation_board_signal.disposition_of_unavailable unavailable
-     with
-     | Keeper_world_observation_board_signal.Permanent -> Stimulus_consumed []
-     | Keeper_world_observation_board_signal.Transient ->
-       Stimulus_retry_later unavailable)
+  | Error unavailable -> Stimulus_read_failed unavailable
 ;;
 
-(* Board-unavailable-result: permanent poison is consumed so a swept post
-   cannot crash-loop forever. A transient environment failure remains a typed
-   retry; the queue selection came from [peek_when_result], so retaining it
-   requires no mutation — only withholding consumption and ACK. *)
+(* A Board read failure leaves the selected durable head untouched and returns
+   an exact cycle failure. The heartbeat terminalizes that pending selection;
+   this function grants no automatic replay authority. *)
 let pending_board_events_of_stimulus_result ~meta_after_triage stim =
   let read_result = pending_board_event_of_stimulus ~meta_after_triage stim in
   match read_result with
@@ -129,21 +121,12 @@ let pending_board_events_of_stimulus_result ~meta_after_triage stim =
           , Runtime_observation_query_operation.(to_label Board_stimulus_intake) )
         ]
       ();
-    (match Keeper_world_observation_board_signal.disposition_of_unavailable unavailable with
-     | Keeper_world_observation_board_signal.Permanent ->
-       Log.Keeper.warn
-         "stimulus intake: board read permanently unavailable, consuming stimulus \
-          without retry stimulus_id=%s keeper=%s: %s"
-         stim.Keeper_event_queue.post_id
-         meta_after_triage.name
-         (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-     | Keeper_world_observation_board_signal.Transient ->
-       Log.Keeper.warn
-         "stimulus intake: board read transiently unavailable, retaining exact \
-          pending source stimulus_id=%s keeper=%s: %s"
-         stim.Keeper_event_queue.post_id
-         meta_after_triage.name
-         (Keeper_world_observation_board_signal.unavailable_to_string unavailable));
+    Log.Keeper.warn
+      "stimulus intake: board read failed; terminalizing exact pending \
+       source stimulus_id=%s keeper=%s: %s"
+      stim.Keeper_event_queue.post_id
+      meta_after_triage.name
+      (Keeper_world_observation_board_signal.unavailable_to_string unavailable);
     classify_pending_board_event_result read_result
 ;;
 
@@ -366,7 +349,7 @@ let consume_single_heartbeat_stimulus
       Stimulus_consumed []
   in
   match intake_result with
-  | Stimulus_retry_later _ -> intake_result
+  | Stimulus_read_failed _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StimulusConsumed)
@@ -531,26 +514,7 @@ let heartbeat_event_intake
      checkpoints while that exact source stays pending for continuation. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
-  (* A stimulus whose intake fails transiently keeps its pending entry — it is
-     never acked and never dropped — but it must not hold the selection for the
-     rest of this cycle, or one unreadable entry stops every entry behind it.
-     [select_when] already scans with [first_ready_entry], so withdrawing the
-     observed failure from [ready] hands the turn to the next entry instead.
-
-     The withdrawal set grows by one entry per iteration over a finite pending
-     list, so the walk terminates on the list itself. That is why this is not a
-     retry count, a cooldown, or a cap: nothing here suppresses the failure or
-     defers it on a clock. The entry is reconsidered on the next cycle exactly
-     as before. *)
-  let withdrawn_this_cycle = ref [] in
   let select_pending_matching ready =
-    let ready (stimulus : Keeper_event_queue.stimulus) =
-      (not
-         (List.exists
-            (Keeper_event_queue.stimulus_identity_equal stimulus)
-            !withdrawn_this_cycle))
-      && ready stimulus
-    in
     Keeper_registry_event_queue.select_when_result
       ~base_path
       keeper_name
@@ -677,10 +641,7 @@ let heartbeat_event_intake
            ~keeper_name
            ~event_ids)
   in
-  (* [first_withdrawn] keeps the first transient failure of the cycle so the
-     reported error still names the entry that was actually unavailable, even
-     when a later entry supplies the turn. *)
-  let rec intake_selection first_withdrawn =
+  let intake_selection () =
     match select_pending_after_spent_reconciliation () with
     | Error message ->
       Log.Keeper.error
@@ -689,10 +650,7 @@ let heartbeat_event_intake
         message;
       [], [], None, [], Some (Pending_selection_failed message)
     | Ok None ->
-      (match first_withdrawn with
-       | None -> [], [], None, [], None
-       | Some (selection, unavailable) ->
-         [], [], Some selection, [], Some (Transient_board_read unavailable))
+      [], [], None, [], None
     | Ok (Some selection) ->
       let companions = connector_attention_batch_of_selection selection in
       let connector_attention_items =
@@ -717,10 +675,10 @@ let heartbeat_event_intake
                     companion.source
                 with
                 | Stimulus_consumed observations -> observations
-                | Stimulus_retry_later _ ->
+                | Stimulus_read_failed _ ->
                   (* Unreachable in practice: [consume_single_heartbeat_stimulus]
-                     only returns [Stimulus_retry_later] for a Board/Fusion/etc.
-                     transient read, never for [Connector_attention], and every
+                     only returns [Stimulus_read_failed] for a Board/Fusion/etc.
+                     read, never for [Connector_attention], and every
                      batch companion is itself a [Connector_attention] stimulus
                      (see [connector_attention_batch_of_selection] above). Matched
                      exhaustively rather than assumed away: treat it as "no
@@ -742,20 +700,12 @@ let heartbeat_event_intake
          , Some selection
          , selections
          , None )
-       | Stimulus_retry_later unavailable ->
-         withdrawn_this_cycle := selection.source :: !withdrawn_this_cycle;
-         Log.Keeper.info
-           "turn entry: withdrew transiently unavailable stimulus from this \
-            cycle keeper=%s: %s"
-           keeper_name
-           (Keeper_world_observation_board_signal.unavailable_to_string
-              unavailable);
-         let first_withdrawn =
-           match first_withdrawn with
-           | None -> Some (selection, unavailable)
-           | Some _ as kept -> kept
-         in
-         intake_selection first_withdrawn)
+       | Stimulus_read_failed unavailable ->
+         ( []
+         , []
+         , Some selection
+         , []
+         , Some (Board_read_failed unavailable) ))
   in
   let ( queued_observations
       , consumed_stimuli
@@ -763,7 +713,7 @@ let heartbeat_event_intake
       , consumed_selections
       , event_queue_intake_error )
     =
-    intake_selection None
+      intake_selection ()
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers =

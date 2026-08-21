@@ -140,7 +140,6 @@ let test_broadcast_response_roundtrip () =
       ; delivery_status = Delivery_accepted
       ; delivery_reason = None
       ; workspace_persistence_status = Workspace_persisted
-      ; retry_disposition = Retry_do_not_resend
       }
   in
   let bytes = T.BroadcastResponse.to_bytes resp in

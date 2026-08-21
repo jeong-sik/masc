@@ -73,7 +73,7 @@ import {
   SSE_DEFAULT_DEBOUNCE_MS,
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
-  SSE_RECONNECT_RETRY_MS,
+  SSE_RECONNECT_REFRESH_DELAY_MS,
 } from './config/constants'
 
 // --- Refresh function registration (avoids circular imports) ---
@@ -421,7 +421,7 @@ function handleOperatorDigest(payload: unknown): void {
   }
 }
 
-// P2 silent-failure fix: previously the dynamic import retried on every
+// P2 silent-failure fix: previously the dynamic import reloaded on every
 // Transport-health push event with only console.debug on failure (hidden
 // from default DevTools view).  Two improvements:
 //   1. Cache the imported module so failure is signalled exactly once
@@ -513,7 +513,7 @@ function handleReconnect(): void {
 
   // Refresh all data to recover events missed during disconnect.
   // If the server is still warming up after restart, the first fetch may fail.
-  // Schedule a single retry after 3s to cover the warm-up window.
+  // Schedule a single refresh after 3s to cover the warm-up window.
   invalidateDashboardCache()
   resetExecutionSnapshotGeneration()
   void refreshExecution({ force: true })
@@ -555,22 +555,22 @@ async function hydrateAfterReconnect(): Promise<void> {
   void refreshActiveRoute().catch(err =>
     console.warn('[server-push] reconnect route refresh failed', err instanceof Error ? err.message : err),
   )
-  // Safety-net retry: if project-snapshot fetch failed (e.g. server warm-up),
-  // the scheduler's error signal will be set. Retry once after delay.
+  // Safety-net refresh: if project-snapshot fetch failed (e.g. server warm-up),
+  // the scheduler's error signal will be set. Refresh once after delay.
   setTimeout(() => {
     if (namespaceTruthError.value) {
       requestNamespaceTruthNow()
     }
-    void refreshDashboard({ force: true }).catch(retryErr =>
+    void refreshDashboard({ force: true }).catch(refreshErr =>
       console.warn(
-        '[server-push] reconnect dashboard retry failed',
-        retryErr instanceof Error ? retryErr.message : retryErr,
+        '[server-push] reconnect dashboard refresh failed',
+        refreshErr instanceof Error ? refreshErr.message : refreshErr,
       ),
     )
-    void refreshActiveRoute().catch(retryErr =>
-      console.warn('[server-push] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
+    void refreshActiveRoute().catch(refreshErr =>
+      console.warn('[server-push] reconnect route refresh failed', refreshErr instanceof Error ? refreshErr.message : refreshErr),
     )
-  }, SSE_RECONNECT_RETRY_MS)
+  }, SSE_RECONNECT_REFRESH_DELAY_MS)
 }
 
 // --- Board incremental hydration ---

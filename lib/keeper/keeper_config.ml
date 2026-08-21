@@ -103,14 +103,14 @@ let keeper_bootstrap_stagger_step_sec_rp =
 let keeper_bootstrap_stagger_step_sec () : int =
   Runtime_params.get keeper_bootstrap_stagger_step_sec_rp
 
-let keeper_bootstrap_retry_interval_sec_rp =
-  _rp_int ~key:"keeper.bootstrap.retry_interval_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_RETRY_INTERVAL_SEC"
+let keeper_bootstrap_registration_interval_sec_rp =
+  _rp_int ~key:"keeper.bootstrap.registration_interval_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_REGISTRATION_INTERVAL_SEC"
                           ~default:30 ~min_v:5 ~max_v:300)
     ~min_v:5 ~max_v:300
-    ~description:"Delay between autoboot retry rounds (seconds)" ()
-let keeper_bootstrap_retry_interval_sec () : int =
-  Runtime_params.get keeper_bootstrap_retry_interval_sec_rp
+    ~description:"Delay between autoboot registration rounds (seconds)" ()
+let keeper_bootstrap_registration_interval_sec () : int =
+  Runtime_params.get keeper_bootstrap_registration_interval_sec_rp
 
 let keeper_batch_limit_rp =
   _rp_int ~key:"keeper.turn.batch_limit"

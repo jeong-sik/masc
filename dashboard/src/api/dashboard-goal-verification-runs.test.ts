@@ -58,14 +58,12 @@ describe('parseGoalVerificationRunsResponse', () => {
       count: 1,
       runs: [row({
         status: 'deferred',
-        retryable: false,
         detail: 'linked task has no performer tree',
         tools: [],
       })],
     })
     expect(parsed.runs[0]).toMatchObject({
       status: 'deferred',
-      retryable: false,
       detail: 'linked task has no performer tree',
     })
   })

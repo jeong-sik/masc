@@ -51,12 +51,6 @@ let compact_receipt_runtime_json receipt =
       ; ( "fallback_applied"
         , Json_util.bool_opt_to_json (json_bool "fallback_applied" runtime) )
       ; "outcome", Json_util.string_opt_to_json (json_string "outcome" runtime)
-      ; ( "degraded_retry_applied"
-        , Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" runtime) )
-      ; ( "degraded_retry_runtime"
-        , Json_util.string_opt_to_json (json_string "degraded_retry_runtime" runtime) )
-      ; ( "fallback_reason"
-        , Json_util.string_opt_to_json (json_string "fallback_reason" runtime) )
       ]
   | _ -> `Null
 ;;

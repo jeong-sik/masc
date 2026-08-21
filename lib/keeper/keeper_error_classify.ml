@@ -1,5 +1,4 @@
-(** Keeper_error_classify — Error classification
-    and retry constants for the unified keeper cycle.
+(** Keeper_error_classify — Error classification for the unified keeper cycle.
 
     Pure predicates and classification functions over [Agent_core.Error.t].
     No I/O, no state mutation.
@@ -13,10 +12,8 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-(** Detect transient network errors that warrant retry with short backoff.
-    Uses structured [Agent_core.Error.t] pattern matching instead of
-    substring matching on stringified error messages. *)
-let is_transient_internal_transport_error = function
+(** Exact typed runner TLS diagnostic. *)
+let is_runner_tls_transport_error = function
   | Llm_provider.Http_client.Tls_error -> true
   | Llm_provider.Http_client.Connection_refused
   | Llm_provider.Http_client.Dns_failure
@@ -27,13 +24,13 @@ let is_transient_internal_transport_error = function
     false
 ;;
 
-let is_transient_internal_runner_error (err : Agent_core.Error.t) : bool =
+let is_runner_tls_error (err : Agent_core.Error.t) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
       (Keeper_turn_driver.Internal_unhandled_exception
          { site; transport_error_kind = Some transport_error_kind; _ })
     when String.equal site Keeper_turn_driver.runtime_runner_execute_site ->
-    is_transient_internal_transport_error transport_error_kind
+    is_runner_tls_transport_error transport_error_kind
   | Some
       ( Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Runtime_exhausted _
@@ -50,10 +47,10 @@ let is_transient_internal_runner_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None -> false
 
-(** {1 Typed retry classification} *)
+(** {1 Typed provider availability diagnostics} *)
 
-let is_transient_network_error (err : Agent_core.Error.t) : bool =
-  if is_transient_internal_runner_error err
+let is_provider_availability_error (err : Agent_core.Error.t) : bool =
+  if is_runner_tls_error err
   then true
   else match err with
   | Agent_core.Error.Api (NetworkError _) -> true
@@ -145,7 +142,7 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
     non-overflow stop_reason but returned no thinking, text, or tool calls
     (a broken backend model answering with an empty assistant turn).  AGENT_CORE
     surfaces exactly two shapes for this condition
-    (agent_core [Retry.verdict_of_empty_completion]):
+    (agent_core [Api_error.verdict_of_empty_completion]):
 
     - [Provider (ProviderUnavailable {detail})] with [detail] starting
       ["empty completion (stop_reason="] — a recognized non-overflow
@@ -156,7 +153,7 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
 
     - [Api (InvalidRequest _)] — AGENT_CORE flattens only the unmodeled-stop_reason
       and the context-overflow empty completions into [InvalidRequest].  The
-      first is intentionally non-retryable (agent_core
+      first is intentionally terminal (agent_core
       provider_failure_attribution.ml: retrying replays the identical prompt
       and never terminates); the second replays the same oversized prompt.
       Neither is recoverable by retry or failover, so no [InvalidRequest]
@@ -228,37 +225,6 @@ let is_receipt_lost_error (err : Agent_core.Error.t) : bool =
 let is_provider_timeout_error (err : Agent_core.Error.t) : bool =
   Keeper_provider_runtime_boundary.is_provider_timeout_error err
 
-let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some
-      (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
-      true
-  | Some
-      (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
-      true
-  | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      (* Legacy [cooldown_cause] values are diagnostic-only. A decoded receipt
-         from the retired pre-dispatch gate must not regain lifecycle authority. *)
-      true
-  | Some (Keeper_turn_driver.Runtime_exhausted _) ->
-      false
-  | Some (Keeper_turn_driver.Accept_rejected _)
-  | Some (Keeper_turn_driver.Resumable_cli_session _)
-  (* RFC-0159 Phase A: opaque internal failures. *)
-  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
-  | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _)
-  | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
-  | Some (Keeper_turn_driver.Terminal_effect_failed _)
-  | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
-  | Some (Keeper_turn_driver.Tool_correction_lost _)
-  | Some (Keeper_turn_driver.Receipt_persistence_failed _)
-  | Some (Keeper_turn_driver.Gate_replay_repair_required _)
-  | None ->
-      false
-
 let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
@@ -282,386 +248,6 @@ let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None ->
     false
-
-(* Classification of why a degraded retry is being attempted.  Closed set
-   covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
-   and [recoverable_runtime_failure_reason] (broader set including raw
-   provider API failures).  Wire form is the lowercase string via
-   [degraded_retry_reason_to_string]. *)
-type degraded_retry_reason =
-  | Hard_quota
-  | Resumable_cli_session
-  | Runtime_candidates_filtered
-  | Runtime_exhausted
-  | Capacity_backpressure
-  | Rate_limit
-  | Server_error
-  | Auth_error
-  | Deferred_runtime_lane
-  | Empty_no_progress
-  | Thinking_only_no_progress
-
-let degraded_retry_reason_to_string = function
-  | Hard_quota -> "hard_quota"
-  | Resumable_cli_session -> "resumable_cli_session"
-  | Runtime_candidates_filtered -> "runtime_candidates_filtered"
-  | Runtime_exhausted -> "runtime_exhausted"
-  | Capacity_backpressure -> "capacity_backpressure"
-  | Rate_limit -> "rate_limit"
-  | Server_error -> "server_error"
-  | Auth_error -> "auth_error"
-  | Deferred_runtime_lane -> "deferred_runtime_lane"
-  | Empty_no_progress -> "empty_no_progress"
-  | Thinking_only_no_progress -> "thinking_only_no_progress"
-
-let accept_rejection_degraded_retry_reason err =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some internal_error ->
-    (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
-     | Some `Empty_no_progress -> Some Empty_no_progress
-     | Some `Thinking_only_no_progress -> Some Thinking_only_no_progress
-     | None -> None)
-  | None -> None
-
-type degraded_retry =
-  { next_runtime : string
-  ; fallback_reason : degraded_retry_reason
-  }
-
-let is_declared_phase_alias raw phase_name =
-  String.equal (String.trim raw) phase_name
-
-let fallback_runtime_for_unavailable_profile
-    ~(base_runtime : string)
-    ~(effective_runtime : string) : string option =
-  let normalized_base =
-    String.trim base_runtime
-  in
-  let normalized_effective =
-    String.trim effective_runtime
-  in
-  if not (String.equal normalized_effective normalized_base)
-  then Some normalized_base
-  else if String.equal normalized_effective (Keeper_config.default_runtime_id ())
-  then None
-  else Some (Keeper_config.default_runtime_id ())
-
-let degraded_retry_after_recoverable_error
-    ~(effective_runtime : string)
-    (err : Agent_core.Error.t) : degraded_retry option =
-  let normalized_effective =
-    String.trim effective_runtime
-  in
-  let effective_is_declared_phase_buffer =
-    is_declared_phase_alias effective_runtime (Keeper_config.default_runtime_id ())
-  in
-  let effective_is_declared_phase_recovery =
-    is_declared_phase_alias
-      effective_runtime
-      (Keeper_config.default_runtime_id ())
-  in
-  let phase_recovery_retry fallback_reason =
-    Some
-      {
-        next_runtime = (Keeper_config.default_runtime_id ());
-        fallback_reason;
-      }
-  in
-  if effective_is_declared_phase_buffer
-     || effective_is_declared_phase_recovery
-     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
-  then None
-  else if Keeper_runtime_failure_route.core_error_is_hard_quota err then
-    phase_recovery_retry Hard_quota
-  else
-    match Keeper_turn_driver.classify_masc_internal_error err with
-    | Some (Keeper_turn_driver.Resumable_cli_session _) ->
-        phase_recovery_retry Resumable_cli_session
-    | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        phase_recovery_retry Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
-        phase_recovery_retry Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
-        phase_recovery_retry Runtime_candidates_filtered
-    | Some (Keeper_turn_driver.Accept_rejected _) ->
-        (match accept_rejection_degraded_retry_reason err with
-         | Some reason -> phase_recovery_retry reason
-         | None -> None)
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted _)
-    (* RFC-0159 Phase A: opaque internal failures have no
-       local-recovery retry mapping. *)
-    | Some (Keeper_turn_driver.Internal_unhandled_exception _)
-    | Some (Keeper_turn_driver.Internal_bridge_exception _)
-    | Some (Keeper_turn_driver.Internal_contract_rejected _)
-    | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
-    | Some (Keeper_turn_driver.Terminal_effect_failed _)
-    | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
-    | Some (Keeper_turn_driver.Tool_correction_lost _)
-    | Some (Keeper_turn_driver.Receipt_persistence_failed _)
-    | Some (Keeper_turn_driver.Gate_replay_repair_required _)
-    | None ->
-        None
-
-let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
-  if Keeper_runtime_failure_route.core_error_is_hard_quota err then
-    Some Hard_quota
-  else
-    match Keeper_turn_driver.classify_masc_internal_error err with
-    | Some (Keeper_turn_driver.Resumable_cli_session _) ->
-        Some Resumable_cli_session
-    | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        Some Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
-        Some Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
-        Some Runtime_candidates_filtered
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted _) ->
-        (* Generic runtime exhaustion: all candidates failed without a more
-           specific reason. Treat as recoverable so declarative
-           [fallback_runtime] hints declared in runtime.toml actually
-           escalate. Receipt-derived data on 2026-04-25 showed 31/39
-           silent turns ended with [(null)] fallback_reason because this
-           arm previously returned [None]. Other arms below remain
-           non-recoverable to keep the surface conservative. *)
-        Some Runtime_exhausted
-    | Some (Keeper_turn_driver.Accept_rejected _) ->
-        accept_rejection_degraded_retry_reason err
-    (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
-       reasons; they expose previously-opaque raw exception payloads.  *)
-    | Some (Keeper_turn_driver.Internal_unhandled_exception _)
-    | Some (Keeper_turn_driver.Internal_bridge_exception _)
-    | Some (Keeper_turn_driver.Internal_contract_rejected _)
-    | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
-    | Some (Keeper_turn_driver.Terminal_effect_failed _)
-    | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
-    | Some (Keeper_turn_driver.Tool_correction_lost _)
-    | Some (Keeper_turn_driver.Receipt_persistence_failed _)
-    | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
-        None
-    | None ->
-        (* Typed runtime rotation: raw provider API errors that are
-           not wrapped in a MASC internal error (e.g. single-provider runtimes
-           where AGENT_CORE surfaces the error directly) should still trigger rotation
-           when a different runtime may succeed.
-
-           429 rate-limit (non-hard-quota): rotate through explicitly declared
-           candidates. The error type does not carry model/account/provider
-           scope, so this boundary must not infer a broader blocked set.
-
-           [ServerError]: the provider is unhealthy or overloaded; a
-           different runtime may be healthy.
-
-           401/403 auth errors: the credential for this runtime is invalid; a
-           different runtime with different credentials may succeed.
-
-           [PaymentRequired] and provider [HardQuota] are handled above by
-           [core_error_is_hard_quota]. Rate limits intentionally keep [Rate_limit]
-           so declared runtime fallback remains available. *)
-        (match err with
-         | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _) ->
-             Some Rate_limit
-         | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _) ->
-             Some Capacity_backpressure
-         | Agent_core.Error.Api (Llm_provider.Retry.ServerError _) ->
-             Some Server_error
-         | Agent_core.Error.Api
-             ( Llm_provider.Retry.AuthError _
-             | Llm_provider.Retry.AuthorizationError _ ) ->
-             Some Auth_error
-         | Agent_core.Error.Provider
-             (Llm_provider.Error.RateLimit _) ->
-             Some Rate_limit
-         | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
-             Some Capacity_backpressure
-         | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
-             Some Hard_quota
-         | Agent_core.Error.Provider (Llm_provider.Error.ServerError _) ->
-             Some Server_error
-         | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
-             Some Server_error
-         | Agent_core.Error.Provider
-             ( Llm_provider.Error.AuthError _
-             | Llm_provider.Error.AuthorizationError _
-             | Llm_provider.Error.MissingApiKey _ ) ->
-             Some Auth_error
-         (* Wire/provided-response failures are intentionally excluded here.
-            This function selects a deferred whole-runtime lane after the
-            current candidate walk; same-turn candidate rotation is already
-            decided by [Keeper_runtime_attempt] mapping these typed facts to
-            [ProviderFailure]. Reclassifying them here would conflate the two
-            boundaries and schedule a second whole-runtime wake for the same
-            malformed provider response. *)
-         | Agent_core.Error.Provider
-             (Llm_provider.Error.InvalidConfig _
-             | Llm_provider.Error.InvalidRequest _
-             | Llm_provider.Error.NotFound _
-             | Llm_provider.Error.NetworkError _
-             | Llm_provider.Error.Timeout _
-             | Llm_provider.Error.ParseError _
-             | Llm_provider.Error.ProviderWireError _
-             | Llm_provider.Error.ProviderReportedError _
-             | Llm_provider.Error.UnknownVariant _
-             | Llm_provider.Error.ProviderTerminal _) ->
-             None
-         | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
-         | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
-         | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
-         | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
-         | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
-         | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
-         | Agent_core.Error.Api (Llm_provider.Retry.Timeout _) -> None
-         (* Non-API error families have no rotation reason here: structured
-            MASC internal errors are handled by [classify_masc_internal_error]
-            above; agent / mcp / config / etc. are not provider-level rotations. *)
-         | Agent_core.Error.Agent _
-         | Agent_core.Error.Mcp _
-         | Agent_core.Error.Config _
-         | Agent_core.Error.Serialization _
-         | Agent_core.Error.Io _
-         | Agent_core.Error.Orchestration _
-         | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)
-
-let normalized_runtime_id ~catalog_names name =
-  let trimmed = String.trim name in
-  if List.exists (String.equal trimmed) catalog_names then trimmed
-  else if String.equal trimmed (Keeper_config.default_runtime_id ())
-  then trimmed
-  else trimmed
-
-let runtime_catalog_names () =
-  match Runtime.get_runtime_ids () with
-  | [] -> [ Keeper_config.default_runtime_id () ]
-  | names -> names
-;;
-
-let default_degraded_rotation_candidates
-    ~catalog_names
-    ~(fallback_reason : degraded_retry_reason option)
-    ~(base_runtime : string) =
-  let normalized_base = normalized_runtime_id ~catalog_names base_runtime in
-  let default_runtime =
-    normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
-  in
-  let phase_recovery_runtime =
-    normalized_runtime_id ~catalog_names
-      (Runtime.get_default_runtime_id ())
-  in
-  let default_candidates = [ normalized_base; default_runtime; phase_recovery_runtime ] in
-  let catalog_runtimes =
-    Runtime.get_runtimes ()
-    |> List.map (fun (runtime : Runtime.t) ->
-           normalized_runtime_id ~catalog_names runtime.id)
-  in
-  let candidates_with_catalog =
-    dedupe_keep_order (default_candidates @ catalog_runtimes)
-  in
-  match fallback_reason with
-  | Some (Empty_no_progress | Thinking_only_no_progress) ->
-    let tool_capable =
-      Runtime.get_runtimes ()
-      |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)
-      |> List.map (fun (runtime : Runtime.t) ->
-             normalized_runtime_id ~catalog_names runtime.id)
-    in
-    dedupe_keep_order (default_candidates @ tool_capable)
-  | Some
-      ( Capacity_backpressure
-      | Server_error
-      | Auth_error
-      | Runtime_exhausted
-      | Runtime_candidates_filtered
-      | Resumable_cli_session ) ->
-    (* Phase B-1: include the full runtime catalog so transient infrastructure
-       failures (notably capacity_backpressure) can fail over to a healthy
-       runtime outside the narrow [base; default; phase_recovery] set.
-       Without this, two unavailable runtimes had nowhere to go (#23373,
-       incidents 2026-05-21 / 2026-07-06). *)
-    candidates_with_catalog
-  | Some Deferred_runtime_lane -> []
-  | Some (Hard_quota | Rate_limit)
-  | None ->
-    default_candidates
-
-let degraded_rotation_candidates
-    ~catalog_names
-    ~(fallback_reason : degraded_retry_reason)
-    ~(fallback_hint : string option)
-    ~(base_runtime : string)
-    ~(effective_runtime : string) =
-  let normalized_effective =
-    normalized_runtime_id ~catalog_names effective_runtime
-  in
-  let raw_candidates =
-    default_degraded_rotation_candidates
-      ~catalog_names
-      ~fallback_reason:(Some fallback_reason)
-      ~base_runtime
-  in
-  let fallback_hint_candidate =
-    match fallback_hint with
-    | None -> None
-    | Some hint ->
-        let trimmed = String.trim hint in
-        if String.equal trimmed "" then None
-        else Some (normalized_runtime_id ~catalog_names trimmed)
-  in
-  let candidates =
-    match fallback_hint_candidate with
-    | None -> raw_candidates
-    | Some hint -> dedupe_keep_order (hint :: raw_candidates)
-  in
-  candidates
-  |> List.filter (fun candidate ->
-         not (String.equal candidate normalized_effective))
-
-let degraded_rotation_after_recoverable_error
-      ?fallback_hint
-      ~(base_runtime : string)
-      ~(effective_runtime : string)
-    ~(attempted_runtimes : string list)
-    (err : Agent_core.Error.t) : degraded_retry option =
-  match recoverable_runtime_failure_reason err with
-  | None -> None
-  | Some fallback_reason ->
-      (* Load the live catalog once at the degraded-rotation boundary and pass
-         the snapshot through normalization/filter helpers.  This preserves
-         concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = runtime_catalog_names () in
-      let attempted =
-        attempted_runtimes
-        |> List.map (normalized_runtime_id ~catalog_names)
-        |> dedupe_keep_order
-      in
-      let candidates =
-        degraded_rotation_candidates
-          ~catalog_names
-          ~fallback_reason
-          ~fallback_hint
-          ~base_runtime ~effective_runtime
-      in
-      let untried =
-        List.find_opt
-          (fun candidate ->
-             not (List.exists (String.equal candidate) attempted))
-          candidates
-      in
-      (match untried with
-       | Some next_runtime ->
-         Some { next_runtime; fallback_reason }
-       | None ->
-         (* One typed candidate pass is complete. A later Keeper turn may make
-            a fresh attempt; this boundary never invents a timed retry cycle. *)
-         None)
 
 (** [true] only for the typed API-side 400 rejection. Rendered provider text
     carries no recovery authority. *)
@@ -690,63 +276,6 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Api (InputCapacity _) -> false
   | _ -> false
 
-(* Invariant for this predicate: the exemption gate is
-   [Keeper_unified_turn_failure.account_failure_counting].  When it returns
-   [false], [record_failure_observation] skips [increment_turn_failures], so
-   every exempted class must carry its own compensating accounting.  Without
-   one, "not counted toward crash" means the keeper retries the same failure
-   forever with [consecutive] pinned at 0.
-
-   - runtime-exhausted ([Runtime_exhausted _] / [Resumable_cli_session _]):
-     NOT exempt.  [account_failure_counting] counts them toward the crash
-     threshold via its [is_runtime_exhausted_error] override, so the ordinary
-     consecutive-failure threshold bounds them.
-   - capacity backpressure: exempt; bounded by the runtime-rotation path —
-     [recoverable_runtime_failure_reason] maps it to [Capacity_backpressure]
-     and [degraded_rotation_after_recoverable_error] walks the untried
-     runtime catalog once, then stops (it never invents a timed retry cycle).
-   - transient network: exempt from Keeper crash accounting. The typed route
-     allows only a configured successor runtime. Without one, the heartbeat
-     records a terminal source observation instead of re-entering the same
-     request on a timer or queue cycle.
-   - context overflow: NOT exempt (#26546). The automatic in-lane compaction
-     recovery was removed after producing no committed compaction. A provider
-     overflow without a state-changing successor has no evidence that
-     mechanical retry will fit. The ordinary consecutive-failure threshold
-     bounds it, and the heartbeat quarantines the selected source unless the
-     failure carries a deferred runtime lane
-     ([Keeper_heartbeat_loop.failed_source_disposition]).
-   - 0-byte empty completion: bounded by
-     [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
-     [empty_completion_exemption_budget] consecutive exempted empty
-     completions the failure counts toward the crash threshold again, and a
-     successful turn resets the budget.  Only the modeled, non-overflow
-     shapes are exempt via [is_empty_completion_error]; the unmodeled
-     stop_reason shape that AGENT_CORE reports as [InvalidRequest] is NOT an
-     empty-completion exemption — it falls under the [InvalidRequest] class
-     below.
-   - deterministic invalid request (400): bounded by the per-keeper
-     consecutive counter in
-     [Keeper_unified_turn_failure.note_invalid_request_failure]; after
-     [max_consecutive_invalid_request_failures] rejections without an
-     intervening success the observation degrades to ordinary crash
-     accounting, so a poisoned checkpoint cannot retry forever with the
-     counter pinned at 0.
-
-   Provider parse rejections used to be listed here and had no such accounting.
-   A provider that keeps emitting a malformed stream (for example a tool_call
-   delta with a blank id, which the AGENT_CORE SSE parser rejects) produced an
-   unbounded retry loop: 923 rejections across five keepers in 1h41m on
-   2026-07-21, each attempt costing up to 70s, with no escalation because the
-   counter never advanced. They are no longer exempt, so the ordinary
-   consecutive-failure threshold bounds them; an isolated malformed response
-   still costs nothing, because a later success resets the counter. *)
-let is_auto_recoverable_turn_error (err : Agent_core.Error.t) : bool =
-  is_transient_network_error err
-  || is_auto_recoverable_runtime_exhausted_error err
-  || is_empty_completion_error err
-  || is_invalid_request_error err
-
 let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   if Keeper_provider_runtime_boundary.is_provider_timeout_error err
   then true
@@ -770,9 +299,6 @@ let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
     false
-
-(* [is_context_overflow] now lives earlier in this file, above
-   [is_auto_recoverable_turn_error], since that predicate depends on it. *)
 
 (** Extract the [InputRequired] payload from an [core_error], if any.
     Typed companion to {!is_input_required_error}; callers that need

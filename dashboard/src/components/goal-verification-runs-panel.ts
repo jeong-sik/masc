@@ -92,7 +92,7 @@ function GoalVerificationRunRow({ row }: { row: GoalVerificationRunRecord }) {
       <td class="py-2 pr-2 tabular-nums">${formatElapsed(row.elapsedSeconds)}</td>
       <td class="py-2 pr-2 whitespace-nowrap">${relativeTime(new Date(row.startedAt * 1000).toISOString())}</td>
       <td class="py-2 pr-2 break-words">
-        ${row.retryable === false ? html`<strong>[수동 확인 필요]</strong> ` : null}${row.detail ?? ''}
+        ${row.detail ?? ''}
       </td>
       <td class="py-2"><${ToolCalls} row=${row} /></td>
     </tr>

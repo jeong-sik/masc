@@ -40,7 +40,7 @@ type t =
 val ignoring_execution_env : tool_handler -> execution_env_tool_handler
 
 (** Adapt a context-aware handler. Executing it without a context returns a
-    non-recoverable [Deterministic] error rather than substituting one. *)
+    [Deterministic] error rather than substituting one. *)
 val requiring_context : context_tool_handler -> execution_env_tool_handler
 
 (** Pair a schema with a handler.

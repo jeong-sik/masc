@@ -568,11 +568,11 @@ export async function resolveGateApproval(
   return decodeResolveGateApprovalResponse(raw, id, resolution.decision)
 }
 
-export function retryGateAutoJudge(
+export function rerunGateAutoJudge(
   id: string,
   expected: KeeperAutoJudgeRearmExpectation,
 ): Promise<{ ok: boolean; id: string }> {
-  return post('/api/v1/dashboard/gate/retry', { id, ...expected })
+  return post('/api/v1/dashboard/gate/rerun', { id, ...expected })
 }
 
 export async function deleteGateApprovalRule(

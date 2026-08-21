@@ -85,7 +85,6 @@ module Attr_key = struct
   let keeper_generation = register Legacy "keeper.generation"
   let keeper_max_context = register Legacy "keeper.max_context"
   let keeper_channel = register Legacy "keeper.channel"
-  let keeper_is_retry = register Legacy "keeper.is_retry"
   let keeper_current_task_id = register Legacy "keeper.current_task_id"
 
   let registry = List.rev !registry_ref
@@ -163,7 +162,6 @@ let keeper_turn_attrs
       ~generation
       ~max_context
       ~channel
-      ~is_retry
       ~current_task_id
   =
   let runtime_id = runtime_id in
@@ -178,7 +176,6 @@ let keeper_turn_attrs
   ; Attr_key.keeper_generation, `Int generation
   ; Attr_key.keeper_max_context, `Int max_context
   ; Attr_key.keeper_channel, `String channel
-  ; Attr_key.keeper_is_retry, `Bool is_retry
   ; Attr_key.gen_ai_operation_name, `String "invoke_agent"
   ; Attr_key.gen_ai_provider_name, `String "masc"
   ; Attr_key.gen_ai_agent_name, `String keeper_name
@@ -205,7 +202,6 @@ let with_keeper_turn_span
       ~generation
       ~max_context
       ~channel
-      ~is_retry
       ~current_task_id
       f
   =
@@ -221,7 +217,6 @@ let with_keeper_turn_span
         ~generation
         ~max_context
         ~channel
-        ~is_retry
         ~current_task_id
     in
     Otel_spans.with_span

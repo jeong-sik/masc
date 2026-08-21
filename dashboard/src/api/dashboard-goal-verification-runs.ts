@@ -21,7 +21,6 @@ export interface GoalVerificationRunRecord {
   status: GoalVerificationRunStatus
   elapsedSeconds?: number
   evaluatorRuntime?: string
-  retryable?: boolean
   detail?: string
   tools?: VerificationToolObservation[]
 }
@@ -88,7 +87,7 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
     : status === 'reviewed' || status === 'committed'
       ? ['elapsed_s', 'tools']
       : status === 'deferred'
-        ? ['elapsed_s', 'tools', 'retryable', 'detail']
+        ? ['elapsed_s', 'tools', 'detail']
         : ['elapsed_s', 'tools', 'detail']
   exactFields(raw, [...baseFields, ...outcomeFields], status === 'running' ? [] : ['evaluator_runtime'], context)
   const tools = status === 'running'
@@ -96,9 +95,6 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
     : Array.isArray(raw.tools)
       ? raw.tools.map((tool, toolIndex) => parseVerificationToolObservation(tool, `${context}.tools[${toolIndex}]`))
       : protocolError(`${context}.tools must be an array`)
-  if (status === 'deferred' && typeof raw.retryable !== 'boolean') {
-    protocolError(`${context}.retryable must be a boolean`)
-  }
   return {
     runId: nonEmptyString(raw.run_id, `${context}.run_id`),
     goalId: nonEmptyString(raw.goal_id, `${context}.goal_id`),
@@ -112,7 +108,6 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
     evaluatorRuntime: raw.evaluator_runtime === undefined
       ? undefined
       : nonEmptyString(raw.evaluator_runtime, `${context}.evaluator_runtime`),
-    retryable: status === 'deferred' ? raw.retryable as boolean : undefined,
     detail: status === 'deferred' || status === 'raised'
       ? nonEmptyString(raw.detail, `${context}.detail`)
       : undefined,

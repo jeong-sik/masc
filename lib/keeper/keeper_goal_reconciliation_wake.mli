@@ -42,4 +42,4 @@ val reconcile_startup :
 (** Re-scan canonical Goal, Task, and link state and atomically restore missing
     reconciliation stimuli. Safe to call on every existing supervisor
     reconciliation pass: accounted stimuli are reported as already present,
-    storage failures remain visible and retryable, and no Goal state changes. *)
+    storage failures remain visible, and no Goal state changes. *)

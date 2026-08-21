@@ -3,16 +3,11 @@
 // 1-tier (existing): EmptyState, LoadingState, ErrorState — single
 // message. ErrorState is the catch-all for unstructured failures.
 //
-// 2-tier (added per design-system v0.4 cb-group-g SPEC §G3): split
-// recoverable/fatal so callers can distinguish "tried-and-bounced,
-// retry will likely work" from "session/connection broken, reload
-// is the only path forward". Each tier exposes a primary action slot.
-
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { ActionButton } from './button'
 
-export type FeedbackStateKind = 'empty' | 'loading' | 'error' | 'recoverable' | 'fatal'
+export type FeedbackStateKind = 'empty' | 'loading' | 'error' | 'fatal'
 
 export interface FeedbackStateSummary {
   kind: FeedbackStateKind
@@ -142,62 +137,6 @@ export function ErrorState({ message, class: cx }: ErrorStateProps) {
   `
 }
 
-interface ErrorRecoverableProps {
-  /** One-line summary surfaced as the alert headline. */
-  title: string
-  /** Optional second line — caller-supplied context (timing, provider,
-      retry count). Rendered in the muted secondary tone. */
-  detail?: string
-  /** Click handler for the inline retry action. When omitted the button
-      is not rendered (caller may be queueing retries elsewhere). */
-  onRetry?: () => void
-  /** Override the retry button label. Default: "다시 시도". */
-  retryLabel?: string
-  class?: string
-}
-
-/** Soft / amber tier — the operation bounced through fallback paths
-    and ended up in a state where another attempt will likely succeed
-    (e.g. runtime exhausted at the selected provider, retry will rotate to a fallback). */
-export function ErrorRecoverable({
-  title,
-  detail,
-  onRetry,
-  retryLabel = '다시 시도',
-  class: cx,
-}: ErrorRecoverableProps) {
-  const summary = summarizeFeedbackState('recoverable', {
-    icon: true,
-    action: onRetry,
-    detail,
-  })
-  return html`
-    <section
-      role="alert"
-      class="flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
-      ...${feedbackStateAttrs(summary)}
-    >
-      <div class="flex items-center gap-2">
-        <span class="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--warn-20)] px-1 font-mono text-[10px] text-[var(--warn-bright)]" aria-hidden="true" data-feedback-icon>
-          RT
-        </span>
-        <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--warn-bright)]">
-          복구 가능
-        </span>
-        ${onRetry ? html`
-          <span class="ml-auto">
-            <${ActionButton} variant="ghost" size="sm" onClick=${onRetry}>
-              ${retryLabel}
-            <//>
-          </span>
-        ` : null}
-      </div>
-      <div class="text-sm text-[var(--color-fg-primary)]">${title}</div>
-      ${detail ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${detail}</div>` : null}
-    </section>
-  `
-}
-
 interface ErrorFatalProps {
   /** One-line summary surfaced as the alert headline. */
   title: string
@@ -213,9 +152,7 @@ interface ErrorFatalProps {
   class?: string
 }
 
-/** Hard / bad tier — the underlying connection or session is gone and
-    no retry of the in-flight operation will help. Reload is the path
-    forward (e.g. WebSocket closed, auth token expired). */
+/** Hard / bad tier with an explicit whole-surface reload action. */
 export function ErrorFatal({
   title,
   detail,

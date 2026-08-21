@@ -279,9 +279,6 @@ describe('parseKeeperCompositeSnapshot', () => {
           attempt_count: 2,
           fallback_applied: true,
           outcome: 'exhausted',
-          degraded_retry_applied: false,
-          degraded_retry_runtime: null,
-          fallback_reason: 'stale_turn_timeout',
         },
         claim_attempt: {
           present: false,

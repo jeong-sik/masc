@@ -713,11 +713,11 @@ let handle_gate_resolve_body state operator_name request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
-let handle_gate_retry_body state operator_name request reqd body_str =
+let handle_gate_rerun_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
     let base_path = (Mcp_server.workspace_config state).base_path in
-    match dashboard_gate_retry_http_json ~base_path ~requested_by:operator_name ~args with
+    match dashboard_gate_rerun_http_json ~base_path ~requested_by:operator_name ~args with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error message ->
       respond_json_value_with_cors
@@ -1539,11 +1539,11 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_resolve_body state operator_name request reqd))
          request reqd)
-  |> Http.Router.post "/api/v1/dashboard/gate/retry" (fun request reqd ->
+  |> Http.Router.post "/api/v1/dashboard/gate/rerun" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_retry_body state operator_name request reqd))
+             (handle_gate_rerun_body state operator_name request reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/schedule/prune" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

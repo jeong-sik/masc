@@ -46,12 +46,9 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
 let keeper_diagnostic_health_state json =
   Json_util.get_string json "health_state" |> Option.map String.lowercase_ascii
 
-let keeper_diagnostic_recoverable json =
-  Json_util.get_bool json "recoverable" |> Option.value ~default:false
-
 let keeper_recovery_outcome after_diagnostic =
   match keeper_diagnostic_health_state after_diagnostic with
-  | Some ("healthy" | "idle") when not (keeper_diagnostic_recoverable after_diagnostic) ->
+  | Some ("healthy" | "idle") ->
       (true, None)
   | Some state ->
       ( false,
@@ -166,24 +163,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         resolve_keeper_meta_for_name ctx ~name
       in
       let* before_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
-      let recoverable =
-        Json_util.get_bool before_diagnostic "recoverable" |> Option.value ~default:false
-      in
-      if not recoverable then
-        Ok
-          (`Assoc
-            [
-              ("tool_name", `String "masc_keeper_recover");
-              ( "result",
-                `Assoc
-                  [
-                    ("recovered", `Bool false);
-                    ("skipped_reason", `String "keeper is already healthy enough; recovery not required");
-                    ("before", before_diagnostic);
-                  ] );
-            ])
-      else
-        let* down_result =
+      let* down_result =
           dispatch_keeper_json ctx ~tool_name:"masc_keeper_down"
             ~args:(`Assoc [ ("name", `String resolved_name) ])
         in

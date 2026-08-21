@@ -822,7 +822,6 @@ let test_terminal_typed_error_allows_correction () =
   let typed_error =
     Error
       { Types.message = "correct input"
-      ; recoverable = true
       ; error_class = Some Types.Deterministic
       }
   in
@@ -865,7 +864,6 @@ let test_terminal_post_effect_error_stops_before_next_provider () =
   let typed_error =
     Error
       { Types.message = "effect committed before receipt failure"
-      ; recoverable = true
       ; error_class = Some Types.Unknown
       }
   in
@@ -917,7 +915,6 @@ let test_terminal_unknown_effect_error_is_typed () =
   let typed_error =
     Error
       { Types.message = "effect outcome cannot be proven"
-      ; recoverable = true
       ; error_class = Some Types.Unknown
       }
   in

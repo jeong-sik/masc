@@ -2,8 +2,8 @@ module AQ = Masc.Keeper_approval_queue
 module Rules = Masc.Keeper_approval_queue_rules
 module Rule_types = Keeper_approval_queue_rules_types
 
-let reserve_retry_exact ~base_path (entry : Rule_types.pending_approval) =
-  AQ.reserve_summary_attempt_retry
+let reserve_rerun_exact ~base_path (entry : Rule_types.pending_approval) =
+  AQ.reserve_summary_attempt_rerun
     ~base_path
     ~id:entry.id
     ~input_hash:entry.input_hash
@@ -286,7 +286,7 @@ let test_dedup_never_merges_distinct_origins () =
            ()
        in
        Alcotest.(check string)
-         "next-turn retry folds onto the pending approval"
+         "repeated request folds onto the pending approval"
          first
          retried_next_turn;
        let another_channel =
@@ -359,7 +359,7 @@ let test_retry_folds_onto_unconsumed_grant_until_consumed () =
            ()
        in
        Alcotest.(check string)
-         "retry after approval reuses the approved id"
+         "repeated request after approval reuses the approved id"
          first.approval_id
          retried.approval_id;
        (match retried.disposition with
@@ -1908,7 +1908,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
        check_rearm
          "bound restart is not rearmed"
          false
-         (reserve_retry_exact ~base_path (pending_entry_exn id));
+         (reserve_rerun_exact ~base_path (pending_entry_exn id));
        let quarantine_cause = Rule_types.Exact_domain_invalid_output in
        check_exact_update
          "quarantine replacement"
@@ -1993,7 +1993,7 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        check_rearm
          "live released pending work does not enter restart-only recovery"
          false
-         (reserve_retry_exact ~base_path (pending_entry_exn released_id));
+         (reserve_rerun_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { exact_attempt =
               Rule_types.Exact_bound
@@ -2064,7 +2064,7 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        check_rearm
          "explicit operator recovery clears restart-only released binding"
          true
-         (reserve_retry_exact ~base_path (pending_entry_exn released_id));
+         (reserve_rerun_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { summary_status = Rule_types.Summary_pending
           ; exact_attempt = Rule_types.Exact_unbound
@@ -2086,7 +2086,7 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        check_rearm
          "operator recovery rearms the selected restart-classified release"
          true
-         (reserve_retry_exact ~base_path (pending_entry_exn bulk_id));
+         (reserve_rerun_exact ~base_path (pending_entry_exn bulk_id));
        match pending_entry_exn bulk_id with
        | { summary_status = Rule_types.Summary_pending
          ; exact_attempt = Rule_types.Exact_unbound
@@ -2836,7 +2836,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
           Alcotest.fail "blocked disposition bound without operator rearm");
        let entry = pending_entry_exn id in
        (match
-          AQ.reserve_summary_attempt_retry
+          AQ.reserve_summary_attempt_rerun
             ~base_path
             ~id
             ~input_hash:entry.input_hash
@@ -2853,7 +2853,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
        check_rearm
          "in-flight start reservation cannot be reserved again"
          false
-         (reserve_retry_exact ~base_path reserved_entry);
+         (reserve_rerun_exact ~base_path reserved_entry);
        (match
           AQ.mark_summary_attempt_identity_unbound
             ~base_path
@@ -2867,11 +2867,11 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
             "pre-bind start reservation did not settle identity-unbound"
         | Error error ->
           Alcotest.fail (AQ.exact_attempt_error_to_string error));
-       let retryable_entry = pending_entry_exn id in
+       let rerunnable_entry = pending_entry_exn id in
        check_rearm
          "pre-bind terminal failure restores explicit retryability"
          true
-         (reserve_retry_exact ~base_path retryable_entry);
+         (reserve_rerun_exact ~base_path rerunnable_entry);
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some
             { summary_status = Rule_types.Summary_pending
@@ -2936,7 +2936,7 @@ let test_operator_recovery_skips_terminal_exact_failure () =
        check_rearm
          "explicit operator action cannot reopen exact quarantine"
          false
-         (reserve_retry_exact ~base_path (pending_entry_exn quarantined_id));
+         (reserve_rerun_exact ~base_path (pending_entry_exn quarantined_id));
        (match AQ.For_testing.get_pending_entry_unchecked ~id:quarantined_id with
         | Some
             { summary_status = Rule_types.Summary_failed _
@@ -3716,7 +3716,7 @@ let test_default_auto_judge_defers_without_blocking () =
             check_rearm
               "explicit operator retry reserves pre-worker start"
               true
-              (reserve_retry_exact ~base_path blocked)
+              (reserve_rerun_exact ~base_path blocked)
           | Some _ ->
             Alcotest.fail "Auto Judge pre-worker failure lost its durable reason"
           | None -> Alcotest.fail "Auto Judge request was not durably queued");
@@ -4341,7 +4341,7 @@ let () =
             `Quick
             test_dedup_never_merges_distinct_origins
         ; Alcotest.test_case
-            "retry folds onto unconsumed grant until consumed"
+            "repeated request folds onto unconsumed grant until consumed"
             `Quick
             test_retry_folds_onto_unconsumed_grant_until_consumed
         ; Alcotest.test_case

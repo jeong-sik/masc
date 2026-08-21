@@ -10,14 +10,12 @@ let workflow_rejection_result
       ~tool_name
       ~start_time
       ?rule_id
-      ?recoverable
       ?extra_fields
       message
   =
   let data =
     Workflow_rejection_payload.payload
       ?rule_id
-      ?recoverable
       ?extra_fields
       message
   in
@@ -207,10 +205,6 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~tool_name
       ~start_time
       ?rule_id
-      ?recoverable:
-        (match rule_id with
-         | Some "task_done_requires_claimed_or_started" -> Some true
-         | _ -> None)
       message
   | None ->
   match handoff_context with
@@ -391,7 +385,6 @@ and handle_transition ~tool_name ~start_time ctx args =
         ~tool_name
         ~start_time
         ~rule_id:"task_transition_invalid_state"
-        ~recoverable:false
         ~extra_fields:
           [ "task_id", `String task_id
           ; "action", `String action_s

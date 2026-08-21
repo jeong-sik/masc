@@ -72,8 +72,6 @@ function compactionOutcomePresentation(outcome: CompactionSnapshot['outcome']): 
   switch (outcome) {
     case 'checkpoint_committed':
       return { label: '체크포인트 커밋 완료', color: 'var(--status-ok)' }
-    case 'retry_without_checkpoint':
-      return { label: '체크포인트 없이 재시도', color: 'var(--status-warn)' }
     case 'lifecycle_cleanup_failed_without_checkpoint':
       return {
         label: '체크포인트 없이 lifecycle 정리 실패',

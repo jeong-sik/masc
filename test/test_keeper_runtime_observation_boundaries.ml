@@ -14,7 +14,7 @@ let raw_provider_timeout_error ~phase =
 
 let raw_api_timeout_error () =
   Agent_core.Error.Api
-    (Llm_provider.Retry.Timeout
+    (Llm_provider.Api_error.Timeout
        { message = "Per-provider timeout after 90.0s"; phase = None })
 
 let tls_handshake_internal_error () =
@@ -64,15 +64,11 @@ let test_tls_handshake_internal_error_is_transient () =
   Alcotest.(check bool)
     "runtime_runner TLS handshake failure is a transient runner error"
     true
-    (EC.is_transient_internal_runner_error err);
+    (EC.is_runner_tls_error err);
   Alcotest.(check bool)
-    "runtime_runner TLS handshake failure enters transient network retry"
+    "runtime_runner TLS handshake failure is a transient network observation"
     true
-    (EC.is_transient_network_error err);
-  Alcotest.(check bool)
-    "runtime_runner TLS handshake failure is auto-recoverable at turn level"
-    true
-    (EC.is_auto_recoverable_turn_error err)
+    (EC.is_provider_availability_error err)
 
 (* A provider parse rejection stays a parse rejection, but it must not be
    exempt from the crash threshold: the exemption skips [increment_turn_failures]
@@ -88,10 +84,7 @@ let test_provider_parse_rejection_counts_toward_crash () =
     "provider parse rejection is still classified as a server parse rejection"
     true
     (EC.is_server_rejected_parse_error err);
-  Alcotest.(check bool)
-    "provider parse rejection is not exempt from the crash threshold"
-    false
-    (EC.is_auto_recoverable_turn_error err)
+  ()
 
 let test_provider_wire_error_is_not_rate_limit_or_request_parse () =
   let err =
@@ -112,16 +105,13 @@ let test_provider_wire_error_is_not_rate_limit_or_request_parse () =
     "wire error is not server parse rejection"
     false
     (EC.is_server_rejected_parse_error err);
-  Alcotest.(check bool)
-    "wire error remains crash-accounted"
-    false
-    (EC.is_auto_recoverable_turn_error err)
+  ()
 
 (* A 0-byte empty completion with a modeled non-overflow stop_reason (AGENT_CORE
-   [Retry.Empty_attributed]) surfaces as [ProviderUnavailable] and is
+   [Api_error.Empty_attributed]) surfaces as [ProviderUnavailable] and is
    auto-recoverable: retry/failover can make progress on a broken backend
    model answering with an empty assistant turn. *)
-let test_attributed_empty_completion_is_auto_recoverable () =
+let test_attributed_empty_completion_is_typed () =
   let err =
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -135,10 +125,6 @@ let test_attributed_empty_completion_is_auto_recoverable () =
     "attributed empty completion is an empty completion error"
     true
     (EC.is_empty_completion_error err);
-  Alcotest.(check bool)
-    "attributed empty completion is auto-recoverable"
-    true
-    (EC.is_auto_recoverable_turn_error err);
   Alcotest.(check bool)
     "attributed empty completion is not a server parse rejection"
     false
@@ -158,16 +144,13 @@ let test_attributed_empty_completion_is_auto_recoverable () =
    [InvalidRequest] counter (companion change), not by the exemption
    budget. *)
 let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
-  let module KUF = Keeper_unified_turn_failure in
-  let keeper_name = "test-keeper-unmodeled-stop-reason" in
-  KUF.note_turn_success keeper_name;
   let err =
     Agent_core.Error.Api
-      (Llm_provider.Retry.InvalidRequest
+      (Llm_provider.Api_error.InvalidRequest
          { message =
              "empty completion with unmodeled stop_reason=\"glmtoken\": \
               provider returned an empty assistant turn"
-         ; reason = Llm_provider.Retry.Unknown_invalid_request
+         ; reason = Llm_provider.Api_error.Unknown_invalid_request
          })
   in
   Alcotest.(check bool)
@@ -177,12 +160,7 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
   Alcotest.(check bool)
     "unmodeled stop_reason shape is classified as invalid request"
     true
-    (EC.is_invalid_request_error err);
-  Alcotest.(check bool)
-    "invalid request does not consume the empty-completion exemption budget"
-    false
-    (KUF.account_failure_counting ~keeper_name ~is_auto_recoverable:true err);
-  KUF.note_turn_success keeper_name
+    (EC.is_invalid_request_error err)
 
 (* A generic 400 [InvalidRequest] is not an empty-completion exemption
    either: main (#25592) classifies it as auto-recoverable, and its
@@ -190,68 +168,17 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
    [InvalidRequest] counter (companion change), not by the empty-completion
    budget. *)
 let test_generic_invalid_request_is_not_empty_completion () =
-  let module KUF = Keeper_unified_turn_failure in
-  let keeper_name = "test-keeper-generic-invalid-request" in
-  KUF.note_turn_success keeper_name;
   let err =
     Agent_core.Error.Api
-      (Llm_provider.Retry.InvalidRequest
+      (Llm_provider.Api_error.InvalidRequest
          { message = "invalid request body"
-         ; reason = Llm_provider.Retry.Unknown_invalid_request
+         ; reason = Llm_provider.Api_error.Unknown_invalid_request
          })
   in
   Alcotest.(check bool)
     "generic InvalidRequest is not an empty completion error"
     false
-    (EC.is_empty_completion_error err);
-  Alcotest.(check bool)
-    "generic InvalidRequest does not consume the empty-completion budget"
-    false
-    (KUF.account_failure_counting ~keeper_name ~is_auto_recoverable:true err);
-  KUF.note_turn_success keeper_name
-
-(* Bounded compensating accounting: the empty-completion exemption is capped
-   per keeper; once the budget is exhausted the failure counts toward crash
-   again, and a success resets the budget. *)
-let test_empty_completion_exemption_budget_is_bounded () =
-  let module KUF = Keeper_unified_turn_failure in
-  let keeper_name = "test-keeper-empty-completion-budget" in
-  KUF.note_turn_success keeper_name;
-  let empty_err =
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable
-         { provider = "ollama-cloud"
-         ; detail = "empty completion (stop_reason=end_turn): empty turn"
-         })
-  in
-  let transient_err =
-    Agent_core.Error.Api
-      (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
-  in
-  for i = 1 to KUF.empty_completion_exemption_budget do
-    Alcotest.(check bool)
-      (Printf.sprintf "exempted empty completion %d does not count toward crash" i)
-      false
-      (KUF.account_failure_counting
-         ~keeper_name ~is_auto_recoverable:true empty_err)
-  done;
-  Alcotest.(check bool)
-    "a non-empty auto-recoverable failure does not consume the budget"
-    false
-    (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true transient_err);
-  Alcotest.(check bool)
-    "empty completion past the budget counts toward crash"
-    true
-    (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true empty_err);
-  KUF.note_turn_success keeper_name;
-  Alcotest.(check bool)
-    "success resets the exemption budget"
-    false
-    (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true empty_err);
-  KUF.note_turn_success keeper_name
+    (EC.is_empty_completion_error err)
 
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
@@ -287,16 +214,14 @@ let () =
         Alcotest.test_case
           "provider wire error stays distinct and crash-accounted" `Quick
           test_provider_wire_error_is_not_rate_limit_or_request_parse;
-        Alcotest.test_case "attributed empty completion is auto-recoverable" `Quick
-          test_attributed_empty_completion_is_auto_recoverable;
+        Alcotest.test_case "attributed empty completion is typed" `Quick
+          test_attributed_empty_completion_is_typed;
         Alcotest.test_case
           "unmodeled stop_reason InvalidRequest is not empty completion" `Quick
           test_unmodeled_stop_reason_invalid_request_is_not_empty_completion;
         Alcotest.test_case
           "generic InvalidRequest is not empty completion" `Quick
           test_generic_invalid_request_is_not_empty_completion;
-        Alcotest.test_case "empty completion exemption budget is bounded" `Quick
-          test_empty_completion_exemption_budget_is_bounded;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
       ] );

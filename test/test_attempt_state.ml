@@ -36,7 +36,7 @@ let test_backoff_window () =
   Alcotest.(check bool)
     "past deadline → inactive" false
     (is_backoff_active ~now:131.0 t);
-  let never_retries = { t with next_retry_unix = None } in
+  let never_retries = { t with next_launch_not_before_unix = None } in
   Alcotest.(check bool)
     "None → inactive" false
     (is_backoff_active ~now:0.0 never_retries)
@@ -52,7 +52,7 @@ let test_json_roundtrip_start_dispatched () =
       Alcotest.(check int) "num" t.attempt_number t'.attempt_number;
       Alcotest.(check string) "id" t.attempt_id t'.attempt_id;
       Alcotest.(check (option (float 0.001)))
-        "next_retry" t.next_retry_unix t'.next_retry_unix;
+        "next_launch_not_before" t.next_launch_not_before_unix t'.next_launch_not_before_unix;
       Alcotest.(check (float 0.001)) "updated" t.updated_unix t'.updated_unix
   | None -> Alcotest.fail "json roundtrip returned None"
 
@@ -87,7 +87,7 @@ let test_of_json_rejects_missing_fields () =
         ("attempt_number", `Int 1);
         ("attempt_id", `String "1:1");
         ("last_result", `String "not_a_real_state");
-        ("next_retry_unix", `Null);
+        ("next_launch_not_before_unix", `Null);
         ("updated_unix", `Float 100.0);
       ]
   in

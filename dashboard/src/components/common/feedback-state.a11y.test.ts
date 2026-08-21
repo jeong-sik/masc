@@ -2,7 +2,7 @@
 //
 // jest-axe coverage for FeedbackState primitives. EmptyState renders
 // `role="status"` so axe verifies the live-region attribute is on a
-// proper container; ErrorState/Recoverable/Fatal carry retry/reload
+// proper container; ErrorState/Fatal carry explicit reload actions
 // buttons whose accessible names this test pins.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
@@ -12,7 +12,6 @@ import {
   EmptyState,
   LoadingState,
   ErrorState,
-  ErrorRecoverable,
   ErrorFatal,
 } from './feedback-state'
 
@@ -72,29 +71,6 @@ describe('ErrorState a11y', () => {
   it('with message passes axe', async () => {
     render(
       html`<${ErrorState} message="Network unavailable" />`,
-      container,
-    )
-    expect(await axe(container)).toHaveNoViolations()
-  })
-})
-
-describe('ErrorRecoverable a11y', () => {
-  let container: HTMLElement
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-  })
-  afterEach(() => {
-    render(null, container)
-    document.body.removeChild(container)
-  })
-
-  it('with retry callback passes axe', async () => {
-    render(
-      html`<${ErrorRecoverable}
-        title="Sync failed"
-        onRetry=${() => {}}
-      />`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()

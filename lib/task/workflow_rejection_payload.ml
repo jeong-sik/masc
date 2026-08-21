@@ -10,7 +10,6 @@ let optional_string_field key value =
 
 let payload
       ?rule_id
-      ?(recoverable = false)
       ?(extra_fields = [])
       message
   =
@@ -23,7 +22,6 @@ let payload
           (Tool_result.tool_failure_class_to_string
              Tool_result.Workflow_rejection) )
     ; "error_class", `String "deterministic"
-    ; "recoverable", `Bool recoverable
     ]
     @ (if diagnosis = [] then [] else [ "diagnosis", `Assoc diagnosis ])
     @ extra_fields

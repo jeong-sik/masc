@@ -240,17 +240,6 @@ let emit_error ~model_id ~message ~reason =
     ()
 ;;
 
-let emit_retry ~provider ~model_id ~attempt =
-  note_provider ~model_id ~provider;
-  inc_counter
-    Otel_metric_store.metric_llm_provider_retries
-    ~labels:
-      [ ("provider", provider)
-      ; ("model", model_id)
-      ; ("attempt", string_of_int attempt)
-      ]
-;;
-
 let emit_circuit_state ~provider ~model_id ~provider_key ~state =
   note_provider ~model_id ~provider;
   set_gauge
@@ -380,7 +369,6 @@ let make_sink () : Metrics.t =
   ; on_http_status = emit_http_status
   ; on_circuit_state = emit_circuit_state
   ; on_capability_drop = emit_capability_drop
-  ; on_retry = emit_retry
   ; on_token_usage = emit_token_usage
   ; on_tool_calls = emit_tool_calls
   ; on_streaming_first_chunk = emit_streaming_first_chunk

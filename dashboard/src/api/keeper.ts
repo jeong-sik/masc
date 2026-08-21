@@ -13,7 +13,6 @@ import {
 } from './core'
 import {
   ensureDevToken,
-  refreshDevTokenAfterAuthError,
 } from './dev-token'
 import type { KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
 import type {
@@ -297,10 +296,8 @@ export async function streamKeeperMessage(
   // Direct keeper chat is a mutation path just like MCP tools.  Bootstrap the
   // loopback dashboard credential before constructing the request so a freshly
   // loaded dashboard never emits a misleading 401 "Token required" toast.
-  // Existing credentials are left to the typed 401 recovery below; only a
-  // missing credential needs the preflight bootstrap. This avoids an extra
-  // network round-trip for every message while still preventing the common
-  // freshly-loaded-dashboard failure.
+  // Existing credentials are sent once. A rejected mutation is never replayed
+  // automatically: the server may already have accepted the operation id.
   if (!jsonHeaders().Authorization) await ensureDevToken()
   const exactOperationId = operationId.trim()
   if (!exactOperationId) throw new Error('Keeper chat operation id is required')
@@ -336,7 +333,7 @@ export async function streamKeeperMessage(
   }
   const requestBody = JSON.stringify(body)
   const streamPath = '/api/v1/keepers/chat/stream'
-  const postStream = () => fetch(streamPath, {
+  const res = await fetch(streamPath, {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
@@ -346,22 +343,8 @@ export async function streamKeeperMessage(
     signal,
   })
 
-  let res = await postStream()
-
   if (!res.ok) {
-    let requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
-    if (
-      res.status === 401
-      && await refreshDevTokenAfterAuthError(requestError.authErrorCode)
-    ) {
-      res = await postStream()
-      if (!res.ok) {
-        requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
-      }
-    }
-    if (!res.ok) {
-      throw requestError
-    }
+    throw await apiRequestErrorFromResponse('POST', streamPath, res)
   }
 
   if (!res.body) {

@@ -1,19 +1,19 @@
-(** Keeper_error_classify — Error classification, side-effect safety,
-    and retry constants for the unified keeper cycle.
+(** Keeper_error_classify — Error classification and side-effect safety for
+    the unified keeper cycle.
 
     Extracted from keeper_unified_turn.ml.
 
     @since 0.122.0 *)
 
-(** Detect transient network errors eligible for retry.
-    Uses structured [Agent_core.Error.t] pattern matching. *)
-val is_transient_network_error : Agent_core.Error.t -> bool
+(** Typed provider availability diagnostic. This controls observation labels
+    only and grants no candidate transition or replay authority. *)
+val is_provider_availability_error : Agent_core.Error.t -> bool
 
-(** [true] when a typed internal runner exception preserves a transient
-    transport failure raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
+(** [true] when a typed internal runner exception preserves a TLS failure
+    raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
     Legacy internal exception envelopes without [transport_error_kind] are
     diagnostic-only and are not parsed heuristically. *)
-val is_transient_internal_runner_error : Agent_core.Error.t -> bool
+val is_runner_tls_error : Agent_core.Error.t -> bool
 
 (** Detect request body parse errors from either the provider or the API
     (e.g. Ollama yyjson rejecting a malformed request body or the API
@@ -52,12 +52,6 @@ val is_invalid_request_error : Agent_core.Error.t -> bool
     [InvalidRequest] does not. *)
 val is_empty_completion_error : Agent_core.Error.t -> bool
 
-(** [true] when the keeper should preserve liveness and skip consecutive
-    failure counting, even if same-turn retry is still disabled. Typed AGENT_CORE
-    turn-limit and execution-time observations are included defensively so a
-    boundary regression cannot promote them into Keeper lifecycle authority. *)
-val is_auto_recoverable_turn_error : Agent_core.Error.t -> bool
-
 (** [true] for accept-rejected responses tagged by the built-in keeper
     progress contract as no usable text/tool/non-terminal progress. *)
 val is_accept_no_usable_progress_error : Agent_core.Error.t -> bool
@@ -87,95 +81,6 @@ val extract_input_required
 
 (** [true] when an error represents terminal runtime exhaustion. *)
 val is_runtime_exhausted_error : Agent_core.Error.t -> bool
-
-(** Classification of why a degraded retry is being attempted. Closed
-    set; producer-side is [keeper_error_classify]. Wire form is the
-    lowercase string via [degraded_retry_reason_to_string]. *)
-type degraded_retry_reason =
-  | Hard_quota
-  | Resumable_cli_session
-  | Runtime_candidates_filtered
-  | Runtime_exhausted
-  | Capacity_backpressure
-  | Rate_limit
-  | Server_error
-  | Auth_error
-  | Deferred_runtime_lane
-  | Empty_no_progress
-  | Thinking_only_no_progress
-
-val degraded_retry_reason_to_string : degraded_retry_reason -> string
-
-val normalized_runtime_id : catalog_names:string list -> string -> string
-(** Normalize a runtime name for rotation matching.
-    All runtime names are plain provider:model strings. *)
-
-type degraded_retry =
-  { next_runtime : string
-  ; fallback_reason : degraded_retry_reason
-  }
-
-(** Opportunistically fail open to a broader runtime when the current
-    effective runtime is temporarily unavailable (for example cooldown /
-    phase-buffer bootstrap fallback). *)
-val fallback_runtime_for_unavailable_profile :
-  base_runtime:string ->
-  effective_runtime:string ->
-  string option
-
-(** Classifies an agent-core error into a fallback reason label when the runtime
-    failure is recoverable via [fallback_runtime] or [degraded_rotation].
-    Returns [None] for terminal errors (e.g. generic accept-rejected,
-    ambiguous post-commit) that should not trigger same-turn escalation. A
-    narrow built-in progress-contract rejection is recoverable only when the
-    response was thinking-only after a read-only tool.
-
-    Typed rotation: raw API errors that are not wrapped in a MASC
-    internal error are also classified when a different runtime may succeed:
-    - [PaymentRequired] / provider [HardQuota] → ["hard_quota"]
-    - [RateLimited] provider throttles → ["rate_limit"]
-    - [Overloaded] / [CapacityExhausted] → ["capacity_backpressure"]
-    - API [ServerError] and transient provider [ServerError] → ["server_error"]
-    - [AuthError] → ["auth_error"]
-
-    Exposed for unit tests; production callers go through
-    [degraded_retry_after_recoverable_error] or
-    [degraded_rotation_after_recoverable_error]. *)
-val recoverable_runtime_failure_reason :
-  Agent_core.Error.t -> degraded_retry_reason option
-
-(** Returns the one-shot degraded retry lane for recoverable whole-runtime
-    failures. Already-degraded lanes do not broaden further. *)
-val degraded_retry_after_recoverable_error :
-  effective_runtime:string ->
-  Agent_core.Error.t ->
-  degraded_retry option
-
-(** Returns the next untried runtime in the same-turn recovery group for a
-    whole-runtime failure. Uses the default degraded rotation candidate set
-    (base/default/phase-recovery). Read-only no-progress accept rejections also
-    append configured tool-capable runtimes so a default-runtime
-    thinking-only response can still rotate to another safe tool-capable model.
-
-    [fallback_hint], when provided, is prepended to the candidate list so
-    that single-provider profiles can declare an immediate escalation
-    target via [runtime.toml]. The hint is normalized and deduplicated like
-    any other candidate; if it duplicates the effective runtime or has
-    already been attempted, the next legal candidate is returned.
-
-    Quota and rate-limit observations do not imply account-wide scope: every
-    untried runtime in the declaratively selected recovery group remains
-    eligible. Once every typed candidate has been attempted, the current turn
-    stops rotating. A later Keeper turn may make a fresh attempt; this function
-    does not synthesize a timed retry cycle.
-    @since 0.174.0 *)
-val degraded_rotation_after_recoverable_error :
-  ?fallback_hint:string ->
-  base_runtime:string ->
-  effective_runtime:string ->
-  attempted_runtimes:string list ->
-  Agent_core.Error.t ->
-  degraded_retry option
 
 val is_provider_timeout_error : Agent_core.Error.t -> bool
 (** True when [err] is a typed provider-timeout class failure. Live caller:

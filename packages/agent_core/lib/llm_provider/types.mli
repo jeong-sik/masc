@@ -55,8 +55,7 @@ type tool_error_class =
     projection; provider wire serializers deliberately omit it. *)
 type tool_failure_kind =
   | Validation_error
-  | Recoverable_tool_error
-  | Non_retryable_tool_error
+  | Tool_error
   | Reported_tool_error
   | Unattributed_tool_error
   (** A persisted failure whose original execution boundary did not record
@@ -77,12 +76,10 @@ type tool_result_outcome =
   | Tool_failed of tool_failure_provenance
 [@@deriving show]
 
-val tool_failure_kind_is_recoverable : tool_failure_kind -> bool
 val tool_result_outcome_is_error : tool_result_outcome -> bool
 
 type tool_error =
   { message : string
-  ; recoverable : bool
   ; error_class : tool_error_class option
   }
 

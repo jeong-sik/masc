@@ -221,7 +221,7 @@ let record_attempt_start (capture : runtime_metrics_capture) ~model_id:_ =
     string-based classification at this layer (see #12817 spirit and the
     project memory rule "no string matching for classification"). *)
 let runtime_attempt_terminal_event_json ?slot_release_at_phase
-    ?productive_phase_elapsed_ms ?retry_phase_elapsed_ms ~model_id:_
+    ?productive_phase_elapsed_ms ~model_id:_
     ~model_label:_
     ~latency_ms ~error () =
   let outcome = if Option.is_some error then "failure" else "success" in
@@ -235,7 +235,6 @@ let runtime_attempt_terminal_event_json ?slot_release_at_phase
       ( "error_message", Json_util.string_opt_to_json error );
       ( "slot_release_at_phase", Json_util.string_opt_to_json slot_release_at_phase );
       ( "productive_phase_elapsed_ms", Json_util.int_opt_to_json productive_phase_elapsed_ms );
-      ( "retry_phase_elapsed_ms", Json_util.int_opt_to_json retry_phase_elapsed_ms );
     ]
 
 let log_runtime_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
@@ -313,7 +312,6 @@ let runtime_metrics_for_candidates () =
       on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> ());
       on_circuit_state =
         (fun ~provider:_ ~model_id:_ ~provider_key:_ ~state:_ -> ());
-      on_retry = (fun ~provider:_ ~model_id:_ ~attempt:_ -> ());
       on_token_usage =
         (fun ~provider:_ ~model_id:_ ~input_tokens:_ ~output_tokens:_ -> ());
       on_tool_calls = (fun ~provider:_ ~model_id:_ ~count:_ -> ());

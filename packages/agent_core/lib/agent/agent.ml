@@ -6,7 +6,7 @@
     {!Agent_checkpoint}.  Sync and streaming turns share a single
     {!run_turn_core} with an [api_strategy] parameter. *)
 
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 open Types
 include Agent_types
 open Agent_trace
@@ -613,7 +613,6 @@ let run_handoff_target ~sw ?clock agent (target : Handoff.handoff_target) prompt
     Error
       { message =
           Printf.sprintf "Handoff to %s failed: %s" target.name (Error.to_string error)
-      ; recoverable = false
       ; error_class = Some Unknown
       }
 ;;

@@ -190,11 +190,11 @@ let test_provider_terminal () =
           }))
 ;;
 
-let test_retry_rate_limit_mapping () =
+let test_api_error_rate_limit_mapping () =
   let err =
-    Error.of_retry_api_error
+    Error.of_api_error
       ~provider:"anthropic"
-      (Retry.RateLimited { retry_after = Some 2.5; message = "try later" })
+      (Api_error.RateLimited { retry_after = Some 2.5; message = "try later" })
   in
   match err with
   | Error.RateLimit { provider; retry_after; detail } ->
@@ -204,11 +204,11 @@ let test_retry_rate_limit_mapping () =
   | _ -> fail "expected RateLimit"
 ;;
 
-let test_retry_rate_limit_prose_mapping () =
+let test_api_error_rate_limit_prose_mapping () =
   let err =
-    Error.of_retry_api_error
+    Error.of_api_error
       ~provider:"zai"
-      (Retry.RateLimited
+      (Api_error.RateLimited
          { retry_after = Some 10.0
          ; message = "Insufficient balance or no resource package. Please recharge."
          })
@@ -225,14 +225,14 @@ let test_retry_rate_limit_prose_mapping () =
   | _ -> fail "expected RateLimit"
 ;;
 
-let test_retry_payment_required_mapping () =
+let test_api_error_payment_required_mapping () =
   (* HTTP 402 (e.g. DeepSeek's "Insufficient Balance") is a hard billing
      signal by status code alone — it maps onto the same [HardQuota]
      provider_error rather than [InvalidRequest]. *)
   let err =
-    Error.of_retry_api_error
+    Error.of_api_error
       ~provider:"deepseek"
-      (Retry.PaymentRequired { message = "Insufficient Balance" })
+      (Api_error.PaymentRequired { message = "Insufficient Balance" })
   in
   match err with
   | Error.HardQuota { provider; retry_after; detail } ->
@@ -242,10 +242,10 @@ let test_retry_payment_required_mapping () =
   | _ -> fail "expected HardQuota"
 ;;
 
-let test_retry_overloaded_unknown_provider_mapping () =
+let test_api_error_overloaded_unknown_provider_mapping () =
   let check_unknown_provider provider =
     let err =
-      Error.of_retry_api_error ?provider (Retry.Overloaded { message = "busy" })
+      Error.of_api_error ?provider (Api_error.Overloaded { message = "busy" })
     in
     match err with
     | Error.CapacityExhausted { scope; affected; retry_after; detail } ->
@@ -351,17 +351,17 @@ let test_http_timeout_error_mapping () =
   | _ -> fail "expected Timeout"
 ;;
 
-let test_retry_timeout_phase_mapping () =
-  (* Retry.Timeout carries the transport phase that Http_client.TimeoutError
+let test_api_error_timeout_phase_mapping () =
+  (* Api_error.Timeout carries the transport phase that Http_client.TimeoutError
      attached (complete_stream's local catch sets First_token for prefill).
-     [of_retry_api_error] must preserve it onto Error.Timeout.timeout_phase:
+     [of_api_error] must preserve it onto Error.Timeout.timeout_phase:
      a prefill timeout that exhausts retries must still surface as
      [First_token], not collapse to [None] (which would re-introduce the
      phase mislabeling that PR #2093 fixed at the transport layer). *)
   let err =
-    Error.of_retry_api_error
+    Error.of_api_error
       ~provider:"ollama"
-      (Retry.Timeout
+      (Api_error.Timeout
          { message = "prefill exceeded first-token budget"
          ; phase = Some Http_client.First_token
          })
@@ -378,36 +378,36 @@ let test_retry_timeout_phase_mapping () =
   | _ -> fail "expected Timeout"
 ;;
 
-let test_retry_remaining_variants_mapping () =
+let test_api_error_remaining_variants_mapping () =
   let cases =
-    [ ( Error.of_retry_api_error
+    [ ( Error.of_api_error
           ~provider:"openai"
-          (Retry.AuthError { message = "bad key" })
+          (Api_error.AuthError { message = "bad key" })
       , "auth" )
-    ; ( Error.of_retry_api_error
+    ; ( Error.of_api_error
           ~provider:"openai"
-          (Retry.AuthorizationError { message = "forbidden" })
+          (Api_error.AuthorizationError { message = "forbidden" })
       , "authorization" )
-    ; ( Error.of_retry_api_error
+    ; ( Error.of_api_error
           ~provider:"openai"
-          (Retry.InvalidRequest
+          (Api_error.InvalidRequest
              { message = "bad payload"; reason = Unknown_invalid_request })
       , "invalid" )
-    ; ( Error.of_retry_api_error
+    ; ( Error.of_api_error
           ~provider:"openai"
-          (Retry.NotFound { message = "missing model" })
+          (Api_error.NotFound { message = "missing model" })
       , "not_found" )
-    ; ( Error.of_retry_api_error
+    ; ( Error.of_api_error
           ~provider:"openai"
-          (Retry.ContextOverflow { message = "too long"; limit = Some 123 })
+          (Api_error.ContextOverflow { message = "too long"; limit = Some 123 })
       , "context" )
-    ; ( Error.of_retry_api_error
+    ; ( Error.of_api_error
           ~provider:"openai"
-          (Retry.NetworkError { message = "tls"; kind = Http_client.Tls_error })
+          (Api_error.NetworkError { message = "tls"; kind = Http_client.Tls_error })
       , "network" )
-    ; ( Error.of_retry_api_error
+    ; ( Error.of_api_error
           ~provider:"openai"
-          (Retry.Timeout { message = "slow"; phase = None })
+          (Api_error.Timeout { message = "slow"; phase = None })
       , "timeout" )
     ]
   in
@@ -617,8 +617,8 @@ let test_empty_completion_overflow_maps_to_invalid_request () =
   | Error.InvalidRequest { provider; reason } ->
     check string "overflow provider" "anthropic" provider;
     let expected =
-      Retry.error_message
-        (Retry.ContextOverflow
+      Api_error.error_message
+        (Api_error.ContextOverflow
            { message =
                "empty completion (stop_reason=model_context_window_exceeded): no content \
                 blocks"
@@ -667,13 +667,13 @@ let () =
         ; test_case "ProviderTerminal" `Quick test_provider_terminal
         ] )
     ; ( "mapping"
-      , [ test_case "Retry RateLimited" `Quick test_retry_rate_limit_mapping
-        ; test_case "Retry rate-limit prose" `Quick test_retry_rate_limit_prose_mapping
-        ; test_case "Retry payment required" `Quick test_retry_payment_required_mapping
+      , [ test_case "API error RateLimited" `Quick test_api_error_rate_limit_mapping
+        ; test_case "API error rate-limit prose" `Quick test_api_error_rate_limit_prose_mapping
+        ; test_case "API error payment required" `Quick test_api_error_payment_required_mapping
         ; test_case
-            "Retry overloaded unknown provider"
+            "API error overloaded unknown provider"
             `Quick
-            test_retry_overloaded_unknown_provider_mapping
+            test_api_error_overloaded_unknown_provider_mapping
         ; test_case
             "Empty completion overflow -> InvalidRequest"
             `Quick
@@ -688,13 +688,13 @@ let () =
         ; test_case "HTTP network error" `Quick test_http_network_error_mapping
         ; test_case "HTTP timeout error" `Quick test_http_timeout_error_mapping
         ; test_case
-            "Retry timeout phase preserved"
+            "API error timeout phase preserved"
             `Quick
-            test_retry_timeout_phase_mapping
+            test_api_error_timeout_phase_mapping
         ; test_case
-            "Retry remaining variants"
+            "API error remaining variants"
             `Quick
-            test_retry_remaining_variants_mapping
+            test_api_error_remaining_variants_mapping
         ; test_case
             "Provider failure remaining variants"
             `Quick

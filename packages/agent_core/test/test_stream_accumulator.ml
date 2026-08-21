@@ -1,7 +1,7 @@
 (** Unit tests for Streaming.{create_stream_acc, accumulate_event, finalize_stream_acc}. *)
 
 open Agent_core
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 open Types
 
 (* [lib/streaming.ml]'s stream-accumulator/map_http_error surface was a
@@ -562,7 +562,7 @@ let test_map_http_error_http () =
          { code = 429; body = "rate limited"; retry_after_header = None })
   in
   match err with
-  | Error.Api (Retry.RateLimited _) -> ()
+  | Error.Api (Api_error.RateLimited _) -> ()
   | _ -> Alcotest.fail "expected RateLimited"
 ;;
 
@@ -573,7 +573,7 @@ let test_map_http_error_network () =
          { message = "connection refused"; kind = Unknown })
   in
   match err with
-  | Error.Api (Retry.NetworkError { message; _ }) ->
+  | Error.Api (Api_error.NetworkError { message; _ }) ->
     Alcotest.(check string) "msg" "connection refused" message
   | _ -> Alcotest.fail "expected NetworkError"
 ;;

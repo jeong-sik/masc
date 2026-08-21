@@ -4,7 +4,7 @@
 //   1. Happy path: children render unchanged → axe just verifies the
 //      passthrough doesn't introduce wrapping issues.
 //   2. Error path: a child throws on render → boundary catches and
-//      shows the fatal/recoverable banner with retry (+reload for
+//      shows the fatal/resettable banner with reset (+reload for
 //      fatal). axe verifies the banner's own a11y (heading hierarchy,
 //      button labels, alert role).
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -52,9 +52,9 @@ describe('ErrorBoundary a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('error path with recoverable severity passes axe', async () => {
+  it('error path with resettable severity passes axe', async () => {
     render(
-      html`<${ErrorBoundary} label="Test" severity="recoverable">
+      html`<${ErrorBoundary} label="Test" severity="resettable">
         <${Boom} />
       <//>`,
       container,

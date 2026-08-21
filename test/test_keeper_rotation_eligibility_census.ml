@@ -2,10 +2,8 @@
 
    [Keeper_turn_driver.attempt_runtime_candidates] owns the decision "does this
    lane move to its next declared candidate". The decision is reached through a
-   chain — [lane_should_retry] -> [core_error_to_http_error] ->
-   [Runtime_attempt_fsm.should_try_next] — where two of the three links can
-   answer [false] for reasons that are invisible at the call site. Reading the
-   chain predicts the outcome; this test measures it.
+   total typed [Keeper_runtime_failure_route.route_of_error] boundary. This
+   test measures the resulting candidate selection through the real loop.
 
    Each case drives the real loop with two candidates: the first fails with the
    error under test, the second would succeed. Reaching the second candidate is
@@ -103,33 +101,33 @@ let provider_reported_error =
 
 let api_network_error =
   Agent_core.Error.Api
-    (Agent_core.Retry.NetworkError
+    (Agent_core.Api_error.NetworkError
        { message = "failed to resolve hostname: ollama.com"
        ; kind = Llm_provider.Http_client.Unknown
        })
 
 let api_payment_required =
   Agent_core.Error.Api
-    (Agent_core.Retry.PaymentRequired { message = "quota exhausted" })
+    (Agent_core.Api_error.PaymentRequired { message = "quota exhausted" })
 
 let api_rate_limited =
   Agent_core.Error.Api
-    (Agent_core.Retry.RateLimited { message = "429"; retry_after = None })
+    (Agent_core.Api_error.RateLimited { message = "429"; retry_after = None })
 
 let api_server_error =
   Agent_core.Error.Api
-    (Agent_core.Retry.ServerError { status = 503; message = "unavailable" })
+    (Agent_core.Api_error.ServerError { status = 503; message = "unavailable" })
 
 let api_context_overflow =
   Agent_core.Error.Api
-    (Agent_core.Retry.ContextOverflow
+    (Agent_core.Api_error.ContextOverflow
        { message = "context window exceeded"; limit = Some 128_000 })
 
 let api_invalid_request_unknown_model =
   Agent_core.Error.Api
-    (Agent_core.Retry.InvalidRequest
+    (Agent_core.Api_error.InvalidRequest
        { message = "model not found"
-       ; reason = Agent_core.Retry.Unknown_invalid_request
+       ; reason = Agent_core.Api_error.Unknown_invalid_request
        })
 
 let api_attempt_rejected =
@@ -159,7 +157,7 @@ let internal_remote_command_failed =
 (* Post-RFC-0370 typed forms of the same boundary failures. *)
 let api_turn_budget_timeout =
   Agent_core.Error.Api
-    (Agent_core.Retry.Timeout
+    (Agent_core.Api_error.Timeout
        { message = "Codex app-server turn timed out after 300.000s"
        ; phase = None
        })

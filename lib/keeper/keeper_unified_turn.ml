@@ -469,10 +469,7 @@ let run_keeper_cycle
     ; manifest_seq = 0
     ; current_turn_blocker_info = None
     ; last_execution = None
-    ; degraded_retry_info = None
-    ; runtime_rotation_attempts = []
     ; failure_reason = None
-    ; retry_phase_started_at = None
     }
   in
   let turn_state =
@@ -544,7 +541,7 @@ let run_keeper_cycle
        | None ->
          (* RFC-0136 PR-3: pre-dispatch validation extracted to
             [Keeper_unified_turn_pre_dispatch].  profile_defaults stays
-            in scope so the retry-loop block below can also call the
+            in scope so the caller can use the
             extracted builder with the same defaults. *)
          let effective_runtime_runtime_name = effective_runtime_id in
          let profile_and_execution =
@@ -709,11 +706,11 @@ let run_keeper_cycle
                     only (wake marker + HITL resolutions). *)
                  { system_prompt; dynamic_context = world_state }
                in
-               (* 5. Run via Agent_core.Agent.run() with transient-error retry.
+               (* 5. Run via Agent_core.Agent.run().
                   The turn-local AGENT_CORE Event_bus preserves factual
                   ToolCalled/ToolCompleted pairing and drives
                   Streaming⇄Awaiting_tool_result FSM transitions. It does
-                  not infer tool effects or veto retry. *)
+                  does not infer tool effects or grant replay authority. *)
                let turn_state =
                  { turn_state with last_execution = Some initial_execution }
                in
@@ -734,7 +731,7 @@ let run_keeper_cycle
                in
                (* PR-J: [?site] labels the call-site so metric queries can attribute
          drain pressure to background polling vs unsubscribe vs the
-         retry path. [outcome=drained] when at least one event was
+         explicit event-bus drain path. [outcome=drained] when at least one event was
          pulled, [outcome=empty] otherwise (the latter is the no-op
          tick that establishes the lock-acquire baseline). *)
                let drain_turn_event_bus ?(site = "unspecified") () =
@@ -825,11 +822,6 @@ let run_keeper_cycle
                      | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
-                       let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
-                         =
-                         Keeper_unified_turn_retry_setup.build
-                           ~now:(fun () -> Eio.Time.now clock)
-                       in
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
                            { attempt = 1
@@ -863,7 +855,6 @@ let run_keeper_cycle
                            ~initial_execution
                            ~turn_state
                            ~before_dispatch_authority
-                           ~current_turn_phase_elapsed_ms
                            ~user_message
                            ~registry_base_path
                            ~record_streaming_cancelled_observation
@@ -914,18 +905,6 @@ let run_keeper_cycle
                         (turn_event_bus_manifest_decision turn_event_bus))
                    Keeper_runtime_manifest.Event_bus_correlated
                in
-               let degraded_retry_info = turn_state.degraded_retry_info in
-               let degraded_retry_applied = Option.is_some degraded_retry_info in
-               let degraded_retry_runtime =
-                 Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.next_runtime)
-                   degraded_retry_info
-               in
-               let fallback_reason =
-                 Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
-                   degraded_retry_info
-               in
                (match run_result with
                 | Error err when EC.is_input_required_error err ->
                   (* InputRequired: special stop condition (not a failure).
@@ -960,21 +939,18 @@ let run_keeper_cycle
                        trajectory_acc
                        (Trajectory.Failed (Agent_core.Error.to_string err));
                   let e_str = Agent_core.Error.to_string err in
-                  let is_transient = EC.is_transient_network_error err in
+                  let is_provider_availability =
+                    EC.is_provider_availability_error err
+                  in
                   (match err with
                       | Agent_core.Error.Api (Timeout _) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string Agent_coreTimeoutClassifications)
-                          ~labels:[ "classification", "transient_network" ]
+                          ~labels:[ "classification", "provider_availability" ]
                           ()
                       | _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_provider_wire_error = EC.is_provider_wire_error err in
-                  let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
-                  let counts_toward_crash =
-                    Keeper_unified_turn_failure.account_failure_counting
-                      ~keeper_name:meta.name ~is_auto_recoverable err
-                  in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "failure" ]
@@ -1031,16 +1007,12 @@ let run_keeper_cycle
                      + String.length world_state
                      + String.length user_message)
                     latency_ms
-                    (if is_provider_wire_error && counts_toward_crash
-                    then " (provider wire error, counts toward crash threshold)"
-                    else if is_provider_wire_error
-                    then " (provider wire error, crash counting skipped)"
-                    else if is_server_parse_rejection && counts_toward_crash
-                     then " (server parse rejection, counts toward crash threshold)"
-                     else if is_server_parse_rejection
-                     then " (server parse rejection, auto-recoverable: crash counting skipped)"
-                     else if is_transient
-                     then " (transient, cooldown preserved)"
+                    (if is_provider_wire_error
+                    then " (provider wire error)"
+                    else if is_server_parse_rejection
+                     then " (server parse rejection)"
+                     else if is_provider_availability
+                     then " (provider availability failure)"
                      else if EC.should_warn_keeper_cycle_failed err
                      then " (policy handled)"
                      else "")
@@ -1082,10 +1054,6 @@ let run_keeper_cycle
                     ~observation
                     ~latency_ms
                     ~outcome:"error"
-                    ~degraded_retry_applied
-                    ?degraded_retry_runtime
-                    ?fallback_reason:
-                      (Option.map EC.degraded_retry_reason_to_string fallback_reason)
                     ~error:e_str
                     ~terminal_reason
                     ();
@@ -1144,7 +1112,6 @@ let run_keeper_cycle
                   Keeper_unified_turn_failure.record_failure_observation
                     ~config
                     ~meta
-                    ~counts_toward_crash
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
@@ -1185,9 +1152,6 @@ let run_keeper_cycle
                       ~turn_ctx_cell
                       ~observation
                       ~latency_ms
-                      ~degraded_retry_applied
-                      ~degraded_retry_runtime
-                      ~fallback_reason
                       ~keeper_turn_id
                       execution_outcome
                   in

@@ -422,7 +422,6 @@ let keeper_diagnostic_json
       ("health_state", `String (keeper_health_to_string health_state));
       ( "quiet_reason", Json_util.string_opt_to_json quiet_reason );
       ("next_action_path", `String next_action_path);
-      ("recoverable", `Bool (String.equal next_action_path "recover"));
       ("summary", `String (keeper_diagnostic_summary ~meta ~health_state ~quiet_reason));
       ("last_reply_status", last_reply_status);
       ("last_reply_at", last_reply_at);

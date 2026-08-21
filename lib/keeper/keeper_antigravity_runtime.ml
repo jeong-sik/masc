@@ -25,7 +25,7 @@ let runtime_error_to_core_error = function
          })
   | Runtime_antigravity.Timeout seconds ->
     Agent_core.Error.Api
-      (Agent_core.Retry.Timeout
+      (Agent_core.Api_error.Timeout
          { message = Printf.sprintf "Antigravity turn timed out after %.3fs" seconds
          ; phase = None
          })

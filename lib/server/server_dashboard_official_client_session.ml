@@ -50,9 +50,8 @@ let string_opt_json = function
 ;;
 
 let resolution_json = function
-  | Keeper_official_client_session_store.Retry_previous ->
-    `Assoc [ "kind", `String "retry_previous" ]
-  | Restart_fresh -> `Assoc [ "kind", `String "restart_fresh" ]
+  | Keeper_official_client_session_store.Restart_fresh ->
+    `Assoc [ "kind", `String "restart_fresh" ]
 ;;
 
 let resolution_record_json
@@ -207,18 +206,14 @@ let parse_body body =
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
      | [ "keeper_name", `String keeper_name
        ; "recovery_id", `String recovery_id
-       ; "resolution", `String ("retry_previous" as resolution) ]
-     | [ "keeper_name", `String keeper_name
-       ; "recovery_id", `String recovery_id
-       ; "resolution", `String ("restart_fresh" as resolution) ] ->
+       ; "resolution", `String "restart_fresh" ] ->
        let* keeper_name = validate_keeper_name keeper_name in
        let* recovery_id = non_empty "recovery_id" recovery_id in
-       let resolution =
-         if String.equal resolution "retry_previous"
-         then Keeper_official_client_session_store.Retry_previous
-         else Restart_fresh
-       in
-       Ok { keeper_name; recovery_id; resolution }
+       Ok
+         { keeper_name
+         ; recovery_id
+         ; resolution = Keeper_official_client_session_store.Restart_fresh
+         }
      | _ ->
        error
          Bad_request
@@ -290,10 +285,6 @@ let store_resolution_error = function
     conflict
       "recovery_not_required"
       "official-client session is not awaiting recovery"
-  | Retry_previous_unavailable ->
-    conflict
-      "retry_previous_unavailable"
-      "official-client recovery has no exact previous settlement to retry"
   | Resolution_conflict ->
     conflict
       "recovery_resolution_conflict"

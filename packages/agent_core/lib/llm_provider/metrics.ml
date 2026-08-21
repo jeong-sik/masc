@@ -48,9 +48,6 @@ type t =
       a structured log event for alerting on misconfigured agents.
 
       @since 0.184.0 *)
-  ; on_retry : provider:string -> model_id:string -> attempt:int -> unit
-    (** Fired when a request is retried due to a retryable error.
-      @since 0.185.0 *)
   ; on_token_usage :
       provider:string -> model_id:string -> input_tokens:int -> output_tokens:int -> unit
     (** Fired when a response carries usage tokens.
@@ -75,7 +72,6 @@ let noop =
   ; on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> ())
   ; on_circuit_state = (fun ~provider:_ ~model_id:_ ~provider_key:_ ~state:_ -> ())
   ; on_capability_drop = (fun ~model_id:_ ~field:_ -> ())
-  ; on_retry = (fun ~provider:_ ~model_id:_ ~attempt:_ -> ())
   ; on_token_usage = (fun ~provider:_ ~model_id:_ ~input_tokens:_ ~output_tokens:_ -> ())
   ; on_tool_calls = (fun ~provider:_ ~model_id:_ ~count:_ -> ())
   ; on_streaming_first_chunk = (fun ~provider:_ ~model_id:_ ~ttfrc_ms:_ -> ())
@@ -109,7 +105,6 @@ type provider_snapshot =
   ; model_id : string
   ; request_total : int
   ; error_total : int
-  ; retry_total : int
   ; input_tokens_total : int
   ; output_tokens_total : int
   ; tool_call_total : int
@@ -127,7 +122,6 @@ let provider_snapshot_to_yojson (snapshot : provider_snapshot) : Yojson.Safe.t =
     ; "model_id", `String snapshot.model_id
     ; "request_total", `Int snapshot.request_total
     ; "error_total", `Int snapshot.error_total
-    ; "retry_total", `Int snapshot.retry_total
     ; "input_tokens_total", `Int snapshot.input_tokens_total
     ; "output_tokens_total", `Int snapshot.output_tokens_total
     ; "tool_call_total", `Int snapshot.tool_call_total
@@ -227,7 +221,6 @@ type aggregate_key = string
 type aggregate_state =
   { mutable request_total : int
   ; mutable error_total : int
-  ; mutable retry_total : int
   ; mutable input_tokens_total : int
   ; mutable output_tokens_total : int
   ; mutable tool_call_total : int
@@ -242,7 +235,6 @@ type aggregate_state =
 let empty_state () : aggregate_state =
   { request_total = 0
   ; error_total = 0
-  ; retry_total = 0
   ; input_tokens_total = 0
   ; output_tokens_total = 0
   ; tool_call_total = 0
@@ -326,11 +318,6 @@ module Aggregating = struct
           agg.hooks.on_circuit_state ~provider ~model_id ~provider_key ~state)
     ; on_capability_drop =
         (fun ~model_id ~field -> agg.hooks.on_capability_drop ~model_id ~field)
-    ; on_retry =
-        (fun ~provider ~model_id ~attempt ->
-          agg.hooks.on_retry ~provider ~model_id ~attempt;
-          with_state agg (key ~provider ~model_id) (fun s ->
-            s.retry_total <- s.retry_total + 1))
     ; on_token_usage =
         (fun ~provider ~model_id ~input_tokens ~output_tokens ->
           agg.hooks.on_token_usage ~provider ~model_id ~input_tokens ~output_tokens;
@@ -372,7 +359,6 @@ module Aggregating = struct
            ; model_id
            ; request_total = s.request_total
            ; error_total = s.error_total
-           ; retry_total = s.retry_total
            ; input_tokens_total = s.input_tokens_total
            ; output_tokens_total = s.output_tokens_total
            ; tool_call_total = s.tool_call_total

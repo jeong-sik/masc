@@ -71,8 +71,7 @@ type tool_error_class =
 
 type tool_failure_kind =
   | Validation_error
-  | Recoverable_tool_error
-  | Non_retryable_tool_error
+  | Tool_error
   | Reported_tool_error
   | Unattributed_tool_error
 [@@deriving yojson, show]
@@ -88,11 +87,6 @@ type tool_result_outcome =
   | Tool_failed of tool_failure_provenance
 [@@deriving show]
 
-let tool_failure_kind_is_recoverable = function
-  | Validation_error | Recoverable_tool_error -> true
-  | Non_retryable_tool_error | Reported_tool_error | Unattributed_tool_error -> false
-;;
-
 let tool_result_outcome_is_error = function
   | Tool_succeeded -> false
   | Tool_failed _ -> true
@@ -100,7 +94,6 @@ let tool_result_outcome_is_error = function
 
 type tool_error =
   { message : string
-  ; recoverable : bool
   ; error_class : tool_error_class option
   }
 
@@ -108,12 +101,8 @@ type tool_result = (tool_output, tool_error) result
 
 let tool_result_of_outcome ~content = function
   | Tool_succeeded -> Ok { content; _meta = None }
-  | Tool_failed { failure_kind; error_class } ->
-    Error
-      { message = content
-      ; recoverable = tool_failure_kind_is_recoverable failure_kind
-      ; error_class
-      }
+  | Tool_failed { failure_kind = _; error_class } ->
+    Error { message = content; error_class }
 ;;
 
 type tool_param =
@@ -1561,7 +1550,7 @@ type sse_event =
                 [None] when the provider omits it. *)
       ; raw : string
         (** Original error payload JSON, carried verbatim so the consumer
-                can feed it to [Retry.classify_error] (retry_after, hard-quota
+                can feed it to [Api_error.classify_error] (retry_after, hard-quota
                 detection) exactly as the non-streaming path does. *)
       }
   | NDJSONError of

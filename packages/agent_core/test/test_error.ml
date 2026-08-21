@@ -2,7 +2,7 @@
 
 open Alcotest
 open Agent_core
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 
 let core_error_testable =
   Alcotest.testable (fun fmt e -> Format.pp_print_string fmt (Error.to_string e)) ( = )
@@ -15,7 +15,7 @@ let category_testable =
 ;;
 
 let category_cases : (string * Error.t * Error.category * string) list =
-  [ "Api", Error.Api (Retry.AuthError { message = "bad key" }), Error.Api_category, "api"
+  [ "Api", Error.Api (Api_error.AuthError { message = "bad key" }), Error.Api_category, "api"
   ; ( "Provider"
     , Error.Provider
         (Llm_provider.Error.InvalidConfig { field = "model"; detail = "invalid" })
@@ -70,21 +70,21 @@ let category_tests =
 
 let test_api_rate_limited () =
   let err =
-    Error.Api (Retry.RateLimited { retry_after = Some 1.5; message = "slow down" })
+    Error.Api (Api_error.RateLimited { retry_after = Some 1.5; message = "slow down" })
   in
   let s = Error.to_string err in
   check bool "contains 'Rate limited'" true (String.length s > 0);
   check
     bool
-    "matches Retry.error_message"
+    "matches Api_error.error_message"
     true
     (s
-     = Retry.error_message
-         (Retry.RateLimited { retry_after = Some 1.5; message = "slow down" }))
+     = Api_error.error_message
+         (Api_error.RateLimited { retry_after = Some 1.5; message = "slow down" }))
 ;;
 
 let test_api_auth_error () =
-  let err = Error.Api (Retry.AuthError { message = "bad key" }) in
+  let err = Error.Api (Api_error.AuthError { message = "bad key" }) in
   check string "auth error message" "Auth error: bad key" (Error.to_string err)
 ;;
 
@@ -238,7 +238,7 @@ let test_internal () =
    exception misses. *)
 let test_wrapped_timeout_is_typed () =
   match Error.of_raised_exn (Eio.Cancel.Cancelled Eio.Time.Timeout) with
-  | Error.Api (Retry.Timeout { phase; _ }) ->
+  | Error.Api (Api_error.Timeout { phase; _ }) ->
     check bool "no HTTP phase is claimed for a fiber timeout" true (phase = None)
   | other ->
     failf "expected Api (Timeout _), got %s" (Error.to_string other)
@@ -246,7 +246,7 @@ let test_wrapped_timeout_is_typed () =
 
 let test_bare_timeout_is_typed () =
   match Error.of_raised_exn Eio.Time.Timeout with
-  | Error.Api (Retry.Timeout _) -> ()
+  | Error.Api (Api_error.Timeout _) -> ()
   | other -> failf "expected Api (Timeout _), got %s" (Error.to_string other)
 ;;
 
@@ -273,14 +273,14 @@ let test_ordinary_exception_keeps_internal_wording () =
 (* ── Equality / pattern matching ──────────────────────────────────── *)
 
 let test_equality () =
-  let a = Error.Api (Retry.AuthError { message = "x" }) in
-  let b = Error.Api (Retry.AuthError { message = "x" }) in
+  let a = Error.Api (Api_error.AuthError { message = "x" }) in
+  let b = Error.Api (Api_error.AuthError { message = "x" }) in
   check core_error_testable "same errors are equal" a b
 ;;
 
 let test_inequality () =
-  let a = Error.Api (Retry.AuthError { message = "x" }) in
-  let b = Error.Api (Retry.AuthError { message = "y" }) in
+  let a = Error.Api (Api_error.AuthError { message = "x" }) in
+  let b = Error.Api (Api_error.AuthError { message = "y" }) in
   check bool "different messages are not equal" true (a <> b)
 ;;
 

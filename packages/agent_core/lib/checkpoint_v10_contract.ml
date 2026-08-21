@@ -366,8 +366,7 @@ let rec validate_tool_result ~scope json =
       (match Types.tool_failure_kind_of_yojson value with
        | Ok
            ( Types.Validation_error
-           | Types.Recoverable_tool_error
-           | Types.Non_retryable_tool_error
+           | Types.Tool_error
            | Types.Reported_tool_error
            | Types.Unattributed_tool_error ) -> Ok ()
        | Error _ -> json_errorf "%s.failure_kind is not a supported value" scope)

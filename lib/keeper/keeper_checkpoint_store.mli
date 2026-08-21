@@ -222,7 +222,7 @@ type checkpoint_installation =
     different content is rejected as [Source_changed]. On success the returned
     ref is derived from the exact compact bytes passed to the durable atomic
     JSON writer. A writer error after atomic rename is an [Installed] result
-    carrying [Commit_durability_unknown], never a retryable not-installed
+    carrying [Commit_durability_unknown], never a not-installed
     failure. Releasing the stable lock cannot replace the already-computed body
     result: [Not_installed] retains its exact cause and [Installed] retains its
     exact reference, with [Release_process_lock_failed] appended as auxiliary

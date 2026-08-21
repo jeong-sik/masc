@@ -14,7 +14,7 @@ val utf8_repair_string : string -> string
 val normalize_prompt_text : max_bytes:int -> string -> string
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
-val keeper_bootstrap_retry_interval_sec : unit -> int
+val keeper_bootstrap_registration_interval_sec : unit -> int
 val keeper_batch_limit : unit -> int
 val keeper_unified_temperature : unit -> float
 val keeper_status_fast_default : unit -> bool

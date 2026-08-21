@@ -127,8 +127,8 @@ val turn_phase_to_witness : turn_phase -> packed_turn_phase
 val packed_turn_phase_label : packed_turn_phase -> string
 
 (** RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
-    [Runtime_transition].  Enumerates the 23 valid cross-state transitions
-    of the 7-variant [turn_phase] FSM.  The 19 forbidden pairs have no
+    [Runtime_transition].  Enumerates the 14 valid cross-state transitions
+    of the 7-variant [turn_phase] FSM.  The 28 forbidden pairs have no
     constructor and are therefore type-unrepresentable.  Idempotent
     self-loops are not represented (mutator-boundary no-ops). *)
 module Turn_phase_transition : sig
@@ -138,24 +138,15 @@ module Turn_phase_transition : sig
     | Prompting_to_executing : (turn_prompting, turn_executing) t
     | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
     | Prompting_to_exhausted : (turn_prompting, turn_exhausted) t
-    | Routing_to_prompting : (turn_routing, turn_prompting) t
     | Routing_to_executing : (turn_routing, turn_executing) t
     | Routing_to_exhausted : (turn_routing, turn_exhausted) t
-    | Executing_to_prompting : (turn_executing, turn_prompting) t
     | Executing_to_routing : (turn_executing, turn_routing) t
     | Executing_to_compacting : (turn_executing, turn_compacting) t
     | Executing_to_finalizing : (turn_executing, turn_finalizing) t
     | Executing_to_exhausted : (turn_executing, turn_exhausted) t
-    | Compacting_to_prompting : (turn_compacting, turn_prompting) t
     | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
     | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
-    | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
-    | Finalizing_to_routing : (turn_finalizing, turn_routing) t
-    | Finalizing_to_executing : (turn_finalizing, turn_executing) t
     | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
-    | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
-    | Exhausted_to_routing : (turn_exhausted, turn_routing) t
-    | Exhausted_to_executing : (turn_exhausted, turn_executing) t
 
   type packed = Packed_transition : ('a, 'b) t -> packed
 
@@ -172,15 +163,24 @@ type turn_phase_transition_spec_violation =
   | Prompting_to_idle
   | Prompting_to_compacting
   | Routing_to_idle
+  | Routing_to_prompting
   | Routing_to_compacting
   | Routing_to_finalizing
   | Executing_to_idle
+  | Executing_to_prompting
   | Compacting_to_idle
+  | Compacting_to_prompting
   | Compacting_to_routing
   | Compacting_to_executing
   | Finalizing_to_idle
+  | Finalizing_to_prompting
+  | Finalizing_to_routing
+  | Finalizing_to_executing
   | Finalizing_to_compacting
   | Exhausted_to_idle
+  | Exhausted_to_prompting
+  | Exhausted_to_routing
+  | Exhausted_to_executing
   | Exhausted_to_compacting
   | Exhausted_to_finalizing
 

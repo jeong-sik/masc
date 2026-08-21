@@ -71,7 +71,6 @@ type sample = {
   cache_hit : bool option;
       (** Prefix or implicit cache hit detected by the provider. *)
   status : status;  (** Outcome of the call. *)
-  retry_count : int;
       (** Number of runtime retries attempted before this sample (0 for the
           first attempt). *)
 }
@@ -90,7 +89,6 @@ val sample_of_response :
   model_id:string ->
   ?total_duration_ms:float ->
   ?serialization_ms:float ->
-  ?retry_count:int ->
   status:status ->
   Agent_core.Types.api_response ->
   sample
@@ -125,7 +123,6 @@ val record_response :
   model_id:string ->
   ?total_duration_ms:float ->
   ?serialization_ms:float ->
-  ?retry_count:int ->
   status:status ->
   Agent_core.Types.api_response ->
   unit

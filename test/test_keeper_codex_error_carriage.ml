@@ -11,9 +11,9 @@ let class_of (err : Agent_core.Error.t) =
   match err with
   | Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ }) ->
     "config:" ^ field
-  | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) ->
+  | Agent_core.Error.Api (Agent_core.Api_error.ContextOverflow _) ->
     "api:context_overflow"
-  | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> "api:timeout"
+  | Agent_core.Error.Api (Agent_core.Api_error.Timeout _) -> "api:timeout"
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
     "provider:unavailable"
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _) ->

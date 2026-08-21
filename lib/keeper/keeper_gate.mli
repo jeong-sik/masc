@@ -136,7 +136,7 @@ val decide :
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
-val retry_blocked_auto_judge :
+val rerun_blocked_auto_judge :
   base_path:string ->
   requested_by:string ->
   expected_input_hash:string ->

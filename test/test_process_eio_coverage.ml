@@ -11,17 +11,17 @@ let contains haystack needle =
   in
   loop 0
 
-let test_should_retry_unix_fallback_on_bind_error () =
+let test_should_use_unix_fallback_on_bind_error () =
   let exn = Unix.Unix_error (Unix.EADDRINUSE, "bind", "") in
   check bool "retry bind eaddrinuse" true
-    (Process_eio.should_retry_unix_fallback exn)
+    (Process_eio.should_use_unix_fallback exn)
 
-let test_should_retry_unix_fallback_on_cancelled_bind_error () =
+let test_should_use_unix_fallback_on_cancelled_bind_error () =
   let exn =
     Eio.Cancel.Cancelled (Unix.Unix_error (Unix.EADDRINUSE, "bind", ""))
   in
   check bool "retry cancelled bind eaddrinuse" true
-    (Process_eio.should_retry_unix_fallback exn)
+    (Process_eio.should_use_unix_fallback exn)
 
 (* A child that emits past the capture ceiling must yield a bounded result
    that names what it elided, not the whole stream. Before the ceiling the
@@ -573,9 +573,9 @@ let () =
       ( "fallback",
         [
           test_case "retry-on-bind-eaddrinuse" `Quick
-            test_should_retry_unix_fallback_on_bind_error;
+            test_should_use_unix_fallback_on_bind_error;
           test_case "retry-on-cancelled-bind-eaddrinuse" `Quick
-            test_should_retry_unix_fallback_on_cancelled_bind_error;
+            test_should_use_unix_fallback_on_cancelled_bind_error;
           test_case "argv-fallback-preserves-env" `Quick
             test_run_argv_fallback_preserves_env;
           test_case "argv-with-status-fallback-includes-stderr-on-failure"

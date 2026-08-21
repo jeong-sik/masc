@@ -26,13 +26,13 @@ let test_api_rate_limited_is_runtime_unavailable () =
     "soft 429 requires a different configured runtime"
     (KFR.Rotate_now { rotate = KFR.Rate_window_unavailable })
     (Agent_core.Error.Api
-       (Llm_provider.Retry.RateLimited
+       (Llm_provider.Api_error.RateLimited
           { retry_after = Some 30.0; message = "slow down" }))
 
 let test_api_quota_message_does_not_override_rate_limit () =
   let err =
     Agent_core.Error.Api
-      (Llm_provider.Retry.RateLimited
+      (Llm_provider.Api_error.RateLimited
          { retry_after = None; message = "You have exceeded your current quota." })
   in
   check_route
@@ -43,36 +43,36 @@ let test_api_quota_message_does_not_override_rate_limit () =
     "PaymentRequired is the typed API hard-quota signal"
     (KFR.Rotate_now { rotate = KFR.Account_quota_unavailable })
     (Agent_core.Error.Api
-       (Llm_provider.Retry.PaymentRequired { message = "billing required" }))
+       (Llm_provider.Api_error.PaymentRequired { message = "billing required" }))
 
 let test_api_overloaded_is_backpressure () =
   check_route
     "typed Overloaded stays transient backpressure (#23483)"
     (KFR.Rotate_now { rotate = KFR.Capacity_unavailable })
-    (Agent_core.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
+    (Agent_core.Error.Api (Llm_provider.Api_error.Overloaded { message = "overloaded" }))
 
 let test_api_server_error_uses_typed_variant () =
   check_route
     "ServerError does not reinterpret status codes"
     (KFR.Rotate_now { rotate = KFR.Provider_service_unavailable })
     (Agent_core.Error.Api
-       (Llm_provider.Retry.ServerError { status = 524; message = "timeout" }));
+       (Llm_provider.Api_error.ServerError { status = 524; message = "timeout" }));
   check_route
     "typed ServerError remains a server error for an unusual status"
     (KFR.Rotate_now { rotate = KFR.Provider_service_unavailable })
     (Agent_core.Error.Api
-       (Llm_provider.Retry.ServerError { status = 418; message = "teapot" }))
+       (Llm_provider.Api_error.ServerError { status = 418; message = "teapot" }))
 
 let test_api_auth_rotates_invalid_request_judges () =
   check_route
     "auth error rotates (credentials differ per runtime)"
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
-    (Agent_core.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
+    (Agent_core.Error.Api (Llm_provider.Api_error.AuthError { message = "401" }));
   check_route
     "authorization error rotates (credential scopes differ per runtime)"
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
     (Agent_core.Error.Api
-       (Llm_provider.Retry.AuthorizationError { message = "403" }));
+       (Llm_provider.Api_error.AuthorizationError { message = "403" }));
   check_route
     "provider authorization error rotates"
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
@@ -82,9 +82,9 @@ let test_api_auth_rotates_invalid_request_judges () =
   match
     route_of_agent_core_error
       (Agent_core.Error.Api
-         (Llm_provider.Retry.InvalidRequest
+         (Llm_provider.Api_error.InvalidRequest
             { message = "bad body"
-            ; reason = Llm_provider.Retry.Unknown_invalid_request
+            ; reason = Llm_provider.Api_error.Unknown_invalid_request
             }))
   with
   | KFR.Exhausted_visible_alive { terminal = KFR.Deterministic_request; _ } -> ()
@@ -107,7 +107,7 @@ let test_api_input_capacity_is_terminal_judgment () =
   in
   let error reason =
     Agent_core.Error.Api
-      (Llm_provider.Retry.InputCapacity
+      (Llm_provider.Api_error.InputCapacity
          { message = "typed capacity"; constraint_; reason })
   in
   check_route
@@ -118,7 +118,7 @@ let test_api_input_capacity_is_terminal_judgment () =
        ; detail =
            Agent_core.Error.to_string
              (error
-                (Llm_provider.Retry.Serving_constraint_rejected
+                (Llm_provider.Api_error.Serving_constraint_rejected
                    (Llm_provider.Serving_constraint.Input_rejected
                       { input_tokens = 524299
                       ; accepted_through = 524298
@@ -127,7 +127,7 @@ let test_api_input_capacity_is_terminal_judgment () =
            |> Keeper_internal_error.cap_blocker_detail
        })
     (error
-       (Llm_provider.Retry.Serving_constraint_rejected
+       (Llm_provider.Api_error.Serving_constraint_rejected
           (Llm_provider.Serving_constraint.Input_rejected
              { input_tokens = 524299
              ; accepted_through = 524298
@@ -135,7 +135,7 @@ let test_api_input_capacity_is_terminal_judgment () =
              })));
   let measurement_unavailable =
     error
-      (Llm_provider.Retry.Token_measurement_unavailable
+      (Llm_provider.Api_error.Token_measurement_unavailable
          Llm_provider.Input_token_count.Anthropic_messages_count_tokens)
   in
   check_route
@@ -205,7 +205,7 @@ let test_masc_internal_backpressure_requires_another_runtime () =
          { runtime_id = "glm-coding.glm-5-turbo"
          ; source = Keeper_internal_error.Provider_capacity
          ; detail = "429 burst"
-         ; retry_after = Keeper_internal_error.Explicit 45.0
+         ; provider_reset = Keeper_internal_error.Provider_reset_after_seconds 45.0
          ; cooldown_cause = None
          })
   in

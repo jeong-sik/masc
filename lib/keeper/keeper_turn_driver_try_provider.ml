@@ -468,16 +468,8 @@ let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
    history; every later cut sees a list that has already been shortened — so
    the reported share keeps that denominator.
 
-   #28845: with one exception. When the raw cut refuses with
-   [Newest_atom_exceeds_available], the newest atom is indivisible and larger
-   than the whole history budget, so no cut exists and there is no boundary to
-   anchor to. The composition is retried once with the demotion boundary moved
-   past the newest atom ([demote_before = atom_count]), lifting the RFC-0351
-   §4 current-turn exclusion for that attempt only: the turn's own tool
-   results are replaced by their externalized markers instead of failing the
-   turn. If the atom carries nothing demotable, or still does not fit once
-   demoted, the typed refusal stands — this is a single last-resort attempt,
-   not a retry loop. *)
+   If the raw cut refuses, the typed refusal is terminal for this composition;
+   the function does not move the demotion boundary and re-run the cut. *)
 let plan_and_window_model_input
       ~measure_message_bytes
       ~capacity_bytes
@@ -508,30 +500,6 @@ let plan_and_window_model_input
     | Ok windowed -> Ok (planned, windowed, history_atom_count)
   in
   match raw_cut messages with
-  | Error
-      (Runtime_model_input_tail_window.Newest_atom_exceeds_available _ as
-       first_error) ->
-    (* #28845: no cut exists, so there is no raw-cut boundary to anchor
-       demotion to. Retry the composition once with the boundary moved past
-       the newest atom — lifting the RFC-0351 §4 current-turn exclusion for
-       this attempt only — so the turn's own results leave as externalized
-       markers instead of failing the turn. Nothing demotable, or still
-       oversized once demoted, keeps the typed refusal. *)
-    let _, atom_count = Runtime_model_input_tail_window.annotate messages in
-    let planned = plan ~demote_before:atom_count in
-    (match planned.Keeper_model_input_demotion.pending with
-     | [] -> Error first_error
-     | _ ->
-       (match cut_planned planned atom_count with
-        | Ok _ as ok -> ok
-        | Error
-            (Runtime_model_input_tail_window.Newest_atom_exceeds_available _) ->
-          (* The re-cut measured the placeholder-saturated atom, so its
-             [newest_atom_bytes] reports marker sizes and masks the true
-             magnitude. Re-raise the refusal measured against the real
-             bytes. *)
-          Error first_error
-        | Error _ as error -> error))
   | Error error -> Error error
   | Ok raw_projection ->
     let planned = plan ~demote_before in
@@ -644,11 +612,8 @@ let budgeted_model_input_projection
            a message cannot rewrite the retained prefix, because it moves
            once per turn rather than once per message.
 
-           One exception, exercised only when no cut exists at all: when the
-           raw cut refuses with [Newest_atom_exceeds_available],
-           [plan_and_window_model_input] retries once with the boundary moved
-           past the newest atom, demoting this turn's own results into their
-           externalized markers rather than failing the turn (#28845). *)
+           If no cut exists, the typed capacity refusal is returned without
+           changing this boundary. *)
         let demote_before =
           Runtime_model_input_tail_window.first_atom_at_or_after
             messages
@@ -729,13 +694,8 @@ let budgeted_model_input_projection
 
 let run_try_provider
       (ctx : try_provider_ctx)
-      ?enable_thinking_override
       candidate
   =
-  (* [enable_thinking_override] lets the caller re-issue the SAME candidate with a
-     different thinking policy without mutating [ctx]. RFC-0271 §4.1 uses it for the
-     [Retry_no_thinking] recovery arm: a [Thinking_only_no_progress] rejection is
-     retried once with thinking forced off before rerouting to the next candidate. *)
   let resolved_lane =
     match ctx.tools with
     | [] -> "none"
@@ -783,10 +743,7 @@ let run_try_provider
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context
-          ; enable_thinking =
-              (match enable_thinking_override with
-               | Some v -> Some v
-               | None -> ctx.enable_thinking)
+          ; enable_thinking = ctx.enable_thinking
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
@@ -919,7 +876,7 @@ let run_try_provider
          | `Attempt_stalled ->
            Error
              (Agent_core.Error.Api
-                (Llm_provider.Retry.Timeout
+                (Llm_provider.Api_error.Timeout
                    { message =
                        Printf.sprintf
                          "provider call made no progress for %.0fs \
@@ -927,13 +884,10 @@ let run_try_provider
                          threshold_sec
                          ctx.runtime_id
                        (* [Wall_clock] is kept deliberately: the existing
-                          classifiers
-                          ([Runtime_attempt_fsm.should_try_next],
-                          [Keeper_provider_runtime_boundary.is_provider_timeout_error])
-                          already route this phase to declared-lane candidate
-                          rotation, and this is still a wall-clock-derived
-                          verdict. Introducing a new phase would change retry
-                          policy, which #28417 does not intend to touch. *)
+                          typed runtime route and
+                          [Keeper_provider_runtime_boundary.is_provider_timeout_error]
+                          already preserve this phase as a provider timeout,
+                          and this is still a wall-clock-derived verdict. *)
                    ; phase = Some Llm_provider.Http_client.Wall_clock
                    })))
       | None, _ | _, None -> run_attempt_switch ()

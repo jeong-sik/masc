@@ -584,8 +584,6 @@ let run_keeper_invocation_turn_admitted_inner
 	                           ?on_event
 	                           ?on_tool_result_ready
 	                           ~trajectory_acc
-	                           ~runtime_rotation_attempts:[]
-	                           ~is_retry:false
 	                           ?event_bus
 	                           ?continuation_channel
 	                           ()
@@ -625,9 +623,6 @@ let run_keeper_invocation_turn_admitted_inner
                     ~turn_ctx_cell
                     ~observation:world_observation
                     ~latency_ms
-                    ~degraded_retry_applied:false
-                    ~degraded_retry_runtime:None
-                    ~fallback_reason:None
                     ~keeper_turn_id
                     execution_outcome
                 with

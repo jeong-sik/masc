@@ -41,9 +41,6 @@ val handle
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> observation:Keeper_world_observation.world_observation
   -> latency_ms:int
-  -> degraded_retry_applied:bool
-  -> degraded_retry_runtime:string option
-  -> fallback_reason:Keeper_error_classify.degraded_retry_reason option
   -> keeper_turn_id:int
   -> Keeper_execution_outcome.t
   -> handle_result

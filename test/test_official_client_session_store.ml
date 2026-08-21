@@ -488,7 +488,7 @@ let test_restart_recovery_and_transient_release () =
        check string "claim epoch" owner_epoch required.owner_epoch
      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
        fail "old process claim did not enter recovery");
-    let reclaimed =
+    (match
       claim
         ~base_path
         ~keeper_name
@@ -498,9 +498,38 @@ let test_restart_recovery_and_transient_release () =
         ~runtime_id:"antigravity.gemini"
         ~tool_surface_sha256:empty_surface
         ~updated_at:4.0
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "ambiguous restart recovery was claimed without operator resolution");
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "expected recovery identity"
+    in
+    let restarted, _ =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator"
+        ~resolved_at:4.0
       |> Result.get_ok
     in
-    check int "recovery claim reuses failed turn ordinal" 1 reclaimed.turn_count;
+    let reclaimed =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some restarted)
+        ~client_kind:Antigravity
+        ~owner_epoch:next_owner_epoch
+        ~runtime_id:"antigravity.gemini"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:4.5
+      |> Result.get_ok
+    in
+    check int "resolved restart begins a fresh ordinal" 1 reclaimed.turn_count;
     let released =
       release_transient
         ~base_path
@@ -592,169 +621,11 @@ let test_exact_recovery_restart () =
     in
     check bool "recovery replayed" true (replay_application = Replayed);
     check bool "replay returns committed binding" true (restarted = replayed);
-    (match
-       resolve_recovery
-         ~base_path
-         ~keeper_name
-         ~expected:recovery
-         ~recovery_id
-         ~resolution:Retry_previous
-         ~resolved_by:"operator"
-         ~resolved_at:6.0
-     with
-     | Error Resolution_conflict -> ()
-     | Error _ -> fail "different replay decision returned the wrong conflict"
-     | Ok _ -> fail "different replay decision replaced committed recovery");
     match restarted.last_recovery_resolution with
     | Some record ->
       check string "durable actor" "operator" record.resolved_by;
       check string "recovery fence" recovery_id record.recovery_id
     | None -> fail "recovery resolution evidence was not persisted")
-;;
-
-let test_retry_previous_restores_exact_settlement () =
-  with_workspace "masc-official-client-store-retry-" (fun base_path ->
-    let keeper_name = "retry" in
-    let claimed =
-      claim_new
-        ~base_path
-        ~keeper_name
-        ~client_kind:Codex
-        ~runtime_id:"codex.default"
-        ~owner_epoch
-        ~at:1.0
-    in
-    let active =
-      mark_active
-        ~base_path
-        ~keeper_name
-        ~expected:claimed
-        ~session_id:"session-1"
-        ~updated_at:2.0
-      |> Result.get_ok
-    in
-    let starting =
-      mark_turn_starting
-        ~base_path
-        ~keeper_name
-        ~expected:active
-        ~session_id:"session-1"
-        ~updated_at:3.0
-      |> Result.get_ok
-    in
-    let inflight =
-      mark_turn_started
-        ~base_path
-        ~keeper_name
-        ~expected:starting
-        ~session_id:"session-1"
-        ~turn_id:"turn-1"
-        ~turn_count:starting.turn_count
-        ~updated_at:4.0
-      |> Result.get_ok
-    in
-    let settled =
-      settle
-        ~base_path
-        ~keeper_name
-        ~expected:inflight
-        ~session_id:"session-1"
-        ~turn_id:"turn-1"
-        ~updated_at:5.0
-      |> Result.get_ok
-    in
-    let resumed_claim =
-      claim
-        ~base_path
-        ~keeper_name
-        ~expected:(Some settled)
-        ~client_kind:Codex
-        ~owner_epoch
-        ~runtime_id:"codex.default"
-        ~tool_surface_sha256:empty_surface
-        ~updated_at:6.0
-      |> Result.get_ok
-    in
-    let recovery =
-      require_recovery
-        ~base_path
-        ~keeper_name
-        ~expected:resumed_claim
-        ~failure:Protocol_failed
-        ~detail:"resume transport ended before the next turn started"
-        ~required_at:7.0
-      |> Result.get_ok
-    in
-    let recovery_id =
-      match recovery.phase with
-      | Recovery_required required ->
-        check bool
-          "retry retains exact previous settlement"
-          true
-          (required.previous_settlement
-           = Some { session_id = "session-1"; turn_id = "turn-1" });
-        required.recovery_id
-      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-        fail "resumed claim did not enter recovery"
-    in
-    let automatic_plan =
-      plan_claim
-        ~expected:(Some recovery)
-        ~client_kind:Codex
-        ~runtime_id:"codex.default"
-      |> Result.get_ok
-    in
-    check int "automatic recovery restarts ordinal" 1 automatic_plan.turn_count;
-    check
-      (option string)
-      "automatic recovery drops surface requirement"
-      None
-      automatic_plan.required_tool_surface_sha256;
-    check
-      bool
-      "automatic recovery does not resume an ambiguous provider conversation"
-      true
-      (Option.is_none automatic_plan.previous_settlement);
-    let restored, application =
-      resolve_recovery
-        ~base_path
-        ~keeper_name
-        ~expected:recovery
-        ~recovery_id
-        ~resolution:Retry_previous
-        ~resolved_by:"operator"
-        ~resolved_at:8.0
-      |> Result.get_ok
-    in
-    check bool "retry decision applied" true (application = Applied);
-    check int "failed retry does not count" 1 restored.turn_count;
-    (match restored.phase with
-     | Settled { session_id; turn_id } ->
-       check string "restored session" "session-1" session_id;
-       check string "restored turn" "turn-1" turn_id
-     | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
-       fail "retry_previous did not restore the exact settlement");
-    let next_claim =
-      claim
-        ~base_path
-        ~keeper_name
-        ~expected:(Some restored)
-        ~client_kind:Codex
-        ~owner_epoch
-        ~runtime_id:"codex.default"
-        ~tool_surface_sha256:empty_surface
-        ~updated_at:9.0
-      |> Result.get_ok
-    in
-    match next_claim.phase with
-    | Start { previous_settlement; _ } ->
-      check bool
-        "next claim resumes restored session"
-        true
-        (previous_settlement
-         = Some { session_id = "session-1"; turn_id = "turn-1" })
-    | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
-      fail "restored settlement did not drive the next resume claim")
 ;;
 
 (* The sibling restart case starts at turn_count = 1, where [turn_count - 1] and
@@ -1002,10 +873,6 @@ let () =
             `Quick
             test_restart_recovery_and_transient_release
         ; test_case "exact recovery restart" `Quick test_exact_recovery_restart
-        ; test_case
-            "retry previous restores exact settlement"
-            `Quick
-            test_retry_previous_restores_exact_settlement
         ; test_case
             "restart fresh lets the next fresh turn start"
             `Quick

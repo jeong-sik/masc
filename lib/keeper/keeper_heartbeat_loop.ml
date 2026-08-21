@@ -519,8 +519,7 @@ let run_keepalive_unified_turn
              primary, so a companion whose durable entry changed out from
              under this turn is caught before dispatch instead of only at
              ack time. Falls back to the pre-batch single [pending_selection]
-             when nothing was consumed as a batch (e.g. the transient-board
-             withdrawal case, which never populates [consumed_selections]). *)
+             when nothing was consumed as a batch. *)
           let selections_to_validate =
             match !consumed_selections with
             | [] -> Option.to_list !pending_selection
@@ -857,6 +856,16 @@ let run_keepalive_unified_turn
                reason
                detail)
       in
+      (match event_intake.event_queue_intake_error, !pending_selection with
+       | Some (Stimulus_intake.Board_read_failed unavailable), Some selection ->
+         terminalize_failed_selection
+           ~selection
+           ~detail:
+             (Stimulus_intake.event_queue_intake_error_to_string
+                (Stimulus_intake.Board_read_failed unavailable))
+       | Some (Stimulus_intake.Pending_selection_failed _), _
+       | None, _
+       | Some (Stimulus_intake.Board_read_failed _), None -> ());
       let persist_transcript_corruption_pause ~detail =
         let pause_result =
           try

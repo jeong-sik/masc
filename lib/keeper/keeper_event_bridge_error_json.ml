@@ -36,12 +36,12 @@ let agent_completed_result_fields = function
 ;;
 
 let invalid_request_reason_to_wire = function
-  | Agent_core.Retry.Json_parse_error -> "json_parse_error"
-  | Agent_core.Retry.Attempt_rejected -> "attempt_rejected"
-  | Agent_core.Retry.Request_body_too_large _ -> "request_body_too_large"
-  | Agent_core.Retry.Request_body_refused_by_provider _ ->
+  | Agent_core.Api_error.Json_parse_error -> "json_parse_error"
+  | Agent_core.Api_error.Attempt_rejected -> "attempt_rejected"
+  | Agent_core.Api_error.Request_body_too_large _ -> "request_body_too_large"
+  | Agent_core.Api_error.Request_body_refused_by_provider _ ->
     "request_body_refused_by_provider"
-  | Agent_core.Retry.Unknown_invalid_request -> "unknown_invalid_request"
+  | Agent_core.Api_error.Unknown_invalid_request -> "unknown_invalid_request"
 ;;
 
 let serving_constraint_source_kind_to_wire = function
@@ -74,7 +74,7 @@ let serving_constraint_to_json
 ;;
 
 let input_capacity_reason_to_json = function
-  | Agent_core.Retry.Serving_constraint_rejected reason ->
+  | Agent_core.Api_error.Serving_constraint_rejected reason ->
     let fields =
       match reason with
       | Llm_provider.Serving_constraint.Evidence_not_yet_valid
@@ -105,7 +105,7 @@ let input_capacity_reason_to_json = function
         ]
     in
     `Assoc fields
-  | Agent_core.Retry.Token_measurement_unavailable protocol ->
+  | Agent_core.Api_error.Token_measurement_unavailable protocol ->
     `Assoc
       [ "kind", `String "token_measurement_unavailable"
       ; "protocol", `String (Llm_provider.Input_token_count.show_protocol protocol)
@@ -137,58 +137,58 @@ let agent_failed_error_summary = function
 ;;
 
 let core_api_error_fields = function
-  | Agent_core.Retry.RateLimited { retry_after; message } ->
+  | Agent_core.Api_error.RateLimited { retry_after; message } ->
     [ "variant", `String "rate_limited"
     ; "message", `String message
     ; "retry_after_s", Json_util.float_opt_to_json retry_after
     ]
-  | Agent_core.Retry.Overloaded { message } ->
+  | Agent_core.Api_error.Overloaded { message } ->
     [ "variant", `String "overloaded"; "message", `String message ]
-  | Agent_core.Retry.ServerError { status; message } ->
+  | Agent_core.Api_error.ServerError { status; message } ->
     [ "variant", `String "server_error"
     ; "status", `Int status
     ; "message", `String message
     ]
-  | Agent_core.Retry.AuthError { message } ->
+  | Agent_core.Api_error.AuthError { message } ->
     [ "variant", `String "auth_error"; "message", `String message ]
-  | Agent_core.Retry.AuthorizationError { message } ->
+  | Agent_core.Api_error.AuthorizationError { message } ->
     [ "variant", `String "authorization_error"; "message", `String message ]
-  | Agent_core.Retry.PaymentRequired { message } ->
+  | Agent_core.Api_error.PaymentRequired { message } ->
     [ "variant", `String "payment_required"; "message", `String message ]
-  | Agent_core.Retry.InvalidRequest { message; reason } ->
+  | Agent_core.Api_error.InvalidRequest { message; reason } ->
     [ "variant", `String "invalid_request"
     ; "message", `String message
     ; "reason", `String (invalid_request_reason_to_wire reason)
     ]
     @ (match reason with
-       | Agent_core.Retry.Request_body_too_large { actual_bytes; limit_bytes } ->
+       | Agent_core.Api_error.Request_body_too_large { actual_bytes; limit_bytes } ->
          [ "actual_bytes", `Int actual_bytes
          ; "limit_bytes", `Int limit_bytes
          ]
-       | Agent_core.Retry.Request_body_refused_by_provider { status } ->
+       | Agent_core.Api_error.Request_body_refused_by_provider { status } ->
          [ "status", `Int status ]
-       | Agent_core.Retry.Json_parse_error
-       | Agent_core.Retry.Attempt_rejected
-       | Agent_core.Retry.Unknown_invalid_request -> [])
-  | Agent_core.Retry.NotFound { message } ->
+       | Agent_core.Api_error.Json_parse_error
+       | Agent_core.Api_error.Attempt_rejected
+       | Agent_core.Api_error.Unknown_invalid_request -> [])
+  | Agent_core.Api_error.NotFound { message } ->
     [ "variant", `String "not_found"; "message", `String message ]
-  | Agent_core.Retry.ContextOverflow { message; limit } ->
+  | Agent_core.Api_error.ContextOverflow { message; limit } ->
     [ "variant", `String "context_overflow"
     ; "message", `String message
     ; "limit", Json_util.int_opt_to_json limit
     ]
-  | Agent_core.Retry.InputCapacity { message; constraint_; reason } ->
+  | Agent_core.Api_error.InputCapacity { message; constraint_; reason } ->
     [ "variant", `String "input_capacity"
     ; "message", `String message
     ; "constraint", serving_constraint_to_json constraint_
     ; "reason", input_capacity_reason_to_json reason
     ]
-  | Agent_core.Retry.NetworkError { message; kind } ->
+  | Agent_core.Api_error.NetworkError { message; kind } ->
     [ "variant", `String "network_error"
     ; "message", `String message
     ; "network_kind", `String (Keeper_agent_error.network_error_kind_to_wire kind)
     ]
-  | Agent_core.Retry.Timeout { message; phase } ->
+  | Agent_core.Api_error.Timeout { message; phase } ->
     [ "variant", `String "timeout"
     ; "message", `String message
     ; ( "timeout_phase"

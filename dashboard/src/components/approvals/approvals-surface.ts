@@ -46,7 +46,7 @@ import {
   deleteKeeperApprovalRule,
   refreshGate,
   respondToKeeperApproval,
-  retryKeeperAutoJudge,
+  rerunKeeperAutoJudge,
   setKeeperGateMode,
 } from '../gate-store'
 
@@ -541,8 +541,8 @@ function ApprovalCard({
           ${rearmExpectation
             ? html`<button
                 type="button"
-                class="ap-act retry"
-                onClick=${() => void retryKeeperAutoJudge(item.id, rearmExpectation)}
+                class="ap-act rerun"
+                onClick=${() => void rerunKeeperAutoJudge(item.id, rearmExpectation)}
                 title="durable blocked state를 operator CAS로 한 번 재개합니다"
                 disabled=${anyBusy}
               >${busy ? '요청 중…' : 'Auto Judge 재개'}</button>`

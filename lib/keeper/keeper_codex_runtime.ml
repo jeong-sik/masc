@@ -218,7 +218,7 @@ let codex_error_to_core_error = function
   | Runtime_codex_app_server.Context_window_exceeded
       { message; tool_effect_attempted = false } ->
     Agent_core.Error.Api
-      (Llm_provider.Retry.ContextOverflow { message; limit = None })
+      (Llm_provider.Api_error.ContextOverflow { message; limit = None })
   | Runtime_codex_app_server.Context_window_exceeded _ as error ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
@@ -228,7 +228,7 @@ let codex_error_to_core_error = function
          })
   (* Provider- and transport-side failures carry typed constructors so the
      lane rotation chain ([core_error_to_runtime_outcome] returns [None] for
-     [Internal _], which short-circuits [lane_should_retry]) can judge them.
+     [Internal _]) can judge them.
      Mirrors [claude_error_to_core_error] / [runtime_error_to_core_error]
      (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
      must decide its rotation class at compile time. *)
@@ -269,7 +269,7 @@ let codex_error_to_core_error = function
          })
   | Runtime_codex_app_server.Timeout { seconds; turn_accepted = false } ->
     Agent_core.Error.Api
-      (Agent_core.Retry.Timeout
+      (Agent_core.Api_error.Timeout
          { message =
              Printf.sprintf
                "Codex app-server stream was idle for %.3fs before turn/start"

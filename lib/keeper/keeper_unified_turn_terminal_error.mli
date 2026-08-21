@@ -1,5 +1,5 @@
 (** RFC-0136 PR-4-b: terminal error side effects extracted from
-    [keeper_unified_turn] retry loop.
+    [keeper_unified_turn].
 
     Two paths based on [Keeper_error_classify.is_runtime_exhausted_error]:
 
@@ -13,7 +13,7 @@
       [Terminal_non_exhaustion], and logs a structured WARN.
 
     Side effects only.  The function is unit-returning to keep the 9
-    retry-loop call sites unchanged: they invoke a [mark_terminal_error]
+    failure call sites unchanged: they invoke a [mark_terminal_error]
     closure that adapts {!handle} to the loop-scoped [attempt] /
     [attempted_runtimes] values.  Cycle 52 narrative behavior preserved. *)
 

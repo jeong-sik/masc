@@ -5,7 +5,7 @@
 
     Classification results are returned as a typed variant rather than
     string tokens. String serialization is owned by
-    {!docker_failure_class_to_string} so retry policy, telemetry, and
+    {!docker_failure_class_to_string} so routing, telemetry, and
     the dashboard surface cannot drift when a class is added or renamed. *)
 
 type docker_failure_class =

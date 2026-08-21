@@ -329,10 +329,6 @@ let test_transport_health_json () =
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
   Otel_metric_store.set_gauge Otel_metric_store.metric_agent_core_sse_relay_queue_depth 4.0;
-  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_retries
-    ~labels:[ ("stage", "append") ] ~delta:2.0 ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_retries
-    ~labels:[ ("stage", "broadcast") ] ~delta:1.0 ();
   Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
   Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
@@ -394,9 +390,6 @@ let test_transport_health_json () =
     ; "queue_avg_depth"
     ; "queue_max_depth"
     ; "relay_queue_depth"
-    ; "relay_retry_total"
-    ; "relay_retry_append"
-    ; "relay_retry_broadcast"
     ; "relay_drop_total"
     ; "relay_drop_queue"
     ; "relay_drop_append"
@@ -450,8 +443,6 @@ let test_transport_health_json () =
     ((sse_json |> U.member "hot_sessions" |> U.to_list |> List.length) > 0);
   check int "relay queue depth" 4
     (sse_json |> U.member "relay_queue_depth" |> U.to_int);
-  check int "relay retries total" 3
-    (sse_json |> U.member "relay_retry_total" |> U.to_int);
   check int "relay drops total" 4
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
   check string "presence stream endpoint" "/events/presence"

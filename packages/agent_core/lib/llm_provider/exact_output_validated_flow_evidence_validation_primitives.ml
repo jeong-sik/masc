@@ -124,7 +124,7 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && attempt.http_status = Some http_status
     && Option.is_some attempt.provider_trace_sha256
     && Option.is_some attempt.raw_response_sha256
-  (* [Retry.classify_error] produces [RateLimited] from status 429 alone, so an
+  (* [Api_error.classify_error] produces [RateLimited] from status 429 alone, so an
      advance recorded as rate-limited must carry that status and the one
      dispatch that received it. *)
   | Rate_limited { http_status }, Response_received ->

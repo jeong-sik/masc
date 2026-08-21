@@ -91,37 +91,6 @@ val first_atom_at_or_after
     Kept here so the conversion uses the same labelling as the cut rather than
     a second reading of where an atom begins. *)
 
-val next_shrink_capacity_bytes
-  :  ?allow_empty_history:bool
-  -> measure_message_bytes:(Agent_core.Types.message -> int)
-  -> target_capacity_bytes:int
-  -> Agent_core.Types.message list
-  -> int option
-(** Choose a smaller projection capacity at an atom boundary after a provider
-    has rejected [messages]. [None] means there is no smaller structural view.
-
-    [allow_empty_history=false] preserves the newest atom. When explicitly
-    [true], a caller that carries the current goal outside [messages] may use a
-    zero-prior-history floor after every atom boundary has been exhausted.
-
-    The returned capacity is never below the bytes required by pinned
-    messages, the synthetic preamble, and the newest atom. It is also strictly
-    smaller than the exact rejected window after synthetic framing is charged;
-    otherwise this function returns [None]. Thus applying {!project} cannot
-    replace a size-driven refusal with an equal or larger request.
-    [target_capacity_bytes] is used when it lies inside those structural
-    bounds (for example, the ordinary halving policy). *)
-
-val minimum_capacity_bytes
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
-  -> Agent_core.Types.message list
-  -> int option
-(** Return the exact measured capacity of the zero-prior-history view: pinned
-    messages plus the omission preamble. [None] means [messages] has no
-    shrinkable atom or the framed floor is not strictly smaller than the
-    rejected view. Callers must pass [allow_empty_history=true] to {!project}
-    when applying this capacity. *)
-
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int

@@ -186,12 +186,11 @@ let test_bounded_inline_rejects_oversized_result () =
       (tool_ok ~tool_name:"keeper_artifact_read" payload)
   with
   | Ok _ -> Alcotest.fail "oversized bounded-inline result was accepted"
-  | Error { message; recoverable; error_class } ->
+  | Error { message; error_class } ->
     Alcotest.(check string)
       "provider receives bounded projection failure"
       "tool output exceeds descriptor budget"
       message;
-    Alcotest.(check bool) "bounded projection carries no recovery hint" false recoverable;
     (match error_class with
      | Some Agent_core.Types.Deterministic -> ()
      | _ -> Alcotest.fail "bounded projection failure is not deterministic")
@@ -231,13 +230,12 @@ let test_tool_identity_does_not_bypass_externalization () =
 let test_to_agent_core_typed_error_inlined () =
   match B.to_agent_core_typed_result (tool_error ~tool_name:"test" "fail") with
   | Ok _ -> Alcotest.fail "expected Error"
-  | Error { message; recoverable; _ } ->
-      Alcotest.(check string) "message" "fail" message;
-      Alcotest.(check bool) "default recoverable=false" false recoverable
+  | Error { message; _ } ->
+      Alcotest.(check string) "message" "fail" message
 
 let test_to_agent_core_typed_error_ignores_json_metadata () =
   let msg =
-    {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
+    {|{"ok":false,"error":"try again","error_class":"transient_mutex_contention"}|}
   in
   let tr : Tool_result.result =
     Tool_result.Failed
@@ -251,9 +249,8 @@ let test_to_agent_core_typed_error_ignores_json_metadata () =
   in
   match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
-  | Error { message; recoverable; error_class } ->
+  | Error { message; error_class } ->
       Alcotest.(check string) "message" msg message;
-      Alcotest.(check bool) "runtime failure stays non-recoverable" false recoverable;
       (match error_class with
        | Some Agent_core.Types.Unknown -> ()
        | _ -> Alcotest.fail "expected typed runtime failure mapping")
@@ -300,8 +297,7 @@ let test_to_agent_core_typed_result_preserves_workflow_rejection () =
   in
   match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
-  | Error { recoverable; error_class; _ } ->
-    Alcotest.(check bool) "workflow rejection is non-recoverable" false recoverable;
+  | Error { error_class; _ } ->
     (match error_class with
      | Some Agent_core.Types.Deterministic -> ()
      | _ -> Alcotest.fail "expected deterministic error_class")
@@ -316,8 +312,7 @@ let test_to_agent_core_dependency_failure_carries_no_replay_hint () =
   in
   match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
-  | Error { recoverable; error_class; _ } ->
-    Alcotest.(check bool) "no replay hint" false recoverable;
+  | Error { error_class; _ } ->
     (match error_class with
      | Some Agent_core.Types.Unknown -> ()
      | _ -> Alcotest.fail "expected unknown error_class")
@@ -462,12 +457,11 @@ let test_blob_store_failure_is_typed () =
            (tool_ok ~tool_name:"test" payload)
        with
        | Ok _ -> Alcotest.fail "projection failure became AGENT_CORE success"
-       | Error { message; recoverable; error_class } ->
+       | Error { message; error_class } ->
          Alcotest.(check string)
            "provider error hides storage internals"
            "tool output artifact storage failed"
            message;
-         Alcotest.(check bool) "provider gets no replay hint" false recoverable;
          (match error_class with
           | Some Agent_core.Types.Unknown -> ()
           | _ -> Alcotest.fail "expected unknown storage failure"));
@@ -484,11 +478,7 @@ let test_blob_store_failure_is_typed () =
            (tool_ok ~tool_name:"effectful-test" payload)
        with
        | Ok _ -> Alcotest.fail "projection failure became success"
-       | Error { recoverable; error_class; _ } ->
-         Alcotest.(check bool)
-           "projection carries no recovery hint"
-           false
-           recoverable;
+       | Error { error_class; _ } ->
          (match error_class with
           | Some Agent_core.Types.Unknown -> ()
           | _ -> Alcotest.fail "expected unknown post-effect failure class")))

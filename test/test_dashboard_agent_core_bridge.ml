@@ -21,7 +21,6 @@ let make_sample
       ?(cost = 0.001)
       ?(cache = false)
       ?(status = DOB.Success)
-      ?(retry = 0)
       ()
   : DOB.sample
   =
@@ -37,7 +36,6 @@ let make_sample
   ; cost_usd = (if usage_reported then Some cost else None)
   ; cache_hit = (if usage_reported then Some cache else None)
   ; status
-  ; retry_count = retry
   }
 ;;
 
@@ -185,7 +183,6 @@ let test_sample_json_preserves_signal_fields () =
          ~cost:0.03
          ~cache:true
          ~status:(DOB.Cancelled { reason = "operator" })
-         ~retry:2
          ())
   in
   Alcotest.(check string)
@@ -231,7 +228,7 @@ let test_sample_json_preserves_signal_fields () =
     "status reason"
     "operator"
     (json |> Json.member "status" |> Json.member "reason" |> Json.to_string);
-  Alcotest.(check int) "retry" 2 (json |> Json.member "retry_count" |> Json.to_int)
+  ()
 ;;
 
 let test_recent_json_provider_filter_is_runtime_alias () =
@@ -524,7 +521,6 @@ let expected_signal_keys =
   ; "cost_usd"
   ; "cache_hit"
   ; "status"
-  ; "retry_count"
   ]
 ;;
 

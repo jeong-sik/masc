@@ -170,7 +170,7 @@ describe('deriveKeeperRuntimeProjection', () => {
         phase: 'failing',
         turn_phase: 'executing',
         decision: { stage: 'tool_optional' },
-        runtime: { state: 'degraded_retry' },
+        runtime: { state: 'provider_runtime_error' },
         compaction: { stage: 'idle' },
       }),
       runtimeTrace: runtimeTrace(),

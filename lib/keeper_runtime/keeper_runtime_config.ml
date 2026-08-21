@@ -456,9 +456,9 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
        | "MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC" ->
          display_float
            Env_config_keeper.KeeperBootstrap.lazy_startup_poll_interval_sec
-       | "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC" ->
+       | "MASC_KEEPER_BOOTSTRAP_LISTENER_RECONCILE_INTERVAL_SEC" ->
          display_float
-           Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec
+           Env_config_keeper.KeeperBootstrap.keeper_listener_reconcile_interval_sec
        | "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC" ->
          display_float Env_config_keeper.KeeperBootstrap.post_startup_settle_sec
        | "MASC_KEEPER_REACTIVE_ENABLED"

@@ -10,13 +10,6 @@ afterEach(() => {
 })
 
 describe('keeper attention labels', () => {
-  it('labels transient runtime retry without warning', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    expect(attentionReasonLabel('transient_runtime_retry', false)).toBe('일시적 런타임 재시도')
-    expect(warn).not.toHaveBeenCalled()
-  })
-
   it('labels a fenced provider effect without exposing the raw token', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

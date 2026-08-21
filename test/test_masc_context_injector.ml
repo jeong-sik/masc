@@ -9,7 +9,7 @@ let ok_output content : Agent_core.Types.tool_result =
   Ok { Agent_core.Types.content; _meta = None }
 
 let err_output message : Agent_core.Types.tool_result =
-  Error { Agent_core.Types.message; recoverable = true; error_class = None }
+  Error { Agent_core.Types.message; error_class = None }
 
 (* ── Unit tests: injector function ──────────────────── *)
 

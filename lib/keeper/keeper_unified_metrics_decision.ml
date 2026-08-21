@@ -20,9 +20,6 @@ let append_decision_record
     ~(latency_ms : int)
     ~(outcome : string)
     ?channel
-    ?(degraded_retry_applied = false)
-    ?degraded_retry_runtime
-    ?fallback_reason
     ?turn_mode
       ?(result : Keeper_agent_run.run_result option = None)
     ?error
@@ -151,10 +148,6 @@ let append_decision_record
             (Keeper_world_observation.channel_to_string
                channel) );
         ("outcome", `String outcome);
-        ("degraded_retry_applied", `Bool degraded_retry_applied);
-        ( "degraded_retry_runtime",
-          Json_util.string_opt_to_json degraded_retry_runtime );
-        ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
         ("duration_ms", `Int latency_ms);

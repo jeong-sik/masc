@@ -173,7 +173,6 @@ end
            declaration takes precedence
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
-    @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared AGENT_CORE context for cross-turn state
     @param event_bus Optional MASC event bus *)
 val run_turn
@@ -200,11 +199,6 @@ val run_turn
   -> ?on_event:(Agent_core.Types.sse_event -> unit)
   -> ?on_tool_result_ready:(tool_call_id:string -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
-  -> ?degraded_retry_applied:bool
-  -> ?degraded_retry_runtime:string
-  -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
-  -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
-  -> ?is_retry:bool
   -> ?shared_context:Agent_core.Context.t
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?trace_link:string * string

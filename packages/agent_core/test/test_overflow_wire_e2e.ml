@@ -1,6 +1,6 @@
 (** agent-core boundary end-to-end regression: an empty completion whose OpenAI/GLM wire
     [finish_reason] is the overflow token must classify as
-    [Retry.ContextOverflow], not provider-unavailability.
+    [Api_error.ContextOverflow], not provider-unavailability.
 
     The pre-existing attribution suite injected a PRE-TYPED
     [Types.ContextWindowExceeded] straight into [empty_completion_error], so it
@@ -21,7 +21,7 @@ module Types = Llm_provider.Types
 module Wire = Llm_provider.Stop_reason_wire
 module Parse = Llm_provider.Backend_openai_parse
 module Glm = Llm_provider.Backend_glm
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 module Attribution = Provider_failure_attribution
 
 (* Canonical overflow wire token — the same string [Types.stop_reason_of_string]
@@ -90,10 +90,10 @@ let test_glm_parse_overflow () =
 let test_classifier_reachable_from_wire () =
   let body = empty_completion_body ~finish_reason:overflow_token in
   let stop_reason = empty_completion_stop_reason "glm" (Glm.parse_response_result body) in
-  match Retry.overflow_of_empty_completion ~stop_reason ~message:"e2e" with
-  | Some (Retry.ContextOverflow { limit = None; _ }) -> ()
+  match Api_error.overflow_of_empty_completion ~stop_reason ~message:"e2e" with
+  | Some (Api_error.ContextOverflow { limit = None; _ }) -> ()
   | Some other ->
-    Alcotest.failf "expected ContextOverflow, got %s" (Retry.error_message other)
+    Alcotest.failf "expected ContextOverflow, got %s" (Api_error.error_message other)
   | None ->
     Alcotest.fail "overflow_of_empty_completion did not fire on wire-decoded overflow"
 ;;
@@ -107,7 +107,7 @@ let test_attribution_end_to_end () =
   match
     Attribution.core_error_of_http_error (Http.empty_completion_error ~stop_reason)
   with
-  | Error.Api (Retry.ContextOverflow { limit = None; _ }) -> ()
+  | Error.Api (Api_error.ContextOverflow { limit = None; _ }) -> ()
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
 ;;
 

@@ -9,8 +9,7 @@
 
 (** Create a canonical tool with a typed parser and handler.
 
-    Parse errors are recoverable tool failures. Handler errors are
-    non-recoverable domain failures. *)
+    Parse and handler errors preserve their typed execution provenance. *)
 val create
   :  name:string
   -> description:string

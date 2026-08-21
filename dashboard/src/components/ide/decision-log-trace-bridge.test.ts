@@ -114,7 +114,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
 
   it('maps fields correctly: id, tsMs, keeperName, source, decisionId, semanticOutcome', () => {
     bridgeDecisionsToTrace(
-      [dec('scholar', 1_715_000_000, 'tool_use', 'error_retryable')],
+      [dec('scholar', 1_715_000_000, 'tool_use', 'error')],
       new Set(),
     )
     const event = keeperTraceState.value.events[0]!
@@ -124,13 +124,13 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
     expect(event.source).toBe('decision-log')
     if (event.source === 'decision-log') {
       expect(event.decisionId).toBe('decision:scholar:1715000000:tool_use')
-      expect(event.semanticOutcome).toBe('error_retryable')
+      expect(event.semanticOutcome).toBe('error')
     }
   })
 
   it('maps optional IDE route context into the trace event', () => {
     bridgeDecisionsToTrace(
-      [dec('scholar', 1_715_000_000, 'tool_use', 'error_retryable', {
+      [dec('scholar', 1_715_000_000, 'tool_use', 'error', {
         file_path: 'runtime.ts',
         line: 9,
         goal_id: 'goal-decision',

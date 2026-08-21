@@ -55,14 +55,14 @@ describe('ErrorState', () => {
     expect(container.querySelector('.kv-state-g')?.textContent).toBe('⚠')
   })
 
-  it('renders a retry button that calls onAction', () => {
+  it('renders an explicit action button that calls onAction', () => {
     const onAction = vi.fn()
     const container = document.createElement('div')
     render(html`<${ErrorState} title="Failed" onAction=${onAction} />`, container)
 
     const button = container.querySelector('button')
     expect(button).not.toBeNull()
-    expect(button!.textContent).toContain('다시 시도')
+    expect(button!.textContent).toContain('다시 불러오기')
     button!.click()
     expect(onAction).toHaveBeenCalledTimes(1)
   })

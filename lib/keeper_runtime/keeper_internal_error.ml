@@ -49,9 +49,9 @@ let capacity_backpressure_source_of_string = function
   | _ -> None
 
 (** Provider-supplied retry-after hint for capacity backpressure. *)
-type capacity_retry_after =
-  | Explicit of float
-  | No_retry_hint
+type capacity_reset_evidence =
+  | Provider_reset_after_seconds of float
+  | No_provider_reset_evidence
 
 (** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
     It has no retry, admission, or lifecycle authority. *)
@@ -260,7 +260,7 @@ type masc_internal_error =
       runtime_id : string;
       source : capacity_backpressure_source;
       detail : string;
-      retry_after : capacity_retry_after;
+      provider_reset : capacity_reset_evidence;
       cooldown_cause : provider_cooldown_cause option;
       (* Legacy diagnostic only. Current producers use [None]; decoded values
          never grant retry, admission, or lifecycle authority. *)
@@ -420,12 +420,12 @@ let masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
+  | Capacity_backpressure { runtime_id; source; detail; provider_reset; cooldown_cause } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
-      match retry_after with
-      | Explicit s -> [ "retry_after_sec", `Float s ]
-      | No_retry_hint -> [ ("retry_after_sec", `Null) ]
+      match provider_reset with
+      | Provider_reset_after_seconds s -> [ "provider_reset_after_sec", `Float s ]
+      | No_provider_reset_evidence -> [ ("provider_reset_after_sec", `Null) ]
     in
     let cooldown_cause_fields =
       match cooldown_cause with
@@ -581,11 +581,11 @@ let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
   && response_shape = Some Accept_response_thinking_only
 
 let summary_of_masc_internal_error = function
-  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
+  | Capacity_backpressure { runtime_id; source; detail; provider_reset; cooldown_cause } ->
       let retry_after_suffix =
-        match retry_after with
-        | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
-        | No_retry_hint -> ""
+        match provider_reset with
+        | Provider_reset_after_seconds value -> Printf.sprintf "; provider_reset=%.1fs" value
+        | No_provider_reset_evidence -> ""
       in
       let cooldown_cause_suffix =
         match cooldown_cause with
@@ -706,48 +706,6 @@ let runtime_id_of_masc_internal_error = function
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ -> "unknown"
 
-let accept_no_progress_retry_kind = function
-  | Accept_rejected
-      {
-        reason_kind;
-        response_shape;
-        _;
-      }
-    when accept_rejection_is_empty_no_progress
-           ~reason_kind
-           ~response_shape ->
-    Some `Empty_no_progress
-  | Accept_rejected
-      {
-        reason_kind;
-        response_shape;
-        _;
-      }
-    when accept_rejection_is_thinking_only_no_progress
-           ~reason_kind
-           ~response_shape ->
-    Some `Thinking_only_no_progress
-  | Accept_rejected _
-  | Runtime_exhausted _
-  | Capacity_backpressure _
-  | Resumable_cli_session _
-  | Internal_unhandled_exception _
-  | Internal_bridge_exception _
-  | Internal_contract_rejected _
-  | Incomplete_tool_transcript _
-  | Terminal_effect_failed _
-  | Provider_attempt_effect_fenced _
-  | Tool_correction_lost _
-  | Receipt_persistence_failed _
-  | Gate_replay_repair_required _ ->
-    None
-
-let accept_rejection_has_no_progress_retry_hint err =
-  match accept_no_progress_retry_kind err with
-  | Some (`Empty_no_progress | `Thinking_only_no_progress) ->
-    true
-  | None -> false
-
 (* The typed value rides the carrier (RFC-0371 B12 §6.1(1)); the message
    keeps the exact prefixed-JSON spelling so anything that only stringifies
    — logs, receipts, persisted turn state — sees the same wire text as
@@ -823,7 +781,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                       ; "runtime_id"
                       ; "source"
                       ; "detail"
-                      ; "retry_after_sec"
+                      ; "provider_reset_after_sec"
                       ]
                       fields
                     || exact_fields
@@ -831,14 +789,14 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                          ; "runtime_id"
                          ; "source"
                          ; "detail"
-                         ; "retry_after_sec"
+                         ; "provider_reset_after_sec"
                          ; "cooldown_cause"
                          ]
                          fields ->
-               let retry_after =
-                 match float_opt_of_assoc "retry_after_sec" json with
-                 | None -> No_retry_hint
-                 | Some s -> Explicit s
+               let provider_reset =
+                 match float_opt_of_assoc "provider_reset_after_sec" json with
+                 | None -> No_provider_reset_evidence
+                 | Some s -> Provider_reset_after_seconds s
                in
                let cooldown_cause =
                  match string_opt_of_assoc "cooldown_cause" json with
@@ -847,7 +805,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                in
                Some
                  (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after; cooldown_cause })
+                    { runtime_id; source; detail; provider_reset; cooldown_cause })
              | Some _ | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (

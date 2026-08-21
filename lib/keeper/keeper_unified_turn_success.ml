@@ -451,9 +451,6 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Keeper_registry.reset_turn_failures
       ~base_path:config.Workspace.base_path
       updated_meta.name;
-    Keeper_unified_turn_failure.reset_invalid_request_failures
-      ~keeper_name:updated_meta.name;
-    Keeper_unified_turn_failure.note_turn_success updated_meta.name;
     Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with
@@ -539,9 +536,6 @@ let handle
       ~turn_ctx_cell
       ~observation
       ~latency_ms
-      ~degraded_retry_applied
-      ~degraded_retry_runtime
-      ~fallback_reason
       ~keeper_turn_id
       execution_outcome
   =
@@ -632,10 +626,6 @@ let handle
         (decision_outcome_to_label
            (decision_outcome_of_terminal_outcome terminal_outcome))
       ~channel
-      ~degraded_retry_applied
-      ?degraded_retry_runtime
-      ?fallback_reason:
-        (Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
       ~turn_mode
       ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
       ~result:(Some result)

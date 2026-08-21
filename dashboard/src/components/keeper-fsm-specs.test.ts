@@ -302,11 +302,10 @@ describe('buildTurnFsmSpec', () => {
     const expected = new Set([
       'idle->prompting',
       'prompting->routing', 'prompting->executing', 'prompting->finalizing', 'prompting->exhausted',
-      'routing->prompting', 'routing->executing', 'routing->exhausted',
-      'executing->prompting', 'executing->routing', 'executing->compacting', 'executing->finalizing', 'executing->exhausted',
-      'compacting->prompting', 'compacting->finalizing', 'compacting->exhausted',
-      'finalizing->prompting', 'finalizing->routing', 'finalizing->executing', 'finalizing->exhausted',
-      'exhausted->prompting', 'exhausted->routing', 'exhausted->executing',
+      'routing->executing', 'routing->exhausted',
+      'executing->routing', 'executing->compacting', 'executing->finalizing', 'executing->exhausted',
+      'compacting->finalizing', 'compacting->exhausted',
+      'finalizing->exhausted',
     ])
     const seen = new Set(spec.edges.map(e => `${e.source}->${e.target}`))
     expect(seen).toEqual(expected)

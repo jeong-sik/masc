@@ -1,6 +1,6 @@
 (** Fine-grained error domains using polymorphic variants. *)
 
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 module Http_client = Llm_provider.Http_client
 
 type provider_error =
@@ -12,11 +12,11 @@ type provider_error =
   | `Provider_timeout of Http_client.timeout_phase option * string
   | `Streaming_timeout of Http_client.timeout_phase * string
   | `Overloaded
-  | `Invalid_request of Llm_provider.Retry.invalid_request_reason * string
+  | `Invalid_request of Llm_provider.Api_error.invalid_request_reason * string
   | `Not_found of string
   | `Context_overflow of string * int option
   | `Input_capacity of
-      Retry.input_capacity_reason * Llm_provider.Serving_constraint.t * string
+      Api_error.input_capacity_reason * Llm_provider.Serving_constraint.t * string
   | `Provider_wire_error of
       string
       * Http_client.provider_wire_format
@@ -84,24 +84,24 @@ let is_streaming_timeout_phase = function
 
 (* ── Conversion from Error.t ────────────────────── *)
 
-let of_api_error (err : Retry.api_error) : provider_error =
+let of_api_error (err : Api_error.api_error) : provider_error =
   match err with
-  | Retry.RateLimited r -> `Rate_limited (r.retry_after, r.message)
-  | Retry.AuthError r -> `Auth_error r.message
-  | Retry.AuthorizationError r -> `Authorization_error r.message
-  | Retry.ServerError r -> `Server_error (r.status, r.message)
-  | Retry.NetworkError r -> `Network_error r.message
-  | Retry.Timeout r ->
+  | Api_error.RateLimited r -> `Rate_limited (r.retry_after, r.message)
+  | Api_error.AuthError r -> `Auth_error r.message
+  | Api_error.AuthorizationError r -> `Authorization_error r.message
+  | Api_error.ServerError r -> `Server_error (r.status, r.message)
+  | Api_error.NetworkError r -> `Network_error r.message
+  | Api_error.Timeout r ->
     (match r.phase with
      | Some phase when is_streaming_timeout_phase phase ->
        `Streaming_timeout (phase, r.message)
      | phase -> `Provider_timeout (phase, r.message))
-  | Retry.Overloaded _ -> `Overloaded
-  | Retry.InvalidRequest r -> `Invalid_request (r.reason, r.message)
-  | Retry.NotFound r -> `Not_found r.message
-  | Retry.ContextOverflow r -> `Context_overflow (r.message, r.limit)
-  | Retry.InputCapacity r -> `Input_capacity (r.reason, r.constraint_, r.message)
-  | Retry.PaymentRequired r -> `Payment_required r.message
+  | Api_error.Overloaded _ -> `Overloaded
+  | Api_error.InvalidRequest r -> `Invalid_request (r.reason, r.message)
+  | Api_error.NotFound r -> `Not_found r.message
+  | Api_error.ContextOverflow r -> `Context_overflow (r.message, r.limit)
+  | Api_error.InputCapacity r -> `Input_capacity (r.reason, r.constraint_, r.message)
+  | Api_error.PaymentRequired r -> `Payment_required r.message
 ;;
 
 let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error =
@@ -119,26 +119,26 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
      | phase -> `Provider_timeout (phase, r.detail))
   | Llm_provider.Error.CapacityExhausted _ -> `Overloaded
   | Llm_provider.Error.InvalidRequest r ->
-    `Invalid_request (Retry.Unknown_invalid_request, r.reason)
+    `Invalid_request (Api_error.Unknown_invalid_request, r.reason)
   | Llm_provider.Error.NotFound r -> `Not_found r.detail
   | Llm_provider.Error.MissingApiKey r ->
     `Auth_error (Printf.sprintf "missing API key: %s" r.var_name)
   | Llm_provider.Error.InvalidConfig r ->
-    `Invalid_request (Retry.Unknown_invalid_request, r.detail)
+    `Invalid_request (Api_error.Unknown_invalid_request, r.detail)
   | Llm_provider.Error.ParseError r ->
-    `Invalid_request (Retry.Unknown_invalid_request, r.detail)
+    `Invalid_request (Api_error.Unknown_invalid_request, r.detail)
   | Llm_provider.Error.ProviderWireError r ->
     `Provider_wire_error (r.provider, r.format, r.kind, r.detail)
   | Llm_provider.Error.ProviderReportedError r ->
     `Provider_reported_error (r.provider, r.error_type, r.detail)
   | Llm_provider.Error.UnknownVariant r ->
     `Invalid_request
-      ( Retry.Unknown_invalid_request
+      ( Api_error.Unknown_invalid_request
       , Printf.sprintf "unknown %s variant: %s" r.type_name r.value )
   | Llm_provider.Error.ProviderUnavailable r -> `Network_error r.detail
   | Llm_provider.Error.ProviderTerminal r ->
     `Invalid_request
-      (Retry.Unknown_invalid_request, Printf.sprintf "%s: %s" r.reason r.detail)
+      (Api_error.Unknown_invalid_request, Printf.sprintf "%s: %s" r.reason r.detail)
 ;;
 
 let of_core_error (err : Error.t) : core_error_poly =
@@ -175,34 +175,34 @@ let of_core_error (err : Error.t) : core_error_poly =
 
 let provider_to_error : provider_error -> Error.t = function
   | `Rate_limited (after, message) ->
-    Error.Api (Retry.RateLimited { retry_after = after; message })
-  | `Auth_error msg -> Error.Api (Retry.AuthError { message = msg })
-  | `Authorization_error msg -> Error.Api (Retry.AuthorizationError { message = msg })
-  | `Server_error (status, msg) -> Error.Api (Retry.ServerError { status; message = msg })
-  | `Network_error msg -> Error.Api (Retry.NetworkError { message = msg; kind = Unknown })
-  | `Provider_timeout (phase, msg) -> Error.Api (Retry.Timeout { message = msg; phase })
+    Error.Api (Api_error.RateLimited { retry_after = after; message })
+  | `Auth_error msg -> Error.Api (Api_error.AuthError { message = msg })
+  | `Authorization_error msg -> Error.Api (Api_error.AuthorizationError { message = msg })
+  | `Server_error (status, msg) -> Error.Api (Api_error.ServerError { status; message = msg })
+  | `Network_error msg -> Error.Api (Api_error.NetworkError { message = msg; kind = Unknown })
+  | `Provider_timeout (phase, msg) -> Error.Api (Api_error.Timeout { message = msg; phase })
   | `Streaming_timeout (phase, msg) ->
     Error.Provider
       (Llm_provider.Error.Timeout
          { provider = "unknown"; timeout_phase = Some phase; detail = msg })
-  | `Overloaded -> Error.Api (Retry.Overloaded { message = "overloaded" })
+  | `Overloaded -> Error.Api (Api_error.Overloaded { message = "overloaded" })
   (* The reverse direction used to overwrite the reason with
      Unknown_invalid_request, so a round trip through this module erased a typed
      capacity refusal even when the forward direction had carried it. *)
   | `Invalid_request (reason, msg) ->
-    Error.Api (Retry.InvalidRequest { message = msg; reason })
-  | `Not_found msg -> Error.Api (Retry.NotFound { message = msg })
+    Error.Api (Api_error.InvalidRequest { message = msg; reason })
+  | `Not_found msg -> Error.Api (Api_error.NotFound { message = msg })
   | `Context_overflow (msg, limit) ->
-    Error.Api (Retry.ContextOverflow { message = msg; limit })
+    Error.Api (Api_error.ContextOverflow { message = msg; limit })
   | `Input_capacity (reason, constraint_, message) ->
-    Error.Api (Retry.InputCapacity { message; constraint_; reason })
+    Error.Api (Api_error.InputCapacity { message; constraint_; reason })
   | `Provider_wire_error (provider, format, kind, detail) ->
     Error.Provider
       (Llm_provider.Error.ProviderWireError { provider; format; kind; detail })
   | `Provider_reported_error (provider, error_type, detail) ->
     Error.Provider
       (Llm_provider.Error.ProviderReportedError { provider; error_type; detail })
-  | `Payment_required msg -> Error.Api (Retry.PaymentRequired { message = msg })
+  | `Payment_required msg -> Error.Api (Api_error.PaymentRequired { message = msg })
 ;;
 
 let to_core_error (err : core_error_poly) : Error.t =

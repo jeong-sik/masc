@@ -21,7 +21,7 @@ type paused_dead_reason =
 
 type owner_execution_truth =
   | Executable
-  | Recoverable
+  | No_live_owner
   | Retained_disabled of retained_disabled_reason
   | Paused_dead of paused_dead_reason
   | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
@@ -177,7 +177,7 @@ let paused_dead_reason_to_wire = function
 
 let owner_execution_truth_to_wire = function
   | Executable -> "executable"
-  | Recoverable -> "recoverable"
+  | No_live_owner -> "no_live_owner"
   | Retained_disabled reason -> retained_disabled_reason_to_wire reason
   | Paused_dead reason -> paused_dead_reason_to_wire reason
   | Shutdown_fenced _ -> "shutdown_fenced"
@@ -207,7 +207,7 @@ let classify_owner_execution_with
         | Some Proactive_disabled
         | None ->
           (match runtime with
-           | Owner_unregistered -> Recoverable
+           | Owner_unregistered -> No_live_owner
            (* [Stopped] is terminal. [Paused] is not terminal, but it is also
               not executable. Both must be excluded before the live-fiber
               fast path below. *)
@@ -219,7 +219,7 @@ let classify_owner_execution_with
                } ->
              Paused_dead (Runtime_terminal phase)
            | Owner_registered { live_fiber = true; _ } -> Executable
-           | Owner_registered { live_fiber = false; _ } -> Recoverable)))
+           | Owner_registered { live_fiber = false; _ } -> No_live_owner)))
 ;;
 
 let classify_owner_execution =

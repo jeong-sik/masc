@@ -560,7 +560,7 @@ let test_tool_result_followup_merge_preserves_internal_metadata () =
           ; content = "failed"
           ; outcome =
               Tool_failed
-                { failure_kind = Recoverable_tool_error
+                { failure_kind = Tool_error
                 ; error_class = Some Deterministic
                 }
           ; json = None

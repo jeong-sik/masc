@@ -21,7 +21,7 @@ let input_capacity constraint_ reason =
     (InputCapacity
        { message = "Context overflow: typed capacity"
        ; constraint_
-       ; reason = Agent_core.Retry.Serving_constraint_rejected reason
+       ; reason = Agent_core.Api_error.Serving_constraint_rejected reason
        })
 
 let measurement_unavailable constraint_ =
@@ -30,7 +30,7 @@ let measurement_unavailable constraint_ =
        { message = "token measurement unavailable"
        ; constraint_
        ; reason =
-           Agent_core.Retry.Token_measurement_unavailable
+           Agent_core.Api_error.Token_measurement_unavailable
              Llm_provider.Input_token_count.Anthropic_messages_count_tokens
        })
 
@@ -63,8 +63,6 @@ let test_is_context_overflow_only_for_overflow_errors () =
   in
   check bool "rendered internal text does not match" false
     (EC.is_context_overflow rendered_only);
-  check bool "rendered internal text is not auto-recoverable" false
-    (EC.is_auto_recoverable_turn_error rendered_only);
   (* [Error.Agent (UnrecognizedStopReason _)] is never a context overflow here,
      whatever token it carries. Both an unmodeled provider token and an overflow
      token are asserted, because agent core CAN deliver the latter: only
@@ -78,9 +76,6 @@ let test_is_context_overflow_only_for_overflow_errors () =
   in
   check bool "unmodeled stop reason is not a context overflow" false
     (EC.is_context_overflow unmodeled_stop_reason);
-  check bool "unmodeled stop reason is not auto-recoverable"
-    false
-    (EC.is_auto_recoverable_turn_error unmodeled_stop_reason);
   let overflow_token_stop_reason =
     Agent_core.Error.Agent
       (UnrecognizedStopReason { reason = "model_context_window_exceeded" })
@@ -121,26 +116,13 @@ let test_input_capacity_is_not_context_overflow () =
        .Provider_context_overflow _ -> false)
 ;;
 
-(* ContextOverflow counts toward the ordinary crash threshold (#26546): the
-   automatic overflow-compaction recovery was removed after producing no
-   committed compaction. Exempting it would pin [consecutive] at 0 while a
-   request with no state-changing successor loops every cycle. *)
-let test_context_overflow_is_not_auto_recoverable () =
-  check
-    bool
-    "ContextOverflow is not auto-recoverable at turn level"
-    false
-    (EC.is_auto_recoverable_turn_error
-       (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
-;;
-
 module Budget = Masc.Keeper_turn_runtime_budget
 
 let request_body_too_large ~actual_bytes ~limit_bytes =
   Agent_core.Error.Api
     (InvalidRequest
        { message = "serialized request body exceeds the declared limit"
-       ; reason = Agent_core.Retry.Request_body_too_large { actual_bytes; limit_bytes }
+       ; reason = Agent_core.Api_error.Request_body_too_large { actual_bytes; limit_bytes }
        })
 ;;
 
@@ -148,7 +130,7 @@ let request_body_refused_by_provider ~status =
   Agent_core.Error.Api
     (InvalidRequest
        { message = "provider refused the serialized request body"
-       ; reason = Agent_core.Retry.Request_body_refused_by_provider { status }
+       ; reason = Agent_core.Api_error.Request_body_refused_by_provider { status }
        })
 ;;
 
@@ -319,10 +301,6 @@ let () =
             "is_context_overflow only matches ContextOverflow"
             `Quick
             test_is_context_overflow_only_for_overflow_errors
-        ; test_case
-            "context overflow is not auto-recoverable"
-            `Quick
-            test_context_overflow_is_not_auto_recoverable
         ; test_case
             "input capacity is not context overflow"
             `Quick

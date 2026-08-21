@@ -101,7 +101,7 @@ val review
     [~prompt_name] selects the prompt-registry template rendered for the
     review; it defaults to {!Prompt_names.verification} (the task completion
     review). The goal verification lane (RFC-0387) passes its own templates —
-    provider selection, failover, and the verdict channel are unchanged. *)
+    prompt selection does not alter runtime authority or the verdict channel. *)
 
 (** Render the single prompt-registry SSOT. There is no inline fallback prompt;
     an error keeps the Task nonterminal. [~prompt_name] defaults to

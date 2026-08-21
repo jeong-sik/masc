@@ -8,9 +8,6 @@ val append_decision_record :
   latency_ms:int ->
   outcome:string ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
-  ?degraded_retry_applied:bool ->
-  ?degraded_retry_runtime:string ->
-  ?fallback_reason:string ->
   ?turn_mode:Keeper_unified_metrics_support.turn_mode ->
   ?result:Keeper_agent_run.run_result option ->
   ?error:string ->

@@ -297,7 +297,7 @@ let supervise_keepalive
       meta.name
       reason
   | Keeper_activation_readiness.Executable -> ()
-  | Keeper_activation_readiness.Recoverable ->
+  | Keeper_activation_readiness.No_live_owner ->
     (match Keeper_registry.get ~base_path meta.name with
      | None -> register_and_launch ()
      | Some reg ->

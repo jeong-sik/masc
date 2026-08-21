@@ -99,7 +99,7 @@ let test_execute_with_string_input () =
 let test_execute_error_propagation () =
   let tool = Agent_tool.create_simple ~name:"fail" ~description:"d" error_runner in
   match Tool.execute tool (`Assoc [ "prompt", `String "test" ]) with
-  | Error { recoverable; _ } -> Alcotest.(check bool) "not recoverable" false recoverable
+  | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected error"
 ;;
 
@@ -237,12 +237,11 @@ let test_typed_constructor_returns_canonical_tool () =
     Alcotest.(check string) "text" "child: bridge" (json |> member "text" |> to_string)
 ;;
 
-let test_typed_missing_prompt_recoverable () =
+let test_typed_missing_prompt_error () =
   let tool = Agent_tool.create_typed (typed_config structured_runner) in
   match Tool.execute tool (`Assoc [ "other", `String "x" ]) with
   | Ok _ -> Alcotest.fail "expected parse error"
-  | Error { recoverable; message; _ } ->
-    Alcotest.(check bool) "recoverable" true recoverable;
+  | Error { message; _ } ->
     Alcotest.(check string) "message" "Agent_tool input requires a prompt field" message
 ;;
 
@@ -273,7 +272,7 @@ let () =
             "canonical_tool"
             `Quick
             test_typed_constructor_returns_canonical_tool
-        ; Alcotest.test_case "missing_prompt" `Quick test_typed_missing_prompt_recoverable
+        ; Alcotest.test_case "missing_prompt" `Quick test_typed_missing_prompt_error
         ] )
     ]
 ;;

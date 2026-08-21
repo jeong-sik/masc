@@ -68,7 +68,7 @@ val to_agent_core_typed_result :
     [Deferred] project one-way to AGENT_CORE [Ok]; [Deferred] carries an opaque MASC
     disposition marker in [_meta].  The adapter never parses that metadata
     back into MASC semantics.  [Failed] maps its typed [failure_class] directly
-    to AGENT_CORE [recoverable]/[error_class]. [on_externalization_error] lets an
+    to AGENT_CORE [error_class]. [on_externalization_error] lets an
     owning runtime keep its terminal state consistent when storage fails. The
     provider receives only a bounded generic error and no replay instruction.
 

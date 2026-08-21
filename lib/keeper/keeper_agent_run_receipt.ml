@@ -10,37 +10,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let degraded_retry_runtime_of_wire ~keeper_name raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None
-  else
-    let normalized_declared =
-      try String.trim trimmed with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | _ -> trimmed
-    in
-    let candidates =
-      [ trimmed
-      ; normalized_declared
-      ; "route." ^ trimmed
-      ]
-    in
-    (* RFC-0206: a runtime id is a raw string (no runtime-name prefix
-       validation / re-qualification). Accept the first non-empty candidate. *)
-    let rec first_valid = function
-      | [] -> None
-      | candidate :: rest ->
-        if String.trim candidate = "" then first_valid rest else Some candidate
-    in
-    match first_valid candidates with
-    | Some _ as parsed -> parsed
-    | None ->
-      Log.Keeper.warn ~keeper_name:keeper_name
-          "execution_receipt degraded_retry_runtime %S is not a \
-           qualified or re-qualifiable runtime name; dropping receipt field"
-          raw;
-      None
-
 let finalize
     ~config
     ~meta
@@ -51,10 +20,6 @@ let finalize
     ~receipt_started_at
     ~runtime_manifest_context
     ~(acc : Keeper_run_tools.hook_accumulator)
-    ~degraded_retry_applied
-    ~degraded_retry_runtime
-    ~fallback_reason
-    ~runtime_rotation_attempts
     ~turn_result
     ~receipt_turn_count_ref
     ~receipt_stop_reason_ref
@@ -67,7 +32,7 @@ let finalize
    | Error err ->
      let status, exception_kind =
        match err with
-       | Agent_core.Error.Api (Llm_provider.Retry.Timeout _) ->
+       | Agent_core.Error.Api (Llm_provider.Api_error.Timeout _) ->
          "timeout", Some "outer_agent_core_timeout"
        | _ -> "error", Some "outer_agent_core_error"
      in
@@ -174,12 +139,6 @@ let finalize
         (match runtime_observation with
          | Some obs -> obs.agent_core_internal_runtime_allowed
          | None -> false)
-    ; degraded_retry_applied
-    ; degraded_retry_runtime =
-        Option.bind degraded_retry_runtime
-          (degraded_retry_runtime_of_wire ~keeper_name:meta.name)
-    ; fallback_reason
-    ; runtime_rotation_attempts
     ; stop_reason = !receipt_stop_reason_ref
     ; error_kind
     ; error_message

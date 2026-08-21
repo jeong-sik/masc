@@ -99,7 +99,7 @@ let test_unknown_string () =
 (* ── agent-core error → blocker_class mapping exhaustiveness ────────────── *)
 
 module CoreError = Agent_core.Error
-module CoreRetry = Agent_core.Retry
+module CoreApiError = Agent_core.Api_error
 module KSB = Masc.Keeper_status_bridge_blocker
 module KTD = Masc.Keeper_turn_driver
 module Reg = Masc.Keeper_registry
@@ -215,7 +215,7 @@ let test_agent_variant_count_pin () =
 let test_api_timeout_prose_does_not_map_to_agent_timeout () =
   let api_timeout =
     CoreError.Api
-      (CoreRetry.Timeout
+      (CoreApiError.Timeout
          { message =
              "Turn wall-clock budget exhausted during runtime attempt \
               (budget=554.9s)"

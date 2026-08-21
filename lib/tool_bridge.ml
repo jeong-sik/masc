@@ -154,9 +154,9 @@ let maybe_externalize ?base_path ?(mime = "text/plain")
 
 (** {1 Result Conversion} *)
 
-let make_tool_error ?(recoverable = false) ?error_class message
+let make_tool_error ?error_class message
   : Agent_core.Types.tool_result =
-  Error { Agent_core.Types.message; recoverable; error_class }
+  Error { Agent_core.Types.message; error_class }
 
 let project_content ?base_path ~model_projection message =
   match model_projection with
@@ -176,20 +176,14 @@ let project_content ?base_path ~model_projection message =
         }
 ;;
 
-let externalization_tool_error ~recoverable error =
+let externalization_tool_error error =
   match error.kind with
   | Artifact_storage_failure ->
     make_tool_error
-      ~recoverable
-      ~error_class:
-        (if recoverable
-         then Agent_core.Types.Transient
-         else Agent_core.Types.Unknown)
+      ~error_class:Agent_core.Types.Unknown
       "tool output artifact storage failed"
   | Inline_budget_exceeded ->
-    make_tool_error
-      ~recoverable:false
-      ~error_class:Agent_core.Types.Deterministic
+    make_tool_error ~error_class:Agent_core.Types.Deterministic
       "tool output exceeds descriptor budget"
 ;;
 
@@ -276,7 +270,7 @@ let project_result
   | Ok content -> on_content content
   | Error error ->
     Option.iter (fun observe -> observe error) on_externalization_error;
-    externalization_tool_error ~recoverable:false error
+    externalization_tool_error error
 ;;
 
 let to_agent_core_typed_result
@@ -337,7 +331,6 @@ let to_agent_core_typed_result
       message
       (fun message ->
        make_tool_error
-         ~recoverable:false
          ~error_class:(agent_core_error_class_of_tool_failure_class class_)
          message)
 

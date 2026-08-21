@@ -10,10 +10,10 @@
    tests. Wire bytes are preserved: payload-bearing variants carry the
    original string and [to_wire] returns it verbatim. *)
 
-(* SSOT for the two retry-recoverable transient wire codes inside the
+(* SSOT for the two typed transport wire codes inside the
    [api_error_*] / [Provider_runtime_failure] family. These are the wire
    forms of exactly the [Agent_core.Error] variants that
-   [Keeper_error_classify.is_transient_network_error] reports as transient:
+   [Keeper_error_classify.is_provider_availability_error] groups for diagnostics:
    a plain (non-structural) [Api.Timeout] and an [Api.NetworkError]. The
    producer [Keeper_agent_error.api_error_terminal_reason_code] builds the
    same strings; it references these constants so encoder and the
@@ -98,34 +98,4 @@ let to_wire = function
   | Internal_error wire -> wire
   | Pre_dispatch_success wire -> wire
   | Unknown wire -> wire
-;;
-
-(* A [Provider_runtime_failure] whose underlying error is a retry-recoverable
-   transient (idle-chunk liveness kill wrapped as [Api.Timeout], or a
-   transient [Api.NetworkError]). The keeper's in-turn retry typically
-   self-heals these on the next attempt, so the disposition classifier must
-   advance to the next runtime/model rather than page a human.
-
-   Matched by exact equality against the two transient wire constants. This
-   excludes every other [api_error_*] code (rate_limited, overloaded, server:*,
-   context_overflow, …), all of which remain generic provider failures.
-   Only [Provider_runtime_failure] is inspected; all other variants are
-   [false]. *)
-let is_transient_provider_runtime_failure = function
-  | Provider_runtime_failure wire ->
-    String.equal wire wire_api_error_timeout
-    || String.equal wire wire_api_error_network
-    || String.equal wire "provider_error_timeout"
-    || String.starts_with ~prefix:"provider_error_timeout:" wire
-    || String.equal wire "provider_error_network:timeout"
-    || String.starts_with ~prefix:"provider_error_network:timeout:" wire
-  | Runtime_exhausted _
-  | Capacity_backpressure _
-  | Config_or_auth _
-  | Transcript_corruption _
-  | Provider_attempt_effect_fenced _
-  | Tool_correction_lost _
-  | Internal_error _
-  | Pre_dispatch_success _
-  | Unknown _ -> false
 ;;

@@ -9,8 +9,7 @@ let _log = Log.create ~module_name:"agent_tools" ()
 
 type tool_failure_kind = Types.tool_failure_kind =
   | Validation_error
-  | Recoverable_tool_error
-  | Non_retryable_tool_error
+  | Tool_error
   | Reported_tool_error
   | Unattributed_tool_error
 
@@ -508,11 +507,8 @@ let find_and_execute_tool_with_index
          let content, outcome =
            match result with
            | Ok { content; _meta = _ } -> content, Tool_succeeded
-           | Error { message; recoverable; error_class } ->
-             let failure_kind =
-               if recoverable then Recoverable_tool_error else Non_retryable_tool_error
-             in
-             message, Tool_failed { failure_kind; error_class }
+           | Error { message; error_class } ->
+             message, Tool_failed { failure_kind = Tool_error; error_class }
          in
          { result =
              { invocation; tool_name = name; input = exact_input; content; outcome }

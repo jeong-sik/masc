@@ -45,13 +45,11 @@ let make_handoff_tool ~(delegate : string -> Types.tool_result) (target : handof
                Printf.sprintf
                  "handoff prompt must be a string, got %s"
                  (Tool_input_validation.describe_json_value value)
-           ; recoverable = true
            ; error_class = Some Types.Deterministic
            }
        | None ->
          Error
            { message = "handoff prompt is required"
-           ; recoverable = true
            ; error_class = Some Types.Deterministic
            })
     | input ->
@@ -60,7 +58,6 @@ let make_handoff_tool ~(delegate : string -> Types.tool_result) (target : handof
             Printf.sprintf
               "handoff input must be an object, got %s"
               (Tool_input_validation.describe_json_value input)
-        ; recoverable = true
         ; error_class = Some Types.Deterministic
         }
   in
@@ -110,7 +107,7 @@ let%test "make_handoff_tool rejects missing prompt without invoking delegate" =
       inline_test_target
   in
   match Tool.execute tool (`Assoc []) with
-  | Error { recoverable = true; error_class = Some Types.Deterministic; _ } ->
+  | Error { error_class = Some Types.Deterministic; _ } ->
     not !invoked
   | Ok _ | Error _ -> false
 ;;

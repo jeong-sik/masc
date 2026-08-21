@@ -143,7 +143,7 @@ val wakeup_relevant_keeper_for_board_signal :
 (** Test hook (#25600): force the next [count] board-signal relevance
     computations to report a transient store read failure, exercising the
     bounded-retry path without a real store outage. *)
-val force_transient_relevance_failures_for_test : int -> unit
+val force_relevance_read_failures_for_test : int -> unit
 
 (** Per-stage timing accumulator for Phase 0 profiling. *)
 type stage_timing = {

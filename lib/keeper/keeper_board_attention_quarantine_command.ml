@@ -307,10 +307,10 @@ let request_wake ~base_path ~failure_category command candidate partition =
   | Error detail -> Error (Wake_request_failed detail)
 ;;
 
-let requeue_cursor_retry_limit = 2
+let requeue_cursor_reconcile_limit = 2
 
 let rec reload_same_generation_ready
-    ?(remaining_cursor_retries = requeue_cursor_retry_limit)
+    ?(remaining_cursor_reconciliations = requeue_cursor_reconcile_limit)
     ~base_path
     ~expected_blocked
     command
@@ -330,14 +330,14 @@ let rec reload_same_generation_ready
               partition.generation ->
        confirm_ready_partition ~base_path partition
      | Partition.Blocked _
-       when remaining_cursor_retries > 0 && partition = expected_blocked ->
+       when remaining_cursor_reconciliations > 0 && partition = expected_blocked ->
        (match Partition.requeue_blocked ~base_path ~partition with
         | Error detail -> Error (Partition_state_conflict detail)
         | Ok (Partition.Requeued transition) ->
           confirm_requeue ~base_path transition
         | Ok (Partition.Cursor_conflict _) ->
           reload_same_generation_ready
-            ~remaining_cursor_retries:(remaining_cursor_retries - 1)
+            ~remaining_cursor_reconciliations:(remaining_cursor_reconciliations - 1)
             ~base_path
             ~expected_blocked
             command

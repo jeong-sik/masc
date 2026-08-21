@@ -6,17 +6,13 @@
     deadline.
 
     Route semantics:
-    - [Rotate_now] — a different configured runtime may be selected
-      (credentials, model availability, no-progress recovery hints).
+    - [Rotate_now] — the typed failure identifies the current configured
+      runtime as unavailable, so a different declared candidate may be selected.
     - [Exhausted_visible_alive] — deterministic failure: mechanical retry or
       rotation cannot change the outcome. The keeper keeps running and exposes
       the typed terminal observation; it does not dispatch a second LLM call.
 
     Classification is typed-only: a quota error routes by its typed class.
-    Divergence between this route and the legacy
-    [Keeper_error_classify.recoverable_runtime_failure_reason] opinion is
-    an explicit typed-boundary mismatch, not scheduling authority.
-
     Hard quota is recognized only from the typed [PaymentRequired] and
     [HardQuota] constructors. Rate-limit messages and status prose are never
     reclassified. *)
@@ -40,14 +36,10 @@ type rotate_class =
   | Provider_service_unavailable
   | Network_unavailable
   | Provider_timeout
-  | No_progress_empty
-  | No_progress_thinking_only
-      (** accept-rejections carrying an explicit no-progress recovery hint:
-          a different model may make progress *)
 
 (** Typed terminal classes that mechanical retry or rotation cannot change. *)
 type terminal_class =
-  | Deterministic_request  (** request-body/schema rejections; retry is futile *)
+  | Deterministic_request  (** request-body/schema rejections are terminal *)
   | Context_overflow  (** typed context-window overflow *)
   | Contract_violation
       (** completion/progress contract rejections without a recovery hint,

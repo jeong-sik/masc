@@ -572,7 +572,7 @@ let () =
                   [ ( "failure_kind"
                     , Types.tool_failure_kind_to_yojson Types.Validation_error )
                   ; ( "failure_kind"
-                    , Types.tool_failure_kind_to_yojson Types.Recoverable_tool_error )
+                    , Types.tool_failure_kind_to_yojson Types.Tool_error )
                   ]
                 reported_tool_failure
             in

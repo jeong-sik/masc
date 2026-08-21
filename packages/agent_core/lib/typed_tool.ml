@@ -4,10 +4,10 @@
 
 let execute_typed ~parse ~handler ~encode json =
   match parse json with
-  | Error message -> Error { Types.message; recoverable = true; error_class = None }
+  | Error message -> Error { Types.message; error_class = None }
   | Ok input ->
     (match handler input with
-     | Error message -> Error { Types.message; recoverable = false; error_class = None }
+     | Error message -> Error { Types.message; error_class = None }
      | Ok output ->
        let content = output |> encode |> Yojson.Safe.to_string in
        Ok { Types.content; _meta = None })

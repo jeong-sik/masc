@@ -27,21 +27,16 @@ type comment_state =
 
 type comment_status = comment_state board_read
 
-(** Whether a failed board read is worth retrying (RFC board-unavailable-result).
-    Closed set: adding a new {!Board.board_error} variant forces a
-    classification decision in {!disposition_of_error} rather than defaulting
-    to "retry forever" or "silently drop". *)
-type disposition =
-  | Permanent
-      (** Retrying the same read reproduces the same error (e.g. the post
-          was deleted). Callers must consume/drop the affected stimulus and
-          must not requeue it. *)
-  | Transient
-      (** An environment-level hiccup unrelated to whether the target
-          exists. Callers may retain the stimulus for a later cycle. *)
+(** Exact source/store boundary for a failed Board read. Closed set: adding a
+    new {!Board.board_error} variant forces an explicit mapping. *)
+type read_failure_kind =
+  | Source_rejected
+      (** The source is absent or the read request itself is rejected. *)
+  | Store_io_failed
+      (** The Board store failed to perform the read. *)
 
-val disposition_of_error : Board.board_error -> disposition
-val disposition_of_unavailable : board_unavailable -> disposition
+val read_failure_kind_of_error : Board.board_error -> read_failure_kind
+val read_failure_kind_of_unavailable : board_unavailable -> read_failure_kind
 
 (* [board_read_operation_to_string] renders the operation inside
    [unavailable_to_string] below, which is this module's only use of it. *)

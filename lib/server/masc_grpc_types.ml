@@ -393,11 +393,6 @@ module BroadcastResponse = struct
     | Delivery_not_persisted
     | Delivery_outcome_unknown
 
-  type retry_disposition =
-    | Retry_do_not_resend
-    | Retry_allowed
-    | Retry_outcome_unknown
-
   type workspace_persistence_status =
     | Workspace_persisted
     | Workspace_not_persisted
@@ -410,7 +405,6 @@ module BroadcastResponse = struct
     ; delivery_status : delivery_status
     ; delivery_reason : string option
     ; workspace_persistence_status : workspace_persistence_status
-    ; retry_disposition : retry_disposition
     }
 
   let delivery_status_to_wire = function
@@ -434,19 +428,6 @@ module BroadcastResponse = struct
     | "not_persisted" -> Delivery_not_persisted
     | "outcome_unknown" -> Delivery_outcome_unknown
     | value -> invalid_arg (Printf.sprintf "unknown BroadcastResponse.delivery_status: %S" value)
-  ;;
-
-  let retry_disposition_to_wire = function
-    | Retry_do_not_resend -> "do_not_resend"
-    | Retry_allowed -> "retry_allowed"
-    | Retry_outcome_unknown -> "outcome_unknown"
-  ;;
-
-  let retry_disposition_of_wire = function
-    | "do_not_resend" -> Retry_do_not_resend
-    | "retry_allowed" -> Retry_allowed
-    | "outcome_unknown" -> Retry_outcome_unknown
-    | value -> invalid_arg (Printf.sprintf "unknown BroadcastResponse.retry_disposition: %S" value)
   ;;
 
   let workspace_persistence_status_to_wire = function
@@ -476,7 +457,6 @@ module BroadcastResponse = struct
     ; delivery_reason = p.delivery_reason
     ; workspace_persistence_status =
         workspace_persistence_status_of_wire p.workspace_persistence_status
-    ; retry_disposition = retry_disposition_of_wire p.retry_disposition
     }
   ;;
 
@@ -490,7 +470,6 @@ module BroadcastResponse = struct
       ; delivery_reason = t.delivery_reason
       ; workspace_persistence_status =
           workspace_persistence_status_to_wire t.workspace_persistence_status
-      ; retry_disposition = retry_disposition_to_wire t.retry_disposition
       }
   ;;
 end
@@ -524,4 +503,3 @@ module StatusResponse = struct
       }
   ;;
 end
-

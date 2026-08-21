@@ -899,10 +899,10 @@ let known_network_error_kind = function
     | End_of_file ) as kind -> Some kind
 ;;
 
-(* For composite errors, prefer kinds that should not be retried (local
-   resource exhaustion and TLS errors) over transient network failures.
-   This mirrors the severity ordering rather than the retry policy itself. *)
-let network_error_kind_is_non_retryable = function
+(* For composite errors, prefer kinds that receive priority (local
+   resource exhaustion and TLS errors) over other network failures.
+   This is a diagnostic severity ordering only. *)
+let network_error_kind_has_priority = function
   | Local_resource_exhaustion | Tls_error -> true
   | Connection_refused | Dns_failure | Timeout | End_of_file | Unknown -> false
 ;;
@@ -925,7 +925,7 @@ let rec classify_eio_error = function
         (fun (err, _, _) -> classify_eio_error err |> known_network_error_kind)
         errors
     in
-    (match List.find_opt network_error_kind_is_non_retryable kinds with
+    (match List.find_opt network_error_kind_has_priority kinds with
      | Some kind -> kind
      | None ->
        (match kinds with
@@ -3201,7 +3201,7 @@ let[@warning "-32"] multiple_io_exn errs =
     fst (List.fold_left combine (eio_exn err, Printexc.get_callstack 0) errs)
 ;;
 
-let%test "classify_network_exn: Multiple_io prefers non-retryable kind" =
+let%test "classify_network_exn: Multiple_io prefers priority kind" =
   match
     classify_network_exn
       (multiple_io_exn

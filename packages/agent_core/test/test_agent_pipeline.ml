@@ -417,7 +417,7 @@ let test_agent_run_tool_error () =
         ~description:"Always fails"
         ~parameters:[]
         (fun _input ->
-           Error { Types.message = "tool broke"; recoverable = true; error_class = None })
+           Error { Types.message = "tool broke"; error_class = None })
     in
     let agent = make_agent ~net:env#net ~tools:[ fail_tool ] url in
     match Agent.run ~sw agent "trigger error" with
@@ -593,7 +593,7 @@ let test_agent_run_context_like_http_400_is_unknown_invalid_request_without_retr
     | Ok _ -> fail "expected InvalidRequest Unknown_invalid_request"
     | Error
         (Error.Api
-           (Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; message = _ }))
+           (Api_error.InvalidRequest { reason = Api_error.Unknown_invalid_request; message = _ }))
       ->
       check int "no internal retry" 1 (Atomic.get calls);
       Eio.Switch.fail sw Exit

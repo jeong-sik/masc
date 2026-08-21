@@ -253,11 +253,11 @@ let requested_messages_with_plan
 
        Because this gate precedes summarizer selection, a keeper with BOTH a
        broken history and an unavailable summarizer now reports
-       [Invalid_structure] (terminal) rather than [Summarizer_unavailable]
-       (retryable). That ordering is intended: the structural break is the
-       condition that no retry can clear.
+       [Invalid_structure] rather than [Summarizer_unavailable]
+       (unavailable). That ordering is intended: the structural break is the
+       primary condition.
 
-       Scope: this stops the retry loop and its cost. It does not make a
+       Scope: this stops compaction before provider dispatch. It does not make a
        structurally broken history compactable — the break has to be prevented
        at the write boundary that admitted a tool_use with no matching
        tool_result (#25443). *)

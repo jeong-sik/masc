@@ -138,13 +138,12 @@ let call_tool t ~name ~arguments : Types.tool_result =
   | Error detail ->
     Error
       { message = Printf.sprintf "MCP tools/call '%s' failed: %s" name detail
-      ; recoverable = true
       ; error_class = None
       }
   | Ok result ->
     let text = text_of_tool_result result in
     if Option.value ~default:false result.Sdk_types.is_error
-    then Error { message = text; recoverable = true; error_class = None }
+    then Error { message = text; error_class = None }
     else Ok { content = text; _meta = None }
 ;;
 

@@ -31,7 +31,6 @@ module Attr_key : sig
   val keeper_generation : string
   val keeper_max_context : string
   val keeper_channel : string
-  val keeper_is_retry : string
   val keeper_current_task_id : string
 
   (** Every registered Attr_key constant exported by this module.
@@ -99,7 +98,6 @@ val keeper_turn_attrs
   -> generation:int
   -> max_context:int
   -> channel:string
-  -> is_retry:bool
   -> current_task_id:string option
   -> attr list
 
@@ -113,7 +111,6 @@ val with_keeper_turn_span
   -> generation:int
   -> max_context:int
   -> channel:string
-  -> is_retry:bool
   -> current_task_id:string option
   -> ((unit -> (string * string) option) -> 'a)
   -> 'a

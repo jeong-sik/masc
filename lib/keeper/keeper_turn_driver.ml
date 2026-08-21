@@ -271,12 +271,7 @@ let attempt_runtime_candidates
             not admission: if every remaining candidate is demoted they are
             all still attempted in their prior relative order. *)
          let rest = demote_rest rest in
-         let transition_permission =
-           candidate_transition_permission
-             ~runtime_id:attempt_runtime_id
-             ~attempt:idx
-             error
-         in
+         let transition_route = candidate_transition_route error in
          let terminal_error =
            match effect_disposition with
            | Keeper_provider_attempt_effect.No_effect_observed -> error
@@ -303,37 +298,26 @@ let attempt_runtime_candidates
                      ; diagnostic = Agent_core.Error.to_string error
                      }))
          in
-         (match
-            effect_disposition,
-            transition_permission,
-            candidate_transition_route error,
-            rest
-          with
-          | ( Keeper_provider_attempt_effect.No_effect_observed
-            , Candidate_transition_allowed
-            , Keeper_runtime_failure_route.Rotate_now _
-            , _ :: _ ) ->
-            loop (idx + 1) rest
-          | ( Keeper_provider_attempt_effect.No_effect_observed
-            , Candidate_transition_allowed
-            , Keeper_runtime_failure_route.Rotate_now _
-            , [] ) ->
-            Error error
-          | ( ( Keeper_provider_attempt_effect.Effect_attempted
-              | Keeper_provider_attempt_effect.Observation_unavailable )
-            , _
-            , _
-            , _ )
-          | ( Keeper_provider_attempt_effect.No_effect_observed
-            , Candidate_transition_denied
-            , _
-            , _ ) ->
+         (match effect_disposition with
+          | Keeper_provider_attempt_effect.Effect_attempted
+          | Keeper_provider_attempt_effect.Observation_unavailable ->
             Error terminal_error
-          | ( Keeper_provider_attempt_effect.No_effect_observed
-            , Candidate_transition_allowed
-            , Keeper_runtime_failure_route.Exhausted_visible_alive _
-            , _ ) ->
-            Error error))
+          | Keeper_provider_attempt_effect.No_effect_observed ->
+            (match transition_route with
+             | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
+               Error error
+             | Keeper_runtime_failure_route.Rotate_now _ ->
+               (match
+                  candidate_transition_permission
+                    ~runtime_id:attempt_runtime_id
+                    ~attempt:idx
+                    error,
+                  rest
+                with
+                | Candidate_transition_allowed, _ :: _ ->
+                  loop (idx + 1) rest
+                | Candidate_transition_allowed, [] -> Error error
+                | Candidate_transition_denied, _ -> Error terminal_error))))
   in
   loop 0 candidates
 
@@ -1182,7 +1166,5 @@ module For_testing = struct
   let checkpoint_allows_candidate_transition =
     Keeper_turn_driver_try_provider.checkpoint_allows_candidate_transition
 
-  let accept_no_progress_should_try_next =
-    Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
 
 end

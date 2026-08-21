@@ -56,7 +56,7 @@ interface DashboardWsDiscovery {
 
 interface DashboardWsDiscoveryResult {
   wsUrl: string | null
-  retry: boolean
+  pollAgain: boolean
   fromCache: boolean
   reason?: string
 }
@@ -575,13 +575,13 @@ function closeSocket(): void {
 
 async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
   const cachedUrl = readCachedWsUrl()
-  if (cachedUrl) return { wsUrl: cachedUrl, retry: false, fromCache: true }
+  if (cachedUrl) return { wsUrl: cachedUrl, pollAgain: false, fromCache: true }
 
   const response = await fetch('/ws', { credentials: 'same-origin' })
   if (!response.ok) {
     return {
       wsUrl: null,
-      retry: true,
+      pollAgain: true,
       fromCache: false,
       reason: `discovery HTTP ${response.status}`,
     }
@@ -590,7 +590,7 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
   if (data.enabled !== true) {
     return {
       wsUrl: null,
-      retry: false,
+      pollAgain: false,
       fromCache: false,
       reason: discoveryUnavailableReason(data),
     }
@@ -599,12 +599,12 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
   if (data.listening !== true || !wsUrl) {
     return {
       wsUrl: null,
-      retry: true,
+      pollAgain: true,
       fromCache: false,
       reason: discoveryUnavailableReason(data),
     }
   }
-  return { wsUrl, retry: false, fromCache: false }
+  return { wsUrl, pollAgain: false, fromCache: false }
 }
 
 function sendRpc(method: string, params: JsonObject, timeoutMs = DASHBOARD_WS_RPC_TIMEOUT_MS): Promise<unknown> {
@@ -877,7 +877,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
         dashboardWsLastError.value = dashboardWsUnavailableMessage(discovery.reason)
       })
     }
-    if (generation === connectGeneration && shouldReconnect && discovery.retry) {
+    if (generation === connectGeneration && shouldReconnect && discovery.pollAgain) {
       scheduleReconnect()
     }
     return

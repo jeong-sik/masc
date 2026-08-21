@@ -169,7 +169,7 @@ export function OfficialClientSessionPanel() {
             ? html`
               <div class="mt-4 rounded-[var(--r-1)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-3" data-testid="official-client-session-recovery-required">
                 <div class="flex flex-wrap items-center gap-2 mb-2">
-                  <${StatusChip} tone="warn" uppercase=${false}>next turn auto-recovers<//>
+                  <${StatusChip} tone="warn" uppercase=${false}>operator resolution required<//>
                   <span class="mono text-2xs">${recovery.recovery_id}</span>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs mb-3">
@@ -180,14 +180,6 @@ export function OfficialClientSessionPanel() {
                 </div>
                 <div class="mb-3 whitespace-pre-wrap break-words text-xs text-[var(--color-fg-secondary)]">${recovery.detail}</div>
                 <div class="flex flex-wrap gap-2">
-                  <${ActionButton}
-                    variant="warn"
-                    size="sm"
-                    testId="official-client-session-retry-previous"
-                    disabled=${resolving.value}
-                    ariaBusy=${resolving.value}
-                    onClick=${() => void resolve({ resolution: 'retry_previous' })}
-                  >이전 settlement에서 재시도<//>
                   <${ActionButton}
                     variant="danger"
                     size="sm"

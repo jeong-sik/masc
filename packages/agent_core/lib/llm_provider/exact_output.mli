@@ -218,12 +218,12 @@ type raw_response =
   }
 
 (** The provider's own verdict on one dispatched request, projected from
-    {!Retry.api_error} onto the two facts an exact flow acts on: the status the
+    {!Api_error.api_error} onto the two facts an exact flow acts on: the status the
     response carried, and which refusal it was. The full [api_error] is not
     carried because its payloads (messages, serving constraints) would enter
     flow evidence, which fingerprints and persists what it holds.
 
-    Every constructor of [Retry.api_error] maps to exactly one constructor here,
+    Every constructor of [Api_error.api_error] maps to exactly one constructor here,
     so a new provider failure kind cannot reach a flow as an unclassified one. *)
 type provider_refusal =
   | Request_body_refused

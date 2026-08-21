@@ -950,12 +950,12 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
   assert (str_contains (Tool_result.message result) "todo");
   assert (str_contains (Tool_result.message result) "valid_next_actions");
   assert (str_contains (Tool_result.message result) "claim");
-  (* The output must be a structured workflow rejection so the AGENT_CORE retry
-     ladder treats it as deterministic non-retryable. *)
+  (* The output is structured workflow evidence without an execution-policy
+     hint. *)
   let rejection_json = Tool_result.data result in
   assert (json_string [ "failure_class" ] rejection_json = "workflow_rejection");
   assert (json_string [ "error_class" ] rejection_json = "deterministic");
-  assert (not (json_bool [ "recoverable" ] rejection_json));
+  assert (Json_util.assoc_member_opt "recoverable" rejection_json = None);
   let task_entries =
     Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
   in
@@ -2637,7 +2637,7 @@ let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
   assert (str_contains (Tool_result.message result) "still todo");
   assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
   let data = Tool_result.data result in
-  assert (Json_util.get_bool data "recoverable" = Some true);
+  assert (Json_util.assoc_member_opt "recoverable" data = None);
   assert (
     match Json_util.assoc_member_opt "diagnosis" data with
     | Some diagnosis ->

@@ -59,9 +59,6 @@ type t =
 
         @since 0.193.10 *)
   ; on_capability_drop : model_id:string -> field:string -> unit
-  ; on_retry : provider:string -> model_id:string -> attempt:int -> unit
-    (** Fired when a request is retried due to a retryable error.
-      @since 0.185.0 *)
   ; on_token_usage :
       provider:string -> model_id:string -> input_tokens:int -> output_tokens:int -> unit
     (** Fired when a response carries usage tokens.
@@ -129,7 +126,6 @@ type provider_snapshot =
   ; model_id : string
   ; request_total : int
   ; error_total : int
-  ; retry_total : int
   ; input_tokens_total : int
   ; output_tokens_total : int
   ; tool_call_total : int

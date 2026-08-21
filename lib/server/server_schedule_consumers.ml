@@ -513,7 +513,7 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
      | Keeper_activation_readiness.Unknown detail ->
        Keeper_wake_activation_deferred
          (Keeper_wake_activation_owner_unknown detail)
-     | Keeper_activation_readiness.Recoverable ->
+     | Keeper_activation_readiness.No_live_owner ->
        (match runtime with
         | Keeper_activation_readiness.Owner_unregistered ->
           Keeper_wake_activation_deferred Keeper_wake_activation_unregistered

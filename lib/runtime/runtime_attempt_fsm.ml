@@ -8,36 +8,6 @@ type provider_outcome =
       ; reason : string
       }
 
-type decision =
-  | Accept of Llm_provider.Types.api_response
-  | Accept_on_exhaustion of
-      { response : Llm_provider.Types.api_response
-      ; reason : string
-      }
-  | Try_next of { last_err : Llm_provider.Http_client.http_error option }
-  | Exhausted of { last_err : Llm_provider.Http_client.http_error option }
-
-let should_try_next = function
-  | Llm_provider.Http_client.HttpError { code; _ } -> code = 408 || code = 409 || code = 429 || code >= 500
-  | Llm_provider.Http_client.NetworkError _
-  | Llm_provider.Http_client.TimeoutError _
-  | Llm_provider.Http_client.ProviderFailure _ ->
-    true
-  | Llm_provider.Http_client.AcceptRejected _
-  | Llm_provider.Http_client.ProviderTerminal _ ->
-    false
-
-let decide ~accept_on_exhaustion ~is_last = function
-  | Call_ok response -> Accept response
-  | Accept_rejected { response; reason } ->
-    if is_last && accept_on_exhaustion
-    then Accept_on_exhaustion { response; reason }
-    else Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
-  | Call_err err ->
-    if (not is_last) && should_try_next err
-    then Try_next { last_err = Some err }
-    else Exhausted { last_err = Some err }
-
 let to_user_message = function
   | Some (Llm_provider.Http_client.HttpError { code; body; _ }) ->
     Printf.sprintf

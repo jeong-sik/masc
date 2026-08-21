@@ -94,7 +94,7 @@ val dashboard_gate_resolve_http_json :
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, approval_resolve_http_error) result
 
-val dashboard_gate_retry_http_json :
+val dashboard_gate_rerun_http_json :
   base_path:string ->
   requested_by:string ->
   args:Yojson.Safe.t ->

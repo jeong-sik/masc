@@ -49,17 +49,14 @@ import type {
   KeeperCompositeSnapshot,
 } from '../api/schemas/keeper-composite'
 import { deriveBlockerReason } from './keeper-blocker-reason'
-import {
-  isKeeperAutoRecoverPause,
-  keeperDisplayStatus,
-} from './keeper-runtime-display'
+import { keeperDisplayStatus } from './keeper-runtime-display'
 import {
   isKeeperOffline,
   isKeeperPaused,
 } from './keeper-predicates'
 
 export type OfflineCause = 'unbooted' | 'shutdown' | 'crashed' | 'unknown'
-export type PausedCause = 'operator' | 'auto_recover' | 'unknown'
+export type PausedCause = 'operator' | 'unknown'
 export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 
 // RFC-0135 PR-14a — attention axis SSOT (Goal-2 typed-state expansion).
@@ -182,7 +179,6 @@ function isPaused(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
 }
 
 function derivePausedCause(k: Keeper, c: KeeperCompositeSnapshot | null): PausedCause {
-  if (isKeeperAutoRecoverPause(k)) return 'auto_recover'
   if (c?.phase_diagnosis?.conditions.operator_paused === true) return 'operator'
   if (k.pause_state === 'paused') return 'operator'
   if (k.phase === 'Paused') return 'operator'

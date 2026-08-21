@@ -5,7 +5,6 @@ import { html } from 'htm/preact'
 import {
   EmptyState,
   ErrorFatal,
-  ErrorRecoverable,
   ErrorState,
   LoadingState,
   summarizeFeedbackState,
@@ -71,77 +70,6 @@ describe('FeedbackState base primitives', () => {
     expect(state?.getAttribute('data-feedback-kind')).toBe('error')
     expect(state?.getAttribute('data-feedback-has-icon')).toBe('true')
     expect(container.querySelector('[data-feedback-icon]')?.textContent).toContain('ER')
-  })
-})
-
-describe('ErrorRecoverable', () => {
-  let container: HTMLElement
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-  })
-  afterEach(() => {
-    render(null, container)
-    document.body.removeChild(container)
-  })
-
-  it('renders a role=alert section with title text', () => {
-    render(html`<${ErrorRecoverable} title="Runtime fallback exhausted" />`, container)
-    const section = container.querySelector('section')!
-    expect(section).toBeTruthy()
-    expect(section.getAttribute('role')).toBe('alert')
-    expect(section.textContent).toContain('Runtime fallback exhausted')
-    expect(section.textContent).toContain('복구 가능')
-    expect(section.getAttribute('data-feedback-kind')).toBe('recoverable')
-    expect(section.getAttribute('data-feedback-has-action')).toBe('false')
-  })
-
-  it('renders detail line when provided', () => {
-    render(
-      html`<${ErrorRecoverable}
-        title="provider:openai"
-        detail="2 fallback hops, timed out at 12.4s"
-      />`,
-      container,
-    )
-    expect(container.textContent).toContain('2 fallback hops, timed out at 12.4s')
-    expect(
-      container
-        .querySelector('[data-feedback-state]')
-        ?.getAttribute('data-feedback-has-detail'),
-    ).toBe('true')
-  })
-
-  it('omits the retry button when onRetry is not supplied', () => {
-    render(html`<${ErrorRecoverable} title="t" />`, container)
-    expect(container.querySelector('button')).toBeNull()
-  })
-
-  it('renders a retry button that calls onRetry on click', () => {
-    const onRetry = vi.fn()
-    render(html`<${ErrorRecoverable} title="t" onRetry=${onRetry} />`, container)
-    const btn = container.querySelector('button')!
-    expect(btn).toBeTruthy()
-    expect(btn.textContent).toContain('다시 시도')
-    expect(
-      container
-        .querySelector('[data-feedback-state]')
-        ?.getAttribute('data-feedback-has-action'),
-    ).toBe('true')
-    btn.click()
-    expect(onRetry).toHaveBeenCalledTimes(1)
-  })
-
-  it('honors a custom retryLabel', () => {
-    render(
-      html`<${ErrorRecoverable}
-        title="t"
-        onRetry=${() => {}}
-        retryLabel="재시도"
-      />`,
-      container,
-    )
-    expect(container.querySelector('button')!.textContent).toContain('재시도')
   })
 })
 

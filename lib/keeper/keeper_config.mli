@@ -93,7 +93,7 @@ val keeper_own_recent_turns_max : unit -> int
 
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
-val keeper_bootstrap_retry_interval_sec : unit -> int
+val keeper_bootstrap_registration_interval_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
 

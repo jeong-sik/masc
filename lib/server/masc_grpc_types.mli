@@ -142,11 +142,6 @@ module BroadcastResponse : sig
     | Delivery_not_persisted
     | Delivery_outcome_unknown
 
-  type retry_disposition =
-    | Retry_do_not_resend
-    | Retry_allowed
-    | Retry_outcome_unknown
-
   type workspace_persistence_status =
     | Workspace_persisted
     | Workspace_not_persisted
@@ -159,7 +154,6 @@ module BroadcastResponse : sig
     ; delivery_status : delivery_status
     ; delivery_reason : string option
     ; workspace_persistence_status : workspace_persistence_status
-    ; retry_disposition : retry_disposition
     }
 
   val of_bytes : string -> t
@@ -179,4 +173,3 @@ module StatusResponse : sig
   val of_bytes : string -> t
   val to_bytes : t -> string
 end
-

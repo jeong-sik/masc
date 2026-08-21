@@ -157,7 +157,7 @@ let run
                          (* Retain the registry authority in both cases, but a
                             pre-start callback failure owns no live fiber that
                             can settle the Librarian lifecycle. Close that
-                            lifecycle so the exact Offline lane is retryable.
+                            lifecycle so the exact Offline lane remains available.
                             A started lane keeps terminal cleanup ownership. *)
                          if Keeper_lane.crossed_start_boundary reg.lane
                          then None, None

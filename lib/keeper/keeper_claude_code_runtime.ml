@@ -144,7 +144,7 @@ let claude_error_to_core_error = function
          { provider = "claude_code"; error_type = Some "turn_failed"; detail })
   | Runtime_claude_code.Timeout seconds ->
     Agent_core.Error.Api
-      (Agent_core.Retry.Timeout
+      (Agent_core.Api_error.Timeout
          { message = Printf.sprintf "Claude Code turn timed out after %.3fs" seconds
          ; phase = None
          })
@@ -162,7 +162,7 @@ let claude_error_to_core_error = function
   | Runtime_claude_code.Context_window_exceeded
       { message; tool_effect_attempted = false; response_emitted = false } ->
     Agent_core.Error.Api
-      (Llm_provider.Retry.ContextOverflow { message; limit = None })
+      (Llm_provider.Api_error.ContextOverflow { message; limit = None })
   | Runtime_claude_code.Context_window_exceeded _ as error ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError

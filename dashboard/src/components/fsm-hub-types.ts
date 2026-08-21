@@ -392,9 +392,7 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   healthy: '정상',
   runtime_exhausted: '런타임 후보 소진',
   preflight_config_error: '실행 전 설정 오류',
-  degraded_retry: '저하 상태 재시도',
   runtime_fallback: '런타임 폴백',
-  transient_runtime_retry: '일시적 런타임 재시도',
   capacity_backpressure: 'Provider 수용량 부족',
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
@@ -440,7 +438,7 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
  *    `Tool_required_unsatisfied`, `Agent_core_error` (which inject the raw `code`
  *    string straight onto the wire).
  *  - `Keeper_agent_error.to_terminal_reason_code` (lib/keeper/keeper_agent_error.ml:134-143)
- *    maps Agent-core retry variants to `api_error_*` codes
+ *    maps Agent-core API error variants to `api_error_*` codes
  *    (`api_error_server:<http_status>` is parameterized).
  *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like

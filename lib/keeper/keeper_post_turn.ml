@@ -381,7 +381,7 @@ let rejection_disposition = function
 type prepared_compaction =
   { session : Keeper_context_core.session_context
   ; source_ref : Keeper_checkpoint_ref.t
-  ; retry_meta : keeper_meta
+  ; compaction_meta : keeper_meta
   ; turn_generation : int
   ; prepared_trigger : Compaction_trigger.t
   ; context : Keeper_context_core.working_context
@@ -457,13 +457,13 @@ let prepare_compaction_admitted
       checkpoint_generation checkpoint ~fallback:meta.runtime.nonce
     in
     let ctx = context_of_agent_core_checkpoint checkpoint in
-    let retry_meta =
+    let compaction_meta =
       if turn_generation = meta.runtime.nonce then meta
       else map_runtime (fun rt -> { rt with nonce = turn_generation }) meta
     in
     let preparation : Keeper_compact_policy.compaction_preparation =
       compact_for_request
-        ~meta:retry_meta
+        ~meta:compaction_meta
         ~trigger
         ctx
     in
@@ -480,7 +480,7 @@ let prepare_compaction_admitted
        Ok
          { session
          ; source_ref
-         ; retry_meta
+         ; compaction_meta
          ; turn_generation
          ; prepared_trigger
          ; context = preparation.context
@@ -546,7 +546,7 @@ let commit_prepared_compaction_with
      by [expected_source_ref], not by the slot. *)
   let { session
       ; source_ref
-      ; retry_meta
+      ; compaction_meta
       ; turn_generation
       ; prepared_trigger
       ; context
@@ -568,13 +568,13 @@ let commit_prepared_compaction_with
     with
     | Error detail ->
       Log.Keeper.error
-        ~keeper_name:retry_meta.name
+        ~keeper_name:compaction_meta.name
         "compaction checkpoint has invalid commit count: %s"
         detail;
       not_committed Keeper_compaction_outcome.Domain_invalid_output
     | Ok source_commit_count when source_commit_count = max_int ->
       Log.Keeper.error
-        ~keeper_name:retry_meta.name
+        ~keeper_name:compaction_meta.name
         "compaction checkpoint commit count is exhausted";
       not_committed Keeper_compaction_outcome.Domain_invalid_output
     | Ok source_commit_count ->
@@ -594,10 +594,10 @@ let commit_prepared_compaction_with
       in
       (match
          save_agent_core_checkpoint_if_source
-           ~multimodal_policy:retry_meta.multimodal_policy
-           ~keeper_name:retry_meta.name
+           ~multimodal_policy:compaction_meta.multimodal_policy
+           ~keeper_name:compaction_meta.name
            ~session
-           ~agent_name:retry_meta.agent_name
+           ~agent_name:compaction_meta.agent_name
            ~ctx:commit_context
            ~generation:turn_generation
            ~expected_source_ref:source_ref
@@ -623,7 +623,7 @@ let commit_prepared_compaction_with
                swallow around a total call. *)
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string Compactions)
-              ~labels:[ "keeper", retry_meta.name ]
+              ~labels:[ "keeper", compaction_meta.name ]
               ();
             Committed recovery
           with
@@ -661,7 +661,7 @@ let commit_prepared_compaction_with
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
            ~labels:
-             [ "keeper", retry_meta.agent_name
+             [ "keeper", compaction_meta.agent_name
              ; ( "operation"
                , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
              ]

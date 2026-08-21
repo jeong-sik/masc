@@ -36,7 +36,7 @@ import {
  *                     separate decision uuid — the synth tuple key
  *                     suffices for chip identity)
  *   semanticOutcome ← decision.outcome  (string | null; consumers can
- *                     surface "ok"/"error_retryable"/"error_fatal"/etc.
+ *                     surface the producer's exact outcome verbatim.
  *                     verbatim, or null for in-flight)
  *
  * Why a pure function (not a stateful subscription):

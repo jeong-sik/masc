@@ -548,7 +548,7 @@ let publication_recovery_available_snapshot_to_health_yojson
      ; discovery_row_count
      ; discovered_owner_count
      ; invalid_owner_name_count
-     ; retryable_lane_failure_count
+     ; lane_store_failure_count
      ; owners
      } : Fs_compat.Publication_recovery.health_snapshot)
   =
@@ -613,7 +613,7 @@ let publication_recovery_available_snapshot_to_health_yojson
       ; invalid_owner_name_count
       ; owner_identity_rejected_count
       ; owners.blocked
-      ; retryable_lane_failure_count
+      ; lane_store_failure_count
       ]
   in
   let status =
@@ -629,7 +629,7 @@ let publication_recovery_available_snapshot_to_health_yojson
     ; invalid_owner_name_count, "invalid_owner_name"
     ; owner_identity_rejected_count, "owner_identity_rejected"
     ; owners.blocked, "owner_blocked"
-    ; retryable_lane_failure_count, "owner_lane_store_failure"
+    ; lane_store_failure_count, "owner_lane_store_failure"
     ]
   in
   let status_reasons =
@@ -669,7 +669,7 @@ let publication_recovery_available_snapshot_to_health_yojson
             , `Int owners.ready_without_obligation )
           ; "owner_blocked", `Int owners.blocked
           ; "owner_lane_store_failure"
-          , `Int retryable_lane_failure_count
+          , `Int lane_store_failure_count
           ] )
     ]
 ;;
@@ -1006,7 +1006,7 @@ module For_testing = struct
       ; discovery_row_count = 0
       ; discovered_owner_count = 0
       ; invalid_owner_name_count = 0
-      ; retryable_lane_failure_count = 0
+      ; lane_store_failure_count = 0
       ; owners =
           { Fs_compat.Publication_recovery.inspection_pending = 0
           ; inspection_running = 0

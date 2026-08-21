@@ -427,7 +427,7 @@ let test_resolve_params_error_tool_results () =
               ; content = "permission denied"
               ; outcome =
                   Tool_failed
-                    { failure_kind = Recoverable_tool_error
+                    { failure_kind = Tool_error
                     ; error_class = Some Deterministic
                     }
               ; json = None
@@ -451,9 +451,8 @@ let test_resolve_params_error_tool_results () =
   in
   Alcotest.(check int) "1 error result" 1 (List.length !captured_results);
   match List.hd !captured_results with
-  | Error { message; recoverable; error_class } ->
+  | Error { message; error_class } ->
     Alcotest.(check string) "error message" "permission denied" message;
-    Alcotest.(check bool) "recoverable" true recoverable;
     Alcotest.(check bool) "error class" true (error_class = Some Types.Deterministic)
   | Ok _ -> Alcotest.fail "expected Error result"
 ;;
@@ -611,7 +610,7 @@ let test_context_injection_error_result () =
       ; content = "something went wrong"
       ; outcome =
           Tool_failed
-            { failure_kind = Agent_tools.Recoverable_tool_error; error_class = None }
+            { failure_kind = Agent_tools.Tool_error; error_class = None }
       }
     ]
   in
@@ -620,9 +619,9 @@ let test_context_injection_error_result () =
     |> context_messages
   in
   match !received_output with
-  | Some (Error { message; recoverable; _ }) ->
+  | Some (Error { message; _ }) ->
     Alcotest.(check string) "error message" "something went wrong" message;
-    Alcotest.(check bool) "recoverable" true recoverable
+    ()
   | Some (Ok _) -> Alcotest.fail "expected Error output"
   | None -> Alcotest.fail "injector not called"
 ;;

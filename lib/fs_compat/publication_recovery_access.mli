@@ -136,7 +136,7 @@ type health_snapshot =
   ; discovery_row_count : int
   ; discovered_owner_count : int
   ; invalid_owner_name_count : int
-  ; retryable_lane_failure_count : int
+  ; lane_store_failure_count : int
   ; owners : owner_health_counts
   }
 
@@ -151,7 +151,7 @@ type health_counter =
   | Ready_without_obligation_counter
   | Ready_counter
   | Blocked_counter
-  | Retryable_lane_failure_counter
+  | Lane_store_failure_counter
 
 type health_counter_change =
   | Increment_health_counter
@@ -383,7 +383,7 @@ module For_testing : sig
     :  registry:registry
     -> owner:string
     -> (unit, Capability_recovery_obligation.validation_error) result
-  (** Deterministic injection boundary for the maintained retryable lane-store
+  (** Deterministic injection boundary for the maintained lane-store
       health aggregate. Both functions use the same attempt transition as
       production [with_lane]; they perform no filesystem operation. *)
 

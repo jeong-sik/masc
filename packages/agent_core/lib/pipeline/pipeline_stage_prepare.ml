@@ -140,7 +140,7 @@ let%test "last_tool_results_from routes through canonical projection (with json)
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "ok payload"; _meta = _ }
-    ; Error { message = "boom"; recoverable = false; error_class = None }
+    ; Error { message = "boom"; error_class = None }
     ] -> true
   | _ -> false
 ;;

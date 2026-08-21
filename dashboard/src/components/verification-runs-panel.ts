@@ -42,7 +42,7 @@ import { registerInternalAgentRefresh } from '../sse-store'
  *  the decoder before a row reaches this projection.
  *
  *  `infrastructure_unavailable` is bad because no semantic verdict reached
- *  the Task; the submitted obligation remains pending for retry. */
+ *  the Task; the submitted obligation remains pending for explicit follow-up. */
 export function verificationRunTone(status: VerificationRunStatusLabel): StatusBadgeTone {
   switch (status) {
     case 'running':

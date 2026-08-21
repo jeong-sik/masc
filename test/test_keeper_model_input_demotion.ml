@@ -438,7 +438,7 @@ let projection_reuses_candidate_measurements () =
     !raw_measurements
 ;;
 
-(* --- 7. Last resort: the newest atom does not fit (#28845) ------------- *)
+(* --- 7. Oversized newest atom is terminal (#28845) ------------- *)
 
 (* The sangsu incident shape: parallel WebSearch results joined the assistant
    atom that called them, and that one atom (indivisible to the tail window)
@@ -482,64 +482,7 @@ let oversized_newest_history () =
   earlier, earlier @ newest, bytes_of newest
 ;;
 
-let oversized_newest_atom_is_demoted_as_last_resort () =
-  let earlier, messages, newest_bytes = oversized_newest_history () in
-  (* [capacity] admits the newest atom only demoted: the raw history budget is
-     exactly the atom's own bytes, which the charged preamble pushes over. *)
-  let capacity_bytes = newest_bytes in
-  let demote_before =
-    Window.first_atom_at_or_after
-      messages
-      ~message_index:(List.length earlier)
-  in
-  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
-  (match
-     Window.project_with_drop
-       ~measure_message_bytes
-       ~capacity_bytes
-       ~reserved_bytes:0
-       messages
-   with
-   | Error (Window.Newest_atom_exceeds_available _) -> ()
-   | Error error -> Alcotest.fail (Window.budget_error_to_string error)
-   | Ok _ -> Alcotest.fail "fixture must not fit without the last resort");
-  match
-    compose
-      ~base_path:(Filename.temp_dir "demote" "")
-      ~capacity_bytes
-      ~demote_before
-      messages
-  with
-  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
-  | Ok (planned, windowed, history_atom_count) ->
-    Alcotest.(check int)
-      "each of the newest atom's results is demoted"
-      (List.length newest_bodies)
-      (List.length planned.Demotion.pending);
-    Alcotest.(check int)
-      "the denominator is still the whole history"
-      3
-      history_atom_count;
-    let outcome =
-      Demotion.materialize ~store ~pending:planned.Demotion.pending windowed.Window.messages
-    in
-    Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
-    let transmitted = markers outcome.Demotion.messages in
-    List.iteri
-      (fun i size ->
-         let body = String.make size (Char.chr (Char.code 'a' + i)) in
-         Alcotest.(check bool)
-           (Printf.sprintf "body %d left as a reference, not its bytes" i)
-           false
-           (List.exists (String.equal body) transmitted))
-      newest_bodies;
-    Alcotest.(check int)
-      "the references are readable blob markers"
-      (List.length newest_bodies)
-      (List.length (List.filter Tool_output.is_marker transmitted))
-;;
-
-(* The last resort is not a blank cheque: an oversized atom with nothing
+(* The capacity boundary is terminal: an oversized atom with nothing
    demotable in it keeps the typed refusal, with the original measured
    values. *)
 let oversized_atom_without_demotable_body_still_refuses () =
@@ -564,7 +507,7 @@ let oversized_atom_without_demotable_body_still_refuses () =
 
 (* Without a blob store there is nothing a marker could reference, so the
    refusal stands exactly as it did before #28845. *)
-let last_resort_requires_a_blob_store () =
+let oversized_atom_refuses_without_blob_store () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
   let demote_before =
     Window.first_atom_at_or_after
@@ -580,7 +523,7 @@ let last_resort_requires_a_blob_store () =
 ;;
 
 (* Demotion can shrink an atom only down to its non-demotable residue. When
-   that residue alone exceeds the budget, the last resort still refuses — and
+   that residue alone exceeds the budget, the composition refuses — and
    the refusal must carry the atom's true bytes, not the placeholder-saturated
    measurement the re-cut saw. *)
 let still_oversized_after_demotion_reports_true_magnitude () =
@@ -594,14 +537,14 @@ let still_oversized_after_demotion_reports_true_magnitude () =
   in
   let messages = earlier @ newest in
   let _, atom_count = Window.annotate messages in
-  (* [plan] is pure, so this probe is exactly the plan the last-resort arm
+  (* [plan] is pure, so this probe is exactly the plan the removed boundary-shift arm
      computes: it proves the composition took the demotion branch and still
      refused, rather than refusing for want of anything demotable. *)
   let probe =
     Demotion.plan ~measure_message_bytes ~demote_before:atom_count messages
   in
   Alcotest.(check int)
-    "the atom carries demotable results, so the last resort planned demotions"
+    "the atom carries demotable results, so the probe planned demotions"
     2
     (List.length probe.Demotion.pending);
   (* [capacity] admits neither the raw atom nor its demoted residue: even the
@@ -673,19 +616,15 @@ let () =
             `Quick
             projection_reuses_candidate_measurements
          ] )
-    ; ( "last_resort"
+    ; ( "oversized_newest"
       , [ Alcotest.test_case
-            "oversized newest atom is demoted as a last resort"
-            `Quick
-            oversized_newest_atom_is_demoted_as_last_resort
-        ; Alcotest.test_case
             "oversized atom without a demotable body still refuses"
             `Quick
             oversized_atom_without_demotable_body_still_refuses
         ; Alcotest.test_case
-            "last resort requires a blob store"
+            "oversized atom refuses without a blob store"
             `Quick
-            last_resort_requires_a_blob_store
+            oversized_atom_refuses_without_blob_store
         ; Alcotest.test_case
             "still oversized after demotion reports the true magnitude"
             `Quick

@@ -610,7 +610,6 @@ export interface KeeperDiagnostic {
   last_reply_at?: string | null
   last_reply_preview?: string | null
   last_error?: string | null
-  recoverable?: boolean
   summary?: string
   keepalive_running?: boolean
   continuity_state?: KeeperContinuityState | null

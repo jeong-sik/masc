@@ -658,9 +658,9 @@ let test_api_common_content_block_roundtrip () =
 
 let test_error_domain_full_roundtrip () =
   let errors : Agent_core.Error.t list =
-    [ Agent_core.Error.Api (Retry.RateLimited { retry_after = Some 2.0; message = "slow" })
-    ; Agent_core.Error.Api (Retry.AuthError { message = "bad key" })
-    ; Agent_core.Error.Api (Retry.ServerError { status = 500; message = "internal" })
+    [ Agent_core.Error.Api (Api_error.RateLimited { retry_after = Some 2.0; message = "slow" })
+    ; Agent_core.Error.Api (Api_error.AuthError { message = "bad key" })
+    ; Agent_core.Error.Api (Api_error.ServerError { status = 500; message = "internal" })
     ; Agent_core.Error.Config (MissingEnvVar { var_name = "API_KEY" })
     ; Agent_core.Error.Config (UnsupportedProvider { detail = "unknown" })
     ; Agent_core.Error.Config

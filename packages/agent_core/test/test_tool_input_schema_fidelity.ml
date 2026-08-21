@@ -641,13 +641,13 @@ let test_context_handler_still_refuses_a_missing_context () =
   in
   match Tool.execute tool `Null with
   | Ok _ -> fail "expected the missing context to be refused"
-  | Error { message; recoverable; _ } ->
+  | Error { message; _ } ->
     check
       string
       "names the missing context"
       "context-aware tool requires explicit context"
       message;
-    check bool "not recoverable" false recoverable
+    ()
 ;;
 
 (* [input_schema = None] is encoded by omitting the key. The derived decoder

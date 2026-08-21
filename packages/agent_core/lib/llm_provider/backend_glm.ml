@@ -257,7 +257,7 @@ let parse_response_result body : (api_response, Backend_openai_parse.parse_error
      the typed empty completion lets [Complete_sync]'s Glm_chat seam route it
      through [Http_client.empty_completion_error ~stop_reason] exactly like the
      sibling Openai_chat seam, so an overflow empty turn reaches
-     [Retry.overflow_of_empty_completion] as [ContextWindowExceeded] rather
+     [Api_error.overflow_of_empty_completion] as [ContextWindowExceeded] rather
      than provider-parse-failure (the #2659/#2696 classifier was previously
      unreachable on the GLM path). Malformed JSON and GLM provider errors
      ([check_glm_error_json]) still raise [Glm_api_error]. *)

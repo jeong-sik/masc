@@ -28,7 +28,7 @@ describe('ErrorBoundary', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders the retry action with the shared card border token after a render error', async () => {
+  it('renders the component reset action with the shared card border token after a render error', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
     expect(() => {

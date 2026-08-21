@@ -325,9 +325,9 @@ let test_closed_ownership_matrix () =
     (Attribution.of_request_validation_error
        ~binding:with_credential
        (Error.Api
-          (Llm_provider.Retry.InvalidRequest
+          (Llm_provider.Api_error.InvalidRequest
              { message = "invalid request"
-             ; reason = Llm_provider.Retry.Unknown_invalid_request
+             ; reason = Llm_provider.Api_error.Unknown_invalid_request
              })));
   check_detailed_ownership
     "response parse is attempt local"
@@ -554,7 +554,7 @@ let test_empty_completion_overflow_types_as_context_overflow () =
          ; message = "provider returned an empty assistant turn"
          })
   with
-  | Error.Api (Llm_provider.Retry.ContextOverflow { limit = None; _ }) -> ()
+  | Error.Api (Llm_provider.Api_error.ContextOverflow { limit = None; _ }) -> ()
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
 ;;
 
@@ -569,7 +569,7 @@ let test_provider_reported_overflow_types_as_context_overflow () =
          ; message = "Prompt exceeds max length"
          })
   with
-  | Error.Api (Llm_provider.Retry.ContextOverflow { limit = None; _ }) -> ()
+  | Error.Api (Llm_provider.Api_error.ContextOverflow { limit = None; _ }) -> ()
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
 ;;
 
@@ -579,9 +579,9 @@ let test_request_body_limit_preserves_typed_capacity_evidence () =
       (Http.request_body_too_large_error ~actual_bytes:2048 ~limit_bytes:1024)
   with
   | Error.Api
-      (Llm_provider.Retry.InvalidRequest
+      (Llm_provider.Api_error.InvalidRequest
          { reason =
-             Llm_provider.Retry.Request_body_too_large { actual_bytes; limit_bytes }
+             Llm_provider.Api_error.Request_body_too_large { actual_bytes; limit_bytes }
          ; _
          }) ->
     Alcotest.(check int) "actual serialized bytes" 2048 actual_bytes;
@@ -621,8 +621,8 @@ let test_empty_completion_unmodeled_stop_reason_fails_loud () =
          })
   with
   | Error.Api
-      (Llm_provider.Retry.InvalidRequest
-         { message; reason = Llm_provider.Retry.Unknown_invalid_request }) ->
+      (Llm_provider.Api_error.InvalidRequest
+         { message; reason = Llm_provider.Api_error.Unknown_invalid_request }) ->
     check_bool
       "names the unmodeled stop_reason token"
       true

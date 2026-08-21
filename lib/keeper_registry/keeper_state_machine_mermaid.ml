@@ -49,7 +49,7 @@ let phase_to_mermaid ~(current : phase) : string =
      name the phase. *)
   p "    Overflowed --> Running : operator clear (retired phase)\n";
   p "    Compacting --> Running : compact done\n";
-  p "    Compacting --> Running : compact failed (Lane retry queued)\n";
+  p "    Compacting --> Running : compact failed (failure recorded)\n";
   p "    Compacting --> Failing : hb fail\n";
   p "    Compacting --> Crashed : fiber death\n";
   p "    Compacting --> Draining : stop requested\n";

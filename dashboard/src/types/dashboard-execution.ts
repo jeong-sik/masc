@@ -254,7 +254,7 @@ export const DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS = [
 
 export const DASHBOARD_KEEPER_EXECUTION_TRUTHS = [
   'executable',
-  'recoverable',
+  'no_live_owner',
   'retained_disabled',
   'paused_dead',
   'shutdown_fenced',

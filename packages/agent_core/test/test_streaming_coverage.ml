@@ -5,7 +5,7 @@
     are not exercised by the existing test_streaming.ml. *)
 
 open Agent_core
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 open Types
 
 (* [lib/streaming.ml]'s stream-accumulator/map_http_error surface was a
@@ -698,7 +698,7 @@ let test_map_http_error_network_error () =
   in
   let core_err = Streaming.map_http_error http_err in
   match core_err with
-  | Error.Api (Retry.NetworkError { message; _ }) ->
+  | Error.Api (Api_error.NetworkError { message; _ }) ->
     check_string "message" "connection refused" message
   | _ -> Alcotest.fail "expected Error.Api NetworkError"
 ;;
@@ -713,7 +713,7 @@ let test_map_http_error_server_error () =
   in
   let core_err = Streaming.map_http_error http_err in
   match core_err with
-  | Error.Api (Retry.ServerError { status; _ }) -> check_int "status" 500 status
+  | Error.Api (Api_error.ServerError { status; _ }) -> check_int "status" 500 status
   | _ -> Alcotest.fail "expected Error.Api ServerError"
 ;;
 
@@ -724,7 +724,7 @@ let test_map_http_error_auth_error () =
   in
   let core_err = Streaming.map_http_error http_err in
   match core_err with
-  | Error.Api (Retry.AuthError _) -> ()
+  | Error.Api (Api_error.AuthError _) -> ()
   | _ -> Alcotest.fail "expected Error.Api AuthError"
 ;;
 
@@ -734,7 +734,7 @@ let test_map_http_error_accept_rejected_not_network () =
   in
   let core_err = Streaming.map_http_error http_err in
   match core_err with
-  | Error.Api (Retry.InvalidRequest { message; _ }) ->
+  | Error.Api (Api_error.InvalidRequest { message; _ }) ->
     check_string "message" "missing transport" message
   | _ -> Alcotest.fail "expected Error.Api InvalidRequest"
 ;;

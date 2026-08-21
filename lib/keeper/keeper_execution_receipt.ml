@@ -3,23 +3,6 @@
 include Keeper_execution_receipt_types
 
 
-let runtime_rotation_attempt_to_json attempt =
-  `Assoc
-    [ "from_runtime", `String (attempt.from_runtime)
-    ; "to_runtime", `String (attempt.to_runtime)
-    ; ( "reason"
-      , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
-    ; "outcome", `String (runtime_rotation_outcome_to_string attempt.outcome)
-    ; ( "productive_phase_elapsed_ms"
-      , Json_util.int_opt_to_json attempt.productive_phase_elapsed_ms )
-    ; ( "retry_phase_elapsed_ms"
-      , Json_util.int_opt_to_json attempt.retry_phase_elapsed_ms )
-    ; "error_kind", string_opt_json (Option.map error_kind_to_string attempt.error_kind)
-    ; "error_message", string_opt_json attempt.error_message
-    ; "recorded_at", `String attempt.recorded_at
-    ]
-;;
-
 let receipt_duration_ms receipt =
   match
     ( Masc_domain.parse_iso8601_opt receipt.started_at
@@ -85,9 +68,7 @@ type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
   | Reason_preflight_config_error
-  | Reason_degraded_retry
   | Reason_runtime_fallback
-  | Reason_transient_runtime_retry
   | Reason_capacity_backpressure
   | Reason_provider_runtime_error
   | Reason_internal_error
@@ -103,9 +84,7 @@ let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
   | Reason_runtime_exhausted -> "runtime_exhausted"
   | Reason_preflight_config_error -> "preflight_config_error"
-  | Reason_degraded_retry -> "degraded_retry"
   | Reason_runtime_fallback -> "runtime_fallback"
-  | Reason_transient_runtime_retry -> "transient_runtime_retry"
   | Reason_capacity_backpressure -> Keeper_internal_error.capacity_backpressure_kind
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
@@ -175,12 +154,12 @@ let operator_disposition (receipt : t)
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
-    (* The typed runtime route treats provider-capacity failure as retryable and
+    (* The typed runtime route marks provider capacity unavailable and
        continues with another eligible runtime.  [runtime_fallback_applied] is
        derived from the lane walk's winning candidate index, which only
        advances on a candidate that actually wins the turn — this receipt is
        for the failed pre-dispatch attempt itself, so [runtime_fallback_applied]
-       stays false here even though the lane goes on to try a later
+       stays false here even though the lane may select a later
        candidate. It must neither claim a completed fallback nor page a
        human. *)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
@@ -188,28 +167,9 @@ let operator_disposition (receipt : t)
     Disp_fail_open_next_runtime, Reason_preflight_config_error
   | _
     when provider_runtime_failure
-         && (receipt.degraded_retry_applied
-             || Option.is_some receipt.degraded_retry_runtime) ->
-    Disp_fail_open_next_runtime, Reason_degraded_retry
-  | _
-    when provider_runtime_failure
          && (receipt.runtime_fallback_applied
              || receipt.runtime_outcome = Runtime_passed_to_next_model) ->
     Disp_pass_next_model, Reason_runtime_fallback
-  | _
-    when provider_runtime_failure
-         && Keeper_terminal_reason.is_transient_provider_runtime_failure
-              terminal_reason ->
-    (* The reason is [Reason_transient_runtime_retry], not
-       [Reason_runtime_fallback]: this arm is reached only AFTER the
-       runtime-fallback arm above excluded [runtime_fallback_applied] /
-       [Runtime_passed_to_next_model], so by construction no cross-runtime
-       fallback happened — the turn recovered via the SAME runtime's in-turn
-       retry. [operator_disposition_reason] is serialised into receipt JSON
-       unconditionally (dashboard-visible), so collapsing this onto the
-       fallback label would mislabel every transient-recovery turn as a
-       genuine fallback. *)
-    Disp_fail_open_next_runtime, Reason_transient_runtime_retry
   | _ when provider_runtime_failure ->
     Disp_fail_open_next_runtime, Reason_provider_runtime_error
   | Keeper_terminal_reason.Internal_error _ ->
@@ -225,10 +185,7 @@ let operator_disposition (receipt : t)
        [Unknown] reach here in practice;
        [Config_or_auth] and [Provider_runtime_failure] are listed to keep the
        match exhaustive without a wildcard. *)
-    if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
-    then Disp_fail_open_next_runtime, Reason_degraded_retry
-    else if
-      receipt.runtime_fallback_applied
+    if receipt.runtime_fallback_applied
       || receipt.runtime_outcome = Runtime_passed_to_next_model
     then Disp_pass_next_model, Reason_runtime_fallback
     else if
@@ -389,21 +346,6 @@ let to_json_with_operator_disposition
           ; "fallback_applied", `Bool receipt.runtime_fallback_applied
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
           ; "agent_core_internal_runtime_allowed", `Bool receipt.agent_core_internal_runtime_allowed
-          ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
-          ; ( "degraded_retry_runtime"
-            , match receipt.degraded_retry_runtime with
-              | Some value -> `String (value)
-              | None -> `Null )
-          ; ( "fallback_reason"
-            , match receipt.fallback_reason with
-              | Some value ->
-                `String (Keeper_error_classify.degraded_retry_reason_to_string value)
-              | None -> `Null )
-          ; ( "rotation_attempts"
-            , `List
-                (List.map
-                   runtime_rotation_attempt_to_json
-                   receipt.runtime_rotation_attempts) )
           ] )
     ; ( "stop_reason"
       , match receipt.stop_reason with

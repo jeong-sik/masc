@@ -25,19 +25,6 @@ let test_aggregating_on_request_start () =
   check string "model_id" "test-model" entry.M.model_id
 ;;
 
-let test_aggregating_on_retry () =
-  let agg = Agg.create () in
-  let hooks = Agg.to_hooks agg in
-  hooks.on_retry ~provider:"openai" ~model_id:"gpt-4" ~attempt:1;
-  hooks.on_retry ~provider:"openai" ~model_id:"gpt-4" ~attempt:2;
-  let snap = Agg.snapshot agg in
-  check int "one entry" 1 (List.length snap);
-  let entry = List.hd snap in
-  check int "retry_total" 2 entry.M.retry_total;
-  check string "provider" "openai" entry.M.provider;
-  check string "model_id" "gpt-4" entry.M.model_id
-;;
-
 let test_aggregating_on_token_usage () =
   let agg = Agg.create () in
   let hooks = Agg.to_hooks agg in
@@ -166,7 +153,11 @@ let test_aggregating_key () =
 let test_aggregating_multiple_providers () =
   let agg = Agg.create () in
   let hooks = Agg.to_hooks agg in
-  hooks.on_retry ~provider:"openai" ~model_id:"gpt-4" ~attempt:1;
+  hooks.on_token_usage
+    ~provider:"openai"
+    ~model_id:"gpt-4"
+    ~input_tokens:0
+    ~output_tokens:0;
   hooks.on_token_usage
     ~provider:"anthropic"
     ~model_id:"claude"
@@ -183,7 +174,6 @@ let test_provider_snapshot_to_yojson () =
     ; model_id = "gpt-4.1"
     ; request_total = 3
     ; error_total = 1
-    ; retry_total = 2
     ; input_tokens_total = 123
     ; output_tokens_total = 45
     ; tool_call_total = 7
@@ -237,7 +227,6 @@ let test_provider_snapshots_to_yojson_is_stable () =
       ; model_id = "z-model"
       ; request_total = 1
       ; error_total = 0
-      ; retry_total = 0
       ; input_tokens_total = 0
       ; output_tokens_total = 0
       ; tool_call_total = 0
@@ -252,7 +241,6 @@ let test_provider_snapshots_to_yojson_is_stable () =
       ; model_id = "a-model"
       ; request_total = 2
       ; error_total = 0
-      ; retry_total = 0
       ; input_tokens_total = 0
       ; output_tokens_total = 0
       ; tool_call_total = 0
@@ -286,7 +274,6 @@ let test_provider_snapshots_to_yojson_is_stable () =
 let test_aggregating_save_snapshot_json () =
   let agg = Agg.create () in
   let hooks = Agg.to_hooks agg in
-  hooks.on_retry ~provider:"openai" ~model_id:"gpt-4.1" ~attempt:1;
   hooks.on_token_usage
     ~provider:"openai"
     ~model_id:"gpt-4.1"
@@ -320,11 +307,6 @@ let test_aggregating_save_snapshot_json () =
                  (List.assoc "provider" provider |> Yojson.Safe.Util.to_string);
                check
                  int
-                 "retry_total"
-                 1
-                 (List.assoc "retry_total" provider |> Yojson.Safe.Util.to_int);
-               check
-                 int
                  "input_tokens_total"
                  10
                  (List.assoc "input_tokens_total" provider |> Yojson.Safe.Util.to_int)
@@ -356,7 +338,6 @@ let () =
     [ "create", [ test_case "empty snapshot" `Quick test_aggregating_create_empty ]
     ; ( "counters"
       , [ test_case "on_request_start" `Quick test_aggregating_on_request_start
-        ; test_case "on_retry" `Quick test_aggregating_on_retry
         ; test_case "on_token_usage" `Quick test_aggregating_on_token_usage
         ; test_case "on_tool_calls" `Quick test_aggregating_on_tool_calls
         ; test_case "on_circuit_state" `Quick test_aggregating_on_circuit_state

@@ -26,7 +26,7 @@ type paused_dead_reason =
 
 type owner_execution_truth =
   | Executable
-  | Recoverable
+  | No_live_owner
   | Retained_disabled of retained_disabled_reason
   | Paused_dead of paused_dead_reason
   | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
@@ -83,7 +83,7 @@ val classify_owner_execution :
   owner_execution_truth
 (** Pure, closed execution verdict shared by supervisor, maintenance, schedule
     activation, and health. [Executable] requires a live registry fiber.
-    Policy permission without one is [Recoverable], never runnable.
+    Policy permission without one is [No_live_owner], never runnable.
     Missing/unreadable metadata fails closed as [Unknown]. *)
 
 val classify_durable_demand_execution :

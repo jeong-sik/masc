@@ -148,11 +148,6 @@ let () =
 (* Independent copy of the intended canonical-wire policy. DO NOT refactor to
    call production helpers — this is the oracle. *)
 
-let frozen_is_transient_provider_runtime_failure terminal_reason =
-  String.equal terminal_reason "api_error_timeout"
-  || String.equal terminal_reason "api_error_network"
-;;
-
 let frozen_is_config_or_auth_wire = function
   | "config_error"
   | "api_error_auth"
@@ -192,25 +187,14 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
   else if
     provider_runtime_failure
-    && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
-  then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
-  else if
-    provider_runtime_failure
     && (receipt.runtime_fallback_applied
         || receipt.runtime_outcome = R.Runtime_passed_to_next_model)
   then R.Disp_pass_next_model, R.Reason_runtime_fallback
-  else if
-    provider_runtime_failure
-    && frozen_is_transient_provider_runtime_failure terminal_reason
-  then R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
   then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
   else if String.equal terminal_reason "internal_error"
   then R.Disp_fail_open_next_runtime, R.Reason_internal_error
-  else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
-  then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
-  else if
-    receipt.runtime_fallback_applied
+  else if receipt.runtime_fallback_applied
     || receipt.runtime_outcome = R.Runtime_passed_to_next_model
   then R.Disp_pass_next_model, R.Reason_runtime_fallback
   else if
@@ -261,10 +245,6 @@ let base_receipt : R.t =
   ; runtime_fallback_applied = false
   ; runtime_outcome = R.Runtime_completed
   ; agent_core_internal_runtime_allowed = true
-  ; degraded_retry_applied = false
-  ; degraded_retry_runtime = None
-  ; fallback_reason = None
-  ; runtime_rotation_attempts = []
   ; stop_reason = None
   ; error_kind = None
   ; error_message = None
@@ -592,7 +572,6 @@ let error_kinds =
   ; Some (R.error_kind_of_string "io")
   ]
 
-let degraded_bools = [ false; true ]
 let fallback_bools = [ false; true ]
 
 let runtime_outcomes =
@@ -661,8 +640,6 @@ let () =
        List.iter
          (fun error_kind ->
             List.iter
-              (fun degraded ->
-                 List.iter
                    (fun fallback ->
                       List.iter
                         (fun runtime_outcome ->
@@ -674,7 +651,6 @@ let () =
                                        { base_receipt with
                                          terminal_reason_code = code
                                        ; error_kind
-                                       ; degraded_retry_applied = degraded
                                        ; runtime_fallback_applied = fallback
                                        ; runtime_outcome
                                        ; completion_contract_result = tcr
@@ -695,7 +671,7 @@ let () =
                                        then
                                          check
                                            (Printf.sprintf
-                                              "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s deg=%b fb=%b want=%s got=%s"
+                                              "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s fb=%b want=%s got=%s"
                                               code
                                               (match error_kind with
                                                | None -> "none"
@@ -704,7 +680,6 @@ let () =
                                               (R.runtime_outcome_to_string
                                                  runtime_outcome)
                                               (R.completion_contract_result_to_string tcr)
-                                              degraded
                                               fallback
                                               (disp_pair_to_string want)
                                               (disp_pair_to_string got))
@@ -713,7 +688,6 @@ let () =
                              completion_contract_results)
                         runtime_outcomes)
                    fallback_bools)
-              degraded_bools)
          error_kinds)
     codes;
   Printf.printf
@@ -728,7 +702,7 @@ let () =
       { runtime_id = "runtime-capacity"
       ; source = Keeper_internal_error.Provider_capacity
       ; detail = "provider health cooldown active before dispatch"
-      ; retry_after = Keeper_internal_error.No_retry_hint
+      ; provider_reset = Keeper_internal_error.No_provider_reset_evidence
       ; cooldown_cause = None
       }
   in
@@ -796,9 +770,6 @@ let () =
 
 let () =
   let code = "provider_error_timeout:http_operation" in
-  check
-    "provider timeout marker is transient"
-    (Tr.is_transient_provider_runtime_failure (Tr.of_wire code));
   let receipt =
     { base_receipt with
       terminal_reason_code = code
@@ -808,7 +779,7 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry in
+  let want = R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error in
   check
     (Printf.sprintf
        "provider timeout marker disposition want=%s got=%s"
@@ -824,9 +795,6 @@ let () =
     (match Tr.of_wire code with
      | Tr.Provider_runtime_failure wire -> String.equal wire code
      | _ -> false);
-  check
-    "provider parse marker is not transient"
-    (not (Tr.is_transient_provider_runtime_failure (Tr.of_wire code)));
   let receipt =
     { base_receipt with
       terminal_reason_code = code
@@ -1231,7 +1199,7 @@ let () =
       ; "transition_outbox_count", `Int 0
       ; "runnable_backlog_count", `Int count
       ; "runnable_oldest_age_seconds", oldest_age
-      ; "recoverable_backlog_count", `Int 0
+      ; "no_live_owner_backlog_count", `Int 0
       ; "retained_disabled_backlog_count", `Int 0
       ; "paused_dead_backlog_count", `Int 0
       ; "shutdown_fenced_backlog_count", `Int 0
@@ -1266,10 +1234,10 @@ let () =
       `Assoc
         (("status", `String "degraded")
          :: ("operator_action_required", `Bool true)
-         :: ("recoverable_backlog_count", `Int 2)
+         :: ("no_live_owner_backlog_count", `Int 2)
          :: List.remove_assoc "status"
               (List.remove_assoc "operator_action_required"
-                 (List.remove_assoc "recoverable_backlog_count" fields)))
+                 (List.remove_assoc "no_live_owner_backlog_count" fields)))
     | _ -> assert false
   in
   let recoverable =
@@ -1280,9 +1248,9 @@ let () =
   check
     "non-runnable actionable backlog carries an explicit reason"
     (match member "status_reasons" recoverable with
-     (* The fixture above sets recoverable_backlog_count to 2, and the reason
+     (* The fixture above sets no_live_owner_backlog_count to 2, and the reason
         now carries it so an operator can tell two from two hundred. *)
-     | `List reasons -> List.mem (`String "recoverable_backlog=2") reasons
+     | `List reasons -> List.mem (`String "no_live_owner_backlog=2") reasons
      | _ -> false);
   check
     "non-runnable actionable backlog is never backlog-clean"

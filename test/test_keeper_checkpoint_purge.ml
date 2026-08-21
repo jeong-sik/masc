@@ -35,7 +35,7 @@ let tool_error_result ?(content = "raw tool error") id : Types.content_block =
     ; content
     ; outcome =
         Types.Tool_failed
-          { failure_kind = Types.Recoverable_tool_error; error_class = None }
+          { failure_kind = Types.Tool_error; error_class = None }
     ; json = Some (`Assoc [ "error", `String "boom" ])
     ; content_blocks = None
     }

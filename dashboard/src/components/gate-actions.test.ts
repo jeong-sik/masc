@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   refreshGate: vi.fn(),
   setGateMode: vi.fn(),
-  retryGateAutoJudge: vi.fn(),
+  rerunGateAutoJudge: vi.fn(),
   resolveGateApproval: vi.fn(),
   deleteGateApprovalRule: vi.fn(),
   showToast: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock('./common/toast', () => ({
 vi.mock('../api/dashboard-gate', () => ({
   deleteGateApprovalRule: mocks.deleteGateApprovalRule,
   resolveGateApproval: mocks.resolveGateApproval,
-  retryGateAutoJudge: mocks.retryGateAutoJudge,
+  rerunGateAutoJudge: mocks.rerunGateAutoJudge,
   setGateMode: mocks.setGateMode,
 }))
 
@@ -27,7 +27,7 @@ vi.mock('./gate-refresh', () => ({
 import {
   deleteKeeperApprovalRule,
   respondToKeeperApproval,
-  retryKeeperAutoJudge,
+  rerunKeeperAutoJudge,
   setKeeperGateMode,
 } from './gate-actions'
 import {
@@ -54,7 +54,7 @@ const baseResponse = {
 beforeEach(() => {
   mocks.refreshGate.mockReset().mockResolvedValue(undefined)
   mocks.setGateMode.mockReset()
-  mocks.retryGateAutoJudge.mockReset().mockResolvedValue({ ok: true, id: 'appr-1' })
+  mocks.rerunGateAutoJudge.mockReset().mockResolvedValue({ ok: true, id: 'appr-1' })
   mocks.resolveGateApproval.mockReset()
   mocks.deleteGateApprovalRule.mockReset()
   mocks.showToast.mockReset()
@@ -129,7 +129,7 @@ describe('committed Gate mutation audit degradation', () => {
   })
 })
 
-describe('retryKeeperAutoJudge exact observation', () => {
+describe('rerunKeeperAutoJudge exact observation', () => {
   it('forwards the complete observed row identity', async () => {
     const expected = {
       input_hash: 'a'.repeat(64),
@@ -142,9 +142,9 @@ describe('retryKeeperAutoJudge exact observation', () => {
       },
     }
 
-    await retryKeeperAutoJudge('appr-1', expected)
+    await rerunKeeperAutoJudge('appr-1', expected)
 
-    expect(mocks.retryGateAutoJudge).toHaveBeenCalledWith('appr-1', expected)
+    expect(mocks.rerunGateAutoJudge).toHaveBeenCalledWith('appr-1', expected)
   })
 })
 

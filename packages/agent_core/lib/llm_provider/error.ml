@@ -202,45 +202,45 @@ let to_string = function
     Printf.sprintf "Provider '%s' terminal %s: %s" r.provider r.reason r.detail
 ;;
 
-let of_retry_api_error ?provider err =
+let of_api_error ?provider err =
   let provider = provider_name provider in
   match err with
-  | Retry.RateLimited r ->
+  | Api_error.RateLimited r ->
     RateLimit { provider; retry_after = r.retry_after; detail = r.message }
-  | Retry.Overloaded r ->
+  | Api_error.Overloaded r ->
     CapacityExhausted
       { scope = CapacityProvider
       ; affected = affected_provider provider
       ; retry_after = None
       ; detail = r.message
       }
-  | Retry.ServerError r ->
+  | Api_error.ServerError r ->
     ServerError
       { provider
       ; code = r.status
       ; detail = r.message
       }
-  | Retry.AuthError r -> AuthError { provider; detail = r.message }
-  | Retry.AuthorizationError r -> AuthorizationError { provider; detail = r.message }
-  | Retry.PaymentRequired r ->
+  | Api_error.AuthError r -> AuthError { provider; detail = r.message }
+  | Api_error.AuthorizationError r -> AuthorizationError { provider; detail = r.message }
+  | Api_error.PaymentRequired r ->
     (* HTTP 402 is a typed payment boundary by status code alone. *)
     HardQuota { provider; retry_after = None; detail = r.message }
-  | Retry.InvalidRequest r -> InvalidRequest { provider; reason = r.message }
-  | Retry.NotFound r -> NotFound { provider; detail = r.message }
-  | Retry.ContextOverflow r ->
-    InvalidRequest { provider; reason = Retry.error_message (Retry.ContextOverflow r) }
-  | Retry.InputCapacity r ->
+  | Api_error.InvalidRequest r -> InvalidRequest { provider; reason = r.message }
+  | Api_error.NotFound r -> NotFound { provider; detail = r.message }
+  | Api_error.ContextOverflow r ->
+    InvalidRequest { provider; reason = Api_error.error_message (Api_error.ContextOverflow r) }
+  | Api_error.InputCapacity r ->
     (* [Error.t] is the legacy provider-only surface and cannot preserve the
        constraint evidence. The Agent Core [Error.Api] / error-domain path keeps
-       [Retry.InputCapacity] typed end to end; new consumers must use it. *)
-    InvalidRequest { provider; reason = Retry.error_message (Retry.InputCapacity r) }
-  | Retry.NetworkError r ->
+       [Api_error.InputCapacity] typed end to end; new consumers must use it. *)
+    InvalidRequest { provider; reason = Api_error.error_message (Api_error.InputCapacity r) }
+  | Api_error.NetworkError r ->
     NetworkError { provider; kind = r.kind; timeout_phase = None; detail = r.message }
-  (* Preserve the transport phase carried by Retry.Timeout so a retried
+  (* Preserve the transport phase carried by Api_error.Timeout so a retried
      prefill timeout surfaces as [First_token] (not the default [None]
      that would collapse every retry-classified timeout into an
      unclassifiable provider timeout).  See http_client.timeout_phase. *)
-  | Retry.Timeout r -> Timeout { provider; timeout_phase = r.phase; detail = r.message }
+  | Api_error.Timeout r -> Timeout { provider; timeout_phase = r.phase; detail = r.message }
 ;;
 
 let capacity_scope_of_http = function
@@ -310,17 +310,17 @@ let of_provider_failure ?provider kind message =
           Printf.sprintf "provider response exceeded %d bytes: %s" limit_bytes message
       }
   | Http_client.Empty_completion { stop_reason } ->
-    (match Retry.verdict_of_empty_completion ~stop_reason ~message with
-     | Retry.Empty_overflow overflow ->
+    (match Api_error.verdict_of_empty_completion ~stop_reason ~message with
+     | Api_error.Empty_overflow overflow ->
        (* Third promotion site of the #2621 misclassification fix: a
           ContextWindowExceeded empty completion is a caller-fixable context
           overflow, not provider unavailability. The overflow VALUE comes from
-          the shared [Retry.verdict_of_empty_completion] classifier; this
+          the shared [Api_error.verdict_of_empty_completion] classifier; this
           deliberate agent-core boundary flattens it to a string via
-          [Retry.error_message] into [InvalidRequest], preserving the typed →
+          [Api_error.error_message] into [InvalidRequest], preserving the typed →
           string boundary that keeps the public surface source-compatible. *)
-       InvalidRequest { provider; reason = Retry.error_message overflow }
-     | Retry.Empty_unattributed { token } ->
+       InvalidRequest { provider; reason = Api_error.error_message overflow }
+     | Api_error.Empty_unattributed { token } ->
        (* An empty turn whose stop_reason token agent core does not model is not
           evidence of provider unavailability, and rendering it as such invites
           the caller to retry the identical prompt — which never terminates when
@@ -335,7 +335,7 @@ let of_provider_failure ?provider kind message =
                token
                message
          }
-     | Retry.Empty_attributed ->
+     | Api_error.Empty_attributed ->
        (* [stop_reason] stays typed until this deliberate agent-core boundary.  The
           public error surface remains source-compatible: callers already handle
           a recognized non-overflow empty completion as provider unavailability,
@@ -350,13 +350,13 @@ let of_provider_failure ?provider kind message =
          })
   | Http_client.Context_overflow { limit } ->
     (* agent-core boundary: same agent-core-boundary flattening as the Empty_overflow arm above —
-       the typed overflow value is rendered via [Retry.error_message] into
+       the typed overflow value is rendered via [Api_error.error_message] into
        [InvalidRequest] so the public surface stays source-compatible, while
        the attribution path ([Provider_failure_attribution]) keeps the typed
-       [Retry.ContextOverflow] for consumers that branch on it. *)
+       [Api_error.ContextOverflow] for consumers that branch on it. *)
     InvalidRequest
       { provider
-      ; reason = Retry.error_message (Retry.ContextOverflow { message; limit })
+      ; reason = Api_error.error_message (Api_error.ContextOverflow { message; limit })
       }
   | Http_client.Unknown_provider_failure { reason } ->
     let reason =
@@ -369,8 +369,8 @@ let of_provider_failure ?provider kind message =
 
 let of_http_error ?provider = function
   | Http_client.HttpError { code; body; retry_after_header } ->
-    Retry.classify_error ~retry_after_header ~status:code ~body
-    |> of_retry_api_error ?provider
+    Api_error.classify_error ~retry_after_header ~status:code ~body
+    |> of_api_error ?provider
   | Http_client.NetworkError { message; kind } ->
     NetworkError
       { provider = provider_name provider; kind; timeout_phase = None; detail = message }

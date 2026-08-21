@@ -165,7 +165,6 @@ type t =
   | RestartOutcomes
   | Agent_coreRunTimeout
   | RuntimeSelected
-  | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
   | ReceiptUnmappedDisposition
@@ -193,7 +192,6 @@ type t =
   | PromptTemplateRenderOutcome (* counter: template render ok/fallback/empty *)
   | ToolCallParamCompleteness   (* counter: tool calls with all required params vs missing *)
   | KeeperTurnInstructionHash   (* gauge: hash of system+user prompt for change detection *)
-  | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
   | RawTraceSinkDegraded        (* counter: raw-trace sink create failed; turn dispatched untraced *)
   | RawTraceRetentionDeleted   (* counter: unreachable raw-trace files deleted after TurnRecord commit *)
@@ -375,7 +373,6 @@ let to_string = function
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
   | Agent_coreRunTimeout -> "masc_keeper_agent_core_run_timeout_total"
   | RuntimeSelected -> "masc_keeper_runtime_selected_total"
-  | RuntimeRotation -> "masc_keeper_runtime_rotation_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
@@ -407,7 +404,6 @@ let to_string = function
   | PromptTemplateRenderOutcome -> "masc_keeper_prompt_template_render_outcome_total"
   | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"
   | KeeperTurnInstructionHash -> "masc_keeper_turn_instruction_hash"
-  | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
   | RawTraceSinkDegraded -> "masc_keeper_raw_trace_sink_degraded_total"
   | RawTraceRetentionDeleted -> "masc_keeper_raw_trace_retention_deleted_total"
@@ -429,30 +425,6 @@ let collection = function
   | PersistenceLaneWaits | PersistenceLanePending | PersistenceLaneInFlight ->
     External_observable
   | _ -> Metric_store
-;;
-
-let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
-  Otel_metric_store_core.inc_counter
-    (to_string RuntimeSelected)
-    ~labels:
-      [ "keeper", keeper_name
-      ; "runtime_id", runtime_id
-      ; "source", "fallback"
-      ; "fallback_reason", fallback_reason
-      ]
-    ()
-;;
-
-let emit_runtime_rotation ~keeper_name ~from_runtime ~to_runtime ~reason =
-  Otel_metric_store_core.inc_counter
-    (to_string RuntimeRotation)
-    ~labels:
-      [ "keeper", keeper_name
-      ; "from_runtime", from_runtime
-      ; "to_runtime", to_runtime
-      ; "reason", reason
-      ]
-    ()
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

@@ -109,8 +109,6 @@ message BroadcastResponse {
   optional string delivery_reason = 5;
   // persisted | not_persisted | outcome_unknown
   string workspace_persistence_status = 6;
-  // do_not_resend | retry_allowed | outcome_unknown
-  string retry_disposition = 7;
 }
 
 // ===== Status =====
@@ -144,4 +142,3 @@ message TaskInfo {
   string assigned_to = 4;
   int32 priority = 5;
 }
-

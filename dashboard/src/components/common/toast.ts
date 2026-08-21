@@ -60,7 +60,7 @@ const ICON: Record<ToastType, () => ComponentChildren> = {
 /** Pure: default dismiss duration per toast type. Reference — Sentry
     error banner lingers, GitHub success toast is quick. Error toasts
     need more reading time AND often carry information the operator
-    wants to copy (stack, id, retry token); dismissing at 4s has
+    wants to copy (stack, id, correlation token); dismissing at 4s has
     burned users. Warnings sit in the middle. Success confirms an
     already-completed action, so short is fine.
 

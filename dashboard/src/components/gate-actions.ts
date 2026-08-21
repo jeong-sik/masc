@@ -2,7 +2,7 @@ import { showToast } from './common/toast'
 import {
   deleteGateApprovalRule,
   resolveGateApproval,
-  retryGateAutoJudge,
+  rerunGateAutoJudge,
   setGateMode,
 } from '../api/dashboard-gate'
 import type { SetGateModeResponse } from '../api/dashboard-gate'
@@ -53,14 +53,14 @@ export async function respondToKeeperApproval(
   }
 }
 
-export async function retryKeeperAutoJudge(
+export async function rerunKeeperAutoJudge(
   id: string,
   expected: KeeperAutoJudgeRearmExpectation,
 ) {
   if (!id) return
   gateApprovalActing.value = id
   try {
-    await retryGateAutoJudge(id, expected)
+    await rerunGateAutoJudge(id, expected)
     showToast('Auto Judge를 한 번 다시 요청했습니다', 'success')
     await refreshGate({ force: true })
   } catch (err) {

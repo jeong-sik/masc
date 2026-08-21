@@ -1405,7 +1405,7 @@ let start_keeper_loops_owned
            (Printexc.to_string exn));
       Eio.Time.sleep
         clock
-        Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec;
+        Env_config_keeper.KeeperBootstrap.keeper_listener_reconcile_interval_sec;
       loop ()
     in
     loop ());
@@ -1540,7 +1540,7 @@ let start_keeper_loops_owned
        and the chat store is first-write-wins on that key. If the mention
        delivery returned without writing its row — the target's metadata was
        unavailable, or its identity was ambiguous — an unstamped projection row
-       would claim the key, and the retry that follows could never stamp it:
+       would claim the key, and the later delivery pass could never stamp it:
        the reloaded row carries only content-derived mentions, so a keeper
        whose feed targets do not match the text reads as already answered, the
        wake is skipped, and the message is recorded as delivered. Project only
@@ -1806,7 +1806,7 @@ let start_keeper_loops_owned
                  produced the bulk of the false-positive "not in registry"
                  WARNs).  Check the synchronous is_registered predicate
                  instead — the running transition is observed later by the
-                 retry loop.  See #7889. *)
+                 registration reconciliation loop.  See #7889. *)
               let registered =
                 Keeper_registry.is_registered ~base_path:config.base_path m.name
               in
@@ -1835,11 +1835,11 @@ let start_keeper_loops_owned
       let booted_count = List.length booted in
       let total = List.length names in
       Log.Keeper.info "autoboot: initial pass %d/%d keepers started" booted_count total;
-      (* Retry loop for keepers that failed initial boot *)
+      (* Registration reconciliation for keepers missing after initial boot *)
       if booted_count < total
       then (
-        let retry_interval_s =
-          Float.of_int (Keeper_config.keeper_bootstrap_retry_interval_sec ())
+        let registration_interval_s =
+          Float.of_int (Keeper_config.keeper_bootstrap_registration_interval_sec ())
         in
         let unbooted =
           List.filter (fun name -> not (List.mem name booted)) names
@@ -1850,32 +1850,32 @@ let start_keeper_loops_owned
                ~sw
                ~on_error:(fun exn ->
                  Log.Keeper.error
-                   "autoboot retry crashed keeper=%s error=%s"
+                   "autoboot registration reconciliation crashed keeper=%s error=%s"
                    name
                    (Printexc.to_string exn))
                (fun () ->
-               let rec retry_loop round =
+               let rec registration_loop round =
                  if Keeper_registry.is_registered ~base_path:config.base_path name
                  then
                    Log.Keeper.info
-                     "autoboot: %s registered after %d retry round(s)"
+                     "autoboot: %s registered after %d registration round(s)"
                      name
                      (round - 1)
                  else (
-                   Eio.Time.sleep clock retry_interval_s;
+                   Eio.Time.sleep clock registration_interval_s;
                    Log.Keeper.info
-                     "autoboot: retry round %d for unbooted keeper %s"
+                     "autoboot: registration round %d for unbooted keeper %s"
                      round
                      name;
-                   if try_boot_one ~log_prefix:"autoboot-retry" idx name
+                   if try_boot_one ~log_prefix:"autoboot-registration" idx name
                    then
                      Log.Keeper.info
-                       "autoboot: %s registered on retry round %d"
+                       "autoboot: %s registered on registration round %d"
                        name
                        round
-                   else retry_loop (round + 1))
+                   else registration_loop (round + 1))
                in
-               retry_loop 1))
+               registration_loop 1))
           unbooted);
       (* Keeper lifecycle startup has one owner: this subsystem boots the
          configured roster and then starts its supervisor. The sweep starts

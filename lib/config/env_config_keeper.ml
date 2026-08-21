@@ -34,15 +34,15 @@ module KeeperBootstrap = struct
   ;;
 
   (** Polling interval (seconds) for the keeper-lifecycle listener
-      retry loop in [server_bootstrap_loops.ml]. After a listener
+      reconciliation loop in [server_bootstrap_loops.ml]. After a listener
       iteration raises (non-cancellation) the loop sleeps for this
-      interval before retrying — keeping the spinning under control
+      interval before reconciling again — keeping the spinning under control
       when an upstream subsystem is briefly down. Default 0.25s
       preserves the inline literal at [server_bootstrap_loops.ml:240]. *)
-  let keeper_listener_retry_interval_sec =
+  let keeper_listener_reconcile_interval_sec =
     Float.max
       0.05
-      (get_float ~default:0.25 "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC")
+      (get_float ~default:0.25 "MASC_KEEPER_BOOTSTRAP_LISTENER_RECONCILE_INTERVAL_SEC")
   ;;
 
   (** Settle delay (seconds) between lazy-startup completion and the

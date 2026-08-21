@@ -486,7 +486,7 @@ let test_authorization_errors_have_typed_projection () =
     "API authorization"
     "api"
     (Agent_core.Error.Api
-       (Agent_core.Retry.AuthorizationError { message = "permission refused" }));
+       (Agent_core.Api_error.AuthorizationError { message = "permission refused" }));
   check_projection
     "provider authorization"
     "provider"
@@ -498,10 +498,10 @@ let test_request_body_too_large_projection_preserves_bounds () =
   let projection =
     Error_json.agent_failed_error_projection
       (Agent_core.Error.Api
-         (Agent_core.Retry.InvalidRequest
+         (Agent_core.Api_error.InvalidRequest
             { message = "request body too large"
             ; reason =
-                Agent_core.Retry.Request_body_too_large
+                Agent_core.Api_error.Request_body_too_large
                   { actual_bytes = 1_671_330; limit_bytes = 1_048_576 }
             }))
   in
@@ -530,10 +530,10 @@ let test_provider_request_body_refusal_projection_preserves_status () =
   let projection =
     Error_json.agent_failed_error_projection
       (Agent_core.Error.Api
-         (Agent_core.Retry.InvalidRequest
+         (Agent_core.Api_error.InvalidRequest
             { message = "payload too large"
             ; reason =
-                Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+                Agent_core.Api_error.Request_body_refused_by_provider { status = 413 }
             }))
   in
   check
@@ -573,11 +573,11 @@ let test_input_capacity_projection_preserves_evidence () =
   let projection =
     Error_json.agent_failed_error_projection
       (Agent_core.Error.Api
-         (Agent_core.Retry.InputCapacity
+         (Agent_core.Api_error.InputCapacity
             { message = "typed capacity"
             ; constraint_
             ; reason =
-                Agent_core.Retry.Serving_constraint_rejected
+                Agent_core.Api_error.Serving_constraint_rejected
                   (Llm_provider.Serving_constraint.Input_rejected
                      { input_tokens = 524299
                      ; accepted_through = 524298
@@ -608,14 +608,14 @@ let test_input_capacity_projection_preserves_evidence () =
     (Some "input_rejected")
     (string_of_field (member "kind" reason_json))
 
-(* [Retry.Timeout] carries a typed phase that separates an admission or queue
+(* [Api_error.Timeout] carries a typed phase that separates an admission or queue
    wait from a streaming stall. The arm bound only [message], so every timeout
    reached the wire indistinguishable from every other one. *)
 let test_timeout_projection_preserves_phase () =
   let projection =
     Error_json.agent_failed_error_projection
       (Agent_core.Error.Api
-         (Agent_core.Retry.Timeout
+         (Agent_core.Api_error.Timeout
             { message = "per-provider timeout after 90.0s"
             ; phase = Some Llm_provider.Http_client.Admission
             }))
@@ -639,7 +639,7 @@ let test_timeout_projection_without_phase_reports_null () =
   let projection =
     Error_json.agent_failed_error_projection
       (Agent_core.Error.Api
-         (Agent_core.Retry.Timeout { message = "unattributed timeout"; phase = None }))
+         (Agent_core.Api_error.Timeout { message = "unattributed timeout"; phase = None }))
   in
   check
     (option string)

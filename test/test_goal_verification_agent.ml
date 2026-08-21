@@ -4,10 +4,8 @@
     ([Criterion_pending] / [Proof_pending]) through
     [Task.Anti_rationalization.review] on the stubbed verifier_exact lane and
     commits verdicts via the application-owned typed boundary, under the fixed
-    identity [verifier_exact]. Typed non-verdicts (evaluator
-    unavailable, malformed replies after all slots failed, a verdict without
-    a stated reason) leave the pending row durable and schedule a retry —
-    failure never consumes a pending row. *)
+    identity [verifier_exact]. Typed non-verdicts leave the pending row durable
+    without scheduling an automatic replay. *)
 
 open Alcotest
 open Masc
@@ -268,7 +266,7 @@ let recording_reviewer calls behaviors =
     | Some Stub_unavailable ->
       Error
         (Agent_core.Error.Api
-           (Agent_core.Retry.ServerError
+           (Agent_core.Api_error.ServerError
               { status = 503; message = "test evaluator unavailable" }))
     | None ->
       Error (Agent_core.Error.Internal ("unexpected evaluator slot " ^ evaluator_runtime))
@@ -503,7 +501,7 @@ let test_criterion_pending_drains_to_viable () =
 ;;
 
 (* (d) An unavailable evaluator is a typed non-verdict: the row stays
-   pending, the phase stays Verifying, and the outcome schedules a retry. *)
+   pending and the phase stays Verifying without automatic replay. *)
 let test_lane_unavailable_keeps_the_pending_row () =
   with_workspace
   @@ fun config ->
@@ -524,10 +522,10 @@ let test_lane_unavailable_keeps_the_pending_row () =
        List.iter
          (fun outcome ->
             match outcome with
-            | Agent.Deferred { retryable = true; reason = _ } ->
-              check bool "retry scheduled for a retryable deferral" true
-                (Agent.should_schedule_retry outcome)
-            | _ -> fail "an unavailable evaluator must defer retryable")
+            | Agent.Deferred { reason } ->
+              check bool "typed deferral keeps a reason" true
+                (String.trim reason <> "")
+            | Agent.Committed -> fail "an unavailable evaluator must defer")
          outcomes);
   check string "the phase never left verifying" "verifying"
     (stored_phase config goal_id);
@@ -536,9 +534,9 @@ let test_lane_unavailable_keeps_the_pending_row () =
   | _ -> fail "failure must not consume the pending row"
 ;;
 
-(* (e) A malformed reply fails over to the next slot in frozen declaration
-   order; when every slot fails, the row stays pending. *)
-let test_malformed_reply_fails_over_to_the_next_slot () =
+(* (e) A malformed reply from the authoritative slot leaves the row pending;
+   another configured runtime is not selected implicitly. *)
+let test_malformed_reply_does_not_select_another_slot () =
   with_workspace
   @@ fun config ->
   let ctx = workspace_ctx config in
@@ -555,16 +553,17 @@ let test_malformed_reply_fails_over_to_the_next_slot () =
          ; "verifier-b", Stub_approve "second slot proved it"
          ])
     (fun () -> drain config);
-  check (list string) "failover follows the declared slot order"
-    (* The creation-time criterion check drains in the same scan and also
-       fails over, so the attempt log reads [a; b] per review. *)
-    [ "verifier-a"; "verifier-b"; "verifier-a"; "verifier-b" ]
+  check (list string) "only the authoritative slot was called"
+    [ "verifier-a" ]
     !calls;
-  check string "the second slot's verdict completed the goal" "completed"
-    (stored_phase config goal_id)
+  check string "the phase never left verifying" "verifying"
+    (stored_phase config goal_id);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_pending _ -> ()
+  | _ -> fail "malformed verdict must not consume the pending row"
 ;;
 
-let test_all_slots_failed_keeps_the_pending_row () =
+let test_additional_malformed_slots_are_not_called () =
   with_workspace
   @@ fun config ->
   let ctx = workspace_ctx config in
@@ -579,14 +578,14 @@ let test_all_slots_failed_keeps_the_pending_row () =
          calls
          [ "verifier-a", Stub_malformed; "verifier-b", Stub_malformed ])
     (fun () -> drain config);
-  check (list string) "every slot was tried for the blocking criterion"
-    [ "verifier-a"; "verifier-b" ]
+  check (list string) "only the first configured slot was called"
+    [ "verifier-a" ]
     !calls;
   check string "the phase never left verifying" "verifying"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_pending _ -> ()
-  | _ -> fail "all-slots-fail must not consume the pending row"
+  | _ -> fail "malformed authoritative verdict must not consume the pending row"
 ;;
 
 let test_unreachable_criterion_blocks_the_pending_proof () =
@@ -786,10 +785,10 @@ let () =
     ; ( "non-verdicts keep evidence"
       , [ test_case "lane unavailable keeps the pending row" `Quick
             test_lane_unavailable_keeps_the_pending_row
-        ; test_case "malformed reply fails over to the next slot" `Quick
-            test_malformed_reply_fails_over_to_the_next_slot
-        ; test_case "all slots failed keeps the pending row" `Quick
-            test_all_slots_failed_keeps_the_pending_row
+        ; test_case "malformed reply does not select another slot" `Quick
+            test_malformed_reply_does_not_select_another_slot
+        ; test_case "additional malformed slots are not called" `Quick
+            test_additional_malformed_slots_are_not_called
         ; test_case "unreachable criterion blocks the pending proof" `Quick
             test_unreachable_criterion_blocks_the_pending_proof
         ; test_case "approve without a stated reason does not commit" `Quick

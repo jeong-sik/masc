@@ -22,14 +22,14 @@ let binding_identity_for_call agent provider_config =
 
 let invalid_request message =
   Error.Api
-    (Llm_provider.Retry.InvalidRequest
-       { message; reason = Llm_provider.Retry.Unknown_invalid_request })
+    (Llm_provider.Api_error.InvalidRequest
+       { message; reason = Llm_provider.Api_error.Unknown_invalid_request })
 ;;
 
 let input_capacity_error ~binding ~message ~constraint_ ~reason =
   Provider_failure_attribution.of_request_validation_error
     ~binding
-    (Error.Api (Llm_provider.Retry.InputCapacity { message; constraint_; reason }))
+    (Error.Api (Llm_provider.Api_error.InputCapacity { message; constraint_; reason }))
 ;;
 
 let measurement_error ~binding ~constraint_ ~provider = function
@@ -49,7 +49,7 @@ let measurement_error ~binding ~constraint_ ~provider = function
               (Llm_provider.Input_token_count.show_protocol protocol)
               model_id)
          ~constraint_
-         ~reason:(Llm_provider.Retry.Token_measurement_unavailable protocol)
+         ~reason:(Llm_provider.Api_error.Token_measurement_unavailable protocol)
      | None ->
        Provider_failure_attribution.of_request_validation_error
          ~binding
@@ -63,14 +63,14 @@ let measurement_error ~binding ~constraint_ ~provider = function
     Provider_failure_attribution.of_response_parse_error
       ~binding
       (Error.Api
-         (Llm_provider.Retry.InvalidRequest
+         (Llm_provider.Api_error.InvalidRequest
             { message =
                 Printf.sprintf
                   "invalid %s input measurement for model %s: %s"
                   (Llm_provider.Input_token_count.show_protocol protocol)
                   model_id
                   detail
-            ; reason = Llm_provider.Retry.Json_parse_error
+            ; reason = Llm_provider.Api_error.Json_parse_error
             }))
   | Llm_provider.Count_tokens_sync.Output_token_resolution_failed
       Llm_provider.Types.Required_output_token_ceiling_missing ->
@@ -114,7 +114,7 @@ let fit_error ~binding = function
     Provider_failure_attribution.of_request_validation_error
       ~binding
       (Error.Api
-         (Llm_provider.Retry.ContextOverflow
+         (Llm_provider.Api_error.ContextOverflow
             { message =
                 Printf.sprintf
                   "prepared request requires %d input + %d reserved output tokens, limit \
@@ -129,7 +129,7 @@ let fit_error ~binding = function
       ~binding
       ~message:"prepared request rejected by resolved serving constraint"
       ~constraint_
-      ~reason:(Llm_provider.Retry.Serving_constraint_rejected reason)
+      ~reason:(Llm_provider.Api_error.Serving_constraint_rejected reason)
 ;;
 
 let preflight_serving_constraint ~binding ~now_unix_s prepared =
@@ -144,7 +144,7 @@ let preflight_serving_constraint ~binding ~now_unix_s prepared =
             ~binding
             ~message:"resolved serving-constraint evidence is not current"
             ~constraint_
-            ~reason:(Llm_provider.Retry.Serving_constraint_rejected reason)))
+            ~reason:(Llm_provider.Api_error.Serving_constraint_rejected reason)))
 ;;
 
 let finish_call ?on_provider_failure = function

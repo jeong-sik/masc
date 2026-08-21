@@ -111,8 +111,7 @@ let option_json project = function
 
 let tool_failure_kind_string = function
   | Agent_core.Types.Validation_error -> "validation_error"
-  | Agent_core.Types.Recoverable_tool_error -> "recoverable_tool_error"
-  | Agent_core.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
+  | Agent_core.Types.Tool_error -> "tool_error"
   | Agent_core.Types.Reported_tool_error -> "reported_tool_error"
   | Agent_core.Types.Unattributed_tool_error -> "unattributed_tool_error"
 

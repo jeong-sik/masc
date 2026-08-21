@@ -17,7 +17,7 @@ let blocked_tool_result ~invocation ~tool_name ~input ~content =
   ; content
   ; outcome =
       Types.Tool_failed
-        { failure_kind = Types.Non_retryable_tool_error
+        { failure_kind = Types.Tool_error
         ; error_class = Some Types.Deterministic
         }
   }

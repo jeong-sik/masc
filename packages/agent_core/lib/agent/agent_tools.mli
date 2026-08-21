@@ -44,8 +44,7 @@ val find_in_index : tool_index -> string -> Tool.t option
 
 type tool_failure_kind = Types.tool_failure_kind =
   | Validation_error
-  | Recoverable_tool_error
-  | Non_retryable_tool_error
+  | Tool_error
   | Reported_tool_error
   | Unattributed_tool_error
 

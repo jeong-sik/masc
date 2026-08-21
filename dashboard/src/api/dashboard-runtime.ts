@@ -1220,7 +1220,7 @@ export type DashboardOfficialClientSessionPhase =
 export interface DashboardOfficialClientRecoveryResolutionRecord {
   recovery_id: string
   failure: DashboardOfficialClientRecoveryFailure
-  resolution: { kind: 'retry_previous' | 'restart_fresh' }
+  resolution: { kind: 'restart_fresh' }
   resolved_by: string
   resolved_at: number
 }
@@ -1261,9 +1261,7 @@ export interface DashboardOfficialClientRecoveryResponse
   audit: DashboardOfficialClientAuditReceipt
 }
 
-export type DashboardOfficialClientRecoveryDecision =
-  | { resolution: 'retry_previous' }
-  | { resolution: 'restart_fresh' }
+export type DashboardOfficialClientRecoveryDecision = { resolution: 'restart_fresh' }
 
 export type DashboardOfficialClientLoginStatus =
   | 'ready'
@@ -1475,7 +1473,7 @@ function decodeOfficialClientResolutionRecord(raw: unknown): DashboardOfficialCl
   const resolved_at = asNumber(raw.resolved_at)
   const kind = typeof raw.resolution.kind === 'string' ? raw.resolution.kind : null
   if (!recovery_id || !failure || !resolved_by || resolved_at == null) return null
-  const resolution = kind === 'retry_previous' || kind === 'restart_fresh'
+  const resolution = kind === 'restart_fresh'
     ? { kind } as const
     : null
   if (!resolution) return null

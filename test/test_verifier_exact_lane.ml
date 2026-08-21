@@ -56,7 +56,7 @@ let recording_reviewer calls behaviors =
 let rate_limited =
   Error
     (Agent_core.Error.Api
-       (Agent_core.Error.Retry.RateLimited
+       (Agent_core.Error.Api_error.RateLimited
           { retry_after = None; message = "rate limited" }))
 ;;
 

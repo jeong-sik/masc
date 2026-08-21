@@ -237,7 +237,6 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
         incr executions;
         Error
           { Agent_core.Types.message = "same deterministic failure"
-          ; recoverable = false
           ; error_class = Some Agent_core.Types.Deterministic
           })
     in
@@ -282,7 +281,6 @@ let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
         Error
           { Agent_core.Types.message =
               Printf.sprintf "changing failure %d" !executions
-          ; recoverable = false
           ; error_class = Some Agent_core.Types.Deterministic
           })
     in
@@ -343,7 +341,6 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
                };
            Error
              { Agent_core.Types.message = "terminal node rejected"
-             ; recoverable = false
              ; error_class = Some Agent_core.Types.Deterministic
              })
     in
@@ -390,7 +387,6 @@ let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
                };
            Error
              { Agent_core.Types.message = "ordinary composition failed"
-             ; recoverable = false
              ; error_class = Some Agent_core.Types.Deterministic
              })
     in
@@ -421,7 +417,6 @@ let test_terminal_pre_effect_failure_remains_correction_capable () =
         (fun _input ->
            Error
              { Agent_core.Types.message = "validation rejected before effect"
-             ; recoverable = false
              ; error_class = Some Agent_core.Types.Deterministic
              })
     in
@@ -446,7 +441,6 @@ let test_terminal_external_deferral_keeps_pending_stop () =
            state := Masc.Keeper_tools_agent_core.External_effect_deferred;
            Error
              { Agent_core.Types.message = "waiting for durable approval"
-             ; recoverable = true
              ; error_class = Some Agent_core.Types.Transient
              })
     in
@@ -476,7 +470,6 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
            state := Masc.Keeper_tools_agent_core.Deferred_tool_result;
            Error
              { Agent_core.Types.message = "waiting for durable stimulus"
-             ; recoverable = true
              ; error_class = Some Agent_core.Types.Transient
              })
     in

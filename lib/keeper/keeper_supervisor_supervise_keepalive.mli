@@ -27,7 +27,7 @@ val supervise_keepalive :
   Keeper_meta_contract.keeper_meta ->
   unit
 (** Register or launch an [Offline] supervised keepalive fiber only when the
-    shared closed owner-execution verdict is [Recoverable]. Other registered
+    shared closed owner-execution verdict is [No_live_owner]. Other registered
     phases remain owned by the lifecycle sweep. [Executable] is a no-op;
     lifecycle/policy blocks, unreadable owner truth, and a shutdown fence retain
     durable work without booting.

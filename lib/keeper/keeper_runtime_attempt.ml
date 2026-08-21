@@ -93,11 +93,11 @@ let core_error_to_runtime_outcome err =
          (Llm_provider.Http_client.NetworkError
             { message = detail; kind = Llm_provider.Http_client.Unknown }))
   | Some
-      (Keeper_internal_error.Capacity_backpressure { detail; retry_after; source; _ }) ->
+      (Keeper_internal_error.Capacity_backpressure { detail; provider_reset; source; _ }) ->
     let retry_after =
-      match retry_after with
-      | Keeper_internal_error.Explicit s -> Some s
-      | No_retry_hint -> None
+      match provider_reset with
+      | Keeper_internal_error.Provider_reset_after_seconds s -> Some s
+      | No_provider_reset_evidence -> None
     in
     Some
       (Runtime_attempt_fsm.Call_err
@@ -116,14 +116,14 @@ let core_error_to_runtime_outcome err =
      | Agent_core.Error.Api api_err ->
        let http_err =
          match api_err with
-         | Llm_provider.Retry.InvalidRequest { message; _ } ->
+         | Llm_provider.Api_error.InvalidRequest { message; _ } ->
            http_error ~code:400 ~body:message
          | ContextOverflow { message; _ } ->
            http_error ~code:400 ~body:message
          | InputCapacity { message; _ } ->
            http_error ~code:400 ~body:message
          | RateLimited { message; retry_after } ->
-           (* Reconstruction boundary: [retry_after] is the resolved value
+           (* Reconstruction boundary: [retry_after] is the provider's resolved value
               (body-or-header) and the header slot is the only retry-after
               carrier on [HttpError], so it re-enters here rather than being
               dropped. *)
@@ -145,7 +145,7 @@ let core_error_to_runtime_outcome err =
            Llm_provider.Http_client.NetworkError { message; kind }
          | Timeout { message; phase } ->
            (* [Http_client.Timeout] is the ETIMEDOUT transport kind, but
-              [Retry.Timeout] also covers Admission, Queue, First_token and
+              [Api_error.Timeout] also covers Admission, Queue, First_token and
               Capacity_backpressure waits that never touched a socket.
               [TimeoutError] carries the phase, so route there and keep it. *)
            Llm_provider.Http_client.TimeoutError

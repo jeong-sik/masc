@@ -65,7 +65,6 @@ let requiring_context (handler : context_tool_handler) execution_env input =
   | None ->
     Error
       { message = "context-aware tool requires explicit context"
-      ; recoverable = false
       ; error_class = Some Deterministic
       }
 ;;

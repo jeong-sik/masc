@@ -297,7 +297,7 @@ let test_mcp_tool_bridge_error () =
     }
   in
   let call_fn _input : Types.tool_result =
-    Error { message = "server error"; recoverable = true; error_class = None }
+    Error { message = "server error"; error_class = None }
   in
   let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
   let result = Tool.execute agent_core_tool (`Assoc []) in

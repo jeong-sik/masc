@@ -300,7 +300,7 @@ val dequeue : t -> (stimulus * t) option
 val prepend_list : stimulus list -> t -> t
 (** [prepend_list stimuli q] puts [stimuli] back at the front of [q] while
     preserving [stimuli]'s order. Used when a keepalive cycle crashes after
-    draining stimuli but before completing the turn, so restart/retry keeps an
+    draining stimuli but before completing the turn, so restart replay keeps an
     at-least-once replay boundary. *)
 
 val remove_by_post_id : post_id -> t -> stimulus list * t

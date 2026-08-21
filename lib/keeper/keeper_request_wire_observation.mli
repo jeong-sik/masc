@@ -3,7 +3,7 @@
 
     AGENT_CORE's provider-specific serialization observer measures admitted requests;
     a refused request instead carries the same exact size in
-    [Agent_core.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
+    [Agent_core.Api_error.Request_body_too_large.actual_bytes]. Nothing MASC already
     computes substitutes:
     [Keeper_context_core_accessors.serialize_context] covers
     [{system_prompt, messages}] and excludes tool schemas and every

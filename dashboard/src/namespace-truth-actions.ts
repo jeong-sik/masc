@@ -11,30 +11,30 @@ import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
 import { mergeServerStatus } from './store-normalizers'
 import { FetchScheduler } from './lib/fetch-scheduler'
 
-// --- Warm-up retry state ---
+// --- Warm-up polling state ---
 //
 // Phase 2 Action 6 — exponential backoff replaces the fixed 3 000 ms cadence.
 // The fixed cadence kept beating the server at 3 s intervals during cold
 // starts, which interacted poorly with Dashboard_cache stampede protection
-// (every retry races to start a fresh compute).  The schedule below
+// (every poll races to start a fresh compute).  The schedule below
 // (3 s / 5 s / 10 s / 20 s / cap 30 s) preserves the worst-case warm-up
-// budget (WARM_MAX_RETRIES retries) while smoothing client load.
+// budget (WARMUP_MAX_POLLS polls) while smoothing client load.
 
-export const WARM_RETRY_DELAYS_MS = [3_000, 5_000, 10_000, 20_000, 30_000]
-export const WARM_RETRY_CAP_MS = 30_000
+export const WARMUP_POLL_DELAYS_MS = [3_000, 5_000, 10_000, 20_000, 30_000]
+export const WARMUP_POLL_CAP_MS = 30_000
 
-export function warmRetryDelayFor(attempt: number): number {
+export function warmupPollDelayFor(attempt: number): number {
   // attempt is 1-indexed by callers; clamp to the schedule, falling back
   // to the cap so a misuse never produces 0 / NaN / negative delay.
-  if (!Number.isFinite(attempt) || attempt < 1) return WARM_RETRY_DELAYS_MS[0] ?? WARM_RETRY_CAP_MS
-  const idx = Math.min(attempt - 1, WARM_RETRY_DELAYS_MS.length - 1)
-  const delay = WARM_RETRY_DELAYS_MS[idx]
-  return delay ?? WARM_RETRY_CAP_MS
+  if (!Number.isFinite(attempt) || attempt < 1) return WARMUP_POLL_DELAYS_MS[0] ?? WARMUP_POLL_CAP_MS
+  const idx = Math.min(attempt - 1, WARMUP_POLL_DELAYS_MS.length - 1)
+  const delay = WARMUP_POLL_DELAYS_MS[idx]
+  return delay ?? WARMUP_POLL_CAP_MS
 }
 
-const WARM_MAX_RETRIES = 10
-let warmRetryAttempt = 0
-let warmRetryTimer: ReturnType<typeof setTimeout> | null = null
+const WARMUP_MAX_POLLS = 10
+let warmupPollAttempt = 0
+let warmupPollTimer: ReturnType<typeof setTimeout> | null = null
 
 // --- Core fetch function (owns signal updates) ---
 
@@ -47,13 +47,13 @@ async function doFetchNamespaceTruth(): Promise<void> {
       isRecord(raw)
       && asString((raw as Record<string, unknown>).status) === 'initializing'
     if (isInitializing) {
-      console.debug('[project-snapshot] server initializing, scheduling warm-up retry')
+      console.debug('[project-snapshot] server initializing, scheduling warm-up poll')
       namespaceTruthInitializing.value = true
-      scheduleNamespaceWarmRetry()
+      scheduleNamespaceWarmupPoll()
       return
     }
     namespaceTruthInitializing.value = false
-    warmRetryAttempt = 0
+    warmupPollAttempt = 0
     const normalized = normalizeNamespaceTruth(raw)
     namespaceTruth.value = normalized
     serverStatus.value = mergeServerStatus(
@@ -70,22 +70,22 @@ async function doFetchNamespaceTruth(): Promise<void> {
   }
 }
 
-function scheduleNamespaceWarmRetry(): void {
-  warmRetryAttempt++
-  if (warmRetryAttempt > WARM_MAX_RETRIES) {
+function scheduleNamespaceWarmupPoll(): void {
+  warmupPollAttempt++
+  if (warmupPollAttempt > WARMUP_MAX_POLLS) {
     namespaceTruthInitializing.value = false
     namespaceTruthError.value = 'Server warm-up timed out. Try refreshing.'
     namespaceTruthLoading.value = false
-    warmRetryAttempt = 0
+    warmupPollAttempt = 0
     return
   }
-  const delayMs = warmRetryDelayFor(warmRetryAttempt)
+  const delayMs = warmupPollDelayFor(warmupPollAttempt)
   console.debug(
-    `[project-snapshot] warm-up retry ${warmRetryAttempt}/${WARM_MAX_RETRIES} in ${delayMs}ms`,
+    `[project-snapshot] warm-up poll ${warmupPollAttempt}/${WARMUP_MAX_POLLS} in ${delayMs}ms`,
   )
-  if (warmRetryTimer) clearTimeout(warmRetryTimer)
-  warmRetryTimer = setTimeout(() => {
-    warmRetryTimer = null
+  if (warmupPollTimer) clearTimeout(warmupPollTimer)
+  warmupPollTimer = setTimeout(() => {
+    warmupPollTimer = null
     namespaceTruthScheduler.requestNow()
   }, delayMs)
 }
@@ -121,10 +121,10 @@ export async function refreshNamespaceTruth(opts?: { force?: boolean }): Promise
 }
 
 export function disposeNamespaceTruthScheduler(): void {
-  if (warmRetryTimer) {
-    clearTimeout(warmRetryTimer)
-    warmRetryTimer = null
+  if (warmupPollTimer) {
+    clearTimeout(warmupPollTimer)
+    warmupPollTimer = null
   }
-  warmRetryAttempt = 0
+  warmupPollAttempt = 0
   namespaceTruthScheduler.dispose()
 }

@@ -133,7 +133,7 @@ type event =
   | Gate_exact_rule_expired
   | Gate_exact_rule_store_degraded
   | Gate_grant_unavailable
-  | Auto_judge_operator_retry_started
+  | Auto_judge_operator_rerun_started
   | Auto_judge_block_observation_superseded
   | Auto_judge_restart_worker_recovered
   | Auto_judge_restart_judgment_recovered
@@ -149,7 +149,7 @@ let event_to_string = function
   | Gate_exact_rule_expired -> "gate_exact_rule_expired"
   | Gate_exact_rule_store_degraded -> "gate_exact_rule_store_degraded"
   | Gate_grant_unavailable -> "gate_grant_unavailable"
-  | Auto_judge_operator_retry_started -> "auto_judge_operator_retry_started"
+  | Auto_judge_operator_rerun_started -> "auto_judge_operator_rerun_started"
   | Auto_judge_block_observation_superseded ->
     "auto_judge_block_observation_superseded"
   | Auto_judge_restart_worker_recovered -> "auto_judge_restart_worker_recovered"
@@ -171,7 +171,7 @@ let event_of_string = function
   | "gate_exact_rule_expired" -> Some Gate_exact_rule_expired
   | "gate_exact_rule_store_degraded" -> Some Gate_exact_rule_store_degraded
   | "gate_grant_unavailable" -> Some Gate_grant_unavailable
-  | "auto_judge_operator_retry_started" -> Some Auto_judge_operator_retry_started
+  | "auto_judge_operator_rerun_started" -> Some Auto_judge_operator_rerun_started
   | "auto_judge_block_observation_superseded" ->
     Some Auto_judge_block_observation_superseded
   | "auto_judge_restart_worker_recovered" ->

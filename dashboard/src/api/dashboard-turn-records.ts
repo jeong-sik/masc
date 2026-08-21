@@ -288,7 +288,6 @@ export type KeeperCompactionReinjectionObservation = {
 
 export type KeeperCompactionOutcome =
   | 'checkpoint_committed'
-  | 'retry_without_checkpoint'
   | 'lifecycle_cleanup_failed_without_checkpoint'
 
 export type KeeperCompactionSnapshot = {
@@ -1078,7 +1077,6 @@ function decodeCompactionOutcome(raw: unknown): KeeperCompactionOutcome | null |
   const value = asString(raw)
   switch (value) {
     case 'checkpoint_committed':
-    case 'retry_without_checkpoint':
     case 'lifecycle_cleanup_failed_without_checkpoint':
       return value
     case undefined:
@@ -1097,7 +1095,6 @@ function compactionOutcomeContractIsValid(
       return evidence === null && cause === null
     case 'checkpoint_committed':
       return evidence !== null && (cause === null || Boolean(cause.trim()))
-    case 'retry_without_checkpoint':
     case 'lifecycle_cleanup_failed_without_checkpoint':
       return evidence === null && Boolean(cause?.trim())
   }

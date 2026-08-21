@@ -100,5 +100,5 @@ and capacity_scope =
 
 val to_string : provider_error -> string
 val capacity_scope_to_string : capacity_scope -> string
-val of_retry_api_error : ?provider:string -> Retry.api_error -> provider_error
+val of_api_error : ?provider:string -> Api_error.api_error -> provider_error
 val of_http_error : ?provider:string -> Http_client.http_error -> provider_error

@@ -342,7 +342,7 @@ val pending_board_event_of_external_attention :
     [Bootstrap] returns [None] (no prompt injection).
     [Error unavailable] means the underlying board read for [Board_signal] /
     [Board_attention] failed (board-unavailable-result). Callers classify via
-    {!Keeper_world_observation_board_signal.disposition_of_unavailable} and
+    {!Keeper_world_observation_board_signal.read_failure_kind_of_unavailable} and
     decide whether to drop or retain the stimulus — this function only
     reports the read failure, it does not decide. *)
 val pending_board_event_of_stimulus :

@@ -130,28 +130,9 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
     || status === 'stopped'
 }
 
-/** Closed set of blocker classes that the wakeup action is intended
- *  to recover. These three are the classes pre-RFC `canWake` checked
- *  inline in keeper-action-panel.ts; widening this set requires
- *  matching backend wakeup-recovery handling.
- *  Runtime execution-limit observations are deliberately absent: they are
- *  completed turn observations and never recoverable blocker classes. */
-const WAKEUP_RECOVERABLE_BLOCKERS = new Set<string>([
-  'runtime_exhausted',
-])
-
-export function keeperIsStuckOnRecoverableBlocker(keeper: Keeper): boolean {
-  const cls = keeper.runtime_blocker_class
-  return typeof cls === 'string' && WAKEUP_RECOVERABLE_BLOCKERS.has(cls)
-}
-
 /** Wakeup only kicks the next turn, so it is offered for every live
- *  (non-paused, non-offline) keeper — including ones stuck on a
- *  recoverable blocker. The blocker classes no longer gate this
- *  predicate (the old `if stuck return true; return true` had collapsed
- *  into a constant); keeperIsStuckOnRecoverableBlocker remains the
- *  advisory signal (currently pinned by tests only; no render surface
- *  consumes it yet). */
+ *  (non-paused, non-offline) keeper. Blocker classes do not grant
+ *  recovery authority. */
 export function keeperCanWakeup(keeper: Keeper): boolean {
   return !isKeeperPaused(keeper) && !isKeeperOffline(keeper)
 }

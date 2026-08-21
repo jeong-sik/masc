@@ -1329,7 +1329,7 @@ export function KeeperRuntimeActions({
   const probing = keeperProbing.value[keeper.name] ?? false
   const recovering = keeperRecovering.value[keeper.name] ?? false
   const recommended = diagnostic?.next_action_path ?? null
-  const canRecover = diagnostic?.recoverable === true
+  const canRecover = recommended === 'recover'
 
   const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]`

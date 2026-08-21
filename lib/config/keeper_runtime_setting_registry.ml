@@ -105,13 +105,13 @@ let all =
       "Lazy-startup completion poll interval in seconds"
   ; setting
       ~range:(float_range ~min:0.05 ())
-      ~env_name:"MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC"
+      ~env_name:"MASC_KEEPER_BOOTSTRAP_LISTENER_RECONCILE_INTERVAL_SEC"
       ~exposure:Env_only
       ~value_kind:Float
       ~default:"0.25"
-      ~consumers:[ "Server_bootstrap_loops lifecycle-listener retry" ]
+      ~consumers:[ "Server_bootstrap_loops lifecycle-listener reconciliation" ]
       ~category:"bootstrap"
-      "Keeper lifecycle-listener retry interval in seconds"
+      "Keeper lifecycle-listener reconciliation interval in seconds"
   ; setting
       ~range:(float_range ~min:0.0 ())
       ~env_name:"MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC"

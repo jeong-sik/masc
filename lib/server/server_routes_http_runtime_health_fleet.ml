@@ -237,8 +237,8 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
     let read_error_count = queue_assoc_int "read_error_count" fields in
     let transition_outbox_count = queue_assoc_int "transition_outbox_count" fields in
     let runnable_backlog_count = queue_assoc_int "runnable_backlog_count" fields in
-    let recoverable_backlog_count =
-      queue_assoc_int "recoverable_backlog_count" fields
+    let no_live_owner_backlog_count =
+      queue_assoc_int "no_live_owner_backlog_count" fields
     in
     let retained_disabled_backlog_count =
       queue_assoc_int "retained_disabled_backlog_count" fields
@@ -250,7 +250,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       queue_assoc_int "shutdown_fenced_backlog_count" fields
     in
     (* Only part of the non-runnable backlog is something an operator can act
-       on.  [recoverable] clears once the owner fiber is restored and
+       on.  [no_live_owner] clears once the owner fiber is restored and
        [shutdown_fenced] clears once the shutdown completes, so both warrant a
        prompt.  [retained_disabled] and [paused_dead] are the operator's own
        standing decision -- a keeper deliberately paused, or autoboot /
@@ -261,7 +261,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
        [status_reasons], so the backlog stays visible without demanding
        action. *)
     let actionable_backlog_count =
-      recoverable_backlog_count + shutdown_fenced_backlog_count
+      no_live_owner_backlog_count + shutdown_fenced_backlog_count
     in
     (* [backlog_clean] answers a different question than [work_action_required]:
        it reports whether the queue holds anything at all, so an operator-paused
@@ -336,7 +336,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
         then "transition_projection_pending" :: reasons
         else reasons)
       |> backlog_reason "runnable_backlog" runnable_backlog_count
-      |> backlog_reason "recoverable_backlog" recoverable_backlog_count
+      |> backlog_reason "no_live_owner_backlog" no_live_owner_backlog_count
       |> backlog_reason "retained_disabled_backlog" retained_disabled_backlog_count
       |> backlog_reason "paused_dead_backlog" paused_dead_backlog_count
       |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
@@ -418,11 +418,11 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ; "runnable_oldest_arrived_at_unix", `Null
       ; "runnable_oldest_age_seconds", `Null
       ; "runnable_by_keeper", `List []
-      ; "recoverable_pending_count", `Int 0
-      ; "recoverable_backlog_count", `Int 0
-      ; "recoverable_oldest_arrived_at_unix", `Null
-      ; "recoverable_oldest_age_seconds", `Null
-      ; "recoverable_by_keeper", `List []
+      ; "no_live_owner_pending_count", `Int 0
+      ; "no_live_owner_backlog_count", `Int 0
+      ; "no_live_owner_oldest_arrived_at_unix", `Null
+      ; "no_live_owner_oldest_age_seconds", `Null
+      ; "no_live_owner_by_keeper", `List []
       ; "retained_disabled_pending_count", `Int 0
       ; "retained_disabled_backlog_count", `Int 0
       ; "retained_disabled_oldest_arrived_at_unix", `Null
@@ -462,8 +462,8 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       with
       | Keeper_activation_readiness.Executable ->
         Keeper_event_queue_persistence.Runnable
-      | Keeper_activation_readiness.Recoverable ->
-        Keeper_event_queue_persistence.Recoverable
+      | Keeper_activation_readiness.No_live_owner ->
+        Keeper_event_queue_persistence.No_live_owner
       | Keeper_activation_readiness.Retained_disabled _
         -> Keeper_event_queue_persistence.Retained_disabled
       | Keeper_activation_readiness.Paused_dead _ ->

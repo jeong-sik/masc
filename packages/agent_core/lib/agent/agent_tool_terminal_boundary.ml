@@ -28,7 +28,6 @@ let execute_handler ~tool ~name run =
      | Tool_contract.Continue_after_success ->
        Error
          { message = Printf.sprintf "Tool '%s' raised: %s" name (Printexc.to_string exn)
-         ; recoverable = false
          ; error_class = Some Types.Unknown
          })
 ;;

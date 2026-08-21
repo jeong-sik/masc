@@ -460,9 +460,9 @@ type auto_judge_start_outcome =
   | Started
   | Skipped
 
-type auto_judge_retry_outcome =
-  | Retry_started
-  | Retry_skipped
+type auto_judge_rerun_outcome =
+  | Rerun_started
+  | Rerun_skipped
 
 module Auto_judge_owner = struct
   type t = string * string
@@ -645,25 +645,25 @@ type auto_judge_drain_blocker =
 let auto_judge_drain_blocker_to_string = function
   | Drain_owner_active approval_id ->
     Printf.sprintf
-      "Auto Judge retry could not start because approval %s owns the active worker"
+      "Auto Judge rerun could not start because approval %s owns the active worker"
       approval_id
   | Drain_entry_changed approval_id ->
     Printf.sprintf
-      "Auto Judge retry could not start because approval %s changed before worker start"
+      "Auto Judge rerun could not start because approval %s changed before worker start"
       approval_id
   | Drain_entry_missing approval_id ->
     Printf.sprintf
-      "Auto Judge retry could not start because approval %s is no longer pending"
+      "Auto Judge rerun could not start because approval %s is no longer pending"
       approval_id
   | Drain_start_failed (approval_id, reason) ->
     Printf.sprintf
-      "Auto Judge retry could not start because approval %s failed before worker start: %s"
+      "Auto Judge rerun could not start because approval %s failed before worker start: %s"
       approval_id
       reason
   | Drain_mode_manual ->
-    "Auto Judge retry could not start because Gate mode changed to manual"
+    "Auto Judge rerun could not start because Gate mode changed to manual"
   | Drain_mode_always_allow ->
-    "Auto Judge retry could not start because Gate mode changed to always_allow"
+    "Auto Judge rerun could not start because Gate mode changed to always_allow"
 ;;
 
 type auto_judge_drain_outcome =
@@ -876,7 +876,7 @@ and spawn_auto_judge_entry entry =
     ~spawn_worker:Hitl_summary_worker.spawn
     entry
 
-and retry_auto_judge_entry
+and rerun_auto_judge_entry
       ~requested_by
       ~expected_input_hash
       ~expected_sequence
@@ -885,7 +885,7 @@ and retry_auto_judge_entry
       (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
   match
-    Keeper_approval_queue.reserve_summary_attempt_retry
+    Keeper_approval_queue.reserve_summary_attempt_rerun
       ~base_path:entry.audit_base_path
       ~id:entry.id
       ~input_hash:expected_input_hash
@@ -896,7 +896,7 @@ and retry_auto_judge_entry
   with
   | Error error ->
     Error (Keeper_approval_queue.exact_attempt_error_to_string error)
-  | Ok false -> Ok Retry_skipped
+  | Ok false -> Ok Rerun_skipped
   | Ok true ->
     let reblock reason =
       mark_pre_worker_unavailable
@@ -923,24 +923,24 @@ and retry_auto_judge_entry
           with
           | Some reason, _, _ -> Error (reblock reason)
           | None, Some id, _ when String.equal id entry.id ->
-            Ok Retry_started
+            Ok Rerun_started
           | None, Some started_id, _ ->
             Error
               (reblock
                  (Printf.sprintf
-                    "Auto Judge retry could not start because earlier approval %s acquired the owner"
+                    "Auto Judge rerun could not start because earlier approval %s acquired the owner"
                     started_id))
           | None, None, Some blocker ->
             Error (reblock (auto_judge_drain_blocker_to_string blocker))
           | None, None, None ->
             Error
               (reblock
-                 "Auto Judge retry drain completed without a start or blocker"))
+                 "Auto Judge rerun drain completed without a start or blocker"))
      with
      | Eio.Cancel.Cancelled _ as exn ->
        let backtrace = Printexc.get_raw_backtrace () in
        let reason =
-         "Auto Judge retry was cancelled before exact attempt binding: "
+         "Auto Judge rerun was cancelled before exact attempt binding: "
          ^ Printexc.to_string exn
        in
        let _reblocked_reason =
@@ -949,7 +949,7 @@ and retry_auto_judge_entry
        Printexc.raise_with_backtrace exn backtrace
      | exn ->
        let reason =
-         "Auto Judge retry failed before exact attempt binding: "
+         "Auto Judge rerun failed before exact attempt binding: "
          ^ Printexc.to_string exn
        in
        Error (reblock reason))
@@ -1232,7 +1232,7 @@ let observe_recovered_work kind (entry : Keeper_approval_queue_rules_types.pendi
        ())
 ;;
 
-let retry_blocked_auto_judge
+let rerun_blocked_auto_judge
       ~base_path
       ~requested_by
       ~expected_input_hash
@@ -1244,7 +1244,7 @@ let retry_blocked_auto_judge
   match Keeper_gate_mode.read ~base_path with
   | Error detail -> Error detail
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-    Error "Auto Judge retry requires auto_judge mode"
+    Error "Auto Judge rerun requires auto_judge mode"
   | Ok Keeper_gate_mode.Auto_judge ->
     (match
        Keeper_approval_queue.get_pending_entry_for_workspace
@@ -1256,7 +1256,7 @@ let retry_blocked_auto_judge
      | Ok None -> Error ("pending approval not found: " ^ approval_id)
      | Ok (Some entry) ->
        (match
-          retry_auto_judge_entry
+          rerun_auto_judge_entry
             ~requested_by
             ~expected_input_hash
             ~expected_sequence
@@ -1265,25 +1265,25 @@ let retry_blocked_auto_judge
             entry
         with
         | Error reason -> Error reason
-        | Ok Retry_skipped ->
+        | Ok Rerun_skipped ->
           Error
             ("approval summary is not blocked or is already active: "
              ^ approval_id)
-        | Ok Retry_started ->
+        | Ok Rerun_started ->
           Log.Keeper.info
             ~keeper_name:entry.keeper_name
-            "auto judge operator retry started approval=%s operation=%s actor=%s"
+            "auto judge operator rerun started approval=%s operation=%s actor=%s"
             entry.id
             entry.tool_name
             requested_by;
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string HitlSummaryOutcomes)
-            ~labels:[ "outcome", "operator_retry_started" ]
+            ~labels:[ "outcome", "operator_rerun_started" ]
             ();
        ignore
          (Keeper_approval.Audit.record
             ~base_path:entry.audit_base_path
-            ~event_type:Keeper_approval.Audit.Auto_judge_operator_retry_started
+            ~event_type:Keeper_approval.Audit.Auto_judge_operator_rerun_started
             ~id:entry.id
             ~keeper_name:entry.keeper_name
             ~tool_name:entry.tool_name

@@ -14,7 +14,7 @@
 module KeeperBootstrap : sig
   val enabled : bool
   val lazy_startup_poll_interval_sec : float
-  val keeper_listener_retry_interval_sec : float
+  val keeper_listener_reconcile_interval_sec : float
   val post_startup_settle_sec : float
 end
 (** {1 Keeper metrics rotation} *)

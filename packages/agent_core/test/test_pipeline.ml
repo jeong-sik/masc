@@ -1106,7 +1106,7 @@ let test_make_tool_results_error () =
       ; content = "failed"
       ; outcome =
           Tool_failed
-            { failure_kind = Agent_tools.Recoverable_tool_error; error_class = None }
+            { failure_kind = Agent_tools.Tool_error; error_class = None }
       }
     ]
   in
@@ -1132,7 +1132,7 @@ let test_make_tool_results_mixed () =
       ; content = "bad"
       ; outcome =
           Tool_failed
-            { failure_kind = Agent_tools.Recoverable_tool_error; error_class = None }
+            { failure_kind = Agent_tools.Tool_error; error_class = None }
       }
     ]
   in
@@ -1295,7 +1295,7 @@ let test_error_domain_provider_errors () =
     ; `Server_error (500, "internal")
     ; `Overloaded
     ; `Provider_timeout (None, "slow")
-    ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "bad")
+    ; `Invalid_request (Llm_provider.Api_error.Unknown_invalid_request, "bad")
     ]
   in
   List.iter
@@ -1325,7 +1325,7 @@ let test_error_domain_of_persistence_not_api () =
     "genuine provider error -> Api"
     "Api"
     (Internal_pipeline.error_domain_of
-       (Error.Api (Error.Retry.AuthError { message = "bad key" })));
+       (Error.Api (Error.Api_error.AuthError { message = "bad key" })));
   (* A third variant confirms the label is derived, not constant. *)
   Alcotest.(check string)
     "config error -> Config"
@@ -3441,7 +3441,7 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
                        ; content = "blocked by pre_tool_use hook"
                        ; outcome =
                            Tool_failed
-                             { failure_kind = Non_retryable_tool_error
+                             { failure_kind = Tool_error
                              ; error_class = Some Deterministic
                              }
                        ; json = None

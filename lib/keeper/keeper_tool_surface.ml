@@ -412,7 +412,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           let cleared_ctx = { checkpoint } in
           (* Increment generation from meta to signal a new context epoch.
              Using a hardcoded value would violate generation monotonicity
-             — the keeper_unified_turn retry loop uses meta.runtime.nonce
+             — keeper_unified_turn uses meta.runtime.nonce
              to detect stale contexts. *)
           let current_gen =
             match meta_for_trace with
@@ -450,8 +450,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       (* Clear registry failure state *)
       Keeper_registry.set_failure_reason ~base_path:config.base_path name None;
       Keeper_registry.reset_turn_failures ~base_path:config.base_path name;
-      Keeper_unified_turn_failure.reset_invalid_request_failures ~keeper_name:name;
-      Keeper_unified_turn_failure.note_turn_success name;
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;

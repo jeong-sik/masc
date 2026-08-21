@@ -426,7 +426,7 @@ val quarantine_summary_exact_attempt :
     binding accepts only [Exact_terminal_persistence_failure],
     [Exact_cancellation], or [Exact_flow_execution_failed]. The same identity
     and cause is idempotently strict-rewritten. The same strict snapshot
-    atomically records a non-retryable [Summary_failed] with a stable MASC-owned
+    atomically records a terminal [Summary_failed] with a stable MASC-owned
     cause. It can never return to the summary mutation path. Restart-only states
     are not values of
     [exact_attempt_quarantine_cause] and cannot enter this surface. *)
@@ -484,12 +484,12 @@ val mark_summary_attempt_pre_worker_unavailable :
   (bool, exact_attempt_error) result
 (** Durably block an unbound current-schema row before provider dispatch. The
     closed reason code and exact non-blank operator detail are persisted in the
-    same snapshot and are retryable only through
-    [reserve_summary_attempt_retry]. *)
+    same snapshot and are operator-rerunnable only through
+    [reserve_summary_attempt_rerun]. *)
 
 val summary_attempt_start_reserved_operator_detail : string
 
-val reserve_summary_attempt_retry :
+val reserve_summary_attempt_rerun :
   base_path:string ->
   id:string ->
   input_hash:string ->
@@ -502,7 +502,7 @@ val reserve_summary_attempt_retry :
     start reservation. No intermediate ready row is persisted. The
     caller-observed row identity, exact attempt, and disposition must still
     match atomically. A restart-classified released binding returns to unbound
-    in the same write. An existing start reservation is not retryable.
+    in the same write. An existing start reservation is not rerunnable.
     Terminal exact quarantine is never retried. *)
 
 val pending_count_for_keeper_in_workspace :

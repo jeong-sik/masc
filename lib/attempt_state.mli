@@ -1,4 +1,4 @@
-(** Shared retry/attempt state for reconcile-style surfaces.
+(** Shared process-launch attempt state for reconcile-style surfaces.
 
     Purpose: a single record + backoff predicate reused by sidecar lifecycle
     routes and other surfaces that need [attempt_record] /
@@ -30,7 +30,7 @@ type t = {
   attempt_number : int;
   attempt_id : string;  (** [Printf.sprintf "%d:%d" generation attempt_number]. *)
   last_result : result;
-  next_retry_unix : float option;
+  next_launch_not_before_unix : float option;
   updated_unix : float;
 }
 
@@ -45,7 +45,7 @@ val make_next :
     [previous] when [generation] matches, else resets to 1. *)
 
 val is_backoff_active : now:float -> t -> bool
-(** Window test. False when [next_retry_unix] is [None] or in the past. *)
+(** Window test. False when [next_launch_not_before_unix] is [None] or in the past. *)
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> t option

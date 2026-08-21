@@ -28,9 +28,16 @@ let blocker_reason_of_turn_driver_reason
 ;;
 
 let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class option =
-  match Keeper_error_classify.recoverable_runtime_failure_reason err with
-  | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
-  | _ ->
+  match
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+      err
+  with
+  | Keeper_runtime_failure_route.Rotate_now
+      { rotate = Keeper_runtime_failure_route.Capacity_unavailable } ->
+    Some Capacity_backpressure
+  | Keeper_runtime_failure_route.Rotate_now _
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
   | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->

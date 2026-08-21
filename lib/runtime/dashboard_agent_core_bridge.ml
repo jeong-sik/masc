@@ -26,7 +26,6 @@ type sample = {
   cost_usd : float option;
   cache_hit : bool option;
   status : status;
-  retry_count : int;
 }
 
 (* Guards [table]. Critical sections are short — queue push, fold, or clear.
@@ -103,7 +102,6 @@ let sample_to_yojson (s : sample) =
       ("cost_usd", Json_util.float_opt_to_json s.cost_usd);
       ("cache_hit", Json_util.bool_opt_to_json s.cache_hit);
       ("status", status_to_yojson s.status);
-      ("retry_count", `Int s.retry_count);
     ]
 
 let sample_entry_to_yojson (s, recorded_at) =
@@ -232,7 +230,7 @@ let throughput_from_response ~(usage : Agent_core.Types.api_usage option)
         usage
 
 let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
-    ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
+    ?(serialization_ms = 0.0) ~status
     (response : Agent_core.Types.api_response) =
   let usage = response.usage in
   let total_duration_ms =
@@ -261,14 +259,13 @@ let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
           usage.cost_usd);
     cache_hit = cache_hit_from_response ~usage response;
     status;
-    retry_count;
   }
 
 let record_response ~provider_id ~model_id ?total_duration_ms ?serialization_ms
-    ?retry_count ~status response =
+    ~status response =
   record
     (sample_of_response ~provider_id ~model_id ?total_duration_ms
-       ?serialization_ms ?retry_count ~status response)
+       ?serialization_ms ~status response)
 
 let snapshot_provider _provider =
   let provider = public_runtime_provider_label in

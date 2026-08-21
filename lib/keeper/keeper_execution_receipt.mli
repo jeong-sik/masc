@@ -74,14 +74,6 @@ val assert_receipt_authoritative
 type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
-(** Terminal classification of a runtime rotation attempt. Closed set;
-    wire form is [runtime_rotation_outcome_to_string]. *)
-type runtime_rotation_outcome =
-  | Rotation_setup_failed
-  | Rotation_retry_scheduled
-
-val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
-
 (** Receipt-level summary of how the in-turn runtime attempt sequence
     ended. Closed set; wire form is [runtime_outcome_to_string]. *)
 type runtime_outcome =
@@ -106,18 +98,6 @@ type completion_contract_result =
 val completion_contract_result_to_string : completion_contract_result -> string
 
 val completion_contract_result_of_string : string -> completion_contract_result option
-
-type runtime_rotation_attempt =
-  { from_runtime : string
-  ; to_runtime : string
-  ; reason : Keeper_error_classify.degraded_retry_reason
-  ; outcome : runtime_rotation_outcome
-  ; productive_phase_elapsed_ms : int option
-  ; retry_phase_elapsed_ms : int option
-  ; error_kind : error_kind option
-  ; error_message : string option
-  ; recorded_at : string
-  }
 
 type t =
   { keeper_name : string
@@ -145,10 +125,6 @@ type t =
   ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
   ; agent_core_internal_runtime_allowed : bool
-  ; degraded_retry_applied : bool
-  ; degraded_retry_runtime : string option
-  ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
-  ; runtime_rotation_attempts : runtime_rotation_attempt list
   ; stop_reason : Runtime_agent.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option
@@ -193,14 +169,7 @@ type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
   | Reason_preflight_config_error
-  | Reason_degraded_retry
   | Reason_runtime_fallback
-  | Reason_transient_runtime_retry
-  (** A retry-recoverable transient provider-runtime failure
-      ([api_error_timeout] / [api_error_network]) that the keeper's in-turn
-      retry self-healed on the SAME runtime — distinct from
-      [Reason_runtime_fallback] (cross-runtime fallback). Paired with
-      [Disp_fail_open_next_runtime]. *)
   | Reason_capacity_backpressure
   (** Typed provider-capacity observation before a retry/rotation has completed.
       Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and

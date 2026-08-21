@@ -19,10 +19,10 @@ import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import { normalizeIdeContextFilePath } from './ide-state'
 import {
   DEFAULT_MASC_ORIGIN,
-  TRANSPORT_RETRY_BASE_MS,
-  TRANSPORT_RETRY_JITTER_MS,
-  TRANSPORT_RETRY_MAX_ATTEMPTS,
-  TRANSPORT_RETRY_MAX_MS,
+  TRANSPORT_RECONNECT_BASE_MS,
+  TRANSPORT_RECONNECT_JITTER_MS,
+  TRANSPORT_RECONNECT_MAX_ATTEMPTS,
+  TRANSPORT_RECONNECT_MAX_MS,
 } from '../../config/constants'
 import { DEFAULT_LANGUAGE_ID } from './ide-language'
 
@@ -437,7 +437,7 @@ export class LspConnection {
   private initialized = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
-  private reconnectDelayMs = TRANSPORT_RETRY_BASE_MS
+  private reconnectDelayMs = TRANSPORT_RECONNECT_BASE_MS
   /**
    * Absolute host path of the workspace tree, from the initialize result.
    * Until it arrives we cannot name a document: we know the repo-relative
@@ -605,19 +605,19 @@ export class LspConnection {
   private scheduleReconnect(): void {
     if (this.disposed) return
     if (this.reconnectTimer !== null) return
-    if (this.reconnectAttempts >= TRANSPORT_RETRY_MAX_ATTEMPTS) {
+    if (this.reconnectAttempts >= TRANSPORT_RECONNECT_MAX_ATTEMPTS) {
       this.onError(new Error('LSP reconnect attempts exhausted'))
       return
     }
     const delayMs =
-      Math.min(this.reconnectDelayMs, TRANSPORT_RETRY_MAX_MS)
-      + Math.random() * TRANSPORT_RETRY_JITTER_MS // real-randomness-needed: transport retry jitter
+      Math.min(this.reconnectDelayMs, TRANSPORT_RECONNECT_MAX_MS)
+      + Math.random() * TRANSPORT_RECONNECT_JITTER_MS // real-randomness-needed: transport reconnect jitter
     this.reconnectAttempts += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       if (!this.disposed) this.connect()
     }, delayMs)
-    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, TRANSPORT_RETRY_MAX_MS)
+    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, TRANSPORT_RECONNECT_MAX_MS)
   }
 
   private async initialize(): Promise<void> {
@@ -763,7 +763,7 @@ export class LspConnection {
 
   private resetReconnectBackoff(): void {
     this.reconnectAttempts = 0
-    this.reconnectDelayMs = TRANSPORT_RETRY_BASE_MS
+    this.reconnectDelayMs = TRANSPORT_RECONNECT_BASE_MS
   }
 
   private rejectPending(reason: Error): void {

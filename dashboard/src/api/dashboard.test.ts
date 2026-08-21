@@ -799,7 +799,7 @@ describe('keeper tool telemetry fetchers', () => {
             compaction_source: 'provider_overflow',
             compaction_outcome: 'checkpoint_committed',
             cause: 'compaction completion dispatch failed',
-            status: 'retryable_failure',
+            status: 'failed',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
             exact_evidence: {
               before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
@@ -829,9 +829,9 @@ describe('keeper tool telemetry fetchers', () => {
             saved_tokens: null,
             compaction_id: null,
             compaction_source: 'pre_dispatch_hygiene',
-            compaction_outcome: 'retry_without_checkpoint',
+            compaction_outcome: 'lifecycle_cleanup_failed_without_checkpoint',
             cause: 'compaction dispatch failed',
-            status: 'retryable_failure',
+            status: 'failed',
             links: {},
             exact_evidence: null,
             reinjection_observation: {
@@ -887,9 +887,9 @@ describe('keeper tool telemetry fetchers', () => {
             saved_tokens: null,
             compaction_id: 'cmp-contradictory',
             compaction_source: 'provider_overflow',
-            compaction_outcome: 'retry_without_checkpoint',
+            compaction_outcome: 'lifecycle_cleanup_failed_without_checkpoint',
             cause: 'compaction dispatch failed',
-            status: 'retryable_failure',
+            status: 'failed',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
             exact_evidence: {
               before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,

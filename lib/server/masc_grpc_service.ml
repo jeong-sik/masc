@@ -70,7 +70,6 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
         ; delivery_status = Delivery_not_persisted
         ; delivery_reason = Some "multiple_mention_targets_unsupported"
         ; workspace_persistence_status = Workspace_not_persisted
-        ; retry_disposition = Retry_allowed
         }
     else try
       let content =
@@ -114,7 +113,6 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
            ; delivery_reason =
                Workspace_broadcast.mention_delivery_reason delivery.mention_delivery
            ; workspace_persistence_status = Workspace_persisted
-           ; retry_disposition = Retry_do_not_resend
            }
        | Error error ->
          Log.Transport.error
@@ -127,7 +125,6 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
            ; delivery_status = Delivery_not_persisted
            ; delivery_reason = Some (Workspace.broadcast_error_to_string error)
            ; workspace_persistence_status = Workspace_not_persisted
-           ; retry_disposition = Retry_allowed
            })
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -140,7 +137,6 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
         ; delivery_status = Delivery_outcome_unknown
         ; delivery_reason = Some (Printexc.to_string exn)
         ; workspace_persistence_status = Workspace_persistence_unknown
-        ; retry_disposition = Retry_outcome_unknown
         }
   in
   T.BroadcastResponse.to_bytes result

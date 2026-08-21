@@ -418,7 +418,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
       keeperName: 'scholar',
       source: 'decision-log',
       decisionId: 'decision:scholar:2000:tool_use',
-      semanticOutcome: 'error_retryable',
+      semanticOutcome: 'error',
       decisionChoice: 'use_shell',
       decisionReason: 'verify touched test target',
       filePath: 'runtime.ts',

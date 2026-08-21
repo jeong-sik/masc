@@ -73,7 +73,6 @@ let build_turn_context
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(history_user_source : string)
       ~(user_turn_record : user_turn_record)
-      ~(is_retry : bool)
       ~(start_turn_count : int)
   : turn_prompt_context
   =
@@ -135,13 +134,13 @@ let build_turn_context
     | Record_user_turn -> Keeper_context_runtime.append ctx_work user_msg
     | Skip_already_checkpointed_user_turn -> ctx_work
   in
-  (match user_turn_record, is_retry with
-   | Record_user_turn, false ->
+  (match user_turn_record with
+   | Record_user_turn ->
      Keeper_context_runtime.persist_message
        ~source:history_user_source
        session
        user_msg
-   | Record_user_turn, true | Skip_already_checkpointed_user_turn, _ -> ());
+   | Skip_already_checkpointed_user_turn -> ());
   { turn_system_prompt
   ; dynamic_context
   ; memory_context

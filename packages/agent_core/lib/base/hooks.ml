@@ -205,7 +205,7 @@ type hook_decision =
       it is never coerced to [Continue]. *)
   | Block of string
   (** PreToolUse only: intentional caller rejection. The host executes no tool
-      and produces an [is_error=true] tool result ([Non_retryable_tool_error],
+      and produces an [is_error=true] tool result ([Tool_error],
       [Deterministic]) whose content is the string payload verbatim. Distinct
       from [HookFailed], which represents an unintentional hook failure. Use
       this when the embedding application has already made an explicit

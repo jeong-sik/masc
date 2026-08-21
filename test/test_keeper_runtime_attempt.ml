@@ -1,7 +1,7 @@
 (** Mapping tests for [Keeper_runtime_attempt.core_error_to_runtime_outcome].
 
     Pins the 429 reconstruction boundary: the resolved [retry_after] on
-    [Llm_provider.Retry.RateLimited] must re-enter through
+    [Llm_provider.Api_error.RateLimited] must re-enter through
     [HttpError.retry_after_header] instead of being dropped. Both 0.216
     adaptation passes on 2026-07-17 (#25082, #25084) discarded it with a
     [{ message; _ }] pattern, so this mapping is fenced by test. *)
@@ -16,7 +16,7 @@ let retry_after_of_outcome = function
   | _ -> None
 
 let rate_limited retry_after =
-  Agent_core.Error.Api (Llm_provider.Retry.RateLimited { message = "slow down"; retry_after })
+  Agent_core.Error.Api (Llm_provider.Api_error.RateLimited { message = "slow down"; retry_after })
 
 let test_429_threads_resolved_retry_after () =
   Alcotest.(check (option (option (float 0.0))))
@@ -30,7 +30,7 @@ let test_429_without_hint_stays_none () =
     (Some None)
     (retry_after_of_outcome (KRA.core_error_to_runtime_outcome (rate_limited None)))
 
-(* [Retry.Timeout] spans Admission, Queue, First_token and Capacity_backpressure
+(* [Api_error.Timeout] spans Admission, Queue, First_token and Capacity_backpressure
    waits, none of which touched a socket. Routing them to
    [NetworkError { kind = Timeout }] labelled them ETIMEDOUT and dropped the
    phase; [TimeoutError] is the constructor that carries it. A [None] here
@@ -44,7 +44,7 @@ let timeout_phase_label_of_outcome = function
 
 let api_timeout phase =
   Agent_core.Error.Api
-    (Llm_provider.Retry.Timeout { message = "per-provider timeout after 90.0s"; phase })
+    (Llm_provider.Api_error.Timeout { message = "per-provider timeout after 90.0s"; phase })
 
 let test_timeout_threads_phase () =
   Alcotest.(check (option string))
@@ -81,7 +81,7 @@ let provider_reported_error () =
        ; detail = "provider rejected the stream"
        })
 
-let test_provider_wire_failure_is_next_candidate_eligible () =
+let test_provider_wire_failure_preserves_kind () =
   match KRA.core_error_to_runtime_outcome (provider_wire_error ()) with
   | Some (Runtime_attempt_fsm.Call_err (Llm_provider.Http_client.ProviderFailure error)) ->
     (match error.kind with
@@ -89,25 +89,17 @@ let test_provider_wire_failure_is_next_candidate_eligible () =
          { format = Llm_provider.Http_client.Sse
          ; kind = Llm_provider.Http_client.Malformed_payload
          } ->
-       Alcotest.(check bool)
-         "typed wire failure tries the next lane candidate"
-         true
-         (Runtime_attempt_fsm.should_try_next
-            (Llm_provider.Http_client.ProviderFailure error))
+       ()
      | _ -> Alcotest.fail "wire failure kind was not preserved")
   | _ -> Alcotest.fail "wire failure did not map to ProviderFailure"
 
-let test_provider_reported_failure_is_next_candidate_eligible () =
+let test_provider_reported_failure_preserves_kind () =
   match KRA.core_error_to_runtime_outcome (provider_reported_error ()) with
   | Some (Runtime_attempt_fsm.Call_err (Llm_provider.Http_client.ProviderFailure error)) ->
     (match error.kind with
      | Llm_provider.Http_client.Provider_reported_error
          { error_type = Some "overloaded" } ->
-       Alcotest.(check bool)
-         "provider-reported failure tries the next lane candidate"
-         true
-         (Runtime_attempt_fsm.should_try_next
-            (Llm_provider.Http_client.ProviderFailure error))
+       ()
      | _ -> Alcotest.fail "provider-reported kind was not preserved")
   | _ -> Alcotest.fail "provider-reported failure did not map to ProviderFailure"
 
@@ -127,12 +119,12 @@ let () =
         ] )
     ; ( "provider_failures"
       , [ Alcotest.test_case
-            "wire failure tries next candidate"
+            "wire failure preserves kind"
             `Quick
-            test_provider_wire_failure_is_next_candidate_eligible
+            test_provider_wire_failure_preserves_kind
         ; Alcotest.test_case
-            "provider-reported failure tries next candidate"
+            "provider-reported failure preserves kind"
             `Quick
-            test_provider_reported_failure_is_next_candidate_eligible
+            test_provider_reported_failure_preserves_kind
         ] )
     ]

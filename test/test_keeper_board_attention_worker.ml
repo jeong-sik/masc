@@ -556,7 +556,7 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok (W.Drained | W.Retry_later _) ->
+   | Ok (W.Drained | W.Reinspect_later _) ->
      Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
@@ -885,7 +885,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
            Ok (W.Rescan_later contention)))
   in
   (match outcome with
-   | W.Retry_later
+   | W.Reinspect_later
        { contention = observed
        ; reason = W.Selected_generation_changed
        } ->
@@ -898,7 +898,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
        true
        (P.Generation.equal contention.generation observed.generation)
    | W.Drained
-   | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
+   | W.Reinspect_later { reason = W.Exact_claim_contended; _ } ->
      Alcotest.fail "changed selection did not reach typed delayed rescan");
   Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
   Alcotest.(check int) "rescan did not yield into sibling claim" 0 !yields;
@@ -2271,13 +2271,13 @@ let test_drain_outcome_labels_stay_distinct () =
     List.map
       W.For_testing.drain_outcome_label
       [ W.Drained
-      ; W.Retry_later { contention; reason = W.Exact_claim_contended }
-      ; W.Retry_later { contention; reason = W.Selected_generation_changed }
+      ; W.Reinspect_later { contention; reason = W.Exact_claim_contended }
+      ; W.Reinspect_later { contention; reason = W.Selected_generation_changed }
       ]
   in
   Alcotest.(check (list string))
     "one token per verdict"
-    [ "drained"; "retry_claim_contended"; "retry_generation_changed" ]
+    [ "drained"; "reinspect_claim_contended"; "retry_generation_changed" ]
     labels;
   Alcotest.(check int)
     "no two verdicts share a token"
@@ -2285,7 +2285,7 @@ let test_drain_outcome_labels_stay_distinct () =
     (List.length (List.sort_uniq compare labels))
 ;;
 
-(* A drain that returns Retry_later left the durable partition undrained and
+(* A drain that returns Reinspect_later left the durable partition undrained and
    re-armed the same contention, so the next wake re-inspects the same root.
    Emitting that at the same level as a completed drain makes a worker that
    never finishes read as routine while its candidate ledger grows (#26863). *)
@@ -2310,12 +2310,12 @@ let test_undrained_outcomes_are_not_routine () =
   Alcotest.(check string)
     "a contended claim is not routine"
     "warn"
-    (level_name (W.Retry_later { contention; reason = W.Exact_claim_contended }));
+    (level_name (W.Reinspect_later { contention; reason = W.Exact_claim_contended }));
   Alcotest.(check string)
     "a moved generation is not routine"
     "warn"
     (level_name
-       (W.Retry_later { contention; reason = W.Selected_generation_changed }))
+       (W.Reinspect_later { contention; reason = W.Selected_generation_changed }))
 ;;
 
 (* task-336 sibling defect (masc, 2026-08-16): before this fix,

@@ -72,7 +72,6 @@ type phase =
   | Settled of settlement
 
 type recovery_resolution =
-  | Retry_previous
   | Restart_fresh
 
 type recovery_resolution_application =
@@ -86,7 +85,6 @@ type recovery_resolution_error =
   | Session_changed
   | Recovery_id_changed
   | Recovery_not_required
-  | Retry_previous_unavailable
   | Resolution_conflict
   | Store_unavailable of string
 
@@ -251,7 +249,7 @@ let validate_recovery (recovery : recovery_required) =
 ;;
 
 let validate_recovery_resolution = function
-  | Retry_previous | Restart_fresh -> Ok ()
+  | Restart_fresh -> Ok ()
 ;;
 
 let validate_recovery_resolution_record (record : recovery_resolution_record) =
@@ -388,12 +386,10 @@ let client_kind_of_string = function
 ;;
 
 let recovery_resolution_to_yojson = function
-  | Retry_previous -> `Assoc [ "kind", `String "retry_previous" ]
   | Restart_fresh -> `Assoc [ "kind", `String "restart_fresh" ]
 ;;
 
 let recovery_resolution_of_yojson = function
-  | `Assoc [ "kind", `String "retry_previous" ] -> Ok Retry_previous
   | `Assoc [ "kind", `String "restart_fresh" ] -> Ok Restart_fresh
   | `Assoc _ -> Error "official-client recovery resolution fields are not exact"
   | _ -> Error "official-client recovery resolution must be a JSON object"
@@ -731,10 +727,6 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       when binding.client_kind <> client_kind
            || not (String.equal binding.runtime_id runtime_id) ->
       Ok (None, 1, None)
-    | Some ({ phase = Recovery_required _; _ } as binding)
-      when binding.client_kind <> client_kind
-           || not (String.equal binding.runtime_id runtime_id) ->
-      Ok (None, 1, None)
     | Some
         { phase = Settled settlement
         ; turn_count
@@ -751,7 +743,8 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       Error "official-client session has an active unsettled attempt; refusing duplicate execution"
     | Some { phase = Turn_inflight _; _ } ->
       Error "official-client session has an in-flight turn; refusing duplicate execution"
-    | Some { phase = Recovery_required _; _ } -> Ok (None, 1, None)
+    | Some { phase = Recovery_required _; _ } ->
+      Error "official-client session requires explicit recovery resolution"
   in
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;
@@ -800,15 +793,6 @@ let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_i
       ; updated_at
       }
   in
-  (match expected with
-   | Some { phase = Recovery_required recovery; _ } ->
-     Log.Keeper.info
-       ~keeper_name
-       "auto-superseded official-client recovery=%s failure=%s with a fresh session owner_epoch=%s"
-       recovery.recovery_id
-       (recovery_failure_to_string recovery.failure)
-       owner_epoch
-   | Some _ | None -> ());
   Ok claimed
 ;;
 
@@ -1034,12 +1018,6 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
   let apply directory (current : t) (recovery : recovery_required) =
     let* phase, turn_count =
       match resolution with
-      | Retry_previous ->
-        (* The conversation is kept, so only the turn that failed is dropped and
-           the next claim re-attempts the same ordinal against it. *)
-        (match recovery.previous_settlement with
-         | None -> Error Retry_previous_unavailable
-         | Some settlement -> Ok (Settled settlement, current.turn_count - 1))
       | Restart_fresh ->
         (* Restart abandons the conversation, so the ordinal restarts with it and
            the next claim asks for ordinal 1 -- what a fresh provider conversation
@@ -1076,9 +1054,7 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
       "resolved official-client session recovery=%s actor=%s decision=%s"
       recovery_id
       resolved_by
-      (match resolution with
-       | Retry_previous -> "retry_previous"
-       | Restart_fresh -> "restart_fresh");
+      "restart_fresh";
     Ok (resolved, Applied)
   in
   match prepare_state_dir ~base_path ~keeper_name with

@@ -72,12 +72,12 @@ export function EmptyState({
   `
 }
 
-/** Error state surface — glyph, title, optional detail and retry action. */
+/** Error state surface — glyph, title, optional detail and explicit action. */
 export function ErrorState({
   glyph = '⚠',
   title,
   detail,
-  action = '다시 시도',
+  action = '다시 불러오기',
   onAction,
   compact,
   class: cx,

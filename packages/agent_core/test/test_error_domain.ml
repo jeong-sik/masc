@@ -2,13 +2,13 @@
 
 open Agent_core
 module Http_client = Llm_provider.Http_client
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 
 (* ── Roundtrip: core_error -> poly -> core_error ───────────── *)
 
 let test_roundtrip_api_rate_limited () =
   let orig =
-    Error.Api (Retry.RateLimited { retry_after = Some 1.5; message = "slow down" })
+    Error.Api (Api_error.RateLimited { retry_after = Some 1.5; message = "slow down" })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
@@ -31,13 +31,13 @@ let test_provider_to_error_preserves_rate_limit_message () =
     `Rate_limited (Some 3.0, "too many concurrent requests")
   in
   match Error_domain.to_core_error poly with
-  | Error.Api (Retry.RateLimited { retry_after; message }) ->
+  | Error.Api (Api_error.RateLimited { retry_after; message }) ->
     Alcotest.(check (option (float 0.001))) "retry_after preserved" (Some 3.0) retry_after;
     Alcotest.(check string)
       "provider message preserved (not the hardcoded literal)"
       "too many concurrent requests"
       message
-  | _ -> Alcotest.fail "expected Error.Api (Retry.RateLimited _)"
+  | _ -> Alcotest.fail "expected Error.Api (Api_error.RateLimited _)"
 ;;
 
 let test_roundtrip_config_missing_env () =
@@ -95,7 +95,7 @@ let test_to_string_each_variant () =
     ; `Provider_timeout (None, "3s elapsed")
     ; `Streaming_timeout (Http_client.Stream_body, "stream body elapsed")
     ; `Overloaded
-    ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "bad body")
+    ; `Invalid_request (Llm_provider.Api_error.Unknown_invalid_request, "bad body")
     ; `Tool_exec_failed ("search", "crash")
     ; `Tool_timeout ("calc", 30.0)
     ; `Guardrail_violation ("typed-input", "rejected")
@@ -133,7 +133,7 @@ let test_all_variants_convert () =
     ; `Provider_timeout (None, "x")
     ; `Streaming_timeout (Http_client.Stream_idle Http_client.Streaming_thinking, "idle")
     ; `Overloaded
-    ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "x")
+    ; `Invalid_request (Llm_provider.Api_error.Unknown_invalid_request, "x")
     ; `Tool_exec_failed ("t", "d")
     ; `Tool_timeout ("t", 1.0)
     ; `Guardrail_violation ("typed-input", "rejected")
@@ -163,44 +163,44 @@ let test_all_variants_convert () =
 (* ── Roundtrip: remaining of_core_error branches ─────────── *)
 
 let test_roundtrip_api_auth_error () =
-  let orig = Error.Api (Retry.AuthError { message = "forbidden" }) in
+  let orig = Error.Api (Api_error.AuthError { message = "forbidden" }) in
   let poly = Error_domain.of_core_error orig in
   (match poly with
    | `Auth_error "forbidden" -> ()
    | _ -> Alcotest.fail "expected Auth_error");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.AuthError { message = "forbidden" }) -> ()
+  | Error.Api (Api_error.AuthError { message = "forbidden" }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for AuthError"
 ;;
 
 let test_roundtrip_api_authorization_error () =
-  let orig = Error.Api (Retry.AuthorizationError { message = "permission refused" }) in
+  let orig = Error.Api (Api_error.AuthorizationError { message = "permission refused" }) in
   let poly = Error_domain.of_core_error orig in
   (match poly with
    | `Authorization_error "permission refused" -> ()
    | _ -> Alcotest.fail "expected Authorization_error");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.AuthorizationError { message = "permission refused" }) -> ()
+  | Error.Api (Api_error.AuthorizationError { message = "permission refused" }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for AuthorizationError"
 ;;
 
 let test_roundtrip_api_server_error () =
-  let orig = Error.Api (Retry.ServerError { status = 503; message = "down" }) in
+  let orig = Error.Api (Api_error.ServerError { status = 503; message = "down" }) in
   let poly = Error_domain.of_core_error orig in
   (match poly with
    | `Server_error (503, "down") -> ()
    | _ -> Alcotest.fail "expected Server_error");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.ServerError { status = 503; message = "down" }) -> ()
+  | Error.Api (Api_error.ServerError { status = 503; message = "down" }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for ServerError"
 ;;
 
 let test_roundtrip_api_network_error () =
   let orig =
-    Error.Api (Retry.NetworkError { message = "conn refused"; kind = Unknown })
+    Error.Api (Api_error.NetworkError { message = "conn refused"; kind = Unknown })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
@@ -208,26 +208,26 @@ let test_roundtrip_api_network_error () =
    | _ -> Alcotest.fail "expected Network_error");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.NetworkError _) -> ()
+  | Error.Api (Api_error.NetworkError _) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for NetworkError"
 ;;
 
 let test_roundtrip_api_timeout () =
-  let orig = Error.Api (Retry.Timeout { message = "3s"; phase = None }) in
+  let orig = Error.Api (Api_error.Timeout { message = "3s"; phase = None }) in
   let poly = Error_domain.of_core_error orig in
   (match poly with
    | `Provider_timeout (None, "3s") -> ()
    | _ -> Alcotest.fail "expected Provider_timeout");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.Timeout _) -> ()
+  | Error.Api (Api_error.Timeout _) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for Timeout"
 ;;
 
 let test_roundtrip_api_timeout_preserves_phase () =
   let orig =
     Error.Api
-      (Retry.Timeout { message = "prefill"; phase = Some Http_client.First_token })
+      (Api_error.Timeout { message = "prefill"; phase = Some Http_client.First_token })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
@@ -244,7 +244,7 @@ let test_roundtrip_api_timeout_preserves_phase () =
 let test_roundtrip_api_timeout_preserves_non_streaming_phase () =
   let orig =
     Error.Api
-      (Retry.Timeout { message = "headers"; phase = Some Http_client.Http_operation })
+      (Api_error.Timeout { message = "headers"; phase = Some Http_client.Http_operation })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
@@ -252,7 +252,7 @@ let test_roundtrip_api_timeout_preserves_non_streaming_phase () =
    | _ -> Alcotest.fail "expected Provider_timeout with Http_operation phase");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.Timeout { phase = Some Http_client.Http_operation; message }) ->
+  | Error.Api (Api_error.Timeout { phase = Some Http_client.Http_operation; message }) ->
     Alcotest.(check string) "message" "headers" message
   | _ -> Alcotest.fail "roundtrip lost non-streaming timeout phase"
 ;;
@@ -292,20 +292,20 @@ let test_roundtrip_provider_streaming_timeout () =
 ;;
 
 let test_roundtrip_api_overloaded () =
-  let orig = Error.Api (Retry.Overloaded { message = "busy" }) in
+  let orig = Error.Api (Api_error.Overloaded { message = "busy" }) in
   let poly = Error_domain.of_core_error orig in
   (match poly with
    | `Overloaded -> ()
    | _ -> Alcotest.fail "expected Overloaded");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.Overloaded _) -> ()
+  | Error.Api (Api_error.Overloaded _) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for Overloaded"
 ;;
 
 let test_roundtrip_api_invalid_request () =
   let orig =
-    Error.Api (Retry.InvalidRequest { message = "bad"; reason = Unknown_invalid_request })
+    Error.Api (Api_error.InvalidRequest { message = "bad"; reason = Unknown_invalid_request })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
@@ -313,14 +313,14 @@ let test_roundtrip_api_invalid_request () =
    | _ -> Alcotest.fail "expected Invalid_request");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.InvalidRequest _) -> ()
+  | Error.Api (Api_error.InvalidRequest _) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for InvalidRequest"
 ;;
 
 let test_roundtrip_api_invalid_request_does_not_infer_malformed_json () =
   let message = "Unexpected token } in JSON at position 12" in
   let orig =
-    Error.Api (Retry.InvalidRequest { message; reason = Retry.Json_parse_error })
+    Error.Api (Api_error.InvalidRequest { message; reason = Api_error.Json_parse_error })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
@@ -331,7 +331,7 @@ let test_roundtrip_api_invalid_request_does_not_infer_malformed_json () =
      no-inference property is asserted separately below, starting from
      Unknown_invalid_request with the same malformed-JSON message. *)
   match Error_domain.to_core_error poly with
-  | Error.Api (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ }) -> ()
+  | Error.Api (Api_error.InvalidRequest { reason = Api_error.Json_parse_error; _ }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for InvalidRequest"
 ;;
 
@@ -342,16 +342,16 @@ let test_roundtrip_api_invalid_request_does_not_infer_malformed_json () =
 let test_roundtrip_api_invalid_request_keeps_unknown_reason_unknown () =
   let message = "Unexpected token } in JSON at position 12" in
   let orig =
-    Error.Api (Retry.InvalidRequest { message; reason = Retry.Unknown_invalid_request })
+    Error.Api (Api_error.InvalidRequest { message; reason = Api_error.Unknown_invalid_request })
   in
   match Error_domain.to_core_error (Error_domain.of_core_error orig) with
-  | Error.Api (Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ }) -> ()
+  | Error.Api (Api_error.InvalidRequest { reason = Api_error.Unknown_invalid_request; _ }) -> ()
   | _ -> Alcotest.fail "an unknown reason must stay unknown"
 ;;
 
 let test_roundtrip_api_context_overflow () =
   let orig =
-    Error.Api (Retry.ContextOverflow { message = "too big"; limit = Some 8192 })
+    Error.Api (Api_error.ContextOverflow { message = "too big"; limit = Some 8192 })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
@@ -359,31 +359,31 @@ let test_roundtrip_api_context_overflow () =
    | _ -> Alcotest.fail "expected Context_overflow");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.ContextOverflow { message = "too big"; limit = Some 8192 }) -> ()
+  | Error.Api (Api_error.ContextOverflow { message = "too big"; limit = Some 8192 }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for ContextOverflow"
 ;;
 
 let test_roundtrip_api_context_overflow_no_limit () =
-  let orig = Error.Api (Retry.ContextOverflow { message = "overflow"; limit = None }) in
+  let orig = Error.Api (Api_error.ContextOverflow { message = "overflow"; limit = None }) in
   let poly = Error_domain.of_core_error orig in
   (match poly with
    | `Context_overflow ("overflow", None) -> ()
    | _ -> Alcotest.fail "expected Context_overflow None");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.ContextOverflow { limit = None; _ }) -> ()
+  | Error.Api (Api_error.ContextOverflow { limit = None; _ }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for ContextOverflow None"
 ;;
 
 let test_roundtrip_api_payment_required () =
-  let orig = Error.Api (Retry.PaymentRequired { message = "Insufficient Balance" }) in
+  let orig = Error.Api (Api_error.PaymentRequired { message = "Insufficient Balance" }) in
   let poly = Error_domain.of_core_error orig in
   (match poly with
    | `Payment_required "Insufficient Balance" -> ()
    | _ -> Alcotest.fail "expected Payment_required");
   let back = Error_domain.to_core_error poly in
   match back with
-  | Error.Api (Retry.PaymentRequired { message = "Insufficient Balance" }) -> ()
+  | Error.Api (Api_error.PaymentRequired { message = "Insufficient Balance" }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for PaymentRequired"
 ;;
 
@@ -596,7 +596,7 @@ let test_provider_roundtrip_all_via_to_sdk () =
     ; `Provider_timeout (None, "x")
     ; `Streaming_timeout (Http_client.Stream_body, "x")
     ; `Overloaded
-    ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "x")
+    ; `Invalid_request (Llm_provider.Api_error.Unknown_invalid_request, "x")
     ]
   in
   List.iter

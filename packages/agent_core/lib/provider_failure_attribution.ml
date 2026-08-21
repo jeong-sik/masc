@@ -1,7 +1,7 @@
 (** Closed ownership and detailed error evidence for resolved provider calls. *)
 
 module Http = Llm_provider.Http_client
-module Retry = Llm_provider.Retry
+module Api_error = Llm_provider.Api_error
 
 type failure_ownership =
   | Attempt_local
@@ -41,39 +41,39 @@ type accept_rejected =
   | Api_invalid_request
   | Config_invalid_config of { field : string }
 
-let invalid_request ?(reason_kind = Retry.Unknown_invalid_request) reason =
+let invalid_request ?(reason_kind = Api_error.Unknown_invalid_request) reason =
   Error.Api
-    (Retry.InvalidRequest { message = reason; reason = reason_kind })
+    (Api_error.InvalidRequest { message = reason; reason = reason_kind })
 ;;
 
 let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider err =
   match err with
   | Http.HttpError { code; body; retry_after_header } ->
-    Error.Api (Retry.classify_error ~retry_after_header ~status:code ~body)
+    Error.Api (Api_error.classify_error ~retry_after_header ~status:code ~body)
   | Http.NetworkError { message; kind } ->
-    Error.Api (Retry.NetworkError { message; kind })
+    Error.Api (Api_error.NetworkError { message; kind })
   | Http.TimeoutError _ -> Error.Provider (Llm_provider.Error.of_http_error ?provider err)
   | Http.AcceptRejected { reason } ->
     (match accept_rejected with
      | Api_invalid_request ->
-       invalid_request ~reason_kind:Retry.Attempt_rejected reason
+       invalid_request ~reason_kind:Api_error.Attempt_rejected reason
      | Config_invalid_config { field } ->
        Error.Config (Error.InvalidConfig { field; detail = reason }))
   | Http.ProviderFailure
       { kind = Http.Request_body_too_large { actual_bytes; limit_bytes }; message } ->
     Error.Api
-      (Retry.InvalidRequest
-         { message; reason = Retry.Request_body_too_large { actual_bytes; limit_bytes } })
+      (Api_error.InvalidRequest
+         { message; reason = Api_error.Request_body_too_large { actual_bytes; limit_bytes } })
   | Http.ProviderFailure { kind = Http.Context_overflow { limit }; message } ->
     (* agent-core boundary: a provider-reported context overflow (e.g. glm 1261) is the
        same consumer contract as a ContextWindowExceeded empty turn — only the
        consumer's context recovery (compaction/shrink) can make progress, so
        it must surface as the typed [Api ContextOverflow] and never as a
        generic invalid-request. *)
-    Error.Api (Retry.ContextOverflow { message; limit })
+    Error.Api (Api_error.ContextOverflow { message; limit })
   | Http.ProviderFailure { kind = Http.Empty_completion { stop_reason }; message } ->
     (* The #2621 empty-completion overflow rule is centralised in
-       [Retry.verdict_of_empty_completion]. A ContextWindowExceeded empty turn
+       [Api_error.verdict_of_empty_completion]. A ContextWindowExceeded empty turn
        surfaces as [Api ContextOverflow] so downstream overflow classifiers fire
        on the streaming path exactly as for HTTP-classified overflows; a
        recognized non-overflow stop_reason falls through to the same
@@ -92,19 +92,19 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider 
        "unmodeled provider contract" variant, and adding one breaks every
        exhaustive matcher in agent core and in its consumers. Root fix: a
        dedicated variant, scheduled with the next breaking API change. *)
-    (match Retry.verdict_of_empty_completion ~stop_reason ~message with
-     | Retry.Empty_overflow overflow -> Error.Api overflow
-     | Retry.Empty_attributed ->
+    (match Api_error.verdict_of_empty_completion ~stop_reason ~message with
+     | Api_error.Empty_overflow overflow -> Error.Api overflow
+     | Api_error.Empty_attributed ->
        Error.Provider (Llm_provider.Error.of_http_error ?provider err)
-     | Retry.Empty_unattributed { token } ->
+     | Api_error.Empty_unattributed { token } ->
        Error.Api
-         (Retry.InvalidRequest
+         (Api_error.InvalidRequest
             { message =
                 Printf.sprintf
                   "empty completion with unmodeled stop_reason=%S: %s"
                   token
                   message
-            ; reason = Retry.Unknown_invalid_request
+            ; reason = Api_error.Unknown_invalid_request
             }))
   | Http.ProviderTerminal _ | Http.ProviderFailure _ ->
     Error.Provider (Llm_provider.Error.of_http_error ?provider err)
@@ -238,8 +238,8 @@ let attribution_of_http_error ~binding = function
        [Failure_scope_unknown] rather than a guess, but it is still routed
        through the typed capacity vocabulary (not the generic [Http_status]
        catch-all) so the retry_after evidence survives into attribution
-       instead of being visible only in the classified [Retry.api_error]. *)
-    let retry_after = Retry.resolve_retry_after ~body ~header:retry_after_header in
+       instead of being visible only in the classified [Api_error.api_error]. *)
+    let retry_after = Api_error.resolve_retry_after ~body ~header:retry_after_header in
     let kind =
       Http.Capacity_exhausted
         { scope = Http.Failure_scope_unknown; retry_after; model = None }

@@ -448,7 +448,7 @@ let test_make_tool_results () =
       ; content = "error msg"
       ; outcome =
           Tool_failed
-            { failure_kind = Agent_tools.Recoverable_tool_error
+            { failure_kind = Agent_tools.Tool_error
             ; error_class = Some Types.Deterministic
             }
       }
@@ -464,7 +464,7 @@ let test_make_tool_results () =
      | Types.ToolResult
          { outcome =
              Tool_failed
-               { failure_kind = Types.Recoverable_tool_error
+               { failure_kind = Types.Tool_error
                ; error_class = Some Types.Deterministic
                }
          ; _
@@ -697,7 +697,7 @@ let test_apply_context_injection_preserves_non_retryable_error () =
       ; content = "fatal"
       ; outcome =
           Tool_failed
-            { failure_kind = Agent_tools.Non_retryable_tool_error
+            { failure_kind = Agent_tools.Tool_error
             ; error_class = Some Types.Deterministic
             }
       }
@@ -712,9 +712,8 @@ let test_apply_context_injection_preserves_non_retryable_error () =
     |> context_messages
   in
   match !received_output with
-  | Some (Error { message; recoverable; error_class }) ->
+  | Some (Error { message; error_class }) ->
     Alcotest.(check string) "message" "fatal" message;
-    Alcotest.(check bool) "recoverable false" false recoverable;
     (match error_class with
      | Some Types.Deterministic -> ()
      | _ -> Alcotest.fail "expected deterministic error_class")

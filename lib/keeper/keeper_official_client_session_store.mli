@@ -64,7 +64,6 @@ type phase =
   | Settled of settlement
 
 type recovery_resolution =
-  | Retry_previous
   | Restart_fresh
 
 type recovery_resolution_application =
@@ -78,7 +77,6 @@ type recovery_resolution_error =
   | Session_changed
   | Recovery_id_changed
   | Recovery_not_required
-  | Retry_previous_unavailable
   | Resolution_conflict
   | Store_unavailable of string
 
@@ -243,9 +241,7 @@ val resolve_recovery :
   resolved_at:float ->
   ((t * recovery_resolution_application), recovery_resolution_error) result
 (** Resolve one exact recovery claim with compare-and-swap authority.
-    [Retry_previous] restores the last settled session and drops only the turn
-    that failed, so the next claim re-attempts the same ordinal against it.
-    [Restart_fresh] abandons the conversation, so the ordinal restarts with it
+    [Restart_fresh] abandons the ambiguous conversation, so the ordinal restarts with it
     and the next claim asks for ordinal 1 -- the same reset an automatic
     supersede performs. Repeating the same recovery id and decision returns the
     already committed binding as [Replayed]; a different decision for the same

@@ -32,7 +32,6 @@ type hot_queue_session =
 let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
 
 let sse_session_kinds = [ Observer; Agent_stream; Presence ]
-let relay_retry_stages = [ "append"; "broadcast" ]
 let relay_drop_stages = [ "queue"; "append"; "broadcast" ]
 
 let () =
@@ -45,14 +44,6 @@ let () =
         ~labels:[ "kind", kind ]
         ())
     sse_session_kinds;
-  List.iter
-    (fun stage ->
-      Otel_metric_store.register_counter
-        ~name:Otel_metric_store.metric_agent_core_sse_relay_retries
-        ~help:Otel_metric_store.metric_agent_core_sse_relay_retries
-        ~labels:[ "stage", stage ]
-        ())
-    relay_retry_stages;
   List.iter
     (fun stage ->
       Otel_metric_store.register_counter
@@ -421,11 +412,11 @@ let primary_path ~grpc_subscribers ~ws_sessions ~sse_sessions =
   else "streamable_http"
 ;;
 
-let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_retry_total ~relay_drop_total =
+let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_drop_total =
   let max_queue_depth = max sse_queue_max relay_queue_depth in
   if max_queue_depth >= 32 || relay_drop_total > 0
   then "high"
-  else if max_queue_depth >= 8 || relay_queue_depth > 0 || relay_retry_total > 0
+  else if max_queue_depth >= 8 || relay_queue_depth > 0
   then "watch"
   else "steady"
 ;;
@@ -472,17 +463,6 @@ let transport_health_json () =
   let sse_queue_max = int_of_float (v Otel_metric_store.metric_sse_queue_depth_max ()) in
   let relay_queue_depth =
     int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_queue_depth ())
-  in
-  let relay_retry_append =
-    int_of_float
-      (v Otel_metric_store.metric_agent_core_sse_relay_retries ~labels:[ "stage", "append" ] ())
-  in
-  let relay_retry_broadcast =
-    int_of_float
-      (v Otel_metric_store.metric_agent_core_sse_relay_retries ~labels:[ "stage", "broadcast" ] ())
-  in
-  let relay_retry_total =
-    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_agent_core_sse_relay_retries)
   in
   let relay_drop_queue =
     int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "queue" ] ())
@@ -547,7 +527,6 @@ let transport_health_json () =
                 (queue_pressure
                    ~sse_queue_max
                    ~relay_queue_depth
-                   ~relay_retry_total
                    ~relay_drop_total) )
           ; "external_fanout_targets", `Int sse_external_subscribers
           ] )
@@ -563,9 +542,6 @@ let transport_health_json () =
           ; "queue_avg_depth", `Float sse_queue_avg
           ; "queue_max_depth", `Int sse_queue_max
           ; "relay_queue_depth", `Int relay_queue_depth
-          ; "relay_retry_total", `Int relay_retry_total
-          ; "relay_retry_append", `Int relay_retry_append
-          ; "relay_retry_broadcast", `Int relay_retry_broadcast
           ; "relay_drop_total", `Int relay_drop_total
           ; "relay_drop_queue", `Int relay_drop_queue
           ; "relay_drop_append", `Int relay_drop_append

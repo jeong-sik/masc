@@ -511,7 +511,7 @@ let keeper_non_executable_cause_to_wire = function
 
 let owner_execution_truth_to_wire = function
   | Keeper_activation_readiness.Executable -> "executable"
-  | Keeper_activation_readiness.Recoverable -> "recoverable"
+  | Keeper_activation_readiness.No_live_owner -> "no_live_owner"
   | Keeper_activation_readiness.Retained_disabled _ -> "retained_disabled"
   | Keeper_activation_readiness.Paused_dead _ -> "paused_dead"
   | Keeper_activation_readiness.Shutdown_fenced _ -> "shutdown_fenced"
@@ -520,7 +520,7 @@ let owner_execution_truth_to_wire = function
 
 let non_executable_cause ~registry_entry = function
   | Keeper_activation_readiness.Executable -> None
-  | Keeper_activation_readiness.Recoverable ->
+  | Keeper_activation_readiness.No_live_owner ->
     Some
       (match registry_entry with
        | None -> Cause_owner_unregistered
@@ -607,7 +607,7 @@ let keeper_execution_snapshot config =
     |> List.filter_map (fun owner ->
       match owner.truth with
       | Keeper_activation_readiness.Executable -> Some owner.keeper_name
-      | Keeper_activation_readiness.Recoverable
+      | Keeper_activation_readiness.No_live_owner
       | Keeper_activation_readiness.Retained_disabled _
       | Keeper_activation_readiness.Paused_dead _
       | Keeper_activation_readiness.Shutdown_fenced _

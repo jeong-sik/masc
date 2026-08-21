@@ -81,7 +81,7 @@ async function submit(connectorId: string, entry: FormEntry) {
   const ok = await bindConnector(connectorId, entry.keeperName, channel)
   // bindConnector surfaces success/error toasts itself and never rejects.
   // Clear the draft only on success — on failure the operator needs the
-  // typed channel ID intact to retry.
+  // typed channel ID intact for a later explicit submission.
   setEntry(connectorId, ok ? { channelId: '', submitting: false } : { submitting: false })
 }
 

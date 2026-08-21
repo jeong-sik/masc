@@ -103,7 +103,7 @@ let sidecar_operator_next_action =
 ;;
 
 let iso_of_unix_opt = Option.map Masc_domain.iso8601_of_unix_seconds
-let next_retry_at record = iso_of_unix_opt record.attempt.next_retry_unix
+let next_launch_not_before record = iso_of_unix_opt record.attempt.next_launch_not_before_unix
 let updated_at record = Masc_domain.iso8601_of_unix_seconds record.attempt.updated_unix
 
 let desired_state_to_string =
@@ -123,7 +123,7 @@ let attempt_record_json (record : attempt_record) =
     ; "attempt_id", `String attempt.attempt_id
     ; "attempt_number", `Int attempt.attempt_number
     ; "last_attempt_result", `String (Attempt.result_to_string attempt.last_result)
-    ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at record) )
+    ; ( "next_launch_not_before", Json_util.string_opt_to_json (next_launch_not_before record) )
     ; "operator_next_action", `String record.operator_next_action
     ; "updated_at", `String (updated_at record)
     ]
@@ -160,14 +160,14 @@ let parse_timestamp_field ~field value =
   | None -> Error (Attempt_record_invalid_timestamp { field; value })
 ;;
 
-let optional_next_retry_unix fields =
-  match List.assoc_opt "next_retry_at" fields with
+let optional_next_launch_not_before_unix fields =
+  match List.assoc_opt "next_launch_not_before" fields with
   | None | Some `Null -> Ok None
   | Some (`String value) ->
-    (match parse_timestamp_field ~field:"next_retry_at" value with
+    (match parse_timestamp_field ~field:"next_launch_not_before" value with
      | Ok unix -> Ok (Some unix)
      | Error _ as error -> error)
-  | Some actual -> invalid_attempt_field ~field:"next_retry_at" ~expected:"string or null" actual
+  | Some actual -> invalid_attempt_field ~field:"next_launch_not_before" ~expected:"string or null" actual
 ;;
 
 let attempt_record_of_json_result = function
@@ -183,7 +183,7 @@ let attempt_record_of_json_result = function
       | Some result -> Ok result
       | None -> Error (Attempt_record_unknown_result last_attempt_result)
     in
-    let* next_retry_unix = optional_next_retry_unix fields in
+    let* next_launch_not_before_unix = optional_next_launch_not_before_unix fields in
     let* operator_next_action = required_string_field fields "operator_next_action" in
     let* updated_at = required_string_field fields "updated_at" in
     let* updated_unix = parse_timestamp_field ~field:"updated_at" updated_at in
@@ -194,7 +194,7 @@ let attempt_record_of_json_result = function
           ; attempt_id
           ; attempt_number
           ; last_result
-          ; next_retry_unix
+          ; next_launch_not_before_unix
           ; updated_unix
           }
       ; operator_next_action
@@ -440,17 +440,17 @@ let observed_state_of_status_json ~now ~id json =
 (** Backoff window between repeated same-generation reconcile start
     dispatches. Default 30s, overridable via [MASC_SIDECAR_RECONCILE_BACKOFF_SEC]
     (#8930 consolidation). *)
-let retry_backoff_seconds () = Env_config_runtime.Sidecar.reconcile_backoff_sec
+let launch_backoff_seconds () = Env_config_runtime.Sidecar.reconcile_backoff_sec
 
 (** Compare backoff deadline against [now] in unix-epoch seconds. Parses both
     [now] via [Types_core.parse_iso8601_opt], then delegates the deadline
     comparison to [Attempt_state.is_backoff_active].  Persisted
-    [next_retry_at] strings are parsed once at the JSON boundary into
+    [next_launch_not_before] strings are parsed once at the JSON boundary into
     [Attempt_state.t], so runtime backoff no longer compares wire strings.
     Malformed [now] keeps backoff inactive so reconcile retries instead of
     stalling (#8930 phase 3); malformed persisted deadlines fail at the
     attempt-record read boundary. *)
-let retry_backoff_active ~now attempt =
+let launch_deferred ~now attempt =
   match Types_core.parse_iso8601_opt now with
   | Some now_unix -> Attempt.is_backoff_active ~now:now_unix attempt.attempt
   | None -> false
@@ -462,17 +462,17 @@ let unix_of_iso_result ~field value =
   | None -> Error (Printf.sprintf "invalid %s: %s" field value)
 ;;
 
-let next_attempt_record_result ~now ~next_retry_at previous (record : desired_record) =
+let next_attempt_record_result ~now ~next_launch_not_before previous (record : desired_record) =
   let ( let* ) = Result.bind in
   let* now_unix = unix_of_iso_result ~field:"now" now in
-  let* next_retry_unix = unix_of_iso_result ~field:"next_retry_at" next_retry_at in
+  let* next_launch_not_before_unix = unix_of_iso_result ~field:"next_launch_not_before" next_launch_not_before in
   let previous = Option.map (fun record -> record.attempt) previous in
   Ok
     { connector_id = record.connector_id
     ; attempt =
         Attempt.make_next
           ~now:now_unix
-          ~backoff_seconds:(next_retry_unix -. now_unix)
+          ~backoff_seconds:(next_launch_not_before_unix -. now_unix)
           ~generation:record.generation
           ~last_result:Attempt.Start_dispatched
           ~previous
@@ -482,7 +482,7 @@ let next_attempt_record_result ~now ~next_retry_at previous (record : desired_re
 
 let reconcile_desired_once
       ?(now = Masc_domain.now_iso ())
-      ?(next_retry_at = Masc_domain.iso8601_of_unix_seconds (Unix.time () +. retry_backoff_seconds ()))
+      ?(next_launch_not_before = Masc_domain.iso8601_of_unix_seconds (Unix.time () +. launch_backoff_seconds ()))
       ?previous_attempt
       ?(write_attempt = fun (_ : attempt_record) -> Ok ())
       ~current_generation
@@ -498,10 +498,10 @@ let reconcile_desired_once
       (match previous_attempt with
        | Some attempt
          when attempt.attempt.generation = record.generation
-              && retry_backoff_active ~now attempt ->
+              && launch_deferred ~now attempt ->
          Reconcile_noop "backoff_active"
        | _ ->
-         (match next_attempt_record_result ~now ~next_retry_at previous_attempt record with
+         (match next_attempt_record_result ~now ~next_launch_not_before previous_attempt record with
           | Error msg ->
             Log.Server.warn
               "[sidecar/reconcile] invalid attempt timestamp for %s generation %d: %s"
@@ -526,7 +526,7 @@ let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_
     (match previous_attempt with
      | Some attempt
        when attempt.attempt.generation = record.generation
-            && retry_backoff_active ~now attempt ->
+            && launch_deferred ~now attempt ->
        "noop:backoff_active"
      | _ -> "would_start")
   | Desired_running, Observed_available -> "noop:already_available"
@@ -536,13 +536,13 @@ let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_
 let attempt_fields = function
   | None ->
     [ "last_attempt_result", `Null
-    ; "next_retry_at", `Null
+    ; "next_launch_not_before", `Null
     ; "operator_next_action", `Null
     ]
   | Some attempt ->
     [ ( "last_attempt_result"
       , `String (Attempt.result_to_string attempt.attempt.last_result) )
-    ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at attempt) )
+    ; ( "next_launch_not_before", Json_util.string_opt_to_json (next_launch_not_before attempt) )
     ; "operator_next_action", `String attempt.operator_next_action
     ; "attempt_id", `String attempt.attempt.attempt_id
     ]

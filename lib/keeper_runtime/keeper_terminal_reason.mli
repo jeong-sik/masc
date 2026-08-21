@@ -108,14 +108,14 @@ val of_wire : string -> t
     inverse: [to_wire (of_wire s) = s] for every [s]. *)
 val to_wire : t -> string
 
-(** {1 Transient provider-runtime wire codes (SSOT)}
+(** {1 Provider transport wire codes (SSOT)}
 
-    Retry-recoverable transient wire codes inside the
+    Typed transport wire codes inside the
     [Provider_runtime_failure] family: a plain (non-structural)
     [Api.Timeout], [Api.NetworkError], and provider-level timeout markers
     such as ["provider_error_timeout:http_operation"]. These mirror the
     [Agent_core.Error] variants
-    [Keeper_error_classify.is_transient_network_error] reports as transient.
+    [Keeper_error_classify.is_provider_availability_error] groups for diagnostics.
     The encoder [Keeper_agent_error.api_error_terminal_reason_code]
     references these so producer and consumer cannot drift.
 
@@ -123,12 +123,3 @@ val to_wire : t -> string
 val wire_api_error_timeout : string
 
 val wire_api_error_network : string
-
-(** [true] when [t] is a [Provider_runtime_failure] carrying one of the
-    transient wire codes ([wire_api_error_timeout] / [wire_api_error_network])
-    or a provider timeout marker. The API timeout matches remain exact, so
-    every other [api_error_*] code returns [false]. Every
-    non-[Provider_runtime_failure] variant is [false].
-    The disposition classifier routes a [true] result to a runtime-advance
-    disposition instead of [Disp_pause_human]. *)
-val is_transient_provider_runtime_failure : t -> bool

@@ -10,8 +10,7 @@
     - The synthetic [Api (Timeout { phase = Some Wall_clock })] value that
       [Keeper_turn_driver_try_provider.run_try_provider] constructs when the
       operator-configured deadline fires: this proves (not just documents)
-      that it joins the EXISTING declared-lane candidate rotation
-      ([Runtime_attempt_fsm.should_try_next]) and the EXISTING post-hoc
+      that it joins the typed declared-lane candidate route and the EXISTING post-hoc
       provider-timeout observation channel
       ([Keeper_provider_runtime_boundary.is_provider_timeout_error]) without
       any change to either classifier.
@@ -156,7 +155,7 @@ let test_a_missing_sample_falls_back_to_elapsed () =
 
 let wall_clock_timeout () =
   Agent_core.Error.Api
-    (Llm_provider.Retry.Timeout
+    (Llm_provider.Api_error.Timeout
        { message = "provider call exceeded the configured wall-clock deadline"
        ; phase = Some Llm_provider.Http_client.Wall_clock
        })
@@ -164,7 +163,7 @@ let wall_clock_timeout () =
 
 let test_wall_clock_timeout_carries_the_wall_clock_phase () =
   match wall_clock_timeout () with
-  | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; _ }) ->
+  | Agent_core.Error.Api (Llm_provider.Api_error.Timeout { phase; _ }) ->
     check bool "phase is Wall_clock" true
       (match phase with
        | Some Llm_provider.Http_client.Wall_clock -> true
@@ -172,18 +171,15 @@ let test_wall_clock_timeout_carries_the_wall_clock_phase () =
   | _ -> fail "expected Api (Timeout _)"
 ;;
 
-let test_wall_clock_timeout_joins_existing_candidate_rotation () =
-  let http_error =
-    Masc.Keeper_turn_driver_try_runtime.core_error_to_http_error
+let test_wall_clock_timeout_joins_typed_candidate_route () =
+  match
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution
       (wall_clock_timeout ())
-  in
-  match http_error with
-  | Some err ->
-    check bool
-      "a same-lane deadline timeout retries the next declared-lane candidate"
-      true
-      (Runtime_attempt_fsm.should_try_next err)
-  | None -> fail "expected the timeout to map to an http_error"
+  with
+  | Keeper_runtime_failure_route.Rotate_now
+      { rotate = Keeper_runtime_failure_route.Provider_timeout } -> ()
+  | _ -> fail "expected Provider_timeout candidate route"
 ;;
 
 let test_wall_clock_timeout_joins_existing_provider_timeout_observation () =
@@ -200,7 +196,7 @@ let test_non_timeout_error_does_not_trip_the_observation_channel () =
     false
     (Masc.Keeper_provider_runtime_boundary.is_provider_timeout_error
        (Agent_core.Error.Api
-          (Llm_provider.Retry.ContextOverflow { message = "exceeded"; limit = None })))
+          (Llm_provider.Api_error.ContextOverflow { message = "exceeded"; limit = None })))
 ;;
 
 let () =
@@ -233,8 +229,8 @@ let () =
     ; ( "wall_clock_timeout_integration"
       , [ test_case "carries the Wall_clock phase" `Quick
             test_wall_clock_timeout_carries_the_wall_clock_phase
-        ; test_case "joins existing candidate rotation" `Quick
-            test_wall_clock_timeout_joins_existing_candidate_rotation
+        ; test_case "joins typed candidate route" `Quick
+            test_wall_clock_timeout_joins_typed_candidate_route
         ; test_case "joins existing provider-timeout observation" `Quick
             test_wall_clock_timeout_joins_existing_provider_timeout_observation
         ; test_case "a non-timeout error is not misclassified" `Quick

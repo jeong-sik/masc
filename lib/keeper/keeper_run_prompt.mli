@@ -57,6 +57,5 @@ val build_turn_context
   -> meta:Keeper_meta_contract.keeper_meta
   -> history_user_source:string
   -> user_turn_record:user_turn_record
-  -> is_retry:bool
   -> start_turn_count:int
   -> turn_prompt_context

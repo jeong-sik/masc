@@ -2,7 +2,7 @@
 
 (* Closed sum type for turn_lane.  Two producers emit values:
    - keeper_run_tools.ml emits the per-turn lanes
-     (text_only, tool_optional, tool_disabled, retry).
+     (text_only, tool_optional, tool_disabled).
    - keeper_turn_helpers.pre_dispatch_tool_surface emits the
      [Lane_pre_dispatch] placeholder before the per-turn lane logic
      runs.
@@ -13,21 +13,18 @@ type turn_lane =
   | Lane_text_only
   | Lane_tool_optional
   | Lane_tool_disabled
-  | Lane_retry
 
 let turn_lane_to_string = function
   | Lane_pre_dispatch -> "pre_dispatch"
   | Lane_text_only -> "text_only"
   | Lane_tool_optional -> "tool_optional"
   | Lane_tool_disabled -> "tool_disabled"
-  | Lane_retry -> "retry"
 
 let turn_lane_of_string = function
   | "pre_dispatch" -> Some Lane_pre_dispatch
   | "text_only" -> Some Lane_text_only
   | "tool_optional" -> Some Lane_tool_optional
   | "tool_disabled" -> Some Lane_tool_disabled
-  | "retry" -> Some Lane_retry
   | _ -> None
 
 let turn_lane_to_yojson lane = `String (turn_lane_to_string lane)

@@ -23,15 +23,15 @@ type step =
       ; reason : Partition.blocked_reason
       }
 
-type retry_reason =
+type reinspection_reason =
   | Exact_claim_contended
   | Selected_generation_changed
 
 type drain_outcome =
   | Drained
-  | Retry_later of
+  | Reinspect_later of
       { contention : contention
-      ; reason : retry_reason
+      ; reason : reinspection_reason
       }
 
 type rearm_schedule =
@@ -84,7 +84,7 @@ type contention_rearm_outcome =
   | Outcome_not_registered
   | Outcome_delivery_error
   | Outcome_delivery_reset
-  | Outcome_delivery_retry
+  | Outcome_delivery_resignal
   | Outcome_sleep_cancelled
   | Outcome_fork_cancelled
   | Outcome_reset
@@ -100,7 +100,7 @@ let contention_rearm_outcome_label = function
   | Outcome_not_registered -> "not_registered"
   | Outcome_delivery_error -> "delivery_error"
   | Outcome_delivery_reset -> "delivery_reset"
-  | Outcome_delivery_retry -> "delivery_retry"
+  | Outcome_delivery_resignal -> "delivery_resignal"
   | Outcome_sleep_cancelled -> "sleep_cancelled"
   | Outcome_fork_cancelled -> "fork_cancelled"
   | Outcome_reset -> "reset"
@@ -119,7 +119,7 @@ let log_contention_rearm event (contention : contention) ~delay_s ~outcome =
     | Outcome_signaled
     | Outcome_coalesced
     | Outcome_delivery_reset
-    | Outcome_delivery_retry
+    | Outcome_delivery_resignal
     | Outcome_sleep_cancelled
     | Outcome_fork_cancelled
     | Outcome_reset
@@ -176,7 +176,7 @@ let wake_result_outcome = function
   | Wake.Not_registered -> Outcome_not_registered
 ;;
 
-let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
+let fire_rearm_ticket scheduler contention ticket ~launch_delivery_resignal =
   let consumed =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       match find_rearm_entry scheduler contention with
@@ -209,7 +209,7 @@ let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
              (match delivery with
               | Ok wake -> `Delivered wake
               | Error _ ->
-                `Retry (prepare_rearm_ticket_locked scheduler entry))
+                `Resignal (prepare_rearm_ticket_locked scheduler entry))
            | Some _ | None -> `Suppressed)
         | None -> `Suppressed)
     in
@@ -220,13 +220,13 @@ let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
         contention
         ~delay_s:ticket.delay_s
         ~outcome:(wake_result_outcome wake)
-    | `Retry next_ticket ->
+    | `Resignal next_ticket ->
       log_contention_rearm
         "fired"
         contention
         ~delay_s:ticket.delay_s
         ~outcome:Outcome_delivery_error;
-      launch_delivery_retry next_ticket
+      launch_delivery_resignal next_ticket
     | `Suppressed ->
       log_contention_rearm
         "cancelled"
@@ -294,13 +294,13 @@ let schedule_contention_rearm scheduler contention =
              scheduler
              contention
              ticket
-             ~launch_delivery_retry:(fun next_ticket ->
+             ~launch_delivery_resignal:(fun next_ticket ->
                launch next_ticket;
                log_contention_rearm
                  "scheduled"
                  contention
                  ~delay_s:next_ticket.delay_s
-                 ~outcome:Outcome_delivery_retry))
+                 ~outcome:Outcome_delivery_resignal))
        with
        | exn ->
          cancel_rearm_ticket scheduler contention ticket Outcome_fork_cancelled;
@@ -348,31 +348,31 @@ let reset_contention_rearms scheduler ~keep =
     removed
 ;;
 
-(* The drain verdict as one token. Retry_later carries its reason so a stuck
+(* The drain verdict as one token. Reinspect_later carries its reason so a stuck
    worker is distinguishable from a contended one: Exact_claim_contended means
    another flow holds the claim, Selected_generation_changed means the partition
    moved under this worker. *)
 let drain_outcome_label = function
   | Drained -> "drained"
-  | Retry_later { reason = Exact_claim_contended; _ } -> "retry_claim_contended"
-  | Retry_later { reason = Selected_generation_changed; _ } ->
+  | Reinspect_later { reason = Exact_claim_contended; _ } -> "reinspect_claim_contended"
+  | Reinspect_later { reason = Selected_generation_changed; _ } ->
     "retry_generation_changed"
 ;;
 
-(* The drain line derives its level from the outcome it reports. [Retry_later]
+(* The drain line derives its level from the outcome it reports. [Reinspect_later]
    leaves the durable partition undrained and re-arms the same contention, so a
    worker that keeps returning it makes no progress while its candidate ledger
    grows; at [Info] that state reads the same as normal draining. *)
 let drain_outcome_log_level = function
   | Drained -> Log.Info
-  | Retry_later _ -> Log.Warn
+  | Reinspect_later _ -> Log.Warn
 ;;
 
 let apply_drain_rearm scheduler = function
   | Drained ->
     reset_contention_rearms scheduler ~keep:None;
     None
-  | Retry_later { contention; reason = _ } ->
+  | Reinspect_later { contention; reason = _ } ->
     reset_contention_rearms scheduler ~keep:(Some contention);
     Some (schedule_contention_rearm scheduler contention)
 ;;
@@ -1794,9 +1794,9 @@ let rec drain_available_with_process ~yield ~process =
   match process () with
   | Ok Idle -> Ok Drained
   | Ok (Contended contention) ->
-    Ok (Retry_later { contention; reason = Exact_claim_contended })
+    Ok (Reinspect_later { contention; reason = Exact_claim_contended })
   | Ok (Rescan_later contention) ->
-    Ok (Retry_later { contention; reason = Selected_generation_changed })
+    Ok (Reinspect_later { contention; reason = Selected_generation_changed })
   | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
     yield ();
     drain_available_with_process ~yield ~process

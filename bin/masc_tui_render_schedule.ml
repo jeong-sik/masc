@@ -126,14 +126,16 @@ type overview_allocation = {
   task_rows : int;
 }
 
-let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~task_count
-    ~has_task_error =
+let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
+    ~task_count ~has_task_error =
   (* Ten rows are invariant chrome; the cluster/project row is present only
      after a briefing has loaded. Reserve one row for a nonempty task block,
-     then preserve the existing Attention-first priority. *)
+     then size the shared Attention / Recent Events panel from either side. *)
   let fixed_rows = 10 + (if has_cluster then 1 else 0) in
   let available = max 0 (terminal_rows - fixed_rows) in
-  let desired_attention_rows = min 6 (max 1 attention_count) in
+  let desired_panel_rows =
+    min 6 (max 1 (max attention_count event_count))
+  in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =
     if task_count <= 0 then
@@ -146,7 +148,7 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~task_count
   in
   let reserved_task_rows = min 1 desired_task_block_rows in
   let attention_rows =
-    min desired_attention_rows (max 0 (available - reserved_task_rows))
+    min desired_panel_rows (max 0 (available - reserved_task_rows))
   in
   let task_block_rows =
     min desired_task_block_rows (max 0 (available - attention_rows))

@@ -235,6 +235,64 @@ let test_masc_broadcast_schema () =
             (List.mem_assoc "message" props)
       | None -> Alcotest.fail "masc_broadcast missing properties"
 
+let test_broadcast_cache_signal_reaches_keeper_and_agent_core_surfaces () =
+  let assert_optional_pair label schema =
+    match get_json_assoc "properties" schema with
+    | None -> Alcotest.fail (label ^ " missing properties")
+    | Some props ->
+      Alcotest.(check bool)
+        (label ^ " has typed cache subject")
+        true
+        (List.mem_assoc "task_cache_subject_agent" props);
+      Alcotest.(check bool)
+        (label ^ " has typed cache task")
+        true
+        (List.mem_assoc "task_cache_task_id" props)
+  in
+  let keeper_schema =
+    Tool_shard_types.taskboard_tools
+    |> List.find_opt (fun (schema : Masc_domain.tool_schema) ->
+      String.equal schema.name "keeper_broadcast")
+  in
+  (match keeper_schema with
+   | None -> Alcotest.fail "keeper_broadcast schema missing"
+   | Some schema -> assert_optional_pair "keeper_broadcast" schema.input_schema);
+  let binding =
+    Masc.Agent_core_tool_contract.agent_core_binding_by_name "masc_broadcast"
+  in
+  (match binding with
+   | None -> Alcotest.fail "agent-core masc_broadcast binding missing"
+   | Some binding -> assert_optional_pair "agent-core masc_broadcast" binding.input_schema);
+  let arguments =
+    `Assoc
+      [ "content", `String "typed cache observation"
+      ; "task_cache_subject_agent", `String "subject"
+      ; "task_cache_task_id", `String "task-123"
+      ]
+  in
+  match
+    Masc.Agent_core_tool_contract.resolve_requested_tool_call
+      ~agent_name:"observer"
+      ~requested_name:"masc_broadcast"
+      ~arguments
+  with
+  | Error detail -> Alcotest.fail ("agent-core broadcast projection failed: " ^ detail)
+  | Ok (operation, `Assoc projected) ->
+    Alcotest.(check string) "canonical broadcast operation" "masc_broadcast" operation;
+    Alcotest.(check (option string))
+      "agent-core preserves typed cache subject"
+      (Some "subject")
+      (Option.bind
+         (List.assoc_opt "task_cache_subject_agent" projected)
+         (function `String value -> Some value | _ -> None));
+    Alcotest.(check (option string))
+      "agent-core preserves typed cache task"
+      (Some "task-123")
+      (Option.bind
+         (List.assoc_opt "task_cache_task_id" projected)
+         (function `String value -> Some value | _ -> None))
+  | Ok (_, _) -> Alcotest.fail "agent-core broadcast projection is not an object"
+
 let test_masc_transition_schema () =
   match find_registered_tool "masc_transition" with
   | None -> Alcotest.fail "masc_transition not found"
@@ -703,6 +761,8 @@ let () =
       Alcotest.test_case "masc_start" `Quick test_masc_start_schema;
       Alcotest.test_case "masc_status" `Quick test_masc_status_schema;
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
+      Alcotest.test_case "broadcast cache signal surfaces" `Quick
+        test_broadcast_cache_signal_reaches_keeper_and_agent_core_surfaces;
       Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;
       Alcotest.test_case "masc_run schemas share SSOT" `Quick
         test_masc_run_schemas_share_ssot;

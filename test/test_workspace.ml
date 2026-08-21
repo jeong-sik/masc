@@ -373,6 +373,76 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     None
     (current_task_for observer);
 
+  let before_rejected =
+    Workspace.get_all_messages_raw config ~since_seq:0 |> List.length
+  in
+  let rejected =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-001" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:"typed signal without a matching subject cache"
+  in
+  Alcotest.(check bool)
+    "mismatched subject cache is rejected"
+    true
+    (match rejected with
+     | Error (Workspace_broadcast.Broadcast_policy_rejected _) -> true
+     | Error _ | Ok _ -> false);
+  Alcotest.(check int)
+    "rejected typed signal is not persisted"
+    before_rejected
+    (Workspace.get_all_messages_raw config ~since_seq:0 |> List.length);
+
+  let absent_agent =
+    match Workspace.read_json config agent_file |> Masc_domain.agent_of_yojson with
+    | Ok agent ->
+      { agent with status = Masc_domain.Busy; current_task = Some "task-ghost" }
+    | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
+  in
+  Workspace.write_json config agent_file (Masc_domain.agent_to_yojson absent_agent);
+  let absent_result =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-ghost" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:"typed signal for a task absent from the canonical backlog"
+    |> Result.get_ok
+  in
+  Alcotest.(check bool)
+    "absent canonical task invalidates an exact subject cache"
+    true
+    (str_contains absent_result.content "[cache_invalidated]");
+  Alcotest.(check (option string))
+    "absent canonical task cache is cleared"
+    None
+    (current_task_for subject);
+
+  let _ =
+    Workspace.add_task config ~title:"Active task" ~priority:1 ~description:""
+  in
+  let _ = Workspace.claim_task config ~agent_name:subject ~task_id:"task-002" in
+  let active_content = "typed signal for a still-active canonical task" in
+  let active_result =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-002" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:active_content
+    |> Result.get_ok
+  in
+  Alcotest.(check string)
+    "active exact subject cache is preserved"
+    active_content
+    active_result.content;
+  Alcotest.(check (option string))
+    "active exact subject cache remains owned"
+    (Some "task-002")
+    (current_task_for subject);
+
   let normal_update =
     "Normal update: blocked by task-001 while I wait for review context."
   in

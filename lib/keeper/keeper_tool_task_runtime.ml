@@ -395,21 +395,47 @@ let handle_keeper_task_tool_with_outcome
             ]))
     | Broadcast ->
     let message = Safe_ops.json_string ~default:"" "content" args |> String.trim in
+    let task_cache_subject_agent =
+      Safe_ops.json_string_opt "task_cache_subject_agent" args
+      |> String_util.option_trim
+    in
+    let task_cache_task_id =
+      Safe_ops.json_string_opt "task_cache_task_id" args
+      |> String_util.option_trim
+    in
     if message = ""
     then
       Keeper_tool_execution.failure
         ~class_:Tool_result.Policy_rejection
         (error_json "content is required. Good: content='Build complete, all tests pass.'.")
+    else if Option.is_some task_cache_subject_agent <> Option.is_some task_cache_task_id
+    then
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Policy_rejection
+        (error_json
+           "task_cache_subject_agent and task_cache_task_id must be supplied together")
     else (
+      let task_cache_signal =
+        match task_cache_subject_agent, task_cache_task_id with
+        | Some subject_agent, Some task_id ->
+          Some Workspace_broadcast.{ subject_agent; task_id }
+        | None, None -> None
+        | Some _, None | None, Some _ -> None
+      in
       match
         (* A Keeper calling keeper_broadcast is speaking to the workspace,
            so this reaches every Keeper's conversation window. *)
         Workspace.broadcast
+          ?task_cache_signal
           ~audience:Workspace_broadcast.Fleet_conversation
           config
           ~from_agent:(keeper_agent_sender ~meta)
           ~content:message
       with
+      | Error (Workspace_broadcast.Broadcast_policy_rejected detail) ->
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Policy_rejection
+          (error_json ("broadcast rejected: " ^ detail))
       | Error error ->
         Keeper_tool_execution.failure
           ~class_:Tool_result.Runtime_failure

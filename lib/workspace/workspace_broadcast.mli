@@ -2,7 +2,10 @@
     accompanying message-activity event. *)
 
 
-type broadcast_error = Broadcast_not_persisted of string
+type broadcast_error =
+  | Broadcast_not_persisted of string
+  | Broadcast_policy_rejected of string
+  | Broadcast_dependency_unavailable of string
 
 val broadcast_error_to_string : broadcast_error -> string
 

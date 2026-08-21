@@ -68,6 +68,132 @@ let test_task_create_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+let test_keeper_broadcast_forwards_typed_cache_signal () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name:meta.agent_name
+            ~capabilities:[ "test" ]
+            ());
+       let subject = Masc.Workspace.resolve_agent_name config meta.agent_name in
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Terminal cache fixture"
+            ~priority:1
+            ~description:"");
+       ignore (Masc.Workspace.claim_task config ~agent_name:subject ~task_id:"task-001");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let terminal_backlog =
+         { backlog with
+           tasks =
+             List.map
+               (fun (task : Masc_domain.task) ->
+                  if String.equal task.id "task-001"
+                  then
+                    { task with
+                      task_status =
+                        Masc_domain.Done
+                          { assignee = subject
+                          ; completed_at = "2026-08-22T00:00:00Z"
+                          ; notes = Some "keeper broadcast cache fixture"
+                          }
+                    }
+                  else task)
+               backlog.tasks
+         }
+       in
+       Workspace_backlog.write_backlog config terminal_backlog;
+       let agent_file =
+         Filename.concat
+           (Masc.Workspace.agents_dir config)
+           (Masc.Workspace.safe_filename subject ^ ".json")
+       in
+       let stale_agent =
+         match
+           Masc.Workspace.read_json config agent_file
+           |> Masc_domain.agent_of_yojson
+         with
+         | Ok agent ->
+           { agent with
+             status = Masc_domain.Busy
+           ; current_task = Some "task-001"
+           }
+         | Error detail -> fail ("fixture agent decode failed: " ^ detail)
+       in
+       Masc.Workspace.write_json
+         config
+         agent_file
+         (Masc_domain.agent_to_yojson stale_agent);
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_broadcast"
+           ~args:
+             (`Assoc
+               [ "content", `String "typed stale cache observation"
+               ; "task_cache_subject_agent", `String subject
+               ; "task_cache_task_id", `String "task-001"
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () -> fail "keeper broadcast was deferred"
+        | Tool_result.Failed _ ->
+          fail ("keeper broadcast failed: " ^ execution.raw_output));
+       check bool
+         "keeper surface persists canonical cache invalidation"
+         true
+         (String_util.contains_substring
+            execution.raw_output
+            "[cache_invalidated]");
+       let current_task =
+         Option.bind
+           (Masc.Workspace.get_agents_raw config
+            |> List.find_opt (fun (agent : Masc_domain.agent) ->
+              String.equal agent.name subject))
+           (fun agent -> agent.current_task)
+       in
+       check (option string) "keeper surface clears exact stale cache" None current_task)
+
+let test_keeper_broadcast_rejects_partial_typed_cache_signal () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta:(keeper_meta ())
+           ~name:"keeper_broadcast"
+           ~args:
+             (`Assoc
+               [ "content", `String "partial typed signal"
+               ; "task_cache_subject_agent", `String "subject"
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Failed Tool_result.Policy_rejection -> ()
+        | Tool_result.Failed _ -> fail "partial pair used the wrong failure class"
+        | Tool_result.Completed () | Tool_result.Deferred () ->
+          fail "partial typed cache pair was accepted");
+       check bool
+         "partial pair error names both fields"
+         true
+         (String_util.contains_substring
+            execution.raw_output
+            "task_cache_subject_agent and task_cache_task_id"))
+
 (* A page is not the backlog. The sort keys on priority alone and is stable, so
    within one priority the newest task sits last and falls off [limit] first.
    Eight tasks registered at priority 2 and 3 stayed invisible across nineteen
@@ -581,6 +707,10 @@ let () =
             "keeper_tasks_list reports a truncated page"
             `Quick
             test_tasks_list_reports_truncation
+        ; test_case "keeper_broadcast forwards typed cache signal" `Quick
+            test_keeper_broadcast_forwards_typed_cache_signal
+        ; test_case "keeper_broadcast rejects partial typed cache signal" `Quick
+            test_keeper_broadcast_rejects_partial_typed_cache_signal
         ; test_case
             "keeper_tasks_list returns snapshot and unchanged"
             `Quick

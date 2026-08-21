@@ -79,6 +79,13 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
         ~from_agent:agent_name ~content
     in
     match delivery with
+    | Error (Workspace_broadcast.Broadcast_policy_rejected detail) ->
+      Some
+        (Tool_result.error
+           ~failure_class:Tool_result.Workflow_rejection
+           ~tool_name
+           ~start_time
+           ("Broadcast rejected: " ^ detail))
     | Error error ->
       Some
         (Tool_result.error

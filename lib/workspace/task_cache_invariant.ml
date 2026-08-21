@@ -20,68 +20,124 @@
 open Masc_domain
 open Workspace_utils
 
+type fresh_task_lookup =
+  | Found of Masc_domain.task_status
+  | Absent
+  | Unavailable of string
+
 (** Read the current task status directly from the backlog (snapshot read,
-    no write lock).  Returns [None] when the task is absent or the backlog
-    cannot be read. *)
-let fresh_task_status config ~(task_id : string)
-    : Masc_domain.task_status option =
+    no write lock), preserving absence and read failure as distinct facts. *)
+let read_fresh_task_status config ~(task_id : string) : fresh_task_lookup =
   match Workspace_backlog.read_backlog_r config with
-  | Error _ -> None
+  | Error detail -> Unavailable detail
   | Ok backlog ->
-      List.find_opt
-        (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-        backlog.tasks
-      |> Option.map (fun (t : Masc_domain.task) -> t.task_status)
+    (match
+       List.find_opt
+         (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+         backlog.tasks
+     with
+     | Some task -> Found task.task_status
+     | None -> Absent)
+;;
+
+let fresh_task_status config ~task_id =
+  match read_fresh_task_status config ~task_id with
+  | Found status -> Some status
+  | Absent | Unavailable _ -> None
+;;
 
 (** [is_terminal status] returns [true] iff the status is [Done _] or
     [Cancelled _].  SSOT: [Masc_domain.task_status_is_terminal]. *)
 let is_terminal = Masc_domain.task_status_is_terminal
 
-(** Clear the agent's [current_task] field on disk when it equals [task_id]
-    and log a [cache_desync.cleared] diagnostic event. *)
-let clear_stale_agent_task
+let emit_cache_desync_event config ~agent_name ~task_id ~status_label ~module_name =
+  try
+    log_event config
+      (`Assoc
+        [ "type", `String "cache_desync.cleared"
+        ; "module", `String module_name
+        ; "agent", `String agent_name
+        ; "task_id", `String task_id
+        ; "backlog_status", `String status_label
+        ; "ts", `String (now_iso ())
+        ])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "task_cache_invariant: log_event failed (%s %s): %s"
+      module_name
+      task_id
+      (Printexc.to_string exn)
+;;
+
+let agent_file config agent_name =
+  Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+;;
+
+let agent_current_task_matches config ~agent_name ~task_id =
+  let path = agent_file config agent_name in
+  if not (path_exists config path)
+  then false
+  else
+    with_file_lock config path (fun () ->
+      match agent_of_yojson (read_json config path) with
+      | Ok agent -> agent.current_task = Some task_id
+      | Error detail ->
+        Log.Misc.warn
+          "task_cache_invariant: agent parse failed for %s: %s"
+          agent_name
+          detail;
+        false)
+;;
+
+let clear_stale_agent_task_if_matching
       config
       ~(agent_name : string)
       ~(task_id : string)
-      ~(status : Masc_domain.task_status)
+      ~(status_label : string)
       ~(module_name : string)
-    : unit =
-  (* 1. Clear agent state on disk *)
-  let agent_file =
-    Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+  =
+  let path =
+    agent_file config agent_name
   in
-  if path_exists config agent_file then
-    with_file_lock config agent_file (fun () ->
-      let json = read_json config agent_file in
-      match agent_of_yojson json with
-      | Ok agent when agent.current_task = Some task_id ->
+  let cleared =
+    if not (path_exists config path)
+    then false
+    else
+      with_file_lock config path (fun () ->
+        let json = read_json config path in
+        match agent_of_yojson json with
+        | Ok agent when agent.current_task = Some task_id ->
           let updated =
             { agent with status = Masc_domain.Active; current_task = None }
           in
-          write_json config agent_file (agent_to_yojson updated)
-      | Ok _ -> ()
-      | Error msg ->
+          write_json config path (agent_to_yojson updated);
+          true
+        | Ok _ -> false
+        | Error msg ->
           Log.Misc.warn
             "task_cache_invariant: agent parse failed for %s: %s"
-            agent_name msg);
-  (* 2. Log the desync event *)
-  (try
-     log_event config
-       (`Assoc
-           [ ("type", `String "cache_desync.cleared")
-           ; ("module", `String module_name)
-           ; ("agent", `String agent_name)
-           ; ("task_id", `String task_id)
-           ; ("backlog_status",
-              `String (Masc_domain.task_status_to_string status))
-           ; ("ts", `String (now_iso ()))
-           ])
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Misc.warn
-         "task_cache_invariant: log_event failed (%s %s): %s"
-         module_name task_id (Printexc.to_string exn))
+            agent_name
+            msg;
+          false)
+  in
+  if cleared
+  then emit_cache_desync_event config ~agent_name ~task_id ~status_label ~module_name;
+  cleared
+;;
+
+(** Clear the agent's [current_task] field on disk when it equals [task_id]
+    and log a [cache_desync.cleared] diagnostic event. *)
+let clear_stale_agent_task config ~agent_name ~task_id ~status ~module_name =
+  ignore
+    (clear_stale_agent_task_if_matching
+       config
+       ~agent_name
+       ~task_id
+       ~status_label:(Masc_domain.task_status_to_string status)
+       ~module_name)
+;;
 
 (** Scan every on-disk agent record and clear [current_task] when it equals
     [task_id].  Use this when the backlog no longer references the task

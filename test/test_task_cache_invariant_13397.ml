@@ -131,6 +131,23 @@ let test_fresh_status_missing () =
     let result = TCI.fresh_task_status config ~task_id:"task-999" in
     check bool "absent task returns None" true (Option.is_none result))
 
+let test_typed_fresh_status_missing () =
+  with_temp_config (fun config ->
+    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
+    seed_backlog config (make_task ~id:"task-001" ~status:T.Todo);
+    match TCI.read_fresh_task_status config ~task_id:"task-999" with
+    | TCI.Absent -> ()
+    | TCI.Found _ -> fail "absent task was reported as found"
+    | TCI.Unavailable detail ->
+      failf "readable backlog was reported unavailable: %s" detail)
+
+let test_typed_fresh_status_unavailable () =
+  with_temp_config (fun config ->
+    match TCI.read_fresh_task_status config ~task_id:"task-999" with
+    | TCI.Unavailable _ -> ()
+    | TCI.Absent -> fail "missing backlog was collapsed into task absence"
+    | TCI.Found _ -> fail "missing backlog unexpectedly returned a task")
+
 let test_with_fresh_terminal_returns_none () =
   with_temp_config (fun config ->
     let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
@@ -183,6 +200,10 @@ let () =
             test_fresh_status_active
         ; test_case "absent task returns None" `Quick
             test_fresh_status_missing
+        ; test_case "typed lookup preserves task absence" `Quick
+            test_typed_fresh_status_missing
+        ; test_case "typed lookup preserves backlog failure" `Quick
+            test_typed_fresh_status_unavailable
         ] )
     ; ( "with_fresh_task_status"
       , [ test_case "terminal task returns None (skip)" `Quick

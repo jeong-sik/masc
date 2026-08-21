@@ -8,6 +8,8 @@ type signal =
 type rewrite =
   | Unchanged of string
   | Invalidated of string
+  | Rejected of string
+  | Dependency_unavailable of string
 
 val rewrite_signal :
   config:Workspace_utils_backend_setup.config ->

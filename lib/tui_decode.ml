@@ -298,7 +298,9 @@ let sanitize_terminal_text text =
 ;;
 
 let keeper_blocker_for_terminal keeper =
-  Option.value ~default:"-" keeper.k_last_blocker |> sanitize_terminal_text
+  match keeper.k_last_blocker with
+  | None -> "-"
+  | Some blocker -> sanitize_terminal_text blocker
 ;;
 
 let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =

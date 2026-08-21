@@ -22,6 +22,7 @@ from typing import Any
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
 HttpFixtures = dict[str, tuple[int, object]]
+HttpRequests = list[tuple[str, bytes]]
 WorkspaceSetup = Callable[[str], None]
 WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
 WORKSPACE_RENDERED = b"workspace\\x1B]8;;https://attacker.invalid\\x07owned"
@@ -33,6 +34,7 @@ CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
 @contextmanager
 def test_http_endpoint(
     fixtures: HttpFixtures | None,
+    requests: HttpRequests | None,
 ) -> Iterator[tuple[int, Callable[[], None]]]:
     if fixtures is None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stalled_endpoint:
@@ -46,7 +48,7 @@ def test_http_endpoint(
         return
 
     class FixtureHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
+        def respond(self) -> None:
             status, payload = fixtures.get(
                 self.path,
                 (503, {"error": "fixture endpoint unavailable"}),
@@ -58,6 +60,16 @@ def test_http_endpoint(
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            self.respond()
+
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length)
+            self.respond()
+            if requests is not None:
+                requests.append((self.path, body))
 
         def log_message(self, format: str, *args: object) -> None:
             del format, args
@@ -130,10 +142,22 @@ def send_and_wait(
     output: bytearray,
     data: bytes,
     needle: bytes,
-) -> None:
+) -> bytes:
+    read_available(master_fd, output)
     start = len(output)
     os.write(master_fd, data)
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
+    needle_end = output.find(needle, start) + len(needle)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=needle_end,
+        timeout=3.0,
+    )
+    frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
+    return bytes(output[start:frame_end])
 
 
 def wait_for_terminal_input_consumed(slave_fd: int) -> None:
@@ -440,6 +464,7 @@ def run_terminal_scenario(
     interact: Interaction,
     refresh: float = 60.0,
     http_fixtures: HttpFixtures | None = None,
+    http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
 ) -> None:
     master_fd, slave_fd = os.openpty()
@@ -448,7 +473,10 @@ def run_terminal_scenario(
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         os.set_blocking(master_fd, False)
-        with test_http_endpoint(http_fixtures) as (server_port, start_http_endpoint):
+        with test_http_endpoint(http_fixtures, http_requests) as (
+            server_port,
+            start_http_endpoint,
+        ):
             with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
                 seed_workspace(base_path)
                 if prepare_workspace is not None:
@@ -847,7 +875,115 @@ def assert_row_budgeted_surfaces(
     os.write(master_fd, b"q")
 
 
+def wait_for_http_request(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    requests: HttpRequests,
+    *,
+    path: str,
+) -> bytes:
+    deadline = time.monotonic() + 3.0
+    while True:
+        for request_path, body in requests:
+            if request_path == path:
+                return body
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            raise AssertionError(f"TUI exited before HTTP request {path!r}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            raise AssertionError(f"timed out waiting for HTTP request {path!r}")
+        select.select([master_fd], [], [], min(0.05, remaining))
+
+
+def utf8_message_interaction(requests: HttpRequests) -> Interaction:
+    expected_text = "Aé한🙂"
+    expected_bytes = expected_text.encode()
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+
+        typed_frame = send_and_wait(
+            process, master_fd, output, expected_bytes, b"> " + expected_bytes
+        )
+        typed_frame.decode("utf-8")
+        backspace_cases = (
+            ("> Aé한".encode(), "🙂".encode()),
+            ("> Aé".encode(), "한".encode()),
+            (b"> A", "é".encode()),
+        )
+        for expected, removed in backspace_cases:
+            frame = send_and_wait(process, master_fd, output, b"\x7f", expected)
+            frame.decode("utf-8")
+            if removed[:1] in frame:
+                raise AssertionError(
+                    f"backspace left part of UTF-8 scalar {removed!r}: {frame!r}"
+                )
+
+        send_and_wait(process, master_fd, output, b"\xe2x", b"> Ax")
+        send_and_wait(process, master_fd, output, b"\x7f", b"> A")
+        send_and_wait(process, master_fd, output, b"\xe2\x15", b"> ")
+        send_and_wait(process, master_fd, output, b"A", b"> A")
+        os.write(master_fd, b"\xe2")
+        wait_for_terminal_input_consumed(slave_fd)
+        time.sleep(0.08)
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=29,
+            columns=100,
+            needle=b"Message to: alpha",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25h",
+        )
+        send_and_wait(process, master_fd, output, b"y", b"> Ay")
+
+        send_and_wait(process, master_fd, output, b"\x15", b"> ")
+        send_and_wait(
+            process, master_fd, output, expected_bytes, b"> " + expected_bytes
+        )
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        payload = json.loads(body)
+        if payload.get("message") != expected_text:
+            raise AssertionError(f"Keeper chat changed UTF-8 message bytes: {body!r}")
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def run_keyboard_regression(executable: str) -> None:
+    utf8_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="UTF-8 message input",
+        interact=utf8_message_interaction(utf8_requests),
+        http_fixtures={
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after UTF-8 request capture"},
+            )
+        },
+        http_requests=utf8_requests,
+    )
     run_terminal_scenario(
         executable,
         description="row-budgeted Overview and Board",

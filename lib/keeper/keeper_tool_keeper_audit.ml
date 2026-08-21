@@ -246,8 +246,6 @@ let summary items =
       ("autoboot_disabled", `Int count_autoboot_disabled);
       ("keeper_paused", `Int (count_issue "keeper_paused"));
       ("keepalive_not_running", `Int (count_issue "keepalive_not_running"));
-      ("empty_active_goal_ids", `Int (count_issue "empty_active_goal_ids"));
-      ("stale_active_goal_ids", `Int (count_issue "stale_active_goal_ids"));
     ]
 
 let handle ~(config : Workspace.config) args : tool_result =

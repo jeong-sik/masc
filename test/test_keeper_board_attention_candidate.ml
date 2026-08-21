@@ -114,16 +114,16 @@ let comment_of_signal
   }
 ;;
 
-let keeper_context ?(active_goal_ids = []) () =
+let keeper_context ?(mention_keeper_ids = [ "sangsu" ]) () =
   `Assoc
     [ "lane_keeper_name", `String "sangsu"
     ; "agent_name", `String "sangsu-agent"
     ; "keeper_record_id", `Null
     ; "keeper_runtime_uid", `Null
     ; "instructions", `String "continue"
-    ; "active_goal_ids", `List (List.map (fun id -> `String id) active_goal_ids)
     ; "current_task_id", `Null
-    ; "mention_keeper_ids", `List [ `String "sangsu" ]
+    ; "mention_keeper_ids"
+      , `List (List.map (fun id -> `String id) mention_keeper_ids)
     ]
 ;;
 
@@ -253,7 +253,7 @@ let load_one ~base_path =
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
-      ~context:(keeper_context ~active_goal_ids:[ "g-1"; "g-2" ] ())
+      ~context:(keeper_context ())
       (signal "post-codec")
   in
   let encoded = A.candidate_to_json original in
@@ -280,7 +280,7 @@ let test_codec_and_context_identity_are_strict () =
   let reordered =
     candidate
       ~context:
-        (match keeper_context ~active_goal_ids:[ "g-1"; "g-2" ] () with
+        (match keeper_context () with
          | `Assoc fields -> `Assoc (List.rev fields)
          | _ -> assert false)
       (signal "post-reordered")
@@ -293,7 +293,7 @@ let test_codec_and_context_identity_are_strict () =
     (A.Context_key.equal left reordered);
   let changed_list =
     candidate
-      ~context:(keeper_context ~active_goal_ids:[ "g-2"; "g-1" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "sangsu"; "rondo" ] ())
       (signal "post-list-order")
     |> A.Context_key.of_candidate
     |> ok "changed list context"

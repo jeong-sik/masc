@@ -754,7 +754,7 @@ let field_value fixture ~tool_name field_name schema =
       | None -> `String "active")
   | "objective" -> `String "tool matrix objective"
   | "invariants" | "artifact_priors" | "roster" | "capability_profile"
-  | "active_goal_ids" | "depends_on_operation_ids" ->
+  | "depends_on_operation_ids" ->
       `List [ `String "tool-matrix-item" ]
   | "success_metric" | "current_focus" | "policy" | "budget" | "chain_input"
   | "meta" ->

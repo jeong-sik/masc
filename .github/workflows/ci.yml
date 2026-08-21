@@ -1157,7 +1157,6 @@ jobs:
             @test/runtest-test_voice_command_descriptor_parity
 
       - name: Run goal-scope terminal-phase suite
-        # validate_active_goal_ids is where a keeper's declared goal scope meets
         # the live store, and everything downstream reads the list it returns.
         # The prompt and the world observation filter the same list by phase, so
         # a Completed goal left in scope makes the two disagree -- for 2.5 days

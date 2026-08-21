@@ -1,18 +1,14 @@
-(** A keeper is handed only the goals it can still progress.
+(** A keeper is shown only the Goals that are still open.
 
-    [keeper_meta.active_goal_ids] records which goals were assigned to a keeper.
-    Nothing removes an id when the goal reaches a terminal phase, and
-    [resolve_active_goal_ids] only checks that the id exists — so a Completed or
-    Dropped goal stays on the list indefinitely.
+    Two prompt surfaces read the Goal store: [<available_goals>] in the system
+    prompt (via {!Keeper_unified_prompt.active_goal_summaries_of_store}) and
+    [### Active Goals] in the per-turn world state (via
+    [world_observation.active_goals]). A Goal names no keeper, so both show the
+    same list to everyone.
 
-    Two prompt surfaces read that list: [<available_goals>] in the system prompt
-    (via {!Keeper_unified_prompt.active_goal_summaries_of_store}) and [### Active Goals]
-    in the per-turn world state (via [world_observation.active_goals]). Both
-    announced terminal goals as this keeper's work, on every turn, under
-    headings that call them available.
-
-    [Goal_phase.admits_self_directed_progress] is the exhaustive predicate for
-    the question and had no callers. These tests pin both surfaces to it. *)
+    [Goal_phase.admits_self_directed_progress] is the exhaustive predicate that
+    decides membership — [Verifying] stays in, terminal phases drop out. These
+    tests pin both surfaces to it. *)
 
 open Alcotest
 open Masc
@@ -169,8 +165,6 @@ let test_no_goals_surface_when_all_are_terminal () =
 ;;
 
 (* An executing Goal that no Task serves is one fact addressed to every Keeper.
-   The keeper's [active_goal_ids] is empty here on purpose: the fact lives on
-   the Goal store and must surface without any keeper-side pointer.
 
    Four exclusions in one predicate: terminal Goals are not open work, a Goal
    already carrying a Task is not an invitation, and [Verifying] is held back so

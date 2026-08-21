@@ -350,7 +350,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                 | Ok
                     ( Keeper_shutdown_supersession.No_shutdown_admission
                     | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
-               (* RFC-0315 P3 W0: goals that newly entered active_goal_ids
+               (* RFC-0315 P3 W0: goals newly assigned
                   wake the keeper once at the assignment edge. Enqueue is
                   durable, so the keepalive restart below delivers it on the
                   new fiber's first cycle. Removals never wake. *)

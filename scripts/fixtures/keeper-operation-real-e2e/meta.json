@@ -34,7 +34,6 @@
   "consecutive_noop_count": 0,
   "last_compaction_check_ts": 0.0,
   "last_compaction_decision": "initialized",
-  "active_goal_ids": [],
   "last_autonomous_action_at": "",
   "autonomous_action_count": 0,
   "autonomous_turn_count": 0,

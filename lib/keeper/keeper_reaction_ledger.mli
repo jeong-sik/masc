@@ -16,7 +16,6 @@ type stimulus_kind =
   | Hitl_resolved  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Manual_compaction
   | Goal_assigned
-      (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
   | Goal_reconciliation_ready
       (** Linked Tasks reached a terminal boundary and Goal synthesis is ready. *)
   | Completion_authority_rejected

@@ -98,9 +98,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
              then Some (g.id, g.title)
              else None)
       in
-      let active_goal_ids_json =
-        `List (List.map (fun (id, _) -> `String id) active_goals)
-      in
       let active_goals_json =
         `List
           (List.map
@@ -111,21 +108,13 @@ let keeper_config_json (config : Workspace.config) (name : string)
                 ])
              active_goals)
       in
-      let missing_active_goal_ids = [] in
       let workspace =
         match workspace_surface_json m with
         | `Assoc fields ->
             `Assoc
               (fields
                @ [
-                   ("active_goal_ids", active_goal_ids_json);
                    ("active_goals", active_goals_json);
-                   ("active_goal_count", `Int (List.length active_goals));
-                   ( "missing_active_goal_ids",
-                     `List
-                       (List.map
-                          (fun goal_id -> `String goal_id)
-                          missing_active_goal_ids) );
                  ])
         | other -> other
       in
@@ -289,7 +278,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let body =
        `Assoc [
          ("name", `String m.name);
-         ("active_goal_ids", active_goal_ids_json);
          ("autoboot_enabled", `Bool m.autoboot_enabled);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
          (* Keeper-level override only ([None] = inherit the fleet

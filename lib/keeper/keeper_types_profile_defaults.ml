@@ -20,7 +20,6 @@ type keeper_profile_defaults = {
      the system prompt once, this is the conversation input the keeper receives
      every cycle and which the durable checkpoint keeps. [None] inherits. *)
   autonomous_wake_prompt : string option;
-  active_goal_ids : string list option;
   max_context_override : int option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
@@ -50,7 +49,6 @@ let empty_keeper_profile_defaults =
     network_mode = None;
     multimodal_policy = None;
     autonomous_wake_prompt = None;
-    active_goal_ids = None;
     max_context_override = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;

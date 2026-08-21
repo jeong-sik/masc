@@ -993,7 +993,6 @@ let execution_trust_row_of_dashboard_row row =
     ; ("trace_id", field "trace_id")
     ; ("generation", field "generation")
     ; ("current_task_id", field "current_task_id")
-    ; ("active_goal_ids", field "active_goal_ids")
     ; ("trust", field "trust")
     ]
 

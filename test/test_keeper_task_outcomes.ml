@@ -34,46 +34,11 @@ let meta_with_active_goals goal_ids =
         [ "name", `String "task-create-test"
         ; "agent_name", `String "keeper-task-create-test-agent"
         ; "trace_id", `String "trace-task-create-test"
-        ; ( "active_goal_ids"
-          , `List (List.map (fun goal_id -> `String goal_id) goal_ids) )
         ])
   with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
 
-let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [ "goal-a"; "goal-b" ] in
-       let payload =
-         Task.handle_keeper_task_tool
-           ~config
-           ~meta
-           ~name:"keeper_task_create"
-           ~args:
-             (`Assoc
-               [ "title", `String "Unscoped task"
-               ; "description", `String "Should not require a disambiguating goal_id"
-               ; "priority", `Int 3
-               ])
-       in
-       let json = Yojson.Safe.from_string payload in
-       check bool "task create succeeds" true (json |> U.member "ok" |> U.to_bool);
-       check bool "task create returns null goal_id" true
-         (json |> U.member "goal_id" = `Null);
-       match Masc.Workspace.get_tasks_raw config with
-       | [ _task ] -> ()
-       | tasks ->
-           failf "expected exactly one persisted task, got %d" (List.length tasks))
-
-(* A page is not the backlog. The sort keys on priority alone and is stable, so
-   within one priority the newest task sits last and falls off [limit] first.
-   Eight tasks registered at priority 2 and 3 stayed invisible across nineteen
-   todo listings because the response gave no sign it had cut anything (#29101). *)
 let test_tasks_list_reports_truncation () =
   let base_path = temp_dir () in
   Fun.protect
@@ -576,10 +541,6 @@ let () =
   run "keeper task outcomes"
     [ ( "outcomes"
       , [ test_case
-            "keeper_task_create treats ambiguous active_goal_ids as advisory"
-            `Quick
-            test_task_create_multi_active_goals_without_goal_id_is_unscoped
-        ; test_case
             "keeper_tasks_list reports a truncated page"
             `Quick
             test_tasks_list_reports_truncation

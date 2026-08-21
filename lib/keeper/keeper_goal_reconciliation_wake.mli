@@ -22,7 +22,7 @@ val enqueue_if_ready :
   enqueue_outcome
 (** Re-read canonical Goal/Task state after a terminal Task commit, durably
     enqueue one typed reconciliation stimulus, then wake its Keeper. The
-    registered or persisted Keeper assignment whose [active_goal_ids] contains
+    registered or persisted Keeper assignment that covers
     the Goal is authoritative. When no unambiguous assignment exists, an
     exact live or persisted [agent_name] binding may identify the producer;
     identity strings are never parsed to invent a Keeper name. The function

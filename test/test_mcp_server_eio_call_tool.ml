@@ -41,8 +41,6 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
      | [] -> []
      | ids ->
          [
-           ( "active_goal_ids",
-             `List (List.map (fun goal_id -> `String goal_id) goal_ids) );
          ])
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
@@ -792,8 +790,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "keeper_turn_id" |> U.to_int);
       check string "task id" "task-456"
         (row |> U.member "task_id" |> U.to_string);
-      check int "goal id count" 1
-        (row |> U.member "goal_ids" |> U.to_list |> List.length);
       let runtime_contract = row |> U.member "runtime_contract" in
       check string "runtime contract agent"
         (Masc.Keeper_identity.keeper_agent_name keeper_name)

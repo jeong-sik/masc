@@ -1,7 +1,7 @@
 (** Keeper_goal_assignment_wake — RFC-0315 P3 W0 producer.
 
     Enqueues a [Keeper_event_queue.Goal_assigned] stimulus for each goal that
-    newly entered a keeper's [active_goal_ids], then signals its Running lane.
+    was newly assigned to a keeper, then signals its Running lane.
 
     Edge semantics: callers pass the pre-change and post-change id lists;
     only ids present in [new_ids] and absent from [old_ids] enqueue.

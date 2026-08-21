@@ -1309,10 +1309,7 @@ class MissionRun:
             },
         )
         for role, keeper in self.roles.items():
-            arguments: dict[str, Any] = {
-                "name": keeper,
-                "active_goal_ids": [self.goal_id],
-            }
+            arguments: dict[str, Any] = {"name": keeper}
             runtime_id = self.runtime_for_role(role)
             if runtime_id:
                 arguments["runtime_id"] = runtime_id

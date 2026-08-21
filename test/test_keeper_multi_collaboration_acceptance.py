@@ -349,11 +349,6 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         # directed RW23 phase and the verifier Goal out of ordinary fleet scope.
         self.assertNotIn("goal-verifier-task-create", setup_source)
         self.assertNotIn("goal-verifier-assign", setup_source)
-        self.assertIn('"active_goal_ids": [self.goal_id]', setup_source)
-        self.assertNotIn(
-            '"active_goal_ids": [self.goal_id, self.verifier_goal_id]',
-            setup_source,
-        )
         self.assertIn("goal-verifier-task-create", rw23_source)
         self.assertIn("goal-verifier-assign", rw23_source)
         self.assertLess(

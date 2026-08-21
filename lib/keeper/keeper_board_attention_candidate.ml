@@ -1117,7 +1117,6 @@ let validate_keeper_context ~keeper_name json =
       ; "keeper_record_id"
       ; "keeper_runtime_uid"
       ; "instructions"
-      ; "active_goal_ids"
       ; "current_task_id"
       ; "mention_keeper_ids"
       ]
@@ -1153,12 +1152,6 @@ let validate_keeper_context ~keeper_name json =
     optional_string_of_yojson
       ~context:(context ^ ".keeper_runtime_uid")
       keeper_runtime_uid
-  in
-  let* active_goal_ids = field ~context "active_goal_ids" fields in
-  let* () =
-    string_list_of_yojson
-      ~context:(context ^ ".active_goal_ids")
-      active_goal_ids
   in
   let* current_task_id = field ~context "current_task_id" fields in
   let* () =

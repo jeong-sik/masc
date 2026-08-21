@@ -64,7 +64,7 @@ type stimulus_payload =
          waiting keeper must be notified of. *)
   | Manual_compaction_requested
   | Goal_assigned of goal_assignment
-      (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
+      (* RFC-0315 P3 W0: a goal was assigned to this keeper
          (keeper_up tool args or TOML reconcile). Wakes the keeper ONCE at
          the assignment edge so the new standing objective arrives as
          actionable turn input — before this, an assigned goal was

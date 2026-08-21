@@ -37,8 +37,8 @@ type pending_board_event_kind =
           the same producer-owned attention record through its bounded durable
           projection. *)
   | Goal_assigned
-      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
-          the assignment edge surfaces as actionable turn input. *)
+      (** RFC-0315 P3 W0: a Goal was assigned to this keeper; the edge
+          surfaces as actionable turn input. *)
   | Goal_reconciliation_ready
       (** All linked Tasks are terminal; the Keeper must re-read SSOT and
           choose completion, blocking, or follow-up work. *)

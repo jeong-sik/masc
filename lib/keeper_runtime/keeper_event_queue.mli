@@ -90,7 +90,6 @@ type stimulus_payload =
       (** Operator-requested MASC compaction. The tool only enqueues this
           stimulus; the owning Keeper consumes it in its Owner child. *)
   | Goal_assigned of goal_assignment
-      (** A goal was newly added to this keeper's [active_goal_ids]. *)
   | Goal_reconciliation_ready of goal_reconciliation_ready
       (** Every Task linked to an executing Goal is terminal. This wakes a
           Keeper to re-read SSOT and choose a Goal action; it does not authorize

@@ -331,15 +331,9 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     Option.value turn_params.system_prompt_override ~default:system_prompt
   in
   (* No preemptive cut of the seed. The provider owns its own window and says
-     so in a typed terminal — glm code 1261, Codex "Context overflow" — which
-     [Keeper_turn_driver_try_provider.context_overflow_shrink_sequence] already
-     consumes to shrink and retry, starting from
-     [unbounded_model_input_capacity_bytes]. Cutting here as well meant two
-     authorities over the same window, and the one that ran first measured in
-     wire bytes rather than tokens and discarded the oldest atoms outright.
-
-     The discard was the part that could not be justified: it removed
-     conversation the keeper had already committed to, kept no copy, and its
+     so in a typed terminal — glm code 1261, Codex "Context overflow". The
+     prior byte ceiling discarded conversation the keeper had already
+     committed to, kept no copy, and its
      [seed_dropped_atoms] receipt had no reader anywhere in the tree — the loss
      was reported to nobody. Reactive shrink loses nothing the provider has not
      already refused to accept. *)

@@ -131,75 +131,6 @@ let project_messages messages =
   loop [] [] messages
 ;;
 
-let unbounded_model_input_capacity_bytes = max_int
-
-let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (Host.encode_history_message message)
-;;
-
-(* Keep the first official-client attempt byte-identical. Only the provider's
-   exact typed overflow opens a bounded retry, and that retry windows the
-   provider-bound copy without rewriting the durable conversation. *)
-let model_input_projection_for_capacity
-    ~capacity_bytes
-    ~observed_next_shrink_capacity_bytes
-    source_projection
-    messages =
-  let windowed =
-    if capacity_bytes = unbounded_model_input_capacity_bytes
-    then Ok messages
-    else
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        match
-          Runtime_model_input_tail_window.project
-            ~measure_message_bytes:measure_model_input_message_bytes
-            ~capacity_bytes
-            ~reserved_bytes:0
-            messages
-        with
-        | Ok projected -> Ok projected
-        | Error error ->
-          Error
-            (Runtime_model_input_tail_window.budget_error_to_string error))
-  in
-  let* windowed = windowed in
-  (* Compute the next structural retry boundary from the current bounded
-     history before source projections append synthetic evidence (for example
-     Gate replay). Using the current window also means the oracle reaches
-     [None] at the newest-atom floor instead of authorizing an identical
-     provider retry from the original unwindowed history. *)
-  let () =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      let full_bytes =
-        List.fold_left
-          (fun total message ->
-             total + measure_model_input_message_bytes message)
-          0
-          windowed
-      in
-      let target_capacity_bytes =
-        if capacity_bytes = unbounded_model_input_capacity_bytes
-        then
-          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity_bytes:full_bytes
-        else
-          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity_bytes
-      in
-      observed_next_shrink_capacity_bytes :=
-        Runtime_model_input_tail_window.next_shrink_capacity_bytes
-          ~measure_message_bytes:measure_model_input_message_bytes
-          ~target_capacity_bytes
-          windowed)
-  in
-  let* projected =
-    match source_projection with
-    | None -> Ok windowed
-    | Some project -> project windowed
-  in
-  Ok projected
-;;
-
 let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_completion
     (tool : Host.dynamic_tool) :
     Runtime_codex_app_server.dynamic_tool =
@@ -953,42 +884,9 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
   let observe_successful_tool_completion () =
     Atomic.set successful_tool_completion Successful_tool_completion
   in
-  let observed_next_shrink_capacity_bytes = ref None in
-  let starting_capacity_bytes =
-    Keeper_context_overflow_shrink_state.starting_capacity_bytes
-      ~keeper_name
-      ~runtime_id
-      ~max_capacity_bytes:unbounded_model_input_capacity_bytes
-  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-      ~starting_capacity_bytes
-      ~same_run_retry_authorized:(fun () ->
-        Keeper_provider_attempt_effect.allows_same_turn_retry
-          (Atomic.get effect_disposition)
-        && Option.is_some !observed_next_shrink_capacity_bytes)
-      ~shrink_capacity:(fun ~capacity_bytes:_ ~default_capacity_bytes ->
-        Option.value
-          !observed_next_shrink_capacity_bytes
-          ~default:(max 1 default_capacity_bytes))
-      ~record_success:(fun ~capacity_bytes ->
-        if capacity_bytes <> unbounded_model_input_capacity_bytes
-        then
-          Keeper_context_overflow_shrink_state.record_success
-            ~keeper_name
-            ~runtime_id
-            ~capacity_bytes)
-      ~on_shrink_retry:
-        (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
-          Log.Keeper.warn
-            ~keeper_name
-            "Codex typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
-            shrink_attempt
-            previous_capacity_bytes
-            capacity_bytes)
-      ~attempt:(fun ~capacity_bytes ->
-        run_without_lifecycle
+      run_without_lifecycle
           ~runtime_id
           ~keeper_name
     ~pre_tool_rejects
@@ -998,12 +896,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
           ~system_prompt
           ~tools
           ~initial_messages
-          ~model_input_projection:
-            (Some
-               (model_input_projection_for_capacity
-                  ~capacity_bytes
-                  ~observed_next_shrink_capacity_bytes
-                  model_input_projection))
+          ~model_input_projection
           ~hooks
           ~context_injector
           ~context
@@ -1014,7 +907,6 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
           ~observe_effect_attempted
           ~observe_successful_tool_completion
           ~config)
-      ())
   in
   { result
   ; effect_disposition = Atomic.get effect_disposition

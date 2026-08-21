@@ -137,43 +137,7 @@ val attempt_stalled :
     pre-#28417 behaviour, so a lost progress signal cannot silently disable
     enforcement. *)
 
-val default_context_overflow_shrink_capacity : capacity_bytes:int -> int
-(** The shared provider-oracle target for one ordinary shrink step. The
-    runtime-specific caller may clamp this target further to structural
-    message boundaries. *)
-
-val context_overflow_shrink_sequence :
-  ?shrink_capacity:
-    (capacity_bytes:int -> default_capacity_bytes:int -> int) ->
-  ?final_shrink_capacity:(capacity_bytes:int -> int option) ->
-  starting_capacity_bytes:int ->
-  same_run_retry_authorized:(unit -> bool) ->
-  record_success:(capacity_bytes:int -> unit) ->
-  on_shrink_retry:
-    (shrink_attempt:int ->
-     previous_capacity_bytes:int ->
-     capacity_bytes:int ->
-     unit) ->
-  attempt:(capacity_bytes:int -> ('ok, Agent_core.Error.t) result) ->
-  unit ->
-  ('ok, Agent_core.Error.t) result
-(** Provider-oracle retry policy shared by AGENT_CORE and official-client
-    runtimes. [default_capacity_bytes] is the policy's ordinary halved value;
-    a custom [shrink_capacity] can replace only exceptional starting values
-    without copying the shared divisor. On the last permitted retry,
-    [final_shrink_capacity] may replace that ordinary target with a measured
-    structural floor. A custom value that does not strictly decrease
-    [capacity_bytes] terminates the sequence without another provider attempt. *)
-
 val run_try_provider :
-  try_provider_ctx ->
-  ?enable_thinking_override:bool ->
-  Runtime_candidate.t ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
-  * Agent_core.Checkpoint.t option
-  * (string * Obj.t) option
-
-val run_try_provider_with_context_overflow_shrink :
   try_provider_ctx ->
   ?enable_thinking_override:bool ->
   Runtime_candidate.t ->
@@ -223,6 +187,4 @@ module For_testing : sig
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 
-  val context_overflow_shrink_max_attempts : int
-  val context_overflow_shrink_divisor : int
 end

@@ -1118,13 +1118,7 @@ let run_named
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
             ; max_request_body_bytes
-            ; (* #27320: the first attempt's windowing budget starts at the
-                 full declared cap; [run_try_provider_with_context_overflow_shrink]
-                 is the one that consults #27320's remembered starting point
-                 and shrinks it on a typed overflow. A direct (non-shrink)
-                 caller of [run_try_provider] gets the un-shrunk cap, same as
-                 before this change. *)
-              model_input_capacity_bytes = max_request_body_bytes
+            ; model_input_capacity_bytes = max_request_body_bytes
             ; base_path
             ; keeper_name
             ; name
@@ -1209,7 +1203,7 @@ let run_named
           in
           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
-            Keeper_turn_driver_try_provider.run_try_provider_with_context_overflow_shrink
+            Keeper_turn_driver_try_provider.run_try_provider
               try_provider_ctx candidate
           in
           let outcomes =

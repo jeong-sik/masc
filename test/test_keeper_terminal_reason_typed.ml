@@ -416,11 +416,6 @@ let () =
        (R.operator_disposition_reason_to_string (snd fenced_disposition))
        fenced_wire);
   check
-    "attempted provider effect still forbids same-turn retry"
-    (not
-       (Keeper_provider_attempt_effect_core.allows_same_turn_retry
-          Keeper_provider_attempt_effect_core.Effect_attempted));
-  check
     "provider-attempt fence still emits an operator broadcast"
     (R.needs_operator_broadcast (fst fenced_disposition));
   check

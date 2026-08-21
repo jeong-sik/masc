@@ -269,7 +269,7 @@ if [[ -z "$comment_id" ]]; then
 fi
 
 next_step "masc_board_vote"
-r_board_vote="$(call_tool 5029 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter}')")"
+r_board_vote="$(call_tool 5029 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter,direction:"up"}')")"
 expect_ok "masc_board_vote" "$r_board_vote"
 
 next_step "masc_board_comment_vote"

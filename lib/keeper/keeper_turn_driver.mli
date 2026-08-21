@@ -86,6 +86,10 @@ val quota_ordered_deferred_runtime_lane :
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 
+type candidate_transition_permission =
+  | Candidate_transition_allowed
+  | Candidate_transition_denied
+
 type named_run_result =
   { run_result : Runtime_agent.run_result
   ; selected_runtime_id : string
@@ -148,7 +152,6 @@ val run_named :
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
-  ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
   ?on_deferred_runtime_consumed:(unit -> unit) ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
@@ -255,12 +258,12 @@ module For_testing : sig
 
   val attempt_runtime_candidates :
     ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
-    ?allow_retry:
-      (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
-    ?allow_accept_no_progress_retry:
-      (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
+    ?candidate_transition_permission:
+      (runtime_id:string ->
+       attempt:int ->
+       Agent_core.Error.t ->
+       candidate_transition_permission) ->
     ?lane_id:string ->
-    ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->
@@ -283,7 +286,7 @@ module For_testing : sig
   val observe_checkpoint_stage :
     bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
 
-  val same_run_retry_allowed : bool Atomic.t -> bool
+  val checkpoint_allows_candidate_transition : bool Atomic.t -> bool
 
   val accept_no_progress_should_try_next : Agent_core.Error.t -> bool
 

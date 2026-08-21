@@ -138,18 +138,6 @@ let run (ctx : ctx)
   (match Eio_context.get_clock () with
    | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
    | Ok clock ->
-   (* Same-run retry authority comes from AGENT_CORE's typed checkpoint boundary.
-      AGENT_CORE invokes the sink only after mutating the agent state at a declared
-      checkpoint stage, and MASC marks the stage before delegating persistence.
-      Therefore a sink failure also closes replay authority: the attempt may
-      already contain effects even when the durable write failed. A lossy
-      Event_bus observation must never reopen or close this boundary.
-
-      [test_keeper_turn_driver_failover] proves both directions: transport
-      failure before any stage may fall back, while every typed stage blocks a
-      same-run fallback. *)
-   let checkpoint_stage_observed = Atomic.make false in
-   let deferred_runtime_lane_ref = ref None in
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
@@ -231,8 +219,6 @@ let run (ctx : ctx)
                    (List.rev turn_state.runtime_rotation_attempts)
                  ?deferred_runtime_lane:
                    (if is_retry then None else deferred_runtime_lane)
-                 ~on_runtime_retry_deferred:
-                   (fun hint -> deferred_runtime_lane_ref := Some hint)
                  ?on_deferred_runtime_consumed:
                    (if is_retry then None else on_deferred_runtime_consumed)
                  ~temperature:execution.temperature
@@ -241,9 +227,6 @@ let run (ctx : ctx)
                  ?shared_context
                  ?event_bus
                  ?trace_link:(trace_link ())
-                 ~on_checkpoint_stage:
-                   (Keeper_turn_driver_try_provider.observe_checkpoint_stage
-                      checkpoint_stage_observed)
                    (* This module is the autonomous lane's turn runner
                       ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
                       reached via the Keeper Owner child); the chat
@@ -330,50 +313,8 @@ let run (ctx : ctx)
         meta.name;
       Ok result, turn_state
     | Error err ->
-      let turn_state =
-        match !deferred_runtime_lane_ref with
-        | Some hint ->
-          { turn_state with deferred_runtime_lane = Some hint }
-        | None -> turn_state
-      in
-      let checkpoint_observed =
-        not
-          (Keeper_turn_driver_try_provider.same_run_retry_allowed
-             checkpoint_stage_observed)
-      in
-      let same_run_retry_has_input_authority = not checkpoint_observed in
-      if not same_run_retry_has_input_authority
-      then
-        Log.Keeper.info
-          ~keeper_name:meta.name
-          "%s: same-run runtime retry deferred after durable run progress \
-           (checkpoint_observed=%b); \
-           current AGENT_CORE contract cannot continue without admitting the input again"
-          meta.name
-          checkpoint_observed;
-      match !deferred_runtime_lane_ref with
-      | Some hint ->
-        let reason =
-          (match
-             Keeper_error_classify.recoverable_runtime_failure_reason
-               hint.failure
-           with
-           | Some reason -> reason
-           | None -> Keeper_error_classify.Deferred_runtime_lane)
-          |> Keeper_error_classify.degraded_retry_reason_to_string
-        in
-        Log.Keeper.info
-          ~keeper_name:meta.name
-          "%s: deferred frozen runtime lane suffix after checkpoint \
-           failed_runtime=%s next_runtime=%s remaining=%d reason=%s"
-          meta.name
-          hint.failed_runtime_id
-          hint.next_runtime_id
-          (List.length hint.later_runtime_ids)
-          reason;
-        mark_terminal_error err;
-        Error err, turn_state
-      | None when Option.is_some deferred_runtime_lane ->
+      match deferred_runtime_lane with
+      | Some _ ->
         Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
           ~keeper_name:meta.name
           ~runtime_id:execution.runtime_id

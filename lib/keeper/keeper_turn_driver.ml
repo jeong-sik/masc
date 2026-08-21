@@ -176,41 +176,20 @@ let runtime_failed_decision ~idx ~runtime_id error =
       , `String Agent_core.Error.(category error |> category_label) );
     ]
 
-let lane_should_retry
-    ~is_last
-    ~allow_retry
-    ~allow_accept_no_progress_retry
-    error =
-  if is_last || not allow_retry then
-    false
-  else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
-  then
-    allow_accept_no_progress_retry
-  else if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
-  then
-    (* A typed ContextOverflow is a per-candidate capacity bound, not a request
-       defect: a later lane candidate with a larger context window can still
-       serve the same turn. [core_error_to_http_error] folds it into a generic
-       HTTP 400 which [Runtime_attempt_fsm.should_try_next] treats as terminal,
-       so the typed error must be read before that mapping. Overflow on the
-       last candidate still returns the typed error, keeping the typed
-       overflow observation (blocker label, failure route) intact. *)
-    true
-  else if Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next error
-  then
-    true
-  else
-    match Keeper_turn_driver_try_runtime.core_error_to_http_error error with
-    | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
-    | None -> false
+type candidate_transition_permission =
+  | Candidate_transition_allowed
+  | Candidate_transition_denied
+
+let candidate_transition_route error =
+  Keeper_runtime_failure_route.route_of_error
+    ~boundary:Keeper_runtime_failure_route.Masc_execution
+    error
 
 let attempt_runtime_candidates
     ?(pre_tool_rejects = ref [])
-    ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
-    ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
-      true)
+    ?(candidate_transition_permission = fun ~runtime_id:_ ~attempt:_ _error ->
+      Candidate_transition_allowed)
     ?lane_id
-    ?(on_retry_deferred = fun _ -> ())
     ?quota_scope_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
@@ -219,17 +198,6 @@ let attempt_runtime_candidates
        ?decision:Yojson.Safe.t ->
        Keeper_runtime_manifest.event_kind ->
        unit) ~run_attempt candidates =
-  (* A typed overflow observed on any candidate is a fact about this turn's
-     input, not about whichever candidate happened to fail last. When the
-     lane ends on a different recoverable error (for example a rate-limited
-     fallback), returning that last error would hide the overflow from the
-     lane classifier: the failure route would misreport a transient error
-     instead of the deterministic capacity bound, and the operator-facing
-     blocker would name the wrong cause (#26530). Remember the first typed
-     overflow and let it represent a naturally exhausted lane. A lane that
-     stops on a non-recoverable error keeps that error: it is the immediate
-     operator signal, and the overflow will be observed again on the next
-     cycle. *)
   let quota_scope_of =
     match quota_scope_of with
     | Some quota_scope_of -> quota_scope_of
@@ -265,18 +233,12 @@ let attempt_runtime_candidates
       dispatchable
     @ undispatchable
   in
-  let rec loop ~observed_overflow idx = function
+  let rec loop idx = function
     | [] ->
-      (match observed_overflow with
-       | Some overflow_error -> Error overflow_error
-       | None ->
-         Error
-           (Agent_core.Error.Internal
-              (Printf.sprintf
-                 "runtime lane %S exhausted all candidates"
-                 runtime_id)))
+      Error
+        (Agent_core.Error.Internal
+           (Printf.sprintf "runtime lane %S exhausted all candidates" runtime_id))
     | candidate :: rest ->
-      let is_last = rest = [] in
       let attempt_runtime_id = runtime_id_of candidate in
       (* Bind quota ownership to the exact candidate that will be dispatched.
          [run_attempt] may span a runtime.toml reload; resolving the id after
@@ -339,12 +301,11 @@ let attempt_runtime_candidates
             not admission: if every remaining candidate is demoted they are
             all still attempted in their prior relative order. *)
          let rest = demote_rest rest in
-         let retry_admitted =
-           allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
-         in
-         let effect_retry_admitted =
-           Keeper_provider_attempt_effect.allows_same_turn_retry
-             effect_disposition
+         let transition_permission =
+           candidate_transition_permission
+             ~runtime_id:attempt_runtime_id
+             ~attempt:idx
+             error
          in
          let terminal_error =
            match effect_disposition with
@@ -372,61 +333,39 @@ let attempt_runtime_candidates
                      ; diagnostic = Agent_core.Error.to_string error
                      }))
          in
-         let allow_accept_no_progress_retry =
-           if
-             Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
-               error
-           then
-             allow_accept_no_progress_retry
-               ~runtime_id:attempt_runtime_id
-               ~attempt:idx
-               error
-           else true
-         in
-         let error_is_retryable =
-           lane_should_retry
-             ~is_last
-             ~allow_retry:true
-             ~allow_accept_no_progress_retry
-             error
-         in
-         let observed_overflow =
-           match observed_overflow with
-           | Some _ -> observed_overflow
-           | None ->
-             if
-               Keeper_turn_driver_try_runtime.context_overflow_should_try_next
-                 error
-             then Some error
-             else None
-         in
-         if not effect_retry_admitted
-         then Error terminal_error
-         else if retry_admitted && error_is_retryable
-         then loop ~observed_overflow (idx + 1) rest
-         else if is_last
-         then (
-           (* Lane fully exhausted: an overflow seen anywhere in the rotation
-              outranks the last candidate's error so the failure route and
-              blocker report the deterministic capacity bound. Cascade
-              telemetry already published each candidate's own error. *)
-           match observed_overflow with
-           | Some overflow_error -> Error overflow_error
-           | None -> Error error)
-         else (
-           (match error_is_retryable, effect_retry_admitted, rest with
-            | true, true, next :: later ->
-              on_retry_deferred
-                { assignment_id = runtime_id
-                ; failed_runtime_id = attempt_runtime_id
-                ; next_runtime_id = runtime_id_of next
-                ; later_runtime_ids = List.map runtime_id_of later
-                ; failure = error
-                }
-            | false, _, _ | true, false, _ | true, true, [] -> ());
-           Error terminal_error))
+         (match
+            effect_disposition,
+            transition_permission,
+            candidate_transition_route error,
+            rest
+          with
+          | ( Keeper_provider_attempt_effect.No_effect_observed
+            , Candidate_transition_allowed
+            , Keeper_runtime_failure_route.Rotate_now _
+            , _ :: _ ) ->
+            loop (idx + 1) rest
+          | ( Keeper_provider_attempt_effect.No_effect_observed
+            , Candidate_transition_allowed
+            , Keeper_runtime_failure_route.Rotate_now _
+            , [] ) ->
+            Error error
+          | ( ( Keeper_provider_attempt_effect.Effect_attempted
+              | Keeper_provider_attempt_effect.Observation_unavailable )
+            , _
+            , _
+            , _ )
+          | ( Keeper_provider_attempt_effect.No_effect_observed
+            , Candidate_transition_denied
+            , _
+            , _ ) ->
+            Error terminal_error
+          | ( Keeper_provider_attempt_effect.No_effect_observed
+            , Candidate_transition_allowed
+            , Keeper_runtime_failure_route.Exhausted_visible_alive _
+            , _ ) ->
+            Error error))
   in
-  loop ~observed_overflow:None 0 candidates
+  loop 0 candidates
 
 let runtime_candidate_missing_error id =
   Agent_core.Error.Internal
@@ -575,7 +514,6 @@ let run_named
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
-    ?on_runtime_retry_deferred
     ?on_deferred_runtime_consumed
     ?provider_config_transform
     ?sw
@@ -841,23 +779,23 @@ let run_named
   attempt_runtime_candidates
     ~pre_tool_rejects
     ?lane_id:lane_id_opt
-    ?on_retry_deferred:on_runtime_retry_deferred
-    ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
+    ~candidate_transition_permission:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
-        Keeper_turn_driver_try_provider.same_run_retry_allowed
+        Keeper_turn_driver_try_provider.checkpoint_allows_candidate_transition
           checkpoint_stage_observed
       in
       if not allowed
       then
         Log.Keeper.info
-          "%s: runtime lane retry deferred after typed AGENT_CORE checkpoint stage \
-           (runtime_id=%s attempt=%d error_kind=%s); the next keeper cycle \
-           remains eligible"
+          "%s: runtime candidate transition denied after typed AGENT_CORE \
+           checkpoint stage (runtime_id=%s attempt=%d error_kind=%s)"
           keeper_name
           attempt_runtime_id
           attempt
           Agent_core.Error.(category error |> category_label);
-      allowed)
+      if allowed
+      then Candidate_transition_allowed
+      else Candidate_transition_denied)
     ~runtime_id:
       (match deferred_runtime_lane with
        | Some hint -> hint.assignment_id
@@ -1324,8 +1262,8 @@ module For_testing = struct
   let observe_checkpoint_stage =
     Keeper_turn_driver_try_provider.observe_checkpoint_stage
 
-  let same_run_retry_allowed =
-    Keeper_turn_driver_try_provider.same_run_retry_allowed
+  let checkpoint_allows_candidate_transition =
+    Keeper_turn_driver_try_provider.checkpoint_allows_candidate_transition
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next

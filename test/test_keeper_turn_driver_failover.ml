@@ -83,13 +83,19 @@ let completed_run_result () : Runtime_agent.run_result =
 let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
-let retryable_network_error message =
+let network_unavailable_error message =
   Agent_core.Error.Api
     (Agent_core.Retry.NetworkError
        { message; kind = Llm_provider.Http_client.Unknown })
 
 let attempt_without_effect result checkpoint =
   result, checkpoint, Masc.Keeper_provider_attempt_effect.No_effect_observed
+;;
+
+let transition_permission allowed =
+  if allowed
+  then Driver.Candidate_transition_allowed
+  else Driver.Candidate_transition_denied
 ;;
 
 let accept_empty_no_progress_error scope =
@@ -728,7 +734,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
         ~failed_runtime_id:"previous.test_model"
         ~next_runtime_id:"primary.test_model"
         ~later_runtime_ids:[ "fallback.test_model" ]
-        ~failure:(retryable_network_error "previous cycle failed")
+        ~failure:(network_unavailable_error "previous cycle failed")
     in
     let result =
       Driver.run_named
@@ -1118,14 +1124,16 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
-        Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+      ~candidate_transition_permission:(fun ~runtime_id:_ ~attempt:_ _error ->
+        transition_permission
+          (Driver.For_testing.checkpoint_allows_candidate_transition
+             checkpoint_stage_observed))
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
           attempt_without_effect
-            (Error (retryable_network_error "primary network failed"))
+            (Error (network_unavailable_error "primary network failed"))
             None
         | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -1145,7 +1153,7 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   Alcotest.(check bool)
     "transport failed before any checkpoint stage"
     true
-    (Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed);
+    (Driver.For_testing.checkpoint_allows_candidate_transition checkpoint_stage_observed);
   let events = List.rev !events in
   Alcotest.(check (list string))
     "manifest events"
@@ -1176,7 +1184,7 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
           if String.equal runtime_id primary.id
           then
             attempt_without_effect
-              (Error (retryable_network_error "primary failed"))
+              (Error (network_unavailable_error "primary failed"))
               None
           else
             attempt_without_effect
@@ -1243,9 +1251,8 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         0
         selected.Driver.lane_attempt_index)
 
-let test_attempt_loop_retries_provider_wire_failure_same_turn () =
+let test_attempt_loop_stops_on_provider_wire_failure () =
   let attempts = ref [] in
-  let deferred = ref 0 in
   let events = ref [] in
   let provider_wire_error =
     Agent_core.Error.Provider
@@ -1261,44 +1268,36 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~on_retry_deferred:(fun _ -> incr deferred)
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
           attempt_without_effect (Error provider_wire_error) None
-        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
+        | "fallback.test_model" ->
+          Alcotest.fail "provider wire failure must not advance candidates"
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
   (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string)
-       "malformed provider stream rotates within the same turn"
-       "fallback.test_model"
-       runtime_id
    | Error error ->
-     Alcotest.failf
-       "expected same-turn provider-wire fallback, got %s"
-       (Agent_core.Error.to_string error));
+     Alcotest.(check string)
+       "provider wire failure preserved"
+       (Agent_core.Error.to_string provider_wire_error)
+       (Agent_core.Error.to_string error)
+   | Ok runtime_id -> Alcotest.failf "unexpected fallback %s" runtime_id);
   Alcotest.(check (list string))
-    "provider-wire failure advances to the next lane candidate"
-    [ "primary.test_model"; "fallback.test_model" ]
+    "provider-wire failure stops at its producer"
+    [ "primary.test_model" ]
     !attempts;
-  Alcotest.(check int)
-    "provider-wire failure does not create a deferred whole-runtime retry"
-    0
-    !deferred;
   let events = List.rev !events in
-  Alcotest.(check int) "both candidate attempts remain observable" 4 (List.length events)
+  Alcotest.(check int) "one candidate attempt remains observable" 2 (List.length events)
 
-let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
+let check_effect_disposition_blocks_candidate_transition label effect_disposition =
   let attempts = ref [] in
-  let deferred = ref [] in
   let result =
     Driver.For_testing.attempt_runtime_candidates
-      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> true)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~candidate_transition_permission:(fun ~runtime_id:_ ~attempt:_ _ ->
+        Driver.Candidate_transition_allowed)
       ~runtime_id:"primary.test_model"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -1306,7 +1305,7 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          ( Error (retryable_network_error "primary failed after possible effect")
+          ( Error (network_unavailable_error "primary failed after possible effect")
           , None
           , effect_disposition )
         | "fallback.test_model" ->
@@ -1341,63 +1340,19 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
   Alcotest.(check (list string))
     (label ^ " attempts only the effect owner")
     [ "primary.test_model" ]
-    !attempts;
-  Alcotest.(check int)
-    (label ^ " does not defer the same unsafe suffix")
-    0
-    (List.length !deferred)
+    !attempts
 
 let test_attempt_loop_stops_after_effect_attempt () =
-  check_effect_disposition_blocks_same_turn_retry
+  check_effect_disposition_blocks_candidate_transition
     "effect attempted"
     Masc.Keeper_provider_attempt_effect.Effect_attempted
 
 let test_attempt_loop_fails_closed_without_effect_observation () =
-  check_effect_disposition_blocks_same_turn_retry
+  check_effect_disposition_blocks_candidate_transition
     "effect observation unavailable"
     Masc.Keeper_provider_attempt_effect.Observation_unavailable
 
-let test_effect_fence_outranks_an_earlier_overflow () =
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:Fun.id
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
-        match candidate with
-        | "small.test_model" ->
-          attempt_without_effect
-            (Error
-               (Agent_core.Error.Api
-                  (Agent_core.Retry.ContextOverflow
-                     { message = "small context"; limit = Some 1024 })))
-            None
-        | "effect-owner.test_model" ->
-          ( Error (retryable_network_error "failed after an effect")
-          , None
-          , Masc.Keeper_provider_attempt_effect.Effect_attempted )
-        | other -> Alcotest.failf "unexpected candidate %s" other)
-      [ "small.test_model"; "effect-owner.test_model" ]
-  in
-  match result with
-  | Error error ->
-    (match Driver.classify_masc_internal_error error with
-     | Some
-         (Driver.Provider_attempt_effect_fenced
-            { runtime_id = "effect-owner.test_model"
-            ; effect_disposition =
-                Masc.Keeper_provider_attempt_effect.Effect_attempted
-            ; _
-            }) ->
-       ()
-     | Some other ->
-       Alcotest.failf
-         "later effect fence was replaced by %s"
-         (Driver.kind_of_masc_internal_error other)
-     | None -> Alcotest.fail "later effect fence was replaced by the first overflow")
-  | Ok _ -> Alcotest.fail "effect-fenced lane unexpectedly succeeded"
-
-let test_attempt_loop_blocks_no_progress_when_gate_denies () =
+ let test_attempt_loop_blocks_no_progress_when_transition_denied () =
   let attempts = ref [] in
   let gate_calls = ref [] in
   let events = ref [] in
@@ -1408,13 +1363,13 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~allow_accept_no_progress_retry:(fun ~runtime_id ~attempt error ->
+      ~candidate_transition_permission:(fun ~runtime_id ~attempt error ->
         gate_calls
         := ( runtime_id,
              attempt,
              Driver.For_testing.accept_no_progress_should_try_next error )
            :: !gate_calls;
-        false)
+        Driver.Candidate_transition_denied)
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -1460,7 +1415,7 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
-let test_attempt_loop_does_not_gate_network_retry () =
+let test_attempt_loop_checks_permission_before_network_transition () =
   let attempts = ref [] in
   let gate_called = ref false in
   let events = ref [] in
@@ -1469,15 +1424,15 @@ let test_attempt_loop_does_not_gate_network_retry () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~allow_accept_no_progress_retry:(fun ~runtime_id:_ ~attempt:_ _ ->
+      ~candidate_transition_permission:(fun ~runtime_id:_ ~attempt:_ _ ->
         gate_called := true;
-        false)
+        Driver.Candidate_transition_allowed)
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
           attempt_without_effect
-            (Error (retryable_network_error "primary network failed"))
+            (Error (network_unavailable_error "primary network failed"))
             None
         | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -1491,8 +1446,8 @@ let test_attempt_loop_does_not_gate_network_retry () =
        "expected fallback success, got %s"
        (Agent_core.Error.to_string e));
   Alcotest.(check bool)
-    "network retry does not call no-progress gate"
-    false
+    "network transition checks permission"
+    true
     !gate_called;
   Alcotest.(check (list string))
     "attempted candidates"
@@ -1622,7 +1577,7 @@ let test_deferred_quota_order_is_frozen_before_predispatch () =
              ~next_runtime_id:"shared_a.test_model"
              ~later_runtime_ids:
                [ "shared_b.test_model"; "other.test_model" ]
-             ~failure:(retryable_network_error "previous cycle failed")
+             ~failure:(network_unavailable_error "previous cycle failed")
          in
          let ordered =
            Driver.quota_ordered_deferred_runtime_lane ~now:100.0 hint
@@ -1648,7 +1603,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
              ~next_runtime_id:"shared_a.test_model"
              ~later_runtime_ids:
                [ "shared_b.test_model"; "other.test_model" ]
-             ~failure:(retryable_network_error "previous cycle failed")
+             ~failure:(network_unavailable_error "previous cycle failed")
          in
          let frozen =
            Driver.quota_ordered_deferred_runtime_lane
@@ -1735,14 +1690,16 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
        let events = ref [] in
        let checkpoint_stage_observed = Atomic.make false in
        Driver.For_testing.observe_checkpoint_stage checkpoint_stage_observed stage;
-       let primary_error = retryable_network_error "response-stage failure" in
+       let primary_error = network_unavailable_error "response-stage failure" in
        let result =
          Driver.For_testing.attempt_runtime_candidates
            ~runtime_id:"resilient"
            ~runtime_id_of:(fun runtime_id -> runtime_id)
            ~emit_runtime_manifest:(emit_manifest_collector events)
-           ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
-             Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+           ~candidate_transition_permission:(fun ~runtime_id:_ ~attempt:_ _error ->
+             transition_permission
+               (Driver.For_testing.checkpoint_allows_candidate_transition
+                  checkpoint_stage_observed))
            ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
              attempts := !attempts @ [ runtime_id ];
              match candidate with
@@ -1780,7 +1737,7 @@ let test_attempt_loop_preserves_last_core_error () =
       ~emit_runtime_manifest:(emit_manifest_collector events)
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempt_without_effect
-          (Error (retryable_network_error (runtime_id ^ " failed")))
+          (Error (network_unavailable_error (runtime_id ^ " failed")))
           None)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -1865,10 +1822,7 @@ let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
     [ "unmeasurable.test_model" ]
     !attempts
 
-(* A typed ContextOverflow is a per-candidate capacity bound: a later lane
-   candidate with a larger context window can still serve the same turn, so
-   the walk must continue instead of treating the 400 mapping as terminal. *)
-let test_attempt_loop_overflow_tries_next_candidate () =
+let test_attempt_loop_overflow_is_terminal () =
   let attempts = ref [] in
   let events = ref [] in
   let result =
@@ -1883,311 +1837,27 @@ let test_attempt_loop_overflow_tries_next_candidate () =
           attempt_without_effect
             (Error (context_overflow_error "prompt exceeds context window"))
             None
-        | "large.test_model" -> attempt_without_effect (Ok runtime_id) None
+        | "large.test_model" -> Alcotest.fail "overflow must not advance candidates"
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "large.test_model" ]
   in
   (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string)
-       "larger-context candidate serves the turn"
-       "large.test_model"
-       runtime_id
-   | Error e ->
-     Alcotest.failf
-       "expected larger-context fallback success, got %s"
-       (Agent_core.Error.to_string e));
-  Alcotest.(check (list string))
-    "overflow continues the lane walk"
-    [ "small.test_model"; "large.test_model" ]
-    !attempts
-
-(* When every candidate overflows, the last typed ContextOverflow must be
-   preserved so the lane classifier
-   ([Keeper_unified_turn_execution.declared_lane_failure_of_error]) still
-   reports the capacity bound. *)
-let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
-  let attempts = ref [] in
-  let events = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        attempts := !attempts @ [ runtime_id ];
-        attempt_without_effect
-          (Error (context_overflow_error (runtime_id ^ " overflow")))
-          None)
-      [ "small.test_model"; "smaller.test_model" ]
-  in
-  (match result with
-   | Ok _ -> Alcotest.fail "expected terminal overflow"
    | Error err ->
      Alcotest.(check bool)
-       "typed overflow preserved for reactive compaction"
+       "typed overflow is terminal"
        true
-       (Masc.Keeper_error_classify.is_context_overflow err));
+       (Masc.Keeper_error_classify.is_context_overflow err)
+   | Ok runtime_id -> Alcotest.failf "unexpected fallback %s" runtime_id);
   Alcotest.(check (list string))
-    "every candidate attempted before terminal overflow"
-    [ "small.test_model"; "smaller.test_model" ]
+    "overflow stops at its producer"
+    [ "small.test_model" ]
     !attempts
 
-(* #26530: an overflow on an earlier candidate must survive lane exhaustion.
-   Live incident 2026-07-31: glm overflowed, the ollama fallback then failed
-   with a rate limit, and the lane returned that rate limit — hiding the
-   deterministic capacity bound from the failure route while every cycle
-   replayed the same oversized checkpoint. *)
-let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
-  let attempts = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
-        attempts := !attempts @ [ runtime_id ];
-        match candidate with
-        | "small.test_model" ->
-          attempt_without_effect
-            (Error (context_overflow_error "prompt exceeds context window"))
-            None
-        | "fallback.test_model" ->
-          attempt_without_effect
-            (Error
-               (Agent_core.Error.Api
-                  (Agent_core.Retry.RateLimited
-                     { retry_after = None; message = "weekly usage limit" })))
-            None
-        | other -> Alcotest.failf "unexpected candidate %s" other)
-      [ "small.test_model"; "fallback.test_model" ]
-  in
-  (match result with
-   | Ok _ -> Alcotest.fail "expected exhausted lane"
-   | Error err ->
-     Alcotest.(check bool)
-       "typed overflow outranks the fallback rate limit"
-       true
-       (Masc.Keeper_error_classify.is_context_overflow err));
-  Alcotest.(check (list string))
-    "both candidates attempted"
-    [ "small.test_model"; "fallback.test_model" ]
-    !attempts
-
-(* Overflow precedence applies only to an exhausted lane: a walk stopped
-   mid-lane by a non-retryable error keeps that stopping error, which is the
-   immediate operator signal. *)
-let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
-  let attempts = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
-        attempts := !attempts @ [ runtime_id ];
-        match candidate with
-        | "small.test_model" ->
-          attempt_without_effect
-            (Error (context_overflow_error "prompt exceeds context window"))
-            None
-        | "broken.test_model" ->
-          attempt_without_effect
-            (Error (Agent_core.Error.Internal "hard mid-lane failure"))
-            None
-        | other ->
-          Alcotest.failf "walk must stop before candidate %s" other)
-      [ "small.test_model"; "broken.test_model"; "fallback.test_model" ]
-  in
-  (match result with
-   | Ok _ -> Alcotest.fail "expected mid-lane stop"
-   | Error (Agent_core.Error.Internal msg) ->
-     Alcotest.(check string)
-       "stopping error preserved"
-       "hard mid-lane failure"
-       msg
-   | Error e ->
-     Alcotest.failf
-       "expected stopping Internal error, got %s"
-       (Agent_core.Error.to_string e));
-  Alcotest.(check (list string))
-    "walk stopped at the terminal candidate"
-    [ "small.test_model"; "broken.test_model" ]
-    !attempts
-
-let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
-  let attempts = ref [] in
-  let deferred = ref [] in
-  let err =
-    Agent_core.Error.Api
-      (Agent_core.Retry.ServerError
-         { status = 500; message = "checkpoint-observed failure" })
-  in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
-      ~runtime_id:"lane.frozen"
-      ~runtime_id_of:Fun.id
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        attempts := runtime_id :: !attempts;
-        attempt_without_effect (Error err) None)
-      [ "runtime.a"; "runtime.b"; "runtime.c"; "runtime.d" ]
-  in
-  (match result with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "checkpoint denial must end the current run");
-  Alcotest.(check (list string))
-    "no same-run second POST"
-    [ "runtime.a" ]
-    (List.rev !attempts);
-  match List.rev !deferred with
-  | [ hint ] ->
-    Alcotest.(check string)
-      "failed runtime"
-      "runtime.a"
-      hint.Driver.failed_runtime_id;
-    Alcotest.(check (list string))
-      "frozen suffix preserved"
-      [ "runtime.b"; "runtime.c"; "runtime.d" ]
-      (Driver.deferred_runtime_ids hint)
-  | hints ->
-    Alcotest.failf "expected one deferred suffix, got %d" (List.length hints)
-
-let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
-  let attempts = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"runtime.b"
-      ~runtime_id_of:Fun.id
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        attempts := runtime_id :: !attempts;
-        match runtime_id with
-        | "runtime.b" ->
-          attempt_without_effect (Error (retryable_network_error "b failed")) None
-        | "runtime.c" -> attempt_without_effect (Ok runtime_id) None
-        | "runtime.a" ->
-          Alcotest.fail "failed lane prefix must not replay on the next cycle"
-        | other -> Alcotest.failf "unexpected runtime %s" other)
-      [ "runtime.b"; "runtime.c"; "runtime.d" ]
-  in
-  (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string) "same-run tail succeeds" "runtime.c" runtime_id
-   | Error error ->
-     Alcotest.failf "expected suffix success: %s" (Agent_core.Error.to_string error));
-  Alcotest.(check (list string))
-    "next cycle starts at B then advances to C"
-    [ "runtime.b"; "runtime.c" ]
-    (List.rev !attempts)
-
-let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
-  let deferred = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
-      ~runtime_id:"runtime.b"
-      ~runtime_id_of:Fun.id
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        Alcotest.(check string) "only B attempted" "runtime.b" runtime_id;
-        attempt_without_effect
-          (Error (retryable_network_error "b checkpoint failure"))
-          None)
-      [ "runtime.b"; "runtime.c"; "runtime.d" ]
-  in
-  (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected B failure");
-  match List.rev !deferred with
-  | [ hint ] ->
-    Alcotest.(check (list string))
-      "replacement hint is C,D"
-      [ "runtime.c"; "runtime.d" ]
-      (Driver.deferred_runtime_ids hint)
-  | hints ->
-    Alcotest.failf "expected one replacement hint, got %d" (List.length hints)
-
-let test_single_candidate_checkpoint_failure_has_no_hint () =
-  let deferred = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
-      ~runtime_id:"runtime.only"
-      ~runtime_id_of:Fun.id
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
-        attempt_without_effect
-          (Error (retryable_network_error "only failed"))
-          None)
-      [ "runtime.only" ]
-  in
-  (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected failure");
-  Alcotest.(check int) "no successor means no hint" 0 (List.length !deferred)
-
-let test_deferred_hint_refs_are_not_shared () =
-  let failure = retryable_network_error "checkpoint failure" in
-  let hint =
-    Driver.For_testing.make_deferred_runtime_lane
-      ~assignment_id:"lane.one"
-      ~failed_runtime_id:"runtime.a"
-      ~next_runtime_id:"runtime.b"
-      ~later_runtime_ids:[ "runtime.c" ]
-      ~failure
-  in
-  let first = ref (Some hint) in
-  let second = ref (Some hint) in
-  Alcotest.(check bool)
-    "first owner consumes its hint"
-    true
-    (Masc.Keeper_heartbeat_loop.For_testing.consume_deferred_runtime_lane_hint
-       first
-       hint);
-  Alcotest.(check bool) "first hint cleared" true (Option.is_none !first);
-  Alcotest.(check bool)
-    "second owner remains independent"
-    true
-    (Option.is_some !second)
-
-let test_missing_deferred_successor_is_typed_error () =
-  match
-    Driver.For_testing.resolve_runtime_candidates
-      [ "runtime.definitely-missing-deferred-successor" ]
-  with
-  | Error (Agent_core.Error.Internal detail) ->
-    Alcotest.(check bool)
-      "missing successor is loud"
-      true
-      (String.length (String.trim detail) > 0)
-  | Error error ->
-    Alcotest.failf
-      "expected typed internal missing-successor error, got %s"
-      (Agent_core.Error.to_string error)
-  | Ok _ -> Alcotest.fail "missing successor unexpectedly resolved"
-
-let test_missing_deferred_head_is_consumed_once () =
-  let consumed = ref 0 in
-  let result =
-    Driver.For_testing.resolve_runtime_candidate_for_attempt
-      ~on_missing:(fun () -> incr consumed)
-      "runtime.definitely-missing-deferred-head"
-  in
-  (match result with
-   | Error (Agent_core.Error.Internal _) -> ()
-   | Error error ->
-     Alcotest.failf
-       "expected typed missing-head error, got %s"
-       (Agent_core.Error.to_string error)
-   | Ok _ -> Alcotest.fail "missing deferred head unexpectedly resolved");
-  Alcotest.(check int) "missing head consumed once" 1 !consumed
-
-let test_initial_lane_exhaustion_cannot_escape_declared_candidates () =
+  let test_initial_lane_exhaustion_cannot_escape_declared_candidates () =
   match
     Masc.Keeper_unified_turn_execution.For_testing
       .declared_lane_failure_of_error
-      (retryable_network_error "declared lane exhausted")
+      (network_unavailable_error "declared lane exhausted")
   with
   | Masc.Keeper_unified_turn_execution.For_testing
       .Declared_runtime_lane_exhausted ->
@@ -2287,9 +1957,9 @@ let () =
             `Quick
             test_first_candidate_success_keeps_lane_attempt_index_zero;
           Alcotest.test_case
-            "provider-wire failure rotates in the same turn"
+            "provider-wire failure stops at its producer"
             `Quick
-            test_attempt_loop_retries_provider_wire_failure_same_turn;
+            test_attempt_loop_stops_on_provider_wire_failure;
           Alcotest.test_case
             "effect attempt blocks same-turn fallback"
             `Quick
@@ -2299,17 +1969,13 @@ let () =
             `Quick
             test_attempt_loop_fails_closed_without_effect_observation;
           Alcotest.test_case
-            "effect fence outranks an earlier overflow"
+            "attempt loop blocks no-progress when transition denied"
             `Quick
-            test_effect_fence_outranks_an_earlier_overflow;
+            test_attempt_loop_blocks_no_progress_when_transition_denied;
           Alcotest.test_case
-            "attempt loop blocks no-progress when gate denies"
+            "attempt loop checks permission before network transition"
             `Quick
-            test_attempt_loop_blocks_no_progress_when_gate_denies;
-          Alcotest.test_case
-            "attempt loop does not gate network retry"
-            `Quick
-            test_attempt_loop_does_not_gate_network_retry;
+            test_attempt_loop_checks_permission_before_network_transition;
           Alcotest.test_case
             "hard quota reorders shared sibling in same turn"
             `Quick
@@ -2339,53 +2005,13 @@ let () =
             `Quick
             test_attempt_loop_preserves_last_core_error;
           Alcotest.test_case
-            "context overflow tries next lane candidate"
+            "context overflow is terminal"
             `Quick
-            test_attempt_loop_overflow_tries_next_candidate;
+            test_attempt_loop_overflow_is_terminal;
           Alcotest.test_case
             "input capacity does not advance MASC lane"
             `Quick
             test_attempt_loop_input_capacity_does_not_advance_masc_lane;
-          Alcotest.test_case
-            "context overflow on last candidate stays terminal"
-            `Quick
-            test_attempt_loop_overflow_on_last_candidate_is_terminal;
-          Alcotest.test_case
-            "lane exhaustion preserves earlier overflow"
-            `Quick
-            test_attempt_loop_exhaustion_preserves_earlier_overflow;
-          Alcotest.test_case
-            "mid-lane terminal outranks observed overflow"
-            `Quick
-            test_attempt_loop_midwalk_terminal_outranks_observed_overflow;
-          Alcotest.test_case
-            "checkpoint denial defers exact frozen suffix once"
-            `Quick
-            test_checkpoint_denial_defers_exact_frozen_suffix_once;
-          Alcotest.test_case
-            "deferred cycle starts at supplied successor and keeps tail"
-            `Quick
-            test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail;
-          Alcotest.test_case
-            "deferred post-checkpoint failure replaces hint with tail"
-            `Quick
-            test_deferred_cycle_post_checkpoint_replaces_hint_with_tail;
-          Alcotest.test_case
-            "single candidate checkpoint failure has no hint"
-            `Quick
-            test_single_candidate_checkpoint_failure_has_no_hint;
-          Alcotest.test_case
-            "deferred hint refs are not shared"
-            `Quick
-            test_deferred_hint_refs_are_not_shared;
-          Alcotest.test_case
-            "missing deferred successor is typed error"
-            `Quick
-            test_missing_deferred_successor_is_typed_error;
-          Alcotest.test_case
-            "missing deferred head is consumed once"
-            `Quick
-            test_missing_deferred_head_is_consumed_once;
           Alcotest.test_case
             "initial lane exhaustion cannot escape declared candidates"
             `Quick

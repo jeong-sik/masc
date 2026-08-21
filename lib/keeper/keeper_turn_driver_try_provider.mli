@@ -116,7 +116,7 @@ val apply_accept :
 val observe_checkpoint_stage :
   bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
 
-val same_run_retry_allowed : bool Atomic.t -> bool
+val checkpoint_allows_candidate_transition : bool Atomic.t -> bool
 
 val attempt_stalled :
   now:float

@@ -135,7 +135,7 @@ let test_non_overflow_error_never_shrinks () =
 
 let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
   (* Mirrors the exact same-run retry authority gate the declared-lane
-     candidate walk applies via [same_run_retry_allowed] /
+     candidate walk applies via [checkpoint_allows_candidate_transition] /
      [checkpoint_stage_observed]: once AGENT_CORE has mutated agent state at a
      durable checkpoint stage, a same-run retry (shrink included) must not
      fire. *)

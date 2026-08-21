@@ -69,8 +69,28 @@ val action_of_string : string -> action option
 val parse_action : string -> action option
 
 val all_actions : action list
-(** Every action in declaration order. SSOT for the schema/validator action
-    enum via [List.map action_to_string all_actions]. *)
+(** Every internal action in declaration order. Includes verifier-only ledger
+    commits and is the SSOT for the exhaustive transition matrix. *)
+
+module Public_action : sig
+  (** Lifecycle requests exposed by [masc_goal_transition]. Verifier verdicts
+      are deliberately absent: they enter through the application-owned typed
+      authority boundary, never through an MCP caller. *)
+  type t =
+    | Request_complete
+    | Pause
+    | Resume
+    | Block
+    | Unblock
+    | Drop
+    | Reopen
+
+  val to_action : t -> action
+  val to_string : t -> string
+  val of_string : string -> t option
+  val parse : string -> t option
+  val all : t list
+end
 
 (** What a transition request resolves to.
 

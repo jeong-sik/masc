@@ -329,15 +329,14 @@ let request_complete config goal_id =
 (* RFC-0387 stage 2: [request_complete] enters [Verifying]; [Completed] is
    reached only through the verifier's proof. *)
 let prove_complete config goal_id =
-  Tool_workspace.dispatch
-    (workspace_ctx config)
-    ~name:"masc_goal_transition"
-    ~args:
-      (`Assoc
-         [ "goal_id", `String goal_id
-         ; "action", `String "record_proof_proven"
-         ; "evidence", `String "observed by the test verifier"
-         ])
+  Some
+    (Workspace_goals.commit_verifier_decision
+       ~tool_name:"goal_verifier_commit"
+       ~start_time:0.
+       config
+       ~goal_id
+       ~decision:Workspace_goals.Proof_proven
+       ~evidence:"observed by the test verifier")
 ;;
 
 let test_goal_completion_accepts_goal_without_tasks () =

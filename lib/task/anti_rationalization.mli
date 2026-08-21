@@ -92,11 +92,6 @@ val review
     review). The goal verification lane (RFC-0387) passes its own templates —
     provider selection, failover, and the verdict channel are unchanged. *)
 
-val verifier_exact_lane_id : string
-(** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
-    lane id every completion-authority judgement call resolves through
-    (RFC-0361 D7(a)). *)
-
 (** Render the single prompt-registry SSOT. There is no inline fallback prompt;
     an error keeps the Task nonterminal. [~prompt_name] defaults to
     {!Prompt_names.verification}; other callers (RFC-0387 goal verification)

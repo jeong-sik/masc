@@ -10,15 +10,14 @@
     that does not decode refuses every mutation AND fails every read loudly —
     never a silent "not verified yet".
 
-    Stage 2 gate (this PR): [request_complete] moves Executing -> Verifying
-    and persists the durable proof request BEFORE the phase write; only
-    [record_proof_proven] (non-blank evidence mandatory) reaches Completed;
-    [record_proof_refuted] returns the goal to Executing with the refutation
-    preserved. A repeated [request_complete] on Verifying answers [Already]
-    and re-arms the proof request when the ledger lost it (the P0-2 wedge).
-    [record_criterion_*] verdicts are phase-neutral ledger commits, and a
-    [Criterion_unreachable] verdict blocks [request_complete] with a typed
-    conflict. The FSM is the only transition decider; the ledger records. *)
+    Stage 2 gate: [request_complete] moves Executing -> Verifying and persists
+    the durable proof request BEFORE the phase write. Public MCP callers cannot
+    name verifier commits. Only the application-owned typed verifier boundary
+    can prove/refute completion or criterion viability, with non-blank
+    evidence and fixed [verifier_exact] authority. A repeated
+    [request_complete] on Verifying answers [Already] and re-arms the proof
+    request when the ledger lost it (the P0-2 wedge). The FSM is the only
+    transition decider; the ledger records. *)
 
 open Alcotest
 open Masc
@@ -515,15 +514,25 @@ let transition ctx goal_id ?note ?evidence action =
   dispatch ctx ~name:"masc_goal_transition" args
 ;;
 
+let verifier_transition config goal_id decision evidence =
+  Workspace_goals.commit_verifier_decision
+    ~tool_name:"goal_verifier_commit"
+    ~start_time:0.
+    config
+    ~goal_id
+    ~decision
+    ~evidence
+;;
+
 let mark_criterion_viable ctx goal_id =
   ignore
     (must_succeed
-       "record_criterion_viable"
-       (transition
-          ctx
+       "typed criterion viable"
+       (verifier_transition
+          ctx.config
           goal_id
-          ~evidence:"criterion is measurable"
-          "record_criterion_viable"))
+          Workspace_goals.Criterion_viable
+          "criterion is measurable"))
 ;;
 
 let stored_phase config goal_id =
@@ -583,8 +592,8 @@ let test_request_complete_enters_verifying_with_proof_pending () =
    | _ -> fail "ledger must hold the durable proof request")
 ;;
 
-(* (b) Only the verifier's proven proof completes the goal, with mandatory
-   evidence; the verdict carries the typed authority. *)
+(* (b) Public callers cannot self-verify. Only the typed verifier boundary can
+   complete the goal, with mandatory evidence and fixed authority. *)
 let test_proof_proven_completes_with_authority_and_evidence () =
   with_workspace
   @@ fun config ->
@@ -592,28 +601,31 @@ let test_proof_proven_completes_with_authority_and_evidence () =
   let goal_id = create_goal ctx "Proof-gated goal" in
   mark_criterion_viable ctx goal_id;
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
-  (* Evidence is mandatory: absent and blank are the same validation error. *)
-  let missing =
-    must_fail "record_proof_proven without evidence"
-      (transition ctx goal_id "record_proof_proven")
+  let public_refusal =
+    must_fail "public record_proof_proven"
+      (transition
+         ctx
+         goal_id
+         ~evidence:"caller-provided evidence"
+         "record_proof_proven")
   in
-  check string "typed validation error" "validation_error"
-    (json_state missing [ "error_code" ]);
+  check string "verifier action is not in the public enum" "validation_error"
+    (json_state public_refusal [ "error_code" ]);
   let blank =
-    must_fail "record_proof_proven with blank evidence"
-      (transition ctx goal_id ~evidence:"   " "record_proof_proven")
+    must_fail "typed proof verdict with blank evidence"
+      (verifier_transition config goal_id Workspace_goals.Proof_proven "   ")
   in
   check string "typed validation error" "validation_error"
     (json_state blank [ "error_code" ]);
   check string "a refused verdict does not move the phase" "verifying"
     (stored_phase config goal_id);
   let completed =
-    must_succeed "record_proof_proven"
-      (transition
-         ctx
+    must_succeed "typed proof proven"
+      (verifier_transition
+         config
          goal_id
-         ~evidence:"metric observed at target"
-         "record_proof_proven")
+         Workspace_goals.Proof_proven
+         "metric observed at target")
   in
   check string "completed via proof" "completed"
     (json_state completed [ "goal"; "phase" ]);
@@ -621,7 +633,7 @@ let test_proof_proven_completes_with_authority_and_evidence () =
     (json_state completed [ "verification"; "completion"; "state" ]);
   check string "the evidence is on the verdict" "metric observed at target"
     (json_state completed [ "verification"; "completion"; "verdict"; "evidence" ]);
-  check string "the caller session is the typed authority" "planner"
+  check string "the caller cannot impersonate the typed authority" "verifier_exact"
     (json_state
        completed
        [ "verification"; "completion"; "verdict"; "authority"; "actor" ]);
@@ -641,13 +653,12 @@ let test_proof_refuted_returns_to_executing_with_reason () =
   mark_criterion_viable ctx goal_id;
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let refuted =
-    must_succeed "record_proof_refuted"
-      (transition
-         ctx
+    must_succeed "typed proof refuted"
+      (verifier_transition
+         config
          goal_id
-         ~evidence:"coverage run attached"
-         ~note:"metric moved under the claim"
-         "record_proof_refuted")
+         (Workspace_goals.Proof_refuted { reason = "metric moved under the claim" })
+         "coverage run attached")
   in
   check string "back to executing" "executing"
     (json_state refuted [ "goal"; "phase" ]);
@@ -708,9 +719,12 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
    | _ -> fail "the re-arm must be durable, not just reported");
   (* And the gate drains from there. *)
   let completed =
-    must_succeed "record_proof_proven"
-      (transition ctx goal_id ~evidence:"verified after re-arm"
-         "record_proof_proven")
+    must_succeed "typed proof proven"
+      (verifier_transition
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "verified after re-arm")
   in
   check string "the re-armed gate completes" "completed"
     (json_state completed [ "goal"; "phase" ])
@@ -724,13 +738,12 @@ let test_unreachable_criterion_blocks_request_complete () =
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Impossible goal" in
   let committed =
-    must_succeed "record_criterion_unreachable"
-      (transition
-         ctx
+    must_succeed "typed criterion unreachable"
+      (verifier_transition
+         config
          goal_id
-         ~evidence:"the named API does not exist"
-         ~note:"no such API exists"
-         "record_criterion_unreachable")
+         (Workspace_goals.Criterion_unreachable { reason = "no such API exists" })
+         "the named API does not exist")
   in
   check string "phase-neutral: still executing" "executing"
     (json_state committed [ "phase" ]);

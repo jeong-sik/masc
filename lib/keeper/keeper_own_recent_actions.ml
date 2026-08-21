@@ -14,7 +14,7 @@ type turn =
   }
 
 (* Sizing hint for the read window, not a bound on any row: how many calls a
-   turn typically makes. Measured on taskmaster 2026-08-16 over 932 calls --
+   turn typically makes. Measured on a live Keeper over 932 calls --
    median 8 per turn, p90 21. Reading short costs turns, never a partial turn:
    only the oldest group can be clipped by the window edge, and
    {!turns_of_rows} drops it. *)

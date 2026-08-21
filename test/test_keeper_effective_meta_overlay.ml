@@ -600,7 +600,7 @@ sandbox_profile = "docker"
 
 let test_keepalive_meta_selection_overlays_disk_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "taskmaster" in
+  let name = "fixture-keeper" in
   write_keeper_agent ~keepers_dir ~name "Coordinate the work.";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))

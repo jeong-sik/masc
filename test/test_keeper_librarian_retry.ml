@@ -712,7 +712,7 @@ let test_prompt_omits_tool_result_payload_and_has_one_message () =
 ;;
 
 (* The constraint category is scoped to rules something outside the agent
-   applies. Measured on the live workspace 2026-08-05: excluding taskmaster,
+   applies. Measured on the live workspace 2026-08-05: excluding fixture-keeper,
    12 of 25 stored facts were category constraint, and five of those were the
    agent's own scope decisions -- "unclaimed implementation tasks are outside
    the epsilon-reviewer's scope and should be ignored", "only intervening when

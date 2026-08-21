@@ -18,17 +18,18 @@ Every open issue in `masc` and `agent core` should be classifiable into one or m
 
 The rubric is applied two ways:
 
-1. GitHub labels `root-cause:{SSOT,TEL,BND,SIL,VAR,STR,DET}` are attached to each issue that matches one or more markers.
+1. The issue body declares `root: <value>[, <value>]` in its `masc-triage` block for each marker that matches;
+   the `Issue Taxonomy` workflow projects those onto `root/*` labels. The vocabulary and the
+   label colors live in `.github/issue-taxonomy.json`.
 2. Benchmark: `~/me/lab/keeper-benchmark/bookshelf/` seeds one bug per category and measures whether the Keeper agent detects, fixes, and self-classifies them.
 
-## The 7 Categories
+## The 8 Categories
 
 ### SSOT — Single Source of Truth Violation
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:SSOT` |
-| Color | `#aa0000` |
+| Label | `root/ssot` |
 | Marker | Same literal or constant appears in ≥2 sites AND at least one site does not go through `Env_config_runtime` / `Config.*` |
 | Example | `"127.0.0.1"` inlined in 6 files with one using a different host (`#8387`) |
 | Issue body triggers | "hardcoded", "drift", "duplicated in N files", "not using Env_config" |
@@ -37,8 +38,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:TEL` |
-| Color | `#0066cc` |
+| Label | `root/telemetry` |
 | Marker | A request path, state transition, or error branch exists without a corresponding metric / span / `correlation_id` propagation |
 | Example | `emit_task_activity ~correlation_id:_` signature exists but no caller wires a real value (`#7520`) |
 | Issue body triggers | "metric", "correlation_id", "OTel", "span", "observability gap" |
@@ -47,8 +47,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:BND` |
-| Color | `#ff6600` |
+| Label | `root/boundary` |
 | Marker | MASC-side code reimplements something agent core already provides: lifecycle, budget, retry, approval hook, context injector |
 | Example | `context_agent_core_sync` manually tracking token counts duplicates agent core context_injector |
 | Issue body triggers | "agent core 재구현", "lifecycle", "budget", "retry", "approval hook", "MASC-side reimplement" |
@@ -57,8 +56,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:SIL` |
-| Color | `#990066` |
+| Label | `root/silent` |
 | Marker | Error / unknown branch coerced to a default without caller signal: `try ... with _ -> default`, `match ... Error _ -> ""`, `Result.value ~default`, `_ -> Unknown → Some Default` |
 | Example | `timeout_s >= interval_s silently clamps across 3 components` (`#7695`) |
 | Issue body triggers | "silent", "fail-open", "swallow", "wildcard default" |
@@ -67,8 +65,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:VAR` |
-| Color | `#006633` |
+| Label | `root/variant` |
 | Marker | A `match` uses `| _ -> fallback` where the wildcard collapses a constructor added later; or a schema enum hand-rolled drifts from a Variant type |
 | Example | A schema enum is maintained separately from its typed variant and omits a constructor |
 | Issue body triggers | "variant miss", "match wildcard", "schema enum drift", "exhaustive", "new constructor" |
@@ -77,8 +74,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:STR` |
-| Color | `#cc6600` |
+| Label | `root/string` |
 | Marker | Control flow branches on `String.contains`, `Str.regexp`, or substring check where a structural parse exists |
 | Example | Title-similarity triage pairing PRs with issues produces 0/17 valid matches (2026-04-19 incident) |
 | Issue body triggers | "string match", "substring", "String.contains", "regex dispatch", "magic string" |
@@ -87,11 +83,19 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:DET` |
-| Color | `#333399` |
+| Label | `root/det` |
 | Marker | Code assumes a single input shape, a race-free ordering, or a stable LLM tool-call format without synchronization or parsing fallback |
 | Example | Admission queue lacks fd/memory saturation gate (`#7500`); shared `ref` counter without `Atomic.int` or `Mutex` |
 | Issue body triggers | "race", "concurrent", "deterministic assumption", "single input shape", "LLM tool-call non-determinism" |
+
+### NDT — Non-Determinism Not Embraced
+
+| Field | Content |
+|-------|---------|
+| Label | `root/ndt` |
+| Marker | A step whose outcome is not deterministic (provider call, network, scheduler) is treated as if it were: no retry, no fallback lane, no jitter, so one unlucky outcome becomes a stuck state |
+| Example | A single-candidate runtime lane makes failover a no-op; a keeper turn that ends on the first provider error |
+| Issue body triggers | "no retry", "no fallback", "single candidate", "stuck after one failure", "jitter" |
 
 ## Mapping from Prior Categorizations
 
@@ -117,7 +121,8 @@ For a new or existing issue:
 
 1. Read title + body first 800 chars.
 2. For each of the 7 triggers above, check marker match.
-3. Apply `root-cause:<CODE>` via `gh issue edit <N> --repo <repo> --add-label "root-cause:<CODE>"`.
+3. Put the matching value in the issue body's `masc-triage` block under `root:`. Do not add the label by hand;
+   the workflow reconciles labels from the block and will remove one that the block does not declare.
 4. If no marker matches, do not apply a default label — either the rubric is underspecified for this case (data for next iteration) or the issue is a pure feature request, not a root-cause fix.
 
 ## Benchmark Linkage

@@ -58,48 +58,55 @@ Status legend:
 
 ### Labels
 
-Each new issue should end with:
+Classification is declared in the issue body and projected onto labels. Nothing else sets them.
 
-- exactly one `type:*`
-- exactly one `area:*`
-- exactly one `target:*`
-- optional `release-blocker`
-- optional `product-gap`
-- temporary `triage-required` while the issue is missing one of the required planning labels
+````text
+```masc-triage
+kind: defect
+area: turn
+impact: breaks-continuity
+root: silent
+must-do: true
+```
+````
 
-Canonical label set:
+The vocabulary SSOT is `.github/issue-taxonomy.json`. The `Issue Taxonomy` workflow reads the block,
+validates every value against that file, and reconciles the labels. It never invents a label:
+if the repository drifts from the SSOT the run fails and names the missing labels.
+`APPLY=1 bash scripts/sync-issue-labels.sh` puts the repository back in line.
 
-| Group | Labels |
-|------|--------|
-| Type | `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs` |
-| Area | `area:workspace collaboration`, `area:supervised-execution`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental` |
-| Target | `target:now`, `target:next`, `target:later` |
-| Gates | `release-blocker`, `product-gap` |
-| Root cause | `root-cause:SSOT`, `root-cause:TEL`, `root-cause:BND`, `root-cause:SIL`, `root-cause:VAR`, `root-cause:STR`, `root-cause:DET` |
+| Axis | Cardinality | Values |
+|------|-------------|--------|
+| `kind` | exactly one | `defect` `gap` `capability` `erosion` `inquiry` |
+| `area` | exactly one | `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime` `transport` `dashboard` `connector` `observability` `persistence` `ci` |
+| `impact` | exactly one | `breaks-continuity` `breaks-collab` `blinds-operator` `degrades` `internal` |
+| `root` | zero or more | `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt` |
+| `must-do` | flag | `true` when the product promise is broken right now |
 
-`root-cause:*` is optional and applied per `docs/spec/16-root-cause-rubric.md`. Multiple labels are allowed: empirical sweep 2026-04-19 found 60% of issues match two or more categories (e.g. a boundary violation that also silently swallows errors). Unlike `type:*` / `area:*` / `target:*`, missing a `root-cause:*` label is not a triage violation — the rubric only applies when a structural marker matches.
+### Priority comes from impact, not from an assertion
 
-Triage defaults:
+`impact` is ordered, and that order is the priority order:
 
-- `target:now`
-  - current product promise is broken or untrustworthy
-- `target:next`
-  - advanced workflow improvement after the front door is reliable
-- `target:later`
-  - large extraction, long architecture cleanup, or speculative platform work
+1. `breaks-continuity` - turns stop, or a keeper cannot recall its own last ten turns
+2. `breaks-collab` - keepers stop reaching each other, or output lands where nobody reads it
+3. `blinds-operator` - it runs, but nobody can see it
+4. `degrades` - friction, performance, or accuracy
+5. `internal` - development flow only
+
+There is no separate priority or scheduling label. Severity is derived from which product failure the issue
+causes, so it can be argued about with evidence instead of asserted. A roadmap decides *when* work happens;
+a label decides *what is at stake*.
+
+`root` is optional and follows `docs/spec/16-root-cause-rubric.md`. Multiple values are expected:
+the 2026-04-19 sweep found 60% of issues match two or more categories, for example a boundary violation
+that also swallows errors. A missing `root` is not a triage violation; the rubric only applies when a
+structural marker actually matches.
 
 ### Issue intake
 
-Use issue forms, not blank issues, for normal product work.
-
-- `type:bug`
-  - broken behavior, regression, incorrect truth
-- `type:friction`
-  - usable but annoying or confusing workflow
-- `type:feature`
-  - new capability or missing affordance
-
-Mark `product-gap` when code exists but the product promise still should not be trusted.
+Humans file through the issue form; keepers file with `gh issue create`. Both produce the same fenced
+`masc-triage` block, so there is one format and one parser. An issue filed without the block gets a comment
+naming the expected shape, and no labels.
 
 ### PR rules
 
@@ -123,7 +130,7 @@ Each PR should link at least one issue and state which promise it affects:
 - while pre-1.0, `0.y.0` carries one promise train
 - `0.y.z` releases stabilize the current promise only
 - `1.0.0` stays reserved until the front-door promise is trustworthy without release-truth caveats
-- do not tag with open `release-blocker`
+- do not tag with open `must-do` issues
 - do not tag if version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`
 
 ## 6-8 Week Tracks

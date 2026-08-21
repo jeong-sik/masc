@@ -72,7 +72,7 @@ graph TB
 | `13-agent-core-integration.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Draft |
 | `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
 | `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |
-| `16-root-cause-rubric.md` | Root-Cause Rubric | 7-category taxonomy (SSOT/TEL/BND/SIL/VAR/STR/DET) for issue triage and Keeper benchmark | Reference |
+| `16-root-cause-rubric.md` | Root-Cause Rubric | Markers behind the `root/*` values declared in a `masc-triage` block | Reference |
 | `17-keeper-behavioral-regime.md` | Keeper Behavioral Regime | 7th FSM axis rules, `tool_aggregate` semantics, snapshot invariants | Reference |
 | `18-log-severity-taxonomy.md` | Log Severity Taxonomy | 4-level contract for `Log.{debug,info,warn,error}` callsites + anti-pattern catalog + lint rules | Reference |
 

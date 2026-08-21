@@ -1,0 +1,179 @@
+name: Issue Taxonomy
+
+# Applies taxonomy labels from the masc-triage declaration block in the issue body.
+# The vocabulary SSOT is .github/issue-taxonomy.json. This workflow never creates labels.
+# labeled/unlabeled are not triggers: labelling would re-enter this workflow and storm.
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Single issue number. Leave empty with scope=open to sweep open issues.
+        required: false
+        type: string
+      scope:
+        required: false
+        default: single
+        type: choice
+        options: [single, open]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-taxonomy-${{ github.event.issue.number || inputs.issue_number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    name: Apply declared taxonomy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            .github/issue-taxonomy.json
+            .github/scripts/issue-taxonomy-core.cjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/github-script@v9
+        env:
+          DISPATCH_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          DISPATCH_SCOPE: ${{ inputs.scope }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const SSOT = JSON.parse(fs.readFileSync('.github/issue-taxonomy.json', 'utf8'));
+            const { createIssueTaxonomyCore } = require('./.github/scripts/issue-taxonomy-core.cjs');
+            const taxonomy = createIssueTaxonomyCore(SSOT);
+            const {
+              knownLabels,
+              orderedValues,
+              severityOrderErrors,
+              parseDeclaration,
+              resolve,
+              managed,
+              reconciliationPlan,
+            } = taxonomy;
+            const LANG = SSOT.declaration_block_language;
+            const MARKER = '<!-- masc-taxonomy-gate -->';
+
+            const repoLabels = new Set(
+              (await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 }))
+                .map((l) => l.name),
+            );
+            const missing = [...knownLabels].filter((l) => !repoLabels.has(l));
+            if (missing.length) {
+              core.setFailed(
+                `Repo labels drifted from the SSOT. Missing: ${missing.join(', ')}. ` +
+                `Run scripts/sync-issue-labels.sh, then re-run.`,
+              );
+              return;
+            }
+
+            // severity_order is the priority order the docs quote. Keep it honest against the
+            // value set it orders, or the two drift inside one file.
+            const severityErrors = severityOrderErrors();
+            if (severityErrors.length) {
+              core.setFailed(severityErrors.join('\n'));
+              return;
+            }
+
+            async function commentOnce(issue_number, body) {
+              const existing = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number, per_page: 100,
+              });
+              const mine = existing.find((c) => (c.body || '').includes(MARKER));
+              const payload = `${MARKER}\n${body}`;
+              if (!mine) {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body: payload });
+              } else if ((mine.body || '').trim() !== payload.trim()) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: payload });
+              }
+            }
+
+            function template() {
+              const lines = Object.entries(SSOT.axes).map(([ax, spec]) => {
+                const opts = orderedValues(spec).join(' | ');
+                return `${ax}: ${spec.required ? opts : '(optional) ' + opts}`;
+              });
+              for (const flag of Object.keys(SSOT.flags)) lines.push(`${flag}: true or false`);
+              return ['```' + LANG, ...lines, '```'].join('\n');
+            }
+
+            // Labels claim a classification. When the body does not declare one, or declares
+            // one we cannot read, the labels must not keep claiming it.
+            async function clearManaged(issue_number, current) {
+              const stale = current.filter(managed);
+              for (const label of stale)
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: label })
+                  .catch((e) => { if (e.status !== 404) throw e; });
+              return stale;
+            }
+
+            async function apply(issue) {
+              const issue_number = issue.number;
+              if (issue.pull_request) return { issue_number, skipped: 'pull request' };
+              const current = issue.labels.map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+
+              const decl = parseDeclaration(issue.body);
+              const reject = async (why) => {
+                const cleared = await clearManaged(issue_number, current);
+                await commentOnce(issue_number, `${why}\n\n${template()}\n\nValue meanings live in \`.github/issue-taxonomy.json\`.`);
+                return { issue_number, declared: false, cleared };
+              };
+              if (!decl.present) return reject('No taxonomy declaration block, so no labels were applied.');
+              if (decl.error) return reject(`Could not read the declaration block: ${decl.error}`);
+
+              const { add, errors } = resolve(decl.fields);
+              if (errors.length) return reject(`The declaration block does not match the vocabulary.\n\n- ${errors.join('\n- ')}`);
+
+              const target = new Set(add);
+              const { toRemove, toAdd } = reconciliationPlan(current, target);
+
+              for (const label of toRemove)
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: label })
+                  .catch((e) => { if (e.status !== 404) throw e; });
+              if (toAdd.length)
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: toAdd });
+
+              // A run that changed nothing says nothing. Sweeps would otherwise notify every subscriber.
+              if (toAdd.length || toRemove.length)
+                await commentOnce(issue_number, `Taxonomy applied: ${[...target].sort().join(', ')}`);
+              return { issue_number, declared: true, added: toAdd, removed: toRemove };
+            }
+
+            const dispatchNumber = (process.env.DISPATCH_ISSUE_NUMBER || '').trim();
+            const dispatchScope = (process.env.DISPATCH_SCOPE || 'single').trim();
+
+            let issues = [];
+            if (context.payload.issue?.number) {
+              const { data } = await github.rest.issues.get({ owner, repo, issue_number: context.payload.issue.number });
+              issues = [data];
+            } else if (dispatchNumber) {
+              const n = Number(dispatchNumber);
+              if (!Number.isInteger(n) || n <= 0) { core.setFailed(`invalid issue number: ${dispatchNumber}`); return; }
+              const { data } = await github.rest.issues.get({ owner, repo, issue_number: n });
+              issues = [data];
+            } else if (dispatchScope === 'open') {
+              // listForRepo already carries body and labels; re-fetching each issue would
+              // spend the token's hourly budget before the sweep finishes.
+              issues = (await github.paginate(github.rest.issues.listForRepo, {
+                owner, repo, state: 'open', per_page: 100,
+              })).filter((i) => !i.pull_request);
+            } else {
+              core.setFailed('workflow_dispatch requires issue_number or scope=open.');
+              return;
+            }
+
+            let changed = 0;
+            for (const issue of issues) {
+              const r = await apply(issue);
+              if (r.added?.length || r.removed?.length || r.cleared?.length) changed++;
+              core.info(JSON.stringify(r));
+            }
+            core.info(`scanned ${issues.length}, changed ${changed}`);

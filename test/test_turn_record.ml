@@ -49,8 +49,8 @@ let sample_record () : Turn_record.t =
       [ Ids.Execution_id.of_string "exec-1781200000000-0001"
       ; Ids.Execution_id.of_string "exec-1781200000001-0002"
       ]
-  ; keeper = "sangsu"
-  ; agent_name = "sangsu-agent"
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
   ; generation = 12
   ; turn_kind = Turn_record.Direct
   ; trace_id = "trace-1780648779957-00000"

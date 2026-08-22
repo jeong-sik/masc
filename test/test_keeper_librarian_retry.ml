@@ -712,10 +712,10 @@ let test_prompt_omits_tool_result_payload_and_has_one_message () =
 ;;
 
 (* The constraint category is scoped to rules something outside the agent
-   applies. Measured on the live workspace 2026-08-05: excluding taskmaster,
+   applies. Measured on the live workspace 2026-08-05: excluding fixture-keeper,
    12 of 25 stored facts were category constraint, and five of those were the
    agent's own scope decisions -- "unclaimed implementation tasks are outside
-   the code-reviewer's scope and should be ignored", "only intervening when
+   the epsilon-reviewer's scope and should be ignored", "only intervening when
    directly mentioned", "does not autonomously claim backlog tasks". None was
    set by an operator; each was a turn's operating judgment promoted to a
    permanent boundary, and the same backlog held 56 cancelled tasks that no
@@ -755,7 +755,7 @@ let test_constraint_category_excludes_self_imposed_scope () =
       (String_util.contains_substring user_text
          "does not earn retention by already being there");
     (* Scoping the omit rule to the constraint bullet left the category itself
-       as the escape hatch. Observed live 2026-08-05 within one hour: kidsnote's
+       as the escape hatch. Observed live 2026-08-05 within one hour: one Keeper's
        store went from revision 129 carrying [constraint] "standing-by policy,
        only intervening ... when directly mentioned" to revision 131 carrying
        [preference] "Skip polling on non-scheduled wakes, acting only when the
@@ -776,10 +776,10 @@ let test_constraint_category_excludes_self_imposed_scope () =
       (String_util.contains_substring user_text
          "drop a stored memory that no external rule enforces but that still \
           narrows what the agent takes on");
-    (* Measured 2026-08-05. kidsnote's operator instructions say "@kidsnote로
+    (* Measured 2026-08-05. That Keeper's operator instructions say "@<keeper>로
        요청받으면 같은 post_id에 구체적인 댓글을 남긴다" -- when to act. The
        stored memory reads "standing-by policy, only intervening in board posts
-       or tasks when directly mentioned (@kidsnote) or assigned" -- the
+       or tasks when directly mentioned (@<keeper>) or assigned" -- the
        inverse, with an exclusivity the operator never wrote. The category
        rules do not catch it because it looks like operator policy, which is
        the family they preserve. This is about the shape of the statement, not

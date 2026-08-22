@@ -88,7 +88,7 @@ let synthesize_summary_from_siblings args =
    outcome of work it did. Pure ownership transitions (Claim, Start)
    have no outcome to summarize yet, so requiring a summary just makes
    the LLM either invent one (degrading audit signal) or fail the call
-   entirely (the 2026-05-17 nick0cave production case).
+   entirely (the 2026-05-17 production case).
 
    Exit-class actions:
      Cancel / Release / Submit_for_verification

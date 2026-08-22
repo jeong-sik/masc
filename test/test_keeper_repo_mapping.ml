@@ -92,8 +92,8 @@ let test_malformed_top_level_mapping_is_explicit () =
 
 let test_wildcard_scope_is_parsed_at_boundary () =
   with_temp_base_path (fun base_path ->
-    write_mapping_raw base_path "[mapping.executor]\nrepositories = [\"*\"]\n";
-    let mapping = load_mapping base_path "executor" in
+    write_mapping_raw base_path "[mapping.omega]\nrepositories = [\"*\"]\n";
+    let mapping = load_mapping base_path "omega" in
     match mapping.repository_scope with
     | Repo_manager_types.All_repositories -> ()
     | Repo_manager_types.Selected_repositories _ ->
@@ -102,16 +102,16 @@ let test_wildcard_scope_is_parsed_at_boundary () =
 
 let test_save_creates_directory_and_replaces_same_keeper () =
   with_temp_base_path (fun base_path ->
-    save_mapping base_path "executor" [ "masc"; "agent_core" ];
+    save_mapping base_path "omega" [ "masc"; "agent_core" ];
     save_mapping base_path "reviewer" [ "docs" ];
-    save_mapping base_path "executor" [ "masc" ];
+    save_mapping base_path "omega" [ "masc" ];
     let mappings = Keeper_repo_mapping.load_all ~base_path |> Result.get_ok in
     Alcotest.(check int) "one row per keeper" 2 (List.length mappings);
-    let executor = load_mapping base_path "executor" in
+    let mapping = load_mapping base_path "omega" in
     Alcotest.(check (list string))
       "latest preference"
       [ "masc" ]
-      executor.repository_ids)
+      mapping.repository_ids)
 ;;
 
 let () =

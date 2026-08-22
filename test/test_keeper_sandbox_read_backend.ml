@@ -934,7 +934,7 @@ let test_sandbox_container_label_args_include_managed_ttl () =
     Keeper_sandbox_runtime.docker_label_args
       ~ttl_sec:90.0
       ~base_path:"/tmp/masc"
-      ~keeper_name:"issue-king"
+      ~keeper_name:"kappa-keeper"
       ~container_kind:"managed"
       ~network_label:"inherit" ()
   in

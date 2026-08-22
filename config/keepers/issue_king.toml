@@ -1,3 +1,4 @@
+# test-contract: neutral-local-inherit
 [keeper]
 autoboot_enabled = true
 sandbox_profile = "local"

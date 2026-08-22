@@ -58,19 +58,19 @@ let test_polling_floor () =
 let test_autoboot_warmup_jitter_is_bounded_not_linear () =
   let names =
     [
-      "analyst";
-      "executor";
-      "issue_king";
+      "delta";
+      "omega";
+      "kappa_keeper";
       "janitor";
-      "masc-improver";
-      "nick0cave";
-      "qa-king";
-      "ramarama";
-      "sangsu";
-      "scholar";
-      "taskmaster";
-      "tech_glutton";
-      "velvet-hammer";
+      "omicron-improver";
+      "theta0";
+      "mu-king";
+      "nu";
+      "alpha";
+      "iota";
+      "fixture-keeper";
+      "pi_glutton";
+      "xi-hammer";
       "verifier";
     ]
   in
@@ -106,7 +106,7 @@ let test_warmup_hash_pinned_cross_platform () =
   check int "verifier hash mod 100 (Int32 djb2)" 25 (warmup "verifier");
   check int "designer hash mod 100 (Int32 djb2)" 74 (warmup "designer");
   check int "developer hash mod 100 (Int32 djb2)" 15 (warmup "developer");
-  check int "analyst hash mod 100 (Int32 djb2)" 73 (warmup "analyst");
+  check int "delta hash mod 100 (Int32 djb2)" 3 (warmup "delta");
   check int "janitor hash mod 100 (Int32 djb2)" 4 (warmup "janitor")
 
 let test_autoboot_warmup_is_order_independent () =

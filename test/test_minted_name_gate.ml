@@ -48,7 +48,7 @@ let test_resolved_external_never_transient_by_shape () =
     [
       "alice";
       "gemini";
-      "keeper-sangsu-agent";
+      "keeper-alpha-agent";
       "admin-board-keeper";
       "agent-foo";
       "role-swift-fox";

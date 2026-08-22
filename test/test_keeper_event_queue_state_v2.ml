@@ -496,7 +496,7 @@ let test_durable_peek_ack_restart () =
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
 ;;
 
-(* taskmaster, 2026-08-22: two Immediate completion_authority_rejected
+(* Observed 2026-08-22: two Immediate completion_authority_rejected
    stimuli sat at queue_index 41 and 48 behind forty Normal entries because
    enqueue only appended. Urgency is a property of the pending list. *)
 let test_immediate_arrival_precedes_pending_normal_entries () =

@@ -255,9 +255,9 @@ let test_error_json_wire_shape () =
     (json |> U.member "error" |> U.to_string)
 
 let test_error_json_unknown_keeper_includes_name () =
-  let json = Channel_gate.error_json "unknown keeper: rondo" in
+  let json = Channel_gate.error_json "unknown keeper: beta" in
   check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
-  check string "error contains keeper name" "unknown keeper: rondo"
+  check string "error contains keeper name" "unknown keeper: beta"
     (json |> U.member "error" |> U.to_string)
 
 let () =

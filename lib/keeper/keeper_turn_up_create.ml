@@ -106,7 +106,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
                   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
                   let bundle_paths =
-                    (* Surface masc-improver/sangsu sandbox boot
+                    (* Surface per-Keeper sandbox boot
                        silent-failure (2026-05-05).  Keeper_fs.ensure_dir
                        raises on filesystem error; the previous [ignore]
                        discarded it.  Now we log + emit a Otel_metric_store

@@ -74,7 +74,7 @@ let keeper_fleet_messages_max () : int =
 
 (* How many of the keeper's own past turns are replayed as actions. The default
    is the depth the product states a keeper must not lose ("10턴 전에 한 자신의
-   발화나 행동"), and it fits: measured on taskmaster 2026-08-16, a turn renders
+   발화나 행동"), and it fits the measured fleet distribution: a turn renders
    at a median 1.6 KB, so ten turns add ~16 KB to a prompt that was assembling
    5.8 KB against a 131 KB runtime cap. *)
 let keeper_own_recent_turns_max_rp =

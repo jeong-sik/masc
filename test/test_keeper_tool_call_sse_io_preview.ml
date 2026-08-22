@@ -87,7 +87,7 @@ let test_sensitive_named_tool_preserves_redacted_io () =
 let test_tool_call_event_uses_canonical_disposition () =
   let event =
     Keeper_tools_agent_core_handler_telemetry.keeper_tool_call_event_json
-      ~keeper_name:"sangsu"
+      ~keeper_name:"alpha"
       ~tool_name:"keeper_file_write"
       ~duration_ms:12
       ~disposition:(Tool_result.Deferred ())

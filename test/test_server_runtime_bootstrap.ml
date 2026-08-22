@@ -1228,8 +1228,8 @@ let test_otel_exporter_setup_failure_is_soft () =
     (Otel_spans.is_exporter_active ());
   Otel_spans.shutdown ~enabled:true ()
 
-let make_keeper_meta_json ?(name = "sangsu")
-    ?(trace_id = "trace-sangsu-live")
+let make_keeper_meta_json ?(name = "alpha")
+    ?(trace_id = "trace-alpha-live")
     ?(updated_at = "2026-03-29T10:36:57Z") () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -1244,8 +1244,8 @@ let make_keeper_meta_json ?(name = "sangsu")
   | Ok meta -> Keeper_meta_json.meta_to_json meta |> Yojson.Safe.pretty_to_string
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
-let make_keeper_meta ?(paused = false) ?(name = "sangsu")
-    ?(trace_id = "trace-sangsu-live")
+let make_keeper_meta ?(paused = false) ?(name = "alpha")
+    ?(trace_id = "trace-alpha-live")
     ?(updated_at = "2026-03-29T10:36:57Z") () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -1748,7 +1748,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
-          (make_keeper_meta ~name:"masc-improver" ~trace_id:"trace-masc-improver" ());
+          (make_keeper_meta ~name:"omicron-improver" ~trace_id:"trace-omicron-improver" ());
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"operator" ~trace_id:"trace-operator" ());
         let json =
@@ -1776,14 +1776,14 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
           (json |> member "materializable_configured_keeper_names" |> to_list
            |> List.map to_string);
         Alcotest.(check (list string)) "persisted meta includes disabled keeper"
-          [ "masc-improver"; "operator" ]
+          [ "omicron-improver"; "operator" ]
           (json |> member "persisted_meta_names" |> to_list |> List.map to_string);
         Alcotest.(check (list string)) "configured without meta"
           [ "mad-improver" ]
           (json |> member "configured_without_meta_names" |> to_list
            |> List.map to_string);
         Alcotest.(check (list string)) "meta without config"
-          [ "masc-improver" ]
+          [ "omicron-improver" ]
           (json |> member "meta_without_config_names" |> to_list
            |> List.map to_string);
         Alcotest.(check string) "drift next action"
@@ -1891,7 +1891,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
-      (Filename.concat (Filename.concat config_root "keepers") "executor.toml")
+      (Filename.concat (Filename.concat config_root "keepers") "omega.toml")
       "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -1905,7 +1905,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
         Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
-          make_keeper_meta ~name:"executor" ~trace_id:"trace-executor" ()
+          make_keeper_meta ~name:"omega" ~trace_id:"trace-omega" ()
         in
         write_keeper_meta_exn config executor;
         let task =
@@ -1968,7 +1968,7 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
   with_temp_dir "health-active-task-owner-executable-alias" (fun dir ->
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
-    List.iter (write_config_root_keeper_toml config_root) [ "executor"; "executor-stale" ];
+    List.iter (write_config_root_keeper_toml config_root) [ "omega"; "omega-stale" ];
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -1981,13 +1981,13 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
         Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
-          make_keeper_meta ~name:"executor" ~trace_id:"trace-executor" ()
+          make_keeper_meta ~name:"omega" ~trace_id:"trace-omega" ()
         in
         let stale_executor =
           {
             (make_keeper_meta
-               ~name:"executor-stale"
-               ~trace_id:"trace-executor-stale"
+               ~name:"omega-stale"
+               ~trace_id:"trace-omega-stale"
                ())
             with
             Keeper_meta_contract.agent_name = executor.agent_name;
@@ -4575,7 +4575,7 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_basepath_keeper_toml dir "masc-improver";
+      write_basepath_keeper_toml dir "omicron-improver";
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
@@ -4594,15 +4594,15 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
         | _ -> Alcotest.fail "missing internal keeper token after startup sync"
       in
       let raw_token_path =
-        Filename.concat (Auth.auth_dir dir) "keeper-masc-improver-agent.token"
+        Filename.concat (Auth.auth_dir dir) "keeper-omicron-improver-agent.token"
       in
       let raw_token = String.trim (read_file raw_token_path) in
       let credential =
-        match Auth.load_credential dir "keeper-masc-improver-agent" with
+        match Auth.load_credential dir "keeper-omicron-improver-agent" with
         | Some cred -> cred
         | None ->
             Alcotest.fail
-              "missing keeper-masc-improver-agent credential after startup sync"
+              "missing keeper-omicron-improver-agent credential after startup sync"
       in
       Alcotest.(check bool) "internal keeper token hash persisted" true
         (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
@@ -4611,12 +4611,12 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       Alcotest.(check bool) "keeper bearer separated from internal token" false
         (String.equal raw_token internal_raw_token);
       match
-        Auth.verify_token dir ~agent_name:"keeper-masc-improver-agent"
+        Auth.verify_token dir ~agent_name:"keeper-omicron-improver-agent"
           ~token:raw_token
       with
       | Ok alias_cred ->
           Alcotest.(check string) "keeper credential resolves exact agent"
-            "keeper-masc-improver-agent" alias_cred.agent_name
+            "keeper-omicron-improver-agent" alias_cred.agent_name
       | Error err ->
           Alcotest.failf "bootable keeper token should verify exactly: %s"
             (Masc_domain.masc_error_to_string err))
@@ -4627,8 +4627,8 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_basepath_keeper_toml dir "analyst";
-      write_basepath_keeper_toml dir "executor";
+      write_basepath_keeper_toml dir "delta";
+      write_basepath_keeper_toml dir "omega";
       let shared_raw_token = "shared-keeper-bootstrap-token" in
       let seed agent_name =
         match
@@ -4643,8 +4643,8 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
             Alcotest.failf "failed to seed shared credential for %s: %s"
               agent_name (Masc_domain.masc_error_to_string err)
       in
-      seed "keeper-analyst-agent";
-      seed "keeper-executor-agent";
+      seed "keeper-delta-agent";
+      seed "keeper-omega-agent";
       Alcotest.(check int) "seeded one duplicate group"
         1 (List.length (Auth.audit_token_uniqueness dir));
       Eio_main.run @@ fun env ->
@@ -4659,21 +4659,21 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
       in
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       Server_runtime_bootstrap.sync_bootable_keeper_credentials state;
-      let analyst =
-        match Auth.load_credential dir "keeper-analyst-agent" with
+      let delta =
+        match Auth.load_credential dir "keeper-delta-agent" with
         | Some cred -> cred
-        | None -> Alcotest.fail "missing keeper-analyst-agent credential"
+        | None -> Alcotest.fail "missing keeper-delta-agent credential"
       in
       let executor =
-        match Auth.load_credential dir "keeper-executor-agent" with
+        match Auth.load_credential dir "keeper-omega-agent" with
         | Some cred -> cred
-        | None -> Alcotest.fail "missing keeper-executor-agent credential"
+        | None -> Alcotest.fail "missing keeper-omega-agent credential"
       in
       Alcotest.(check bool) "boot repair made keeper tokens unique" false
-        (String.equal analyst.token executor.token);
+        (String.equal delta.token executor.token);
       Alcotest.(check int) "audit clean after boot repair"
         0 (List.length (Auth.audit_token_uniqueness dir));
-      [ "keeper-analyst-agent"; "keeper-executor-agent" ]
+      [ "keeper-delta-agent"; "keeper-omega-agent" ]
       |> List.iter (fun agent_name ->
              let raw_token_path =
                Filename.concat (Auth.auth_dir dir) (agent_name ^ ".token")

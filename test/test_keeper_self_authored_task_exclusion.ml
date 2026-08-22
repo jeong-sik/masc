@@ -4,7 +4,7 @@
     a Keeper whose response to "an unclaimed task exists" is to create a
     routing or report task emits a new unclaimed Todo authored by itself, which
     re-satisfies the same trigger on the next observation. Observed live on
-    2026-07-20: keeper "taskmaster" authored 367 of the active tasks, 272 of
+    2026-07-20: keeper "fixture-keeper" authored 367 of the active tasks, 272 of
     them the same four "Route g0700 #N" templates re-emitted once per iteration
     (#28..#90), none ever claimed since 2026-07-09. *)
 
@@ -44,31 +44,31 @@ let task ?created_by ?(task_status = Masc_domain.Todo) id : Masc_domain.task =
 ;;
 
 (* [created_by] carries the keeper handle ([meta.name]), which is what the live
-   backlog records ("taskmaster"), not the agent name. *)
+   backlog records ("fixture-keeper"), not the agent name. *)
 let test_own_todo_is_self_authored () =
-  let meta = make_meta "taskmaster" in
+  let meta = make_meta "fixture-keeper" in
   Alcotest.(check bool)
     "a task authored by this keeper is self-authored"
     true
     (WOI.task_is_self_authored_todo
        ~meta
-       (task ~created_by:"taskmaster" "task-1"))
+       (task ~created_by:"fixture-keeper" "task-1"))
 ;;
 
 let test_other_keeper_task_is_not_self_authored () =
-  let meta = make_meta "taskmaster" in
+  let meta = make_meta "fixture-keeper" in
   Alcotest.(check bool)
     "a task authored by another keeper is not self-authored"
     false
     (WOI.task_is_self_authored_todo
        ~meta
-       (task ~created_by:"executor" "task-2"))
+       (task ~created_by:"omega" "task-2"))
 ;;
 
 (* An unattributed task has no known author, so it must stay claimable rather
    than being silently withheld from everyone. *)
 let test_unattributed_task_is_not_self_authored () =
-  let meta = make_meta "taskmaster" in
+  let meta = make_meta "fixture-keeper" in
   Alcotest.(check bool)
     "a task with no created_by is never excluded"
     false
@@ -76,23 +76,23 @@ let test_unattributed_task_is_not_self_authored () =
 ;;
 
 (* The agent name must not be mistaken for the author key: the live backlog
-   stores "taskmaster", never "keeper-taskmaster-agent". Matching on the agent
+   stores "fixture-keeper", never "keeper-fixture-agent". Matching on the agent
    name would silently exclude nothing and leave the loop intact. *)
 let test_agent_name_is_not_the_author_key () =
-  let meta = make_meta "taskmaster" in
+  let meta = make_meta "fixture-keeper" in
   Alcotest.(check bool)
     "agent-name-shaped author does not match the keeper handle"
     false
     (WOI.task_is_self_authored_todo
        ~meta
-       (task ~created_by:"keeper-taskmaster-agent" "task-4"))
+       (task ~created_by:"keeper-fixture-agent" "task-4"))
 ;;
 
 let test_self_authored_verification_remains_eligible () =
-  let meta = make_meta "taskmaster" in
+  let meta = make_meta "fixture-keeper" in
   let task_status =
     Masc_domain.AwaitingVerification
-      { assignee = "executor"
+      { assignee = "omega"
       ; started_at = "2026-07-20T00:00:00Z"
       ; submitted_at = "2026-07-20T01:00:00Z"
       ; verification_id = "verification-1"
@@ -103,7 +103,7 @@ let test_self_authored_verification_remains_eligible () =
     false
     (WOI.task_is_self_authored_todo
        ~meta
-       (task ~created_by:"taskmaster" ~task_status "task-5"))
+       (task ~created_by:"fixture-keeper" ~task_status "task-5"))
 ;;
 
 let () =

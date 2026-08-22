@@ -23,7 +23,7 @@ let test_keeper_prefix () =
 
 let test_non_match () =
   check bool "different agent does not match" false
-    (m ~agent_name:"albini" "keeper-taskmaster-agent");
+    (m ~agent_name:"albini" "keeper-fixture-agent");
   check bool "empty candidate does not match" false (m ~agent_name:"albini" "")
 
 let test_exact_per_form_not_substring () =

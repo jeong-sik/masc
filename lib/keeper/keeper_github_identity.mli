@@ -93,6 +93,11 @@ val login_argv : hostname:string -> string list
 val logout_argv : hostname:string -> string list
 val login_env : config:Workspace.config -> keeper_name:string -> (string array, string) result
 
+val run_inherited : timeout_sec:float -> env:string array -> string list -> Unix.process_status
+(** Run a subprocess with inherited stdio, bounded by [timeout_sec]. On
+    timeout the child is SIGKILLed and reaped, and [Unix.WEXITED 124] is
+    returned (matching the [with_unix_capture] convention). *)
+
 val observe :
   config:Workspace.config -> keeper_name:string -> hostname:string -> (observation, string) result
 (** [effective] verifies projected credentials with the host process only.

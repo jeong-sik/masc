@@ -27,7 +27,8 @@ let test_keeps_latest_reply () =
            rows);
       check bool (Printf.sprintf "%d columns bounds every plain row" cols) true
         (List.for_all
-           (fun (row : Layout.row) -> String.length row.text <= inner)
+           (fun (row : Layout.row) ->
+             Layout.display_width row.text <= inner)
            rows))
     [ 20; 40; 80 ]
 
@@ -49,12 +50,32 @@ let test_keeps_newest_metadata_and_bytes () =
         (String.starts_with ~prefix:"[12:34:56]" metadata.text)
   | [] -> fail "oversized newest entry rendered no rows"
 
-let test_exact_width_and_utf8_fit () =
+let test_terminal_cell_width_and_fit () =
+  List.iter
+    (fun (text, expected) ->
+      check int (Printf.sprintf "display width of %S" text) expected
+        (Layout.display_width text))
+    [ "", 0
+    ; "A", 1
+    ; "é", 1
+    ; "e\xCC\x81", 1
+    ; "한", 2
+    ; "🙂", 2
+    ; "Aé한🙂", 6
+    ; "\x1B[31m한\x1B[0m", 2
+    ];
   check string "exact-width text is unchanged" "12345"
     (Layout.fit_width "12345" 5);
   let fitted = Layout.fit_width "가나" 5 in
-  check int "truncated UTF-8 fills the byte budget" 5 (String.length fitted);
-  check bool "truncated UTF-8 stays valid" true (String.is_valid_utf_8 fitted)
+  check string "wide text is padded by cells" "가나 " fitted;
+  check int "fitted UTF-8 fills the cell budget" 5
+    (Layout.display_width fitted);
+  check bool "fitted UTF-8 stays valid" true (String.is_valid_utf_8 fitted);
+  check string "wide scalar is never split" "가~"
+    (Layout.fit_width "가나" 3);
+  check string "truncated ANSI style is reset before the marker"
+    "\x1B[31m한\x1B[0m~"
+    (Layout.fit_width "\x1B[31m한글\x1B[0m" 3)
 
 let test_utf8_scalar_input_contract () =
   List.iter
@@ -103,6 +124,68 @@ let test_backspace_removes_one_utf8_scalar () =
   check string "invalid buffer is preserved" invalid
     (Layout.drop_last_utf8_scalar invalid)
 
+let test_input_viewport_keeps_latest_complete_scalars () =
+  let viewport max_cells input = Layout.input_viewport ~max_cells input in
+  check string "short input stays complete" "abc" (viewport 8 "abc");
+  check string "exact boundary stays complete" "abcdefgh"
+    (viewport 8 "abcdefgh");
+  check string "ASCII overflow keeps the newest tail" "~cdefghi"
+    (viewport 8 "abcdefghi");
+  check string "mixed-width overflow keeps complete scalars" "~한🙂Z"
+    (viewport 6 "Aé한🙂Z");
+  check string "one-cell viewport keeps omission marker" "~"
+    (viewport 1 "한");
+  check string "detached combining mark is not rendered" "~"
+    (viewport 2 "A한\xCC\x81");
+  let before = "abcdefghi" in
+  let after = Layout.drop_last_utf8_scalar before in
+  check string "overflow before backspace" "~cdefghi" (viewport 8 before);
+  check string "backspace immediately reveals the new boundary" "abcdefgh"
+    (viewport 8 after);
+  let mixed = "abcdef한🙂" in
+  check string "mixed tail before backspace" "~f한🙂" (viewport 6 mixed);
+  check string "mixed tail after scalar backspace" "~def한"
+    (viewport 6 (Layout.drop_last_utf8_scalar mixed))
+
+let test_input_cursor_uses_visible_terminal_cells () =
+  let column terminal_cols input =
+    Layout.input_cursor_column ~terminal_cols ~input
+  in
+  check int "empty input starts after the prompt" 7 (column 80 "");
+  check int "mixed UTF-8 input advances by cells" 13
+    (column 80 "Aé한🙂");
+  check int "exact boundary reaches the pre-border spacer" 79
+    (column 80 (String.make 72 'a'));
+  check int "visible overflow remains in the pre-border spacer" 79
+    (column 80 (Layout.input_viewport ~max_cells:72 (String.make 100 'a')));
+  check int "tiny terminal cursor stays positive" 3 (column 4 "");
+  let row terminal_rows history_height status_rows =
+    Layout.input_cursor_row ~terminal_rows ~history_height ~status_rows
+  in
+  check int "normal input row" 25 (row 30 15 5);
+  check int "tiny viewport clamps the row" 4 (row 4 0 0);
+  check int "excess status rows clamp to the terminal" 30 (row 30 20 20)
+
+let test_history_wraps_by_cells_without_losing_bytes () =
+  let body = "A한🙂B" in
+  let rows =
+    Layout.visible_rows ~inner_width:6 ~height:10
+      [ entry Layout.Keeper "k" "r" body ]
+  in
+  let body_rows =
+    rows
+    |> List.filteri (fun index _ -> index > 0)
+    |> List.map (fun (row : Layout.row) -> row.text)
+  in
+  check (list string) "wide scalars wrap at the cell boundary"
+    [ "  A한"; "  🙂B" ] body_rows;
+  let reconstructed =
+    body_rows
+    |> List.map (fun text -> String.sub text 2 (String.length text - 2))
+    |> String.concat ""
+  in
+  check string "cell wrapping preserves body bytes" body reconstructed
+
 let test_trailing_newlines_do_not_hide_reply () =
   let entries =
     [ entry Layout.User "you" "tui-..aaaaaaaa" (String.make 300 'u')
@@ -135,12 +218,18 @@ let () =
             test_keeps_latest_reply
         ; test_case "keeps newest metadata and body bytes" `Quick
             test_keeps_newest_metadata_and_bytes
-        ; test_case "exact width and UTF-8 fit" `Quick
-            test_exact_width_and_utf8_fit
+        ; test_case "terminal cell width and UTF-8 fit" `Quick
+            test_terminal_cell_width_and_fit
         ; test_case "UTF-8 scalar input contract" `Quick
             test_utf8_scalar_input_contract
         ; test_case "backspace removes one UTF-8 scalar" `Quick
             test_backspace_removes_one_utf8_scalar
+        ; test_case "input viewport keeps latest scalars" `Quick
+            test_input_viewport_keeps_latest_complete_scalars
+        ; test_case "input cursor uses visible cells" `Quick
+            test_input_cursor_uses_visible_terminal_cells
+        ; test_case "history wraps by cells without byte loss" `Quick
+            test_history_wraps_by_cells_without_losing_bytes
         ; test_case "trailing newlines keep reply visible" `Quick
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick

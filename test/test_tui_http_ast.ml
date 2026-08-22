@@ -97,7 +97,19 @@ let test_keeper_chat_uses_current_async_contract () =
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_reconciliation"
        ~callee:"Masc_tui_http.fetch_keeper_chat_operation"
-     >= 1)
+     >= 1);
+  let render_path = "bin/masc_tui_render.ml" in
+  List.iter
+    (fun callee ->
+      check bool ("message renderer wires " ^ callee) true
+        (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+           ~binding_name:"render_keeper_message" ~callee
+         >= 1))
+    [ "Message_layout.input_viewport"
+    ; "Message_layout.input_cursor_row"
+    ; "Message_layout.input_cursor_column"
+    ; "Ansi.move_to"
+    ]
 ;;
 
 let test_operator_approvals_use_current_contract () =

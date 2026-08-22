@@ -227,7 +227,7 @@
  (name masc_tui_message_layout)
  (wrapped false)
  (modules masc_tui_message_layout)
- (libraries masc.masc_core))
+ (libraries uucp))
 
 (library
  (name masc_tui_keeper_chat_recovery)

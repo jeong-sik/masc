@@ -1162,7 +1162,7 @@ let render_keeper_message (state : state) =
   let buf = Buffer.create 4096 in
 
   Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.show_cursor;  (* Show cursor for text input *)
+  Buffer.add_string buf Ansi.hide_cursor;
 
   match state.msg_target_keeper_name with
   | None ->
@@ -1294,8 +1294,16 @@ let render_keeper_message (state : state) =
         (Printf.sprintf
            "  Keeper %s is no longer registered; draft retained; Esc to choose another"
            display_keeper_name);
+    let input = Buffer.contents state.msg_input in
+    let visible_input =
+      Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)) input
+    in
+    let input_row =
+      Message_layout.input_cursor_row ~terminal_rows:rows ~history_height
+        ~status_rows
+    in
     box_line_styled buf cols ~style:Ansi.cyan
-      (Printf.sprintf "  > %s" (Buffer.contents state.msg_input));
+      (Printf.sprintf "  > %s" visible_input);
 
     box_bottom buf cols;
 
@@ -1314,6 +1322,13 @@ let render_keeper_message (state : state) =
     Buffer.add_string buf
       (Printf.sprintf "%s  %s  Esc:back  Ctrl-U:clear line%s\n" Ansi.dim
          enter_hint Ansi.reset);
+
+    let input_column =
+      Message_layout.input_cursor_column ~terminal_cols:cols
+        ~input:visible_input
+    in
+    Buffer.add_string buf (Ansi.move_to input_row input_column);
+    Buffer.add_string buf Ansi.show_cursor;
 
     print_string (Buffer.contents buf);
     flush stdout

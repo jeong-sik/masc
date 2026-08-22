@@ -26,7 +26,7 @@ module Ansi = struct
   let bg_white = "\027[47m"
 
   (* Cursor movement *)
-  let _move_to row col = Printf.sprintf "\027[%d;%dH" row col
+  let move_to row col = Printf.sprintf "\027[%d;%dH" row col
 
   (* Reverse video for selection highlight *)
   let reverse = "\027[7m"

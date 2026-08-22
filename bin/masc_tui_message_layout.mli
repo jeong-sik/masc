@@ -29,9 +29,27 @@ val drop_last_utf8_scalar : string -> string
 (** Remove one complete scalar from valid UTF-8 text. Empty or invalid text is
     preserved rather than truncated into a different malformed value. *)
 
+val display_width : string -> int
+(** Approximate the terminal display-cell width of UTF-8 text. Renderer-owned
+    ANSI CSI sequences have zero width, combining marks have zero width, and
+    common wide or emoji-presentation scalars have width two. *)
+
 val fit_width : string -> int -> string
-(** Fit plain UTF-8 text to an exact byte budget without splitting a scalar. *)
+(** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar
+    or renderer-owned ANSI CSI sequence. *)
+
+val input_viewport : max_cells:int -> string -> string
+(** Keep the complete input when it fits. Overflow uses a leading [~] and the
+    newest complete-scalar suffix that fits in the remaining cells. *)
+
+val input_cursor_row :
+  terminal_rows:int -> history_height:int -> status_rows:int -> int
+(** One-based input row clamped to the terminal viewport. *)
+
+val input_cursor_column : terminal_cols:int -> input:string -> int
+(** One-based cursor column after the visible input, clamped to the spacer
+    immediately before the right border. *)
 
 val visible_rows : inner_width:int -> height:int -> entry list -> row list
-(** Render chat entries into plain, UTF-8-safe physical rows and retain the
-    newest rows. The newest entry always keeps its metadata row. *)
+(** Render chat entries into cell-bounded, UTF-8-safe physical rows and retain
+    the newest rows. The newest entry always keeps its metadata row. *)

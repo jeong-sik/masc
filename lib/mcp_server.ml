@@ -1,37 +1,7 @@
 (** MCP Protocol Server Core (Eio-only)
 
     This module provides shared types/config/resources for the Eio server.
-    Legacy handlers have been removed.
 *)
-
-(* JSON-RPC core — canonical definitions live in Mcp_transport_protocol.
-   Aliases here preserve backward compatibility for callers using Mcp_server.*.
-   These are zero-cost: OCaml native compilation inlines module aliases. *)
-
-type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request = {
-  jsonrpc : string;
-  id : Yojson.Safe.t option;
-  method_ : string;
-  params : Yojson.Safe.t option;
-}
-
-let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
-let jsonrpc_request_to_yojson = Mcp_transport_protocol.jsonrpc_request_to_yojson
-let has_field = Mcp_transport_protocol.has_field
-let get_field = Mcp_transport_protocol.get_field
-let is_jsonrpc_v2 = Mcp_transport_protocol.is_jsonrpc_v2
-let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
-let is_notification = Mcp_transport_protocol.is_notification
-let get_id = Mcp_transport_protocol.get_id
-let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
-let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
-let make_response = Mcp_transport_protocol.make_response
-let make_error = Mcp_transport_protocol.make_error
-(* Protocol version — canonical in Mcp_transport_protocol *)
-let normalize_protocol_version = Mcp_transport_protocol.normalize_protocol_version
-let protocol_version_from_params = Mcp_transport_protocol.protocol_version_from_params
-
-let validate_protocol_version = Mcp_transport_protocol.validate_protocol_version
 
 (** Server info *)
 type mcp_icon = {

@@ -72,19 +72,6 @@ val run_command_with_status :
   unit ->
   (Unix.process_status * string, string) result
 
-val run_exec_with_status :
-  ?stdin_content:string ->
-  ?on_stdout_chunk:(string -> unit) ->
-  ?on_stderr_chunk:(string -> unit) ->
-  ?timeout_sec:float ->
-  t ->
-  cwd:string ->
-  command_argv:string list ->
-  (Unix.process_status * string, string) result
-(** Execute [command_argv] inside the turn-scoped container and return the raw
-    process status and merged output without applying success-code policy.
-    Existing read-backend callers use this for legacy merged-output behavior. *)
-
 val run_exec_with_status_split :
   ?stdin_content:string ->
   ?on_stdout_chunk:(string -> unit) ->

@@ -52,8 +52,3 @@ val of_keeper_world_observation :
     [classify_actionable_signal o <> No_actionable_signal]
     is the structured equivalent of an observed actionable context. *)
 val classify_actionable_signal : world_observation -> actionable_signal
-
-(** [is_actionable s] is [false] iff [s = No_actionable_signal].
-    Provided so callers comparing the structured signal against the
-    legacy boolean can do so without a manual pattern match. *)
-val is_actionable : actionable_signal -> bool

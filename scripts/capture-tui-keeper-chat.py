@@ -575,6 +575,33 @@ finally:
             release()
 
 
+def file_lock_available(path: Path) -> bool:
+    helper = """
+import fcntl
+import os
+import sys
+fd = os.open(sys.argv[1], os.O_CREAT | os.O_WRONLY, 0o600)
+try:
+    try:
+        fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit(2)
+finally:
+    os.close(fd)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", helper, str(path)],
+        capture_output=True,
+        timeout=5,
+    )
+    require(
+        result.returncode in (0, 2),
+        f"lock probe failed: rc={result.returncode}, stderr={result.stderr!r}",
+    )
+    require(result.stdout == b"", f"lock probe emitted output: {result.stdout!r}")
+    return result.returncode == 0
+
+
 @contextmanager
 def ttyd_session(
     browser: Browser,
@@ -777,6 +804,11 @@ def resize_terminal(page: Page, cols: int, rows: int) -> None:
         arg={"cols": cols, "rows": rows},
         timeout=10_000,
     )
+    page.wait_for_function(
+        r"""() => !Array.from(document.querySelectorAll('.terminal.xterm > div'))
+          .some(node => /^\d+x\d+$/.test((node.textContent || '').trim()))""",
+        timeout=10_000,
+    )
 
 
 def await_event(value: threading.Event, label: str) -> None:
@@ -811,6 +843,12 @@ def capture(
     require(
         dimensions == {"cols": expected_dimensions[0], "rows": expected_dimensions[1]},
         f"wrong dimensions: {dimensions}",
+    )
+    resize_overlays = page.locator(".terminal.xterm > div").evaluate_all(
+        "nodes => nodes.map(node => (node.textContent || '').trim()).filter(text => /^\\d+x\\d+$/.test(text))"
+    )
+    require(
+        resize_overlays == [], f"{filename} retains resize overlay: {resize_overlays}"
     )
     visible = screen_text(page)
     for marker in markers:
@@ -913,6 +951,8 @@ def success_scenario(
         with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-success-") as raw:
             base = Path(raw)
             prepare_base(base)
+            recovery = base / ".masc/tui-keeper-chat-recovery.json"
+            dispatch_lock = Path(str(recovery) + ".dispatch.lock")
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
                 open_message(page)
                 resize_terminal(page, 99, 7)
@@ -981,13 +1021,37 @@ def success_scenario(
                                      SUCCESS_MESSAGE, "Enter:send", expected_cursor=(25, 24),
                                      input_row_markers=(f"> {SUCCESS_MESSAGE}",)))
                 # fmt: on
-                press(page, "Enter")
+                with held_file_lock(dispatch_lock) as release_dispatch_lock:
+                    started = time.monotonic()
+                    press(page, "Enter")
+                    wait_text(page, "(waiting for serialized dispatch ")
+                    measurements["enter_to_dispatch_lock_wait_ui_ms"] = round(
+                        (time.monotonic() - started) * 1000, 3
+                    )
+                    require(
+                        state.summary()["chat_stream_post_count"] == 0,
+                        "externally held dispatch lock allowed a POST",
+                    )
+                    measurements["post_count_while_dispatch_lock_held"] = 0
+                    release_started = time.monotonic()
+                    release_dispatch_lock()
                 await_event(state.post_seen, "success POST")
+                measurements["dispatch_lock_release_to_post_ms"] = round(
+                    (time.monotonic() - release_started) * 1000, 3
+                )
                 request = request_identity(state, SUCCESS_MESSAGE)
                 request_label = (
                     request["request_id"][:4] + ".." + request["request_id"][-8:]
                 )
                 wait_text(page, f"(sending {request_label}")
+                measurements["dispatch_lock_release_to_sending_ui_ms"] = round(
+                    (time.monotonic() - release_started) * 1000, 3
+                )
+                require(
+                    not file_lock_available(dispatch_lock),
+                    "dispatch lock was released while the POST response remained held",
+                )
+                measurements["dispatch_lock_held_while_response_pending"] = True
                 started = time.monotonic()
                 type_text(page, "draft-during-send")
                 wait_text(page, "> draft-during-send")
@@ -1018,6 +1082,15 @@ def success_scenario(
                 measurements["reply_visible_after_release_ms"] = round(latency, 3)
                 require(latency <= 2500, f"reply latency {latency:.3f}ms")
                 wait_text(page, "(sending ", present=False)
+                lock_started = time.monotonic()
+                wait_until(
+                    lambda: file_lock_available(dispatch_lock),
+                    "done ACK did not release the dispatch lock",
+                    timeout=5,
+                )
+                measurements["reply_visible_to_dispatch_lock_reacquired_ms"] = round(
+                    (time.monotonic() - lock_started) * 1000, 3
+                )
                 wait_text(page, "> draft-during-send")
                 visible = screen_text(page)
                 lines = visible.splitlines()

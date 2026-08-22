@@ -16,6 +16,8 @@ val take : t -> now_ns:int64 -> decision
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
 val nonnegative_width : int -> int
 val keeper_context_bar_width : inner_width:int -> int
+val normalize_keeper_detail_scroll :
+  line_count:int -> content_height:int -> int -> int
 
 module Input_wait : sig
   type 'a poll_result =

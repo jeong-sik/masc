@@ -260,7 +260,7 @@
   display: flex;
   /* prototype .ti-tok-legend (keeper-v2/styles/inspector.css:37): gap 18px,
      margin-top 9px, font-size 11.5px. --sp-4 is 10px under v2 and pinches the
-     in/out legend; */
+     in/out legend; pin the literals. */
   gap: 18px;
   margin-top: 9px;
   font-size: 11.5px;
@@ -347,8 +347,8 @@
   overflow: auto;
   /* prototype .turn-body (v2.css:705): padding 16px, inter-section gap 16px,
      inherited font-size 14px (.v2-app, v2.css:178). --sp-3/--sp-4 are 8px/10px
-     under v2; the inter-section
-     16px is carried by .ti-sec margin-bottom below. Pin the literal. */
+     under v2; the inter-section 16px is carried by .ti-sec margin-bottom
+     below. Pin the literal. */
   padding: 16px;
   font-size: var(--fs-12);
 }
@@ -488,7 +488,7 @@
   align-items: center;
   justify-content: space-between;
   /* prototype .ti-wf-foot (inspector.css:59): margin-top 12px, padding-top 11px,
-     font-size 11.5px. --sp-3 is 8px under v2 and */
+     font-size 11.5px. --sp-3 is 8px under v2; pin the literals. */
   margin-top: 12px;
   padding-top: 11px;
   border-top: 1px solid var(--color-border-default);
@@ -599,8 +599,8 @@
   padding: 10px 12px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  /* prototype .ti-code pre (inspector.css:70): 11.5px / line-height 1.62. --lh-loose is 1.6; pin the
-     prototype literals. */
+  /* prototype .ti-code pre (inspector.css:70): 11.5px / line-height 1.62.
+     --lh-loose is 1.6; pin the prototype literals. */
   font-size: 11.5px;
   line-height: 1.62;
   color: var(--color-fg-muted);
@@ -758,8 +758,7 @@
   padding: 10px 12px;
   /* prototype .ti-msg-b (inspector.css:97): font-family --font-body, 12.5px,
      line-height 1.62, color --text-primary. --font-ui has a different fallback
-     stack and --lh-loose is 1.6;
-     pin --font-body + the prototype literals. */
+     stack and --lh-loose is 1.6; pin --font-body + the prototype literals. */
   font-family: var(--font-body);
   font-size: 12.5px;
   line-height: 1.62;
@@ -821,8 +820,7 @@
 .ti-ctx-card pre {
   margin: 0;
   /* prototype .ti-ctx-card pre (inspector.css:112): padding 11px 13px, 11.5px,
-     line-height 1.62. --lh-loose
-     is 1.6; pin the prototype literals. */
+     line-height 1.62. --lh-loose is 1.6; pin the prototype literals. */
   padding: 11px 13px;
   max-height: 340px;
   overflow: auto;

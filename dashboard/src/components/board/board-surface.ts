@@ -87,7 +87,6 @@ import {
   refreshBoardHearths,
   refreshBoardFlairs,
   selectedBoardPostId,
-  boardFilterMode,
   boardSortMode,
   boardComposerMode,
   SORT_MODES,
@@ -266,7 +265,6 @@ function PostCard({ post }: { post: BoardPost }) {
   const downvoteActive = post.current_vote === 'down'
   const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
   const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
-  const isMod = post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
   const selected = selectedBoardPostId.value === post.id
   const category = contentCategory(post)
   const categoryMeta = CONTENT_CATEGORIES.find(item => item.id === category)
@@ -348,7 +346,6 @@ function PostCard({ post }: { post: BoardPost }) {
           }}
         >${authorLabel}</a>
         ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
-        ${isMod ? html`<span class="bd-badge mod">모더레이션 대기</span>` : null}
         <span class="bd-badge" title="게시글 분류">${categoryMeta?.icon ?? ''} ${categoryLabel(category)}</span>
         ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
@@ -446,7 +443,6 @@ function BdRail({ activeSub, onSub, onMentions }: {
   const hearths = boardHearths.value
   const allCount = boardTotal.value ?? boardPosts.value.length
   const allCountLabel = boardTotal.value === null && boardHasMore.value ? `${allCount}+` : String(allCount)
-  const modCount = useMemo(() => boardPosts.value.filter(p => p.moderation_status && p.moderation_status !== 'none' && p.moderation_status !== 'approved').length, [boardPosts.value])
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
 
   return html`
@@ -483,11 +479,6 @@ function BdRail({ activeSub, onSub, onMentions }: {
       <div class="bd-queue-section">
         <div class="div"></div>
         <h4>큐</h4>
-        <button type="button" class="bd-sub" onClick=${() => { boardFilterMode.value = 'mod'; onMentions() }} data-testid="bd-queue-mod">
-          <span class="glyph">⚑</span>
-          모더레이션
-          <span class="n">${modCount}</span>
-        </button>
         <button type="button" class="bd-sub" onClick=${onMentions} data-testid="bd-queue-mentions">
           <span class="glyph">＠</span>
           멘션 인박스
@@ -498,9 +489,7 @@ function BdRail({ activeSub, onSub, onMentions }: {
   `
 }
 
-function BdFeedHead({ activeFilter, onFilter, countLabel, contentQuery, onContentQuery, sortMode, onSort }: {
-  activeFilter: 'all' | 'mod'
-  onFilter: (filter: 'all' | 'mod') => void
+function BdFeedHead({ countLabel, contentQuery, onContentQuery, sortMode, onSort }: {
   countLabel: string
   contentQuery: string
   onContentQuery: (value: string) => void
@@ -511,10 +500,6 @@ function BdFeedHead({ activeFilter, onFilter, countLabel, contentQuery, onConten
   // Prototype board.jsx:158 renders the bare hearth label (e.g. "core/scheduler")
   // with no "#" prefix; the hearth name already carries its namespace path.
   const title = activeHearth === '' ? '전체 피드' : activeHearth
-  const filters: Array<{ key: 'all' | 'mod'; label: string }> = [
-    { key: 'all', label: '전체' },
-    { key: 'mod', label: '모더레이션' },
-  ]
 
   return html`
     <div class="bd-feed-head">
@@ -536,16 +521,6 @@ function BdFeedHead({ activeFilter, onFilter, countLabel, contentQuery, onConten
         class="!w-auto min-w-32 !px-2 !py-1 !text-xs"
         onInput=${(value: string) => onSort(value as BoardSortMode)}
       />
-      <span class="spacer"></span>
-      ${filters.map(f => html`
-        <button
-          key=${f.key}
-          type="button"
-          class=${`bd-filter ${activeFilter === f.key ? 'on' : ''}`}
-          onClick=${() => onFilter(f.key)}
-          data-testid=${`bd-filter-${f.key}`}
-        >${f.label}</button>
-      `)}
     </div>
   `
 }
@@ -1203,30 +1178,14 @@ function BdComposer() {
 }
 
 function BdMobileQueues({
-  activeFilter,
   mentionCount,
-  modCount,
-  onFilter,
   onMentions,
 }: {
-  activeFilter: 'all' | 'mod'
   mentionCount: number
-  modCount: number
-  onFilter: (filter: 'all' | 'mod') => void
   onMentions: () => void
 }) {
   return html`
     <div class="bd-mobile-queues" aria-label="Board mobile queues" data-testid="bd-mobile-queues">
-      <button
-        type="button"
-        class=${`bd-mobile-queue ${activeFilter === 'mod' ? 'on' : ''}`}
-        onClick=${() => onFilter('mod')}
-        data-testid="bd-mobile-queue-mod"
-      >
-        <span class="glyph">⚑</span>
-        모더레이션
-        <span class="n">${modCount}</span>
-      </button>
       <button
         type="button"
         class="bd-mobile-queue"
@@ -1308,34 +1267,17 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
     [filteredPosts, boardHiddenCategories.value],
   )
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
-  const modCount = useMemo(
-    () => posts.filter(post => post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved').length,
-    [posts],
-  )
-
-  const filteredByMode = useMemo(
-    () => visiblePosts.filter(post => {
-      if (boardFilterMode.value === 'mod') return post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
-      return true
-    }),
-    [visiblePosts, boardFilterMode.value],
-  )
-  const countLabel = isFiltering || boardFilterMode.value === 'mod'
-    ? `${filteredByMode.length}개 표시`
+  const countLabel = isFiltering
+    ? `${visiblePosts.length}개 표시`
     : boardTotal.value !== null
       ? `전체 ${boardTotal.value}개`
       : boardHasMore.value
-        ? `현재 ${filteredByMode.length}개 불러옴 · 더 있음`
-        : `전체 ${filteredByMode.length}개`
+        ? `현재 ${visiblePosts.length}개 불러옴 · 더 있음`
+        : `전체 ${visiblePosts.length}개`
 
   return html`
     <section class="bd-feed">
       <${BdFeedHead}
-        activeFilter=${boardFilterMode.value}
-        onFilter=${(filter: 'all' | 'mod') => {
-          boardFilterMode.value = filter
-          feedVisibleLimit.value = PAGE_SIZE
-        }}
         countLabel=${countLabel}
         contentQuery=${contentQuery}
         onContentQuery=${(query: string) => {
@@ -1352,21 +1294,18 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
         }}
       />
       <${BdMobileQueues}
-        activeFilter=${boardFilterMode.value}
         mentionCount=${mentionCount}
-        modCount=${modCount}
-        onFilter=${(filter: 'all' | 'mod') => { boardFilterMode.value = filter }}
         onMentions=${onMentions}
       />
       <div class="bd-list">
-        ${isFiltering && filteredByMode.length === 0 && posts.length > 0
+        ${isFiltering && visiblePosts.length === 0 && posts.length > 0
           ? html`<div class="ov-empty">필터 결과 없음 (${posts.length} items)</div>`
-          : filteredByMode.length === 0 && boardLoading.value
+          : visiblePosts.length === 0 && boardLoading.value
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`
-            : filteredByMode.length === 0
+            : visiblePosts.length === 0
               ? html`<${EmptyState} title="아직 게시글이 없습니다" hint="에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
               : html`<${UnifiedBoardFeed}
-                  posts=${filteredByMode}
+                  posts=${visiblePosts}
                   visibleLimit=${visibleLimit}
                   onVisibleLimitChange=${(limit: number) => { feedVisibleLimit.value = limit }}
                 />`}

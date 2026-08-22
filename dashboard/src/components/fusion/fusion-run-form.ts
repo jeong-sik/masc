@@ -1,12 +1,10 @@
 // Operator-initiated deliberation form.
 //
-// Why this exists: masc_fusion advertises five topologies, but until now only
-// two surfaces could start a run — a keeper calling the tool itself, and
-// POST /catchup-judge, which fixes the prompt to a catch-up digest and
-// hard-codes `topology = "simple"`. So judge_of_judges and
-// staged_judge_of_judges were reachable only by a keeper's own decision, and a
-// preset configured for them could sit unused indefinitely without anyone
-// noticing it had never run.
+// Why this exists: masc_fusion advertises five topologies, but until now the
+// only surface that could start a run was a keeper calling the tool itself.
+// So judge_of_judges and staged_judge_of_judges were reachable only by a
+// keeper's own decision, and a preset configured for them could sit unused
+// indefinitely without anyone noticing it had never run.
 //
 // The form derives which topologies a preset can actually run from the config
 // (runnableTopologies) instead of listing all five and letting the backend

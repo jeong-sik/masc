@@ -199,37 +199,6 @@
   color: var(--text-dim);
 }
 
-.v2-board-surface .bd-feed-head .spacer {
-  flex: 1;
-}
-
-.v2-board-surface .bd-filter {
-  font-family: var(--font-ui);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-main);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: 0.14s;
-  white-space: nowrap;
-}
-
-.v2-board-surface .bd-filter.on {
-  color: var(--volt-ink);
-  background: var(--volt);
-  border-color: var(--volt);
-  font-weight: 600;
-}
-
-.v2-board-surface .bd-filter:not(.on):hover {
-  color: var(--text-mid);
-  border-color: var(--border-highlight);
-}
-
 .v2-board-surface .bd-list {
   flex: 1;
   min-height: 0;
@@ -311,11 +280,6 @@
 .v2-board-surface .bd-badge.pin {
   color: var(--volt-strong);
   border-color: var(--volt-dim);
-}
-
-.v2-board-surface .bd-badge.mod {
-  color: var(--status-warn);
-  border-color: color-mix(in oklab, var(--status-warn) 40%, transparent);
 }
 
 .v2-board-surface .bd-post-title {
@@ -956,7 +920,6 @@
     padding: 0 12px 10px;
   }
 
-  .v2-board-surface .bd-filter,
   .v2-board-surface .bd-mobile-queue,
   .v2-board-surface .bd-react,
   .v2-board-surface .bd-category-pagination button {
@@ -999,10 +962,6 @@
   .v2-board-surface .bd-feed-head {
     flex-wrap: wrap;
     gap: 8px;
-  }
-
-  .v2-board-surface .bd-feed-head .spacer {
-    display: none;
   }
 
   .v2-board-surface .bd-list {

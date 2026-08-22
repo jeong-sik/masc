@@ -3,8 +3,8 @@
    Implements {!Channel_gate_connector.S} so it can be registered at server
    startup via [Channel_gate_connector.register (module Channel_gate_slack_state)].
 
-   The in-process Slack gateway ({!Slack_socket_client}, RFC-0317 PR-1) is the
-   only Slack transport; the Python sidecar is removed in PR-4. Mirrors
+   The in-process Slack gateway ({!Slack_socket_client}, RFC-0317) is the
+   only Slack transport. Mirrors
    {!Channel_gate_discord_state} but is simpler — no threads (Slack threads
    share the parent channel id; a [thread_ts] is not a separate channel), no
    typing indicator (Slack's is a separate Web API we don't surface yet). *)
@@ -321,7 +321,7 @@ let unbind ~channel_id ~actor_name =
     |> Result.map_error Store.mutation_error_to_string
     |> Result.map (fun () -> status_json ())
 
-(* ---- In-process gateway support (replaces sidecars/slack-bot/) ---- *)
+(* ---- In-process gateway support ---- *)
 
 type keeper_binding_resolution = {
   keeper_name : string;

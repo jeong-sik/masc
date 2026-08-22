@@ -60,7 +60,6 @@ type keeper_runtime_store =
   | Keeper_trajectories
 (** Canonical child-store names under {!keepers_runtime_dirname}. *)
 
-val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and

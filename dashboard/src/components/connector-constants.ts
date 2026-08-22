@@ -14,9 +14,10 @@
 // therefore NOT addressed here (tracked separately — backlog Slice 8).
 
 // Known connectors shown in the dashboard (status panels, accent colours,
-// channel icons). Includes external sidecars and the in-process Discord gateway.
-// Source of truth: the sidecars under /sidecars/, the in-process gateway under
-// lib/server/server_discord_in_process_gateway.{ml,mli}, and config/navigation.ts.
+// channel icons). Includes the external sidecars and the in-process Discord
+// and Slack gateways. Source of truth: the sidecars under /sidecars/, the
+// in-process gateways under lib/server/server_{discord,slack}_in_process_gateway.{ml,mli},
+// and config/navigation.ts.
 export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
 export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
 
@@ -54,10 +55,10 @@ export interface SidecarCommands {
 }
 
 // Sidecar directories — only for connectors that run as external sidecar
-// processes. Discord is intentionally absent (RFC-0203 §Phase 3).
+// processes. Discord (RFC-0203 §Phase 3) and Slack (RFC-0317) run in-process
+// and have no directory here.
 const SIDECAR_DIRS: Record<string, string> = {
   imessage: 'sidecars/imessage-bot',
-  slack: 'sidecars/slack-bot',
   telegram: 'sidecars/telegram-bot',
 }
 

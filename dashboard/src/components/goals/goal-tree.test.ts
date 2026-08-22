@@ -72,7 +72,6 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     metric: null,
     target_value: null,
     due_date: null,
-    owner: null,
     tasks: [],
     task_count: 0,
     task_done_count: 0,

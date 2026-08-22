@@ -33,6 +33,7 @@ import {
   type TurnPromptBlockId,
   type TurnRecordRow,
 } from '../api/dashboard'
+import { KeeperPromptCapture } from './keeper-turn-inspector-panel'
 
 export interface MemoryKeeper {
   readonly id: string
@@ -366,12 +367,15 @@ function MemoryCurrentContract({ snapshot }: { snapshot: MemoryOsTurnRecordSnaps
 function MemoryPromptEvidence({
   snapshot,
   row,
+  keeperId,
 }: {
   snapshot: MemoryOsTurnRecordSnapshot
   row: TurnRecordRow | null
+  keeperId: string
 }) {
   const memoryBlock = latestMemoryRecallBlock(row)
   const writer = snapshot.update_source?.kind ?? 'fresh state'
+  const promptOpen = useSignal(false)
   return html`
     <div class="mem-prompt-evidence">
       <div class="mem-prompt-step">
@@ -388,8 +392,17 @@ function MemoryPromptEvidence({
       </div>
       <div class="mem-prompt-step">
         <span class="mem-prompt-n">4</span>
-        <div><b>Full Prompt</b><span>raw text not persisted here; turn-record keeps ordered block digests and byte sizes.</span></div>
+        <div>
+          <b>Full Prompt</b>
+          <button
+            type="button"
+            class="mem-prompt-toggle"
+            aria-expanded=${promptOpen.value}
+            onClick=${() => { promptOpen.value = !promptOpen.value }}
+          >${promptOpen.value ? '마지막 캡처 닫기' : '마지막 캡처 보기'}</button>
+        </div>
       </div>
+      ${promptOpen.value ? html`<div class="mem-prompt-capture"><${KeeperPromptCapture} keeper=${keeperId} /></div>` : null}
       ${row ? html`
         <div class="mem-prompt-foot mono">
           latest assembly ${row.record.trace_id}#${row.record.absolute_turn} · ${formatInstant(row.record.ts)}
@@ -560,9 +573,11 @@ function factTag(fact: MemoryOsFact): string {
 function OneKeeperMemoryReal({
   snapshot,
   rows,
+  keeperId,
 }: {
   snapshot: MemoryOsTurnRecordSnapshot
   rows: readonly TurnRecordRow[]
+  keeperId: string
 }) {
   const kindFilter = useSignal<string>('all')
   const latestPromptRow = latestEntryWithBlocks(rows)
@@ -593,7 +608,7 @@ function OneKeeperMemoryReal({
 
       <div class="turn-sec">
         <h4>회상 연결 · Full Prompt</h4>
-        <${MemoryPromptEvidence} snapshot=${snapshot} row=${latestPromptRow} />
+        <${MemoryPromptEvidence} snapshot=${snapshot} row=${latestPromptRow} keeperId=${keeperId} />
       </div>
 
       <div class="turn-sec">
@@ -1012,7 +1027,7 @@ export function MemoryInspector({
               : state.error
                 ? html`<div class="mem-read-error" role="alert">${'⚠'} 메모리 불러오기 실패 — ${state.error}</div>`
                 : response?.memory_os
-                  ? html`<${OneKeeperMemoryReal} snapshot=${response.memory_os} rows=${response.entries} />`
+                  ? html`<${OneKeeperMemoryReal} snapshot=${response.memory_os} rows=${response.entries} keeperId=${activeId} />`
                   : html`<${MemoryOsMissingState} response=${response} />`}
         </div>
       </div>

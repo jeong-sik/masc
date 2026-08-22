@@ -57,28 +57,28 @@ external channel event
 
 ## 4. Current-State Capability Matrix
 
-| Capability | Dashboard | Discord | Slack (OCaml) | Slack sidecar | Telegram | iMessage | CLI | TUI |
-|---|---|---|---|---|---|---|---|---|
-| Plain text | ✅ | ✅ (2000-char chunks) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Markdown inline | ✅ | ⚠️ partial | ⚠️ mrkdwn | ⚠️ plain | ❌ | ❌ | ❌ | ❌ |
-| Code blocks | ✅ highlighted | ⚠️ fenced, can split | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Lists | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Tables | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Callouts / blockquotes | ✅ | ❌ (quote only) | ⚠️ context | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Images png/jpg/gif/webp | ✅ | ⚠️ embed if event | ⚠️ block if event | ❌ | ❌ | ❌ | ❌ | ❌ |
-| SVG | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Mermaid | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Audio | ✅ player | ❌ raw URL | ❌ link | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Video | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Documents pdf/md/txt/csv/json | ⚠️ limited whitelist | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Inbound attachments | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Outbound attachments | ✅ data-URL | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Capability | Dashboard | Discord | Slack | Telegram | iMessage | CLI | TUI |
+|---|---|---|---|---|---|---|---|
+| Plain text | ✅ | ✅ (2000-char chunks) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Markdown inline | ✅ | ⚠️ partial | ⚠️ mrkdwn | ❌ | ❌ | ❌ | ❌ |
+| Code blocks | ✅ highlighted | ⚠️ fenced, can split | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Lists | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| Tables | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Callouts / blockquotes | ✅ | ❌ (quote only) | ⚠️ context | ❌ | ❌ | ❌ | ❌ |
+| Images png/jpg/gif/webp | ✅ | ⚠️ embed if event | ⚠️ block if event | ❌ | ❌ | ❌ | ❌ |
+| SVG | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Mermaid | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Audio | ✅ player | ❌ raw URL | ❌ link | ❌ | ❌ | ❌ | ❌ |
+| Video | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Documents pdf/md/txt/csv/json | ⚠️ limited whitelist | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Inbound attachments | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Outbound attachments | ✅ data-URL | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Fusion panels | ✅ card | ❌ raw text | ❌ raw text | ❌ | ❌ | ❌ | ❌ |
 | Tool results / blobs | ✅ trace card | ⚠️ embed | ⚠️ context | ❌ | ❌ | ❌ | ❌ |
-| Turn progress / status | ✅ typed receipt | ⚠️ text projection | ⚠️ text projection | ❌ | ❌ | ❌ | ⚠️ manual | ⚠️ status only |
-| Turn start / ack | ✅ | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ✅ | ⚠️ command only |
-| Wait / poll status | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ manual | ❌ |
-| Turn completion / failure identity | ✅ | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ status only |
+| Turn progress / status | ✅ typed receipt | ⚠️ text projection | ⚠️ text projection | ❌ | ❌ | ⚠️ manual | ⚠️ status only |
+| Turn start / ack | ✅ | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ✅ | ⚠️ command only |
+| Wait / poll status | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ manual | ❌ |
+| Turn completion / failure identity | ✅ | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ status only |
 
 Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / unsupported
 
@@ -115,9 +115,9 @@ Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / uns
 
 ### 5.3 Slack connector
 
-**Finding:** The OCaml adapter only handles `Link_block`, `Image_block`, `Audio_block`, and `Tool_context_block`; plain text is sent as raw fallback. The Python sidecar ignores `GateResponse.structured` entirely and builds a single `section` + `context` block. Block Kit limits (50 blocks, 3000 chars per block text) are not enforced. Mrkdwn metacharacters (`<`, `>`, `&`, `*`) are not escaped. Inbound Slack file attachments are ignored.
+**Finding:** The OCaml adapter only handles `Link_block`, `Image_block`, `Audio_block`, and `Tool_context_block`; plain text is sent as raw fallback. Block Kit limits (50 blocks, 3000 chars per block text) are not enforced. Mrkdwn metacharacters (`<`, `>`, `&`, `*`) are not escaped. Inbound Slack file attachments are ignored.
 
-**Improvements (`lib/keeper/keeper_chat_slack.ml`, `sidecars/slack-bot/src/formatters.py`, `sidecars/slack-bot/src/bot.py`):**
+**Improvements (`lib/keeper/keeper_chat_slack.ml`):**
 - On `Run_finished`, parse accumulated text with `content_blocks_of_text`, merge with event blocks, and send a unified Block Kit payload.
 - Map `Code` → fenced code `section`, `Table` → fixed-width ASCII code block or file upload, `List` → bullet section, `Callout` → emoji-prefixed section.
 - Escape Slack mrkdwn special characters in titles/descriptions.
@@ -374,7 +374,6 @@ Add tests:
 - `test_channel_gate_metrics.ml` — every unsupported block emits a downgrade/drop metric.
 - `test_gate_keeper_backend.ml` — `GateResponse.structured` includes final blocks and correlation ids.
 - `sidecars/telegram-bot/tests/test_formatters.py` — MarkdownV2 escape; scalar-aware chunking.
-- `sidecars/slack-bot/tests/test_formatters.py` — chunking preserves code fences.
 - `sidecars/shared/tests/test_gate_response.py` — structured event/poll payload parsing remains backward-compatible.
 - `dashboard/src/components/chat/markdown-blocks.test.ts` — ordered list, empty table header, unmatched backticks.
 - `dashboard/src/components/common/markdown-renderer.test.ts` — XSS sanitization, fence repair correctness.
@@ -420,7 +419,6 @@ Acceptance criteria:
 ### MASC Python sidecars
 - `sidecars/shared/gate_shared/gate_response.py`
 - `sidecars/shared/gate_shared/gate_client_base.py`
-- `sidecars/slack-bot/src/formatters.py`, `bot.py`
 - `sidecars/telegram-bot/src/formatters.py`, `bot.py`
 - `sidecars/imessage-bot/src/bot.py`, `imessage_bridge.py`
 - `sidecars/cli-connector/src/bot.py`

@@ -1,7 +1,17 @@
 // @vitest-environment happy-dom
-import { cleanup, render, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const promptApi = vi.hoisted(() => ({
+  fetchKeeperLastPrompt: vi.fn(),
+  fetchKeeperOperatorNote: vi.fn(),
+  fetchKeeperRawTrace: vi.fn(),
+  fetchKeeperRawTraces: vi.fn(),
+  putKeeperOperatorNote: vi.fn(),
+}))
+
+vi.mock('../api/dashboard-keeper-prompt', () => promptApi)
 import {
   MemoryInspector,
   factCategoryMeta,
@@ -144,6 +154,7 @@ afterEach(() => {
   cleanup()
   clearStoredToken()
   vi.unstubAllGlobals()
+  vi.clearAllMocks()
 })
 
 describe('MemoryInspector current snapshot', () => {
@@ -171,6 +182,39 @@ describe('MemoryInspector current snapshot', () => {
     expect(text).not.toContain('valid_until')
     expect(text).not.toContain('claim_kind')
     expect(text).not.toContain('expired')
+  })
+
+  it('mounts the last captured prompt for the bound keeper from the recall chain', async () => {
+    stubFetch()
+    promptApi.fetchKeeperLastPrompt.mockResolvedValue({
+      keeper: keeper.id,
+      capturedAt: 1_700_000_100,
+      traceId: 'trace-recall',
+      absoluteTurn: 7,
+      blocks: [{ id: 'Memory_os_recall', bytes: 800, text: 'recalled: 계속 유지할 핵심 기억' }],
+      assembled: null,
+    })
+    const { container } = render(
+      html`<${MemoryInspector} keeper=${keeper} keepers=${[keeper]} onClose=${vi.fn()} />`,
+    )
+    const toggle = await waitFor(() => {
+      const button = container.querySelector('.mem-prompt-toggle')
+      expect(button).not.toBeNull()
+      return button as HTMLButtonElement
+    })
+    expect(toggle.textContent).toBe('마지막 캡처 보기')
+    expect(promptApi.fetchKeeperLastPrompt).not.toHaveBeenCalled()
+
+    fireEvent.click(toggle)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('Memory_os_recall')
+    })
+    expect(promptApi.fetchKeeperLastPrompt).toHaveBeenCalledTimes(1)
+    expect(promptApi.fetchKeeperLastPrompt.mock.calls[0]?.[0]).toBe(keeper.id)
+    expect(container.textContent).toContain('trace-recall')
+    expect(container.textContent).not.toContain('raw text not persisted')
+    expect(toggle.textContent).toBe('마지막 캡처 닫기')
   })
 
   it('shows a contract error instead of rendering a retired Memory payload', async () => {

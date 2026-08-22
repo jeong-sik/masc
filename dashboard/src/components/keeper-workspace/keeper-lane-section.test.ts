@@ -10,9 +10,13 @@ const mocks = vi.hoisted(() => ({
   unregisterPush: vi.fn(),
 }))
 
-vi.mock('../../api', () => ({
-  fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
-}))
+vi.mock('../../api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../api')>()
+  return {
+    ...actual,
+    fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
+  }
+})
 vi.mock('../../sse-store', () => ({
   registerKeeperWaitingInventoryRefresh: vi.fn((refresh: (keeperName: string) => void) => {
     mocks.refresh = refresh

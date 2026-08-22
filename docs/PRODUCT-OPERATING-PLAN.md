@@ -115,7 +115,13 @@ describing the repository.
 
 Humans file through the issue form; keepers file with `gh issue create`. Both produce the same fenced
 `masc-triage` block, so there is one format and one parser. An issue filed without the block gets a comment
-naming the expected shape, and no labels.
+naming the expected shape, and no labels. Do not pass `--label` to `gh issue create`: labels set that way
+have no declaration behind them, and the sweep takes them off again.
+
+The workflow also sweeps every open issue once an hour, because the `issues` events do not all arrive - 62
+issues were filed on 2026-08-21 against 16 workflow runs. The sweep, not the event, is what keeps labels
+and bodies in agreement. It touches only the issues where the two disagree, so a quiet repository produces
+no comments and no notifications.
 
 ### PR status labels
 

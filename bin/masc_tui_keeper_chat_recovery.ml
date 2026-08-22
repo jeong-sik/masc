@@ -531,3 +531,8 @@ module For_testing = struct
   let save_file_durable_staged_with = save_file_durable_staged_with
   let remove_file_durable_with = remove_file_durable_with
 end
+
+(* TEL-OK: this durability boundary returns typed claim, phase, and cleanup
+   results to [masc_tui], which emits the user-visible recovery telemetry after
+   applying them. Logging here would duplicate that signal and risk exposing
+   the persisted Keeper message. *)

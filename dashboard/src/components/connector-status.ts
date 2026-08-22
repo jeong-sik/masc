@@ -107,10 +107,10 @@ function activeConnectorFilter(): string | null {
   return KNOWN_CONNECTOR_IDS.includes(connector as KnownConnectorId) ? connector : null
 }
 
-// Per-connector lifecycle hints. The three remaining external sidecars
-// (imessage/slack/telegram) ship a run.sh wrapper — see
-// sidecars/<id>-bot/run.sh. Discord runs in-process under
-// Server_discord_in_process_gateway (RFC-0203 §Phase 3, PR #19393);
+// Per-connector lifecycle hints. The two external sidecars
+// (imessage/telegram) ship a run.sh wrapper — see
+// sidecars/<id>-bot/run.sh. Discord (RFC-0203 §Phase 3) and Slack
+// (RFC-0317) run in-process under Server_{discord,slack}_in_process_gateway;
 // no sidecar process, no lifecycle command panel — see
 // {@link IN_PROCESS_CONNECTOR_IDS}.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
@@ -743,7 +743,7 @@ function ConnectorLivePanel({
 
   const showNoKeeperEmpty =
     configuredBindings.length === 0 && !connector?.available && keepers.length === 0 && !keeperDirectoryError
-  // RFC-0203 §Phase 3: in-process connectors (currently just Discord)
+  // RFC-0203 §Phase 3: in-process connectors (Discord, Slack)
   // have no sidecar process and therefore no "사이드카 미시작" Start
   // affordance. Render the in-process info hint instead — see
   // showInProcessUnavailableHint below.
@@ -890,7 +890,9 @@ function ConnectorLivePanel({
                 <${BoldLabel}>Next: </${BoldLabel}>
                 ${connectorError
                   ? html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
-                  : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
+                  : isInProcessConnector(connectorId)
+                    ? html`check the server log for the ${connectorName} gateway (<${Tk}>gw ${connector?.gateway_state || 'unknown'}<//>) and the <${Tk}>${IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]}<//> env var.`
+                    : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
               </div>
             </${SurfaceCard}>
           `
@@ -1042,7 +1044,7 @@ function ConnectorLivePanel({
 
       ${showInProcessUnavailableHint
         ? (() => {
-            // RFC-0203 §Phase 3: in-process gateways (Discord) have no
+            // RFC-0203 §Phase 3: in-process gateways (Discord, Slack) have no
             // sidecar process to start, so the operator sees this hint
             // instead of the "Start sidecar" panel. Same amber tone as
             // the sidecar panel — "needs action, not broken" — but the
@@ -1068,7 +1070,7 @@ function ConnectorLivePanel({
                     : null}
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${envVar}<//> 환경변수를 설정하고 서버를 재기동하면 자동으로 Discord Gateway 에 연결됩니다.
+                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${envVar}<//> 환경변수를 설정하고 서버를 재기동하면 자동으로 ${connectorName} 게이트웨이에 연결됩니다.
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />
               </${SurfaceCard}>

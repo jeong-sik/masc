@@ -190,7 +190,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0312 | Keeper repo mappings are advisory default scope, not access caps | Accepted | - |
 | 0315 | Typed wake-turn context and self-directed work lane | Active | - |
 | 0316 | Merge gating convergence: enforce_admins=true + live Branch Protection Watchdog | Draft | - |
-| 0317 | In-process Slack connector (Socket Mode) | In progress (PR-1/PR-2 landed; PR-3 implemented; PR-4 sidecar removal pending) | - |
+| 0317 | In-process Slack connector (Socket Mode) | Implemented | - |
 | 0320 | Keeper connector-aware continuation: carry the originating channel through wa... | Draft | - |
 | 0324 | keeper repo 경로를 filesystem 진실로 (catalog 거짓 주입 제거) | Draft | - |
 | 0333 | Deterministic cost↔success frontier join for the eval harness | Draft | - |

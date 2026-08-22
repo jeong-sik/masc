@@ -306,10 +306,23 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
           }
           : Keeper_event_queue.completion_authority_rejection))
   in
+  let sensitive_content = "private-board-content-must-not-cross-inventory" in
+  let board =
+    stimulus ~post_id:"board-post-sensitive" ~arrived_at:103.0
+      (Keeper_event_queue.Board_signal
+         ({ kind = Keeper_event_queue.Post_created
+          ; author = "operator"
+          ; title = "private title"
+          ; content = sensitive_content
+          ; hearth = None
+          ; updated_at = None
+          }
+          : Keeper_event_queue.board_stimulus))
+  in
   Keeper_event_queue_persistence.persist
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
-    (queue_of_list [ message; cancelled; rejected ]);
+    (queue_of_list [ message; cancelled; rejected; board ]);
   let json =
     Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name
   in
@@ -343,7 +356,12 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   check string "rejection task id" "T-2"
     (json_string_member "rejection_task_id" rejected_detail);
   check bool "rejection row does not serialize the authority payload" true
-    (U.member "car_authority" rejected_detail = `Null)
+    (U.member "car_authority" rejected_detail = `Null);
+  let board_detail = detail_of board.Keeper_event_queue.post_id in
+  check string "board row keeps only the typed payload label" "board_signal"
+    (json_string_member "payload_kind" board_detail);
+  check bool "board post content does not cross the inventory" false
+    (String_util.contains_substring (Yojson.Safe.to_string json) sensitive_content)
 ;;
 
 let test_keeper_scoped_projection_excludes_other_keepers () =

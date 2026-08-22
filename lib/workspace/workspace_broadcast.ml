@@ -904,6 +904,19 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
             "workspace broadcast local mirror write failed request_id=%s seq=%d: %s"
             request_id seq message)
        mirror_error;
+     (let mention_label =
+        match mention with
+        | Some target -> target
+        | None -> "none"
+      in
+      Log.Misc.info
+        ~category:Log.Broadcast
+        "workspace broadcast committed from=%s mention=%s request_id=%s seq=%d bytes=%d"
+        safe_agent
+        mention_label
+        request_id
+        seq
+        (String.length safe_content));
      notify_workspace_message_mutation config msg;
      (match backend_publish config ~channel:(broadcast_channel config)
          ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with

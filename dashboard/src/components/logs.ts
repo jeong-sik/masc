@@ -114,14 +114,11 @@ const CATEGORY_LABELS: Record<LogCategory, string> = {
   lifecycle: 'Lifecycle',
   directive: 'Directive',
   heartbeat: 'Heartbeat',
-  presence: 'Presence',
-  task: 'Task',
   tool: 'Tool',
-  memory: 'Memory',
-  telemetry: 'Telemetry',
   routine: 'Routine',
   boundary: 'Boundary',
-  uncategorized: 'Uncategorized',
+  turn: 'Turn',
+  broadcast: 'Broadcast',
 }
 
 const LOG_KIND_FILTERS: readonly { value: LogDisplayKind | ''; label: string }[] = [
@@ -145,11 +142,7 @@ const LOG_CATEGORY_OPTIONS: readonly {
   label: string
 }[] = [
   { value: '', label: '전체 카테고리' },
-  { value: 'tool', label: 'tool' },
-  { value: 'task', label: 'task' },
-  { value: 'lifecycle', label: 'lifecycle' },
-  { value: 'directive', label: 'directive' },
-  { value: 'telemetry', label: 'telemetry' },
+  ...(Object.keys(CATEGORY_LABELS) as LogCategory[]).map(value => ({ value, label: value })),
 ]
 
 function categoryLabel(category: LogCategory): string {
@@ -162,8 +155,6 @@ const LOG_KIND_LABELS: Record<LogDisplayKind, string> = {
   lifecycle: 'LIFECYCLE',
   approval: 'APPROVAL',
   broadcast: 'BROADCAST',
-  telemetry: 'TELEMETRY',
-  task: 'TASK',
   log: 'LOG',
 }
 
@@ -240,7 +231,7 @@ function logSeverity(entry: LogEntry): 'ok' | 'warn' | 'bad' | 'busy' | 'info' {
   if (level === 'WARN') return 'warn'
   const kind = logDisplayKind(entry)
   if (kind === 'tool') return 'busy'
-  if (kind === 'telemetry' || kind === 'broadcast') return 'info'
+  if (kind === 'broadcast') return 'info'
   return 'ok'
 }
 
@@ -723,9 +714,7 @@ function renderLogRow(entry: LogEntry) {
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
   const routeLinks = logRouteLinks(entry)
-  const category = entry.hasExplicitCategory
-    ? categoryLabel(entry.category)
-    : undefined
+  const category = entry.category === null ? undefined : categoryLabel(entry.category)
   const displayKind = logDisplayKind(entry)
   const severity = logSeverity(entry)
   const identity = keeperLabel(entry, details)

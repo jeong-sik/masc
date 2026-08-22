@@ -937,7 +937,7 @@ let print_observation ~config ~keeper_name ~hostname =
     true
 ;;
 
-let run_inherited ~env = function
+let run_inherited ~timeout_sec ~env = function
   | [] -> Unix.WEXITED 127
   | command :: _ as argv ->
     (try
@@ -950,8 +950,32 @@ let run_inherited ~env = function
            Unix.stdout
            Unix.stderr
        in
+       (* NDT-OK: wall-clock deadline bounds the subprocess; on expiry the
+          child is SIGKILLed and reaped, so non-determinism stays at the process boundary. *)
+       let started_at = Unix.gettimeofday () in
+       let deadline = started_at +. timeout_sec in
        let rec wait () =
-         try snd (Unix.waitpid [] process) with
+         try
+           match Unix.waitpid [ Unix.WNOHANG ] process with
+           | 0, _ ->
+             (* NDT-OK: wall-clock deadline; on expiry the child is SIGKILLed
+                and reaped, keeping non-determinism at the process boundary. *)
+             if Unix.gettimeofday () >= deadline then begin
+               (try Unix.kill process Sys.sigkill with Unix.Unix_error _ -> ());
+               let rec reap () =
+                 try snd (Unix.waitpid [] process) with
+                 | Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+               in
+               (* fire-and-forget: reap the SIGKILLed child to avoid a zombie *)
+               ignore (reap ());
+               Unix.WEXITED 124
+             end else begin
+               (* fire-and-forget: poll sleep; EINTR is handled by the outer wait loop *)
+               ignore (Unix.select [] [] [] 0.05);
+               wait ()
+             end
+           | _, status -> status
+         with
          | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
        in
        wait ()
@@ -972,7 +996,7 @@ let run_cli_login ~config ~keeper_name ~hostname =
     prerr_endline message;
     1
   | Ok env ->
-    let status = run_inherited ~env (login_argv ~hostname) in
+    let status = run_inherited ~timeout_sec:600.0 ~env (login_argv ~hostname) in
     let secured =
       match status with
       | Unix.WEXITED 0 ->
@@ -999,7 +1023,7 @@ let run_cli_logout ~config ~keeper_name ~hostname =
     prerr_endline message;
     1
   | Ok env ->
-    let status = run_inherited ~env (logout_argv ~hostname) in
+    let status = run_inherited ~timeout_sec:600.0 ~env (logout_argv ~hostname) in
     let logged_out =
       match status with
       | Unix.WEXITED 0 -> true

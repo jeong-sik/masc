@@ -1,6 +1,18 @@
 module Github = Keeper_github_identity
 module Secret_projection = Keeper_secret_projection
 
+let process_status_to_string = function
+  | Unix.WEXITED n -> Printf.sprintf "WEXITED %d" n
+  | Unix.WSIGNALED n -> Printf.sprintf "WSIGNALED %d" n
+  | Unix.WSTOPPED n -> Printf.sprintf "WSTOPPED %d" n
+;;
+
+let process_status_testable =
+  Alcotest.testable
+    (fun fmt s -> Format.pp_print_string fmt (process_status_to_string s))
+    (fun a b -> a = b)
+;;
+
 let rec mkdir_p path =
   if Sys.file_exists path
   then ()
@@ -539,6 +551,27 @@ let test_tool_projection_rejects_permissive_identity () =
   | Ok _ -> Alcotest.fail "world-readable credential file was accepted"
 ;;
 
+let test_run_inherited_returns_child_exit_status () =
+  let status = Github.run_inherited ~timeout_sec:10.0 ~env:[||] [ "sh"; "-c"; "exit 7" ] in
+  Alcotest.(check process_status_testable)
+    "child exit status is propagated" (Unix.WEXITED 7) status
+;;
+
+let test_run_inherited_times_out_hung_subprocess () =
+  let started_at = Unix.gettimeofday () in
+  let status = Github.run_inherited ~timeout_sec:0.3 ~env:[||] [ "sh"; "-c"; "sleep 30" ] in
+  let elapsed = Unix.gettimeofday () -. started_at in
+  Alcotest.(check process_status_testable)
+    "hung subprocess is killed and reported as timed out" (Unix.WEXITED 124) status;
+  Alcotest.(check bool) "timeout is enforced promptly" true (elapsed < 10.0)
+;;
+
+let test_run_inherited_empty_argv_is_127 () =
+  let status = Github.run_inherited ~timeout_sec:10.0 ~env:[||] [] in
+  Alcotest.(check process_status_testable)
+    "empty argv yields 127" (Unix.WEXITED 127) status
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -600,6 +633,18 @@ let () =
             "tool projection rejects permissive identity"
             `Quick
             test_tool_projection_rejects_permissive_identity
+        ; Alcotest.test_case
+            "run_inherited propagates child exit status"
+            `Quick
+            test_run_inherited_returns_child_exit_status
+        ; Alcotest.test_case
+            "run_inherited times out a hung subprocess"
+            `Quick
+            test_run_inherited_times_out_hung_subprocess
+        ; Alcotest.test_case
+            "run_inherited empty argv yields 127"
+            `Quick
+            test_run_inherited_empty_argv_is_127
         ] )
     ]
 ;;

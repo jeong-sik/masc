@@ -172,6 +172,8 @@ let test_session_transport_kind_required () =
       ; "command", `String "cmd"
       ; "args", `List []
       ; "env", `List []
+      ; "http_base_url", `Null
+      ; "http_headers", `List []
       ; "tool_schemas", `List [] (* no transport_kind field *)
       ]
   in

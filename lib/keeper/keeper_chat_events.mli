@@ -55,11 +55,10 @@ type keeper_chat_event =
   | Text_delta of string
   | Text_message_end
   | External_effect_completed of
-      { target : Keeper_surface_post.delivery_target option }
+      { target : Keeper_surface_post.delivery_target }
       (** A terminal tool already delivered the reply outside this adapter.
           Connector adapters settle the receipt without emitting another
-          text message. [target] names where the post actually landed;
-          [None] only for legacy reply payloads that predate the field. *)
+          text message. [target] names where the post actually landed. *)
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
   | Reply_details of reply_details

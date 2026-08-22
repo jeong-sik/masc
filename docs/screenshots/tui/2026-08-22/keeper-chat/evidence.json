@@ -1,8 +1,8 @@
 {
   "schema": "masc.tui_keeper_chat_capture.v2",
   "target_pr": 29500,
-  "output_dir": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-dacqho__",
-  "started_at": "2026-08-22T11:04:44.138Z",
+  "output_dir": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-t2fw0fg_",
+  "started_at": "2026-08-22T11:22:00.074Z",
   "scenarios": [
     {
       "name": "responsive_success",
@@ -31,20 +31,20 @@
           "x": 25,
           "y": 24
         },
-        "enter_to_dispatch_lock_wait_ui_ms": 10.866,
+        "enter_to_dispatch_lock_wait_ui_ms": 7.688,
         "post_count_while_dispatch_lock_held": 0,
-        "dispatch_lock_release_to_post_ms": 11.669,
-        "dispatch_lock_release_to_sending_ui_ms": 16.085,
+        "dispatch_lock_release_to_post_ms": 18.514,
+        "dispatch_lock_release_to_sending_ui_ms": 24.283,
         "dispatch_lock_held_while_response_pending": true,
-        "draft_visible_latency_ms": 38.393,
+        "draft_visible_latency_ms": 37.254,
         "draft_visible_before_post_release": true,
-        "reply_visible_after_release_ms": 27.279,
-        "reply_visible_to_dispatch_lock_reacquired_ms": 28.473
+        "reply_visible_after_release_ms": 32.99,
+        "reply_visible_to_lock_probe_success_ms": 27.657
       },
       "screenshots": [
         {
           "file": "01-chat-tiny-resize-gate.png",
-          "captured_at": "2026-08-22T11:07:45.312Z",
+          "captured_at": "2026-08-22T11:24:54.522Z",
           "bytes": 6175,
           "sha256": "23490bd36ade98d22f6990c6b157746d743988bd874eddd70a53cf8f4e2e8874",
           "visible_text_sha256": "7b9f033cde18777863861360f5838a349c0d118195df07420003e03bfaee4bf5",
@@ -69,11 +69,11 @@
         },
         {
           "file": "02-chat-long-tail.png",
-          "captured_at": "2026-08-22T11:07:46.047Z",
-          "bytes": 16649,
-          "sha256": "cf01e4e355e6ecedc824e55d41a882cf62f9033f2d9362530ed2408061fb9d99",
-          "visible_text_sha256": "c2a18f667899b12155a0f15bb221e4267e4654795ff0e72eb67b2f080e4b0e6d",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57435)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (no messages yet -- type below and press Enter)                                               │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > ~xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️-TAIL │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
+          "captured_at": "2026-08-22T11:24:55.265Z",
+          "bytes": 16608,
+          "sha256": "a569bdb4c35a075ea1b09426c9ab125104064af453e30319af8b12a809083a7b",
+          "visible_text_sha256": "a32d936929ddb2c5ac89d68d79a14211be76ff85d21f184fd033e7cd94287b4a",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59396)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (no messages yet -- type below and press Enter)                                               │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > ~xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️-TAIL │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -93,11 +93,11 @@
         },
         {
           "file": "03-chat-long-tail-backspace.png",
-          "captured_at": "2026-08-22T11:07:46.114Z",
-          "bytes": 16575,
-          "sha256": "8fdd518970b1218fe5c8c5f697cdd1af27d282f8c1ae7de93865511fa212fb90",
-          "visible_text_sha256": "418a3560677d9bd9e1563bf04b65406282e1ae0b3a35b40c8836a2d9c0e92602",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57435)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (no messages yet -- type below and press Enter)                                               │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > ~xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️-TAI │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
+          "captured_at": "2026-08-22T11:24:55.332Z",
+          "bytes": 16534,
+          "sha256": "b5646e1b8ca65d83baeeea70fb179cb3ef313328969bc322831c07ab4ce46e38",
+          "visible_text_sha256": "2d474e044662c5223284902ebd0edcb388c659d4dd86e558c5fb248a6e45d571",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59396)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (no messages yet -- type below and press Enter)                                               │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > ~xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️-TAI │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -117,11 +117,11 @@
         },
         {
           "file": "04-chat-unicode-draft.png",
-          "captured_at": "2026-08-22T11:07:46.227Z",
-          "bytes": 17757,
-          "sha256": "728abcc67c5578ae1ed9707784d5491a778a114f3a1f1645bb0dfa3fe35cecdb",
-          "visible_text_sha256": "49cb5883d8d1d944599acec491879904708fcb1b494544723a2ba1ed3335e577",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57435)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (no messages yet -- type below and press Enter)                                               │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > Aé한🙂👍🏽🇰🇷❤️-proof                                                                         │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
+          "captured_at": "2026-08-22T11:24:55.432Z",
+          "bytes": 17724,
+          "sha256": "213c673b2facd9feade4168fda93515459a56cc8c676fd5bdc3db4a02caf3df7",
+          "visible_text_sha256": "e495bca31f3e9322c01847c43082c44c3a3fcc5098817f24e10d18ed4b8dcbd8",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59396)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (no messages yet -- type below and press Enter)                                               │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > Aé한🙂👍🏽🇰🇷❤️-proof                                                                         │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -141,11 +141,11 @@
         },
         {
           "file": "05-chat-inflight-responsive.png",
-          "captured_at": "2026-08-22T11:07:46.777Z",
-          "bytes": 24064,
-          "sha256": "65d13a995c603a9abbe5145e081ddbf1645f1485f100dc090d370b6cb15b6015",
-          "visible_text_sha256": "6b7ea94b234afe38f8b1179aab93180e23069314333be656ff4ed64c252bc084",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57435)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:46] you tui-..0de7f209                                                                   │\n│   Aé한🙂👍🏽🇰🇷❤️-proof                                                                           │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (sending tui-..0de7f209…)                                                                     │\n│   > draft-during-send                                                                           │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:wait for current request  Esc:back  Ctrl-U:clear line                                     ",
+          "captured_at": "2026-08-22T11:24:55.965Z",
+          "bytes": 24327,
+          "sha256": "24ef10082c332007aedef027b734d7887e051f8983a7cd5bf93547fec1a4f9cd",
+          "visible_text_sha256": "a9c8304916034bd9465e937549947c2a5b819133e371abdf006bdbab90590ef3",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59396)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:24:55] you tui-..48239d6f                                                                   │\n│   Aé한🙂👍🏽🇰🇷❤️-proof                                                                           │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (sending tui-..48239d6f…)                                                                     │\n│   > draft-during-send                                                                           │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:wait for current request  Esc:back  Ctrl-U:clear line                                     ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -160,18 +160,18 @@
           "input_row_text": "│   > draft-during-send                                                                           │",
           "markers": [
             "Aé한🙂👍🏽🇰🇷❤️-proof",
-            "(sending tui-..0de7f209",
+            "(sending tui-..48239d6f",
             "> draft-during-send",
             "Enter:wait for current request"
           ]
         },
         {
           "file": "06-chat-success-correlated.png",
-          "captured_at": "2026-08-22T11:07:46.898Z",
-          "bytes": 24811,
-          "sha256": "cd431364cdc0b34060c999a0b5d64dcb7cb78567d21498e943d9586e20bd4d32",
-          "visible_text_sha256": "bdaf03c5c8d63ff5a3b9437be800469f71f8ecd33c25a7fe1c18432de31bb3e7",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57435)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:46] you tui-..0de7f209                                                                   │\n│   Aé한🙂👍🏽🇰🇷❤️-proof                                                                           │\n│ [20:07:46] alpha tui-..0de7f209                                                                 │\n│   reply-v3                                                                                      │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > draft-during-send                                                                           │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
+          "captured_at": "2026-08-22T11:24:56.083Z",
+          "bytes": 24885,
+          "sha256": "127292110276e93821d87d363c1bdc52b091537e598d3924260623a243c47ea6",
+          "visible_text_sha256": "516a54b41ee5571c1fae3a0cee28d05ccfda6c8f21abcbc29f2b8b4498d902e9",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59396)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:24:55] you tui-..48239d6f                                                                   │\n│   Aé한🙂👍🏽🇰🇷❤️-proof                                                                           │\n│ [20:24:55] alpha tui-..48239d6f                                                                 │\n│   reply-v3                                                                                      │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   > draft-during-send                                                                           │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -187,7 +187,7 @@
           "markers": [
             "Aé한🙂👍🏽🇰🇷❤️-proof",
             "reply-v3",
-            "tui-..0de7f209",
+            "tui-..48239d6f",
             "> draft-during-send",
             "Enter:send"
           ]
@@ -199,7 +199,7 @@
         "other_post_count": 0,
         "unexpected_chat_route_count": 0,
         "request": {
-          "request_id": "tui-01a02927-c0d4-7000-bc87-342d0de7f209",
+          "request_id": "tui-01a02937-7528-7000-8b70-556948239d6f",
           "name": "alpha",
           "message_bytes": 38,
           "message_sha256": "636becdc117956588321ba6dae852622c5b2116d6f2a9465b2a52942a4e01cc1"
@@ -209,7 +209,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/briefing",
-            "received_monotonic": 589918.338741541,
+            "received_monotonic": 590947.632865208,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -226,7 +226,7 @@
           {
             "method": "GET",
             "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
-            "received_monotonic": 589918.339657041,
+            "received_monotonic": 590947.633612833,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -243,7 +243,7 @@
           {
             "method": "GET",
             "path": "/api/v1/board",
-            "received_monotonic": 589918.340262708,
+            "received_monotonic": 590947.634175125,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -260,7 +260,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/planning",
-            "received_monotonic": 589918.340860708,
+            "received_monotonic": 590947.634738333,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -277,14 +277,14 @@
           {
             "method": "POST",
             "path": "/api/v1/keepers/chat/stream",
-            "received_monotonic": 589925.413292166,
+            "received_monotonic": 590954.681318416,
             "operation_ordinal": null,
             "request_body_bytes": 123,
-            "request_body_sha256": "dd878bf0d34ad861a9cc6e2449a4b4071045cbf7b9db03eb68341a5c40805b1d",
-            "request_body_utf8": "{\"request_id\":\"tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"name\":\"alpha\",\"message\":\"Aé한🙂👍🏽🇰🇷❤️-proof\"}",
+            "request_body_sha256": "0c6a22fb1b501c06f5909e010f870cd596a5babadf9eb7d1772bf1a5b95bfd54",
+            "request_body_utf8": "{\"request_id\":\"tui-01a02937-7528-7000-8b70-556948239d6f\",\"name\":\"alpha\",\"message\":\"Aé한🙂👍🏽🇰🇷❤️-proof\"}",
             "response_body_bytes": 1479,
-            "response_body_sha256": "d3553d459cd8eb9ecb47c99aa1ef9b8d0bfc3b8069f9d1df167b0e0c60c0e0c9",
-            "response_body_utf8": "data: {\"type\":\"CUSTOM\",\"threadId\":\"default\",\"timestamp\":1.0,\"name\":\"KEEPER_CHAT_OPERATION_ACCEPTED\",\"value\":{\"operation_id\":\"tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"state\":\"Queued\",\"queued_count\":0}}\n\ndata: {\"type\":\"RUN_STARTED\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-c0d4-7000-bc87-342d0de7f209\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_START\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"messageId\":\"keeper-operation-message-tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"messageId\":\"keeper-operation-message-tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"delta\":\"reply-v3\"}\n\ndata: {\"type\":\"CUSTOM\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"name\":\"KEEPER_REPLY_DETAILS\",\"value\":{\"reply\":\"reply-v3\",\"turn_outcome\":\"visible_reply\",\"turn_ref\":\"trace-chat#1\"}}\n\ndata: {\"type\":\"TEXT_MESSAGE_END\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-c0d4-7000-bc87-342d0de7f209\",\"messageId\":\"keeper-operation-message-tui-01a02927-c0d4-7000-bc87-342d0de7f209\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-c0d4-7000-bc87-342d0de7f209\"}\n\n",
+            "response_body_sha256": "ae4f9064872cdc3e428c5a3672a35cf33ae52e9f52d35e31906768834ff029fa",
+            "response_body_utf8": "data: {\"type\":\"CUSTOM\",\"threadId\":\"default\",\"timestamp\":1.0,\"name\":\"KEEPER_CHAT_OPERATION_ACCEPTED\",\"value\":{\"operation_id\":\"tui-01a02937-7528-7000-8b70-556948239d6f\",\"state\":\"Queued\",\"queued_count\":0}}\n\ndata: {\"type\":\"RUN_STARTED\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-7528-7000-8b70-556948239d6f\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_START\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-7528-7000-8b70-556948239d6f\",\"messageId\":\"keeper-operation-message-tui-01a02937-7528-7000-8b70-556948239d6f\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-7528-7000-8b70-556948239d6f\",\"messageId\":\"keeper-operation-message-tui-01a02937-7528-7000-8b70-556948239d6f\",\"delta\":\"reply-v3\"}\n\ndata: {\"type\":\"CUSTOM\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-7528-7000-8b70-556948239d6f\",\"name\":\"KEEPER_REPLY_DETAILS\",\"value\":{\"reply\":\"reply-v3\",\"turn_outcome\":\"visible_reply\",\"turn_ref\":\"trace-chat#1\"}}\n\ndata: {\"type\":\"TEXT_MESSAGE_END\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-7528-7000-8b70-556948239d6f\",\"messageId\":\"keeper-operation-message-tui-01a02937-7528-7000-8b70-556948239d6f\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-7528-7000-8b70-556948239d6f\"}\n\n",
             "response_content_type": "text/event-stream",
             "response_status": 200,
             "response_handler_completed": true,
@@ -298,21 +298,21 @@
       "name": "accepted_eof_exact_recovery_across_restart",
       "uncertainty_fixture": "accepted strict SSE ending before terminal event",
       "measurements": {
-        "ctrl_r_to_get_ms": 3.862,
-        "ctrl_r_to_reconciling_ui_ms": 10.862,
+        "ctrl_r_to_get_ms": 4.425,
+        "ctrl_r_to_reconciling_ui_ms": 7.233,
         "ctrl_r_navigation_count": 0,
-        "restart_to_auto_get_ms": 246.289,
-        "recovery_visible_after_release_ms": 27.381
+        "restart_to_auto_get_ms": 241.336,
+        "recovery_visible_after_release_ms": 23.463
       },
-      "recovery_sha256_before_restart": "e0efe0978ed9f9f414804e2dd4f60be1dc486d76643568bb0a7150a8a246b62c",
+      "recovery_sha256_before_restart": "216bd5141141adedf4c8395071a0c099dc35a6ee82d8bd46b4bab4f83a0d57b2",
       "screenshots": [
         {
           "file": "07-chat-outcome-unverified.png",
-          "captured_at": "2026-08-22T11:07:51.128Z",
-          "bytes": 45345,
-          "sha256": "a276602884a7410c412ad94c30484dd38c93c8ac6fb1a51c98d9918d9baa97f8",
-          "visible_text_sha256": "83296f1e534482e528b0462fda3d27b37581db10e4a39cbdf178381b36d5e5e1",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57470)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:50] you tui-..b8aee4e2                                                                   │\n│   recover-v3                                                                                    │\n│ [20:07:50] error tui-..b8aee4e2                                                                 │\n│   Outcome unverified for tui-01a02927-d203-7000-b0e6-5178b8aee4e2; the operation may still exec │\n│   ute. Do not resend with a new ID; use Ctrl-R to reconnect. Keeper chat stream ended after acc │\n│   eptance but before a terminal event                                                           │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   outcome unverified: alpha tui-..b8aee4e2; Ctrl-R resumes the exact request                    │\n│   > blocked-resend                                                                              │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Ctrl-R:resume exact request  Enter:blocked  Esc:back  Ctrl-U:clear line                         ",
+          "captured_at": "2026-08-22T11:25:00.334Z",
+          "bytes": 45927,
+          "sha256": "6829fe42bb727ddb96a4518fff034fedf2b333221a4c3d60c8829db785009a3b",
+          "visible_text_sha256": "5cb24805d5c2942880815f477a42c7e36142c2124f03fb3b22b642048c5506c3",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59409)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:24:59] you tui-..935c1a1f                                                                   │\n│   recover-v3                                                                                    │\n│ [20:24:59] error tui-..935c1a1f                                                                 │\n│   Outcome unverified for tui-01a02937-8653-7000-b26e-d147935c1a1f; the operation may still exec │\n│   ute. Do not resend with a new ID; use Ctrl-R to reconnect. Keeper chat stream ended after acc │\n│   eptance but before a terminal event                                                           │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   outcome unverified: alpha tui-..935c1a1f; Ctrl-R resumes the exact request                    │\n│   > blocked-resend                                                                              │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Ctrl-R:resume exact request  Enter:blocked  Esc:back  Ctrl-U:clear line                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -327,18 +327,18 @@
           "input_row_text": "│   > blocked-resend                                                                              │",
           "markers": [
             "outcome unverified:",
-            "tui-..b8aee4e2",
+            "tui-..935c1a1f",
             "> blocked-resend",
             "Ctrl-R:resume exact request  Enter:blocked"
           ]
         },
         {
           "file": "08-chat-restarted-reconciling.png",
-          "captured_at": "2026-08-22T11:07:54.928Z",
-          "bytes": 36807,
-          "sha256": "c118139c98f4d66410872b55beda12bdb23d1208075aef931b00b51a653a0281",
-          "visible_text_sha256": "910cf7f461c43b04878159681b68fd0bea31b5587b6c03c95eeeecb52cadabf5",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57470)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:51] you tui-..b8aee4e2                                                                   │\n│   recover-v3                                                                                    │\n│ [20:07:51] status tui-..b8aee4e2                                                                │\n│   Recovered an accepted request; reconciling the exact durable operation                        │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (reconciling exact operation tui-..b8aee4e2…)                                                 │\n│   outcome unverified: alpha tui-..b8aee4e2; polling the exact operation                         │\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  reconciling exact operation  Enter:blocked  Esc:back  Ctrl-U:clear line                         ",
+          "captured_at": "2026-08-22T11:25:04.066Z",
+          "bytes": 36678,
+          "sha256": "10eeee9c72a57709694be2276fa2ac38f35b7e6546e502135cf51774e64935eb",
+          "visible_text_sha256": "e31f549b094ebadd54647472acfe63d380026a8ddddd4bf5af664b10ac0ee8a1",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59409)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:25:00] you tui-..935c1a1f                                                                   │\n│   recover-v3                                                                                    │\n│ [20:25:00] status tui-..935c1a1f                                                                │\n│   Recovered an accepted request; reconciling the exact durable operation                        │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (reconciling exact operation tui-..935c1a1f…)                                                 │\n│   outcome unverified: alpha tui-..935c1a1f; polling the exact operation                         │\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  reconciling exact operation  Enter:blocked  Esc:back  Ctrl-U:clear line                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -353,17 +353,17 @@
           "input_row_text": "│   >                                                                                             │",
           "markers": [
             "Recovered an accepted request; reconciling the exact durable operation",
-            "(reconciling exact operation tui-..b8aee4e2",
+            "(reconciling exact operation tui-..935c1a1f",
             "reconciling exact operation  Enter:blocked"
           ]
         },
         {
           "file": "09-chat-reconciled.png",
-          "captured_at": "2026-08-22T11:07:55.016Z",
-          "bytes": 36850,
-          "sha256": "fa2a9b17528b531cc7de6f751843754904a1e348d85c9ee6621c67c9d96f9c6f",
-          "visible_text_sha256": "985899f8553f6601a36148e3fbd080cf9016811fca9896bebd09f516ec0bc4cb",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57470)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:51] you tui-..b8aee4e2                                                                   │\n│   recover-v3                                                                                    │\n│ [20:07:51] status tui-..b8aee4e2                                                                │\n│   Recovered an accepted request; reconciling the exact durable operation                        │\n│ [20:07:54] status tui-..b8aee4e2                                                                │\n│   Operation settled successfully (turn:v3); canonical reply is unavailable after transport reco │\n│   very                                                                                          │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
+          "captured_at": "2026-08-22T11:25:04.150Z",
+          "bytes": 36349,
+          "sha256": "2a4ac7ffdf346b4153f847ed0792dd5892d51eba8a0da7337212c21cfc51419f",
+          "visible_text_sha256": "8d72032921f5798961d0de2d2432880b517dfc894a52e9e1ea12f2faf9c06832",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59409)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:25:00] you tui-..935c1a1f                                                                   │\n│   recover-v3                                                                                    │\n│ [20:25:00] status tui-..935c1a1f                                                                │\n│   Recovered an accepted request; reconciling the exact durable operation                        │\n│ [20:25:04] status tui-..935c1a1f                                                                │\n│   Operation settled successfully (turn:v3); canonical reply is unavailable after transport reco │\n│   very                                                                                          │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -390,7 +390,7 @@
         "other_post_count": 0,
         "unexpected_chat_route_count": 0,
         "request": {
-          "request_id": "tui-01a02927-d203-7000-b0e6-5178b8aee4e2",
+          "request_id": "tui-01a02937-8653-7000-b26e-d147935c1a1f",
           "name": "alpha",
           "message_bytes": 10,
           "message_sha256": "0521a4f8cc6baeeed88ce455cae4869ca9ed758d09c41d5dab09dd2ba456c8bc"
@@ -400,7 +400,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/briefing",
-            "received_monotonic": 589926.667224208,
+            "received_monotonic": 590955.923660416,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -417,7 +417,7 @@
           {
             "method": "GET",
             "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
-            "received_monotonic": 589926.668152041,
+            "received_monotonic": 590955.924557708,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -434,7 +434,7 @@
           {
             "method": "GET",
             "path": "/api/v1/board",
-            "received_monotonic": 589926.668722416,
+            "received_monotonic": 590955.925159291,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -451,7 +451,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/planning",
-            "received_monotonic": 589926.669334833,
+            "received_monotonic": 590955.925709,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -468,14 +468,14 @@
           {
             "method": "POST",
             "path": "/api/v1/keepers/chat/stream",
-            "received_monotonic": 589929.806031166,
+            "received_monotonic": 590959.06483175,
             "operation_ordinal": null,
             "request_body_bytes": 95,
-            "request_body_sha256": "17c2f9a86044d312475c8e41ba21ba0bf56bade2d60922f51aba0015c5626b18",
-            "request_body_utf8": "{\"request_id\":\"tui-01a02927-d203-7000-b0e6-5178b8aee4e2\",\"name\":\"alpha\",\"message\":\"recover-v3\"}",
+            "request_body_sha256": "f0c4b5975cda1bb532f11e3f3915ca5376b01f313c1a1c8ad050c39e9b42b286",
+            "request_body_utf8": "{\"request_id\":\"tui-01a02937-8653-7000-b26e-d147935c1a1f\",\"name\":\"alpha\",\"message\":\"recover-v3\"}",
             "response_body_bytes": 870,
-            "response_body_sha256": "355873a96504f565f9fe2092a08c5b268d8d7a018f9cfb0f1aed2dbdd8ec3cfb",
-            "response_body_utf8": "data: {\"type\":\"CUSTOM\",\"threadId\":\"default\",\"timestamp\":1.0,\"name\":\"KEEPER_CHAT_OPERATION_ACCEPTED\",\"value\":{\"operation_id\":\"tui-01a02927-d203-7000-b0e6-5178b8aee4e2\",\"state\":\"Queued\",\"queued_count\":0}}\n\ndata: {\"type\":\"RUN_STARTED\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-d203-7000-b0e6-5178b8aee4e2\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_START\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-d203-7000-b0e6-5178b8aee4e2\",\"messageId\":\"keeper-operation-message-tui-01a02927-d203-7000-b0e6-5178b8aee4e2\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02927-d203-7000-b0e6-5178b8aee4e2\",\"messageId\":\"keeper-operation-message-tui-01a02927-d203-7000-b0e6-5178b8aee4e2\",\"delta\":\"partial-must-not-be-promoted\"}\n\n",
+            "response_body_sha256": "e7cfb466415b196b6d9688327edf96cf011af916569d9e2a03d6d19d730a35f1",
+            "response_body_utf8": "data: {\"type\":\"CUSTOM\",\"threadId\":\"default\",\"timestamp\":1.0,\"name\":\"KEEPER_CHAT_OPERATION_ACCEPTED\",\"value\":{\"operation_id\":\"tui-01a02937-8653-7000-b26e-d147935c1a1f\",\"state\":\"Queued\",\"queued_count\":0}}\n\ndata: {\"type\":\"RUN_STARTED\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-8653-7000-b26e-d147935c1a1f\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_START\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-8653-7000-b26e-d147935c1a1f\",\"messageId\":\"keeper-operation-message-tui-01a02937-8653-7000-b26e-d147935c1a1f\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"keeper:alpha\",\"timestamp\":1.0,\"runId\":\"keeper-operation-run-tui-01a02937-8653-7000-b26e-d147935c1a1f\",\"messageId\":\"keeper-operation-message-tui-01a02937-8653-7000-b26e-d147935c1a1f\",\"delta\":\"partial-must-not-be-promoted\"}\n\n",
             "response_content_type": "text/event-stream",
             "response_status": 200,
             "response_handler_completed": true,
@@ -484,15 +484,15 @@
           },
           {
             "method": "GET",
-            "path": "/api/v1/keepers/alpha/chat/operations/tui-01a02927-d203-7000-b0e6-5178b8aee4e2",
-            "received_monotonic": 589930.269262583,
+            "path": "/api/v1/keepers/alpha/chat/operations/tui-01a02937-8653-7000-b26e-d147935c1a1f",
+            "received_monotonic": 590959.535448958,
             "operation_ordinal": 1,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "request_body_utf8": "",
             "response_body_bytes": 295,
-            "response_body_sha256": "36c3e3cef5d32fac7451ab18a4b5e22a49b99cb2d25ab5ebb739297df898d553",
-            "response_body_utf8": "{\"schema\": \"masc.keeper_chat_operation.v1\", \"operation_id\": \"tui-01a02927-d203-7000-b0e6-5178b8aee4e2\", \"sequence\": \"7\", \"created_at\": 1.0, \"execution_digest\": \"be98caf7f72acee82b15688118cf0e7630620208bc0d5f3892e7d2a47ef87d1a\", \"source\": {}, \"input\": null, \"state\": \"Running\", \"started_at\": 2.0}",
+            "response_body_sha256": "2f0e6277cc01a835b7d4295285032c967d2a2331e5c53a001978c36e18604cb2",
+            "response_body_utf8": "{\"schema\": \"masc.keeper_chat_operation.v1\", \"operation_id\": \"tui-01a02937-8653-7000-b26e-d147935c1a1f\", \"sequence\": \"7\", \"created_at\": 1.0, \"execution_digest\": \"be98caf7f72acee82b15688118cf0e7630620208bc0d5f3892e7d2a47ef87d1a\", \"source\": {}, \"input\": null, \"state\": \"Running\", \"started_at\": 2.0}",
             "response_content_type": "application/json",
             "response_status": 200,
             "response_handler_completed": true,
@@ -502,7 +502,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/briefing",
-            "received_monotonic": 589930.8849035,
+            "received_monotonic": 590960.142431083,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -518,15 +518,15 @@
           },
           {
             "method": "GET",
-            "path": "/api/v1/keepers/alpha/chat/operations/tui-01a02927-d203-7000-b0e6-5178b8aee4e2",
-            "received_monotonic": 589930.885287166,
+            "path": "/api/v1/keepers/alpha/chat/operations/tui-01a02937-8653-7000-b26e-d147935c1a1f",
+            "received_monotonic": 590960.142684333,
             "operation_ordinal": 2,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "request_body_utf8": "",
             "response_body_bytes": 325,
-            "response_body_sha256": "4b82670bba9bb4f71b9876ba43e46c191c08fc66e9174fe6539ffcde3a9ef268",
-            "response_body_utf8": "{\"schema\": \"masc.keeper_chat_operation.v1\", \"operation_id\": \"tui-01a02927-d203-7000-b0e6-5178b8aee4e2\", \"sequence\": \"7\", \"created_at\": 1.0, \"execution_digest\": \"be98caf7f72acee82b15688118cf0e7630620208bc0d5f3892e7d2a47ef87d1a\", \"source\": {}, \"input\": null, \"state\": \"Succeeded\", \"completed_at\": 3.0, \"outcome_ref\": \"turn:v3\"}",
+            "response_body_sha256": "77ce884263d55652d75a047a48d215c271f4fcdb3a3c3063846f6b1af487f41e",
+            "response_body_utf8": "{\"schema\": \"masc.keeper_chat_operation.v1\", \"operation_id\": \"tui-01a02937-8653-7000-b26e-d147935c1a1f\", \"sequence\": \"7\", \"created_at\": 1.0, \"execution_digest\": \"be98caf7f72acee82b15688118cf0e7630620208bc0d5f3892e7d2a47ef87d1a\", \"source\": {}, \"input\": null, \"state\": \"Succeeded\", \"completed_at\": 3.0, \"outcome_ref\": \"turn:v3\"}",
             "response_content_type": "application/json",
             "response_status": 200,
             "response_handler_completed": true,
@@ -536,7 +536,7 @@
           {
             "method": "GET",
             "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
-            "received_monotonic": 589930.885951458,
+            "received_monotonic": 590960.143171458,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -553,7 +553,7 @@
           {
             "method": "GET",
             "path": "/api/v1/board",
-            "received_monotonic": 589930.886836291,
+            "received_monotonic": 590960.143804916,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -570,7 +570,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/planning",
-            "received_monotonic": 589930.887520875,
+            "received_monotonic": 590960.14453775,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -590,16 +590,16 @@
     {
       "name": "durable_replayable_exact_id_replay",
       "measurements": {
-        "startup_to_replay_post_ms": 271.953
+        "startup_to_replay_post_ms": 256.43
       },
       "screenshots": [
         {
           "file": "10-chat-replayable-exact-replay.png",
-          "captured_at": "2026-08-22T11:07:58.693Z",
-          "bytes": 39840,
-          "sha256": "d224673377e0fb4d5c486f70b4e38acd5f5417470ec0f229d2bbe63c576c1626",
-          "visible_text_sha256": "7002a9461d8497b309ee3d5a65f9fe99efe5d9c58ef818c035049c4ac5f42e38",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57494)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:55] status tui-..456789ab                                                                │\n│   Recovered a replayable request; replaying the exact ID under the cross-process lock           │\n│ [20:07:55] you tui-..456789ab                                                                   │\n│   replayable-v3                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (replaying exact request tui-..456789ab…)                                                     │\n│   prior outcome unverified: alpha tui-..456789ab; replaying the same request ID                 │\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  replaying exact request  Enter:blocked  Esc:back  Ctrl-U:clear line                             ",
+          "captured_at": "2026-08-22T11:25:07.833Z",
+          "bytes": 39785,
+          "sha256": "b1cbb1fae2d08aa43c1f7c42d93ec8f15d0c2b4010c67c20269fe3537c7e96bb",
+          "visible_text_sha256": "7e6ba8c81ae0c962de5ff5163e8574f9bb96c4be39e7b32765a8f07cd7d9f8e8",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59433)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:25:04] status tui-..456789ab                                                                │\n│   Recovered a replayable request; replaying the exact ID under the cross-process lock           │\n│ [20:25:04] you tui-..456789ab                                                                   │\n│   replayable-v3                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   (replaying exact request tui-..456789ab…)                                                     │\n│   prior outcome unverified: alpha tui-..456789ab; replaying the same request ID                 │\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  replaying exact request  Enter:blocked  Esc:back  Ctrl-U:clear line                             ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -636,7 +636,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/briefing",
-            "received_monotonic": 589934.648485291,
+            "received_monotonic": 590963.892279708,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -653,7 +653,7 @@
           {
             "method": "GET",
             "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
-            "received_monotonic": 589934.649486958,
+            "received_monotonic": 590963.892981916,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -670,7 +670,7 @@
           {
             "method": "GET",
             "path": "/api/v1/board",
-            "received_monotonic": 589934.650058166,
+            "received_monotonic": 590963.893643833,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -687,7 +687,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/planning",
-            "received_monotonic": 589934.650696583,
+            "received_monotonic": 590963.89431,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -704,7 +704,7 @@
           {
             "method": "POST",
             "path": "/api/v1/keepers/chat/stream",
-            "received_monotonic": 589934.668808291,
+            "received_monotonic": 590963.908622083,
             "operation_ordinal": null,
             "request_body_bytes": 98,
             "request_body_sha256": "19af54a1b8ea9fc454cfde91cd5e430bd74d8d080ee4f8bd4dc6b62169ea7d5c",
@@ -724,19 +724,21 @@
     {
       "name": "two_tui_stale_prepared_not_recreated",
       "measurements": {
-        "prepared_observer_start_to_blocked_ui_ms": 3361.525,
+        "prepared_observer_start_to_blocked_ui_ms": 3314.071,
         "post_count_while_external_lock_active": 0,
-        "rejection_release_to_fence_removed_ms": 554.964,
-        "stale_ctrl_r_to_send_enabled_ms": 389.407
+        "rejection_release_to_fence_removed_ms": 55.137,
+        "fence_absent_after_500ms_observation": true,
+        "stale_ctrl_r_to_send_enabled_ms": 44.738,
+        "post_count_after_350ms_stability_observation": 1
       },
       "screenshots": [
         {
           "file": "11-chat-stale-prepared-blocked.png",
-          "captured_at": "2026-08-22T11:08:02.482Z",
-          "bytes": 36029,
-          "sha256": "9617b18294246130f2bdf7a5b46a9c1a656c07cad4b0767ec26cabe5bc761eb0",
-          "visible_text_sha256": "5e19d592c799ce01d032f58a2048096a6de478c1c78269975aa11a88074cdc20",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57505)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:59] status tui-..456789ab                                                                │\n│   Recovered a prepared request; claiming its first serialized dispatch                          │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   prepared fence: alpha tui-..456789ab; Ctrl-R retries the first serialized dispatch            │\n│   prepared recovery blocked; no new request may start: Keeper chat dispatch lock failed: File_~ │\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Ctrl-R:retry prepared fence  Enter:blocked  Esc:back  Ctrl-U:clear line                         ",
+          "captured_at": "2026-08-22T11:25:11.616Z",
+          "bytes": 35919,
+          "sha256": "e21908b636e81dea6c5a1ac20d5fb5576ba9e603bae6f5e1e399032f60632e08",
+          "visible_text_sha256": "e25b14839ea8ec7f82ecb19ac2311f91e8077b9958eaceaf72155024618fcdf1",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59445)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:25:08] status tui-..456789ab                                                                │\n│   Recovered a prepared request; claiming its first serialized dispatch                          │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   prepared fence: alpha tui-..456789ab; Ctrl-R retries the first serialized dispatch            │\n│   prepared recovery blocked; no new request may start: Keeper chat dispatch lock failed: File_~ │\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Ctrl-R:retry prepared fence  Enter:blocked  Esc:back  Ctrl-U:clear line                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -757,11 +759,11 @@
         },
         {
           "file": "12-chat-stale-fence-not-recreated.png",
-          "captured_at": "2026-08-22T11:08:06.797Z",
-          "bytes": 20441,
-          "sha256": "a7dda8f4293ef0ed5e7e00177ad3808444c76c1249c8654d22e1e96140b5420e",
-          "visible_text_sha256": "b2e340d91725acb368773b3304531e8eb2013eb81c105b6247385650e6ca7cef",
-          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 57505)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:07:59] status tui-..456789ab                                                                │\n│   Recovered a prepared request; claiming its first serialized dispatch                          │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
+          "captured_at": "2026-08-22T11:25:15.940Z",
+          "bytes": 20322,
+          "sha256": "3e17ad41f47a108fe4ea107c6143ba926230343c2018272add52916739f1f56b",
+          "visible_text_sha256": "a57489219e881977a9e10a2994a4c4d5adf9be494921722589177efe84002a14",
+          "visible_text": "┌─────────────────────────────────────────────────────────────────────────────────────────────────┐\n│  Message to: alpha  (port 59445)                                                                │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│ [20:25:08] status tui-..456789ab                                                                │\n│   Recovered a prepared request; claiming its first serialized dispatch                          │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n│                                                                                                 │\n├─────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   >                                                                                             │\n└─────────────────────────────────────────────────────────────────────────────────────────────────┘\n  Enter:send  Esc:back  Ctrl-U:clear line                                                         ",
           "terminal_columns": 99,
           "terminal_rows": 30,
           "width_px": 834,
@@ -796,7 +798,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/briefing",
-            "received_monotonic": 589938.449655041,
+            "received_monotonic": 590967.679389958,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -813,7 +815,7 @@
           {
             "method": "GET",
             "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
-            "received_monotonic": 589938.450643,
+            "received_monotonic": 590967.680208625,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -830,7 +832,7 @@
           {
             "method": "GET",
             "path": "/api/v1/board",
-            "received_monotonic": 589938.451499583,
+            "received_monotonic": 590967.680847333,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -847,7 +849,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/planning",
-            "received_monotonic": 589938.452157166,
+            "received_monotonic": 590967.681589625,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -864,7 +866,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/briefing",
-            "received_monotonic": 589941.866458083,
+            "received_monotonic": 590971.059747333,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -881,7 +883,7 @@
           {
             "method": "GET",
             "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
-            "received_monotonic": 589941.867280541,
+            "received_monotonic": 590971.0605795,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -898,7 +900,7 @@
           {
             "method": "GET",
             "path": "/api/v1/board",
-            "received_monotonic": 589941.868061458,
+            "received_monotonic": 590971.061131583,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -915,7 +917,7 @@
           {
             "method": "GET",
             "path": "/api/v1/dashboard/planning",
-            "received_monotonic": 589941.868743083,
+            "received_monotonic": 590971.061692791,
             "operation_ordinal": null,
             "request_body_bytes": 0,
             "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -932,7 +934,7 @@
           {
             "method": "POST",
             "path": "/api/v1/keepers/chat/stream",
-            "received_monotonic": 589941.883346583,
+            "received_monotonic": 590971.076187166,
             "operation_ordinal": null,
             "request_body_bytes": 92,
             "request_body_sha256": "e67131c8687830f28100467396c22c79aef69bcf46ccfdf21800c2b0d98560e3",
@@ -955,17 +957,17 @@
       "scripts/dune-local.sh",
       "build",
       "--build-dir",
-      "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-dacqho__/.dune-build-bbj4cwy6",
+      "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-t2fw0fg_/.dune-build-6awc6qgc",
       "bin/masc_tui.exe"
     ],
-    "started_at": "2026-08-22T11:04:46.592Z",
-    "finished_at": "2026-08-22T11:07:37.735Z",
-    "duration_ms": 171140.601,
+    "started_at": "2026-08-22T11:22:02.417Z",
+    "finished_at": "2026-08-22T11:24:46.958Z",
+    "duration_ms": 164542.149,
     "returncode": 0,
     "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stderr_sha256": "dda46a1df33c4f8e930e84d9d367cd2f9437eff5de2471281064a0d82f1c57b2",
+    "stderr_sha256": "dc8d59ab35c6393096493b4cd153d4fe313e66f0c6191df4b223dfe97211d033",
     "stdout_utf8": "",
-    "stderr_utf8": "[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-1244315921.lock\n[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-dacqho__/.source-8ccu5yh1/_build DUNE_CACHE=disabled\n[dune-local] command: dune build --root /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-dacqho__/.source-8ccu5yh1 --build-dir /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-dacqho__/.dune-build-bbj4cwy6 bin/masc_tui.exe\nWarning: option \"-j-std\" is deprecated.\n",
+    "stderr_utf8": "[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-2810868510.lock\n[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-t2fw0fg_/.source-68er4_ny/_build DUNE_CACHE=disabled\n[dune-local] command: dune build --root /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-t2fw0fg_/.source-68er4_ny --build-dir /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-t2fw0fg_/.dune-build-6awc6qgc bin/masc_tui.exe\nWarning: option \"-j-std\" is deprecated.\n",
     "inherited_environment_keys": [
       "HOME",
       "LANG",
@@ -975,20 +977,20 @@
       "PATH",
       "TMPDIR"
     ],
-    "fresh_build_dir": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-dacqho__/.dune-build-bbj4cwy6",
+    "fresh_build_dir": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keeper-chat-capture-t2fw0fg_/.dune-build-6awc6qgc",
     "source_snapshot": {
       "kind": "git_archive",
-      "commit": "39c78d048dc679dbc825fd44bc6af424c34a3ef6",
-      "tar_sha256": "b2aab51d85f097db17a9e5bc326759f28e986ff3b24eb512b8d4dc609bd74662"
+      "commit": "b281875e9aed5000cb6cf8b113a3a1b5e5088881",
+      "tar_sha256": "6fd58f63ceb038245939b4fa11b28c646999efc9fb12cdc505f0e6349574c90a"
     }
   },
   "source": {
-    "head": "39c78d048dc679dbc825fd44bc6af424c34a3ef6",
+    "head": "b281875e9aed5000cb6cf8b113a3a1b5e5088881",
     "branch": "docs/tui-keeper-chat-runtime-evidence-v2",
     "disposition": "exact-head-candidate",
-    "executable_sha256": "cde6686a25351ad05bd0abfe173abaca3fc4451a2a81d85532a15234d80e7de6",
+    "executable_sha256": "70a0e53404ebe47c22fde0f4e60a0363ca2aeb089c61771c47d882ece35dab30",
     "executable_bytes": 39805744,
-    "script_sha256": "5982626ccd732d747b1143947a97e4054c54d982ffba6fe3883f30e4f3211aaa",
+    "script_sha256": "8a36525044cfe44ff6f28a71fc07008669154957a42769c5af1f63f4da6a957d",
     "ttyd_version": "ttyd version 1.7.7-unknown",
     "playwright_version": "1.59.0",
     "child_environment_keys": [
@@ -1018,5 +1020,5 @@
     "screenshots_rehashed": true
   },
   "status": "passed",
-  "finished_at": "2026-08-22T11:08:09.081Z"
+  "finished_at": "2026-08-22T11:25:18.228Z"
 }

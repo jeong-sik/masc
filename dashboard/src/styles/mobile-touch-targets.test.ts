@@ -74,6 +74,15 @@ describe('operator surface mobile touch targets', () => {
     }
   })
 
+  // Regression guard. The Work view toggle was dropped from this list on the
+  // strength of a grep that reported no consumer; `work.ts` renders
+  // `.wk-viewseg` and always did. The selector lives inside a media query, so
+  // the flat cases above cannot see it.
+  it('keeps the Work view toggle on the mobile target token', () => {
+    expect(declarationsInMedia('work-v2.css', '.wk-viewseg button', '(max-width: 700px)')['min-height'])
+      .toBe(target)
+  })
+
   it('keeps Settings navigation on the canonical target token', () => {
     expect(declarationsInMedia('settings-surface.css', '.set-nav-item', '(max-width: 900px)')['min-height'])
       .toBe(target)

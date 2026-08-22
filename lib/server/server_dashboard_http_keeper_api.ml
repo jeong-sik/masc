@@ -1402,10 +1402,9 @@ let keeper_chat_history_page_json config name ~before =
   let next_before =
     List.fold_left
       (fun acc ({ ts; _ } : Keeper_chat_store.chat_message) ->
-        match ts, acc with
-        | None, _ -> acc
-        | Some t, None -> Some t
-        | Some t, Some a -> Some (Float.min a t))
+        match acc with
+        | None -> Some ts
+        | Some a -> Some (Float.min a ts))
       None
       messages
   in

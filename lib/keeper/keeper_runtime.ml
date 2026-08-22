@@ -409,10 +409,7 @@ let ensure_keeper_meta_with_cause config name =
         ~target:overlayed
     in
     emit_keeper_meta_overlay_drift ~keeper_name:meta.name overlay_cats;
-    (* Keep the runtime snapshot honest as well as the live overlay.
-       TOML-only [active_goal_ids] is overlaid in the returned meta but
-       does not trigger
-       a runtime JSON rewrite by themselves. *)
+    (* Keep the runtime snapshot honest as well as the live overlay. *)
     let cats =
       keeper_meta_persistent_drift_categories
         ~defaults

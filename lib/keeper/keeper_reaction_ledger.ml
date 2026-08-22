@@ -7,7 +7,6 @@ type stimulus_kind =
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Manual_compaction
-      (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message

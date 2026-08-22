@@ -63,13 +63,6 @@ type stimulus_payload =
          [Fusion_completed]: a HITL decision is an async completion the
          waiting keeper must be notified of. *)
   | Manual_compaction_requested
-      (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
-         (keeper_up tool args or TOML reconcile). Wakes the keeper ONCE at
-         the assignment edge so the new standing objective arrives as
-         actionable turn input — before this, an assigned goal was
-         discovered only if some unrelated stimulus happened to fire.
-         Uses the same no-dedicated-reason pattern as async completions:
-         turn_reason; the injected pending observation drives the turn. *)
   | Completion_authority_rejected of completion_authority_rejection
   (* Cancellation is the one terminal outcome with no Board projection. This
      carries the cancellation to the Task's author. *)

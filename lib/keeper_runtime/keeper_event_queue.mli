@@ -89,7 +89,6 @@ type stimulus_payload =
   | Manual_compaction_requested
       (** Operator-requested MASC compaction. The tool only enqueues this
           stimulus; the owning Keeper consumes it in its Owner child. *)
-      (** A goal was newly added to this keeper's [active_goal_ids]. *)
   | Completion_authority_rejected of completion_authority_rejection
       (** A system completion authority rejected this Keeper's submitted
           evidence. The event is delivered to the producer Keeper as typed

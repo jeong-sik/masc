@@ -95,8 +95,9 @@ val inference_telemetry_to_runtime_json :
     provider/model identity is collapsed before leaving the AGENT_CORE boundary. *)
 
 val context_max_of_telemetry :
-  Agent_core.Types.inference_telemetry option -> int
-(** Provider-reported context window max, or [0] when telemetry omits it. *)
+  Agent_core.Types.inference_telemetry option -> int option
+(** Provider-reported context window max, or [None] when telemetry omits it or
+    reports a non-positive window. *)
 
 type thinking_log_summary =
   { thinking_present : bool

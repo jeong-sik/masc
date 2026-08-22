@@ -248,7 +248,16 @@ module Ring = struct
       details = `Null;
       category = None;
     }
-  let total = Atomic.make 0 (* total entries ever written *)
+  let total = Atomic.make 0 (* next sequence to hand out *)
+
+  (* Sequence of the oldest entry the ring can answer for.  Zero for a
+     process that started with an empty log directory; after
+     [load_from_file] it is the sequence handed to the first restored
+     entry, which resumes above every sequence already on disk (see
+     [load_from_file]).  Without it the window math below would derive a
+     lower bound of [total - capacity] and scan ring slots that this
+     process never filled. *)
+  let first_seq = Atomic.make 0
 
   (* File sink state *)
   let file_channel : out_channel option ref = ref None
@@ -576,23 +585,42 @@ module Ring = struct
        [normalized_level] / [legacy_classified]) could pass through as a
        WARN; those schemas are gone and nothing writes them. *)
     let buf_ring : entry Queue.t = Queue.create () in
+    (* Highest sequence any row on disk carries, counted over every decoded
+       row rather than the [capacity]-bounded tail the queue keeps: a file
+       whose tail comes from a short-lived run can hold a lower maximum
+       than an earlier run wrote. *)
+    let max_seq_on_disk = ref (-1) in
     let push_file path =
       Fs_compat.fold_jsonl_lines
         ~init:()
         ~f:(fun () ~line_no:_ json ->
           let e = entry_of_json json in
+          if e.seq > !max_seq_on_disk then max_seq_on_disk := e.seq;
           Queue.add e buf_ring;
           if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))
         path
     in
     push_file (log_file_path dir yesterday);
     push_file (log_file_path dir today);
+    (* [total] is process-local but the JSONL sink is per-UTC-day and
+       append-only, so a restart used to re-issue sequences that rows
+       already in the file carry.  Measured on
+       [.masc/logs/system_log_2026-08-21.jsonl]: 130,102 rows, 35,068
+       distinct [seq], one value reused ten times across twelve restarts —
+       [seq] identified no row, and a dashboard cursor taken before a
+       restart landed in the middle of the reissued range, silently
+       skipping or replaying records.  Resuming above the on-disk maximum
+       keeps the sequence a key for the whole file. *)
+    let base_seq = !max_seq_on_disk + 1 in
+    Atomic.set total base_seq;
+    Atomic.set first_seq base_seq;
     Queue.iter
       (fun e ->
         let seq = Atomic.fetch_and_add total 1 in
         let idx = seq mod capacity in
         buf.(idx) <- { e with seq })
-      buf_ring
+      buf_ring;
+    Queue.length buf_ring
 
   let init_file_sink
       ?(identity_recheck_interval_s = default_sink_identity_recheck_interval_s)
@@ -600,8 +628,7 @@ module Ring = struct
     sink_identity_recheck_interval_s := identity_recheck_interval_s;
     last_sink_identity_check_at := neg_infinity;
     close_sink ();
-    load_from_file dir;
-    let loaded = Atomic.get total in
+    let loaded = load_from_file dir in
     open_sink dir;
     if loaded > 0 then
       Printf.eprintf "[%s] [INFO] [Log] Restored %d log entries from disk\n%!" (timestamp ()) loaded
@@ -679,7 +706,7 @@ module Ring = struct
     let t = Atomic.get total in
     if t = 0 then []
     else begin
-      let start = max 0 (t - capacity) in
+      let start = max (Atomic.get first_seq) (t - capacity) in
       (* [since_seq] raises the lower bound (entries strictly newer than the
          cursor); [before_seq] lowers the upper bound (entries strictly older
          than the cursor). For retained slots in [start, t-1] the entry seq
@@ -774,13 +801,17 @@ module Ring = struct
      response so the operator sees the cut, not silence. *)
   let bounds () =
     let t = Atomic.get total in
-    { start_seq = max 0 (t - capacity)
+    let first = Atomic.get first_seq in
+    { start_seq = max first (t - capacity)
     ; total = t
-    ; dropped_before = t > capacity
+    ; dropped_before = t - first > capacity
     }
 
   let summary_json () =
-    let total_entries = Atomic.get total in
+    (* Counts, not sequences: [total] is the next sequence to hand out and
+       starts above the on-disk maximum after a restore, so subtracting
+       [first_seq] is what turns it back into "records this process holds". *)
+    let total_entries = Atomic.get total - Atomic.get first_seq in
     let retained_entries = min total_entries capacity in
     let recent_window = recent ~limit:200 () in
     let recent_errors =

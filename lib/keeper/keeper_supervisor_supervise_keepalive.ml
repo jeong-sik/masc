@@ -283,7 +283,16 @@ let supervise_keepalive
       Keeper_activation_readiness.retained_disabled_reason_to_wire reason
     in
     record_recovery_retained reason;
-    Log.Keeper.info
+    (* Configured-off is a state the sweep re-observes, not something that
+       happened. Emitting it per sweep per keeper made it 4,795 of the 20,458
+       lines (23%%) written in the two hours to 2026-08-22T02:03Z, from 25
+       keepers, and [Executable] — the other steady state — logs nothing at
+       all. [record_recovery_retained] above already keeps the fact on two
+       authoritative planes: a per-keeper/reason counter and an
+       [Admission_denied] lifecycle event the dashboard consumes. This is the
+       third rendering, so it belongs on the routine channel where the text
+       stays retrievable at Debug. *)
+    Log.Keeper.routine
       "%s: supervisor keepalive recovery retained by disabled policy: %s"
       meta.name
       reason
@@ -292,7 +301,10 @@ let supervise_keepalive
       Keeper_activation_readiness.paused_dead_reason_to_wire reason
     in
     record_recovery_retained reason;
-    Log.Keeper.info
+    (* Same shape as the disabled-policy arm above: a paused or dead owner is
+       a state the sweep keeps re-reading, and the counter plus the
+       [Admission_denied] lifecycle event already carry it. *)
+    Log.Keeper.routine
       "%s: supervisor keepalive recovery retained by paused/dead owner truth: %s"
       meta.name
       reason

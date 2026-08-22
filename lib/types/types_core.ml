@@ -122,92 +122,9 @@ type agent = {
   meta: agent_meta option; [@default None] (* session metadata *)
 } [@@deriving yojson { strict = false }, show]
 
-let agent_of_yojson_generated = agent_of_yojson
-
 (* Name kept because 73 call sites reach it through [Masc_domain]; renaming
    them to [Time_codec.rfc3339_of_unix] is tracked in #27131. *)
 let iso8601_of_unix_seconds = Time_codec.rfc3339_of_unix
-
-let normalize_agent_last_seen ~session_bound_at = function
-  | `String _ as value -> Some value
-  | `Int seconds ->
-      Some (`String (iso8601_of_unix_seconds (float_of_int seconds)))
-  | `Float seconds ->
-      Some (`String (iso8601_of_unix_seconds seconds))
-  | `Null -> session_bound_at  (* bootstrap from session_bound_at — see #7947 *)
-  | _ -> None
-
-let short_json_repr = function
-  | `Null -> "null"
-  | `Bool b -> Printf.sprintf "%b" b
-  | `Int i -> string_of_int i
-  | `Float f -> Printf.sprintf "%g" f
-  | `String s ->
-      if String.length s <= 40 then Printf.sprintf "\"%s\"" s
-      else Printf.sprintf "\"%s...\"" (String.sub s 0 37)
-  | `Assoc _ -> "<object>"
-  | `List _ -> "<array>"
-  | `Intlit s -> s
-
-let agent_of_yojson json =
-  match agent_of_yojson_generated json with
-  | Ok _ as ok -> ok
-  | Error original_error -> (
-      match json with
-      | `Assoc fields ->
-          let session_bound_at_value =
-            match List.assoc_opt "session_bound_at" fields with
-            | Some (`String _ as v) -> Some v
-            | _ -> None
-          in
-          let last_seen_raw = List.assoc_opt "last_seen" fields in
-          let annotated_error () =
-            let last_seen_repr =
-              match last_seen_raw with
-              | Some v -> short_json_repr v
-              | None -> "<missing>"
-            in
-            Printf.sprintf "%s (last_seen=%s)" original_error last_seen_repr
-          in
-          (* No liveness evidence at all. [agent_to_yojson] always writes
-             [last_seen], so reaching here means the record did not come from
-             this codec: truncated, hand-edited, or an older schema. Keeping
-             the record is still right (#9751) — it is rebuilt on the next
-             heartbeat — but the filler must not claim liveness. The epoch
-             keeps downstream timestamp readers from treating a corrupt record
-             as "seen just now". *)
-          let no_evidence_iso () = `String (iso8601_of_unix_seconds 0.0) in
-          let normalized_last_seen =
-            match last_seen_raw with
-            | Some value ->
-                normalize_agent_last_seen ~session_bound_at:session_bound_at_value value
-            | None ->
-                (match session_bound_at_value with
-                 | Some _ as v -> v
-                 | None -> Some (no_evidence_iso ()))
-          in
-          (match normalized_last_seen with
-          | Some normalized_last_seen ->
-              let fields_without_last_seen =
-                ("last_seen", normalized_last_seen)
-                :: List.remove_assoc "last_seen" fields
-              in
-              (* Same reasoning for session_bound_at: the generated
-                 deserialiser requires the field, so fill it to keep the
-                 record, but with the epoch rather than a value that claims
-                 the session was bound just now. *)
-              let normalized_fields =
-                match session_bound_at_value with
-                | Some _ -> fields_without_last_seen
-                | None ->
-                    ("session_bound_at", no_evidence_iso ())
-                    :: List.remove_assoc "session_bound_at" fields_without_last_seen
-              in
-              (match agent_of_yojson_generated (`Assoc normalized_fields) with
-               | Ok _ as ok -> ok
-               | Error _ -> Error (annotated_error ()))
-          | None -> Error (annotated_error ()))
-      | _ -> Error original_error)
 
 (** Actions an *agent* may drive on a task. A completion verdict is deliberately
     absent: it is not an agent action. See [completion_authority]. *)

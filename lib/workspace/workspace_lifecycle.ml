@@ -87,7 +87,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
   let already_bound = Sys.file_exists agent_file_dedup in
   if already_bound then begin
-    (match read_agent_with_repair config agent_file_dedup with
+    (match read_agent config agent_file_dedup with
      | Ok existing_agent ->
        let is_inactive = existing_agent.status = Inactive in
        let new_session_id = if is_inactive then generate_session_id () else
@@ -234,7 +234,7 @@ let end_session config ~agent_name =
   if in_fs then begin
     (* Mark agent as Inactive instead of deleting, so a future session can restore
        identity without orphan state. *)
-    (match read_agent_with_repair config agent_file with
+    (match read_agent config agent_file with
      | Ok existing_agent ->
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
        write_json config agent_file (agent_to_yojson updated)

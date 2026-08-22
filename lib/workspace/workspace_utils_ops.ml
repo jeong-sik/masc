@@ -399,14 +399,6 @@ let read_json_opt config path =
       if Sys.file_exists path then Some (read_json_local path)
       else None
 
-let agent_json_needs_repair = function
-  | `Assoc fields -> (
-      match List.assoc_opt "last_seen" fields with
-      | Some (`String _) -> false
-      | Some (`Int _ | `Float _ | `Null) | None -> true
-      | Some _ -> false)
-  | _ -> false
-
 let is_fd_pressure_exn exn =
   match System_error_class.classify_exn exn with
   | System_error_class.Fd_exhaustion -> true
@@ -427,13 +419,13 @@ let read_agent_json_from_backend config key =
     |> Result.map_error (fun e ->
          Json_read_error
            (Printf.sprintf
-              "[read_agent_with_repair] backend_get failed for %s: %s"
+              "[read_agent] backend_get failed for %s: %s"
               key
               (Backend_types.show_error e)))
   in
   match content_opt with
   | Some content ->
-      parse_json_content_result ~context:"read_agent_with_repair" content
+      parse_json_content_result ~context:"read_agent" content
       |> Result.map_error (fun msg -> Json_read_error msg)
   | None -> Ok (`Assoc [])
 
@@ -452,7 +444,7 @@ let read_agent_json_result config path =
        | Memory _ -> read_agent_json_from_backend config key)
   | None -> read_json_local_result_exn path
 
-let read_agent_with_repair_result config path =
+let read_agent_result config path =
   let* json =
     read_agent_json_result config path
     |> Result.map_error (function
@@ -460,19 +452,11 @@ let read_agent_with_repair_result config path =
          | Json_read_exn exn -> Agent_read_error (Printexc.to_string exn)
          | Json_read_error msg -> Agent_read_error msg)
   in
-  let* agent =
-    Masc_domain.agent_of_yojson json
-    |> Result.map_error (fun msg -> Agent_read_error msg)
-  in
-  if agent_json_needs_repair json then (
-    Log.Workspace.warn
-      "agent state repair: repaired agent JSON and rewrote canonical state for %s"
-      path;
-    write_json config path (Masc_domain.agent_to_yojson agent));
-  Ok agent
+  Masc_domain.agent_of_yojson json
+  |> Result.map_error (fun msg -> Agent_read_error msg)
 
-let read_agent_with_repair config path =
-  read_agent_with_repair_result config path
+let read_agent config path =
+  read_agent_result config path
   |> Result.map_error (function
        | Agent_fd_pressure exn ->
            let detail = Printexc.to_string exn in

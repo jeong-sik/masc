@@ -104,11 +104,7 @@ val path_exists : config -> string -> bool
 (** Read JSON if present; [None] for absent files (no WARN log). *)
 val read_json_opt : config -> string -> Yojson.Safe.t option
 
-(** {1 Agent JSON repair} *)
-
-(** [true] iff the agent JSON has a numeric [last_seen] (legacy
-    pre-canonical-form) and needs rewriting. *)
-val agent_json_needs_repair : Yojson.Safe.t -> bool
+(** {1 Agent JSON} *)
 
 val is_fd_pressure_exn : exn -> bool
 (** [true] for typed OS/resource-pressure exceptions that mean an agent file
@@ -118,12 +114,13 @@ type read_agent_error =
   | Agent_fd_pressure of exn
   | Agent_read_error of string
 
-val read_agent_with_repair_result :
+val read_agent_result :
   config -> string -> (agent, read_agent_error) result
 
-(** Read an agent JSON and rewrite it in canonical form when the
-    [last_seen] repair predicate fires. *)
-val read_agent_with_repair :
+(** Decode an agent JSON file with the generated [agent_of_yojson]. A file
+    that does not decode (for example a numeric or missing [last_seen]) is
+    an [Error]; the file on disk is never rewritten. *)
+val read_agent :
   config -> string -> (agent, string) result
 
 (** {1 Locking} *)

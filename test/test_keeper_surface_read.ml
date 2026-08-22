@@ -10,7 +10,7 @@ open Alcotest
 module Store = Masc.Keeper_chat_store
 module SR = Masc.Keeper_surface_read
 
-let msg ?ts ?lane ?speaker ~role content : Store.chat_message =
+let msg ~ts ?lane ?speaker ~role content : Store.chat_message =
   let surface =
     Option.map
       (fun label -> Masc.Surface_ref.Gate { label; address = [] })
@@ -64,7 +64,7 @@ let discord_fixture : Store.chat_message list =
     msg ~ts:4.0 ~lane:"discord"
       ~speaker:(external_speaker "55500001111")
       ~role:Store.Role.User "drive-by, no display name";
-    msg ~role:Store.Role.User "unscoped row";
+    msg ~ts:5.0 ~role:Store.Role.User "unscoped row";
   ]
 
 let test_lane_filter_excludes_other_surfaces_and_unscoped () =
@@ -178,11 +178,9 @@ let test_notes_annotate_and_resurrect_participants () =
   check bool "unnoted participant carries no note field" true
     (member "note" (find "55500001111") = `Null)
 
-let test_oldest_ts_absent_when_page_unstamped () =
+let test_oldest_ts_absent_when_page_empty () =
   let json =
-    parse
-      (SR.respond ~surface:"discord" ~limit:10 ~has_more:false ~notes:[]
-         [ msg ~lane:"discord" ~role:Store.Role.User "no ts row" ])
+    parse (SR.respond ~surface:"discord" ~limit:10 ~has_more:false ~notes:[] [])
   in
   check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
 
@@ -193,8 +191,8 @@ let () =
         [
           test_case "has_more + page-wide oldest_ts" `Quick
             test_paging_fields_reflect_page_not_lane;
-          test_case "oldest_ts absent when page unstamped" `Quick
-            test_oldest_ts_absent_when_page_unstamped;
+          test_case "oldest_ts absent when page empty" `Quick
+            test_oldest_ts_absent_when_page_empty;
           test_case "notes annotate and resurrect participants" `Quick
             test_notes_annotate_and_resurrect_participants;
         ] );

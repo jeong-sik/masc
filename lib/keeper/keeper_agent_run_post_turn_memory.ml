@@ -55,9 +55,8 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
     user_rows
     |> List.filter (fun message -> not (is_external_duplicate message))
     |> List.filter_map (fun (message : Keeper_chat_store.chat_message) ->
-      match message.ts, Keeper_counterpart_observation.of_chat_message message with
-      | Some ts, Some observation -> Some (ts, observation)
-      | None, _ | _, None -> None)
+      Keeper_counterpart_observation.of_chat_message message
+      |> Option.map (fun observation -> message.ts, observation))
   in
   external_observations @ chat_observations
   |> List.stable_sort (fun (left_ts, _) (right_ts, _) ->

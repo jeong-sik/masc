@@ -21,13 +21,36 @@ end
 
 type execution_env_tool_handler = Execution_env.t -> Yojson.Safe.t -> Types.tool_result
 
+(** How an ordinary tool is admitted to a concurrent batch.
+
+    [Static] fixes the mode for every call. [Concurrent_when] carries a
+    predicate over the call input that must {e prove} the call reads only:
+    an input it cannot prove is scheduled [Serial], so an unclassified input
+    never widens admission. There is no third state for "unknown".
+
+    @since 0.233.0 *)
+type ordinary_admission =
+  | Static of Tool_contract.execution_mode
+  | Concurrent_when of (Yojson.Safe.t -> bool)
+
 (** Immutable execution metadata. A terminal tool is serial by construction,
     so [Terminal + Concurrent] is not representable. *)
 type descriptor
 
 val ordinary_descriptor : Tool_contract.execution_mode -> descriptor
+
+(** An ordinary tool whose admission is decided per call input.
+
+    @since 0.233.0 *)
+val ordinary_descriptor_concurrent_when : (Yojson.Safe.t -> bool) -> descriptor
+
 val terminal_descriptor : Tool_contract.failure_effect_disposition -> descriptor
-val descriptor_execution_mode : descriptor -> Tool_contract.execution_mode
+
+val descriptor_execution_mode
+  :  descriptor
+  -> input:Yojson.Safe.t
+  -> Tool_contract.execution_mode
+
 val descriptor_completion : descriptor -> Tool_contract.completion
 
 type t =
@@ -101,8 +124,11 @@ val execute
 
 val descriptor : t -> descriptor option
 
-(** Exact declared execution mode, or [Serial] when no descriptor exists. *)
-val execution_mode : t -> Tool_contract.execution_mode
+(** Execution mode for this call, or [Serial] when no descriptor exists.
+
+    The input is required because a descriptor may decide admission from it;
+    a caller that does not hold the input cannot answer this question. *)
+val execution_mode : t -> input:Yojson.Safe.t -> Tool_contract.execution_mode
 
 (** Exact completion policy, or [Continue_after_success] when no descriptor
     exists. *)

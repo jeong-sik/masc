@@ -6065,7 +6065,7 @@ let test_async_composition_uses_durable_request_status_surface () =
          | Some tool -> tool
          | None -> fail "async composition status tool was not materialized"
        in
-       (match Agent_core.Tool.execution_mode status_tool with
+       (match Agent_core.Tool.execution_mode status_tool ~input:`Null with
         | Agent_core.Tool_contract.Concurrent -> ()
         | Agent_core.Tool_contract.Serial -> fail "status tool lost read-only concurrency");
        let request_id =

@@ -21,15 +21,27 @@ end
 
 type execution_env_tool_handler = Execution_env.t -> Yojson.Safe.t -> Types.tool_result
 
+type ordinary_admission =
+  | Static of Tool_contract.execution_mode
+  | Concurrent_when of (Yojson.Safe.t -> bool)
+
 type descriptor =
-  | Ordinary_descriptor of Tool_contract.execution_mode
+  | Ordinary_descriptor of ordinary_admission
   | Terminal_descriptor of Tool_contract.failure_effect_disposition
 
-let ordinary_descriptor execution_mode = Ordinary_descriptor execution_mode
+let ordinary_descriptor execution_mode = Ordinary_descriptor (Static execution_mode)
+
+let ordinary_descriptor_concurrent_when proves_read_only =
+  Ordinary_descriptor (Concurrent_when proves_read_only)
+;;
+
 let terminal_descriptor failure_effect = Terminal_descriptor failure_effect
 
-let descriptor_execution_mode = function
-  | Ordinary_descriptor execution_mode -> execution_mode
+let descriptor_execution_mode descriptor ~input =
+  match descriptor with
+  | Ordinary_descriptor (Static execution_mode) -> execution_mode
+  | Ordinary_descriptor (Concurrent_when proves_read_only) ->
+    if proves_read_only input then Tool_contract.Concurrent else Tool_contract.Serial
   | Terminal_descriptor _ -> Tool_contract.Serial
 ;;
 
@@ -97,8 +109,11 @@ let execute ?context ?invocation tool input =
 
 let descriptor tool = tool.descriptor
 
-let execution_mode tool =
-  Option.fold ~none:Tool_contract.Serial ~some:descriptor_execution_mode tool.descriptor
+let execution_mode tool ~input =
+  Option.fold
+    ~none:Tool_contract.Serial
+    ~some:(descriptor_execution_mode ~input)
+    tool.descriptor
 ;;
 
 let completion tool =
@@ -113,7 +128,12 @@ let descriptor_to_yojson = function
   | Some descriptor ->
     `Assoc
       [ ( "execution_mode"
-        , Tool_contract.execution_mode_to_yojson (descriptor_execution_mode descriptor) )
+        , match descriptor with
+          | Ordinary_descriptor (Concurrent_when _) -> `String "concurrent_when_read_only"
+          | Ordinary_descriptor (Static execution_mode) ->
+            Tool_contract.execution_mode_to_yojson execution_mode
+          | Terminal_descriptor _ ->
+            Tool_contract.execution_mode_to_yojson Tool_contract.Serial )
       ; ( "completion"
         , Tool_contract.completion_to_yojson (descriptor_completion descriptor) )
       ]

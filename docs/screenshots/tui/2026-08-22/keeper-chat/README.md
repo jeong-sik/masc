@@ -1,25 +1,25 @@
 # TUI Keeper chat runtime evidence — 2026-08-22
 
 These screenshots come from the actual `masc_tui.exe` built from an immutable
-Git archive at `b281875e9aed5000cb6cf8b113a3a1b5e5088881` for PR #29500,
-stacked on the production hardening in PR #29499. Each scenario used an
+Git archive at `43270efe690e2d0bc659aed117d5517354993e70` for PR #29500,
+stacked on the merged production hardening from PR #29499. Each scenario used an
 isolated temporary workspace and deterministic local HTTP fixture. The TUI ran
 in a real PTY through ttyd and rendered in Chromium.
 
-- Captured: `2026-08-22T11:22:00.074Z`–`2026-08-22T11:25:18.228Z`
-  (`20:22:00`–`20:25:18 KST`)
-- Production hardening SHA: `464b8753ba3bc4a74f1c4c0cba5f33d7c830944f`
-- Exact capture source SHA: `b281875e9aed5000cb6cf8b113a3a1b5e5088881`
-- Evidence asset commit SHA: `592416491115d29a403a97c84628ec2b7bb821d0`
+- Captured: `2026-08-22T12:15:56.524Z`–`2026-08-22T12:23:40.772Z`
+  (`21:15:56`–`21:23:40 KST`)
+- Merged production hardening SHA: `b0f56b0e2d99a2f752b76240417c5b1f1016d67e`
+- Exact capture source SHA: `43270efe690e2d0bc659aed117d5517354993e70`
+- Evidence asset commit SHA: `9167e2a3363584daccd0b539142119ef07dd741b`
 - Immutable source archive SHA-256:
-  `6fd58f63ceb038245939b4fa11b28c646999efc9fb12cdc505f0e6349574c90a`
+  `149af09aa88bb9bd0ba024fa15437151844fe673076a17a3695a58b61159e19e`
 - Executable: `39,805,744` bytes, SHA-256
-  `70a0e53404ebe47c22fde0f4e60a0363ca2aeb089c61771c47d882ece35dab30`
+  `fc4d2bc83580fb832ced4cf47434235956dafede6ae7d765da506fc0caf70c71`
 - Capture script SHA-256:
-  `8a36525044cfe44ff6f28a71fc07008669154957a42769c5af1f63f4da6a957d`
+  `2fbaa2c8c70c5f1328140ad5e399f108cf85ecaa32e9a3358a8e3f6f61fd2451`
 - Raw evidence SHA-256:
-  `38120d96aa14a4c87e494d032046a5d18ca80a6952c8365290a8e085158fe3f9`
-- Fresh external build: `164.542s`, return code `0`
+  `6f438fdf9e06a17bdbfd1e36db614e48a70a1001a8daf1de8a6db705d00bfa35`
+- Fresh external build: `176.733s`, return code `0`
 - Focused source verification: projection `23/23`, recovery `33/33`, TUI HTTP
   AST `11/11`, message layout `11/11`, render schedule `9/9`, operation store
   `9/9`
@@ -57,23 +57,24 @@ in a real PTY through ttyd and rendered in Chromium.
 - Resize restored the input cursor to `(6, 24)`. `👍🏽` moved it to `(10, 24)`;
   one scalar backspace moved it to `(8, 24)`. The clipped tail and its
   backspace state both remained at `(97, 24)`.
-- The externally held dispatch lock produced its blocked UI in `7.688ms` and
-  allowed `0` POSTs. After release, the exact POST arrived in `18.514ms` and
-  the no-input `sending` frame appeared in `24.283ms`.
+- The externally held dispatch lock produced its blocked UI in `24.615ms` and
+  allowed `0` POSTs. After release, the exact POST arrived in `19.220ms` and
+  the no-input `sending` frame appeared in `25.767ms`.
 - The dispatch lock remained unavailable to a separate process while the HTTP
-  response was pending. The draft appeared in `37.254ms`; the reply appeared
-  `32.990ms` after release. A separate-process nonblocking probe succeeded
-  within `27.657ms` after the reply became visible, proving that the done ACK
-  had released the lock by that probe; it is not the exact release latency.
-- Ctrl-R reached the exact operation GET in `4.425ms` and the reconciling UI in
-  `7.233ms`, with zero browser navigations. Restart reached the automatic
-  exact GET in `241.336ms`; the settled result appeared `23.463ms` after
+  response was pending. The draft appeared in `37.278ms`; the reply appeared
+  `31.812ms` after release. The separate-process nonblocking probe completed
+  `30.524ms` after the reply became visible and `28.693ms` after the `sending`
+  indicator had cleared. These intervals prove release by the probe; neither
+  is the exact lock-release latency.
+- Ctrl-R reached the exact operation GET in `4.247ms` and the reconciling UI in
+  `11.806ms`, with zero browser navigations. Restart reached the automatic
+  exact GET in `242.882ms`; the settled result appeared `31.244ms` after
   release.
-- A durable Replayable fence reached its exact-ID POST in `256.430ms`.
+- A durable Replayable fence reached its exact-ID POST in `262.928ms`.
 - In the two-TUI race, the observer showed the externally blocked Prepared
-  state in `3314.071ms` with `0` POSTs. The owner's HTTP `403` rejection removed
-  the fence in `55.137ms`, and it remained absent through a separate `500ms`
-  stability observation. The stale observer re-enabled send in `44.738ms`;
+  state in `3356.525ms` with `0` POSTs. The owner's HTTP `403` rejection removed
+  the fence in `52.544ms`, and it remained absent through a separate `500ms`
+  stability observation. The stale observer re-enabled send in `41.309ms`;
   after another `350ms` observation the total remained exactly one POST.
 - Across the four scenarios the fixture observed exactly four chat POSTs and
   two same-operation GETs. Every scenario recorded zero other POSTs, zero

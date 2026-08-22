@@ -1,7 +1,7 @@
 (* test_keeper_connector_attention_batch.ml — RFC-0377: conversation-batched
    stimulus intake.
 
-   sangsu live data (2026-08-08..08-13) showed every delivered continuation
+   Live data (2026-08-08..08-13) showed every delivered continuation
    obligation (48/48) bound 1:1 to a single distinct inbound message: a turn
    admitted exactly one Connector_attention stimulus (RFC-0020 Rule 4), so a
    backlog of N pending messages in the same conversation took N turns to

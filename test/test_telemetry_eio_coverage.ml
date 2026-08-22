@@ -181,7 +181,7 @@ let check_one_tool_called_record label json ~operation_id ~worker_run_id =
           check bool (label ^ " success") false r.success;
           check int (label ^ " duration_ms") 658 r.duration_ms;
           check (option string) (label ^ " agent_id")
-            (Some "keeper-masc-improver-agent") r.agent_id;
+            (Some "keeper-omicron-improver-agent") r.agent_id;
           check (option string) (label ^ " operation_id") operation_id
             r.operation_id;
           check (option string) (label ^ " worker_run_id") worker_run_id
@@ -206,7 +206,7 @@ let test_parse_event_records_tool_called_null_options () =
                   ("tool_name", `String "tool_execute");
                   ("success", `Bool false);
                   ("duration_ms", `Int 658);
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("source", `String "keeper_internal");
                   ("session_id", `String "mcp-session");
                   ("operation_id", `Null);
@@ -232,7 +232,7 @@ let test_parse_event_records_tool_called_missing_options () =
                   ("tool_name", `String "tool_execute");
                   ("success", `Bool false);
                   ("duration_ms", `Int 658);
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("source", `String "keeper_internal");
                   ("session_id", `String "mcp-session");
                 ];
@@ -291,7 +291,7 @@ let check_one_tool_assigned_record label json =
       match record.event with
       | Telemetry_eio.Tool_assigned r ->
           check string (label ^ " agent_id")
-            "keeper-masc-improver-agent" r.agent_id;
+            "keeper-omicron-improver-agent" r.agent_id;
           check string (label ^ " profile") "default" r.profile;
           check int (label ^ " tool_count") 32 r.tool_count;
           check string (label ^ " assignment_id") "asg-001" r.assignment_id
@@ -312,7 +312,7 @@ let test_parse_event_records_tool_assigned_minimal_payload () =
               `String "Tool_assigned";
               `Assoc
                 [
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("profile", `String "default");
                   ("tool_count", `Int 32);
                   ("assignment_id", `String "asg-001");
@@ -333,7 +333,7 @@ let test_parse_event_records_tool_assigned_missing_optional_fields () =
               `String "Tool_assigned";
               `Assoc
                 [
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("profile", `String "default");
                   ("tool_count", `Int 32);
                   ("assignment_id", `String "asg-001");

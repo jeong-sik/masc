@@ -116,10 +116,10 @@ let comment_of_signal
   }
 ;;
 
-let keeper_context ?(mention_keeper_ids = [ "sangsu" ]) () =
+let keeper_context ?(mention_keeper_ids = [ "alpha" ]) () =
   `Assoc
-    [ "lane_keeper_name", `String "sangsu"
-    ; "agent_name", `String "sangsu-agent"
+    [ "lane_keeper_name", `String "alpha"
+    ; "agent_name", `String "alpha-agent"
     ; "keeper_record_id", `Null
     ; "keeper_runtime_uid", `Null
     ; "instructions", `String "continue"
@@ -151,7 +151,7 @@ let render_row_with_non_finite ~field ~literal json =
 let candidate ?(context = keeper_context ()) signal :
   A.candidate
   =
-  let keeper_name = "sangsu" in
+  let keeper_name = "alpha" in
   let candidate_id = A.candidate_id_of_signal ~keeper_name signal in
   { candidate_id
   ; keeper_name
@@ -247,7 +247,7 @@ let record ~base_path candidate =
 ;;
 
 let load_one ~base_path =
-  match ok "load candidate" (A.load_candidates ~base_path ~keeper_name:"sangsu") with
+  match ok "load candidate" (A.load_candidates ~base_path ~keeper_name:"alpha") with
   | [ candidate ] -> candidate
   | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
 ;;
@@ -261,7 +261,7 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
       kind =
         Masc.Board_dispatch.Board_vote_cast
           { target = Masc.Board_dispatch.Vote_on_comment "c-1"
-          ; target_author = "sangsu-agent"
+          ; target_author = "alpha-agent"
           ; voter = "external-author"
           ; direction = Masc.Board.Up
           }
@@ -290,14 +290,14 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
     "a vote and a post on the same post_id are distinct candidates"
     false
     (String.equal
-       (A.candidate_id_of_signal ~keeper_name:"sangsu" vote_signal)
-       (A.candidate_id_of_signal ~keeper_name:"sangsu" (signal "post-vote")))
+       (A.candidate_id_of_signal ~keeper_name:"alpha" vote_signal)
+       (A.candidate_id_of_signal ~keeper_name:"alpha" (signal "post-vote")))
 ;;
 
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
-      ~context:(keeper_context ~mention_keeper_ids:[ "sangsu"; "peer" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] ())
       (signal "post-codec")
   in
   let encoded = A.candidate_to_json original in
@@ -324,7 +324,7 @@ let test_codec_and_context_identity_are_strict () =
   let reordered =
     candidate
       ~context:
-        (match keeper_context ~mention_keeper_ids:[ "sangsu"; "peer" ] () with
+        (match keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] () with
          | `Assoc fields -> `Assoc (List.rev fields)
          | _ -> assert false)
       (signal "post-reordered")
@@ -337,7 +337,7 @@ let test_codec_and_context_identity_are_strict () =
     (A.Context_key.equal left reordered);
   let changed_list =
     candidate
-      ~context:(keeper_context ~mention_keeper_ids:[ "peer"; "sangsu" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "peer"; "alpha" ] ())
       (signal "post-list-order")
     |> A.Context_key.of_candidate
     |> ok "changed list context"
@@ -419,7 +419,7 @@ let ledger_path ~base_path =
     (Filename.concat
        (Common.masc_dir_from_base_path ~base_path)
        "board_attention_candidates")
-    "sangsu.jsonl"
+    "alpha.jsonl"
 ;;
 
 let write_ledger_rows ~base_path rows =
@@ -639,7 +639,7 @@ let test_non_finite_lifecycle_times_are_rejected () =
       (Filename.concat
          (Common.masc_dir_from_base_path ~base_path)
          "board_attention_candidates")
-      "sangsu.jsonl"
+      "alpha.jsonl"
   in
   let non_finite_row =
     render_row_with_non_finite
@@ -841,7 +841,7 @@ let test_record_requests_worker_without_invoking_judgment () =
   Eio.Switch.run @@ fun sw ->
   with_temp_base "board-attention-candidate-wake" @@ fun base_path ->
   let registration =
-    ok "register worker" (Wake.register ~sw ~base_path ~keeper_name:"sangsu")
+    ok "register worker" (Wake.register ~sw ~base_path ~keeper_name:"alpha")
   in
   let original = candidate (signal "post-wake") in
   let accepted =

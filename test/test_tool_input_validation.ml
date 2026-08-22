@@ -671,7 +671,7 @@ let test_registered_hook_masc_board_post_accepts_sources_array () =
 (* Regression: the board_list/search backends already read [compact]
    (board_tool_post.ml handle_post_list, board_tool_handlers.ml
    handle_search), but the Keeper Board projection omitted it, so
-   qa-king's masc_board_list compact=true was rejected as an
+   mu-king's masc_board_list compact=true was rejected as an
    unsupported field. Assert the keeper surface now accepts compact while
    additionalProperties stays false (unknown fields still rejected). *)
 let test_validate_args_masc_board_list_accepts_compact () =
@@ -776,11 +776,11 @@ let test_keeper_down_rejects_undeclared_field () =
 let test_keeper_up_accepts_live_traffic_fields () =
   let args =
     `Assoc
-      [ "name", `String "sangsu"
+      [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
       ; "sandbox_profile", `String "local"
       ; "allowed_paths", `List [ `String "/tmp" ]
-      ; "mention_targets", `List [ `String "sangsu" ]
+      ; "mention_targets", `List [ `String "alpha" ]
       ; "autoboot_enabled", `Bool true
       ; "proactive_enabled", `Bool true
       ; "runtime_id", `String "rt"
@@ -807,7 +807,7 @@ let test_keeper_clear_accepts_live_traffic_fields () =
       ~name:"masc_keeper_clear"
       ~args:
         (`Assoc
-          [ "name", `String "sangsu"
+          [ "name", `String "alpha"
           ; "preserve_system_prompt", `Bool true
           ; "reason", `String "context overflow"
           ])

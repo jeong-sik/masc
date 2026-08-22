@@ -174,8 +174,9 @@ let init_runtime_default_for_tests () =
 (* A verifier is not a Keeper. An AwaitingVerification obligation is decided by
    the application-owned system LLM completion authority or an authenticated
    HITL operator, never through the Keeper tool surface, so no Keeper is
-   offered a task_verify affordance. Guards against a Keeper named "verifier"
-   re-acquiring approval authority. *)
+   offered a task_verify affordance. The exact [verifier] role-collision
+   sentinel is preserved in the lifecycle and task-tool tests: protocol-role
+   vocabulary is not a concrete Keeper identity. *)
 let test_no_task_verify_affordance_for_any_keeper () =
   check bool "no task_verify affordance" false
     (List.mem "task_verify" (UM.observed_affordances_of_observation base_observation))
@@ -210,7 +211,7 @@ let test_board_authors_share_one_neutral_observation_boundary () =
     {
       sample_board_event with
       post_id = "peer-post-1";
-      author = "keeper-ramarama-agent";
+      author = "keeper-nu-agent";
       preview = "I assert the build is green.";
       post_kind = Masc.Board.Automation_post;
       explicit_mention = true;
@@ -686,16 +687,16 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
 let sample_task_cancellation : WO.pending_board_event =
   let cancellation : Keeper_event_queue.task_cancellation =
     { tc_task_id = "task-161"
-    ; tc_cancelled_by = "keeper-rondo-agent"
+    ; tc_cancelled_by = "keeper-beta-agent"
     ; tc_reason = Some "BLOCKED: request-menu service absent from sandbox"
     }
   in
   { sample_board_event with
     event_kind = WO.Task_cancelled cancellation
   ; post_id = "task-cancelled:task-161"
-  ; author = "keeper-rondo-agent"
+  ; author = "keeper-beta-agent"
   ; title = "Task task-161 was cancelled"
-  ; preview = "Task task-161, which you created, was cancelled by keeper-rondo-agent"
+  ; preview = "Task task-161, which you created, was cancelled by keeper-beta-agent"
   ; post_kind = Masc.Board.System_post
   }
 ;;
@@ -714,7 +715,7 @@ let test_task_cancellation_has_own_prompt_layer () =
   check bool "cancellation section is present" true
     (contains_sub "### Cancelled Tasks You Created (1)" world_state);
   check bool "the canceller is named" true
-    (contains_sub "cancelled_by=\"keeper-rondo-agent\"" world_state);
+    (contains_sub "cancelled_by=\"keeper-beta-agent\"" world_state);
   check bool "the reason reaches the author" true
     (contains_sub
        "reason=\"BLOCKED: request-menu service absent from sandbox\""
@@ -739,7 +740,7 @@ let test_task_cancellation_without_reason_omits_the_field () =
   init_runtime_default_for_tests ();
   let render tc_reason =
     let cancellation : Keeper_event_queue.task_cancellation =
-      { tc_task_id = "task-162"; tc_cancelled_by = "keeper-rondo-agent"; tc_reason }
+      { tc_task_id = "task-162"; tc_cancelled_by = "keeper-beta-agent"; tc_reason }
     in
     let obs =
       { base_observation with
@@ -764,7 +765,7 @@ let test_task_cancellation_without_reason_omits_the_field () =
     (contains_sub "reason=\"\"" empty);
   check bool "the identity fields survive the omission" true
     (contains_sub "task_id=\"task-162\"" absent
-     && contains_sub "cancelled_by=\"keeper-rondo-agent\"" absent);
+     && contains_sub "cancelled_by=\"keeper-beta-agent\"" absent);
   check bool "no OCaml option leaks into the prompt" false
     (contains_sub "None" absent);
   check bool "no JSON null leaks into the prompt" false (contains_sub "null" absent)

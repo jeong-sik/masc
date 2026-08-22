@@ -231,9 +231,9 @@ let raw_token_file config agent_name =
     Tries an exact filename match first. If that misses and [agent_name]
     looks like a generated nickname ({agent_type}-{adj}-{animal}[...]),
     retry with just the agent_type prefix — shared-token aliases
-    provisioned for stable keeper names (e.g. [adversary.json]) then
+    provisioned for stable keeper names (e.g. [example-keeper.json]) then
     cover every dynamically generated nickname in that family
-    (e.g. [adversary-fair-tapir]).
+    (e.g. [example-keeper-fair-tapir]).
 
     Without this fallback, Workspace.bind_session's nickname output caused a
     chronic "No credential found for <type>-<adj>-<animal>" noise band
@@ -633,8 +633,8 @@ let () =
 (** #9786: detect credentials sharing the same bearer token.
 
     The 2026-04-23 audit found [external MCP clients] and [admin]
-    tokens being presented for [keeper-sangsu-agent] /
-    [nick0cave-sage-heron] requests — symptom of multiple
+    tokens being presented for [keeper-example-keeper-agent] /
+    [example-keeper-sage-heron] requests — symptom of multiple
     credentials hashing to the same token, or a single MCP
     client connection being reused across agent identities.
 

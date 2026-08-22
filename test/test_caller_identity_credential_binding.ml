@@ -34,8 +34,8 @@ let test_credential_owned_name_is_not_rewritable () =
     false
     (may_rewrite ~credential_owner:(Some "dashboard") ~agent_name:"dashboard")
 
-(* Keeper transport aliases keep working: the caller names "rondo" while the
-   credential belongs to "keeper-rondo-agent", so the alias is still the only
+(* Keeper transport aliases keep working: the caller names "beta" while the
+   credential belongs to "keeper-beta-agent", so the alias is still the only
    thing that can connect the two. *)
 let test_unowned_name_stays_rewritable () =
   check
@@ -43,8 +43,8 @@ let test_unowned_name_stays_rewritable () =
     "an alias may still rewrite a name the credential does not own"
     true
     (may_rewrite
-       ~credential_owner:(Some "keeper-rondo-agent")
-       ~agent_name:"rondo")
+       ~credential_owner:(Some "keeper-beta-agent")
+       ~agent_name:"beta")
 
 let test_unauthenticated_request_stays_rewritable () =
   check
@@ -63,7 +63,7 @@ let test_prefix_sharing_owner_is_not_rewritable () =
         (Printf.sprintf "%S is credential-bound, so no alias rewrite" name)
         false
         (may_rewrite ~credential_owner:(Some name) ~agent_name:name))
-    [ "dashboard"; "dashboard-admin"; "keeper-rondo-agent"; "analyst" ]
+    [ "dashboard"; "dashboard-admin"; "keeper-beta-agent"; "delta" ]
 
 (* The live workspace lookup, as a stub: no [dashboard.json] record exists,
    so the prefix scan returns the first record sharing the "dashboard-"
@@ -71,7 +71,7 @@ let test_prefix_sharing_owner_is_not_rewritable () =
    which is the part that decides what reaches [Auth.authorize_tool_v2]. *)
 let live_alias_scan = function
   | "dashboard" | "dashboard-admin" -> "dashboard-admin-deft-cobra"
-  | "rondo" -> "keeper-rondo-agent"
+  | "beta" -> "keeper-beta-agent"
   | name -> name
 
 let subject_for ~credential_owner agent_name =
@@ -91,8 +91,8 @@ let test_authorization_subject_keeps_transport_alias () =
   check
     string
     "a keeper transport alias still resolves to its bound record"
-    "keeper-rondo-agent"
-    (subject_for ~credential_owner:(Some "keeper-rondo-agent") "rondo")
+    "keeper-beta-agent"
+    (subject_for ~credential_owner:(Some "keeper-beta-agent") "beta")
 
 let test_authorization_subject_without_credential () =
   check

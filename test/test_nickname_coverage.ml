@@ -90,8 +90,8 @@ let test_is_dictionary_generated_nickname_accepts_real () =
     (Nickname.is_dictionary_generated_nickname "claude-swift-fox");
   check bool "claude-swift-fox-a3b2" true
     (Nickname.is_dictionary_generated_nickname "claude-swift-fox-a3b2");
-  check bool "qa-king-warm-heron multi-part type" true
-    (Nickname.is_dictionary_generated_nickname "qa-king-warm-heron");
+  check bool "mu-king-warm-heron multi-part type" true
+    (Nickname.is_dictionary_generated_nickname "mu-king-warm-heron");
   check bool "fresh generated" true
     (Nickname.is_dictionary_generated_nickname (Nickname.generate "claude"));
   check bool "fresh unique" true
@@ -99,14 +99,14 @@ let test_is_dictionary_generated_nickname_accepts_real () =
        (Nickname.generate_unique "claude"))
 
 let test_is_dictionary_generated_nickname_rejects_structured () =
-  check bool "keeper-sangsu-agent" false
-    (Nickname.is_dictionary_generated_nickname "keeper-sangsu-agent");
-  check bool "keeper-issue_king-agent" false
-    (Nickname.is_dictionary_generated_nickname "keeper-issue_king-agent");
+  check bool "keeper-alpha-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-alpha-agent");
+  check bool "keeper-kappa_keeper-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-kappa_keeper-agent");
   check bool "keeper-verifier-agent" false
     (Nickname.is_dictionary_generated_nickname "keeper-verifier-agent");
-  check bool "keeper-nick0cave-agent" false
-    (Nickname.is_dictionary_generated_nickname "keeper-nick0cave-agent");
+  check bool "keeper-theta0-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-theta0-agent");
   check bool "admin-board-keeper" false
     (Nickname.is_dictionary_generated_nickname "admin-board-keeper");
   check bool "non-list adj/animal" false
@@ -150,14 +150,14 @@ let test_extract_agent_type_unique () =
   | None -> fail "should extract from unique"
 
 let test_extract_agent_type_hyphenated_manual () =
-  match Nickname.extract_agent_type "qa-king-warm-heron" with
-  | Some at -> check string "extracted qa-king" "qa-king" at
+  match Nickname.extract_agent_type "mu-king-warm-heron" with
+  | Some at -> check string "extracted mu-king" "mu-king" at
   | None -> fail "should extract hyphenated stable prefix"
 
 let test_extract_agent_type_hyphenated_unique () =
-  let nick = Nickname.generate_unique "qa-king" in
+  let nick = Nickname.generate_unique "mu-king" in
   match Nickname.extract_agent_type nick with
-  | Some at -> check string "extracted qa-king from unique" "qa-king" at
+  | Some at -> check string "extracted mu-king from unique" "mu-king" at
   | None -> fail "should extract hyphenated stable prefix from unique"
 
 (* ============================================================

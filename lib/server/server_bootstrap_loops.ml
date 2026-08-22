@@ -1693,7 +1693,7 @@ let start_keeper_loops_owned
       (* A keeper filtered out here is config-bootable but its admission is
          still owned by a durable shutdown operation from the boot scan.
          Stamp it into the excluded list instead of dropping it silently —
-         the 2026-07-21 wedge left rondo absent from both the boot set and
+         the 2026-07-21 wedge left one Keeper absent from both the boot set and
          the excluded list, so the outage was invisible in the autoboot
          report. Boot recovery settles recoverable operations in this same
          bootstrap, after which the supervisor's periodic pass registers the
@@ -1803,7 +1803,7 @@ let start_keeper_loops_owned
                  fiber flips the registry to running asynchronously on the
                  next Eio tick, so querying is_running here is a race that
                  keepers with a larger proactive-warmup idx lose
-                 deterministically (verdict=165s / sojin=150s / sangsu=135s
+                 deterministically (keeper-a=165s / keeper-b=150s / keeper-c=135s
                  produced the bulk of the false-positive "not in registry"
                  WARNs).  Check the synchronous is_registered predicate
                  instead — the running transition is observed later by the

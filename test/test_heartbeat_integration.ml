@@ -1893,7 +1893,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
     (fun () ->
       ensure_default_runtime ();
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "rondo"));
+      ignore (Masc.Workspace.init config ~agent_name:(Some "beta"));
       seed_keeper_sandbox_profile ~base_dir target_name;
       ignore Masc.Keeper_tool_surface.schemas;
       Masc.Server_startup_state.reset ();
@@ -1935,7 +1935,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
                    Eio_context.with_turn_switch turn_sw @@ fun () ->
                    let ctx : _ Masc.Keeper_tool_surface.context =
                      { config
-                     ; agent_name = "rondo"
+                     ; agent_name = "beta"
                      ; sw = turn_sw
                      ; clock
                      ; proc_mgr = None

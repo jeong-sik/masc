@@ -289,7 +289,7 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   let message =
     { (stimulus ~post_id:"workspace-message:wmsg-1" ~arrived_at:100.0
          (Keeper_event_queue.Workspace_message
-            ({ wmsg_request_id = "wmsg-1"; wmsg_from = "nick0cave" }
+            ({ wmsg_request_id = "wmsg-1"; wmsg_from = "alpha" }
              : Keeper_event_queue.workspace_message)))
       with urgency = Keeper_event_queue.Immediate
     }
@@ -297,7 +297,7 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   let cancelled =
     stimulus ~post_id:"task-cancelled:T-1" ~arrived_at:101.0
       (Keeper_event_queue.Task_cancelled
-         ({ tc_task_id = "T-1"; tc_cancelled_by = "sangsu"; tc_reason = None }
+         ({ tc_task_id = "T-1"; tc_cancelled_by = "alpha"; tc_reason = None }
           : Keeper_event_queue.task_cancellation))
   in
   let rejected =
@@ -346,10 +346,10 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   let detail_of post_id = U.member "detail" (row_of post_id) in
   let what_of post_id = json_string_member "what" (row_of post_id) in
   check string "workspace message sentence names the sender and urgency"
-    "nick0cave가 보낸 메시지 (즉시)"
+    "alpha가 보낸 메시지 (즉시)"
     (what_of message.Keeper_event_queue.post_id);
   check string "cancellation sentence names the canceller and task"
-    "sangsu가 작업 T-1 취소"
+    "alpha가 작업 T-1 취소"
     (what_of cancelled.Keeper_event_queue.post_id);
   check string "rejection sentence names the task"
     "작업 T-2 완료 증거 거절됨"
@@ -358,14 +358,14 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
     "operator의 새 글"
     (what_of board.Keeper_event_queue.post_id);
   let message_detail = detail_of message.Keeper_event_queue.post_id in
-  check string "workspace message sender" "nick0cave"
+  check string "workspace message sender" "alpha"
     (json_string_member "message_from" message_detail);
   check string "workspace message request id" "wmsg-1"
     (json_string_member "message_request_id" message_detail);
   let cancelled_detail = detail_of cancelled.Keeper_event_queue.post_id in
   check string "cancelled task id" "T-1"
     (json_string_member "cancelled_task_id" cancelled_detail);
-  check string "cancelled by" "sangsu" (json_string_member "cancelled_by" cancelled_detail);
+  check string "cancelled by" "alpha" (json_string_member "cancelled_by" cancelled_detail);
   check bool "absent cancellation reason stays absent" true
     (U.member "cancelled_reason" cancelled_detail = `Null);
   let rejected_detail = detail_of rejected.Keeper_event_queue.post_id in

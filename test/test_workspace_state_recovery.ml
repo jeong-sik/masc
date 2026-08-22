@@ -74,7 +74,7 @@ let test_read_state_drops_legacy_active_agent_objects () =
                 [
                   `Assoc [ ("name", `String "codex-swift-fox") ];
                   `String "gemini-brave-bear";
-                  `Assoc [ ("agent_name", `String "keeper-sangsu-agent") ];
+                  `Assoc [ ("agent_name", `String "keeper-alpha-agent") ];
                   `Assoc [ ("id", `String "ignored") ];
                 ] );
           ]

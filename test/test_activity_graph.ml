@@ -102,7 +102,7 @@ let test_events_json_derives_ide_context () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-9")
            ~tags:[
              "file:lib/keeper/keeper_tool_ide_runtime.ml:27";
@@ -151,7 +151,7 @@ let test_events_json_normalizes_ide_context_file_paths () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-payload")
            ~tags:[]
            ~payload:
@@ -163,7 +163,7 @@ let test_events_json_normalizes_ide_context_file_paths () =
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-tag")
            ~tags:[ "file: lib\\tag.ml:27" ]
            ~payload:(`Assoc [])
@@ -186,7 +186,7 @@ let test_events_json_omits_unsafe_ide_context_file_paths () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-absolute")
            ~tags:[]
            ~payload:
@@ -198,21 +198,21 @@ let test_events_json_omits_unsafe_ide_context_file_paths () =
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-drive")
            ~tags:[ "file:C:\\workspace\\lib\\tag.ml:27" ]
            ~payload:(`Assoc [])
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-traversal")
            ~tags:[ "file:lib/../tag.ml:31" ]
            ~payload:(`Assoc [])
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-mismatch")
            ~tags:[ "file:/workspace/lib/tag.ml:99" ]
            ~payload:
@@ -252,7 +252,7 @@ let test_events_json_ignores_invalid_derived_pr_number () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-10")
            ~tags:[]
            ~payload:(`Assoc [ ("pr_number", `Int 0) ])

@@ -168,7 +168,7 @@ let test_invalid_stored_task_id_makes_snapshot_non_authoritative () =
 
 
 (* A count and a set of ids describe the backlog; they do not say whether it is
-   the backlog the last turn described. [taskmaster], whose instructions are to
+   the backlog the last turn described. [fixture-keeper], whose instructions are to
    take unclaimed work on sight, repeated one "nothing actionable" verbatim
    across a day of turns -- and the reason it gave, that the three tasks were
    blocked, appears nowhere in their records (#27629). Nothing in its frame

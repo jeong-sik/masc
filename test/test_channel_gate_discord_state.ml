@@ -283,14 +283,14 @@ let test_resolve_keeper_exact_binding_wins_over_parent () =
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
     ignore
-      (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"sangsu"
+      (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"alpha"
          ~actor_name:"dashboard");
     match
       Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
     with
     | Error _ | Ok None -> fail "expected exact binding to resolve"
     | Ok (Some resolution) ->
-        check string "keeper" "sangsu" resolution.keeper_name;
+        check string "keeper" "alpha" resolution.keeper_name;
         check string "incoming" "thread-1" resolution.incoming_channel_id;
         check string "bound" "thread-1" resolution.bound_channel_id;
         check bool "not via parent" false resolution.via_parent)

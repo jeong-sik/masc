@@ -8,8 +8,8 @@ module PP = Playground_paths
 
 let test_sanitize_allows_safe_chars () =
   check string "alphanumerics pass through"
-    "cheolsu_1.2-test"
-    (PP.sanitize_keeper_name "cheolsu_1.2-test");
+    "beta_1.2-test"
+    (PP.sanitize_keeper_name "beta_1.2-test");
   check string "already sanitized stays the same"
     "Abc-123_x.y"
     (PP.sanitize_keeper_name "Abc-123_x.y")
@@ -40,8 +40,8 @@ let test_all_playgrounds_prefix_stable () =
 
 let test_bundle_root_format () =
   check string "bundle root has trailing slash"
-    ".masc/playground/cheolsu/"
-    (PP.bundle_root "cheolsu");
+    ".masc/playground/beta/"
+    (PP.bundle_root "beta");
   check string "bundle root sanitizes name"
     ".masc/playground/a_b/"
     (PP.bundle_root "a/b")
@@ -77,22 +77,22 @@ let test_no_path_escape () =
 
 let test_strip_canonical_to_short () =
   check string "canonical stripped to short"
-    "masc-improver"
-    (PP.sanitize_keeper_name "keeper-masc-improver-agent");
+    "omicron-improver"
+    (PP.sanitize_keeper_name "keeper-omicron-improver-agent");
   check string "short stays short"
-    "masc-improver"
-    (PP.sanitize_keeper_name "masc-improver");
-  check string "cheolsu canonical"
-    "cheolsu"
-    (PP.sanitize_keeper_name "keeper-cheolsu-agent");
-  check string "sangsu canonical"
-    "sangsu"
-    (PP.sanitize_keeper_name "keeper-sangsu-agent")
+    "omicron-improver"
+    (PP.sanitize_keeper_name "omicron-improver");
+  check string "beta canonical"
+    "beta"
+    (PP.sanitize_keeper_name "keeper-beta-agent");
+  check string "alpha canonical"
+    "alpha"
+    (PP.sanitize_keeper_name "keeper-alpha-agent")
 
 let test_canonical_short_path_identity () =
   check string "bundle_root identity"
-    (PP.bundle_root "cheolsu")
-    (PP.bundle_root "keeper-cheolsu-agent")
+    (PP.bundle_root "beta")
+    (PP.bundle_root "keeper-beta-agent")
 
 let test_strip_edge_cases () =
   check string "keeper-agent not stripped (inner would be empty)"
@@ -102,16 +102,16 @@ let test_strip_edge_cases () =
     "x"
     (PP.sanitize_keeper_name "keeper-x-agent");
   check string "idempotent"
-    (PP.sanitize_keeper_name "masc-improver")
+    (PP.sanitize_keeper_name "omicron-improver")
     (PP.sanitize_keeper_name
-       (PP.sanitize_keeper_name "keeper-masc-improver-agent"));
+       (PP.sanitize_keeper_name "keeper-omicron-improver-agent"));
   check string "different keepers stay different"
-    "sangsu"
-    (PP.sanitize_keeper_name "keeper-sangsu-agent");
-  check bool "sangsu != cheolsu after normalize"
+    "alpha"
+    (PP.sanitize_keeper_name "keeper-alpha-agent");
+  check bool "alpha != beta after normalize"
     true
-    (PP.sanitize_keeper_name "keeper-sangsu-agent"
-     <> PP.sanitize_keeper_name "keeper-cheolsu-agent")
+    (PP.sanitize_keeper_name "keeper-alpha-agent"
+     <> PP.sanitize_keeper_name "keeper-beta-agent")
 
 let test_strip_no_traversal () =
   let result = PP.sanitize_keeper_name "keeper-../../etc-agent" in
@@ -129,10 +129,10 @@ let test_parse_playground_repo_path () =
   in
   check (option (pair string string)) "local sandbox path"
     (Some ("masc", "lib/foo.ml"))
-    (parse ".masc/playground/sangsu/repos/masc/lib/foo.ml");
+    (parse ".masc/playground/alpha/repos/masc/lib/foo.ml");
   check (option (pair string string)) "docker sandbox path"
     (Some ("masc", "lib/foo.ml"))
-    (parse ".masc/playground/docker/sangsu/repos/masc/lib/foo.ml");
+    (parse ".masc/playground/docker/alpha/repos/masc/lib/foo.ml");
   check (option (pair string string)) "keeper named repos"
     (Some ("masc", "lib/foo.ml"))
     (parse ".masc/playground/repos/repos/masc/lib/foo.ml");
@@ -141,7 +141,7 @@ let test_parse_playground_repo_path () =
     (parse ".masc/playground/docker/repos/repos/masc/lib/foo.ml");
   check (option (pair string string)) "nested repo-local pattern is not sandbox"
     None
-    (parse "workspace/repo/.masc/playground/sangsu/repos/masc/lib/foo.ml")
+    (parse "workspace/repo/.masc/playground/alpha/repos/masc/lib/foo.ml")
 
 let test_parse_playground_file_path () =
   let base_path = "/tmp/masc-base" in
@@ -155,25 +155,25 @@ let test_parse_playground_file_path () =
   in
   check bool "local playground artifact"
     true
-    (parse ".masc/playground/executor/artifact.txt"
-     = parsed "executor" "artifact.txt");
+    (parse ".masc/playground/omega/artifact.txt"
+     = parsed "omega" "artifact.txt");
   check bool "docker playground artifact"
     true
-    (parse ".masc/playground/docker/executor/artifact.txt"
-     = parsed "executor" "artifact.txt");
+    (parse ".masc/playground/docker/omega/artifact.txt"
+     = parsed "omega" "artifact.txt");
   check bool "nested artifact"
     true
-    (parse ".masc/playground/docker/executor/scratch/report.txt"
-     = parsed "executor" "scratch/report.txt");
+    (parse ".masc/playground/docker/omega/scratch/report.txt"
+     = parsed "omega" "scratch/report.txt");
   check bool "outside playground rejected"
     true
     (parse "workspace/report.txt" = None);
   check bool "dot-dot segment rejected"
     true
-    (parse ".masc/playground/executor/../other/secret.txt" = None);
+    (parse ".masc/playground/omega/../other/secret.txt" = None);
   check bool "bundle root alone rejected"
     true
-    (parse ".masc/playground/executor" = None)
+    (parse ".masc/playground/omega" = None)
 
 let () =
   run "Playground_paths"

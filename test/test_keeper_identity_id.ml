@@ -114,8 +114,8 @@ let test_of_string_idempotent_on_goldens () =
 
 let keeper_identities =
   [ ("alice", "keeper-alice-agent")
-  ; ("sangsu", "keeper_sangsu_agent")
-  ; ("analyst", "keeper-analyst-agent")
+  ; ("alpha", "keeper_alpha_agent")
+  ; ("delta", "keeper-delta-agent")
   ]
 
 let author_forms name =

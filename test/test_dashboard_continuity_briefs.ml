@@ -8,8 +8,8 @@ let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
     ?(autonomous_turn_count = 0) ?(paused = false) () =
   `Assoc
     [
-      ("name", `String "executor");
-      ("agent_name", `String "executor");
+      ("name", `String "omega");
+      ("agent_name", `String "omega");
       ("keeper_id", `String "k-executor");
       ("status", `String status);
       ("paused", `Bool paused);

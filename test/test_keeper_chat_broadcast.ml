@@ -20,13 +20,13 @@ let test_operation_event_has_singular_identity () =
   let event =
     Ag_ui.make_event
       ~timestamp:13.0
-      ~thread_id:"keeper:taskmaster"
+      ~thread_id:"keeper:fixture-keeper"
       ~delta:(Some "live")
       Ag_ui.Text_message_content
   in
   let fields =
     B.operation_event_to_json
-      ~keeper_name:"taskmaster"
+      ~keeper_name:"fixture-keeper"
       ~operation_id:"kmsg-operation-1"
       ~event
     |> fields_without_ts_unix
@@ -52,7 +52,7 @@ let test_projection_preserves_stream_identity () =
   let state, started =
     project P.initial
       (E.Run_started
-         { run_id = "run-1"; thread_id = "keeper-consumer:taskmaster" })
+         { run_id = "run-1"; thread_id = "keeper-consumer:fixture-keeper" })
   in
   ignore (projected_exn (state, started));
   let state, message_started =
@@ -77,7 +77,7 @@ let test_projection_covers_thinking_and_tool_args () =
   let state, _ =
     project P.initial
       (E.Run_started
-         { run_id = "run-2"; thread_id = "keeper-consumer:taskmaster" })
+         { run_id = "run-2"; thread_id = "keeper-consumer:fixture-keeper" })
   in
   let _, thinking =
     project state
@@ -101,7 +101,7 @@ let test_tool_result_ready_projection_has_exact_identity () =
   let state, _ =
     project P.initial
       (E.Run_started
-         { run_id = "run-3"; thread_id = "keeper-consumer:taskmaster" })
+         { run_id = "run-3"; thread_id = "keeper-consumer:fixture-keeper" })
   in
   let _, ready =
     project state (E.Tool_result_ready { tool_call_id = "tool-use-7" })

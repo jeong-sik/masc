@@ -14,6 +14,7 @@
 import { chromium } from 'playwright'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { VIEW_BY_ID } from './design-parity-views.mjs'
 
 const [label, tmpl, outDir, surfaceCsv] = process.argv.slice(2)
 if (!label || !tmpl || !outDir || !surfaceCsv) {
@@ -47,7 +48,10 @@ page.on('pageerror', e => errors.push(String(e).slice(0, 200)))
 const digest = buf => createHash('sha1').update(buf).digest('hex')
 
 for (const s of surfaces) {
-  const url = tmpl.replaceAll('{s}', s)
+  // A name may be a bare surface or a sub-view: a surface plus the clicks that
+  // open it, because the prototype deep-links nothing behind a tab or drawer.
+  const view = VIEW_BY_ID.get(s)
+  const url = tmpl.replaceAll('{s}', view ? view.surface : s)
   try {
     await page.goto(url, { waitUntil: 'load', timeout: 45000 })
     await page.waitForSelector('.v2-app, #app > *, #root > *', { timeout: 30000 })
@@ -57,6 +61,11 @@ for (const s of surfaces) {
     // 4pp apart from every run after it.
     await page.evaluate(() => document.fonts.ready)
     await page.waitForTimeout(2500)
+    for (const selector of view?.clicks ?? []) {
+      await page.waitForSelector(selector, { timeout: 15000 })
+      await page.click(selector)
+      await page.waitForTimeout(900)
+    }
     await page.addStyleTag({ content: FREEZE })
     // The chat thread is bottom-anchored, and its scroll-to-bottom races the
     // layout: it settles at the bottom (scrollTop 1907 of 1907) or at an earlier

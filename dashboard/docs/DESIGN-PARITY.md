@@ -144,6 +144,40 @@ tiers move to `v2-monitoring.css` under `.v2-monitoring-surface`, keeping the
 
 `design-parity-shot.mjs` takes `PARITY_W` / `PARITY_H` for this.
 
+## Sub-views
+
+The prototype deep-links `?surface=` and `?keeper=` and nothing else, so every
+section tab and drawer — Lane Queue, the prompt book, all twelve Settings panes —
+is reachable only by clicking. Measuring the deep-linkable surfaces alone leaves
+most of the design unverified: Monitor has seven sections and Settings twelve,
+and `?surface=settings` is rejected outright because Settings is not in the
+prototype's `SURFACES` registry.
+
+`design-parity-views.mjs` is the recipe list — a view is a surface plus the
+clicks that open it — and the shot harness follows it. Twenty-two views,
+2026-08-22:
+
+| View | SSIM | | View | SSIM |
+|---|---|---|---|---|
+| ide-cursor | 0.996 | | monitor-tools | 0.969 |
+| monitor-observatory | 0.995 | | settings ×12 | 0.967–0.972 |
+| monitor-journey | 0.993 | | **monitor-lanes** | **0.959** |
+| ide-annotations | 0.992 | | monitor-internal | 0.870 |
+| monitor-runtime | 0.984 | | schedule-list | 0.868 |
+| | | | approvals-history | 0.796 |
+| | | | **mean** | **0.957** |
+
+The sub-views score *higher* than the top-level surfaces (0.957 against 0.949).
+Lane Queue at 0.959 and the prompt book at 0.971 say the `lanes.css` and
+`prompt-book.css` vendoring landed — which had never been verified, only
+assumed. Three are newly short and unexamined: `approvals-history` (0.796),
+`schedule-list` (0.868), `monitor-internal` (0.870).
+
+## Unnecessary UI
+
+`docs/DESIGN-EXTRA-UI.md` runs the reverse check — what the dashboard renders
+that the design does not — and carries its own findings.
+
 ## Divergence ledger
 
 Every surface below 0.94 is held there by something that is not skin drift. Each

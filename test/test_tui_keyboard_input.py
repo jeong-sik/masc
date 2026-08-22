@@ -1381,10 +1381,20 @@ def assert_row_budgeted_surfaces(
 def assert_overview_event_rows(
     process: subprocess.Popen[bytes],
     master_fd: int,
-    _slave_fd: int,
+    slave_fd: int,
     output: bytearray,
     _base_path: str,
 ) -> None:
+    def scroll_to_oldest() -> None:
+        for first in range(2, 6):
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j",
+                f"Recent Events {first}-{first + 1}/6".encode(),
+            )
+
     wait_for_output(process, master_fd, output, b"TUI started", start=0, timeout=10.0)
     wait_for_output(process, master_fd, output, b"task-5", start=0, timeout=3.0)
     wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=3.0)
@@ -1414,6 +1424,8 @@ def assert_overview_event_rows(
     for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"22-row Overview omitted {expected!r}: {overview!r}")
+    if b"Recent Events 1-6/6" not in overview:
+        raise AssertionError(f"22-row Overview omitted its event range: {overview!r}")
     if overview.count(b"Manual refresh") != 5:
         raise AssertionError(
             f"22-row Overview did not show all five refresh events: {overview!r}"
@@ -1432,6 +1444,8 @@ def assert_overview_event_rows(
     for expected in (b"Manual refresh", b"task-1", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
+    if b"Recent Events 1-2/6" not in overview:
+        raise AssertionError(f"14-row Overview omitted its event range: {overview!r}")
     if overview.count(b"Manual refresh") != 2:
         raise AssertionError(
             f"14-row Overview did not cap the shared panel at two events: {overview!r}"
@@ -1440,6 +1454,120 @@ def assert_overview_event_rows(
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
     if "└".encode() not in overview:
         raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
+
+    scroll_to_oldest()
+    oldest = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=99,
+        needle=b"Recent Events 5-6/6",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    if b"TUI started" not in oldest:
+        raise AssertionError(f"Overview could not reach its oldest event: {oldest!r}")
+
+    send_and_wait(process, master_fd, output, b"jk", b"Recent Events 4-5/6")
+    send_and_wait(process, master_fd, output, b"j", b"Recent Events 5-6/6")
+
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\t\t\t\t",
+        b"Recent Events 5-6/6",
+    )
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=99,
+        needle=b"terminal too small",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    os.write(master_fd, b"jk")
+    wait_for_terminal_input_consumed(slave_fd)
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=98,
+        needle=b"terminal too small",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    restored = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"Recent Events 5-6/6",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    if b"TUI started" not in restored:
+        raise AssertionError(
+            f"compact viewport changed the hidden event offset: {restored!r}"
+        )
+
+    expanded = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=22,
+        columns=100,
+        needle=b"Recent Events 1-6/6",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    if b"TUI started" not in expanded:
+        raise AssertionError(f"Overview resize lost a retained event: {expanded!r}")
+
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"Recent Events 1-2/6",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    scroll_to_oldest()
+    send_and_wait(process, master_fd, output, b"r", b"Recent Events 6-7/7")
+    anchored = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=99,
+        needle=b"Recent Events 6-7/7",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    if b"TUI started" not in anchored or anchored.count(b"Manual refresh") != 1:
+        raise AssertionError(f"event prepend changed the manual anchor: {anchored!r}")
+
+    send_and_wait(process, master_fd, output, b"k", b"Recent Events 5-6/7")
+    newer = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"Recent Events 5-6/7",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    if b"TUI started" in newer or newer.count(b"Manual refresh") != 2:
+        raise AssertionError(f"one k did not move toward newer events: {newer!r}")
 
     os.write(master_fd, b"q")
 

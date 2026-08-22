@@ -233,6 +233,7 @@ type state = {
   mutable tasks: task list;
   mutable tasks_error: string option;
   mutable events: event list;
+  mutable overview_event_scroll: int;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
   mutable connection_status: connection_status;
@@ -285,6 +286,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   tasks = [];
   tasks_error = None;
   events = [];
+  overview_event_scroll = 0;
   keepers = [];
   keepers_error = None;
   connection_status = Disconnected;

@@ -5,6 +5,7 @@ module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
+module Render_schedule = Masc_tui_render_schedule
 
 open Masc_tui_types
 open Tui_decode
@@ -194,7 +195,12 @@ let add_event (state : state) event_type content =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let ev = { timestamp; event_type; content } in
-  state.events <- ev :: (List.filteri (fun i _ -> i < 10) state.events)
+  let events = ev :: (List.filteri (fun i _ -> i < 10) state.events) in
+  state.overview_event_scroll <-
+    Render_schedule.overview_event_offset_after_prepend
+      ~retained_count:(List.length events)
+      state.overview_event_scroll;
+  state.events <- events
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty

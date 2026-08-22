@@ -89,6 +89,22 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Broadcast body text"
                       ; "minLength", `Int 1
                       ] )
+                ; ( "task_cache_subject_agent"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Agent whose current-task cache was observed; supply together with task_cache_task_id" )
+                      ; "minLength", `Int 1
+                      ] )
+                ; ( "task_cache_task_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Task ID observed in the subject agent cache; supply together with task_cache_subject_agent" )
+                      ; "minLength", `Int 1
+                      ] )
                 ] )
           ; "required", `List [ `String "content" ]
           ]

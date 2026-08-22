@@ -25,6 +25,9 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let state = ctx.state in
   let content = arg_get_string ctx "content" "" in
   let trimmed = String.trim content in
+  let task_cache_signal_result =
+    Workspace_broadcast.task_cache_signal_of_args ctx.arguments
+  in
   if String.equal trimmed "" then
     (* RFC-0189: caller-input violation (empty broadcast content).
        The producer supplies [Workflow_rejection] explicitly; body text
@@ -34,6 +37,15 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
             ~tool_name ~start_time
             "Broadcast content cannot be empty")
   else
+    match task_cache_signal_result with
+    | Error detail ->
+      Some
+        (Tool_result.error
+           ~failure_class:Tool_result.Workflow_rejection
+           ~tool_name
+           ~start_time
+           detail)
+    | Ok task_cache_signal ->
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
     (* RFC-0189: rate-limit hit — caller should retry after [wait_secs].
@@ -51,10 +63,18 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
       (* A Keeper calling masc_broadcast is speaking to the workspace, so
          this reaches every Keeper's conversation window. *)
       Workspace.broadcast ?trace_context
+        ?task_cache_signal
         ~audience:Workspace_broadcast.Fleet_conversation config
         ~from_agent:agent_name ~content
     in
     match delivery with
+    | Error (Workspace_broadcast.Broadcast_policy_rejected detail) ->
+      Some
+        (Tool_result.error
+           ~failure_class:Tool_result.Workflow_rejection
+           ~tool_name
+           ~start_time
+           ("Broadcast rejected: " ^ detail))
     | Error error ->
       Some
         (Tool_result.error

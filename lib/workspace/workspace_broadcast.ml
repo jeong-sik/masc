@@ -6,10 +6,15 @@
 open Masc_domain
 open Workspace_utils
 
-type broadcast_error = Broadcast_not_persisted of string
+type broadcast_error =
+  | Broadcast_not_persisted of string
+  | Broadcast_policy_rejected of string
+  | Broadcast_dependency_unavailable of string
 
 let broadcast_error_to_string = function
-  | Broadcast_not_persisted detail -> detail
+  | Broadcast_not_persisted detail
+  | Broadcast_policy_rejected detail
+  | Broadcast_dependency_unavailable detail -> detail
 ;;
 
 type mention_delivery_deferred =
@@ -44,6 +49,23 @@ type mention_delivery =
 type audience =
   | Fleet_conversation
   | System_record
+
+type task_cache_signal = Workspace_task_cache_invariant.signal =
+  { subject_agent : string
+  ; task_id : string
+  }
+
+let task_cache_signal_partial_error =
+  "task_cache_subject_agent and task_cache_task_id must be supplied together"
+;;
+
+let task_cache_signal_of_args args =
+  let field name = Safe_ops.json_string_opt name args |> String_util.option_trim in
+  match field "task_cache_subject_agent", field "task_cache_task_id" with
+  | None, None -> Ok None
+  | Some subject_agent, Some task_id -> Ok (Some { subject_agent; task_id })
+  | Some _, None | None, Some _ -> Error task_cache_signal_partial_error
+;;
 
 type broadcast_delivery =
   { request_id : string
@@ -770,8 +792,36 @@ let reconcile_pending_mentions config =
   Cross_context_mutex.with_lock mention_delivery_mutex (fun () ->
     reconcile_pending_mentions_unlocked config)
 
-let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
-    ~content ~pre_extract_mention ~deferred_by_predecessor =
+let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
+  match task_cache_signal with
+  | None -> Ok (content, msg_type)
+  | Some signal ->
+    if not (String.equal msg_type "broadcast")
+    then
+      (* Only a broadcast carries the invalidation replacement, so accepting a
+         signal here would drop it after the caller was told it was applied. *)
+      Error
+        (Broadcast_policy_rejected
+           (Printf.sprintf
+              "task cache signal is carried by a broadcast, not by %s"
+              msg_type))
+    else (
+      match
+        Workspace_task_cache_invariant.rewrite_signal
+          ~config
+          ~module_name:"workspace_broadcast"
+          ~signal
+          ~content
+      with
+      | Unchanged content -> Ok (content, msg_type)
+      | Invalidated content -> Ok (content, "cache_invalidated")
+      | Rejected detail -> Error (Broadcast_policy_rejected detail)
+      | Dependency_unavailable detail ->
+        Error (Broadcast_dependency_unavailable detail))
+;;
+
+let broadcast_with_mention ?trace_context ~msg_type ~audience
+    config ~from_agent ~content ~pre_extract_mention ~deferred_by_predecessor =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
     let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
@@ -781,52 +831,6 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
   in
   ensure_initialized config;
 
-  (* Fleet-wide invariant (PR-B): if the broadcasting agent's current_task is
-     terminal in the backlog, replace the original broadcast with a single
-     cache_invalidated notice and clear the stale state (issue #13397).
-     Only applied to regular "broadcast" messages to avoid recursion. *)
-  let content, msg_type =
-    if String.equal msg_type "broadcast" then
-      let agent_file =
-        Filename.concat (agents_dir config) (safe_filename from_agent ^ ".json")
-      in
-      if path_exists config agent_file then
-        match agent_of_yojson (read_json config agent_file) with
-        | Ok agent -> (
-            match agent.current_task with
-            | Some task_id -> (
-                match Task_cache_invariant.fresh_task_status config ~task_id with
-                | Some status when Task_cache_invariant.is_terminal status ->
-                    Task_cache_invariant.clear_stale_agent_task config
-                      ~agent_name:from_agent ~task_id ~status
-                      ~module_name:"workspace_broadcast";
-                    let inv_content =
-                      Printf.sprintf
-                        "[cache_invalidated] workspace_broadcast: task %s is %s \
-                         — stale broadcast suppressed"
-                        task_id (Masc_domain.task_status_to_string status)
-                    in
-                    (inv_content, "cache_invalidated")
-                | _ ->
-                    ( Workspace_task_cache_invariant.rewrite_broadcast_content
-                        ~config ~from_agent ~module_name:"workspace_broadcast"
-                        ~content,
-                      msg_type ))
-            | None ->
-                ( Workspace_task_cache_invariant.rewrite_broadcast_content
-                    ~config ~from_agent ~module_name:"workspace_broadcast"
-                    ~content,
-                  msg_type ))
-        | Error _ ->
-            ( Workspace_task_cache_invariant.rewrite_broadcast_content
-                ~config ~from_agent ~module_name:"workspace_broadcast" ~content,
-              msg_type )
-      else
-        ( Workspace_task_cache_invariant.rewrite_broadcast_content
-            ~config ~from_agent ~module_name:"workspace_broadcast" ~content,
-          msg_type )
-    else (content, msg_type)
-  in
   let seq = Workspace_state.next_seq config in
   let request_id = Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
   let mention = pre_extract_mention in
@@ -922,42 +926,47 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
      observe safe_msg_type;
      Ok { delivery with mention_delivery })
 
-let broadcast ?trace_context ?(msg_type = "broadcast") ~audience config
-      ~from_agent ~content =
+let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
+      ~audience config ~from_agent ~content =
+  ensure_initialized config;
   (* Preserve original content and extract mention tokens before any
      fleet-wide invariant rewrite. Explicit mentions share the recovery lock,
      so sequence assignment, commit, intake materialization, and wake request
      cannot overtake an older explicit mention. Passive fanout remains
      unsynchronized. *)
   let pre_extract_mention = Mention.extract content in
-  let run deferred_by_predecessor =
-    broadcast_with_mention
-      ?trace_context
-      ~msg_type
-      ~audience
-      config
-      ~from_agent
-      ~content
-      ~pre_extract_mention
-      ~deferred_by_predecessor
-  in
-  match pre_extract_mention with
-  | None -> run None
-  | Some target ->
-    Cross_context_mutex.with_lock mention_delivery_mutex (fun () ->
-      let deferred_by_predecessor =
-        match reconcile_pending_mentions_unlocked config with
-        | Error detail ->
-          Log.Misc.error
-            "workspace mention predecessor reconciliation unavailable target=%s: %s"
-            target detail;
-          Some Recovery_unavailable
-        | Ok report ->
-          if report.global_barrier || List.mem target report.blocked_targets
-          then Some Predecessor_pending
-          else None
-      in
-      run deferred_by_predecessor)
+  match rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content with
+  | Error _ as error -> error
+  | Ok (content, msg_type) ->
+    let run deferred_by_predecessor =
+      broadcast_with_mention
+        ?trace_context
+        ~msg_type
+        ~audience
+        config
+        ~from_agent
+        ~content
+        ~pre_extract_mention
+        ~deferred_by_predecessor
+    in
+    (match pre_extract_mention with
+     | None -> run None
+     | Some target ->
+       Cross_context_mutex.with_lock mention_delivery_mutex (fun () ->
+         let deferred_by_predecessor =
+           match reconcile_pending_mentions_unlocked config with
+           | Error detail ->
+             Log.Misc.error
+               "workspace mention predecessor reconciliation unavailable target=%s: %s"
+               target
+               detail;
+             Some Recovery_unavailable
+           | Ok report ->
+             if report.global_barrier || List.mem target report.blocked_targets
+             then Some Predecessor_pending
+             else None
+         in
+         run deferred_by_predecessor))
 
 module For_testing = struct
   let replace_on_broadcast_mention handler =

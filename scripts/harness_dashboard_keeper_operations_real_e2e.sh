@@ -32,11 +32,12 @@ trap cleanup EXIT
 
 harness_seed_server_config "${ROOT_DIR}" "${BASE_PATH}"
 cp \
-  "${ROOT_DIR}/config/keepers/taskmaster.toml" \
+  "${ROOT_DIR}/scripts/fixtures/keeper-operation-real-e2e/keeper.toml" \
   "${BASE_PATH}/.masc/config/keepers/${KEEPER_NAME}.toml"
-cp -R \
-  "${ROOT_DIR}/config/keepers/taskmaster" \
-  "${BASE_PATH}/.masc/config/keepers/${KEEPER_NAME}"
+mkdir -p "${BASE_PATH}/.masc/config/keepers/${KEEPER_NAME}"
+cp \
+  "${ROOT_DIR}/scripts/fixtures/keeper-operation-real-e2e/AGENT.md" \
+  "${BASE_PATH}/.masc/config/keepers/${KEEPER_NAME}/AGENT.md"
 mkdir -p "${BASE_PATH}/.masc/keepers"
 cp \
   "${ROOT_DIR}/scripts/fixtures/keeper-operation-real-e2e/meta.json" \

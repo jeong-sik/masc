@@ -964,9 +964,9 @@ export function applyKeeperStreamEvent(
         // The reply was already delivered by a terminal surface post, so
         // there is no assistant text — finalize as a terminal control status
         // instead of leaving the entry streaming. The event value names the
-        // real delivery target (null on legacy events).
+        // real delivery target.
         const externalEffectTarget = normalizeKeeperExternalEffectTarget(
-          isRecord(event.value) ? event.value.target : null,
+          event.value.target,
         )
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         updateThreadEntry(keeperName, assistantEntryId, entry => ({

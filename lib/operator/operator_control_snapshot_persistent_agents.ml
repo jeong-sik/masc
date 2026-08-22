@@ -51,7 +51,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                    , field_or_null "selected_runtime_canonical" )
                  ; "primary_model", field_or_null "primary_model"
                  ; "next_model_hint", field_or_null "next_model_hint"
-                 ; "active_goal_ids", field_or_null "active_goal_ids"
                  ; "last_autonomous_action_at", field_or_null "last_autonomous_action_at"
                  ; "autonomous_action_count", field_or_null "autonomous_action_count"
                  ; "updated_at", field_or_null "updated_at"

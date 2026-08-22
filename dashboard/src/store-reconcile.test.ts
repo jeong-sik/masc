@@ -133,7 +133,6 @@ function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
     recent_tool_names: ['keeper_task_claim'],
     latest_tool_names: ['keeper_task_claim'],
     latest_tool_call_count: 1,
-    active_goal_ids: ['goal-1'],
     ...overrides,
   }
 }

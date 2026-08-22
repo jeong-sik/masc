@@ -178,9 +178,6 @@ function keeperByName(name: string | null | undefined): Keeper | undefined {
 }
 
 function leadNameForGoal(goal: Goal): string | undefined {
-  const active = keepers.value.find(k => k.active_goal_ids?.includes(goal.id))
-  if (active) return active.name
-
   const goalTasks = tasks.value.filter(t => t.goal_id === goal.id)
   const counts = new Map<string, number>()
   for (const t of goalTasks) {

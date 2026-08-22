@@ -11,21 +11,6 @@ include Dashboard_goals_types
 
 
 
-let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
-  let labels = [ ("goal_id", goal.id) ] in
-  let measured, pct =
-    match Json_util.get_int attainment "attainment_pct" with
-    | Some pct -> (1.0, float_of_int pct)
-    | None -> (0.0, 0.0)
-  in
-  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_pct
-    ~help:goal_attainment_pct_help ~labels ();
-  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_pct ~labels pct;
-  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_measured
-    ~help:goal_attainment_measured_help ~labels ();
-  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_measured ~labels
-    measured
-
 let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
   | exn ->
@@ -100,28 +85,9 @@ let build_goal_events_projection ~(config : Workspace.config) goals =
   fun goal_id ->
     Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
 
-let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
-  let goals = Goal_store.list_goals config () in
-  let tasks = Workspace.get_tasks_safe config in
-  (* Goal attainment is derived from goals and linked tasks. Approval rows are
-     not an attainment input, so queue unavailability must not freeze these
-     independent gauges. The empty projection remains internal to this
-     attainment-only traversal and is never emitted as queue state. *)
-  let forest = build_forest ~config ~goals ~tasks ~pending_approvals:[] in
-  let all_nodes = flatten_tree [] forest in
-  List.iter
-    (fun (node : tree_node) ->
-      let goal = node.goal in
-      let attainment = goal_attainment_to_json goal node in
-      observe_goal_attainment_metrics goal attainment)
-    all_nodes
-
 let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
   let goal = node.goal in
-  let attainment = goal_attainment_to_json goal node in
   let task_summary = task_summary_to_json node.tasks in
-  let completion_summary = goal_completion_to_json goal node ~attainment in
-  observe_goal_attainment_metrics goal attainment;
   `Assoc
     [
       ("id", `String goal.id);
@@ -133,7 +99,6 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
       ("metric", Json_util.string_opt_to_json goal.metric);
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
-      ("attainment", attainment);
       ("tasks", `List (List.map task_to_tree_json node.tasks));
       ("task_count", `Int (List.length node.tasks));
       ("task_done_count",
@@ -143,7 +108,6 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
                (fun (task : Masc_domain.task) -> task_is_done task)
                node.tasks)));
       ("task_summary", task_summary);
-      ("completion_summary", completion_summary);
       ("timeline_events", `List (events_for_goal goal.id));
       ( "children",
         `List

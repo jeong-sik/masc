@@ -61,9 +61,9 @@ export function goalById(id: string): Goal | undefined {
 }
 
 // -- Task completion counts --------------------------------------
-// This is not a goal-attainment metric. It is a count of linked tasks from
-// the planning store, used only where the richer dashboard goal-tree summary
-// is not available yet. Metric/attainment truth belongs to the goal-tree API.
+// A count of linked tasks from the planning store. It says how many tasks
+// finished, not whether the goal's declared metric was reached — nothing in
+// the system answers that, and nothing here should look like it does.
 
 export interface GoalProgress {
   done: number
@@ -118,7 +118,7 @@ export function TaskProgressBar({ done, total, size = 'md' }: { done: number; to
     <div class="flex items-center gap-2">
       <div
         class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden"
-        title="Linked task completion count. This is not a goal-attainment metric."
+        title="끝난 하위 작업 수. 목표 지표를 잰 값이 아닙니다."
         data-task-count-meter
         data-task-count-meter-pct=${pct}
       >

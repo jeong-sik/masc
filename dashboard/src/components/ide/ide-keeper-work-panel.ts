@@ -202,7 +202,7 @@ function GoalProgressCard(
         <span>${goalPhaseLabel(goal.phase)}</span>
       </div>
       <strong title=${goal.title}>${goal.title}</strong>
-      <div class="ide-keeper-work-goal-bar" aria-hidden="true" title="Linked task count only; metric attainment is not available on this IDE summary card.">
+      <div class="ide-keeper-work-goal-bar" aria-hidden="true" title="끝난 하위 작업 수. 목표 지표를 잰 값이 아닙니다.">
         <span style=${{ width: `${pctValue}%` }} />
       </div>
       <div class="ide-keeper-work-goal-meta">

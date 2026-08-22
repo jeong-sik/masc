@@ -25,15 +25,6 @@ import { VirtualList } from './common/virtual-list'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
 import { goalPhaseLabel } from './goals/goal-helpers'
-import type { AttainmentTone } from '../lib/goal-attainment'
-import {
-  attainmentBasisLabel,
-  attainmentEvaluationCaveat,
-  attainmentTargetProblem,
-  attainmentUnitSuffix,
-  attainmentVerdict,
-  completionRequestText,
-} from '../lib/goal-attainment'
 import { statusLabel } from '../lib/status-label'
 import { GoalCreateForm } from './goals/goal-create-form'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
@@ -445,12 +436,29 @@ function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }
 
 // ── Goal detail panel (expanded goal card body) ─────────────────────────────
 //
-// The panel answers four operator questions, in order: what this goal is,
-// what counts as done, why it sits in its current phase, and where to go next.
+// The panel answers three operator questions, in order: what this goal is,
+// why it sits in its current phase, and where to go next.
+//
+// It carries no "완료 조건" section. The metric and its target value ride the
+// card header next to the progress bar, and the task counts there were a
+// second, worse tally of what the header already prints: the header drops
+// cancelled tasks from the denominator (`goalProgressCounts`, and the comment
+// there says why) while `task_summary` keeps them, so one card showed 6/6 in
+// the header and 전체 7 in the panel. Two answers to one question, with
+// nothing reconciling them.
+//
+// The backend also used to hand down a verdict — observed / target * 100,
+// where "observed" was the count of finished linked tasks and "target" was
+// the first number scraped out of free text like "5 PRs" — labelled with a
+// basis naming the metric it never read. Every goal that declared a metric
+// came back unevaluated, so the number was always a task-count stand-in
+// wearing a metric's name. That projection is gone (#29303); whether the goal
+// is done is a judgement the operator makes from the declaration and the
+// tasks themselves.
 //
 // There is no "기록 0건" fallback on the activity row. The goals-tree endpoint
 // serves timeline rows as {event_type, payload} while the decoder requires
-// {kind, lane, title, summary, severity} (api/dashboard-goals.ts:375), so every
+// {kind, lane, title, summary, severity} (api/dashboard-goals.ts), so every
 // row is dropped before it reaches this component and the list is empty for
 // reasons that have nothing to do with whether the goal has history — see
 // masc#29299. Printing a zero would assert something the payload does not say.
@@ -463,40 +471,7 @@ function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }
 // `next_actions` strings were rendered as plain labels next to no control that
 // performs them.
 
-interface GoalDetailTaskCounts {
-  readonly done: number
-  readonly open: number
-  readonly cancelled: number | null
-  readonly total: number
-}
-
-function goalDetailTaskCounts(node: GoalTreeNode): GoalDetailTaskCounts {
-  const summary = node.completion_summary
-  const byStatus = node.task_summary
-  return {
-    done: summary?.task_done ?? node.task_done_count,
-    open: summary?.task_open ?? Math.max(node.task_count - node.task_done_count, 0),
-    cancelled: byStatus?.cancelled ?? null,
-    total: summary?.task_total ?? node.task_count,
-  }
-}
-
-function goalDetailTaskCountsText(counts: GoalDetailTaskCounts): string {
-  const parts = [`끝남 ${counts.done}`, `남음 ${counts.open}`]
-  if (counts.cancelled != null && counts.cancelled > 0) parts.push(`취소 ${counts.cancelled}`)
-  parts.push(`전체 ${counts.total}`)
-  return parts.join(' · ')
-}
-
 type GoalDetailRowTone = 'ok' | 'warn' | 'bad'
-
-/** htm templates pass props untyped, so an `AttainmentTone` reaching a row
- *  would silently render `class="wk-dossier-row default"` — a class no
- *  stylesheet defines. Narrowing here keeps the neutral tone spelled as the
- *  absence of a modifier. */
-function goalDetailRowTone(tone: AttainmentTone): GoalDetailRowTone | undefined {
-  return tone === 'default' ? undefined : tone
-}
 
 function GoalDetailRow({
   label,
@@ -526,73 +501,6 @@ function GoalDetailSection({ title, children }: { title: string; children: unkno
   `
 }
 
-function GoalCompletionCriteria({ node }: { node: GoalTreeNode }) {
-  const attainment = node.attainment
-  const summary = node.completion_summary
-  const counts = goalDetailTaskCounts(node)
-  const verdict = attainmentVerdict(attainment)
-  const caveat = attainmentEvaluationCaveat(attainment)
-  const targetProblem = attainmentTargetProblem(attainment)
-  // A goal with neither metric nor target is not "missing" three values — it
-  // is complete when its linked tasks are. Saying that once beats three
-  // separate "없음" rows that read like a broken payload.
-  const metricless = attainment.metric == null && attainment.target_value == null
-
-  return html`
-    <${GoalDetailSection} title="완료 조건">
-      ${metricless ? html`
-        <${GoalDetailRow} label="지표" testHook="metric">
-          완료 지표가 정해져 있지 않아요. 연결된 하위 작업이 모두 끝나야 완료로 봅니다.
-        <//>
-      ` : html`
-        <${GoalDetailRow} label="지표" testHook="metric">
-          <span class="mono">${attainment.metric ?? '지표 없음'}</span>
-        <//>
-        <${GoalDetailRow} label="목표치" tone=${targetProblem ? 'warn' : undefined} testHook="target">
-          <span class="mono">${attainment.target_value ?? '목표치 없음'}</span>
-          ${attainment.target_numeric != null ? html`
-            <span class="wk-dossier-sub">숫자로는 ${attainment.target_numeric}${attainmentUnitSuffix(attainment.unit)}</span>
-          ` : null}
-          ${targetProblem ? html`<span class="wk-dossier-sub warn">${targetProblem}</span>` : null}
-        <//>
-        <${GoalDetailRow} label="현재값" testHook="observed">
-          ${attainment.observed_value == null
-            ? html`<span class="wk-dossier-sub">아직 잰 값이 없어요</span>`
-            : html`<span class="mono">${attainment.observed_value}${attainmentUnitSuffix(attainment.unit)}</span>`}
-        <//>
-      `}
-
-      <${GoalDetailRow} label="판정" tone=${goalDetailRowTone(verdict.tone)} testHook="verdict">
-        <span class="wk-dossier-strong">${verdict.label}</span>
-        ${verdict.detail ? html`<span class="wk-dossier-sub">${verdict.detail}</span>` : null}
-      <//>
-
-      ${caveat ? html`
-        <div class="wk-dossier-callout warn" data-goal-detail-caveat>${caveat}</div>
-      ` : null}
-
-      <${GoalDetailRow} label="판정 근거" testHook="basis">
-        ${attainmentBasisLabel(attainment.basis)}
-        ${attainment.note ? html`<span class="wk-dossier-sub">${attainment.note}</span>` : null}
-      <//>
-
-      <${GoalDetailRow} label="하위 작업" testHook="tasks">
-        ${goalDetailTaskCountsText(counts)}
-      <//>
-
-      ${summary ? html`
-        <${GoalDetailRow}
-          label="완료 요청"
-          tone=${summary.ready_to_request_completion ? 'ok' : undefined}
-          testHook="ready"
-        >
-          ${completionRequestText(summary.state)}
-        <//>
-      ` : null}
-    <//>
-  `
-}
-
 function GoalProjectionDossier({
   node,
   reviewNote,
@@ -614,7 +522,7 @@ function GoalProjectionDossier({
       class="wk-dossier"
       data-testid="goal-dossier"
       data-goal-dossier=${node.id}
-      data-goal-dossier-attainment-state=${node.attainment.state}
+      data-goal-dossier-phase=${node.phase}
       data-goal-dossier-timeline-count=${node.timeline_events.length}
     >
       <${GoalDetailSection} title="이 Goal 은">
@@ -628,8 +536,6 @@ function GoalProjectionDossier({
         <${GoalDetailRow} label="만든 날" testHook="created"><span class="mono">${node.created_at}</span><//>
         <${GoalDetailRow} label="마지막 변경" testHook="updated"><span class="mono">${node.updated_at}</span><//>
       <//>
-
-      <${GoalCompletionCriteria} node=${node} />
 
       ${reviewNote ? html`
         <${GoalDetailSection} title="진행 판정 메모">
@@ -820,7 +726,15 @@ function GoalCard({
         <span class="wk-prog-lbl mono">
           ${progress.done}/${progress.total}${progress.verify > 0 ? ` · 검증 ${progress.verify}` : ''}${progress.blocked > 0 ? ` · 막힘 ${progress.blocked}` : ''}
         </span>
-        ${goal.metric ? html`<span class="wk-metric mono" title="목표 지표">${goal.metric}</span>` : null}
+        ${goal.metric ? html`
+          <span
+            class="wk-metric mono"
+            data-goal-metric
+            title=${`목표 지표${goal.target_value ? ` · 목표치 ${goal.target_value}` : ''}`}
+          >
+            ${goal.metric}${goal.target_value ? ` · ${goal.target_value}` : ''}
+          </span>
+        ` : null}
       </div>
       ${open ? html`
         <div class="wk-jobs">

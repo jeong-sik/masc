@@ -642,22 +642,6 @@ export interface GoalTaskSummary {
   by_status: Record<string, number>
 }
 
-export interface GoalCompletionSummary {
-  state: string
-  pct: number | null
-  pct_source: string
-  attainment_state: string
-  attainment_basis: string
-  /** Mirror of {@link GoalAttainmentProjection.metric_evaluation} (task-1743). */
-  metric_evaluation: 'unevaluated' | 'absent'
-  task_total: number
-  task_done: number
-  task_open: number
-  is_complete: boolean
-  is_terminal: boolean
-  ready_to_request_completion: boolean
-}
-
 export interface GoalFsmProjection {
   state: string
   source: 'goal.phase' | string
@@ -745,7 +729,6 @@ export interface GoalTreeMetricProjection {
   target_value: string | null
   due_date: string | null
   owner: string | null
-  attainment: GoalAttainmentProjection
 }
 
 export interface GoalTreeTaskProjection {
@@ -753,7 +736,6 @@ export interface GoalTreeTaskProjection {
   task_count: number
   task_done_count: number
   task_summary?: GoalTaskSummary
-  completion_summary?: GoalCompletionSummary
 }
 
 export interface GoalTreeActivityProjection {
@@ -786,29 +768,6 @@ export interface GoalTreeNode extends
   title: string
   children: GoalTreeNode[]
   child_count: number
-}
-
-export interface GoalAttainmentProjection {
-  state: 'attained' | 'in_progress' | 'not_started' | 'unmeasured' | string
-  basis: 'goal_phase' | 'linked_tasks' | 'metric_target_percent' | 'metric_target_count' | 'unmeasured' | string
-  metric: string | null
-  /**
-   * Whether the declared metric was actually evaluated (task-1743).
-   * 'unevaluated': a metric is declared but no evaluator produced a value —
-   * attainment_pct is task-derived, not a metric measurement.
-   * 'absent': no metric is declared. Distinguishes an unmeasured metric from
-   * a genuine measured zero.
-   */
-  metric_evaluation: 'unevaluated' | 'absent'
-  target_value: string | null
-  target_parse_status: 'absent' | 'parseable' | 'unparseable' | 'invalid_target' | 'unsupported_metric' | 'no_linked_tasks' | string
-  unit: 'percent' | 'count' | 'unknown' | string
-  observed_value: number | null
-  target_numeric: number | null
-  attainment_pct: number | null
-  task_done_count: number
-  task_count: number
-  note: string
 }
 
 export interface GoalTreeSummary {

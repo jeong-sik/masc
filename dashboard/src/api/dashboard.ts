@@ -26,8 +26,6 @@ export type {
   GoalKeeperTrustLatestEvent,
   GoalKeeperTrustSummary,
   GoalDetailTimelineEvent,
-  GoalAttainmentProjection,
-  GoalCompletionSummary,
   GoalTaskSummary,
   GoalTreeNode,
   GoalTreeSummary,

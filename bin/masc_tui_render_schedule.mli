@@ -40,6 +40,45 @@ module Viewport : sig
   val requires_compact_frame : rows:int -> bool
 end
 
+type overview_allocation = {
+  attention_rows : int;
+  task_error_rows : int;
+  task_rows : int;
+}
+
+val allocate_overview :
+  terminal_rows:int ->
+  has_cluster:bool ->
+  attention_count:int ->
+  task_count:int ->
+  has_task_error:bool ->
+  overview_allocation
+
+type board_read_allocation = {
+  body_rows : int;
+  comment_rows : int;
+}
+
+val allocate_board_read :
+  terminal_rows:int ->
+  body_line_count:int ->
+  comment_count:int ->
+  board_read_allocation
+
+type board_read_scroll = {
+  normalized_scroll : int;
+  body_offset : int;
+  comment_offset : int;
+}
+
+val project_board_read_scroll :
+  body_line_count:int ->
+  body_rows:int ->
+  comment_count:int ->
+  comment_rows:int ->
+  int ->
+  board_read_scroll
+
 module Terminal_size_cache : sig
   type t
 

@@ -357,6 +357,25 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
 
+let test_keeper_detail_scroll_normalizes_across_bounds () =
+  let normalize = Schedule.normalize_keeper_detail_scroll in
+  let bottom = normalize ~line_count:29 ~content_height:14 max_int in
+  check int "overscroll reaches the exact bottom" 15 bottom;
+  let resized = normalize ~line_count:29 ~content_height:15 bottom in
+  check int "larger viewport clamps the persisted bottom" 14 resized;
+  check int "one upward action reveals the previous row" 13
+    (max 0 (resized - 1));
+  let measured = normalize ~line_count:31 ~content_height:15 max_int in
+  check int "measured context adds two scroll positions" 16 measured;
+  check int "content shrink clamps to its new bottom" 14
+    (normalize ~line_count:29 ~content_height:15 measured);
+  check int "content growth preserves the current offset" 14
+    (normalize ~line_count:31 ~content_height:15 resized);
+  check int "negative raw state normalizes to zero" 0
+    (normalize ~line_count:29 ~content_height:15 (-1));
+  check int "fully visible content cannot scroll" 0
+    (normalize ~line_count:10 ~content_height:15 max_int)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -388,5 +407,7 @@ let () =
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
             test_board_read_scroll_reaches_hidden_comments
+        ; test_case "keeper detail scroll follows current bounds" `Quick
+            test_keeper_detail_scroll_normalizes_across_bounds
         ] )
     ]

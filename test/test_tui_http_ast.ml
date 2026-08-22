@@ -666,6 +666,11 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"render_keeper_detail"
        ~callee:"Masc_tui_render_schedule.keeper_context_bar_width"
      = 1);
+  check int "keeper detail persists one viewport-normalized scroll" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_detail"
+       ~callee:"Render_schedule.normalize_keeper_detail_scroll");
   check bool "interrupted input uses the deadline-aware retry contract" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"read_byte_unix"

@@ -1004,6 +1004,120 @@ def navigate_with_arrows_and_quit(
     os.write(master_fd, b"q")
 
 
+def keeper_detail_overscroll_interaction(
+    fixtures: HttpFixtures,
+    refresh_gate: GatedHttpResponse,
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        completed = False
+        try:
+            wait_for_output(
+                process, master_fd, output, b"cluster-a", start=0, timeout=10.0
+            )
+            cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                FRAME_END,
+                start=cluster_end,
+                timeout=3.0,
+            )
+            send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\r",
+                b"Keeper: \x1b[1malpha",
+            )
+            detail = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=14,
+                columns=100,
+                needle=b"Keeper: \x1b[1malpha",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            indicators = re.findall(rb"\[(\d+)/(\d+)\]", detail)
+            if not indicators:
+                raise AssertionError(
+                    f"Keeper detail did not expose a scroll indicator: {detail!r}"
+                )
+            position_count = int(indicators[-1][1])
+            if position_count < 3:
+                raise AssertionError(
+                    f"Keeper detail fixture has too few scroll positions: {detail!r}"
+                )
+
+            bottom = f"[{position_count}/{position_count}]".encode()
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j" * (position_count - 1),
+                bottom,
+            )
+
+            fixtures["/api/v1/board"] = refresh_gate
+            read_available(master_fd, output)
+            os.write(master_fd, b"jr")
+            if not refresh_gate.requested.wait(timeout=3.0):
+                raise AssertionError(
+                    "Keeper detail overscroll refresh did not reach its fixture"
+                )
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=14,
+                columns=99,
+                needle=bottom,
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            refresh_gate.release.set()
+
+            previous = f"[{position_count - 1}/{position_count}]".encode()
+            send_and_wait(process, master_fd, output, b"k", previous)
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j",
+                b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+            )
+            beta = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\r",
+                b"Keeper: \x1b[1mbeta",
+            )
+            top = f"[1/{position_count}]".encode()
+            if top not in beta:
+                raise AssertionError(
+                    f"new Keeper detail did not reset to the top: {beta!r}"
+                )
+            os.write(master_fd, b"q")
+            completed = True
+        finally:
+            refresh_gate.release.set()
+            if not completed and process.poll() is None:
+                kill_process_group(process)
+
+    return interact
+
+
 def interrupt_with_ctrl_c(
     _process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1671,6 +1785,8 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
 
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
+    keeper_scroll_fixtures = overview_event_http_fixtures()
+    keeper_scroll_gate = GatedHttpResponse((200, {"posts": []}))
     board_selection_fixtures = board_selection_http_fixtures()
     board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
@@ -1686,6 +1802,15 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=utf8_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper detail overscroll normalization",
+        interact=keeper_detail_overscroll_interaction(
+            keeper_scroll_fixtures,
+            keeper_scroll_gate,
+        ),
+        http_fixtures=keeper_scroll_fixtures,
     )
     run_terminal_scenario(
         executable,

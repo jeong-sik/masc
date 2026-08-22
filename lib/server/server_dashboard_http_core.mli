@@ -61,15 +61,6 @@ val with_dashboard_timeout :
 
 val dashboard_cache_key : Workspace.config -> string -> string -> string
 
-(** {1 Projection Diagnostics} *)
-
-val with_projection_diagnostics :
-  surface:string ->
-  started_at:float ->
-  extra:(string * Yojson.Safe.t) list ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-
 (** {1 Sanitization and Request Helpers} *)
 
 val dashboard_shell_with_request_auth_json :

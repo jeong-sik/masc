@@ -134,13 +134,6 @@ val upsert_assoc_field :
 
 (** {1 Projection-diagnostics builders} *)
 
-val attach_projection_diagnostics :
-  Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-(** [attach_projection_diagnostics json diagnostics] prepends
-    [("projection_diagnostics", diagnostics)] to an [`Assoc]
-    payload, returning [json] unchanged for non-objects.  Used by
-    {!with_projection_diagnostics}. *)
-
 val extend_projection_diagnostics :
   Yojson.Safe.t -> (string * Yojson.Safe.t) list -> Yojson.Safe.t
 (** [extend_projection_diagnostics json extra_fields] merges
@@ -149,37 +142,3 @@ val extend_projection_diagnostics :
     overwritten by [extra_fields] (last-write-wins).  Used by
     {!cached_surface_json} to layer cache-state fields onto an
     existing diagnostic block. *)
-
-val projection_diagnostics_json :
-  surface:string ->
-  started_at:float ->
-  extra:(string * Yojson.Safe.t) list ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-(** [projection_diagnostics_json ~surface ~started_at ~extra json]
-    builds the diagnostic [`Assoc] with [surface] / [build_ms]
-    (computed from [started_at]) / [payload_bytes] (computed from
-    [json] serialised length) / [generated_at] (current ISO time)
-    plus the caller-supplied [extra] fields.  Pure — does not
-    mutate any cached surface. *)
-
-val with_projection_diagnostics :
-  surface:string ->
-  started_at:float ->
-  extra:(string * Yojson.Safe.t) list ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-(** [with_projection_diagnostics ~surface ~started_at ~extra json]
-    is {!projection_diagnostics_json} composed with
-    {!attach_projection_diagnostics}: returns [json] with the
-    diagnostic block prepended.  The convenience wrapper most
-    dashboard handlers use. *)
-
-val initialized_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
-(** [initialized_json_opt json] returns [Some json] when [json] is an
-    [`Assoc] with no [status: "initializing"] field.  Returns [None]
-    for non-objects and for initializing payloads.
-
-    Used to defer rendering an "initializing" envelope while the cache
-    is still warming up: callers surface "no data yet" as a 404 rather
-    than an empty card. *)

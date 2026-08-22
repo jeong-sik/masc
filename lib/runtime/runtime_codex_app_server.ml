@@ -1227,7 +1227,16 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
     match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt with
     | Error _ as error -> error
     | Ok protocol_cwd ->
-      Log.Runtime_agent.info "Codex app-server subscription turn starting";
+      (* Eight keepers starting a turn in the same second produced eight
+         identical lines with nothing to tell them apart (2026-08-22
+         01:36:25Z, seven within one second). The thread is the only identity
+         this entry point holds before [on_thread_ready] fires. *)
+      Log.Runtime_agent.info
+        "Codex app-server subscription turn starting thread=%s model=%s"
+        (match thread_mode with
+         | Start -> "new"
+         | Resume { thread_id } -> thread_id)
+        (Option.value ~default:"-" config.model);
       (match
          (try
             run_spawned

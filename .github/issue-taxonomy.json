@@ -7,27 +7,27 @@
         "defect": {
           "label": "kind/defect",
           "color": "1d76db",
-          "description": "[kind] 구현이 계약을 어긴다 — 동작이 틀리거나 회귀"
+          "description": "부르면 동작은 하는데 결과가 틀리다. 되던 게 안 되는 것도 여기"
         },
         "gap": {
           "label": "kind/gap",
           "color": "1d76db",
-          "description": "[kind] 계약·배선이 없다 — 이름만 있고 연결 안 됨, 미구현"
+          "description": "부를 경로가 아예 없다. 이름·타입만 있고 실제로 이어지지 않았다"
         },
         "capability": {
           "label": "kind/capability",
           "color": "1d76db",
-          "description": "[kind] 새 표면·기능 요구"
+          "description": "새로 만들어 달라는 요청. 대응하는 약속 자체가 아직 없다"
         },
         "erosion": {
           "label": "kind/erosion",
           "color": "1d76db",
-          "description": "[kind] 죽은 코드·실험 잔재·틀린 문서 — 지울 것"
+          "description": "지울 것. 안 쓰는 코드, 실험하다 남은 것, 사실과 다른 문서"
         },
         "inquiry": {
           "label": "kind/inquiry",
           "color": "1d76db",
-          "description": "[kind] 결함 여부 미확정 — 조사·실측 필요"
+          "description": "버그인지 아직 모른다. 재현하거나 재보는 일이 먼저다"
         }
       },
       "required": true,
@@ -38,67 +38,67 @@
         "turn": {
           "label": "area/turn",
           "color": "5319e7",
-          "description": "[area] 턴 진행·스케줄러·DrainQueue·자율 루프"
+          "description": "턴을 돌리는 쪽. 스케줄러·DrainQueue·자율 루프"
         },
         "continuity": {
           "label": "area/continuity",
           "color": "5319e7",
-          "description": "[area] 컨텍스트·컴팩션·메모리·회상"
+          "description": "턴 사이를 잇는 쪽. 컨텍스트·컴팩션·기억·회상"
         },
         "collab": {
           "label": "area/collab",
           "color": "5319e7",
-          "description": "[area] Keeper 간 통신·Broadcast·Board·Comment"
+          "description": "Keeper끼리 주고받는 쪽. Broadcast·Board·Comment"
         },
         "goal-task": {
           "label": "area/goal-task",
           "color": "5319e7",
-          "description": "[area] Goal·Task·Plan 도메인"
+          "description": "Goal·Task·Plan 도메인"
         },
         "verification": {
           "label": "area/verification",
           "color": "5319e7",
-          "description": "[area] Verifier·Judge·Judge-of-Judge·Fusion·교차검증"
+          "description": "Verifier·Judge·Judge-of-Judge·Fusion·교차 검증"
         },
         "tools": {
           "label": "area/tools",
           "color": "5319e7",
-          "description": "[area] 도구 카탈로그·Multi/Async/Batch·Sandbox·MCP"
+          "description": "도구 목록과 실행. Multi/Async/Batch·Sandbox·MCP"
         },
         "runtime": {
           "label": "area/runtime",
           "color": "5319e7",
-          "description": "[area] 프로바이더·모델·런타임 페일오버"
+          "description": "무엇으로 부를지. 프로바이더·모델·런타임 레인·대체 경로"
         },
         "transport": {
           "label": "area/transport",
           "color": "5319e7",
-          "description": "[area] auth·health·프로토콜·전송 계층"
+          "description": "어떻게 실어 나를지. 인증·헬스체크·프로토콜·전송 계층"
         },
         "dashboard": {
           "label": "area/dashboard",
           "color": "5319e7",
-          "description": "[area] 대시보드·읽기 모델·뷰어"
+          "description": "관측 데이터를 보여주는 쪽. 대시보드·TUI·읽기 모델"
         },
         "connector": {
           "label": "area/connector",
           "color": "5319e7",
-          "description": "[area] Slack·Discord 등 외부 출력 경로"
+          "description": "밖으로 내보내는 쪽. Slack·Discord 등"
         },
         "observability": {
           "label": "area/observability",
           "color": "5319e7",
-          "description": "[area] 로그·메트릭·트레이스·스트리밍 관측"
+          "description": "관측 데이터를 만드는 쪽. 로그·메트릭·트레이스·스트리밍"
         },
         "persistence": {
           "label": "area/persistence",
           "color": "5319e7",
-          "description": "[area] 저장소·원장·체크포인트·파일시스템"
+          "description": "디스크에 쓰고 읽는 쪽. 저장소·원장(ledger)·체크포인트"
         },
         "ci": {
           "label": "area/ci",
           "color": "5319e7",
-          "description": "[area] CI·빌드·릴리스·ratchet"
+          "description": "CI·빌드·릴리스. 되돌림 방지 기준선(ratchet) 포함"
         }
       },
       "required": true,
@@ -109,27 +109,27 @@
         "breaks-continuity": {
           "label": "impact/breaks-continuity",
           "color": "b60205",
-          "description": "[impact 1] 턴이 끊기거나 기억이 안 이어진다 — 제품 정의상 실패"
+          "description": "1순위 · 턴이 멈추거나 기억이 안 이어진다. 이러면 제품이라 할 수 없다"
         },
         "breaks-collab": {
           "label": "impact/breaks-collab",
           "color": "d93f0b",
-          "description": "[impact 2] Keeper 간 소통이 끊기거나, 출력이 맥락에 맞지 않는 곳에 도착한다"
+          "description": "2순위 · Keeper끼리 말이 안 닿거나, 결과가 엉뚱한 데로 간다"
         },
         "blinds-operator": {
           "label": "impact/blinds-operator",
           "color": "e99695",
-          "description": "[impact 3] 돌긴 도는데 보이지 않는다"
+          "description": "3순위 · 돌긴 도는데 사람이 볼 수가 없다"
         },
         "degrades": {
           "label": "impact/degrades",
           "color": "fbca04",
-          "description": "[impact 4] 마찰·성능·정확도 저하"
+          "description": "4순위 · 느리거나 번거롭거나, 정확도가 떨어진다"
         },
         "internal": {
           "label": "impact/internal",
           "color": "c5c5c5",
-          "description": "[impact 5] 개발 흐름에만 영향"
+          "description": "5순위 · 개발할 때만 걸린다. 사용자에게는 안 보인다"
         }
       },
       "required": true,
@@ -147,42 +147,42 @@
         "ssot": {
           "label": "root/ssot",
           "color": "d4a017",
-          "description": "[root] 같은 진실이 여러 곳에 — SSOT 위반"
+          "description": "같은 값이 여러 군데에 따로 있다. 원본이 하나가 아니다"
         },
         "silent": {
           "label": "root/silent",
           "color": "d4a017",
-          "description": "[root] Silent failure — 실패를 기본값·fail-open 으로 삼킴"
+          "description": "실패했는데 조용히 넘어간다. 기본값으로 때우거나 그냥 통과시킨다"
         },
         "string": {
           "label": "root/string",
           "color": "d4a017",
-          "description": "[root] 문자열·정규식 비교로 분기 — 구조적 파싱 부재"
+          "description": "문자열을 맞춰 보고 갈라진다. 타입으로 안 갈랐다"
         },
         "variant": {
           "label": "root/variant",
           "color": "d4a017",
-          "description": "[root] 와일드카드가 분기를 삼킴 — 비망라 매치"
+          "description": "와일드카드가 갈래를 삼킨다. 모든 경우를 안 따졌다"
         },
         "boundary": {
           "label": "root/boundary",
           "color": "d4a017",
-          "description": "[root] 경계 위반 — 의존성 역방향, 책임 침범"
+          "description": "의존 방향이 거꾸로거나, 남의 책임까지 들고 있다"
         },
         "telemetry": {
           "label": "root/telemetry",
           "color": "d4a017",
-          "description": "[root] 관측 공백 — 메트릭·스팬·상관관계 누락"
+          "description": "볼 수가 없다. 메트릭·스팬·이어 볼 실마리가 빠졌다"
         },
         "det": {
           "label": "root/det",
           "color": "d4a017",
-          "description": "[root] 결정론 가정 — 단일 입력 모양 가정, 경쟁 미모델링"
+          "description": "입력이 한 모양일 거라 믿는다. 동시에 들어오는 경우를 안 봤다"
         },
         "ndt": {
           "label": "root/ndt",
           "color": "d4a017",
-          "description": "[root] 비결정론 미수용 — 재시도·폴백·지터 부재"
+          "description": "흔들리는 걸 확정처럼 다룬다. 재시도·대체 경로·지터가 없다"
         }
       },
       "required": false,
@@ -193,7 +193,7 @@
     "must-do": {
       "label": "must-do",
       "color": "000000",
-      "description": "반드시 처리 — 지금 제품 약속을 깨고 있다"
+      "description": "지금 당장. 제품이 한 약속을 지금 깨고 있다"
     }
   }
 }

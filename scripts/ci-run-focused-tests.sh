@@ -410,6 +410,7 @@ sse_targets=(
   @test/runtest-test_tui_message_layout
   @test/runtest-test_tui_metrics_tail
   @test/runtest-test_tui_observation_layout
+  @test/runtest-test_tui_planning_selection
   @test/runtest-test_tui_http_ast
   @test/runtest-test_tui_render_schedule
   @test/runtest-test_tui_terminal_write_repair

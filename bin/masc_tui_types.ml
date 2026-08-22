@@ -280,6 +280,16 @@ type state = {
   refresh_interval: float;
 }
 
+(** New Keeper messages require a complete roster observation. [state.keepers]
+    may intentionally retain the previous complete roster while a detail or log
+    view survives a transient metadata read failure, so membership alone is not
+    authorization for an external effect. *)
+let keeper_available_for_new_message (state : state) keeper_name =
+  Option.is_none state.keepers_error
+  && List.exists
+       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+       state.keepers
+
 (** Create initial state *)
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];
@@ -332,16 +342,15 @@ let create_state ~workspace ~port ~refresh_interval = {
   refresh_interval;
 }
 
-let keeper_message_target_registered (state : state) keeper_name =
-  List.exists
-    (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-    state.keepers
-
+(* The row the renderer draws and the row this counts have to come from one
+   predicate. A roster that failed to load leaves stale entries behind, so
+   "registered" answers true while the send path is closed; counting on that
+   answer hid the unavailable row and left the send hint reading Enter:send. *)
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
-    | Some keeper_name when keeper_message_target_registered state keeper_name ->
-        0
+    | Some keeper_name when keeper_available_for_new_message state keeper_name
+      -> 0
     | Some _ | None -> 1
   in
   (if Option.is_some state.msg_inflight then 1 else 0)

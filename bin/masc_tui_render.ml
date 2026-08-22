@@ -1317,7 +1317,7 @@ let render_keeper_message (state : state) =
       Printf.sprintf " Message to: %s  (port %d)" display_keeper_name state.port
     in
     let target_registered =
-      keeper_message_target_registered state keeper_name
+      keeper_available_for_new_message state keeper_name
     in
     let status_rows = keeper_message_status_rows state in
     if
@@ -1500,11 +1500,18 @@ let render_keeper_message (state : state) =
            ("  recovery needs retry; Ctrl-R reloads durable recovery state: "
           ^ Keeper_chat.terminal_safe_text detail)
      | Some _, _, None | None, Some _, None | None, None, None -> ());
-    if not target_registered then
-      box_line_styled buf cols ~style:Ansi.red
-        (Printf.sprintf
-           "  Keeper %s is no longer registered; draft retained; Esc to choose another"
-           display_keeper_name);
+    if not target_registered then begin
+      let unavailable_message =
+        match state.keepers_error with
+        | Some _ ->
+            "  Keeper roster is unavailable; draft retained; Esc to choose another"
+        | None ->
+            Printf.sprintf
+              "  Keeper %s is no longer registered; draft retained; Esc to choose another"
+              display_keeper_name
+      in
+      box_line_styled buf cols ~style:Ansi.red unavailable_message
+    end;
     let input = Buffer.contents state.msg_input in
     let visible_input =
       Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)) input
@@ -1541,6 +1548,8 @@ let render_keeper_message (state : state) =
       | None, None, None ->
           (match state.msg_unverified, target_registered with
            | Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
+           | None, false when Option.is_some state.keepers_error ->
+               "Enter:disabled (roster unavailable)"
            | None, false -> "Enter:disabled (Keeper unavailable)"
            | None, true -> "Enter:send")
     in

@@ -64,32 +64,32 @@ let truncate_value value =
     Printf.sprintf "%s...(%dB)" (String.sub value 0 !cut) len
   end
 
-let render_scalar (json : Yojson.Safe.t) : string option =
+(* A field the producer attached is rendered whatever its value: a key with a
+   null value is a statement that the value is unset, and dropping it from the
+   line would be the same omission this renderer exists to stop. Total, so a
+   new [Agent_core.Log.field] arm has to be given a rendering here. *)
+let render_scalar (json : Yojson.Safe.t) : string =
   match json with
-  | `Null -> None
-  | `String value -> Some value
-  | `Int value -> Some (string_of_int value)
-  | `Intlit value -> Some value
-  | `Float value -> Some (Printf.sprintf "%.3f" value)
-  | `Bool value -> Some (string_of_bool value)
-  | composite -> Some (Yojson.Safe.to_string composite)
+  | `Null -> "null"
+  | `String value -> value
+  | `Int value -> string_of_int value
+  | `Intlit value -> value
+  | `Float value -> Printf.sprintf "%.3f" value
+  | `Bool value -> string_of_bool value
+  | composite -> Yojson.Safe.to_string composite
 
 (* Quote whenever the raw form would break the [key=value] reading a log
    line invites: spaces, quotes, or an empty value. *)
 let render_pair (key, json) =
-  match render_scalar json with
-  | None -> None
-  | Some raw ->
-    let value = truncate_value raw in
-    let needs_quoting =
-      String.equal value ""
-      || String.exists (fun c -> c = ' ' || c = '"' || c = '\n' || c = '\t') value
-    in
-    Some
-      (Printf.sprintf
-         "%s=%s"
-         key
-         (if needs_quoting then Printf.sprintf "%S" value else value))
+  let value = truncate_value (render_scalar json) in
+  let needs_quoting =
+    String.equal value ""
+    || String.exists (fun c -> c = ' ' || c = '"' || c = '\n' || c = '\t') value
+  in
+  Printf.sprintf
+    "%s=%s"
+    key
+    (if needs_quoting then Printf.sprintf "%S" value else value)
 
 (* The human line renders every field the producer attached, in the order it
    attached them.
@@ -107,7 +107,7 @@ let render_message (record : Agent_core.Log.record) : string =
   let rendered =
     List.filteri (fun index _ -> index < max_rendered_fields) record.fields
     |> List.map field_to_json
-    |> List.filter_map render_pair
+    |> List.map render_pair
   in
   let omitted = List.length record.fields - max_rendered_fields in
   let parts =

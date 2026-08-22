@@ -115,6 +115,30 @@ let test_overflowing_fields_are_announced_not_dropped () =
   | other ->
     Alcotest.failf "details is not an object: %s" (Yojson.Safe.to_string other)
 
+(* A key whose value is null is the producer saying the value is unset. Leaving
+   it off the line is the same omission the allowlist used to make, and the
+   overflow marker counts fields rather than rendered pairs, so a dropped null
+   would not even be announced. *)
+let test_null_and_oversized_values_stay_visible () =
+  let long = String.make 400 'x' in
+  emit_record
+    ~module_name:"pipeline"
+    ~message:"partial record"
+    [ Agent_core.Log.J ("cost_usd", `Null); Agent_core.Log.S ("body", long) ];
+  let message = newest_message () in
+  Alcotest.(check bool)
+    "an unset field is stated, not dropped"
+    true
+    (Astring.String.is_infix ~affix:"cost_usd=null" message);
+  Alcotest.(check bool)
+    "an oversized value is cut and says how long it really was"
+    true
+    (Astring.String.is_infix ~affix:"...(400B)" message);
+  Alcotest.(check bool)
+    "the cut line is shorter than the value it reports"
+    true
+    (String.length message < 400)
+
 let () =
   Alcotest.run
     "runtime_log_sink_render"
@@ -135,5 +159,9 @@ let () =
             "overflowing fields are announced"
             `Quick
             test_overflowing_fields_are_announced_not_dropped
+        ; Alcotest.test_case
+            "null and oversized values stay visible"
+            `Quick
+            test_null_and_oversized_values_stay_visible
         ] )
     ]

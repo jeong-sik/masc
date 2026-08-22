@@ -2076,7 +2076,12 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
-    let ascii_prefix = String.make 19_999 'a' in
+    (* One byte short of the cap, so the multibyte character that follows
+       straddles it and the scanner has to drop the partial codepoint.
+       Derived from the cap so raising the cap does not require editing an
+       assertion about UTF-8. *)
+    let cap = VS.verification_evidence_max_bytes in
+    let ascii_prefix = String.make (cap - 1) 'a' in
     let full_artifact = ascii_prefix ^ "한글" ^ String.make 250_000 'z' in
     Fs_compat.save_file artifact_path full_artifact;
     let request_id = "vrf-bounded-evidence" in
@@ -2096,7 +2101,7 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
         } ->
       Alcotest.(check int) "full artifact byte count preserved"
         (String.length full_artifact) bytes;
-      Alcotest.(check int) "UTF-8 boundary stays below 20KB cap" 19_999
+      Alcotest.(check int) "truncation stops before the partial codepoint" (cap - 1)
         (String.length content);
       Alcotest.(check string) "incomplete UTF-8 codepoint removed"
         ascii_prefix content

@@ -3,8 +3,8 @@
 // 런타임 `.rtc-card` / 처리량 `.tps-card` / 컨텍스트 `.ctx-card` / 소유 태스크
 // `.ctx-list`), styled by the vendored SSOT CSS. Live wiring (Keeper object +
 // tasks store + masc_keeper_compact) is unchanged; only the DOM/classes changed.
-// Data gaps (runtime capability flags, effort segments, compaction/memory
-// inspectors) are MARKED, never faked.
+// Data gaps (runtime capability flags, effort segments, memory inspector)
+// are MARKED, never faked.
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
@@ -39,12 +39,10 @@ import {
 import { formatContextTokens } from '../../lib/format-number'
 import { formatTimeAgo } from '../../lib/format-time'
 import { persistentSignal } from '../../lib/persistent-signal'
-import { recordManualCompaction } from './compaction-snapshots'
 import type { MemoryKeeper } from '../memory-inspector'
 import { keepers } from '../../store'
 import { KeeperLaneSection } from './keeper-lane-strip'
 import { openTaskDetail } from '../goals/task-detail-state'
-import { CompactionInspectorOverlay } from './compaction-inspector-overlay'
 
 const LazyMemoryInspector = lazy(async () => ({
   default: (await import('../memory-inspector')).MemoryInspector,
@@ -369,11 +367,9 @@ function compactRequiresForce(keeper: Keeper): boolean {
 
 function ContextSection({
   keeper,
-  onOpenCompaction,
   onOpenMemory,
 }: {
   keeper: Keeper
-  onOpenCompaction: () => void
   onOpenMemory: () => void
 }): VNode {
   const [compacting, setCompacting] = useState(false)
@@ -382,8 +378,6 @@ function ContextSection({
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
   const tokens = formatK(baseTokens)
   const maxLabel = formatK(max)
-  const compactionCount = keeper.compaction_count ?? null
-  const hasCompactionHistory = typeof compactionCount === 'number' && compactionCount > 0
   const hasMeterData = pct !== null && (pct > 0 || max !== null)
   // The server projects these values from the newest completed TurnRecord.
   // Keep only turn identity and age here; serialized request bytes are
@@ -429,19 +423,12 @@ function ContextSection({
         const after = formatK(parsed.after_tokens)
         if (before && after) {
           // Measured before/after present: a compaction actually ran and reduced tokens.
-          recordManualCompaction(
-            keeper.name,
-            parsed.before_tokens,
-            parsed.after_tokens,
-            keeperRuntimeLabel(keeper) ?? '—',
-          )
           showToast(`${keeper.name} compact 완료: ${before} -> ${after}`, 'success')
         } else if (parsed.queued) {
           // masc_keeper_compact only ENQUEUES the request; the compaction runs later on the
           // keeper's owning lane. Queuing is not completion: a queue stuck behind an
           // unrecovered inflight turn stays pending indefinitely, so rendering it as "완료"
-          // is a false success. Surface the pending state, and do not record a phantom
-          // (null-token) compaction snapshot for a request that has not run.
+          // is a false success. Surface the pending state instead.
           const alreadyQueued = parsed.queue_outcome === 'already_present'
           showToast(
             alreadyQueued
@@ -512,9 +499,6 @@ function ContextSection({
             onClick=${runCompact}
           >${compacting ? html`<span class="cmp-spin"></span> 컴팩트 실행 중…` : '◉ 지금 컴팩트'}</button>
         </div>
-        <button type="button" class="cmp-open" data-testid="open-compaction-inspector" onClick=${onOpenCompaction}>
-          ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">before/after 보기</span>
-        </button>
         <button type="button" class="cmp-open" data-testid="open-memory-inspector" onClick=${onOpenMemory}>
           ◈ 메모리 보기 <span class="cmp-open-sub">핀 · 스토어 · 회상</span>
         </button>
@@ -575,7 +559,7 @@ export function KeeperWorkspaceRail({
   keeper: Keeper
   runtimeDrift?: KeeperRuntimeLensConfigDriftAxis | null
 }): VNode {
-  const [overlay, setOverlay] = useState<'compaction' | 'memory' | null>(null)
+  const [overlay, setOverlay] = useState<'memory' | null>(null)
   const memoryKeeper = toMemoryKeeper(keeper)
   const memoryKeepers = keepers.value.map(toMemoryKeeper)
 
@@ -587,16 +571,12 @@ export function KeeperWorkspaceRail({
         <${RuntimeSection} keeper=${keeper} drift=${runtimeDrift} />
         <${ContextSection}
           keeper=${keeper}
-          onOpenCompaction=${() => setOverlay('compaction')}
           onOpenMemory=${() => setOverlay('memory')}
         />
         <${OwnedTasksSection} keeper=${keeper} />
       </div>
     </aside>
 
-    ${overlay === 'compaction'
-      ? html`<${CompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />`
-      : null}
     ${overlay === 'memory'
       ? html`
           <${Suspense} fallback=${html`<div class="turn-overlay" role="dialog" aria-modal="true">Keeper 메모리 로딩…</div>`}>

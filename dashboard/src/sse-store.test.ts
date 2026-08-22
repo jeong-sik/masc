@@ -791,27 +791,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshQueue).toHaveBeenCalledWith('echo')
   })
 
-  it('forces compaction hydration from the typed source event, then re-reads on cache completion', async () => {
-    const { sseStore } = await loadSseStore()
-    const refreshCompaction = vi.fn()
-    sseStore.registerKeeperCompactionRefresh(refreshCompaction)
-
-    sseStore.routeServerPushEvent({
-      type: 'agent_core:context_compacted',
-      agent_name: 'echo',
-      before_tokens: 100,
-      after_tokens: 40,
-    })
-    sseStore.routeServerPushEvent({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'echo',
-      status: 'ready',
-    })
-
-    expect(refreshCompaction).toHaveBeenNthCalledWith(1, 'echo', 'source_changed')
-    expect(refreshCompaction).toHaveBeenNthCalledWith(2, 'echo', 'ready')
-  })
-
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {
     const { sseStore } = await loadSseStore()
     const audio = {

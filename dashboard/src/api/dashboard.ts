@@ -372,15 +372,11 @@ export type {
   MemoryOsUpdateSource,
   MemoryOsTurnRecordSnapshot,
   TurnRecordsResponse,
-  KeeperCompactionSnapshotLinks,
-  KeeperCompactionSnapshot,
-  KeeperCompactionSnapshotsResponse,
   TurnTranscriptLine,
   TurnTranscript,
 } from './dashboard-turn-records'
 export {
   fetchKeeperTurnRecords,
-  fetchKeeperCompactionSnapshots,
   fetchKeeperTurnTranscript,
   parseMemoryOsFactCategory,
 } from './dashboard-turn-records'

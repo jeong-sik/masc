@@ -370,7 +370,7 @@
 /* Disabled send reads clearly inert. */
 .v2-app .send:disabled { transform: none; }
 
-/* Compaction-snapshot trigger: let the "before/after 보기" sub-label drop to
-   its own right-aligned line instead of crushing the label into a wrap. */
+/* Context-rail overlay trigger: let the sub-label drop to its own
+   right-aligned line instead of crushing the label into a wrap. */
 .v2-app .cmp-open { flex-wrap: wrap; align-items: baseline; row-gap: 3px; }
 .v2-app .cmp-open-sub { margin-left: auto; }

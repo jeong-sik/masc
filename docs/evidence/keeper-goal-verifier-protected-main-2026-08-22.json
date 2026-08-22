@@ -20,6 +20,8 @@
     "event_driven_rescan_pr": 29468,
     "event_driven_rescan_merge_sha": "1acf147970764cef6fab68dccb94788af561b4d3",
     "event_driven_rescan_contract": "deferred rows remain durable and stop; a Keeper completion request or another committed review must wake a new scan; no retryable field and no clock retry",
+    "explicit_repeat_wake_pr": 29481,
+    "explicit_repeat_wake_merge_sha": "ecc5076c4de66bbedee1e16534a3885a46f5e2cf",
     "hosted_ci_lane": {
       "status": "removed",
       "pr": 29458,
@@ -56,6 +58,11 @@
       {
         "pr": 29468,
         "run_id": 32547762667,
+        "status": "passed"
+      },
+      {
+        "pr": 29481,
+        "run_id": 32554339563,
         "status": "passed"
       }
     ]
@@ -199,7 +206,7 @@
     "same_run_browser_observed": false,
     "historical_retryable_deferral_observed": true,
     "current_event_driven_deferral_wake_to_commit_observed": false,
-    "note": "Attempt 8 proves the independent Goal chain through Completed with distinct criterion/refuted/proven run IDs. Attempt 7 proves a typed retryable deferral under the c07 contract. PR 29468 later removed the retryable field and clock retry: current source requires a real completion-request or committed-review wake, whose deferred-to-wake-to-commit chain is not yet observed. Attempt 8 still lacks the causally joined real-backend browser screenshot, so CELL-01 remains incomplete."
+    "note": "Attempt 8 proves the independent Goal chain through Completed with distinct criterion/refuted/proven run IDs. Attempt 7 proves a typed retryable deferral under the c07 contract. PR 29468 later removed the retryable field and clock retry; PR 29481 wired repeated request_complete over Proof_pending to the verifier wake hook. The current deferred-to-explicit-wake-to-commit chain is source- and CI-covered but not yet live-observed. Attempt 8 still lacks the causally joined real-backend browser screenshot, so CELL-01 remains incomplete."
   },
   "five_provider_ten_turn": {
     "best_single_run": "five-provider-canary-64e02b2-r6",

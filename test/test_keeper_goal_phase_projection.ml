@@ -153,87 +153,8 @@ let test_no_goals_surface_when_all_are_terminal () =
     observation.Keeper_world_observation.active_goals
 ;;
 
-(* An executing Goal that no Task serves is one fact addressed to every Keeper.
-   The fact lives on the Goal store and surfaces without a keeper-side pointer.
-
-   Four exclusions in one predicate: terminal Goals are not open work, a Goal
-   already carrying a Task is not an invitation, and [Verifying] is held back so
-   a nudge to start new tasks cannot race the RFC-0387 proof gate. *)
-
-let untasked config =
-  List.map fst (Keeper_unified_prompt.executing_goals_without_tasks ~config)
-;;
-
-let test_executing_goal_without_task_surfaces () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_in Goal_phase.Executing "goal-open" "nobody started this"
-          ; goal_in Goal_phase.Completed "goal-done" "already achieved"
-          ]
-      };
-    check (list string) "only the executing, task-less goal" [ "goal-open" ]
-      (untasked config))
-;;
-
-let test_terminal_goals_are_not_open_work () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_in Goal_phase.Completed "goal-done" "achieved"
-          ; goal_in Goal_phase.Dropped "goal-gone" "abandoned"
-          ]
-      };
-    check (list string) "a finished Goal is not an invitation" [] (untasked config))
-;;
-
-(* The proof gate holds the phase, not the work (RFC-0387 stage 2). A Goal
-   awaiting its verdict is still progressible, but it is not "work with no Task
-   yet" -- offering it here would invite new tasks against a pending proof. *)
-let test_verifying_goal_is_held_back () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_in Goal_phase.Verifying "goal-judging" "proof pending"
-          ; goal_in Goal_phase.Executing "goal-open" "has none"
-          ]
-      };
-    check (list string) "a goal awaiting its verdict is not offered"
-      [ "goal-open" ]
-      (untasked config))
-;;
-
-let test_goal_with_a_linked_task_is_not_surfaced () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_in Goal_phase.Executing "goal-served" "already has work"
-          ; goal_in Goal_phase.Executing "goal-open" "has none"
-          ]
-      };
-    ignore
-      (Workspace.add_task
-         ~goal_id:"goal-served"
-         config
-         ~title:"Work on the served goal"
-         ~priority:2
-         ~description:"");
-    check (list string) "a Goal with a Task is not an open invitation"
-      [ "goal-open" ]
-      (untasked config))
-;;
-
-(* The cases above prove which Goals qualify. This proves a Keeper is actually
-   handed them: a correct list nobody renders is the state this block exists to
-   end. *)
+(* A Goal is a standing question, not an assignment. Nothing in a turn frame
+   invites a Keeper to pick one up. *)
 let rendered_world_state config =
   let meta = keeper_meta () in
   let observation =
@@ -257,7 +178,7 @@ let contains_in haystack needle =
   n = 0 || go 0
 ;;
 
-let test_untasked_goals_reach_the_rendered_turn () =
+let test_no_goal_is_offered_as_work_to_pick_up () =
   with_workspace @@ fun config ->
   Goal_store.write_state config
     { version = 1
@@ -268,13 +189,10 @@ let test_untasked_goals_reach_the_rendered_turn () =
         ]
     };
   let world = rendered_world_state config in
-  check bool "the heading names the move the prompt already promises" true
-    (contains_in world
-       "### Executing Goals with no Task yet — picking one up is a move you can \
-        make (1)");
-  check bool "the goal is named with its title" true
-    (contains_in world "- goal-open — nobody started this");
-  check bool "a completed goal is not offered" false (contains_in world "goal-done")
+  check bool "no heading invites the keeper to start work on a goal" false
+    (contains_in world "no Task yet");
+  check bool "no goal is named as a move to make" false
+    (contains_in world "picking one up")
 ;;
 
 let () =
@@ -287,17 +205,9 @@ let () =
         ; test_case "all-terminal yields no goals at either surface" `Quick
             test_no_goals_surface_when_all_are_terminal
         ] )
-    ; ( "executing goals with no task"
-      , [ test_case "executing goal without a task surfaces" `Quick
-            test_executing_goal_without_task_surfaces
-        ; test_case "terminal goals are not open work" `Quick
-            test_terminal_goals_are_not_open_work
-        ; test_case "verifying goal is held back from the invitation" `Quick
-            test_verifying_goal_is_held_back
-        ; test_case "goal with a linked task is not surfaced" `Quick
-            test_goal_with_a_linked_task_is_not_surfaced
-        ; test_case "untasked goals reach the rendered turn" `Quick
-            test_untasked_goals_reach_the_rendered_turn
+    ; ( "goals are not assignments"
+      , [ test_case "no goal is offered as work to pick up" `Quick
+            test_no_goal_is_offered_as_work_to_pick_up
         ] )
     ]
 ;;

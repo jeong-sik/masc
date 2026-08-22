@@ -868,43 +868,6 @@ let active_goal_summaries_of_store ~(config : Workspace.config) =
     (Goal_store.list_goals config ())
 ;;
 
-(* A Goal still executing with no Task linked to it is a fact every Keeper is
-   positioned to act on. It is stated, not demanded: no gate, no cap, no
-   required action, and no empty case is named (#26901 -- naming the empty
-   branch is what produced the flood it replaced).
-
-   Read straight from the Goal store. There is no assignment to consult: a Goal
-   is a shared intent, so the same list is the same fact for everyone. *)
-let executing_goals_without_tasks ~(config : Workspace.config) =
-  match Goal_store.list_goals config () with
-  | [] -> []
-  | goals ->
-    let tasks = Workspace.get_tasks_raw config in
-    let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
-    List.filter_map
-      (fun (g : Goal_store.goal) ->
-         (* Deliberately [Executing] only, not [admits_self_directed_progress]:
-            that predicate also admits [Verifying] (RFC-0387 stage 2), but a
-            goal awaiting its proof verdict is not "work with no Task yet" --
-            nudging the keeper to start new tasks on it would race the gate. *)
-         let executing =
-           match g.phase with
-           | Goal_phase.Executing -> true
-           | Goal_phase.Blocked
-           | Goal_phase.Paused
-           | Goal_phase.Verifying
-           | Goal_phase.Completed
-           | Goal_phase.Dropped -> false
-         in
-         let has_task =
-           match Hashtbl.find_opt index g.id with
-           | Some (_ :: _) -> true
-           | None | Some [] -> false
-         in
-         if executing && not has_task then Some (g.id, g.title) else None)
-      goals
-;;
-
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
@@ -1040,28 +1003,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
             ^ "\n\n")
         else None
       in
-      (* An executing Goal that no Task serves is the same fact for every
-         Keeper, so it is rendered to each. Read from the Goal store, not from
-         any keeper-side pointer: a Goal is shared intent and names nobody. *)
-      let untasked_block =
-        match executing_goals_without_tasks ~config with
-        | [] -> None
-        | goals ->
-          let line (goal_id, title) =
-            if String.trim title = ""
-            then Printf.sprintf "- %s" goal_id
-            else Printf.sprintf "- %s — %s" goal_id title
-          in
-          Some
-            (Printf.sprintf
-               "### Executing Goals with no Task yet — picking one up is a \
-                move you can make (%d)\n%s\n\n"
-               (List.length goals)
-               (String.concat "\n" (List.map line goals)))
-      in
-      (match List.filter_map Fun.id [ active_block; untasked_block ] with
-       | [] -> None
-       | blocks -> Some (String.concat "" blocks))
+      active_block
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
@@ -1175,16 +1117,18 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         then
           Buffer.add_string ubuf
             "- Claimable tasks for this keeper: 0\n";
-        let keeper_or_scope_blocked =
-          max 0
-            (observation.unclaimed_task_count
-             - claimable_task_count)
+        (* The difference is exactly two things: a Todo task still holding a
+           verification verdict, and a Todo task this keeper wrote itself. No
+           goal, tool, or keeper scope narrows the claim pool. *)
+        let unclaimed_not_offered =
+          max 0 (observation.unclaimed_task_count - claimable_task_count)
         in
-        if keeper_or_scope_blocked > 0 then
+        if unclaimed_not_offered > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf
-               "- Blocked by keeper/tool/goal scope: %d\n"
-               keeper_or_scope_blocked);
+               "- Unclaimed but not offered to you (awaiting a verdict, or \
+                authored by you): %d\n"
+               unclaimed_not_offered);
         if observation.failed_task_count > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf

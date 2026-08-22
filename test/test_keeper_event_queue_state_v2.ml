@@ -496,6 +496,42 @@ let test_durable_peek_ack_restart () =
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
 ;;
 
+(* taskmaster, 2026-08-22: two Immediate completion_authority_rejected
+   stimuli sat at queue_index 41 and 48 behind forty Normal entries because
+   enqueue only appended. Urgency is a property of the pending list. *)
+let test_immediate_arrival_precedes_pending_normal_entries () =
+  with_temp_dir "keeper-pending-urgency-arrival" (fun base_path ->
+    let keeper_name = "urgency-keeper" in
+    let immediate =
+      { (stimulus "urgent" 3.0) with urgency = Queue.Immediate }
+    in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      let pending = Queue.enqueue pending (stimulus "first" 1.0) in
+      let pending = Queue.enqueue pending (stimulus "second" 2.0) in
+      Queue.enqueue pending immediate)
+    |> require_ok "seed pending with a late Immediate arrival";
+    let restarted =
+      Persistence.load_pending_result ~base_path ~keeper_name
+      |> require_ok "restart load"
+    in
+    Alcotest.(check (list string))
+      "Immediate arrival is selected first; Normal entries keep arrival order"
+      [ "urgent"; "first"; "second" ]
+      (post_ids restarted);
+    let selected =
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(fun _ -> true)
+      |> require_ok "select head"
+      |> require_some "head selection"
+    in
+    Alcotest.(check string)
+      "head is the Immediate entry"
+      "urgent"
+      selected.source.Queue.post_id)
+;;
+
 let test_durable_reprioritize_is_source_incarnation_fenced () =
   with_temp_dir "keeper-event-reprioritize" (fun base_path ->
     let keeper_name = "priority-keeper" in
@@ -923,6 +959,10 @@ let () =
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
+        ; Alcotest.test_case
+            "Immediate arrival precedes pending Normal entries"
+            `Quick
+            test_immediate_arrival_precedes_pending_normal_entries
         ; Alcotest.test_case
             "durable reprioritize is source incarnation fenced"
             `Quick

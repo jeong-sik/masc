@@ -235,8 +235,13 @@ let with_pending pending state =
       in
       reconcile available (entry :: acc) rest
   in
+  (* Urgency order is a property of the pending list, not of the
+     reprioritize/defer transitions alone: an [Immediate] arrival lands ahead
+     of every [Normal] entry on arrival, and the sort is stable so arrival
+     order is kept among entries of the same urgency. *)
   let pending_entries =
-    Keeper_event_queue.to_list pending
+    Keeper_event_queue.sort_by_urgency pending
+    |> Keeper_event_queue.to_list
     |> Keeper_event_queue.uniq_stimuli
     |> reconcile state.pending_entries []
   in

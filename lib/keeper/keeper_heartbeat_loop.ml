@@ -135,6 +135,9 @@ let decide_keepalive_cycle_action = function
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
+  stimuli_acked : bool;
+      (** The cycle admitted at least one event-queue stimulus and acked
+          every entry of that batch on completion. *)
 }
 
 let consume_deferred_runtime_lane_hint hint_ref expected =
@@ -411,6 +414,26 @@ let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
   else Keeper_state_machine.Turn_succeeded
 ;;
 
+(* Whether the event queue still holds any pending entry. Read errors are
+   logged and answered [false]: the cycle then sleeps the cadence and the
+   next intake reports the same error through its own path. *)
+let pending_stimulus_remains ~ctx ~keeper_name =
+  match
+    Keeper_registry_event_queue.peek_when_result
+      ~base_path:ctx.config.base_path
+      keeper_name
+      ~ready:(fun (_ : Keeper_event_queue.stimulus) -> true)
+  with
+  | Ok (Some _) -> true
+  | Ok None -> false
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name
+      "event queue peek after acked cycle failed; sleeping the cadence: %s"
+      detail;
+    false
+;;
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -426,7 +449,11 @@ let run_keepalive_unified_turn
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
-  then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
+  then
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_completed
+    ; stimuli_acked = false
+    }
   else
     match
       Keeper_owner_registry.run_autonomous_if_idle
@@ -455,6 +482,7 @@ let run_keepalive_unified_turn
     in
     let cycle_outcome_ref = ref None in
     let selection_acked = ref false in
+    let stimuli_acked = ref false in
     let event_queue_failed = ref false in
     let record_event_queue_failure message =
       event_queue_failed := true;
@@ -944,6 +972,7 @@ let run_keepalive_unified_turn
                  (fun selection -> terminalize_completed_selection ~selection)
                  selections
              in
+             stimuli_acked := all_acked;
              if all_acked
              then (
                let event_ids =
@@ -1019,6 +1048,7 @@ let run_keepalive_unified_turn
       { meta = meta_after_cycle
       ; cycle_status =
           if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed
+      ; stimuli_acked = !stimuli_acked
       }
     with
     | Eio.Cancel.Cancelled _ as e ->
@@ -1035,7 +1065,10 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }))
+      { meta = meta_after_triage
+      ; cycle_status = Turn_cycle_crashed
+      ; stimuli_acked = false
+      }))
     with
   | Ok (`Ran outcome) -> outcome
   | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
@@ -1044,18 +1077,30 @@ let run_keepalive_unified_turn
       "keeper owner busy before stimulus intake: %s"
       (Keeper_owner.autonomous_block_to_string
          (Keeper_owner.Turn_busy (Some in_flight)));
-    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_busy block
+    ; stimuli_acked = false
+    }
   | Ok (`Busy block) ->
-    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_busy block
+    ; stimuli_acked = false
+    }
   | Error
       (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
-    { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_completed
+    ; stimuli_acked = false
+    }
   | Error error ->
     Log.Keeper.error
       ~keeper_name:meta_after_triage.name
       "keeper owner rejected autonomous turn: %s"
       (Keeper_owner_registry.command_error_to_string error);
-    { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_crashed
+    ; stimuli_acked = false
+    }
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -1287,7 +1332,11 @@ let run_heartbeat_loop
         let t_turn_start = t_board_end in
         let turn_outcome =
           if not admitted_turn
-          then { meta = meta_current; cycle_status = Turn_cycle_completed }
+          then
+            { meta = meta_current
+            ; cycle_status = Turn_cycle_completed
+            ; stimuli_acked = false
+            }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
                [turn_running] flag toggles around the dispatch and the
@@ -1403,15 +1452,25 @@ let run_heartbeat_loop
           ~t_turn_end;
         (* Carry the inter-cycle sleep result into the next iteration so the
            turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
-           keeper's configured cadence ([Timeout]). *)
+           keeper's configured cadence ([Timeout]).
+
+           A cycle that acked its stimulus batch and left more entries pending
+           does not sleep the cadence: the queue is the wake signal, and the
+           next cycle dispatches as [Woken]. A checkpointed, failed, or busy
+           cycle keeps the cadence so a turn that made no progress is not
+           re-run back to back. *)
         last_wake_source :=
-          Keeper_keepalive_signal.interruptible_sleep
-            ~cadence_sleeping
-            ~clock:ctx.clock
-            ~stop
-            ~wakeup
-            (fun () ->
-              float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()));
+          (if turn_outcome.stimuli_acked
+              && pending_stimulus_remains ~ctx ~keeper_name:m.name
+           then Keeper_keepalive_signal.Woken
+           else
+             Keeper_keepalive_signal.interruptible_sleep
+               ~cadence_sleeping
+               ~clock:ctx.clock
+               ~stop
+               ~wakeup
+               (fun () ->
+                 float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())));
       if Atomic.get stop then () else loop ())
   in
   loop ()

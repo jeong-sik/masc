@@ -134,6 +134,10 @@ val decide_keepalive_cycle_action :
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
+  stimuli_acked : bool;
+      (** The cycle admitted at least one event-queue stimulus and acked
+          every entry of that batch on completion. The loop reads it to
+          skip the cadence sleep while more entries are pending. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:

@@ -165,8 +165,6 @@ let schema_shape_json schema =
   `Assoc fields
 ;;
 
-let schema_has_property_name schema name = List.mem name (schema_property_names schema)
-
 let prepare_args ?schema:_ ~name:_ args = strip_internal_marker_args args
 
 let schema_has_properties = function
@@ -199,8 +197,6 @@ let unsupported_arg_names schema = function
     |> List.sort_uniq String.compare
   | _ -> []
 ;;
-
-let schema_has_property schema name = schema_has_property_name schema name
 
 type one_of_branch = {
   required : string list;

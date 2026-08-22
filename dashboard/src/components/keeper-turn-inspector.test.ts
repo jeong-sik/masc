@@ -297,7 +297,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    const summary = container.querySelector('.kti-turn-summary')
+    const summary = container.querySelector('.ti-turn-summary')
     expect(summary).toBeTruthy()
     fireEvent.click(summary!)
 
@@ -515,7 +515,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
 
       await waitFor(() => {
-        expect(container.querySelectorAll('.kti-turn-summary').length).toBe(3)
+        expect(container.querySelectorAll('.ti-turn-summary').length).toBe(3)
       })
 
       const duplicateKeyCalls = errorSpy.mock.calls
@@ -537,7 +537,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-tab-messages"]')).toBeTruthy()
@@ -570,29 +570,29 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-tab-timeline"]')).toBeTruthy()
     })
 
-    // The pill rail container is the tablist styled by .kti-tabs.
-    const rail = container.querySelector('.kti-tabs')
+    // The pill rail container is the tablist styled by .ti-tabs.
+    const rail = container.querySelector('.ti-tabs')
     expect(rail).toBeTruthy()
     expect(rail?.getAttribute('role')).toBe('tablist')
 
-    // Every tab is a .kti-tab pill (the class the CSS pill rule targets),
+    // Every tab is a .ti-tab pill (the class the CSS pill rule targets),
     // and the rail holds more than one pill so the gap/flex layout applies.
-    const pills = rail!.querySelectorAll('.kti-tab')
+    const pills = rail!.querySelectorAll('.ti-tab')
     expect(pills.length).toBeGreaterThan(1)
     pills.forEach((pill) => {
-      expect(pill.classList.contains('kti-tab')).toBe(true)
+      expect(pill.classList.contains('ti-tab')).toBe(true)
       expect(pill.getAttribute('role')).toBe('tab')
     })
 
-    // Exactly one pill carries the active `.kti-tab.on` class (the volt-wash
+    // Exactly one pill carries the active `.ti-tab.on` class (the volt-wash
     // fill state), and it is the timeline tab by default.
-    const activePills = rail!.querySelectorAll('.kti-tab.on')
+    const activePills = rail!.querySelectorAll('.ti-tab.on')
     expect(activePills.length).toBe(1)
     expect(activePills[0]?.getAttribute('data-testid')).toBe('turn-tab-timeline')
     expect(activePills[0]?.getAttribute('aria-selected')).toBe('true')
@@ -601,7 +601,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
     await waitFor(() => {
-      const nextActive = rail!.querySelectorAll('.kti-tab.on')
+      const nextActive = rail!.querySelectorAll('.ti-tab.on')
       expect(nextActive.length).toBe(1)
       expect(nextActive[0]?.getAttribute('data-testid')).toBe('turn-tab-meta')
     })
@@ -619,14 +619,14 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
     fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
     await waitFor(() => {
       expect(container.textContent).toContain('실행 메타데이터')
     })
 
-    const meta = container.querySelector('.kti-kv')?.textContent ?? ''
+    const meta = container.querySelector('.ti-kv')?.textContent ?? ''
     // grounded from the backend turn record (RFC-0233 §2.3)
     expect(meta).toContain('deepseek-v4-flash')
     expect(meta).toContain('completed')
@@ -659,14 +659,14 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
     fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
     await waitFor(() => {
       expect(container.textContent).toContain('실행 메타데이터')
     })
 
-    const meta = container.querySelector('.kti-kv')?.textContent ?? ''
+    const meta = container.querySelector('.ti-kv')?.textContent ?? ''
     expect(meta).not.toContain('stop')
     expect(meta).not.toContain('deepseek-v4-flash')
     expect(meta).toContain('n/a')
@@ -698,14 +698,14 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
     fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
     await waitFor(() => {
       expect(container.textContent).toContain('실행 메타데이터')
     })
 
-    const meta = container.querySelector('.kti-kv')?.textContent ?? ''
+    const meta = container.querySelector('.ti-kv')?.textContent ?? ''
     expect(meta).toContain('raw tracewr-01H · seq 3-9')
   })
 
@@ -736,14 +736,14 @@ describe('KeeperTurnInspector v2 drawer', () => {
         expect(container.textContent).toContain('T42')
       })
 
-      fireEvent.click(container.querySelector('.kti-turn-summary')!)
+      fireEvent.click(container.querySelector('.ti-turn-summary')!)
       fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
       await waitFor(() => {
         expect(container.textContent).toContain('샘플링 파라미터')
       })
 
-      const params = Array.from(container.querySelectorAll('.kti-param')).map(el => el.textContent ?? '')
+      const params = Array.from(container.querySelectorAll('.ti-param')).map(el => el.textContent ?? '')
       expect(params).toContain('temperature0.7')
       if (enableThinking === undefined) {
         expect(params).toContain('top_p—')
@@ -769,7 +769,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-summary-stats"]')).toBeTruthy()
@@ -804,7 +804,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
@@ -846,7 +846,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
@@ -874,7 +874,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
     })
@@ -905,7 +905,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
     })
@@ -929,7 +929,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
     })
@@ -966,7 +966,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
     })
@@ -991,7 +991,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
     expect(container.textContent).toContain('tool-call timing source unavailable')
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
@@ -1011,7 +1011,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-token-bar"]')).toBeTruthy()
@@ -1032,13 +1032,13 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
-      expect(container.querySelector('.kti-copy')).toBeTruthy()
+      expect(container.querySelector('.ti-copy')).toBeTruthy()
     })
 
-    const copyButtons = container.querySelectorAll('.kti-copy')
+    const copyButtons = container.querySelectorAll('.ti-copy')
     // First copy button is the trace-id copy in the header.
     fireEvent.click(copyButtons[0]!)
 
@@ -1056,7 +1056,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()

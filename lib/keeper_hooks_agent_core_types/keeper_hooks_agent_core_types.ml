@@ -143,13 +143,15 @@ let inference_telemetry_to_runtime_json telemetry =
   |> Agent_core.Types.inference_telemetry_to_yojson
   |> redact_inference_telemetry_json
 
-let default_context_max = 0
-
+(* [None] is "the provider reported no window", which is not the same claim as
+   a window of zero. The turn log line renders the two the same way when this
+   collapses to an int, and it shares that line with [cache_n] / [prompt_n],
+   which already render an absent reading as ["-"]. *)
 let context_max_of_telemetry
     (telemetry : Agent_core.Types.inference_telemetry option) =
   match telemetry with
-  | Some { effective_context_window = Some n; _ } when n > 0 -> n
-  | _ -> default_context_max
+  | Some { effective_context_window = Some n; _ } when n > 0 -> Some n
+  | _ -> None
 
 type thinking_log_summary =
   { thinking_present : bool

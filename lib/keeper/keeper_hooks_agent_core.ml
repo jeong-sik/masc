@@ -199,22 +199,27 @@ let make_hooks
           | None -> cost_usd_json None
         in
         let total_tok = input_tok + output_tok in
+        let context_max_log =
+          match context_max_of_telemetry response.telemetry with
+          | Some n -> string_of_int n
+          | None -> "-"
+        in
         (match usage_trust with
          | Keeper_usage_trust.Usage_untrusted reasons when not usage_missing ->
           if Keeper_usage_trust.warns_operator usage_trust then
             Log.Keeper.warn ~keeper_name:meta.name
-              "after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              "after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%s"
               runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
-              (context_max_of_telemetry response.telemetry)
+              context_max_log
           else
             Log.Keeper.info ~keeper_name:meta.name
-              "after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              "after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%s"
               runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
-              (context_max_of_telemetry response.telemetry)
+              context_max_log
          | Keeper_usage_trust.Usage_missing
          | Keeper_usage_trust.Usage_trusted
          | Keeper_usage_trust.Usage_untrusted _ -> ());
@@ -296,10 +301,10 @@ let make_hooks
               t.prompt_per_second, t.predicted_per_second
           | None | Some { timings = None; _ } -> None, None
         in
-        let latency_ms =
+        let latency_ms_opt =
           match response.telemetry with
-          | Some t -> Option.value ~default:0 t.request_latency_ms
-          | None -> 0
+          | Some t -> t.request_latency_ms
+          | None -> None
         in
         let wall_tok_s_opt =
           wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
@@ -314,13 +319,18 @@ let make_hooks
            windows from 200K to 1M, so the same absolute count means a
            different amount of pressure per keeper and the log cannot be
            compared across them. The window is already on the turn record;
-           carrying it here makes the log self-sufficient. [0] means the
-           provider reported no window rather than a window of zero. *)
-        let context_window = context_max_of_telemetry response.telemetry in
+           carrying it here makes the log self-sufficient. An absent window
+           renders ["-"], the same as the other unread counters on this line;
+           it used to render [0], which reads as a window of zero (25 lines in
+           the two hours to 2026-08-22T02:03Z). *)
         let fmt_int_opt = function
           | Some v -> string_of_int v
           | None -> "-"
         in
+        let context_window =
+          fmt_int_opt (context_max_of_telemetry response.telemetry)
+        in
+        let latency_ms = fmt_int_opt latency_ms_opt in
         let cache_n_log, prompt_n_log =
           match response.telemetry with
           | Some { timings = Some t; _ } ->
@@ -328,7 +338,7 @@ let make_hooks
           | Some { timings = None; _ } | None -> "-", "-"
         in
         Log.Keeper.info ~keeper_name:meta.name
-          "turn=%d total_turns=%d runtime_lane=%s tokens=%d context_window=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s cache_n=%s prompt_n=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
+          "turn=%d total_turns=%d runtime_lane=%s tokens=%d context_window=%s wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s cache_n=%s prompt_n=%s latency_ms=%s thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
           turn meta.runtime.usage.total_turns model total_tok context_window
           wall_tok_s prompt_tok_s decode_tok_s cache_n_log prompt_n_log latency_ms
           thinking.thinking_present
@@ -683,7 +693,20 @@ let make_hooks
             ; (label_callback, callback_label_on_tool_error)
             ]
           ();
-        Log.Keeper.error ~keeper_name "tool_error: %s — %s" tool_name error;
+        (* One tool failure used to leave three operator-facing lines. On
+           2026-08-21 all 184 of them carried, for the same call and the same
+           public tool name, the richer [keeper:<k> tool_call tool=... params=...
+           input_shape=... outcome=error out_len=... error_preview=...] line
+           emitted above at Error, and 174 also carried [tool <internal> returned
+           error result: ...] from [Keeper_tools_agent_core] — which derives its
+           level from the typed failure class, so an expected policy rejection is
+           not an Error there. This arm has only opaque text and no failure
+           class, so it can neither honour that contract nor add anything the
+           other two lack; it hardcoded Error and made a rejection read as a
+           fault while double-counting every failure. Its sibling
+           [post_tool_use_failure] was demoted for the same reason and left this
+           one behind. The counter above keeps the event. *)
+        Log.Keeper.debug ~keeper_name "tool_error: %s — %s" tool_name error;
         Agent_core.Hooks.Continue
       | _event -> Agent_core.Hooks.Continue);
 

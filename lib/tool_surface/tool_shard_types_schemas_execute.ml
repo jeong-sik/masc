@@ -69,11 +69,13 @@ let redirect_target_one_of : Yojson.Safe.t =
     ]
 ;;
 
-let stage_redirect_field ~name ~description =
+(* The object's own keys carry their meaning, so the wrapper adds no
+   description of its own: one more sentence per stream is three more copies
+   of what [redirect_target_properties] already says. *)
+let stage_redirect_field ~name =
   ( name
   , `Assoc
       [ "type", `String "object"
-      ; "description", `String description
       ; "properties", `Assoc redirect_target_properties
       ; "additionalProperties", `Bool false
       ; "oneOf", redirect_target_one_of
@@ -100,26 +102,9 @@ let tool_execute_exec_stage_schema =
                        matches a file literally named 'foo*.ml'. Pass exact paths, \
                        or discover exact paths before invoking the program." )
                 ] )
-          ; stage_redirect_field
-              ~name:"stdin"
-              ~description:
-                "Optional typed stdin redirect for this stage: {discard:true} \
-                 feeds empty input, {file:\"/abs/path\"} reads from an absolute \
-                 path, {fd:N} duplicates another descriptor of this stage. \
-                 Absent inherits the pipe or the parent's stdin."
-          ; stage_redirect_field
-              ~name:"stdout"
-              ~description:
-                "Optional typed stdout redirect for this stage: {discard:true} \
-                 drops it, {file:\"/abs/path\", append?} writes to an absolute \
-                 path, {fd:N} duplicates another descriptor of this stage. \
-                 Absent keeps the pipe to the next stage."
-          ; stage_redirect_field
-              ~name:"stderr"
-              ~description:
-                "Optional typed stderr redirect for this stage: {discard:true} \
-                 drops it, {file:\"/abs/path\", append?} writes to an absolute \
-                 path, {fd:1} merges it into this stage's stdout."
+          ; stage_redirect_field ~name:"stdin"
+          ; stage_redirect_field ~name:"stdout"
+          ; stage_redirect_field ~name:"stderr"
           ] )
     ; "required", `List [ `String "argv" ]
     ; "additionalProperties", `Bool false
@@ -198,34 +183,15 @@ let tool_execute_timeout_sec_field =
 ;;
 
 let tool_execute_stdin_field =
-  stage_redirect_field
-    ~name:"stdin"
-    ~description:
-      "Optional typed stdin redirect: {discard:true} feeds empty input, \
-       {file:\"/abs/path\"} reads from an absolute path. Default \
-       behaviour (field absent) inherits the parent's stdin."
+  stage_redirect_field ~name:"stdin"
 ;;
 
 let tool_execute_stdout_field =
-  stage_redirect_field
-    ~name:"stdout"
-    ~description:
-      "Optional typed stdout redirect: {discard:true} drops the output, \
-       {file:\"/abs/path\"} writes to an absolute path. Use this instead \
-       of putting shell syntax like '>/tmp/out' inside argv (which the \
-       typed gate rejects)."
+  stage_redirect_field ~name:"stdout"
 ;;
 
 let tool_execute_stderr_field =
-  stage_redirect_field
-    ~name:"stderr"
-    ~description:
-      "Optional typed stderr redirect: {discard:true} drops stderr \
-       (equivalent to '2>/dev/null'), {file:\"/abs/path\"} writes to an \
-       absolute path. Use this instead of putting '2>/dev/null' or \
-       similar into argv — the typed gate rejects redirection-shape \
-       argv tokens and surfaces this field as the \
-       alternative."
+  stage_redirect_field ~name:"stderr"
 ;;
 
 let tool_execute_description =

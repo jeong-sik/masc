@@ -795,6 +795,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   `Null );
               ("instructions",
                 if String.trim m.instructions = "" then `Null else `String m.instructions);
+              ( "autonomous_instructions"
+              , (match m.autonomous_instructions with
+                 | Some v when String.trim v <> "" -> `String v
+                 | _ -> `Null) );
               ( "models"
               , `List
                   (List.map

@@ -318,6 +318,10 @@ let keeper_list_row_json ~runtime_class config name =
             ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
             ("status", `String status); ("keepalive_running", `Bool keepalive_running);
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
+            ( "autonomous_instructions"
+            , (match meta.autonomous_instructions with
+               | Some v when String.trim v <> "" -> `String v
+               | _ -> `Null) );
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))

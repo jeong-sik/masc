@@ -178,9 +178,7 @@ function goalFsmObservationLabel(
 
 function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
   const toneClass =
-    fsm.state === 'blocked'
-      ? 'border-bad/35 bg-bad/10 text-bad'
-      : 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
+    'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   return html`
     <span
       class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${toneClass}"
@@ -325,10 +323,6 @@ function TreeSummary({
       <div class="${CARD_BOX} text-center">
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.completed ?? 0}</div>
         <div class="mt-1 ${DECK_LABEL}">완료</div>
-      </div>
-      <div class="${CARD_BOX} text-center">
-        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.blocked ?? 0}</div>
-        <div class="mt-1 ${DECK_LABEL}">Blocked phase</div>
       </div>
       <div class="${CARD_BOX} text-center">
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.verifying ?? 0}</div>
@@ -1105,8 +1099,6 @@ export function GoalTree() {
     const counts: Record<GoalPhaseFilter, number> = {
       all: allNodes.length,
       executing: 0,
-      blocked: 0,
-      paused: 0,
       verifying: 0,
       completed: 0,
       dropped: 0,
@@ -1164,8 +1156,6 @@ export function GoalTree() {
               chips=${([
                 'all',
                 'executing',
-                'blocked',
-                'paused',
                 'verifying',
                 'completed',
                 'dropped',

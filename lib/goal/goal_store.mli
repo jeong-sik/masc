@@ -67,7 +67,6 @@ type state = {
 
 type rollup = {
   active_count : int;
-  paused_count : int;
   verifying_count : int;
   done_count : int;
   dropped_count : int;

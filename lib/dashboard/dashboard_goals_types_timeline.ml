@@ -16,8 +16,6 @@ open Dashboard_goals_types_accessor
 let json_to_string_opt = function | `String s -> Some s | _ -> None
 let goal_phase_color = function
   | Goal_phase.Executing -> "#4ade80"
-  | Goal_phase.Blocked -> "#ef4444"
-  | Goal_phase.Paused -> "#94a3b8"
   (* RFC-0387 stage 2: the proof-pending hue matches the Task domain's
      [AwaitingVerification] so the gate reads as the same shape of wait. *)
   | Goal_phase.Verifying -> "#a78bfa"
@@ -278,8 +276,6 @@ let goal_event_timeline_json event =
            in the store moves to `warn` because of this. *)
         let severity =
           match Goal_phase.of_string phase with
-          | Some Blocked -> "bad"
-          | Some Paused -> "warn"
           | Some (Executing | Verifying | Completed | Dropped) -> "ok"
           | None -> "warn"
         in

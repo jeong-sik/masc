@@ -12,8 +12,6 @@
 (** Goal lifecycle phases. *)
 type t =
   | Executing
-  | Blocked
-  | Paused
   | Verifying
       (** Completion requested; the proof verdict is pending out-of-band
           (RFC-0387 B3). *)
@@ -45,10 +43,6 @@ val admits_self_directed_progress : t -> bool
 (** Operator / system actions that may drive a transition. *)
 type action =
   | Request_complete
-  | Pause
-  | Resume
-  | Block
-  | Unblock
   | Drop
   | Reopen
   | Record_proof_proven
@@ -76,10 +70,6 @@ module Public_action : sig
       authority boundary, never through an MCP caller. *)
   type t =
     | Request_complete
-    | Pause
-    | Resume
-    | Block
-    | Unblock
     | Drop
     | Reopen
 

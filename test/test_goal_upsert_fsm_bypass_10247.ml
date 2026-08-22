@@ -151,12 +151,7 @@ let check_lifecycle_error ~field body =
 let test_any_phase_field_rejected () =
   with_workspace
   @@ fun config ->
-  [ "executing"
-  ; "completed"
-  ; "dropped"
-  ; "blocked"
-  ; "paused"
-  ]
+  [ "executing"; "completed"; "dropped" ]
   |> List.iter (fun phase ->
     let body =
       dispatch_upsert_must_fail
@@ -200,34 +195,33 @@ let test_no_lifecycle_field_still_round_trips () =
      | _ -> false)
 ;;
 
-let test_existing_blocked_cannot_resume_with_executing_phase () =
+let test_existing_dropped_cannot_resume_with_executing_phase () =
   with_workspace
   @@ fun config ->
-  let goal_id = create_goal_id config ~title:"Blocked goal" in
-  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"block";
-  check string "fixture moved to blocked" "blocked" (saved_phase config goal_id);
+  let goal_id = create_goal_id config ~title:"Dropped goal" in
+  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"drop";
+  check string "fixture moved to dropped" "dropped" (saved_phase config goal_id);
   let body =
     dispatch_upsert_must_fail
       (workspace_ctx config)
       [ "id", `String goal_id; "phase", `String "executing" ]
   in
   check_lifecycle_error ~field:"phase" body;
-  check string "blocked goal remains blocked" "blocked" (saved_phase config goal_id)
+  check string "dropped goal remains dropped" "dropped" (saved_phase config goal_id)
 ;;
 
-let test_existing_paused_cannot_resume_with_active_status () =
+let test_existing_dropped_cannot_resume_with_active_status () =
   with_workspace
   @@ fun config ->
-  let goal_id = create_goal_id config ~title:"Paused goal" in
-  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"pause";
-  check string "fixture moved to paused" "paused" (saved_phase config goal_id);
+  let goal_id = create_goal_id config ~title:"Dropped goal" in
+  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"drop";
   let body =
     dispatch_upsert_must_fail
       (workspace_ctx config)
       [ "id", `String goal_id; "status", `String "active" ]
   in
   check_lifecycle_error ~field:"status" body;
-  check string "paused goal remains paused" "paused" (saved_phase config goal_id)
+  check string "dropped goal remains dropped" "dropped" (saved_phase config goal_id)
 ;;
 
 let test_phase_violation_beats_status () =
@@ -260,13 +254,13 @@ let () =
         ] )
     ; ( "existing-goal-regression"
       , [ test_case
-            "blocked goal cannot resume via phase=executing"
+            "dropped goal cannot resume via phase=executing"
             `Quick
-            test_existing_blocked_cannot_resume_with_executing_phase
+            test_existing_dropped_cannot_resume_with_executing_phase
         ; test_case
-            "paused goal cannot resume via status=active"
+            "dropped goal cannot resume via status=active"
             `Quick
-            test_existing_paused_cannot_resume_with_active_status
+            test_existing_dropped_cannot_resume_with_active_status
         ] )
     ; ( "ordering"
       , [ test_case

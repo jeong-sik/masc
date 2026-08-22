@@ -13,8 +13,6 @@ import type { Goal, Task } from '../../types'
 export type GoalPhaseFilter =
   | 'all'
   | 'executing'
-  | 'blocked'
-  | 'paused'
   | 'verifying'
   | 'completed'
   | 'dropped'
@@ -138,8 +136,6 @@ export function priorityStars(n: number): string {
 export function goalPhaseLabel(phase: string): string {
   switch (phase) {
     case 'executing': return '실행 중'
-    case 'blocked': return '차단됨'
-    case 'paused': return '일시정지'
     case 'verifying': return '검증 중'
     case 'completed': return '완료'
     case 'dropped': return '중단'
@@ -150,8 +146,6 @@ export function goalPhaseLabel(phase: string): string {
 export function goalPhaseStatus(phase: string): string {
   switch (phase) {
     case 'completed': return 'completed'
-    case 'blocked': return 'error'
-    case 'paused': return 'paused'
     case 'verifying': return 'awaiting_verification'
     case 'dropped': return 'offline'
     case 'executing':
@@ -179,8 +173,6 @@ export function matchesGoalPhaseFilter(
 export function phaseFilterLabel(value: GoalPhaseFilter): string {
   switch (value) {
     case 'executing':
-    case 'blocked':
-    case 'paused':
     case 'verifying':
     case 'completed':
     case 'dropped':

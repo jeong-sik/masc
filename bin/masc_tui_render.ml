@@ -620,8 +620,6 @@ let planning_phase_label phase = Goal_phase.to_string phase
 
 let planning_phase_color = function
   | Goal_phase.Executing -> Ansi.cyan
-  | Goal_phase.Blocked -> Ansi.red
-  | Goal_phase.Paused -> Ansi.yellow
   | Goal_phase.Verifying -> Ansi.magenta
   | Goal_phase.Completed -> Ansi.green
   | Goal_phase.Dropped -> Ansi.gray

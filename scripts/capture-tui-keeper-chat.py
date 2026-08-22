@@ -1088,7 +1088,7 @@ def success_scenario(
                     "done ACK did not release the dispatch lock",
                     timeout=5,
                 )
-                measurements["reply_visible_to_dispatch_lock_reacquired_ms"] = round(
+                measurements["reply_visible_to_lock_probe_success_ms"] = round(
                     (time.monotonic() - lock_started) * 1000, 3
                 )
                 wait_text(page, "> draft-during-send")
@@ -1414,22 +1414,30 @@ def cross_process_fail_closed_scenario(
                         wait_until(
                             lambda: not recovery.exists(), "rejected fence cleanup"
                         )
-                        owner.wait_for_timeout(500)
                         measurements["rejection_release_to_fence_removed_ms"] = round(
                             (time.monotonic() - released) * 1000, 3
+                        )
+                        owner.wait_for_timeout(500)
+                        measurements[
+                            "fence_absent_after_500ms_observation"
+                        ] = not recovery.exists()
+                        require(
+                            measurements["fence_absent_after_500ms_observation"],
+                            "rejected fence reappeared during stability observation",
                         )
                     resumed = time.monotonic()
                     press(observer, "Control+R")
                     wait_text(observer, "Enter:send")
                     wait_text(observer, "prepared recovery blocked", present=False)
+                    measurements["stale_ctrl_r_to_send_enabled_ms"] = round(
+                        (time.monotonic() - resumed) * 1000, 3
+                    )
                     observer.wait_for_timeout(350)
                     require(
                         state.summary()["chat_stream_post_count"] == 1,
                         "stale Ctrl-R recreated and dispatched the removed fence",
                     )
-                    measurements["stale_ctrl_r_to_send_enabled_ms"] = round(
-                        (time.monotonic() - resumed) * 1000, 3
-                    )
+                    measurements["post_count_after_350ms_stability_observation"] = 1
                     # fmt: off
                     shots.append(capture(observer, output, prefix + "12-chat-stale-fence-not-recreated.png",
                                          "Recovered a prepared request",

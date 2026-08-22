@@ -283,16 +283,27 @@ let supervise_keepalive
       Keeper_activation_readiness.retained_disabled_reason_to_wire reason
     in
     record_recovery_retained reason;
-    (* Configured-off is a state the sweep re-observes, not something that
-       happened. Emitting it per sweep per keeper made it 4,795 of the 20,458
-       lines (23%%) written in the two hours to 2026-08-22T02:03Z, from 25
-       keepers, and [Executable] — the other steady state — logs nothing at
-       all. [record_recovery_retained] above already keeps the fact on two
-       authoritative planes: a per-keeper/reason counter and an
-       [Admission_denied] lifecycle event the dashboard consumes. This is the
-       third rendering, so it belongs on the routine channel where the text
-       stays retrievable at Debug. *)
-    Log.Keeper.routine
+    (* This is the only durable signal that the supervisor is declining to
+       recover a keeper it will keep declining.
+
+       #29467 demoted it to the routine channel as steady-state noise. That
+       read the volume without reading what produced it. The two admission
+       rules for one keeper disagree: process boot excludes only
+       {paused, declarative_autoboot_disabled, autoboot_disabled,
+       shutdown_admission_fence} (keeper_runtime.ml), while this recovery path
+       classifies through [classify_owner_execution], which is
+       [~require_proactive:true] and so refuses any keeper with proactive
+       disabled. A keeper boot would happily start therefore cannot be brought
+       back by the sweep once it falls Offline — it retries and refuses every
+       ~30s until the server restarts.
+
+       That is what the volume was. 25 canary keepers sat Offline from
+       2026-08-21 through 2026-08-22T01:30:56Z emitting 14,017 of that day's
+       130,102 rows, and the 01:31:12Z restart moved every one of them
+       [offline -> running via fiber_started]. Quieting the line would have
+       hidden a fleet-wide liveness failure, so it stays at Info until the
+       admission asymmetry is closed. See #29487. *)
+    Log.Keeper.info
       "%s: supervisor keepalive recovery retained by disabled policy: %s"
       meta.name
       reason
@@ -301,10 +312,7 @@ let supervise_keepalive
       Keeper_activation_readiness.paused_dead_reason_to_wire reason
     in
     record_recovery_retained reason;
-    (* Same shape as the disabled-policy arm above: a paused or dead owner is
-       a state the sweep keeps re-reading, and the counter plus the
-       [Admission_denied] lifecycle event already carry it. *)
-    Log.Keeper.routine
+    Log.Keeper.info
       "%s: supervisor keepalive recovery retained by paused/dead owner truth: %s"
       meta.name
       reason

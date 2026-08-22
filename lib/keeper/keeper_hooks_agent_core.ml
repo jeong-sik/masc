@@ -705,7 +705,10 @@ let make_hooks
            other two lack; it hardcoded Error and made a rejection read as a
            fault while double-counting every failure. Its sibling
            [post_tool_use_failure] was demoted for the same reason and left this
-           one behind. The counter above keeps the event. *)
+           one behind. What keeps this failure on the record is the pair of
+           durable JSONL lines above, not the counter: [Otel_metric_store] is
+           process memory with no reachable exporter here, so it answers
+           nothing after a restart. *)
         Log.Keeper.debug ~keeper_name "tool_error: %s — %s" tool_name error;
         Agent_core.Hooks.Continue
       | _event -> Agent_core.Hooks.Continue);

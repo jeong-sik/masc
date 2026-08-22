@@ -207,7 +207,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
           bool_query_param httpun_request "blind_votes" ~default:false
         in
         let status, body =
-          board_post_detail_json ~include_moderation:false ~blind_votes ~voter
+          board_post_detail_json ~blind_votes ~voter
             ~reaction_actor ~config ~response_format ~post_id
         in
         h2_respond_json h2_reqd body ~status ~extra_headers:cors;

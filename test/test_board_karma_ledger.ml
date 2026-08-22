@@ -406,68 +406,6 @@ let test_delete_post_rewrites_persisted_snapshots () =
     0
     (Hashtbl.length store.dirty_comment_ids)
 
-let test_delete_comment_removes_comment_and_votes () =
-  let post = create_post_exn ~author:"alice" ~content:"parent post" in
-  let pid = Board.Post_id.to_string post.id in
-  let comment =
-    match
-      Board_dispatch.add_comment ~post_id:pid ~author:"bob"
-        ~content:"delete this comment" ()
-    with
-    | Ok c -> c
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let cid = Board.Comment_id.to_string comment.id in
-  vote_comment_exn ~voter:"carol" ~comment_id:cid ~direction:Board.Up;
-  (match
-     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
-       ~target_id:cid ~user_id:"dave" ~emoji:"👍"
-   with
-   | Ok _ -> ()
-   | Error e -> Alcotest.fail (Board.show_board_error e));
-  (match Board_dispatch.delete_comment ~comment_id:cid with
-   | Ok () -> ()
-   | Error e -> Alcotest.fail (Board.show_board_error e));
-  (* Comment must no longer be readable *)
-  (match Board_dispatch.get_comments ~post_id:pid with
-   | Ok comments ->
-       let still_present =
-         List.exists
-           (fun (c : Board.comment) ->
-             String.equal (Board.Comment_id.to_string c.id) cid)
-           comments
-       in
-       Alcotest.(check bool) "deleted comment removed from post" false still_present
-   | Error e -> Alcotest.fail (Board.show_board_error e));
-  (* Parent post survives, reply_count decremented *)
-  (match Board_dispatch.get_post ~post_id:pid with
-   | Ok p ->
-       Alcotest.(check int) "reply_count decremented after delete" 0 p.reply_count
-   | Error e -> Alcotest.fail (Board.show_board_error e));
-  let check_absent label path needle =
-    Alcotest.(check bool) label false (file_contains path needle)
-  in
-  check_absent "comments snapshot removes deleted comment" (Board.comments_path ()) cid;
-  check_absent
-    "vote snapshot removes deleted comment vote"
-    (Board_votes.vote_log_path ())
-    cid;
-  check_absent
-    "reaction snapshot removes deleted comment reaction"
-    (Board.reactions_path ())
-    cid;
-  let store =
-    match Board_dispatch.backend () with
-    | Board_dispatch.Jsonl store -> store
-  in
-  Alcotest.(check bool) "dirty comments cleared after delete" false store.dirty_comments;
-  Alcotest.(check int)
-    "dirty comment ids cleared after delete"
-    0
-    (Hashtbl.length store.dirty_comment_ids)
-
-(** {1 JSON serialisation} *)
-
 let test_karma_event_json_fields () =
   let post = create_post_exn ~author:"alice" ~content:"json test" in
   let pid = Board.Post_id.to_string post.id in
@@ -608,8 +546,6 @@ let () =
         (with_eio test_replay_invariant);
       Alcotest.test_case "delete post rewrites persisted snapshots" `Quick
         (with_eio test_delete_post_rewrites_persisted_snapshots);
-      Alcotest.test_case "delete comment removes comment and votes" `Quick
-        (with_eio test_delete_comment_removes_comment_and_votes);
       Alcotest.test_case "delete paths never nest state and persist locks" `Quick
         test_delete_lock_order_source_pin;
     ];

@@ -217,8 +217,6 @@ val current_post_cursor : unit -> float * string option
 
 val delete_post : post_id:string -> (unit, Board.board_error) Result.t
 
-val delete_comment : comment_id:string -> (unit, Board.board_error) Result.t
-
 val set_thread_id :
   post_id:string ->
   thread_id:string ->

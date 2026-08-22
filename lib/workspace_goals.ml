@@ -193,8 +193,9 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
    [Criterion_pending] / [Proof_pending] request committed. The wake is
    scheduling only — the same discipline as the task-side
    [verification_submitted_fn] call: a raised hook must not fail (or roll
-   back) a commit that already landed; the maintenance-pulse rescan is the
-   backstop. *)
+   back) a commit that already landed. A repeated [request_complete] on a
+   standing [Proof_pending] request sends the explicit event-driven wake
+   again. *)
 let notify_goal_verification_pending (ctx : context) ~goal_id =
   try
     (Atomic.get Workspace_hooks.goal_verification_pending_fn) ctx.config ~goal_id
@@ -655,18 +656,21 @@ let reconcile_committed_proof config ~goal_id =
 
 (* A repeated [request_complete] on [Verifying] is the explicit retry that
    replaces wall-clock expiry (RFC-0387 §5). A missing durable request is
-   re-armed; a committed verdict whose phase/event write was interrupted is
-   reconciled from that exact ledger row without another model call. *)
+   re-armed, a standing pending request is woken again, and a committed
+   verdict whose phase/event write was interrupted is reconciled from that
+   exact ledger row without another model call. *)
 let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~action goal =
   match Goal_verification.get_record ctx.config ~goal_id with
   | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
   | Ok record ->
     (match record with
      | Some
-         { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
+         ({ Goal_verification.completion = Goal_verification.Proof_pending _; _ }
+          as pending_record) ->
+       notify_goal_verification_pending ctx ~goal_id;
        already_goal_response
          ~tool_name ~start_time ~goal_id ~action ~phase:Goal_phase.Verifying goal
-         record
+         (Some pending_record)
      | Some
          ({ Goal_verification.completion =
               (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _)

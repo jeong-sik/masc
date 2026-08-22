@@ -15,9 +15,9 @@
     name verifier commits. Only the application-owned typed verifier boundary
     can prove/refute completion or criterion viability, with non-blank
     evidence and fixed [verifier_exact] authority. A repeated
-    [request_complete] on Verifying answers [Already] and re-arms the proof
-    request when the ledger lost it (the P0-2 wedge). The FSM is the only
-    transition decider; the ledger records. *)
+    [request_complete] on Verifying answers [Already], wakes an existing
+    pending proof again, and re-arms the request when the ledger lost it (the
+    P0-2 wedge). The FSM is the only transition decider; the ledger records. *)
 
 open Alcotest
 open Masc
@@ -829,6 +829,40 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
     (json_state completed [ "goal"; "phase" ])
 ;;
 
+let test_verifying_repeat_wakes_an_existing_proof_request () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Deferred proof needs an explicit wake" in
+  mark_criterion_viable ctx goal_id;
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "test setup: the proof request must already be pending");
+  let previous = Atomic.get Workspace_hooks.goal_verification_pending_fn in
+  let wakes = ref [] in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.goal_verification_pending_fn previous)
+    (fun () ->
+       Atomic.set
+         Workspace_hooks.goal_verification_pending_fn
+         (fun _config ~goal_id -> wakes := goal_id :: !wakes);
+       let answered =
+         must_succeed "repeat request_complete"
+           (transition ctx goal_id "request_complete")
+       in
+       check bool "the public transition remains idempotent" true
+         (json_bool answered [ "noop" ]);
+       check (list string) "the pending proof is explicitly woken once"
+         [ goal_id ] (List.rev !wakes);
+       check string "the goal remains verifying" "verifying"
+         (json_state answered [ "phase" ]);
+       check string "the durable request remains pending" "proof_pending"
+         (json_state answered [ "verification"; "completion"; "state" ]))
+;;
+
 let test_verifying_repeat_reconciles_a_committed_proof () =
   with_workspace
   @@ fun config ->
@@ -1030,6 +1064,8 @@ let () =
             test_proof_refuted_returns_to_executing_with_reason
         ; test_case "verifying repeat re-arms a missing proof request" `Quick
             test_verifying_repeat_rearms_a_missing_proof_request
+        ; test_case "verifying repeat wakes an existing proof request" `Quick
+            test_verifying_repeat_wakes_an_existing_proof_request
         ; test_case "verifying repeat reconciles a committed proof" `Quick
             test_verifying_repeat_reconciles_a_committed_proof
         ; test_case "unreachable criterion blocks request_complete" `Quick

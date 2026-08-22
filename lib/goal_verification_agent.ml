@@ -698,8 +698,7 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, string) result
     List.iter
       (fun item ->
          (* RFC-0387: per-row outcomes are logged at the point of decision
-            (commit/defer) and drive retry only inside the daemon's
-            [process_work]; the synchronous drain discards them. *)
+            (commit/defer); the synchronous drain discards them. *)
          (* fire-and-forget: per-row results are durable in the ledger. *)
          ignore (process_pending_work ~sw config item))
       work;
@@ -709,10 +708,10 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, string) result
 (* {1 Daemon}
 
    Mirrors {!Completion_authority_agent}: a condition-variable wake installed
-   as {!Workspace_hooks.goal_verification_pending_fn}, bounded concurrency via
-   a semaphore, and a maintenance-pulse-interval retry timer as the backstop
-   for typed non-verdicts. No wall-clock expiry: a pending row is durable
-   until a verdict commits over it. *)
+   as {!Workspace_hooks.goal_verification_pending_fn} and bounded concurrency
+   via a semaphore. A committed verdict requests another scan; a deferral
+   stays durable and waits for an explicit completion request or another
+   committed review. No wall-clock expiry or retry timer. *)
 
 type runtime =
   { config : Workspace_utils_backend_setup.config

@@ -31,7 +31,9 @@ val handle_goal_upsert
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
     {!Goal_phase.Public_action.all}). [request_complete] moves an executing
-    Goal to [Verifying]; verifier verdicts are not public actions. *)
+    Goal to [Verifying]. Repeating it while a proof remains pending preserves
+    the idempotent [Already] response and emits a fresh verifier scan wake;
+    verifier verdicts are not public actions. *)
 val handle_goal_transition
   :  tool_name:string
   -> start_time:float

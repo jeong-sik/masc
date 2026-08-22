@@ -573,7 +573,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # runtime_observation.model_label_of_config, session.add_mcp_session_header)
 # and orphaned nothing. 529 -> 528: measured on the merge with main after
 # #29515 (2026-08-22).
-DEAD_EXPORT_BASELINE = 528
+# 528 -> 526: measured on the merge with main (PR #29539, 2026-08-22).
+DEAD_EXPORT_BASELINE = 526
 
 
 def run_ratchet(count: int) -> int:

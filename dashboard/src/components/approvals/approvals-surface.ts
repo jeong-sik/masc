@@ -30,6 +30,7 @@ import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import {
   keeperResolvedApprovalDecisionClass,
+  keeperResolvedApprovalDecisionTone,
   keeperResolvedApprovalDecisionLabel,
   type KeeperResolvedApprovalDecision,
 } from '../../lib/keeper-approval-decision'
@@ -151,44 +152,55 @@ function decisionSourceLabel(source: GateDecisionSource | null | undefined): str
 
 function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
   const decision = keeperResolvedApprovalDecisionLabel(item.decision)
+  const tone = keeperResolvedApprovalDecisionTone(item.decision)
   const judgeSummary =
     item.summary_status?.status === 'available' ? item.summary_status.summary : null
   const judgeSlot =
     item.exact_attempt?.state === 'bound' ? item.exact_attempt.slot_id : null
+  const automated = item.decision_source !== 'human_operator'
   return html`
     <li
-      class="ap-history-item"
+      class=${`ap-hist-row dec-${tone}`}
       data-testid="approval-history-item"
       data-approval-id=${item.id}
     >
-      <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>${decision}</span>
-      <span class="ap-history-tool mono">${item.tool_name}</span>
-      <span class="ap-history-keeper">${item.keeper_name}</span>
-      <span class="ap-history-source">${decisionSourceLabel(item.decision_source)}</span>
-      <span class="ap-history-actor">${item.actor ?? 'unattributed'}</span>
-      <span class="ap-history-id mono">${item.id}</span>
-      ${judgeSlot
-        ? html`<span class="ap-history-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
-        : null}
-      ${item.resolved_at
-        ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
-        : null}
-      ${judgeSummary
-        ? html`
-            <details class="ap-history-judge" data-testid="approval-history-judge">
-              <summary>판정 근거</summary>
-              <p class="ap-summary-text">${judgeSummary.context_summary}</p>
-              ${judgeSummary.key_questions.length
-                ? html`<ul class="ap-summary-questions">
-                    ${judgeSummary.key_questions.map(q => html`<li>${q}</li>`)}
-                  </ul>`
-                : null}
-              ${judgeSummary.rationale.trim()
-                ? html`<p class="ap-summary-rationale">${judgeSummary.rationale.trim()}</p>`
-                : null}
-            </details>
-          `
-        : null}
+      <span class="ap-hist-at mono">
+        ${item.resolved_at ? formatDateTimeKo(item.resolved_at) : '해결 시각 없음'}
+      </span>
+      <span class=${`ap-hist-dec ${tone}`}>${decision}</span>
+      <div class="ap-hist-body">
+        <div class="ap-hist-top">
+          <span class="ap-hist-id mono">${item.id}</span>
+          <span class="ap-hist-keeper mono">${item.keeper_name}</span>
+          <span class="ap-hist-tool mono">${item.tool_name}</span>
+          ${judgeSlot
+            ? html`<span class="ap-hist-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
+            : null}
+        </div>
+        ${judgeSummary
+          ? html`
+              <details class="ap-hist-judge" data-testid="approval-history-judge">
+                <summary>판정 근거</summary>
+                <p class="ap-summary-text">${judgeSummary.context_summary}</p>
+                ${judgeSummary.key_questions.length
+                  ? html`<ul class="ap-summary-questions">
+                      ${judgeSummary.key_questions.map(q => html`<li>${q}</li>`)}
+                    </ul>`
+                  : null}
+                ${judgeSummary.rationale.trim()
+                  ? html`<p class="ap-summary-rationale">${judgeSummary.rationale.trim()}</p>`
+                  : null}
+              </details>
+            `
+          : null}
+      </div>
+      <span
+        class=${`ap-hist-by ${automated ? 'auto' : ''}`}
+        title=${decisionSourceLabel(item.decision_source)}
+      >
+        ${item.actor ?? 'unattributed'}
+        <span class="ap-hist-src">${decisionSourceLabel(item.decision_source)}</span>
+      </span>
     </li>
   `
 }
@@ -284,7 +296,7 @@ function ApHistory({
       </div>
       ${shown.length > 0
         ? html`
-            <ul class="ap-history-list ap-hist-list">
+            <ul class="ap-hist-list">
               ${shown.map(item => html`<${ResolvedApprovalItem} key=${item.id} item=${item} />`)}
             </ul>
           `
@@ -743,7 +755,7 @@ function ApAside({
               <ul class="ap-recent-list">
                 ${recent.map(item => html`
                   <li class="ap-recent-row" key=${item.id}>
-                    <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>
+                    <span class=${`ap-recent-dec ${keeperResolvedApprovalDecisionClass(item.decision)}`}>
                       ${keeperResolvedApprovalDecisionLabel(item.decision)}
                     </span>
                     <span class="ap-recent-body">

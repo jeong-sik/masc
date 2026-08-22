@@ -30,3 +30,19 @@ export function keeperResolvedApprovalDecisionClass(
 ): string {
   return `decision-${decision}`
 }
+
+// The design tones a resolved row by outcome: the row carries `dec-<tone>` for
+// its left stripe and the decision text carries the bare tone. A Record keyed by
+// the decision union makes the mapping total, so adding a third decision fails
+// the build here rather than falling through to an untoned row.
+const KEEPER_RESOLVED_APPROVAL_DECISION_TONES:
+  Record<KeeperResolvedApprovalDecision, 'ok' | 'bad'> = {
+    approve: 'ok',
+    reject: 'bad',
+  }
+
+export function keeperResolvedApprovalDecisionTone(
+  decision: KeeperResolvedApprovalDecision,
+): 'ok' | 'bad' {
+  return KEEPER_RESOLVED_APPROVAL_DECISION_TONES[decision]
+}

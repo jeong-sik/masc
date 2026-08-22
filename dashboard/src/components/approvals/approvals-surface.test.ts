@@ -796,9 +796,9 @@ describe('ApprovalsSurface', () => {
     expect(history?.textContent).toContain('Human')
     expect(history?.textContent).toContain('unattributed')
     expect(history?.textContent).toContain('appr-done')
-    expect(history?.querySelector('.ap-history-decision')?.className).toContain('decision-reject')
-    expect(history?.querySelector('.ap-history-decision')?.className).not.toContain('operator denied')
-    expect(history?.querySelector('.ap-history-at')?.textContent).toContain('2026')
+    expect(history?.querySelector('.ap-hist-dec')?.className).toContain('bad')
+    expect(history?.querySelector('.ap-hist-dec')?.className).not.toContain('operator denied')
+    expect(history?.querySelector('.ap-hist-at')?.textContent).toContain('2026')
   }, 20000)
 
   it('unfolds judge evidence and slot only on rows that carry judge evidence', async () => {

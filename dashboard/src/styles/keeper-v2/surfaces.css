@@ -961,6 +961,37 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 /* ── 큐↔이력 뷰 전환 ── */
 
 /* ── HILT 이력 (감사 로그) ── */
+/* The earlier sync kept this section's header and its @media tail but dropped
+   every base rule, because nothing rendered `.ap-hist-row` at the time — leaving
+   a responsive override for a grid no rule declared. The rows speak the design's
+   names now, so the base is here. `dec-warn` is not vendored: the resolved
+   decision type is `approve | reject`, so nothing can produce it. */
+.ap-hist { margin-top: 4px; }
+.ap-hist-summary { display: flex; gap: 22px; flex-wrap: wrap; padding: 14px 0 16px; border-bottom: 1px solid var(--border-main); margin-bottom: 14px; }
+.ap-hist-stat { font-size: var(--fs-11); color: var(--text-dim); display: flex; align-items: baseline; gap: 6px; }
+.ap-hist-stat b { font-size: 17px; color: var(--text-bright); }
+.ap-hist-stat b.ok { color: var(--status-ok); } .ap-hist-stat b.bad { color: var(--status-bad); }
+.ap-hist-filters { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; }
+.ap-hist-f { font-family: var(--font-ui); font-size: 11.5px; padding: 4px 12px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: transparent; color: var(--text-dim); cursor: pointer; transition: 0.14s; }
+.ap-hist-f:hover { color: var(--text-mid); border-color: var(--border-highlight); }
+.ap-hist-f.on { background: var(--volt-wash); color: var(--volt-strong); border-color: var(--volt-dim); }
+.ap-hist-list { display: flex; flex-direction: column; }
+.ap-hist-row { display: grid; grid-template-columns: 48px 84px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 6px; border-bottom: 1px solid var(--border-soft); border-left: 2px solid var(--tone, transparent); padding-left: 10px; }
+.ap-hist-row.dec-ok { --tone: color-mix(in oklab, var(--status-ok) 45%, transparent); }
+.ap-hist-row.dec-bad { --tone: color-mix(in oklab, var(--status-bad) 50%, transparent); }
+.ap-hist-row:last-child { border-bottom: 0; }
+.ap-hist-at { font-size: var(--fs-11); color: var(--text-dim); padding-top: 2px; }
+.ap-hist-dec { font-family: var(--font-mono); font-size: var(--fs-11); white-space: nowrap; padding-top: 1px; }
+.ap-hist-dec.ok { color: var(--status-ok); } .ap-hist-dec.bad { color: var(--status-bad); }
+.ap-hist-body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.ap-hist-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ap-hist-id { font-size: var(--fs-10); color: var(--text-dim); }
+.ap-hist-keeper { font-size: var(--fs-11); color: var(--text-mid); }
+.ap-hist-tool { font-size: var(--fs-10); color: var(--text-dim); background: var(--bg-sunken); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 1px 6px; }
+.ap-hist-reason { font-size: var(--fs-12); color: var(--text-mid); line-height: 1.5; text-wrap: pretty; }
+.ap-hist-by { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-family: var(--font-ui); font-size: var(--fs-11); color: var(--text-mid); white-space: nowrap; padding-top: 1px; }
+.ap-hist-by.auto { color: var(--info); }
+.ap-hist-lat { font-size: 9.5px; color: var(--text-dim); }
 
 @media (max-width: 720px) {
   .ap-hist-row { grid-template-columns: 44px 70px 1fr; }

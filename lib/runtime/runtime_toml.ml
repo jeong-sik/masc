@@ -316,47 +316,46 @@ let parse_credential (tbl : Otoml.t) (path : string)
      | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t)))
 ;;
 
-(* Deprecation notices fire once per process per [path.capabilities.key], not
-   once per parse. runtime.toml is re-parsed on every keeper boot, so a per-parse
-   warning flooded the WARN log — one observed day carried ~315 of these (25% of
-   the live WARN volume) from a handful of deprecated capability keys across
-   providers, drowning genuine warnings. The notice still surfaces once so an
-   operator can remove the ignored field; only the per-parse repetition is
-   dropped, so no signal is lost. *)
-let deprecation_notice_seen : (string, unit) Hashtbl.t = Hashtbl.create 16
-let deprecation_notice_seen_mu = Stdlib.Mutex.create ()
+let capability_keys =
+  [ "supports-inline-tools"; "argv-prompt-preflight"; "uses-messages-caching" ]
+;;
 
-let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabilities =
-  let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
-  let warn_deprecated key =
-    match Otoml.find_opt tbl Fun.id [ key ] with
-    | None -> ()
-    | Some _ ->
-      let notice_key = path ^ ".capabilities." ^ key in
-      let should_warn =
-        Stdlib.Mutex.protect deprecation_notice_seen_mu (fun () ->
-          if Hashtbl.mem deprecation_notice_seen notice_key
-          then false
-          else (
-            Hashtbl.replace deprecation_notice_seen notice_key ();
-            true))
-      in
-      if should_warn
-      then
-        Log.Runtime.warn
-          "runtime_toml: %s.capabilities.%s is deprecated and ignored; runtime-MCP capability is resolved from AGENT_CORE provider bindings"
-          path
-          key
+(** Parse a [providers.<id>.capabilities] sub-table. Every key must be one of
+    {!capability_keys}; any other key fails the load so a stale or misspelled
+    capability is never silently dropped. *)
+let parse_capabilities ~(path : string) (tbl : Otoml.t)
+  : (Runtime_schema.capabilities, parse_error list) result
+  =
+  let path = path ^ ".capabilities" in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key capability_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown capabilities key %S; expected %s"
+                  key
+                  (String.concat ", " capability_keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTableArray _ -> error path "capabilities must be a TOML table"
   in
-  List.iter
-    warn_deprecated
-    [ "supports-runtime-mcp-tools"
-    ; "supports-runtime-tool-events"
-    ];
-  { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
-  ; argv_prompt_preflight = b "argv-prompt-preflight"
-  ; uses_anthropic_caching = b "uses-messages-caching"
-  }
+  if unknown_key_errors <> []
+  then Error unknown_key_errors
+  else (
+    let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+    Ok
+      { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
+      ; argv_prompt_preflight = b "argv-prompt-preflight"
+      ; uses_anthropic_caching = b "uses-messages-caching"
+      })
 ;;
 
 (** Parse a [providers.<id>.headers] sub-table into a sorted association
@@ -524,9 +523,11 @@ let parse_provider (id : string) (tbl : Otoml.t)
     (match credentials_result, antigravity_cli_result with
      | Error errs, _ | _, Error errs -> Error errs
      | Ok credentials, Ok antigravity_cli ->
-       let capabilities =
-         Otoml.find_opt tbl Fun.id [ "capabilities" ]
-         |> Option.map (parse_capabilities ~path)
+       let capabilities_result =
+         match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
+         | None -> Ok None
+         | Some capabilities_tbl ->
+           Result.map Option.some (parse_capabilities ~path capabilities_tbl)
        in
        let healthcheck_result =
          match Otoml.find_opt tbl Fun.id [ "healthcheck" ] with
@@ -560,9 +561,12 @@ let parse_provider (id : string) (tbl : Otoml.t)
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match enabled_result, healthcheck_result, connect_timeout_result with
-        | Error errs, _, _ | _, Error errs, _ | _, _, Error errs -> Error errs
-        | Ok enabled_opt, Ok healthcheck_path, Ok connect_timeout_s ->
+       (match
+          capabilities_result, enabled_result, healthcheck_result, connect_timeout_result
+        with
+        | Error errs, _, _, _ | _, Error errs, _, _ | _, _, Error errs, _ | _, _, _, Error errs
+          -> Error errs
+        | Ok capabilities, Ok enabled_opt, Ok healthcheck_path, Ok connect_timeout_s ->
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id

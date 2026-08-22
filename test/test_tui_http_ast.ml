@@ -75,11 +75,10 @@ let test_keeper_chat_uses_current_async_contract () =
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"retry_keeper_message"
        ~callee:"Keeper_chat.create_request");
-  check bool "prepared retry rewrites the exact recovery fence" true
+  check int "prepared retry never recreates a missing recovery fence" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"retry_keeper_message"
-       ~callee:"Keeper_chat_recovery.persist_pending"
-     >= 1);
+       ~callee:"Keeper_chat_recovery.persist_pending");
   check bool "recovery errors can reload durable state" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"retry_keeper_message"
@@ -104,7 +103,17 @@ let test_keeper_chat_uses_current_async_contract () =
   check bool "settled cleanup retry uses durable fence removal" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"retry_keeper_message"
-       ~callee:"clear_keeper_chat_recovery"
+       ~callee:"launch_keeper_cleanup"
+     >= 1);
+  check bool "cleanup retry holds the cross-process dispatch lock" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_cleanup"
+       ~callee:"Keeper_chat_recovery.with_dispatch_lock"
+     >= 1);
+  check bool "cleanup retry removes only the exact durable fence" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_cleanup"
+       ~callee:"Keeper_chat_recovery.clear_pending"
      >= 1);
   check int "settled cleanup helper never POSTs" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
@@ -114,6 +123,23 @@ let test_keeper_chat_uses_current_async_contract () =
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"clear_keeper_chat_recovery"
        ~callee:"launch_keeper_reconciliation");
+  check bool "chat POST owns a cross-process dispatch claim" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_request"
+       ~callee:"Keeper_chat_recovery.with_dispatch_claim"
+     >= 1);
+  check bool "dispatch lock waits for main-state acknowledgement" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"enqueue_dispatch_ack" ~callee:"Eio.Promise.await"
+     >= 1);
+  check int "cleanup retry issues no chat POST" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_cleanup"
+       ~callee:"Masc_tui_http.post_keeper_chat");
+  check int "cleanup retry issues no operation GET" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"launch_keeper_cleanup"
+       ~callee:"Masc_tui_http.fetch_keeper_chat_operation");
   check bool "same-ID recovery uses exact operation reconciliation" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"retry_keeper_message"
@@ -140,6 +166,27 @@ let test_keeper_chat_uses_current_async_contract () =
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"apply_keeper_chat_result"
        ~callee:"mark_keeper_chat_accepted"
+     >= 1);
+  check bool "verified rejection persists a no-dispatch terminal phase" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"apply_keeper_chat_result"
+       ~callee:"mark_keeper_chat_rejected"
+     >= 1);
+  check bool "unverified outcome durably gates exact-ID replay" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"apply_keeper_chat_result"
+       ~callee:"mark_keeper_chat_replayable"
+     >= 1);
+  check bool "result handling consumes decoder acceptance provenance" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"apply_keeper_chat_result"
+       ~callee:"Keeper_chat.error_acceptance_observed"
+     >= 1);
+  check bool "HTTP projection preserves stream acceptance provenance" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"post_keeper_chat"
+       ~callee:"Masc_tui_keeper_chat_projection.decode_response_with_provenance"
      >= 1);
   check bool "recovery polls the exact durable operation" true
     (Ast_grep.count_calls_in_value_binding ~module_path

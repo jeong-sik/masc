@@ -2,7 +2,10 @@ type request = Masc_tui_keeper_chat_projection.request
 
 type phase =
   | Prepared
+  | Dispatching
+  | Replayable
   | Accepted
+  | Rejected
 
 type pending =
   { request : request
@@ -13,14 +16,22 @@ type persistence_outcome =
   | Fsync_completed
   | Visible_sync_unconfirmed of string
   | Durable_write_cancelled of string
+  | Dispatching_already
   | Accepted_already
+
+type dispatch_claim =
+  | First_dispatch
+  | Reconcile_dispatch
+  | Replay_dispatch
+  | Accepted_dispatch
+  | Rejected_dispatch
 
 exception Durable_commit_cancelled of exn
 
 type staged_writer =
   string -> string -> (unit, Fs_compat.atomic_replace_failure) result
 
-let schema = "masc.tui_keeper_chat_recovery.v2"
+let schema = "masc.tui_keeper_chat_recovery.v3"
 let filename = "tui-keeper-chat-recovery.json"
 let max_reconciliation_polls = 40
 
@@ -32,11 +43,17 @@ let recovery_path ~base_path =
 
 let phase_to_string = function
   | Prepared -> "prepared"
+  | Dispatching -> "dispatching"
+  | Replayable -> "replayable"
   | Accepted -> "accepted"
+  | Rejected -> "rejected"
 
 let phase_of_string = function
   | "prepared" -> Ok Prepared
+  | "dispatching" -> Ok Dispatching
+  | "replayable" -> Ok Replayable
   | "accepted" -> Ok Accepted
+  | "rejected" -> Ok Rejected
   | value ->
       Error (Printf.sprintf "Keeper chat recovery phase %S is unsupported" value)
 
@@ -226,6 +243,13 @@ let persist_pending_with_writer ~save_file_atomic_strict_staged ~base_path
                current.request.request_id)
       | Ok (Some { phase = Accepted; _ }) ->
           Ok Accepted_already
+      | Ok (Some { phase = Dispatching; _ }) ->
+          Ok Dispatching_already
+      | Ok (Some { phase = Replayable; _ }) ->
+          Error
+            "Keeper chat request has an outcome-unverified replay fence; recovery is required"
+      | Ok (Some { phase = Rejected; _ }) ->
+          Error "Keeper chat request was already rejected; cleanup is required"
       | Ok (Some { phase = Prepared; _ }) | Ok None ->
           (* The atomic helper installs its 0o600 temporary inode. There must be
              no fallible post-rename chmod between visibility and this staged
@@ -243,7 +267,116 @@ let persist_pending ~base_path request =
     ~save_file_atomic_strict_staged:(save_file_durable_staged ~base_path)
     ~base_path request
 
-let mark_accepted_with_writer ~save_file_atomic_strict_staged ~base_path
+let claim_dispatch_with_writer ~save_file_atomic_strict_staged ~base_path
+    request =
+  let path = recovery_path ~base_path in
+  let claim phase claim =
+    match
+      write_pending ~save_file_atomic_strict_staged path { request; phase }
+    with
+    | Ok Fsync_completed -> Ok claim
+    | Ok (Visible_sync_unconfirmed detail) ->
+        Error ("Keeper chat dispatch claim sync is unconfirmed: " ^ detail)
+    | Ok (Durable_write_cancelled detail) ->
+        Error ("Keeper chat dispatch claim was cancelled: " ^ detail)
+    | Ok Dispatching_already | Ok Accepted_already ->
+        Error "Keeper chat dispatch claim reached an impossible phase outcome"
+    | Error _ as error -> error
+  in
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    with_lock path (fun () ->
+      match load_unlocked path with
+      | Error _ as error -> error
+      | Ok None -> Error "Keeper chat recovery fence is missing before dispatch"
+      | Ok (Some current) when not (same_request current request) ->
+          Error
+            (Printf.sprintf "another Keeper chat request is fenced: %s"
+               current.request.request_id)
+      | Ok (Some { phase = Prepared; _ }) ->
+          claim Dispatching First_dispatch
+      | Ok (Some { phase = Dispatching; _ }) ->
+          Ok Reconcile_dispatch
+      | Ok (Some { phase = Replayable; _ }) ->
+          claim Dispatching Replay_dispatch
+      | Ok (Some { phase = Accepted; _ }) -> Ok Accepted_dispatch
+      | Ok (Some { phase = Rejected; _ }) -> Ok Rejected_dispatch)
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+      Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn -> Error ("Keeper chat dispatch claim failed: " ^ Printexc.to_string exn)
+
+let with_dispatch_lock ~base_path f =
+  let lock_key = recovery_path ~base_path ^ ".dispatch" in
+  try
+    Fs_compat.mkdir_p (Filename.dirname lock_key);
+    Ok (File_lock_eio.with_lock lock_key f)
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+      Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+      Error ("Keeper chat dispatch lock failed: " ^ Printexc.to_string exn)
+
+let with_dispatch_claim_with_writer ~save_file_atomic_strict_staged ~base_path
+    request f =
+  match
+    with_dispatch_lock ~base_path (fun () ->
+      match
+        claim_dispatch_with_writer ~save_file_atomic_strict_staged ~base_path
+          request
+      with
+      | Error _ as error -> error
+      | Ok claim -> Ok (f claim))
+  with
+  | Error _ as error -> error
+  | Ok result -> result
+
+let with_dispatch_claim ~base_path request f =
+  with_dispatch_claim_with_writer
+    ~save_file_atomic_strict_staged:(save_file_durable_staged ~base_path)
+    ~base_path request f
+
+let mark_phase_with_writer ~phase ~phase_name ~save_file_atomic_strict_staged
+    ~base_path request =
+  let path = recovery_path ~base_path in
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    with_lock path (fun () ->
+      match load_unlocked path with
+      | Error _ as error -> error
+      | Ok None ->
+          write_pending ~save_file_atomic_strict_staged path { request; phase }
+      | Ok (Some current) when not (same_request current request) ->
+          Error
+            (Printf.sprintf
+               "another Keeper chat request is still fenced: %s"
+               current.request.request_id)
+      | Ok (Some { phase = current_phase; _ })
+        when current_phase = Accepted || current_phase = Rejected ->
+          if current_phase = phase
+          then write_pending ~save_file_atomic_strict_staged path { request; phase }
+          else
+            Error
+              (Printf.sprintf
+                 "Keeper chat request is already terminal in a different phase (%s)"
+                 (phase_to_string current_phase))
+      | Ok (Some _) ->
+          write_pending ~save_file_atomic_strict_staged path { request; phase })
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+      Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+      Error
+        (Printf.sprintf "Keeper chat recovery %s write failed: " phase_name
+       ^ Printexc.to_string exn)
+
+let mark_accepted_with_writer =
+  mark_phase_with_writer ~phase:Accepted ~phase_name:"acceptance"
+
+let mark_rejected_with_writer =
+  mark_phase_with_writer ~phase:Rejected ~phase_name:"rejection"
+
+let mark_replayable_with_writer ~save_file_atomic_strict_staged ~base_path
     request =
   let path = recovery_path ~base_path in
   try
@@ -252,22 +385,28 @@ let mark_accepted_with_writer ~save_file_atomic_strict_staged ~base_path
       match load_unlocked path with
       | Error _ as error -> error
       | Ok None ->
-          write_pending ~save_file_atomic_strict_staged path
-            { request; phase = Accepted }
+          Error
+            "Keeper chat recovery fence is missing before replay authorization"
       | Ok (Some current) when not (same_request current request) ->
           Error
             (Printf.sprintf
                "another Keeper chat request is still fenced: %s"
                current.request.request_id)
-      | Ok (Some _) ->
+      | Ok (Some { phase = Dispatching; _ })
+      | Ok (Some { phase = Replayable; _ }) ->
           write_pending ~save_file_atomic_strict_staged path
-            { request; phase = Accepted })
+            { request; phase = Replayable }
+      | Ok (Some { phase; _ }) ->
+          Error
+            (Printf.sprintf
+               "Keeper chat recovery phase %s cannot authorize a replay"
+               (phase_to_string phase)))
   with
   | Eio.Cancel.Cancelled _ as exn ->
       Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
   | exn ->
       Error
-        ("Keeper chat recovery acceptance write failed: "
+        ("Keeper chat recovery replay permission write failed: "
        ^ Printexc.to_string exn)
 
 let mark_accepted ~base_path request =
@@ -275,10 +414,24 @@ let mark_accepted ~base_path request =
     ~save_file_atomic_strict_staged:(save_file_durable_staged ~base_path)
     ~base_path request
 
-let resume_pending { request; phase } ~retry_prepared ~reconcile_accepted =
+let mark_rejected ~base_path request =
+  mark_rejected_with_writer
+    ~save_file_atomic_strict_staged:(save_file_durable_staged ~base_path)
+    ~base_path request
+
+let mark_replayable ~base_path request =
+  mark_replayable_with_writer
+    ~save_file_atomic_strict_staged:(save_file_durable_staged ~base_path)
+    ~base_path request
+
+let resume_pending { request; phase } ~retry_prepared ~reconcile_dispatching
+    ~retry_replayable ~reconcile_accepted ~cleanup_rejected =
   match phase with
   | Prepared -> retry_prepared request
+  | Dispatching -> reconcile_dispatching request
+  | Replayable -> retry_replayable request
   | Accepted -> reconcile_accepted request
+  | Rejected -> cleanup_rejected request
 
 let load_pending ~base_path =
   let path = recovery_path ~base_path in
@@ -370,7 +523,10 @@ module For_testing = struct
     (unit, Masc.Keeper_fs.durable_remove_error) result
 
   let persist_pending_with_writer = persist_pending_with_writer
+  let with_dispatch_claim_with_writer = with_dispatch_claim_with_writer
   let mark_accepted_with_writer = mark_accepted_with_writer
+  let mark_rejected_with_writer = mark_rejected_with_writer
+  let mark_replayable_with_writer = mark_replayable_with_writer
   let clear_pending_with_remover = clear_pending_with_remover
   let save_file_durable_staged_with = save_file_durable_staged_with
   let remove_file_durable_with = remove_file_durable_with

@@ -2589,6 +2589,7 @@
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_recovery
   fs_compat
+  threads
   unix))
 
 (test

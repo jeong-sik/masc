@@ -1285,9 +1285,17 @@ let render_keeper_message (state : state) =
 
     (* Input line *)
     (match state.msg_inflight, state.msg_inflight_kind with
+     | Some request, Some Dispatch_claim ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf "  (waiting for serialized dispatch %s…)"
+              (Keeper_chat.compact_request_id request.request_id))
      | Some request, Some Operation_get ->
          box_line_styled buf cols ~style:Ansi.yellow
            (Printf.sprintf "  (reconciling exact operation %s…)"
+              (Keeper_chat.compact_request_id request.request_id))
+     | Some request, Some Cleanup_delete ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf "  (finishing durable cleanup %s…)"
               (Keeper_chat.compact_request_id request.request_id))
      | Some request, Some Chat_post
        when Option.exists
@@ -1312,14 +1320,20 @@ let render_keeper_message (state : state) =
               (Keeper_chat.compact_request_id request.request_id))
      | None, Some _ | None, None -> ());
     (match state.msg_prepared with
-     | Some request ->
+     | Some request when state.msg_inflight = None ->
          box_line_styled buf cols ~style:Ansi.yellow
            (Printf.sprintf
-              "  prepared fence: %s %s; Ctrl-R retries durability before dispatch/replay"
+              "  prepared fence: %s %s; Ctrl-R retries the first serialized dispatch"
               (Keeper_chat.terminal_safe_text request.keeper_name)
               (Keeper_chat.compact_request_id request.request_id))
-     | None -> ());
+     | Some _ | None -> ());
     (match state.msg_unverified, state.msg_inflight_kind with
+     | Some request, Some Dispatch_claim ->
+         box_line_styled buf cols ~style:Ansi.red
+           (Printf.sprintf
+              "  prior outcome unverified: %s %s; waiting for the serialized phase recheck"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
      | Some request, Some Chat_post ->
          box_line_styled buf cols ~style:Ansi.red
            (Printf.sprintf
@@ -1330,6 +1344,12 @@ let render_keeper_message (state : state) =
          box_line_styled buf cols ~style:Ansi.red
            (Printf.sprintf
               "  outcome unverified: %s %s; polling the exact operation"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
+     | Some request, Some Cleanup_delete ->
+         box_line_styled buf cols ~style:Ansi.red
+           (Printf.sprintf
+              "  request settled: %s %s; durable cleanup is in progress"
               (Keeper_chat.terminal_safe_text request.keeper_name)
               (Keeper_chat.compact_request_id request.request_id))
      | Some request, None ->
@@ -1383,27 +1403,29 @@ let render_keeper_message (state : state) =
 
     (* Footer *)
     let enter_hint =
-      match
-        state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
+      match state.msg_inflight, state.msg_inflight_kind, state.msg_unverified with
+      | Some _, Some Dispatch_claim, _ ->
+          "waiting for serialized dispatch  Enter:blocked"
+      | Some _, Some Operation_get, _ ->
+          "reconciling exact operation  Enter:blocked"
+      | Some _, Some Cleanup_delete, _ ->
+          "finishing durable cleanup  Enter:blocked"
+      | Some _, Some Chat_post, Some _ ->
+          "replaying exact request  Enter:blocked"
+      | Some _, (Some Chat_post | None), _ -> "Enter:wait for current request"
+      | None, Some _, _ -> "Enter:wait for current request"
+      | None, None, _ ->
+      match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
       with
       | Some _, _, _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
       | None, Some _, _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
       | None, None, Some (Recovery_blocked _) ->
           "Ctrl-R:reload exact recovery  Enter:blocked"
       | None, None, None ->
-      match
-        state.msg_inflight, state.msg_inflight_kind, state.msg_unverified,
-        target_registered
-      with
-      | Some _, Some Operation_get, _, _ ->
-          "reconciling exact operation  Enter:blocked"
-      | Some _, Some Chat_post, Some _, _ ->
-          "replaying exact request  Enter:blocked"
-      | Some _, (Some Chat_post | None), _, _ ->
-          "Enter:wait for current request"
-      | None, _, Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
-      | None, _, None, false -> "Enter:disabled (Keeper unavailable)"
-      | None, _, None, true -> "Enter:send"
+          (match state.msg_unverified, target_registered with
+           | Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
+           | None, false -> "Enter:disabled (Keeper unavailable)"
+           | None, true -> "Enter:send")
     in
     let footer =
       Printf.sprintf "%s  %s  Esc:back  Ctrl-U:clear line%s" Ansi.dim

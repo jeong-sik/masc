@@ -79,13 +79,18 @@ type stream_error =
   | Replayed_failed
   | Replayed_cancelled
 
+type protocol_error = {
+  stream_error : stream_error;
+  acceptance_observed : bool;
+}
+
 type error =
   | Transport_error of string
   | Http_error of {
       status : int;
       body : string;
     }
-  | Protocol_error of stream_error
+  | Protocol_error of protocol_error
 
 type error_certainty =
   | Verified_rejected
@@ -198,31 +203,72 @@ let error_to_string = function
       ^ detail
   | Http_error { status; body } ->
       Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded (String.trim body))
-  | Protocol_error error -> stream_error_to_string error
+  | Protocol_error { stream_error; _ } -> stream_error_to_string stream_error
+
+let stream_error_acceptance_observed = function
+  | Stream_interrupted { accepted }
+  | Run_failed { accepted; _ } -> accepted
+  | Duplicate_acceptance | Duplicate_reply_details | Unknown_custom_event _
+  | Duplicate_run_start | Missing_run_start _ | Missing_reply_details
+  | Missing_text_end | Replayed_failed | Replayed_cancelled -> true
+  | Malformed_event _ | Request_id_mismatch _ | Duplicate_terminal
+  | Event_before_acceptance _ | Event_identity_mismatch _
+  | Unknown_event_type _ | Missing_acceptance -> false
+
+let protocol_error ?(acceptance_observed = false) stream_error =
+  Protocol_error
+    { stream_error
+    ; acceptance_observed =
+        acceptance_observed || stream_error_acceptance_observed stream_error
+    }
+
+let error_acceptance_observed = function
+  | Protocol_error { acceptance_observed; _ } -> acceptance_observed
+  | Transport_error _ | Http_error _ -> false
+
+let verified_pre_handler_http_rejection = function
+  | 400 | 401 | 403 | 404 -> true
+  | _ -> false
 
 let error_certainty ?(was_unverified = false) error =
   let certainty =
     match error with
     | Transport_error _ -> Outcome_unverified
-    | Http_error _ -> Verified_rejected
+    | Http_error { status; _ } ->
+        if verified_pre_handler_http_rejection status
+        then Verified_rejected
+        else Outcome_unverified
     | Protocol_error
-        (Run_failed
+        { stream_error =
+            Run_failed
           { accepted = false
           ; code = Some ("invalid_input" | "owner_stopping" | "unknown_operation" | "not_queued")
           ; _
-          }) ->
+          }
+        ; _
+        } ->
         Verified_rejected
-    | Protocol_error (Run_failed { accepted = false; _ }) -> Outcome_unverified
     | Protocol_error
-        (Run_failed { accepted = true; _ } | Replayed_failed | Replayed_cancelled) ->
+        { stream_error = Run_failed { accepted = false; _ }; _ } ->
+        Outcome_unverified
+    | Protocol_error
+        { stream_error =
+            (Run_failed { accepted = true; _ }
+            | Replayed_failed
+            | Replayed_cancelled)
+        ; _
+        } ->
         Verified_failed
     | Protocol_error
-        (Malformed_event _ | Request_id_mismatch _ | Duplicate_acceptance
-        | Duplicate_reply_details | Duplicate_terminal
-        | Event_before_acceptance _ | Event_identity_mismatch _
-        | Unknown_event_type _ | Unknown_custom_event _ | Duplicate_run_start
-        | Missing_run_start _ | Missing_acceptance | Stream_interrupted _
-        | Missing_reply_details | Missing_text_end) ->
+        { stream_error =
+            (Malformed_event _ | Request_id_mismatch _ | Duplicate_acceptance
+            | Duplicate_reply_details | Duplicate_terminal
+            | Event_before_acceptance _ | Event_identity_mismatch _
+            | Unknown_event_type _ | Unknown_custom_event _ | Duplicate_run_start
+            | Missing_run_start _ | Missing_acceptance | Stream_interrupted _
+            | Missing_reply_details | Missing_text_end)
+        ; _
+        } ->
         Outcome_unverified
   in
   match was_unverified, certainty with
@@ -709,7 +755,14 @@ let decode_data_event ~request state json =
           Ok state
       | unknown -> Error (Unknown_event_type unknown))
 
-let decode_sse ~request body =
+let protocol_failure state stream_error =
+  { stream_error
+  ; acceptance_observed =
+      Option.is_some state.acceptance
+      || stream_error_acceptance_observed stream_error
+  }
+
+let decode_sse_with_provenance ~request body =
   let rec loop line_no state = function
     | [] -> Ok state
     | raw_line :: rest ->
@@ -726,15 +779,22 @@ let decode_sse ~request body =
             try Ok (Yojson.Safe.from_string payload)
             with Yojson.Json_error detail ->
               Error
-                (Malformed_event
-                   (Printf.sprintf "line %d has invalid JSON: %s" line_no detail))
+                (protocol_failure state
+                   (Malformed_event
+                      (Printf.sprintf "line %d has invalid JSON: %s" line_no
+                         detail)))
           in
-          let* state = decode_data_event ~request state json in
+          let* state =
+            decode_data_event ~request state json
+            |> Result.map_error (protocol_failure state)
+          in
           loop (line_no + 1) state rest
         else if String.starts_with ~prefix:"data:" line then
           Error
-            (Malformed_event
-               (Printf.sprintf "line %d has a non-canonical data field" line_no))
+            (protocol_failure state
+               (Malformed_event
+                  (Printf.sprintf "line %d has a non-canonical data field"
+                     line_no)))
         else loop (line_no + 1) state rest
   in
   loop 1 initial_decode_state (String.split_on_char '\n' body)
@@ -777,9 +837,13 @@ let finalize state =
       | Cancelled -> Error Replayed_cancelled
       | Queued | Running -> Error (Stream_interrupted { accepted = true }))
 
+let decode_response_with_provenance ~request body =
+  let* state = decode_sse_with_provenance ~request body in
+  finalize state |> Result.map_error (protocol_failure state)
+
 let decode_response ~request body =
-  let* state = decode_sse ~request body in
-  finalize state
+  decode_response_with_provenance ~request body
+  |> Result.map_error (fun failure -> failure.stream_error)
 
 let decode_operation_reconciliation ~request json =
   let surface = "Keeper chat operation" in

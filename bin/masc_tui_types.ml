@@ -51,8 +51,10 @@ type msg_entry = {
 type msg_recovery_error = Recovery_blocked of string
 
 type msg_inflight_kind =
+  | Dispatch_claim
   | Chat_post
   | Operation_get
+  | Cleanup_delete
 
 (** Attention item for the Overview surface *)
 type attention_severity =
@@ -343,7 +345,9 @@ let keeper_message_status_rows (state : state) =
     | Some _ | None -> 1
   in
   (if Option.is_some state.msg_inflight then 1 else 0)
-  + (if Option.is_some state.msg_prepared then 1 else 0)
+  + (if Option.is_none state.msg_inflight && Option.is_some state.msg_prepared
+     then 1
+     else 0)
   + (if Option.is_some state.msg_unverified then 1 else 0)
   + (if Option.is_some state.msg_cleanup_pending then 1 else 0)
   + (if Option.is_some state.msg_recovery_error then 1 else 0)

@@ -3,6 +3,8 @@ status: runbook
 last_verified: 2026-08-22
 code_refs:
   - bin/masc_tui.ml
+  - bin/masc_tui_keeper_chat_projection.ml
+  - bin/masc_tui_keeper_chat_recovery.ml
   - bin/masc_tui_render.ml
   - bin/masc_tui_loader.ml
 ---
@@ -147,9 +149,11 @@ Message to: sangsu  (port 8935)
 
 Only a request-correlated terminal Keeper result is shown as a reply. Interrupted streams, protocol errors, rejected turns, and terminal outcomes without visible text are rendered as explicit status/error rows; partial text is never promoted to a successful reply. One request may be in flight at a time.
 
-Before the TUI issues a POST, it writes a `prepared` recovery fence and requires any newly created directory chain, the file, and the parent-directory entry to be durably synced. If the rename is visible but the parent sync is unconfirmed in the current process, no POST is issued; `Ctrl-R` rewrites that same request ID and payload until durability is confirmed. A `prepared` fence found after restart is ambiguous because the prior process may have crossed the POST boundary without durably observing acceptance. The TUI therefore preserves the unverified state, fsyncs the exact fence again, and replays only that same request ID and payload. The server treats a replay as idempotent only when both the operation input and authorized source identity still match. An identity change produces an idempotency conflict and keeps the fence instead of silently replacing it.
+Before the TUI issues a POST, it writes a `prepared` recovery fence and requires any newly created directory chain, the file, and the parent-directory entry to be durably synced. A `prepared` fence means no process has durably claimed a POST. The sender then acquires the cross-process dispatch lock, rechecks the exact identity, and advances the fence to `dispatching` before crossing the network boundary. Only that lock holder may POST, and it keeps the lock until the main TUI has applied the result and acknowledged its recovery mutation. `dispatching` never authorizes a later POST: after a crash, cancellation, or failed result-phase write, recovery only reads the exact operation. Only an outcome-unverified result that was durably advanced to `replayable` may be claimed for another exact-ID POST; that replay claim first returns the fence to fail-closed `dispatching`. A stale TUI retry never recreates a missing `prepared` fence: it goes directly through the serialized claim and stops if the fence was already removed. A visible-but-unconfirmed preparation or claim issues no POST and remains retryable with `Ctrl-R`; later phase writes occur only after the current POST result is known. The server treats an authorized serialized replay as idempotent only when both the operation input and authorized source identity still match. An identity change produces an idempotency conflict and keeps the fence instead of silently replacing it.
 
-Once the stream proves server acceptance, the fence becomes `accepted`. If delivery then becomes uncertain, new sends are blocked and `Ctrl-R` polls the exact durable operation until it settles; it does not mint a fresh ID or issue another chat POST. Fence removal also fsyncs its parent directory. If that cleanup is incomplete, the settled request gets a separate cleanup-pending state and `Ctrl-R` retries only durable removal—zero POSTs and zero GETs. Other transient recovery failures keep the exact request identity blocked for reload instead of enabling a new send. `Ctrl-R` remains available even when extra status rows make the terminal too small for normal message input. Drafts are retained per Keeper while navigating.
+Once the stream proves server acceptance, the fence becomes `accepted`. If delivery then becomes uncertain, new sends are blocked and `Ctrl-R` polls the exact durable operation until it settles; it does not mint a fresh ID or issue another chat POST. A definitive pre-acceptance rejection first advances the fence to `rejected`, which is cleanup-only and can never authorize a POST or operation GET. Only the current pre-handler HTTP statuses `400`, `401`, `403`, and `404` qualify as definitive; timeout-like statuses, conflicts, rate limits, `5xx`, and unknown statuses stay outcome-unverified because an intermediary may have forwarded the POST before returning them. Fence removal also fsyncs its parent directory. If that cleanup is incomplete, the settled request gets a separate cleanup-pending state and `Ctrl-R` acquires the same dispatch lock before retrying only durable removal—zero POSTs and zero GETs. Other transient recovery failures keep the exact request identity blocked for reload instead of enabling a new send. `Ctrl-R` remains available even when extra status rows make the terminal too small for normal message input. Drafts are retained per Keeper while navigating.
+
+If a fail-closed `dispatching` fence repeatedly returns operation `404`, the TUI deliberately remains blocked: it cannot prove whether the POST crossed the boundary and offers no force-replay or force-clear shortcut. Verify the exact operation and runtime logs before an operator removes that fence; clearing it without that proof can permit overlapping work.
 
 ## Keybindings
 
@@ -165,7 +169,7 @@ Once the stream proves server acceptance, the fence becomes `accepted`. If deliv
 | `Esc` | Detail | Back to keeper list |
 | `Esc` | Logs / Message | Back to detail |
 | `Enter` | Message | Send message |
-| `Ctrl-R` | Message | Retry a prepared fence, reconcile an accepted request, or finish settled-request cleanup by exact durable ID |
+| `Ctrl-R` | Message | Claim a prepared fence, reconcile a fail-closed dispatching/accepted fence, replay only a replayable fence, or remove a rejected/settled fence by exact durable ID |
 | `Ctrl-U` | Message | Clear input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
 | `r` | All (except message) | Force refresh |

@@ -107,7 +107,8 @@ let post_keeper_chat ~(host : string) ~(port : int)
         (Masc_tui_keeper_chat_projection.Http_error
            { status; body = response_body })
   | Ok (_, response_body) ->
-      Masc_tui_keeper_chat_projection.decode_response ~request response_body
+      Masc_tui_keeper_chat_projection.decode_response_with_provenance ~request
+        response_body
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
@@ -135,10 +136,10 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
            Masc_tui_keeper_chat_projection.decode_operation_reconciliation
              ~request json
            |> Result.map_error (fun error ->
-                  Masc_tui_keeper_chat_projection.Protocol_error error)
+                  Masc_tui_keeper_chat_projection.protocol_error error)
        | exception Yojson.Json_error detail ->
            Error
-             (Masc_tui_keeper_chat_projection.Protocol_error
+             (Masc_tui_keeper_chat_projection.protocol_error
                 (Masc_tui_keeper_chat_projection.Malformed_event
                    ("Keeper chat operation response is invalid JSON: "
                   ^ detail))))

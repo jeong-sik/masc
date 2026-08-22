@@ -5,12 +5,18 @@ type request = Masc_tui_keeper_chat_projection.request
 
 type phase =
   | Prepared
+  | Dispatching
+  | Replayable
   | Accepted
-(** [Prepared] means server acceptance was not durably observed. A surviving
-    record may have crossed the chat POST boundary, so it may only be rewritten
-    with the same request identity; exact-ID replay is allowed after that rewrite
-    returns [Fsync_completed]. [Accepted] means the server acceptance event was
-    observed, so restart recovery uses the exact read-only operation lookup. *)
+  | Rejected
+(** [Prepared] means no dispatcher has durably claimed permission to POST.
+    [Dispatching] means the current lock owner may have crossed the POST
+    boundary, but no later POST is authorized; recovery is read-only.
+    [Replayable] means an outcome-unverified result was observed and exact-ID
+    replay permission was durably recorded. [Accepted] means the server
+    acceptance event was observed, so restart recovery uses the exact read-only
+    operation lookup. [Rejected] means the server definitively rejected the
+    request before acceptance, so restart recovery may only remove the fence. *)
 
 type pending =
   { request : request
@@ -21,6 +27,7 @@ type persistence_outcome =
   | Fsync_completed
   | Visible_sync_unconfirmed of string
   | Durable_write_cancelled of string
+  | Dispatching_already
   | Accepted_already
 (** [Visible_sync_unconfirmed] means rename installed the exact record but the
     parent-directory fsync failed. It converges the visible phase without
@@ -32,11 +39,37 @@ type persistence_outcome =
     cooperative cancellation won before the caller's next side effect. For
     [persist_pending], the caller must keep the prepared fence and issue no POST
     until an explicit retry. For [mark_accepted], the accepted phase is durable
-    and a settled caller must defer further cleanup to an explicit retry. *)
+    and a settled caller must defer further cleanup to an explicit retry.
+    [Dispatching_already] means another process has claimed the exact fence; a
+    caller must enter the serialized dispatch path instead of rewriting it to
+    [Prepared]. *)
+
+type dispatch_claim =
+  | First_dispatch
+  | Reconcile_dispatch
+  | Replay_dispatch
+  | Accepted_dispatch
+  | Rejected_dispatch
+(** A claim is returned while the cross-process dispatch lock is held.
+    [First_dispatch] is the only path from [Prepared]. [Reconcile_dispatch]
+    authorizes zero POSTs and exact operation lookup only. [Replay_dispatch]
+    rewrites an existing [Replayable] fence to [Dispatching] durably before
+    another exact-ID POST.
+    [Accepted_dispatch] authorizes zero POSTs and exact operation lookup only.
+    [Rejected_dispatch] authorizes zero POSTs/GETs and cleanup only. *)
 
 val recovery_path : base_path:string -> string
 val persist_pending :
   base_path:string -> request -> (persistence_outcome, string) result
+val mark_rejected :
+  base_path:string -> request -> (persistence_outcome, string) result
+(** Record a definitive pre-acceptance rejection before attempting cleanup. *)
+val mark_replayable :
+  base_path:string -> request -> (persistence_outcome, string) result
+(** Durably authorize an exact-ID replay only after an outcome-unverified
+    dispatch result has been observed. The exact fence must already be
+    [Dispatching] or [Replayable]; absence, [Prepared], and terminal phases fail
+    closed without creating or rewriting replay authority. *)
 val mark_accepted :
   base_path:string -> request -> (persistence_outcome, string) result
 (** Record observed server acceptance. This is idempotent for the same exact
@@ -47,13 +80,31 @@ val clear_pending : base_path:string -> request -> (unit, string) result
     whose parent sync fails remains an error so callers retain the request
     identity until recovery is reloaded. *)
 
+val with_dispatch_claim :
+  base_path:string ->
+  request ->
+  (dispatch_claim -> 'a) ->
+  ('a, string) result
+(** Hold the cross-process dispatch lock across [f]. The exact fence is
+    re-read under its transaction lock and advanced monotonically before [f]
+    runs. Callers keep this scope through result application/acknowledgement. *)
+
+val with_dispatch_lock :
+  base_path:string -> (unit -> 'a) -> ('a, string) result
+(** Serialize a follow-up mutation, such as retrying cleanup, against every
+    active or replaying POST without changing the durable phase. *)
+
 val resume_pending :
   pending ->
   retry_prepared:(request -> 'a) ->
+  reconcile_dispatching:(request -> 'a) ->
+  retry_replayable:(request -> 'a) ->
   reconcile_accepted:(request -> 'a) ->
+  cleanup_rejected:(request -> 'a) ->
   'a
-(** Route a restart record without conflating pre-dispatch durability retry
-    with post-acceptance operation reconciliation. *)
+(** Route a restart record without conflating first dispatch, serialized replay,
+    fail-closed dispatch reconciliation, authorized replay, post-acceptance
+    operation reconciliation, and rejected-fence cleanup. *)
 
 val max_reconciliation_polls : int
 val next_reconciliation_poll : remaining:int -> [ `Poll of int | `Stop ]
@@ -82,7 +133,26 @@ module For_testing : sig
     request ->
     (persistence_outcome, string) result
 
+  val with_dispatch_claim_with_writer :
+    save_file_atomic_strict_staged:staged_writer ->
+    base_path:string ->
+    request ->
+    (dispatch_claim -> 'a) ->
+    ('a, string) result
+
   val mark_accepted_with_writer :
+    save_file_atomic_strict_staged:staged_writer ->
+    base_path:string ->
+    request ->
+    (persistence_outcome, string) result
+
+  val mark_rejected_with_writer :
+    save_file_atomic_strict_staged:staged_writer ->
+    base_path:string ->
+    request ->
+    (persistence_outcome, string) result
+
+  val mark_replayable_with_writer :
     save_file_atomic_strict_staged:staged_writer ->
     base_path:string ->
     request ->

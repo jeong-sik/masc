@@ -263,8 +263,8 @@ function PostCard({ post }: { post: BoardPost }) {
   const authorTitle = boardActorTitle(post.author, post.author_identity)
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
-  const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
-  const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+  const voteScoreLabel = String(post.votes)
+  const voteScoreAria = `점수 ${post.votes}`
   const selected = selectedBoardPostId.value === post.id
   const category = contentCategory(post)
   const categoryMeta = CONTENT_CATEGORIES.find(item => item.id === category)

@@ -691,7 +691,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
 - Fusion source-split live API check: `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/fusion-runs'` returned `count: 0`.
   The unfiltered recent board fetch
-  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500&blind_votes=true'`
+  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500'`
   returned five fusion board-sink posts, while the persisted-Board-filter shape
   with `exclude_system=true` returned zero. This is the regression the
   dedicated Fusion board fetch avoids.
@@ -702,7 +702,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   five run rows, selected run `fus-bece178da21a3182769258485ddb0c47`, live
   `PR #21805 BLOCKER Resolution` detail text, no old `No fusion runs found`
   copy, no framework overlay, no horizontal overflow, and Refresh requests for
-  `/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard&blind_votes=true`
+  `/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard`
   without `exclude_system`.
 - Fusion source-split mobile rendered smoke: the same `agent-browser` session
   at `390x844` verified the KPI stack, run list/detail after scrolling the
@@ -736,7 +736,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   `0.19.47`, and fresh uptime. `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/fusion-runs'` returned `count: 0`,
   while the unfiltered board fetch
-  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard&blind_votes=true'`
+  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard'`
   returned five Fusion board-sink posts in a 500-row sample.
 - Fusion source-reconciliation rendered smoke: `agent-browser` loaded the
   worktree Vite server with
@@ -1231,7 +1231,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   `/tmp/masc-approvals-inline-detail-mobile-20260621.png`. Browser page errors
   were empty. Console output was limited to Vite debug connection lines.
 - Fusion live empty-state smoke: `curl -fsS
-  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=200&voter=dashboard&blind_votes=true'
+  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=200&voter=dashboard'
   | jq` found zero posts with `meta.source = "fusion"` or
   `meta.fusion_deliberation`, and `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/fusion-runs'` returned `count: 0`.
@@ -1290,7 +1290,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
 - Board mobile-clearance live rendered smoke: `curl -fsS
   'http://127.0.0.1:8935/health?full=1'` returned status `ok`, effective MASC
   root `/Users/dancer/me/.masc`, and `curl -fsS
-  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=20&voter=dashboard&blind_votes=true'`
+  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=20&voter=dashboard'`
   returned 20 live posts. `agent-browser` loaded the worktree Vite server with
   `MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935` at
   `http://127.0.0.1:5193/dashboard/#board`. Mobile `390x844` verified title

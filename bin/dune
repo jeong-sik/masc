@@ -272,6 +272,12 @@
  (wrapped false)
  (modules masc_tui_render_schedule))
 
+(library
+ (name masc_tui_terminal_write_repair)
+ (wrapped false)
+ (modules masc_tui_terminal_write_repair)
+ (libraries masc_tui_render_schedule unix))
+
 (executable
  (name masc_tui)
  (modules
@@ -294,6 +300,7 @@
   masc_tui_observation_layout
   masc_tui_operator_projection
   masc_tui_render_schedule
+  masc_tui_terminal_write_repair
   masc.dashboard
   masc.server
   masc.config

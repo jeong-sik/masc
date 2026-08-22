@@ -410,6 +410,7 @@ sse_targets=(
   @test/runtest-test_tui_observation_layout
   @test/runtest-test_tui_http_ast
   @test/runtest-test_tui_render_schedule
+  @test/runtest-test_tui_terminal_write_repair
   @test/runtest-test_sse_coverage
   @test/runtest-test_ag_ui_coverage
   @test/runtest-test_sse_storm_e2e

@@ -1236,7 +1236,9 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
         (match thread_mode with
          | Start -> "new"
          | Resume { thread_id } -> thread_id)
-        (Option.value ~default:"-" config.model);
+        (match config.model with
+         | Some model -> model
+         | None -> "-");
       (match
          (try
             run_spawned

@@ -72,6 +72,7 @@
 .mem-kind.goal { color: var(--volt-strong); border-color: var(--volt-dim); }
 .mem-kind.constraint { color: var(--info); border-color: color-mix(in oklab, var(--info) 32%, transparent); }
 .mem-kind.blocker { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
+.mem-kind.ephemeral { color: var(--text-dim); border-style: dashed; }
 .mem-kind.unknown { color: var(--text-dim); }
 .mem-kind.entity { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 35%, transparent); }
 .mem-store-main { min-width: 0; flex: 1; }

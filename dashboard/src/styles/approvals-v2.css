@@ -40,12 +40,8 @@
    The queue count is `warn`, not `bad`: the design reserves the failure colour
    for failure, and a queue that is waiting has not failed. The history count
    counts decisions already made, so it stays neutral. */
-.ap-viewseg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-pill); overflow: hidden; flex: none; }
-.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 15px; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; transition: 0.14s; }
-.ap-viewbtn + .ap-viewbtn { border-left: 1px solid var(--border-main); }
-.ap-viewbtn:hover { color: var(--text-mid); }
-.ap-viewbtn.on { background: var(--volt-wash); color: var(--volt-strong); }
-.ap-viewbtn-n { font-size: 10.5px; color: var(--status-warn); }
+/* The segmented control itself is the design's, owned by keeper-v2/surfaces.css
+   — including its flex:none. Only the neutral count tone is live-only. */
 .ap-viewbtn-n.neutral { color: var(--text-dim); }
 
 /* Queue ↔ detail-rail two-column workspace (live surface; not in the prototype,

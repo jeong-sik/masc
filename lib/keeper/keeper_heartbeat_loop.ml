@@ -1088,13 +1088,19 @@ let run_keepalive_unified_turn
     }
   | Error
       (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
-    { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_completed
+    ; stimuli_acked = false
+    }
   | Error error ->
     Log.Keeper.error
       ~keeper_name:meta_after_triage.name
       "keeper owner rejected autonomous turn: %s"
       (Keeper_owner_registry.command_error_to_string error);
-    { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_crashed
+    ; stimuli_acked = false
+    }
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -1326,7 +1332,11 @@ let run_heartbeat_loop
         let t_turn_start = t_board_end in
         let turn_outcome =
           if not admitted_turn
-          then { meta = meta_current; cycle_status = Turn_cycle_completed }
+          then
+            { meta = meta_current
+            ; cycle_status = Turn_cycle_completed
+            ; stimuli_acked = false
+            }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
                [turn_running] flag toggles around the dispatch and the

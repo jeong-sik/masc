@@ -343,7 +343,7 @@ function visibilityAuditLabel(vis: string | null | undefined): string {
 }
 
 export function postVisibilityAuditDetails(post: BoardPost): string {
-  const scoreLabel = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+  const scoreLabel = `점수 ${post.votes}`
   const updatedLabel = isUpdated(post) ? '최근 갱신됨' : '원본 작성 시각 기준'
   return [
     visibilityAuditLabel(post.visibility),

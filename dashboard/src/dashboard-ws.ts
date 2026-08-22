@@ -443,8 +443,8 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
     slices.add('execution')
   }
-  // Board rows are actor/filter scoped (`voter`, blind-vote policy, author and
-  // hearth filters) and are loaded through refreshBoard's HTTP query. Raw board
+  // Board rows are actor/filter scoped (`voter`, author and hearth filters)
+  // and are loaded through refreshBoard's HTTP query. Raw board
   // events still reach the client and schedule/increment board refreshes through
   // sse-store; there is no unscoped board slice subscription.
   if (routeState.tab === 'monitoring') {

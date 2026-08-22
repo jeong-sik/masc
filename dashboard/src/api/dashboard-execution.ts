@@ -175,7 +175,6 @@ export function fetchDashboardMemory(
   params.set('limit', String(limit))
   if (offset > 0) params.set('offset', String(offset))
   params.set('voter', currentDashboardActor())
-  params.set('blind_votes', 'true')
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)

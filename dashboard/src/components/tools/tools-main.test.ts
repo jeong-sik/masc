@@ -85,6 +85,7 @@ function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
             keeper_name: 'sangsu',
             source: 'event_queue_pending',
             waiting_on: 'bootstrap',
+            what: '기동 직후 첫 턴',
             wake_producer: 'keeper_supervisor',
             next_action: 'keeper_drain_event_queue',
           },

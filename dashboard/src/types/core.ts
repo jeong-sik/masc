@@ -150,7 +150,6 @@ export type BoardAttachmentDecode =
   | { ok: false; raw: unknown }
 
 export type BoardVoteDirection = 'up' | 'down'
-export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
@@ -202,8 +201,6 @@ export interface BoardPost {
   visibility?: string
   expires_at?: string | null
   hearth_count?: number
-  report_count?: number
-  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null
@@ -225,8 +222,6 @@ export interface BoardComment {
   vote_blind_reason?: string
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
-  report_count?: number
-  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
 }

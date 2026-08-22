@@ -86,7 +86,6 @@ export const replyingTo = signal<string | null>(null)
 
 // ── Signals: v2 board surface chrome ───────────────────────────────
 export const selectedBoardPostId = signal<string | null>(null)
-export const boardFilterMode = signal<'all' | 'mod'>('all')
 export const boardComposerMode = signal<'post' | 'mention'>('post')
 export const boardComposerDraft = signal('')
 

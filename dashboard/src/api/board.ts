@@ -5,7 +5,7 @@ import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
-  BoardVoteDirection, BoardModerationStatus,
+  BoardVoteDirection,
     BoardAttachmentDecode, BoardAttachmentKind,
     BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
     KeeperApprovalQueueItem, KeeperExactAttemptState,
@@ -553,20 +553,6 @@ function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null {
   return direction === 'up' || direction === 'down' ? direction : null
 }
 
-function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
-  const status = asString(raw, '').trim().toLowerCase()
-  switch (status) {
-    case 'flagged':
-    case 'approved':
-    case 'removed':
-    case 'hidden':
-    case 'warned':
-      return status
-    default:
-      return 'none'
-  }
-}
-
 // RFC-0233 §7: parse the typed origin object (post_to_yojson_with_karma emits
 // turn_ref / source / fusion_run_id). Parse, don't repair: a non-object or an
 // all-absent origin -> null (no empty record); each sub-field degrades
@@ -665,8 +651,6 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         : '')
       || null,
     hearth_count: asNumber(raw.hearth_count, 0),
-    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
-    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     ...(reactions !== undefined ? { reactions } : {}),
     ...(supportedReactionEmojis !== undefined
       ? { supported_reaction_emojis: supportedReactionEmojis }
@@ -712,8 +696,6 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
-    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
-    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     ...(reactions !== undefined ? { reactions } : {}),
     ...(supportedReactionEmojis !== undefined
       ? { supported_reaction_emojis: supportedReactionEmojis }

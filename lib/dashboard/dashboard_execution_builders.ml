@@ -313,7 +313,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       generation turn_count autonomous_turn_count autonomous_action_count
   in
   let focus =
-    match String_util.trim_to_option (string_field "current_task_id" keeper) with
+    match String_util.trim_nonempty (string_field "current_task_id" keeper) with
     | Some task_id -> task_id
     | None -> "진행 중인 Task 없음"
   in

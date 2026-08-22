@@ -951,8 +951,7 @@ let run_inherited ~timeout_sec ~env = function
            Unix.stderr
        in
        (* NDT-OK: wall-clock deadline bounds the subprocess; on expiry the
-          child is SIGKILLed and reaped, so non-determinism stays at the
-          process boundary. *)
+          child is SIGKILLed and reaped, so non-determinism stays at the process boundary. *)
        let started_at = Unix.gettimeofday () in
        let deadline = started_at +. timeout_sec in
        let rec wait () =

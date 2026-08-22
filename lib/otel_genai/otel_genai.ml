@@ -9,7 +9,7 @@ module Attr_key = struct
   type boundary =
     | Official_gen_ai
     | Masc_extension
-    | Legacy
+    | Keeper_namespace
 
   let registry_ref = ref []
 
@@ -79,14 +79,14 @@ module Attr_key = struct
     register Masc_extension "masc.turn.execution_ids"
   ;;
 
-  let keeper_name = register Legacy "keeper.name"
-  let keeper_agent_name = register Legacy "keeper.agent_name"
-  let keeper_trace_id = register Legacy "keeper.trace_id"
-  let keeper_generation = register Legacy "keeper.generation"
-  let keeper_max_context = register Legacy "keeper.max_context"
-  let keeper_channel = register Legacy "keeper.channel"
-  let keeper_is_retry = register Legacy "keeper.is_retry"
-  let keeper_current_task_id = register Legacy "keeper.current_task_id"
+  let keeper_name = register Keeper_namespace "keeper.name"
+  let keeper_agent_name = register Keeper_namespace "keeper.agent_name"
+  let keeper_trace_id = register Keeper_namespace "keeper.trace_id"
+  let keeper_generation = register Keeper_namespace "keeper.generation"
+  let keeper_max_context = register Keeper_namespace "keeper.max_context"
+  let keeper_channel = register Keeper_namespace "keeper.channel"
+  let keeper_is_retry = register Keeper_namespace "keeper.is_retry"
+  let keeper_current_task_id = register Keeper_namespace "keeper.current_task_id"
 
   let registry = List.rev !registry_ref
 
@@ -99,7 +99,6 @@ module Attr_key = struct
   let all_known = List.map fst registry
   let official_gen_ai = keys_for Official_gen_ai
   let masc_extensions = keys_for Masc_extension
-  let legacy = keys_for Legacy
 
   let is_official_gen_ai key = List.mem key official_gen_ai
   let is_masc_extension key = List.mem key masc_extensions

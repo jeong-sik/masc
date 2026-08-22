@@ -436,10 +436,7 @@ let protocol_version_from_body body_str =
   Mcp_transport_protocol.protocol_version_from_body body_str
 
 let get_session_id_query target =
-  let uri = Uri.of_string target in
-  match Uri.get_query_param uri "session_id" with
-  | Some _ as value -> value
-  | None -> Uri.get_query_param uri "sessionId"
+  Uri.get_query_param (Uri.of_string target) "session_id"
 
 let capitalize_ascii (s : string) =
   if s = "" then

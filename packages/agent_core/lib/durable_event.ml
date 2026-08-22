@@ -357,9 +357,14 @@ let event_of_json json =
            })
     | "llm_request" ->
       (match json with
-       | `Assoc fields when List.mem_assoc "input_tokens" fields ->
-         Error "llm_request does not accept legacy field \"input_tokens\""
-       | `Assoc _ ->
+       | `Assoc fields ->
+         let ( let* ) = Result.bind in
+         let* () =
+           Types.exact_object_fields
+             ~scope:"llm_request"
+             ~required:[ "type"; "turn"; "model"; "timestamp" ]
+             fields
+         in
          Ok
            (Llm_request
               { turn = json |> member "turn" |> to_int

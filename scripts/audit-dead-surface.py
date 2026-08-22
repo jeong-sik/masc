@@ -568,11 +568,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # workspace_utils_paths_backend tasks_dirname / backlog_filename) were
 # dropped from their .mli in the same PR, implementations kept where still
 # used internally.
-# 532 -> 529: tightened to the measured count (measured 2026-08-22: 531
-# before, 529 after the prompt_registry purge). Two are
-# prompt_registry.prompt_metrics_of_yojson / prompt_metrics_to_yojson, whose
-# type left with the purge; the remaining count of slack predates it.
-DEAD_EXPORT_BASELINE = 529
+# 532 -> 529: the #29396 A22 purge deleted three exports this audit already
+# listed (keeper_memory_recall.recent_lines_or_record,
+# runtime_observation.model_label_of_config, session.add_mcp_session_header)
+# and orphaned nothing. 529 -> 528: measured on the merge with main after
+# #29515 (2026-08-22).
+# 528 -> 526: measured on the merge with main (PR #29539, 2026-08-22).
+DEAD_EXPORT_BASELINE = 526
 
 
 def run_ratchet(count: int) -> int:

@@ -148,10 +148,21 @@ type snapshot_read_error =
   ; message : string
   }
 
-type snapshot_with_errors =
-  { pending : Keeper_event_queue.t
+type 'pending with_read_errors =
+  { pending : 'pending
   ; read_errors : snapshot_read_error list
   }
+(** A pending projection paired with the typed read errors that emptied it.
+    [read_errors = []] means [pending] is the durable truth; a non-empty list
+    means the durable state could not be read and [pending] is empty. *)
+
+type snapshot_with_errors = Keeper_event_queue.t with_read_errors
+
+type selections_with_errors =
+  Keeper_event_queue_state.pending_selection list with_read_errors
+(** The same read with each pending entry's exact source authority
+    ([source_snapshot_ref] input plus [admitted_revision]), so an operator
+    surface can address one entry without a second read. *)
 
 type durable_state_discovery =
   { keeper_names : string list
@@ -163,6 +174,12 @@ val discover_keeper_names_with_durable_state :
   base_path:string -> durable_state_discovery
 val load_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
+
+val load_selections_with_errors :
+  base_path:string -> keeper_name:string -> selections_with_errors
+(** {!load_snapshot_with_errors} projected through
+    {!Keeper_event_queue_state.pending_selections}: the same durable read and
+    the same typed read errors, keeping each entry's [admitted_revision]. *)
 
 val observe_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors

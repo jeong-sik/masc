@@ -271,24 +271,6 @@ module Response = struct
   let json_value ?status ?compress ?extra_headers ?request value reqd =
     json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
 
-  (** Sunset headers for deprecated endpoints per RFC 8594.
-      [date] must be an HTTP-date (RFC 7231 S7.1.1.1), e.g. ["Sat, 01 Jun 2026 00:00:00 GMT"].
-      Usage: [Response.json ~extra_headers:(sunset_headers ~date ~successor) ...] *)
-  let sunset_headers ~date ?successor () =
-    let base = [
-      ("Sunset", date);
-      ("Deprecation", "true");
-    ] in
-    match successor with
-    | Some url -> ("Link", Printf.sprintf "<%s>; rel=\"successor-version\"" url) :: base
-    | None -> base
-
-  (** Legacy JSON response without compression check (backwards compatible) *)
-  let json_raw ?(status = `OK) body reqd =
-    safe_respond_with_string reqd
-      (response ~content_type:json_content_type status body)
-      body
-
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).
       Uses zstd compression when client accepts it.
@@ -354,10 +336,7 @@ module Request = struct
     in
     match from_env "MASC_MAX_BODY_BYTES" with
     | Some v -> v
-    | None ->
-        (match from_env "MCP_MAX_BODY_BYTES" with
-         | Some v -> v
-         | None -> default_max_body_bytes)
+    | None -> default_max_body_bytes
 
   let respond_error reqd status body =
     let headers =

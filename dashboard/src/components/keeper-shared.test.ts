@@ -8,48 +8,15 @@ const {
   shutdownKeeper,
   cancelKeeperChatOperation,
   editQueuedKeeperChatOperation,
-  fetchKeeperEventQueuePending,
   listQueuedKeeperChatOperations,
   moveQueuedKeeperChatOperationToEnd,
-  operateKeeperEventQueue,
-  KeeperEventQueueOperationError,
 } = vi.hoisted(() => ({
   bootKeeper: vi.fn(),
   shutdownKeeper: vi.fn(),
   cancelKeeperChatOperation: vi.fn(),
   editQueuedKeeperChatOperation: vi.fn(),
-  fetchKeeperEventQueuePending: vi.fn(),
   listQueuedKeeperChatOperations: vi.fn(),
   moveQueuedKeeperChatOperationToEnd: vi.fn(),
-  operateKeeperEventQueue: vi.fn(),
-  KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
-    readonly operation: {
-      action: 'cancel' | 'transfer'
-      operationId: string
-      reason?: string
-      sourceIncarnation: string
-      sourceRef: string
-      targetKeeper?: string
-    }
-    readonly commitState: 'committed' | 'unknown'
-
-    constructor(
-      message: string,
-      operation: {
-        action: 'cancel' | 'transfer'
-        operationId: string
-        reason?: string
-        sourceIncarnation: string
-        sourceRef: string
-        targetKeeper?: string
-      },
-      commitState: 'committed' | 'unknown',
-    ) {
-      super(message)
-      this.operation = operation
-      this.commitState = commitState
-    }
-  },
 }))
 
 const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
@@ -123,11 +90,8 @@ vi.mock('../api/keeper', () => ({
   shutdownKeeper,
   cancelKeeperChatOperation,
   editQueuedKeeperChatOperation,
-  fetchKeeperEventQueuePending,
   listQueuedKeeperChatOperations,
   moveQueuedKeeperChatOperationToEnd,
-  operateKeeperEventQueue,
-  KeeperEventQueueOperationError,
 }))
 
 vi.mock('../store', async (importOriginal) => {
@@ -264,11 +228,9 @@ describe('KeeperConversationPanel', () => {
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
     cancelKeeperChatOperation.mockReset()
     editQueuedKeeperChatOperation.mockReset()
-    fetchKeeperEventQueuePending.mockReset()
     listQueuedKeeperChatOperations.mockReset()
     listQueuedKeeperChatOperations.mockResolvedValue([])
     moveQueuedKeeperChatOperationToEnd.mockReset()
-    operateKeeperEventQueue.mockReset()
   })
 
   afterEach(() => {
@@ -850,14 +812,6 @@ describe('KeeperConversationPanel', () => {
       state: { kind: 'queued' as const },
     }
     listQueuedKeeperChatOperations.mockResolvedValue([operation])
-    fetchKeeperEventQueuePending.mockResolvedValue({
-      keeperName: 'sangsu',
-      sourceIncarnation: 'incarnation-1',
-      totalPending: 0,
-      returned: 0,
-      truncated: false,
-      pending: [],
-    })
     editQueuedKeeperChatOperation.mockResolvedValue(operation)
     moveQueuedKeeperChatOperationToEnd.mockResolvedValue(operation)
     cancelKeeperChatOperation.mockResolvedValue({

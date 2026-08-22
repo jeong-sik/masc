@@ -4,8 +4,8 @@
     Read-only adapter: snapshots [Pool.stats]; the actual sample emission
     lives in [Otel_runtime_observables], which calls
     {!current_snapshot} on each exporter tick.  The pool itself is not
-    modified; the lazy singleton is observed via
-    {!Masc_http_client.pool_singleton_opt}.
+    modified; the per-domain pools are observed via
+    {!Masc_http_client.all_domain_pools}.
 
     Metric names emitted there (no shared prefix beyond [masc_pool_]):
     - [masc_pool_idle_total] (gauge)
@@ -23,8 +23,8 @@
 
 val current_snapshot : unit -> Masc_http_client.Pool.stats option
 (** [current_snapshot ()] returns the live pool snapshot via
-    {!Masc_http_client.pool_singleton_opt}.  Returns [None] when the
-    pool has not been lazy-initialized yet (no HTTP traffic since
+    {!Masc_http_client.all_domain_pools}.  Returns [None] when no
+    pool has been lazy-initialized yet (no HTTP traffic since
     process start). *)
 
 (** {1 Otel_metric_store integration} *)

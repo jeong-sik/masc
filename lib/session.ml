@@ -741,20 +741,3 @@ let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_
     in
     loop ()
   )
-
-let extract_mcp_session_id (headers : Cohttp.Header.t) : string option =
-  match Cohttp.Header.get headers "Mcp-Session-Id" with
-  | Some _ as result -> result
-  | None -> Cohttp.Header.get headers "X-MCP-Session-ID"
-
-let get_or_create_mcp_session (headers : Cohttp.Header.t) : McpSessionStore.mcp_session =
-  match extract_mcp_session_id headers with
-  | Some id ->
-    (match McpSessionStore.get id with
-     | Some session -> session
-     | None -> McpSessionStore.create ())
-  | None ->
-    McpSessionStore.create ()
-
-let add_mcp_session_header (headers : Cohttp.Header.t) (session : McpSessionStore.mcp_session) : Cohttp.Header.t =
-  Cohttp.Header.add headers "Mcp-Session-Id" session.id

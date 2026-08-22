@@ -369,9 +369,8 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
   }
 
   if (name === 'KEEPER_EXTERNAL_EFFECT_COMPLETED') {
-    // null is the legacy wire value; a typed payload carries the delivery
-    // target of the completed surface post (#28374).
-    if (payload === null) return ok(true)
+    // The payload carries the delivery target of the completed surface post
+    // (#28374).
     const object = exactCustomObject(payload, name, ['target'])
     if (!object.success) return object
     const target = object.data.target

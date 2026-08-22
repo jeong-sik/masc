@@ -148,7 +148,16 @@ let test_compression_invalid_header () =
   check bool "short data returns None" true (Option.is_none result);
 
   let result2 = Backend.Compression.decode_header "INVALID_HEADER_DATA" in
-  check bool "invalid header returns None" true (Option.is_none result2)
+  check bool "invalid header returns None" true (Option.is_none result2);
+
+  (* "ZSTD" followed by a byte that is neither NUL nor 'D' is not a frame the
+     writer produces, so it is not a header. *)
+  let result3 = Backend.Compression.decode_header "ZSTDX\x00\x00\x00\x64payload" in
+  check bool "ZSTD + non-NUL fifth byte returns None" true (Option.is_none result3);
+
+  (* A bare 8-byte prefix is shorter than the 9-byte frame. *)
+  let result4 = Backend.Compression.decode_header "ZSTD\x00\x00\x00\x64" in
+  check bool "8-byte prefix returns None" true (Option.is_none result4)
 
 (* ============================================================ *)
 (* Backend.ml - Lock Operations                              *)

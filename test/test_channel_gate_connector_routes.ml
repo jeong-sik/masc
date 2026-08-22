@@ -157,9 +157,8 @@ let test_slack_default_paths_resolve_under_base_path () =
         with_env "MASC_BASE_PATH_INPUT" None (fun () ->
           with_envs
             [
-              "SLACK_STATUS_PATH"; "MASC_SLACK_STATUS_PATH"; "SLACK_BINDING_STORE_PATH"
-            ; "MASC_SLACK_BINDING_STORE_PATH"; "SLACK_BINDING_AUDIT_PATH"
-            ; "MASC_SLACK_BINDING_AUDIT_PATH"
+              "SLACK_BINDING_STORE_PATH"; "MASC_SLACK_BINDING_STORE_PATH"
+            ; "SLACK_BINDING_AUDIT_PATH"; "MASC_SLACK_BINDING_AUDIT_PATH"
             ]
             None
             (fun () ->

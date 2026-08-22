@@ -103,17 +103,10 @@ let project ~timestamp ~redact_text ~redact_json state event =
              ~run_id:state.run_id ~message_id:state.message_id
              Ag_ui.Text_message_end) )
   | External_effect_completed { target } ->
-      (* The reply decoder rejects an External_effect_completed payload with no
-         target, so [None] does not reach here from a live turn; the arm stays
-         because the event type carries the same option every other outcome
-         uses. A typed target names the real destination so the dashboard stops
+      (* A typed target names the real destination so the dashboard stops
          assuming an external connector (#28374). *)
       let value =
-        match target with
-        | None -> `Null
-        | Some target ->
-          `Assoc
-            [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
+        `Assoc [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
       in
       state, Some (custom ~timestamp ~redact_json state External_effect_completed value)
   | Agent_core_stream_connected ->

@@ -257,17 +257,6 @@ async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   if (path === `/api/v1/keepers/${KEEPER}/waiting-inventory` && method === 'GET') {
     return json(waitingInventory())
   }
-  if (path.startsWith(`/api/v1/keepers/${KEEPER}/events/pending?`) && method === 'GET') {
-    return json({
-      schema: 'keeper_event_queue.pending.v2',
-      ok: true,
-      keeper_name: KEEPER,
-      revision: '0',
-      total_pending: 0,
-      next_after: null,
-      pending: [],
-    })
-  }
   if (path.startsWith(`/api/v1/keepers/${KEEPER}/chat/operations?`) && method === 'GET') {
     const operations = fixtureState.operations
       .filter(operation => operation.state.kind === 'Queued')

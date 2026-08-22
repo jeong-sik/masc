@@ -37,6 +37,14 @@ import {
   keeperWaitingInventoryState,
   subscribeKeeperWaitingInventory,
 } from '../../keeper-waiting-inventory-store'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
+import { shellAuthSummary } from '../../store'
+import {
+  LaneEventRecoveries,
+  LaneEventRowActions,
+  useLaneEventQueueActions,
+  type LaneEventQueueActions,
+} from './keeper-lane-event-actions'
 
 const LANE_STATE_LABELS: Record<string, string> = {
   idle: '비어 있음',
@@ -159,10 +167,13 @@ function LaneWaitingRow({
   row,
   first,
   last,
+  actions,
 }: {
   row: DashboardKeeperWaitingRow
   first: boolean
   last: boolean
+  /** Admin operator actions; null renders the row read-only. */
+  actions: LaneEventQueueActions | null
 }): VNode {
   const graphColor = LANE_SOURCE_GRAPH_COLORS[row.source]
   const sinceRelative = row.since_iso == null ? null : relativeTime(row.since_iso)
@@ -202,6 +213,9 @@ function LaneWaitingRow({
         ${row.due_at_iso == null
           ? null
           : html`<div class="text-2xs text-[var(--status-warn)]">실행 예정 · <time dateTime=${row.due_at_iso}>${formatDateTimeKo(row.due_at_iso)}</time> · ${formatTimeUntil(row.due_at_iso)}</div>`}
+        ${actions !== null && row.source === 'event_queue_pending'
+          ? html`<${LaneEventRowActions} row=${row} actions=${actions} />`
+          : null}
         <details class="min-w-0 text-3xs text-[var(--color-fg-muted)]" style=${{ overflowWrap: 'anywhere' }}>
           <summary class="cursor-pointer select-none">Typed queue evidence</summary>
           <div class="mt-2 grid min-w-0 gap-2">
@@ -224,6 +238,7 @@ export function KeeperLaneStrip({
   ready,
   loading,
   error,
+  eventActions = null,
 }: {
   keeper: Keeper
   inventory: DashboardKeeperWaitingInventory | null | undefined
@@ -232,6 +247,9 @@ export function KeeperLaneStrip({
   ready: boolean
   loading: boolean
   error: string | null
+  /** Present only for a session admitted to the event-queue operator route;
+   *  absent renders every row read-only. */
+  eventActions?: LaneEventQueueActions | null
 }): VNode {
   const entry = inventoryEntry(inventory, keeper)
   const rows = waitingRowsNewestFirst(entry?.waiting_on ?? [])
@@ -254,6 +272,9 @@ export function KeeperLaneStrip({
               <div class="flex flex-wrap items-center gap-1.5">
                 <${StatusChip} tone=${stateTone(entry.state)} uppercase=${false} title=${entry.state}>${laneStateLabel(entry.state)}<//>
               </div>
+              ${eventActions === null
+                ? null
+                : html`<${LaneEventRecoveries} actions=${eventActions} />`}
               ${rows.length > 0
                 ? html`
                     <div class="grid gap-1">
@@ -268,6 +289,7 @@ export function KeeperLaneStrip({
                           row=${row}
                           first=${index === 0}
                           last=${index === rows.length - 1}
+                          actions=${eventActions}
                         />
                       `)}
                     </div>
@@ -303,14 +325,18 @@ export function KeeperLaneStrip({
   `
 }
 
-/** Read only this keeper's lane projection. Queue commits and reconnects
- * invalidate the shared keeper-scoped store; no periodic poll is mounted. */
+/** Read this keeper's lane projection. Queue commits and reconnects
+ * invalidate the shared keeper-scoped store; no periodic poll is mounted.
+ * Event-queue operator actions mount only for an Admin session, the same
+ * admission the `/events/operator` route enforces. */
 export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
   useEffect(() => {
     return subscribeKeeperWaitingInventory(keeper.name)
   }, [keeper.name])
 
   const current = keeperWaitingInventoryState(keeper.name)
+  const eventActions = useLaneEventQueueActions(keeper.name)
+  const operatorAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   return html`
     <${KeeperLaneStrip}
       keeper=${keeper}
@@ -318,6 +344,7 @@ export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
       ready=${current.ready}
       loading=${current.loading}
       error=${current.error}
+      eventActions=${operatorAccess.allowed ? eventActions : null}
     />
   `
 }

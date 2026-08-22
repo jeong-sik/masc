@@ -22,7 +22,7 @@
    It is a SUPERSET: the shared .mem-* selectors are duplicated 1:1 with the
    vendored design mirror styles/keeper-v2/memory.css, and this file also
    owns the real-data extension classes (.mem-trust / .mem-policy /
-   .mem-prompt-* / .mem-store-why / .mem-more / .mem-dot / .mem-disclosure /
+   .mem-prompt-* / .mem-delta / .mem-more / .mem-dot / .mem-disclosure /
    selectors that the mirror does not carry. Any change to a shared
    .mem-* selector MUST be mirrored in styles/keeper-v2/memory.css (and vice
    versa). Consolidating the two into one SSOT is tracked separately from
@@ -168,7 +168,13 @@
 .mem-ttl { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
 .mem-ttl.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
 .mem-ttl.expired { color: var(--text-dim); border-style: dashed; }
-.mem-store-why { margin-top: 5px; font-size: 10.5px; color: var(--text-dim); line-height: 1.4; }
+/* revision delta marker — the row's membership in memory_os.change.added /
+   .removed; same chip geometry as the prototype's .mem-ttl (keeper-v2/styles/memory.css:73-75) */
+.mem-delta { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.mem-delta.added { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
+.mem-delta.removed { color: var(--text-dim); border-style: dashed; }
+.mem-store-row.removed .mem-store-text { color: var(--text-dim); }
+.mem-store-row.removed .mem-kind { border-style: dashed; }
 .mem-more { margin-top: 9px; width: 100%; border: 1px solid var(--border-main); border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--text-mid); font-family: var(--font-ui); font-size: var(--fs-11); padding: 7px 10px; cursor: pointer; transition: 0.14s; }
 .mem-more:hover { border-color: var(--volt-dim); color: var(--volt); }
 .mem-leg-tag { margin-left: 6px; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 32%, transparent); border-radius: var(--radius-xs); padding: 0 4px; }

@@ -84,37 +84,6 @@ let event_kind_of_string = function
   | "turn_finished" -> Some Turn_finished
   | _ -> None
 
-type compaction_snapshot_event_class =
-  | Compaction_snapshot_relevant
-  | Compaction_snapshot_known_unrelated
-  | Compaction_snapshot_unknown
-
-let classify_compaction_snapshot_typed_event = function
-  | Event_bus_correlated
-  | Context_compacted
-  | Context_injected
-  | Checkpoint_loaded ->
-    Compaction_snapshot_relevant
-  | Turn_started
-  | Phase_gate_decided
-  | Runtime_routed
-  | Runtime_execution_built
-  | Runtime_completed
-  | Runtime_failed
-  | Pre_dispatch_blocked
-  | Provider_lane_resolved
-  | Provider_attempt_started
-  | Provider_attempt_finished
-  | Checkpoint_saved
-  | Receipt_appended
-  | Turn_finished ->
-      Compaction_snapshot_known_unrelated
-
-let classify_compaction_snapshot_event event =
-  match event_kind_of_string event with
-  | Some typed_event -> classify_compaction_snapshot_typed_event typed_event
-  | None -> Compaction_snapshot_unknown
-
 (* ── Record types ────────────────────────────────────────────────────── *)
 
 type links = {

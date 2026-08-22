@@ -761,6 +761,7 @@ let heartbeat_event_intake
             | Keeper_world_observation.Board_post_created
             | Keeper_world_observation.Board_comment_added
             | Keeper_world_observation.Board_reaction_changed _
+            | Keeper_world_observation.Board_vote_cast _
             | Keeper_world_observation.Fusion_completed
             | Keeper_world_observation.External_attention _
             | Keeper_world_observation.Completion_authority_rejected _

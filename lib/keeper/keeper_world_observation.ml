@@ -22,6 +22,7 @@ type pending_board_event_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
+  | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
@@ -51,6 +52,7 @@ let is_board_activity_event (event : pending_board_event) =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
   | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
@@ -64,6 +66,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
   | External_attention _
   | Completion_authority_rejected _
@@ -76,6 +79,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
   | Schedule_due _
   | External_attention _
@@ -91,6 +95,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
   | Schedule_due _
   | External_attention _
@@ -414,6 +419,7 @@ let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
   | Board_dispatch.Board_comment_added -> Board_comment_added
   | Board_dispatch.Board_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
+  | Board_dispatch.Board_vote_cast vote -> Board_vote_cast vote
 ;;
 
 let pending_board_event_of_board_signal
@@ -455,6 +461,9 @@ let pending_board_event_of_board_signal
          | Board_signal.Available `Never -> Ok (false, 0, None, None)
          | Board_signal.Available (`No_new_external | `New_external _) ->
            Ok (true, 0, None, None))
+      (* The vote row states who voted which way on what; the reply counters
+         belong to comment events, so none are derived here. *)
+      | Board_dispatch.Board_vote_cast _ -> Ok (false, 0, None, None)
     in
     (match comment_derived with
      | Error unavailable -> Error unavailable

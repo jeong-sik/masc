@@ -158,7 +158,18 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
            reaction.target_id
            reaction.user_id
            reaction.emoji
-           reaction.reacted)
+           reaction.reacted
+       | Keeper_event_queue.Vote_cast vote ->
+         Printf.sprintf
+           "vote_cast target=%s target_author=%s voter=%s direction=%s"
+           (match vote.target with
+            | Keeper_event_queue.Vote_on_post post_id -> "post:" ^ post_id
+            | Keeper_event_queue.Vote_on_comment comment_id -> "comment:" ^ comment_id)
+           vote.target_author
+           vote.voter
+           (match vote.direction with
+            | Keeper_event_queue.Vote_up -> "up"
+            | Keeper_event_queue.Vote_down -> "down"))
       bs.author
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"

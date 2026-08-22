@@ -25,4 +25,8 @@ val audience_for_comment : content:string -> (audience, board_error) result
 val audience_for_reaction : audience
 (** Reactions are structural thread activity and carry no textual address. *)
 
+val audience_for_vote : audience
+(** Votes are structural thread activity too; the keeper router selects the
+    voted-on author from the signal payload. *)
+
 val audience_label : audience -> string

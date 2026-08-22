@@ -69,8 +69,9 @@ val address_text : Board_dispatch.board_signal -> string
 (** Text authored by the current signal producer and therefore allowed to
     carry addressing authority. A post uses its title/content (never the
     category [hearth]), a
-    comment uses only the new comment body, and a reaction carries no textual
-    address. Inherited post display fields never re-address later events. *)
+    comment uses only the new comment body, and a reaction or vote carries no
+    textual address. Inherited post display fields never re-address later
+    events. *)
 val mention_ids_of_signal : Board_dispatch.board_signal -> Keeper_identity.Keeper_id.t list
 
 val match_signal
@@ -89,6 +90,8 @@ type wake_reason =
   | Comment_on_self_post
   | Thread_reply_after_self_comment
   | Reaction_after_self_activity
+  | Vote_on_self_post
+  | Vote_on_self_comment
 (** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
     Replaces the prior [string option] contract; consumers match exhaustively
     so the previously dead ["board_activity"] generic bucket is gone. Semantic

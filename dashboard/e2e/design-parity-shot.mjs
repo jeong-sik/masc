@@ -23,7 +23,7 @@ if (!label || !tmpl || !outDir || !surfaceCsv) {
 const surfaces = surfaceCsv.split(',').filter(Boolean)
 mkdirSync(outDir, { recursive: true })
 
-const VIEWPORT = { width: 1600, height: 1000 }
+const VIEWPORT = { width: Number(process.env.PARITY_W || 1600), height: Number(process.env.PARITY_H || 1000) }
 const FREEZE = '*,*::before,*::after{animation:none !important;transition:none !important;caret-color:transparent !important}'
 const MAX_SETTLE_ATTEMPTS = 12
 

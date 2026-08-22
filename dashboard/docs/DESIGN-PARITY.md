@@ -113,6 +113,37 @@ below); without it the figure is 97.6%.
 `settings` is not measurable: the prototype's `SURFACES` registry has no entry for
 it, so `?surface=settings` is rejected and the page renders keepers.
 
+## Measured at a second viewport
+
+Everything above is 1600×1000. `keeper-v2/fleet.css` calls 1440px "the canonical
+operator viewport", so the fleet was measured there too:
+
+| | 1600×1000 | 1440×900 |
+|---|---|---|
+| mean | **0.948** | **0.942** |
+| monitor | 0.995 | 0.928 |
+| overview | 0.842 | 0.868 |
+| schedule | 0.945 | 0.931 |
+| keepers | 0.909 | 0.896 |
+
+The narrower viewport scores lower, and monitor carries most of the drop. Below
+1500px the kit's `--fl-cols` switches to a responsive tier that is tuned the way
+the base value used to be — five tracks with a 160px action cell, and
+`.fl-rhead span:nth-child(5)` hidden — all shaped by the live row's sixth cell,
+which the mock's row does not have. It is the same defect the base track set had,
+still sitting in the tiers.
+
+It is not fixed here. The tier never fires at the measured viewport, so it moves
+no number the bar reads, and splitting it touches the live surface's responsive
+behaviour at three breakpoints — worth its own change with its own verification,
+not a tail-end edit. The split follows the pattern already applied to the base
+value: the design's tiers stay in `keeper-v2/fleet.css`
+(`max-width: 1320px` → four tracks, `max-width: 720px` → three), and the live
+tiers move to `v2-monitoring.css` under `.v2-monitoring-surface`, keeping the
+1500px breakpoint and the column-shedding rule.
+
+`design-parity-shot.mjs` takes `PARITY_W` / `PARITY_H` for this.
+
 ## Divergence ledger
 
 Every surface below 0.94 is held there by something that is not skin drift. Each

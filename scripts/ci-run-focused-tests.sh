@@ -231,6 +231,7 @@ normal_targets=(
   @test/runtest-test_tool_schema_constraint_enforcement
   @test/runtest-test_keeper_artifact_read_request
   @test/runtest-test_tool_input_validation
+  @test/runtest-test_keeper_tool_execute_typed_input
   @test/runtest-test_tool_schema_agent_core_boundary
   @test/runtest-test_tool_call_quality_benchmark
   @test/runtest-test_client_identity

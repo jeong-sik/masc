@@ -179,10 +179,10 @@ let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
 
-let typed_input_env = function
-  | Keeper_tool_execute_typed_input.Exec { env; _ }
-  | Keeper_tool_execute_typed_input.Pipeline { env; _ } ->
-    env
+let typed_input_env
+      ({ env; _ } : Keeper_tool_execute_typed_input.execute_input)
+  =
+  env
 ;;
 
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
@@ -200,22 +200,8 @@ type dispatch_bundle =
   ; cleanup : unit -> unit
   }
 
-let input_with_cwd cwd = function
-  | Keeper_tool_execute_typed_input.Exec
-      { argv; cwd = _; env; timeout_sec; stdin; stdout; stderr } ->
-    Keeper_tool_execute_typed_input.Exec
-      { argv
-      ; cwd = Some cwd
-      ; env
-      ; timeout_sec
-      ; stdin
-      ; stdout
-      ; stderr
-      }
-  | Keeper_tool_execute_typed_input.Pipeline
-      { stages; cwd = _; env; timeout_sec } ->
-    Keeper_tool_execute_typed_input.Pipeline
-      { stages; cwd = Some cwd; env; timeout_sec }
+let input_with_cwd cwd (input : Keeper_tool_execute_typed_input.execute_input) =
+  { input with Keeper_tool_execute_typed_input.cwd = Some cwd }
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

@@ -174,10 +174,6 @@ describe('fetchDashboardExecutionTrust', () => {
           latest_age_s: null,
           health: 'coverage_gap',
         },
-        migration: {
-          body_shape: 'root_fields_preserved',
-          rule: 'additive envelope first',
-        },
       },
       freshness_slo_s: 900,
       entry_count: 0,
@@ -223,7 +219,6 @@ describe('fetchDashboardExecutionTrust', () => {
         key: 'execution-trust:default',
         stale_reason: 'execution_receipt_append_failed',
       },
-      migration: { body_shape: 'root_fields_preserved' },
     })
     expect(result.coverage_gaps?.[0]).toMatchObject({
       producer: 'keeper_agent_run.execution_receipt',

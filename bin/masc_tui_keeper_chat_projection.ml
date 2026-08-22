@@ -204,7 +204,7 @@ let error_certainty ?(was_unverified = false) error =
   let certainty =
     match error with
     | Transport_error _ -> Outcome_unverified
-    | Http_error _ -> Outcome_unverified
+    | Http_error _ -> Verified_rejected
     | Protocol_error
         (Run_failed
           { accepted = false

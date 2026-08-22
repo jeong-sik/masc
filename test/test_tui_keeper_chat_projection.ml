@@ -341,6 +341,14 @@ let test_error_certainty () =
   check bool "transport is unverified" true
     (Chat.error_certainty (Chat.Transport_error "cut")
      = Chat.Outcome_unverified);
+  let unauthorized : Chat.error =
+    Chat.Http_error { status = 401; body = "unauthorized" }
+  in
+  check bool "HTTP rejection before the handler is verified" true
+    (Chat.error_certainty unauthorized = Chat.Verified_rejected);
+  check bool "uncertain reconnect keeps HTTP rejection unverified" true
+    (Chat.error_certainty ~was_unverified:true unauthorized
+     = Chat.Outcome_unverified);
   check bool "pre-accept rejection is verified" true
     (Chat.error_certainty
        (Chat.Protocol_error

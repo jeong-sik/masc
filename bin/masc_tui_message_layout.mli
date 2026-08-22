@@ -56,6 +56,10 @@ val message_viewport_supported :
     scrolling. Unsupported viewports render a compact resize gate and suppress
     message editing. *)
 
+val wrap_words : max_cells:int -> string -> string list
+(** Wrap a plain single-line string at spaces using a terminal-cell budget.
+    Words wider than the budget are split between complete UTF-8 scalars. *)
+
 val visible_rows : inner_width:int -> height:int -> entry list -> row list
 (** Render chat entries into cell-bounded, UTF-8-safe physical rows and retain
     the newest rows. The newest entry always keeps its metadata row. *)

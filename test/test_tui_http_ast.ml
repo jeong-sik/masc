@@ -463,6 +463,37 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"load_selected_keeper_logs"
      >= 3);
+  check int "Board list success uses shared post replacement" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
+       ~callee:"replace_board_posts");
+  check int "Board detail success uses shared post replacement" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~callee:"replace_board_posts");
+  check int "Board post replacement reconciles selection once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"replace_board_posts"
+       ~callee:"Board_selection.reconcile_cursor");
+  check int "Board detail starts through the generation-aware projection" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"start_board_post_refresh"
+       ~callee:"Board_detail.start");
+  check int "Board detail success validates the response post identity" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~callee:"String.equal");
+  check int "Board detail completion remains valid away from the Board tab" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"board_detail_request_still_current" ~callees:[]
+       ~fields:[ "view" ]);
+  check int "Board renderer selects detail by post identity" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_board_read"
+       ~callee:"Board_detail.view_for");
   check bool "metadata refresh reconciles the selected log identity" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml"
@@ -614,6 +645,54 @@ let test_planning_cursor_uses_visible_goal_order () =
      >= 2)
 ;;
 
+let test_planning_refresh_reconciles_navigation_identity () =
+  let main_path = "bin/masc_tui.ml" in
+  check int "planning apply owns one identity reconciliation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_planning_load"
+       ~callee:"Planning_selection.reconcile");
+  check int "planning reconciliation has one application owner" 1
+    (Ast_grep.count_calls ~module_path:main_path
+       ~callee:"Planning_selection.reconcile");
+  check int "planning apply is independent of the visible surface" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_planning_load" ~callees:[]
+       ~fields:[ "view" ]);
+  check int "HTTP surface application owns one planning apply" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_http_surfaces" ~callee:"apply_planning_load");
+  check int "refresh loop no longer checks the stale planning snapshot" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"List.find_opt")
+;;
+
+let test_overview_events_use_scroll_projection () =
+  check int "overview renders one bounded event window" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_overview"
+       ~callee:"Render_schedule.project_overview_event_window");
+  check int "event prepend preserves one manual anchor" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"add_event"
+       ~callee:"Render_schedule.overview_event_offset_after_prepend");
+  check int "overview older input is bounded once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"main"
+       ~callee:"Render_schedule.scroll_overview_events_older");
+  check int "overview newer input is bounded once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"main"
+       ~callee:"Render_schedule.scroll_overview_events_newer");
+  check int "both overview input directions use current layout" 2
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"main" ~callee:"overview_layout")
+;;
+
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
   check bool "main loop reads a monotonic clock" true
@@ -635,6 +714,11 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"render_keeper_detail"
        ~callee:"Masc_tui_render_schedule.keeper_context_bar_width"
      = 1);
+  check int "keeper detail persists one viewport-normalized scroll" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_detail"
+       ~callee:"Render_schedule.normalize_keeper_detail_scroll");
   check bool "interrupted input uses the deadline-aware retry contract" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"read_byte_unix"
@@ -666,11 +750,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  check int "overview consumes one shared row allocation" 1
+  check int "overview layout owns one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview"
+       ~binding_name:"overview_layout"
        ~callee:"Render_schedule.allocate_overview");
-  check int "overview bounds each variable section from that allocation" 4
+  check int "overview renderer consumes one shared layout" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_overview" ~callee:"overview_layout");
+  check int "overview bounds each variable section from that allocation" 5
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
        ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
@@ -960,8 +1047,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     check int (binding ^ " exists exactly once") 1
       (Ast_grep.count_value_bindings ~module_path ~name:binding)
   in
-  let check_fields binding fields =
+  let check_fields ?(non_rendering_calls = []) binding fields =
     check_binding render_path binding;
+    let allowed_calls = sanitizer_calls @ non_rendering_calls in
     List.iter
       (fun field ->
         let total =
@@ -974,7 +1062,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         let outside =
           Ast_grep.count_field_accesses_outside_calls_in_value_binding
             ~module_path:render_path ~binding_name:binding
-            ~callees:sanitizer_calls ~fields:[ field ]
+            ~callees:allowed_calls ~fields:[ field ]
         in
         if outside <> 0 then
           failf
@@ -1015,8 +1103,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ov_project"
     ; "ai_summary"
     ; "content"
-    ; "tasks_error"
     ];
+  check_fields "overview_layout" [ "tasks_error" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
     ; "approvals_error"
@@ -1031,8 +1119,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_created_at"
     ];
   check_fields "render_board_list"
-    [ "board_error"; "bp_id"; "bp_author"; "bp_title" ];
-  check_fields "render_board_read"
+    [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
+  check_fields ~non_rendering_calls:[ "Board_detail.view_for" ]
+    "render_board_read"
     [ "bp_id"
     ; "bp_author"
     ; "bp_title"
@@ -1171,6 +1260,14 @@ let () =
           "planning cursor uses visible goal order"
           `Quick
           test_planning_cursor_uses_visible_goal_order;
+        test_case
+          "planning refresh reconciles navigation identity"
+          `Quick
+          test_planning_refresh_reconciles_navigation_identity;
+        test_case
+          "overview events use bounded scroll projection"
+          `Quick
+          test_overview_events_use_scroll_projection;
         test_case
           "render loop uses monotonic dirty scheduling"
           `Quick

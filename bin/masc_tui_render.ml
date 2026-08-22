@@ -5,6 +5,7 @@ open Tui_decode
 open Masc_tui_ansi
 
 module Frame_presenter = Masc_tui_frame_presenter
+module Board_detail = Masc_tui_board_detail
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
@@ -195,6 +196,24 @@ let render_dashboard (state : state) =
   finish_frame ~surface_key:"dashboard" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
 
+(** Project the shared Overview row budget and its sanitized variable inputs. *)
+let overview_layout (state : state) ~terminal_rows =
+  let attention_items =
+    match state.overview with
+    | None -> []
+    | Some overview -> overview.ov_attention_items
+  in
+  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
+  let row_budget =
+    Render_schedule.allocate_overview ~terminal_rows
+      ~has_cluster:(Option.is_some state.overview)
+      ~attention_count:(List.length attention_items)
+      ~event_count:(List.length state.events)
+      ~task_count:(List.length state.tasks)
+      ~has_task_error:(Option.is_some tasks_error)
+  in
+  attention_items, tasks_error, row_budget
+
 (** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
 let render_overview (state : state) =
   let (rows, cols) = get_terminal_size () in
@@ -256,22 +275,27 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   (* Attention panel *)
-  let attention_items =
-    match ov with
-    | None -> []
-    | Some o -> o.ov_attention_items
-  in
-  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let row_budget =
-    Render_schedule.allocate_overview ~terminal_rows:rows
-      ~has_cluster:(Option.is_some ov)
-      ~attention_count:(List.length attention_items)
-      ~task_count:(List.length state.tasks)
-      ~has_task_error:(Option.is_some tasks_error)
+  let attention_items, tasks_error, row_budget =
+    overview_layout state ~terminal_rows:rows
   in
   let panel_width = (cols - 3) / 2 in
   let attention_title = " Attention " in
-  let events_title = " Recent Events " in
+  let event_count = List.length state.events in
+  let event_window =
+    Render_schedule.project_overview_event_window ~event_count
+      ~visible_rows:row_budget.attention_rows state.overview_event_scroll
+  in
+  state.overview_event_scroll <- event_window.oew_offset;
+  let events_title =
+    let title =
+      if event_window.oew_first_position = 0 then " Recent Events "
+      else
+        Printf.sprintf " Recent Events %d-%d/%d "
+          event_window.oew_first_position event_window.oew_last_position
+          event_count
+    in
+    fit_width title (max 0 panel_width)
+  in
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.bold attention_title Ansi.reset
@@ -295,8 +319,9 @@ let render_overview (state : state) =
       else ""
     in
     let event_str =
-      if i < List.length state.events then
-        let e = List.nth state.events i in
+      let event_index = i + event_window.oew_offset in
+      if event_index < event_count then
+        let e = List.nth state.events event_index in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
           (fit_width (Terminal_text.single_line e.content) (panel_width - 12))
@@ -337,7 +362,7 @@ let render_overview (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
     Ansi.dim state.refresh_interval state.port Ansi.reset);
 
   finish_frame ~surface_key:"overview" ~cursor:Frame_presenter.Hidden ~rows
@@ -510,21 +535,27 @@ let render_board_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
 
-  let board_error = Terminal_text.optional_single_line state.board_error in
+  let board_list_error =
+    Terminal_text.optional_single_line state.board_list_error
+  in
+  let render_list_error err =
+    box_line buf cols
+      (Ansi.red ^ "  (data unreliable: "
+      ^ fit_width err (max 1 (cols - 24))
+      ^ ")" ^ Ansi.reset)
+  in
   if count = 0 then begin
-    (match board_error with
-     | Some err ->
-         box_line buf cols
-           (Ansi.red ^ "  (data unreliable: "
-           ^ fit_width err (cols - 24)
-           ^ ")" ^ Ansi.reset)
+    (match board_list_error with
+     | Some err -> render_list_error err
      | None ->
          box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset));
     for _ = 1 to rows - 7 do
       box_empty buf cols
     done
   end else begin
-    let content_height = rows - 7 in
+    Option.iter render_list_error board_list_error;
+    let error_rows = if Option.is_some board_list_error then 1 else 0 in
+    let content_height = max 0 (rows - 7 - error_rows) in
     let scroll_offset =
       if state.board_cursor >= content_height then
         state.board_cursor - content_height + 1
@@ -564,9 +595,19 @@ let render_board_list (state : state) =
     ~cols buf
 
 (** Render the Board surface (read view). *)
-let render_board_read (state : state) (post : board_post) =
+let render_board_read (state : state) (list_post : board_post) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
+
+  let detail =
+    Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
+  in
+  let post =
+    match detail with
+    | Board_detail.Ready (detail_post, _) -> detail_post
+    | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+        list_post
+  in
 
   let header = Printf.sprintf " MASC Board  %s[%s]%s  by %s  +%d  c%d"
     Ansi.cyan
@@ -595,32 +636,41 @@ let render_board_read (state : state) (post : board_post) =
   (* Body lines *)
   let text_width = cols - 8 in
   let body_lines =
-    let words =
-      String.split_on_char ' ' (Terminal_text.single_line post.bp_body)
-    in
-    let rec wrap acc current = function
-      | [] -> List.rev (if current = "" then acc else current :: acc)
-      | w :: ws ->
-          let candidate = if current = "" then w else current ^ " " ^ w in
-          if String.length candidate <= text_width then
-            wrap acc candidate ws
-          else
-            wrap (current :: acc) w ws
-    in
-    wrap [] "" words
+    Message_layout.wrap_words ~max_cells:text_width
+      (Terminal_text.single_line post.bp_body)
   in
   let total_lines = List.length body_lines in
+  let detail_lines =
+    match detail with
+    | Board_detail.Absent ->
+        [Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset]
+    | Board_detail.Loading ->
+        [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
+    | Board_detail.Failed error ->
+        [ Ansi.red ^ "  Board detail unavailable: "
+          ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
+          ^ Ansi.reset
+        ]
+    | Board_detail.Ready (_, comments) ->
+        List.map
+          (fun c ->
+             Printf.sprintf "  %s: %s"
+               (fit_width (Terminal_text.single_line c.bc_author) 16)
+               (fit_width (Terminal_text.single_line c.bc_content) (cols - 24)))
+          comments
+  in
+  let detail_line_count = List.length detail_lines in
   let row_budget =
     Render_schedule.allocate_board_read ~terminal_rows:rows
       ~body_line_count:total_lines
-      ~comment_count:(List.length state.board_comments)
+      ~comment_count:detail_line_count
   in
   let content_height = row_budget.body_rows in
   let comment_height = row_budget.comment_rows in
   let scroll =
     Render_schedule.project_board_read_scroll ~body_line_count:total_lines
       ~body_rows:content_height
-      ~comment_count:(List.length state.board_comments)
+      ~comment_count:detail_line_count
       ~comment_rows:comment_height state.board_scroll
   in
   state.board_scroll <- scroll.normalized_scroll;
@@ -636,12 +686,7 @@ let render_board_read (state : state) (post : board_post) =
     box_divider buf cols;
     box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
     for i = 0 to comment_height - 1 do
-      let c = List.nth state.board_comments (i + scroll.comment_offset) in
-      let line = Printf.sprintf "  %s: %s"
-        (fit_width (Terminal_text.single_line c.bc_author) 16)
-        (fit_width (Terminal_text.single_line c.bc_content) (cols - 24))
-      in
-      box_line buf cols line
+      box_line buf cols (List.nth detail_lines (i + scroll.comment_offset))
     done
   end;
 
@@ -754,7 +799,8 @@ let render_planning_list (state : state) =
                  g.pg_priority
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
-                    (cols - 30 - (depth * 2) - String.length due))
+                    (cols - 30 - (depth * 2)
+                   - Message_layout.display_width due))
                  (Ansi.dim ^ due ^ Ansi.reset)
              in
              let content =
@@ -1103,9 +1149,13 @@ let render_keeper_detail (state : state) =
     box_divider buf cols;
 
     (* Content area with scrolling *)
-    let content_height = rows - 6 in  (* header + title + divider + bottom + footer + extra *)
+    let content_height = max 0 (rows - 6) in  (* header + title + divider + bottom + footer + extra *)
     let visible_lines = min content_height total_lines in
-    let scroll = min state.detail_scroll (max 0 (total_lines - content_height)) in
+    let scroll =
+      Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
+        ~content_height state.detail_scroll
+    in
+    state.detail_scroll <- scroll;
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in
@@ -1450,11 +1500,18 @@ let render_keeper_message (state : state) =
            ("  recovery needs retry; Ctrl-R reloads durable recovery state: "
           ^ Keeper_chat.terminal_safe_text detail)
      | Some _, _, None | None, Some _, None | None, None, None -> ());
-    if not target_registered then
-      box_line_styled buf cols ~style:Ansi.red
-        (Printf.sprintf
-           "  Keeper %s is no longer registered; draft retained; Esc to choose another"
-           display_keeper_name);
+    if not target_registered then begin
+      let unavailable_message =
+        match state.keepers_error with
+        | Some _ ->
+            "  Keeper roster is unavailable; draft retained; Esc to choose another"
+        | None ->
+            Printf.sprintf
+              "  Keeper %s is no longer registered; draft retained; Esc to choose another"
+              display_keeper_name
+      in
+      box_line_styled buf cols ~style:Ansi.red unavailable_message
+    end;
     let input = Buffer.contents state.msg_input in
     let visible_input =
       Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)) input
@@ -1491,6 +1548,8 @@ let render_keeper_message (state : state) =
       | None, None, None ->
           (match state.msg_unverified, target_registered with
            | Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
+           | None, false when Option.is_some state.keepers_error ->
+               "Enter:disabled (roster unavailable)"
            | None, false -> "Enter:disabled (Keeper unavailable)"
            | None, true -> "Enter:send")
     in

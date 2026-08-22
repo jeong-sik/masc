@@ -174,7 +174,7 @@ let overview_frame_rows ~has_cluster
 let test_overview_rows_share_one_viewport_budget () =
   let max_data =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "14-row attention allocation" 2 max_data.attention_rows;
   check int "14-row task allocation" 1 max_data.task_rows;
@@ -183,7 +183,7 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true max_data);
   let task_error =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~task_count:5 ~has_task_error:true
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:true
   in
   check int "task error keeps its reserved row" 1
     task_error.task_error_rows;
@@ -192,35 +192,58 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true task_error);
   let full =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "full viewport restores attention cap" 6 full.attention_rows;
   check int "full viewport restores task cap" 5 full.task_rows;
+  let events_only =
+    Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
+      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+  in
+  check int "events size the shared panel" 6 events_only.attention_rows;
+  check int "events preserve full task rows" 5 events_only.task_rows;
+  let mixed_panel =
+    Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
+      ~attention_count:2 ~event_count:4 ~task_count:5 ~has_task_error:false
+  in
+  check int "the longer panel column determines shared rows" 4
+    mixed_panel.attention_rows;
+  check int "mixed panel counts preserve full task rows" 5 mixed_panel.task_rows;
+  let compact_events_only =
+    Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
+      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+  in
+  check int "compact events use remaining panel rows" 2
+    compact_events_only.attention_rows;
+  check int "compact events preserve one task row" 1
+    compact_events_only.task_rows;
   for terminal_rows = 14 to 40 do
     List.iter
       (fun has_cluster ->
         for attention_count = 0 to 8 do
-          for task_count = 0 to 7 do
-            List.iter
-              (fun has_task_error ->
-                let allocation =
-                  Schedule.allocate_overview ~terminal_rows ~has_cluster
-                    ~attention_count ~task_count ~has_task_error
-                in
-                let total = overview_frame_rows ~has_cluster allocation in
-                if total > terminal_rows then
-                  failf
-                    "overview exceeds viewport: rows=%d cluster=%b attention=%d tasks=%d error=%b total=%d"
-                    terminal_rows has_cluster attention_count task_count
-                    has_task_error total;
-                if
-                  allocation.attention_rows < 0
-                  || allocation.task_error_rows < 0
-                  || allocation.task_rows < 0
-                then
-                  failf "overview allocation became negative at rows=%d"
-                    terminal_rows)
-              [ false; true ]
+          for event_count = 0 to 8 do
+            for task_count = 0 to 7 do
+              List.iter
+                (fun has_task_error ->
+                  let allocation =
+                    Schedule.allocate_overview ~terminal_rows ~has_cluster
+                      ~attention_count ~event_count ~task_count ~has_task_error
+                  in
+                  let total = overview_frame_rows ~has_cluster allocation in
+                  if total > terminal_rows then
+                    failf
+                      "overview exceeds viewport: rows=%d cluster=%b attention=%d events=%d tasks=%d error=%b total=%d"
+                      terminal_rows has_cluster attention_count event_count
+                      task_count has_task_error total;
+                  if
+                    allocation.attention_rows < 0
+                    || allocation.task_error_rows < 0
+                    || allocation.task_rows < 0
+                  then
+                    failf "overview allocation became negative at rows=%d"
+                      terminal_rows)
+                [ false; true ]
+            done
           done
         done)
       [ false; true ]
@@ -334,6 +357,78 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
 
+let test_keeper_detail_scroll_normalizes_across_bounds () =
+  let normalize = Schedule.normalize_keeper_detail_scroll in
+  let bottom = normalize ~line_count:29 ~content_height:14 max_int in
+  check int "overscroll reaches the exact bottom" 15 bottom;
+  let resized = normalize ~line_count:29 ~content_height:15 bottom in
+  check int "larger viewport clamps the persisted bottom" 14 resized;
+  check int "one upward action reveals the previous row" 13
+    (max 0 (resized - 1));
+  let measured = normalize ~line_count:31 ~content_height:15 max_int in
+  check int "measured context adds two scroll positions" 16 measured;
+  check int "content shrink clamps to its new bottom" 14
+    (normalize ~line_count:29 ~content_height:15 measured);
+  check int "content growth preserves the current offset" 14
+    (normalize ~line_count:31 ~content_height:15 resized);
+  check int "negative raw state normalizes to zero" 0
+    (normalize ~line_count:29 ~content_height:15 (-1));
+  check int "fully visible content cannot scroll" 0
+    (normalize ~line_count:10 ~content_height:15 max_int)
+
+let test_overview_event_window_follows_and_preserves_anchor () =
+  let project = Schedule.project_overview_event_window in
+  let bottom = project ~event_count:6 ~visible_rows:2 max_int in
+  check int "overscroll reaches oldest retained pair" 4 bottom.oew_offset;
+  check int "oldest range begins at five" 5 bottom.oew_first_position;
+  check int "oldest range ends at six" 6 bottom.oew_last_position;
+  let newer = project ~event_count:6 ~visible_rows:2 3 in
+  check int "one upward action moves one row" 3 newer.oew_offset;
+  check int "one upward range begins at four" 4 newer.oew_first_position;
+  check int "one upward range ends at five" 5 newer.oew_last_position;
+  check int "older input saturates at the bottom" 4
+    (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
+       bottom.oew_offset);
+  check int "newer input moves from the bounded bottom" 3
+    (Schedule.scroll_overview_events_newer ~event_count:6 ~visible_rows:2
+       (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
+          bottom.oew_offset));
+  let expanded = project ~event_count:6 ~visible_rows:6 bottom.oew_offset in
+  check int "larger viewport clamps to newest" 0 expanded.oew_offset;
+  check int "expanded range starts at one" 1 expanded.oew_first_position;
+  check int "expanded range shows all events" 6 expanded.oew_last_position;
+  let anchored_scroll =
+    Schedule.overview_event_offset_after_prepend ~retained_count:7
+      bottom.oew_offset
+  in
+  let anchored = project ~event_count:7 ~visible_rows:2 anchored_scroll in
+  check int "prepend advances a manual anchor" 5 anchored.oew_offset;
+  check int "anchored range starts at six" 6 anchored.oew_first_position;
+  check int "anchored range retains the old tail" 7 anchored.oew_last_position;
+  check int "newest-following offset stays at zero" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:7 0);
+  check int "negative raw anchor normalizes to zero" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:7 (-1));
+  check int "retention cap bounds pathological anchor" 10
+    (Schedule.overview_event_offset_after_prepend ~retained_count:11 max_int);
+  let shrunk = project ~event_count:1 ~visible_rows:2 bottom.oew_offset in
+  check int "content shrink clamps to newest" 0 shrunk.oew_offset;
+  check int "single event starts at one" 1 shrunk.oew_first_position;
+  check int "single event ends at one" 1 shrunk.oew_last_position;
+  let empty = project ~event_count:0 ~visible_rows:2 max_int in
+  check int "empty events have zero offset" 0 empty.oew_offset;
+  check int "empty events have no first position" 0 empty.oew_first_position;
+  check int "empty events have no last position" 0 empty.oew_last_position;
+  let hidden = project ~event_count:1 ~visible_rows:0 1 in
+  check int "zero-row window retains a bounded offset" 1 hidden.oew_offset;
+  check int "zero-row window has no first position" 0 hidden.oew_first_position;
+  check int "zero-row window has no last position" 0 hidden.oew_last_position;
+  check int "zero-row older input saturates without overflow" max_int
+    (Schedule.scroll_overview_events_older ~event_count:max_int ~visible_rows:0
+       max_int);
+  check int "negative retained count cannot overflow" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:min_int 1)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -365,5 +460,9 @@ let () =
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
             test_board_read_scroll_reaches_hidden_comments
+        ; test_case "keeper detail scroll follows current bounds" `Quick
+            test_keeper_detail_scroll_normalizes_across_bounds
+        ; test_case "overview events follow and preserve manual anchor" `Quick
+            test_overview_event_window_follows_and_preserves_anchor
         ] )
     ]

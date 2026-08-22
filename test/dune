@@ -2607,6 +2607,26 @@
  (modules test_tui_frame_presenter)
  (libraries alcotest masc_tui_frame_presenter))
 
+(test
+ (name test_tui_board_selection)
+ (modules test_tui_board_selection)
+ (libraries alcotest masc_tui_board_selection))
+
+(test
+ (name test_tui_planning_selection)
+ (modules test_tui_planning_selection)
+ (libraries alcotest masc_tui_planning_selection))
+
+(test
+ (name test_tui_keeper_selection)
+ (modules test_tui_keeper_selection)
+ (libraries alcotest masc_tui_keeper_selection))
+
+(test
+ (name test_tui_board_detail)
+ (modules test_tui_board_detail)
+ (libraries alcotest masc_tui_board_detail))
+
 (rule
  (alias runtest-test_tui_keyboard_input)
  (deps

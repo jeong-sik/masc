@@ -78,6 +78,52 @@ let nonnegative_width width = max 0 width
 let keeper_context_bar_width ~inner_width =
   nonnegative_width (min 30 (inner_width - 40))
 
+let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
+  let line_count = max 0 line_count in
+  let content_height = max 0 content_height in
+  let maximum_scroll = max 0 (line_count - content_height) in
+  max 0 (min scroll maximum_scroll)
+
+type overview_event_window = {
+  oew_offset : int;
+  oew_first_position : int;
+  oew_last_position : int;
+}
+
+let project_overview_event_window ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let maximum_offset = max 0 (event_count - visible_rows) in
+  let oew_offset = max 0 (min scroll maximum_offset) in
+  let visible_count = min visible_rows (event_count - oew_offset) in
+  let oew_first_position = if visible_count = 0 then 0 else oew_offset + 1 in
+  let oew_last_position = if visible_count = 0 then 0 else oew_offset + visible_count in
+  { oew_offset; oew_first_position; oew_last_position }
+
+let scroll_overview_events_older ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  let next_offset =
+    if current.oew_offset >= event_count then current.oew_offset
+    else current.oew_offset + 1
+  in
+  (project_overview_event_window ~event_count ~visible_rows
+     next_offset).oew_offset
+
+let scroll_overview_events_newer ~event_count ~visible_rows scroll =
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  (project_overview_event_window ~event_count ~visible_rows
+     (current.oew_offset - 1)).oew_offset
+
+let overview_event_offset_after_prepend ~retained_count scroll =
+  let retained_count = max 0 retained_count in
+  let maximum_offset = if retained_count = 0 then 0 else retained_count - 1 in
+  if scroll <= 0 || maximum_offset = 0 then 0
+  else
+    let bounded = min scroll maximum_offset in
+    if bounded = maximum_offset then maximum_offset else bounded + 1
+
 module Input_wait = struct
   type 'a poll_result =
     | Ready of 'a
@@ -126,14 +172,16 @@ type overview_allocation = {
   task_rows : int;
 }
 
-let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~task_count
-    ~has_task_error =
+let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
+    ~task_count ~has_task_error =
   (* Ten rows are invariant chrome; the cluster/project row is present only
      after a briefing has loaded. Reserve one row for a nonempty task block,
-     then preserve the existing Attention-first priority. *)
+     then size the shared Attention / Recent Events panel from either side. *)
   let fixed_rows = 10 + (if has_cluster then 1 else 0) in
   let available = max 0 (terminal_rows - fixed_rows) in
-  let desired_attention_rows = min 6 (max 1 attention_count) in
+  let desired_panel_rows =
+    min 6 (max 1 (max attention_count event_count))
+  in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =
     if task_count <= 0 then
@@ -146,7 +194,7 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~task_count
   in
   let reserved_task_rows = min 1 desired_task_block_rows in
   let attention_rows =
-    min desired_attention_rows (max 0 (available - reserved_task_rows))
+    min desired_panel_rows (max 0 (available - reserved_task_rows))
   in
   let task_block_rows =
     min desired_task_block_rows (max 0 (available - attention_rows))

@@ -1,17 +1,17 @@
 # TUI Operator approval screenshots — 2026-08-22
 
 These screenshots come from the actual `masc_tui.exe` built at
-`33a5f7ef1bca097b8d71ee3699ddb4d417ff440e` for PR #29466. Each image used an
+`897b58aaf07745d4515f5e87c23872d25c129553` for PR #29466. Each image used an
 independent temporary workspace and local fixture HTTP server. The TUI itself
 ran in a real PTY through ttyd and rendered in Chromium.
 
-- Captured: `2026-08-22T04:05:03Z`–`2026-08-22T04:05:09Z`
+- Captured: `2026-08-22T04:14:02Z`–`2026-08-22T04:14:08Z`
 - PR / related issue: `#29466` / `#29418`
-- Code source SHA: `33a5f7ef1bca097b8d71ee3699ddb4d417ff440e`
-- Evidence asset commit SHA: `fb2825433bf9d0356cb63ae120fbfb3f1597d74d`
+- Code source SHA: `897b58aaf07745d4515f5e87c23872d25c129553`
+- Evidence asset commit SHA: `5fb44971fb93edc92fd77f5973012442e90a28a0`
 - Worktree before capture: clean
-- Executable: `_build/default/bin/masc_tui.exe`, `26,191,312` bytes,
-  SHA-256 `d6b8bba003264e26010453db313388ed72716c54e318364fe808b85c93df78a1`
+- Executable: `_build/default/bin/masc_tui.exe`, `26,191,616` bytes,
+  SHA-256 `eff98be54d03da842466c14f6cc55ed74695bf32cee17b36f55670fb992aa6a1`
 - Build: `scripts/dune-local.sh build bin/masc_tui.exe
   @test/runtest-test_tui_decode @test/runtest-test_tui_operator_projection
   @test/runtest-test_tui_http_ast @test/runtest-test_operator_control_actions`

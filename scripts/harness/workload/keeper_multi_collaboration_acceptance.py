@@ -108,6 +108,18 @@ KNOWN_ASSERTIONS = {
     "goal_verifier_dashboard_browser_observed",
 }
 
+# Goal verification is an autonomous durable drain, not one synchronous model
+# request. A retryable provider failure is re-armed by the runtime's default
+# 60-second maintenance pulse. The acceptance budget must therefore cover a
+# full first request, that re-arm interval, and a full second request. Keep one
+# additional pulse as scheduling/polling margin so a retry observed near the
+# request boundary is not turned into a false-negative campaign result.
+GOAL_VERIFIER_RETRY_INTERVAL_SEC = 60.0
+
+
+def goal_verifier_convergence_timeout(request_timeout: float) -> float:
+    return (2.0 * request_timeout) + (2.0 * GOAL_VERIFIER_RETRY_INTERVAL_SEC)
+
 
 class AcceptanceError(RuntimeError):
     pass
@@ -1142,8 +1154,10 @@ class MissionRun:
         phase: str,
         completion_state: str | None = None,
         criterion_state: str | None = None,
-        timeout: float = 300.0,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
+        if timeout is None:
+            timeout = goal_verifier_convergence_timeout(self.timeout)
         deadline = time.monotonic() + timeout
         attempt = 0
         last: dict[str, Any] | None = None

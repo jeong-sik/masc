@@ -4,6 +4,7 @@ open Masc_tui_render
 open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
+module Board_detail = Masc_tui_board_detail
 module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
@@ -282,8 +283,9 @@ type http_surface_results = {
 type async_msg =
   | Http_refresh_done of http_surface_results
   | Http_refresh_failed of string * Approval.Flow.generation option
-  | Board_post_refresh_done of string * (board_post * board_comment list, string) result
-  | Board_post_refresh_failed of string * string
+  | Board_post_refresh_done of
+      Board_detail.request * (board_post * board_comment list, string) result
+  | Board_post_refresh_failed of Board_detail.request * string
   | Approval_decision_done of
       approval_item
       * approval_decision
@@ -1042,17 +1044,27 @@ let replace_board_posts state posts =
   state.board_posts <- posts;
   state.board_cursor <- cursor
 
+let leave_board_detail state =
+  state.board_mode <- Board_list;
+  state.board_scroll <- 0;
+  state.board_detail <- Board_detail.clear state.board_detail
+
+let leave_missing_board_detail state =
+  match state.board_mode with
+  | Board_read post_id
+    when not (List.exists (fun post -> String.equal post.bp_id post_id) state.board_posts) ->
+      leave_board_detail state
+  | Board_list | Board_read _ -> ()
+
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
-      state.board_error <- None;
+      state.board_list_error <- None;
+      leave_missing_board_detail state
   | Error err ->
-      state.board_posts <- [];
-      state.board_comments <- [];
-      state.board_mode <- Board_list;
-      remember_surface_error state ~surface:"board"
-        ~current_error:state.board_error
-        ~set_error:(fun value -> state.board_error <- value)
+      remember_surface_error state ~surface:"board list"
+        ~current_error:state.board_list_error
+        ~set_error:(fun value -> state.board_list_error <- value)
         err
 
 let apply_planning_load state = function
@@ -1155,58 +1167,67 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
                (load_http_surfaces ~host ~port ~approval_generation))
   end
 
-let board_detail_still_current state post_id =
-  match state.view, state.board_mode with
-  | Board, Board_read current -> String.equal current post_id
-  | _ -> false
+let board_detail_request_still_current state request =
+  Board_detail.is_current state.board_detail request
+  &&
+  match state.board_mode with
+  | Board_read post_id ->
+      String.equal post_id (Board_detail.request_post_id request)
+  | Board_list -> false
 
-let apply_board_post_load state ~post_id = function
-  | Ok (post, comments) when board_detail_still_current state post_id ->
-      state.board_error <- None;
-      state.board_comments <- comments;
-      replace_board_posts state
-        (post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts)
-  | Ok _ -> ()
-  | Error err ->
-      if board_detail_still_current state post_id then
-        remember_surface_error state ~surface:"board"
-          ~current_error:state.board_error
-          ~set_error:(fun value -> state.board_error <- value)
-          err
-
-let same_inflight_post inflight post_id =
-  match inflight with
-  | Some current -> String.equal current post_id
-  | None -> false
-
-let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight
-    ~mailbox =
-  if not (same_inflight_post !refresh_inflight post_id) then begin
-    refresh_inflight := Some post_id;
-    let clear_inflight () =
-      if same_inflight_post !refresh_inflight post_id then refresh_inflight := None
+let apply_board_post_load state request result =
+  if board_detail_request_still_current state request then
+    let post_id = Board_detail.request_post_id request in
+    let fail err =
+      state.board_detail <-
+        Board_detail.complete state.board_detail request (Error err);
+      if state.view <> Board then
+        add_event state "error" (Printf.sprintf "Board detail unavailable: %s" err)
     in
+    match result with
+    | Ok (post, comments) when String.equal post.bp_id post_id ->
+        state.board_detail <-
+          Board_detail.complete state.board_detail request (Ok (post, comments));
+        replace_board_posts state
+          (post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts)
+    | Ok (post, _) ->
+        fail
+          (Printf.sprintf
+             "Board detail response ID mismatch: expected %s, received %s"
+             post_id post.bp_id)
+    | Error err -> fail err
+
+let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
+  match Board_detail.start state.board_detail ~post_id with
+  | Board_detail.Already_loading -> ()
+  | Board_detail.Started (detail, request) ->
+    state.board_detail <- detail;
     let run_refresh () =
       try
         enqueue_async mailbox
           (Board_post_refresh_done
-             (post_id, load_board_post ~host ~port ~post_id))
+             (request, load_board_post ~host ~port ~post_id))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         enqueue_async mailbox
           (Board_post_refresh_failed
-             ( post_id,
+             ( request,
                Printf.sprintf "board post refresh failed: %s"
                  (Printexc.to_string exn) ))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
     | None ->
-        Fun.protect ~finally:clear_inflight (fun () ->
-            apply_board_post_load state ~post_id
-              (load_board_post ~host ~port ~post_id))
-  end
+        let result =
+          try load_board_post ~host ~port ~post_id with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              Error
+                (Printf.sprintf "board post refresh failed: %s"
+                   (Printexc.to_string exn))
+        in
+        apply_board_post_load state request result
 
 let apply_approval_decision_result state approval decision approvals result =
   (match result with
@@ -1300,8 +1321,8 @@ let handle_approval_decision state approval decision ~mailbox =
            (approval_decision_key decision)
            approval.ap_summary)
 
-let apply_async_message state ~base_path ~http_refresh_inflight
-    ~board_post_refresh_inflight ~mailbox = function
+let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
+  function
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results
@@ -1314,18 +1335,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         approval_generation;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err
-  | Board_post_refresh_done (post_id, result) ->
-      if same_inflight_post !board_post_refresh_inflight post_id then
-        board_post_refresh_inflight := None;
-      apply_board_post_load state ~post_id result
-  | Board_post_refresh_failed (post_id, err) ->
-      if same_inflight_post !board_post_refresh_inflight post_id then
-        board_post_refresh_inflight := None;
-      if board_detail_still_current state post_id then
-        remember_surface_error state ~surface:"board"
-          ~current_error:state.board_error
-          ~set_error:(fun value -> state.board_error <- value)
-          err
+  | Board_post_refresh_done (request, result) ->
+      apply_board_post_load state request result
+  | Board_post_refresh_failed (request, err) ->
+      apply_board_post_load state request (Error err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -1468,14 +1481,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if apply_keeper_chat_reconciliation state ~base_path request result then
         load_from_masc_dir state base_path
 
-let drain_async_messages state ~base_path ~http_refresh_inflight
-    ~board_post_refresh_inflight mailbox =
+let drain_async_messages state ~base_path ~http_refresh_inflight mailbox =
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
     | Some msg ->
-        apply_async_message state ~base_path ~http_refresh_inflight
-          ~board_post_refresh_inflight ~mailbox msg;
+        apply_async_message state ~base_path ~http_refresh_inflight ~mailbox
+          msg;
         loop true
   in
   loop false
@@ -1559,7 +1571,6 @@ let main () =
   let host = Env_config_core.masc_host () in
   let port = state.port in
   let http_refresh_inflight = ref false in
-  let board_post_refresh_inflight = ref None in
   let async_messages = Eio.Stream.create 32 in
   (match Keeper_chat_recovery.load_pending ~base_path with
    | Ok None -> ()
@@ -1634,7 +1645,7 @@ let main () =
       end;
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          ~board_post_refresh_inflight async_messages
+          async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       (* Check for input *)
       let input_timeout =
@@ -1718,7 +1729,6 @@ let main () =
                 (match state.board_mode with
                  | Board_read post_id ->
                      start_board_post_refresh state ~host ~port ~post_id
-                       ~refresh_inflight:board_post_refresh_inflight
                        ~mailbox:async_messages
                  | Board_list -> ())
             | Planning ->
@@ -1760,8 +1770,7 @@ let main () =
             | Board ->
                 (match state.board_mode with
                  | Board_read _ ->
-                     state.board_mode <- Board_list;
-                     state.board_scroll <- 0
+                     leave_board_detail state
                  | Board_list -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -1874,7 +1883,6 @@ let main () =
                           state.board_scroll <- 0;
                           start_board_post_refresh state ~host ~port
                             ~post_id:p.bp_id
-                            ~refresh_inflight:board_post_refresh_inflight
                             ~mailbox:async_messages
                       | None -> ())
                  | Board_read _ -> ())
@@ -1926,7 +1934,7 @@ let main () =
       Eio.Fiber.yield ();
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          ~board_post_refresh_inflight async_messages
+          async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
 
       (* Periodic refresh *)
@@ -1950,7 +1958,6 @@ let main () =
              (match state.board_mode with
               | Board_read post_id ->
                   start_board_post_refresh state ~host ~port ~post_id
-                    ~refresh_inflight:board_post_refresh_inflight
                     ~mailbox:async_messages
               | Board_list -> ())
          | Planning ->

@@ -376,6 +376,59 @@ let test_keeper_detail_scroll_normalizes_across_bounds () =
   check int "fully visible content cannot scroll" 0
     (normalize ~line_count:10 ~content_height:15 max_int)
 
+let test_overview_event_window_follows_and_preserves_anchor () =
+  let project = Schedule.project_overview_event_window in
+  let bottom = project ~event_count:6 ~visible_rows:2 max_int in
+  check int "overscroll reaches oldest retained pair" 4 bottom.oew_offset;
+  check int "oldest range begins at five" 5 bottom.oew_first_position;
+  check int "oldest range ends at six" 6 bottom.oew_last_position;
+  let newer = project ~event_count:6 ~visible_rows:2 3 in
+  check int "one upward action moves one row" 3 newer.oew_offset;
+  check int "one upward range begins at four" 4 newer.oew_first_position;
+  check int "one upward range ends at five" 5 newer.oew_last_position;
+  check int "older input saturates at the bottom" 4
+    (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
+       bottom.oew_offset);
+  check int "newer input moves from the bounded bottom" 3
+    (Schedule.scroll_overview_events_newer ~event_count:6 ~visible_rows:2
+       (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
+          bottom.oew_offset));
+  let expanded = project ~event_count:6 ~visible_rows:6 bottom.oew_offset in
+  check int "larger viewport clamps to newest" 0 expanded.oew_offset;
+  check int "expanded range starts at one" 1 expanded.oew_first_position;
+  check int "expanded range shows all events" 6 expanded.oew_last_position;
+  let anchored_scroll =
+    Schedule.overview_event_offset_after_prepend ~retained_count:7
+      bottom.oew_offset
+  in
+  let anchored = project ~event_count:7 ~visible_rows:2 anchored_scroll in
+  check int "prepend advances a manual anchor" 5 anchored.oew_offset;
+  check int "anchored range starts at six" 6 anchored.oew_first_position;
+  check int "anchored range retains the old tail" 7 anchored.oew_last_position;
+  check int "newest-following offset stays at zero" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:7 0);
+  check int "negative raw anchor normalizes to zero" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:7 (-1));
+  check int "retention cap bounds pathological anchor" 10
+    (Schedule.overview_event_offset_after_prepend ~retained_count:11 max_int);
+  let shrunk = project ~event_count:1 ~visible_rows:2 bottom.oew_offset in
+  check int "content shrink clamps to newest" 0 shrunk.oew_offset;
+  check int "single event starts at one" 1 shrunk.oew_first_position;
+  check int "single event ends at one" 1 shrunk.oew_last_position;
+  let empty = project ~event_count:0 ~visible_rows:2 max_int in
+  check int "empty events have zero offset" 0 empty.oew_offset;
+  check int "empty events have no first position" 0 empty.oew_first_position;
+  check int "empty events have no last position" 0 empty.oew_last_position;
+  let hidden = project ~event_count:1 ~visible_rows:0 1 in
+  check int "zero-row window retains a bounded offset" 1 hidden.oew_offset;
+  check int "zero-row window has no first position" 0 hidden.oew_first_position;
+  check int "zero-row window has no last position" 0 hidden.oew_last_position;
+  check int "zero-row older input saturates without overflow" max_int
+    (Schedule.scroll_overview_events_older ~event_count:max_int ~visible_rows:0
+       max_int);
+  check int "negative retained count cannot overflow" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:min_int 1)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -409,5 +462,7 @@ let () =
             test_board_read_scroll_reaches_hidden_comments
         ; test_case "keeper detail scroll follows current bounds" `Quick
             test_keeper_detail_scroll_normalizes_across_bounds
+        ; test_case "overview events follow and preserve manual anchor" `Quick
+            test_overview_event_window_follows_and_preserves_anchor
         ] )
     ]

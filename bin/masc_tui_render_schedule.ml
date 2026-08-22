@@ -84,6 +84,46 @@ let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
   let maximum_scroll = max 0 (line_count - content_height) in
   max 0 (min scroll maximum_scroll)
 
+type overview_event_window = {
+  oew_offset : int;
+  oew_first_position : int;
+  oew_last_position : int;
+}
+
+let project_overview_event_window ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let maximum_offset = max 0 (event_count - visible_rows) in
+  let oew_offset = max 0 (min scroll maximum_offset) in
+  let visible_count = min visible_rows (event_count - oew_offset) in
+  let oew_first_position = if visible_count = 0 then 0 else oew_offset + 1 in
+  let oew_last_position = if visible_count = 0 then 0 else oew_offset + visible_count in
+  { oew_offset; oew_first_position; oew_last_position }
+
+let scroll_overview_events_older ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  let next_offset =
+    if current.oew_offset >= event_count then current.oew_offset
+    else current.oew_offset + 1
+  in
+  (project_overview_event_window ~event_count ~visible_rows
+     next_offset).oew_offset
+
+let scroll_overview_events_newer ~event_count ~visible_rows scroll =
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  (project_overview_event_window ~event_count ~visible_rows
+     (current.oew_offset - 1)).oew_offset
+
+let overview_event_offset_after_prepend ~retained_count scroll =
+  let retained_count = max 0 retained_count in
+  let maximum_offset = if retained_count = 0 then 0 else retained_count - 1 in
+  if scroll <= 0 || maximum_offset = 0 then 0
+  else
+    let bounded = min scroll maximum_offset in
+    if bounded = maximum_offset then maximum_offset else bounded + 1
+
 module Input_wait = struct
   type 'a poll_result =
     | Ready of 'a

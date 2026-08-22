@@ -248,7 +248,7 @@ describe('server-push Agent Core typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Handoff requested · alpha→beta · load')
   })
 
-  it('creates a journal entry and compaction record from a typed agent_core:context_compacted payload', () => {
+  it('creates a journal entry from a typed agent_core:context_compacted payload', () => {
     emitEvent({
       type: 'agent_core:context_compacted',
       event_type: 'context_compacted',

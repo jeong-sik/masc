@@ -437,23 +437,6 @@ describe('SSEMessageSchema', () => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
   })
 
-  it('accepts a typed compaction snapshot cache completion', () => {
-    expect(SSEMessageSchema.safeParse({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'keeper-1',
-      status: 'ready',
-      ts_unix: 1_712_000_000,
-    }).success).toBe(true)
-  })
-
-  it('rejects compaction snapshot cache completion without a closed status', () => {
-    expect(SSEMessageSchema.safeParse({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'keeper-1',
-      status: 'warming',
-    }).success).toBe(false)
-  })
-
   it('accepts a gate_mode_changed event with a null previous_mode', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'gate_mode_changed',

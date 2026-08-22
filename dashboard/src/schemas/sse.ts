@@ -67,7 +67,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_chat_appended',
   'keeper_chat_operation_event',
   'keeper_waiting_inventory_changed',
-  'keeper_compaction_snapshots_changed',
   'agent_core_telemetry_sample',
   'ide_cursor_changed',
   'keeper_tool_call',
@@ -779,15 +778,6 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
     if (value.queue_kind !== 'chat_operation' && value.queue_kind !== 'event_queue') {
       return fail('queue_kind', 'Expected chat_operation or event_queue queue_kind')
-    }
-  }
-
-  if (value.type === 'keeper_compaction_snapshots_changed') {
-    if (typeof value.keeper_name !== 'string' || value.keeper_name.trim() === '') {
-      return fail('keeper_name', 'Expected non-empty keeper_name')
-    }
-    if (value.status !== 'ready' && value.status !== 'failed') {
-      return fail('status', 'Expected ready or failed compaction snapshot status')
     }
   }
 

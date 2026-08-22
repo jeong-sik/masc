@@ -439,7 +439,7 @@
 /* Disabled send reads clearly inert. */
 .v2-app .send:disabled { transform: none; }
 
-/* Compaction-snapshot trigger sub-label alignment. */
+/* Context-rail overlay trigger sub-label alignment. */
 .v2-app .cmp-open { flex-wrap: wrap; align-items: baseline; row-gap: 3px; }
 .v2-app .cmp-open-sub { margin-left: auto; }
 

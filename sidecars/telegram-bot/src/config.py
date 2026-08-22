@@ -100,7 +100,7 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices("TELEGRAM_ADMIN_USER_IDS", "admin_user_ids"),
     )
 
-    # Timeouts — match discord-bot + slack-bot env var naming so operators
+    # Timeouts — unprefixed names shared with imessage-bot so operators
     # don't need to remember per-sidecar prefixes for the common Gate knobs.
     gate_timeout_sec: float = Field(
         default=120.0,

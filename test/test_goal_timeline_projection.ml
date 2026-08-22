@@ -72,7 +72,30 @@ let test_severity_follows_the_phase () =
   check (option string) "blocked" (Some "bad") (severity_of "blocked");
   check (option string) "paused" (Some "warn") (severity_of "paused");
   check (option string) "executing" (Some "ok") (severity_of "executing");
-  check (option string) "completed" (Some "ok") (severity_of "completed")
+  check (option string) "verifying" (Some "ok") (severity_of "verifying");
+  check (option string) "completed" (Some "ok") (severity_of "completed");
+  check (option string) "dropped" (Some "ok") (severity_of "dropped")
+;;
+
+(* A phase this build cannot parse is not healthy. The old string match sent
+   every unrecognised token to "ok", so a corrupted producer event rendered
+   neutral — indistinguishable from a running goal for anyone scanning the
+   timeline by colour. The markers are loud in the summary text; this keeps
+   them loud in the severity too. *)
+let test_unparseable_phase_is_not_ok () =
+  let severity_of phase =
+    field
+      "severity"
+      (DGT.goal_event_timeline_json
+         (goal_phase_event (live_phase_payload ~phase ~actor:"sangsu")))
+  in
+  check (option string) "token no producer writes" (Some "warn") (severity_of "retired");
+  check (option string) "empty token" (Some "warn") (severity_of "");
+  check
+    (option string)
+    "missing phase falls to the marker, which is also unparseable"
+    (Some "warn")
+    (field "severity" (DGT.goal_event_timeline_json (goal_phase_event (`Assoc []))))
 ;;
 
 (* A producer that stops writing a field must show up, not disappear: the
@@ -175,6 +198,7 @@ let () =
       , [ test_case "phase event shape" `Quick test_normalizes_a_phase_event
         ; test_case "summary names the actor" `Quick test_summary_names_the_actor
         ; test_case "severity follows the phase" `Quick test_severity_follows_the_phase
+        ; test_case "unparseable phase is not ok" `Quick test_unparseable_phase_is_not_ok
         ; test_case "missing fields are marked" `Quick test_missing_payload_fields_are_marked
         ; test_case
             "unknown event type keeps its token"

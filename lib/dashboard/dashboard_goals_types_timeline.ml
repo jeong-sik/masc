@@ -265,12 +265,25 @@ let goal_event_timeline_json event =
           (* NDT-OK: bracketed marker, not a permissive default. *)
           |> Option.value ~default:"<missing payload.actor>"
         in
-        ( "Goal Phase",
-          Printf.sprintf "phase=%s by %s" phase actor,
-          (match phase with
-          | "blocked" -> "bad"
-          | "paused" -> "warn"
-          | _ -> "ok") )
+        (* Enumerated over [Goal_phase.t] rather than matched on the string, so
+           adding a phase to the variant fails this match instead of landing in
+           a healthy-looking bucket by default.
+
+           A phase this build cannot parse — including the [<missing ...>]
+           marker above — is `warn`, not `ok`. The marker is loud in the summary
+           text but the old `_ -> "ok"` made the row render neutral, the same as
+           a healthy event, so a corrupted producer event was invisible to an
+           operator scanning by colour. Live ledger check before the change: all
+           78 goal_phase rows carry one of the six known tokens, so nothing
+           in the store moves to `warn` because of this. *)
+        let severity =
+          match Goal_phase.of_string phase with
+          | Some Blocked -> "bad"
+          | Some Paused -> "warn"
+          | Some (Executing | Verifying | Completed | Dropped) -> "ok"
+          | None -> "warn"
+        in
+        ("Goal Phase", Printf.sprintf "phase=%s by %s" phase actor, severity)
     | _ ->
         ("Goal Event", event_type, "ok")
   in

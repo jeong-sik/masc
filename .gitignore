@@ -142,14 +142,18 @@ config/keepers/ramarama.toml
 /specs/bug-models/*_TTrace_*.bin
 specs/**/*_TTrace_*.bin
 
-# Operator-local scratch (PR/CR dumps, temp edits)
-pr_*.json
-pr-*.json
-pr_body_*.txt
-cr_*.txt
-comments_*.txt
-all_comments_*.txt
-test-integration-*.txt
+# Operator-local scratch (PR/CR dumps, temp edits).
+# Anchored to the repository root. Unanchored, `pr-*.json` matched every directory and
+# silently swallowed `.github/pr-status-labels.json` - a tracked config file that simply
+# never appeared in `git status`. Operators drop these dumps where they run the command,
+# which is the root, so the root is where the rule belongs.
+/pr_*.json
+/pr-*.json
+/pr_body_*.txt
+/cr_*.txt
+/comments_*.txt
+/all_comments_*.txt
+/test-integration-*.txt
 tmp_edit/
 .tmp/
 /refute_tmp/

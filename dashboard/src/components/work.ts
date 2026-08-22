@@ -508,14 +508,13 @@ function GoalDetailSection({ title, children }: { title?: string; children: unkn
 }
 
 // One labelled instant of the activity row: relative text, absolute time on
-// hover (TimeAgo). The goals endpoint serves ISO-8601 for all three instants;
-// a value that does not parse as a date is shown as sent, because TimeAgo
-// throws on an invalid date and a blank would hide the broken value.
+// hover and on the <time> element (TimeAgo). The goals endpoint serves ISO-8601
+// for all three instants (`tree_node_to_json`), so the value goes to TimeAgo
+// as served.
 function GoalDossierInstant({ label, at, testHook }: { label: string; at: string; testHook: string }) {
-  const parses = Number.isFinite(Date.parse(at))
   return html`
     <span data-goal-detail-when=${testHook}>
-      ${label} ${parses ? html`<${TimeAgo} timestamp=${at} />` : html`<span class="mono">${at}</span>`}
+      ${label} <${TimeAgo} timestamp=${at} />
     </span>
   `
 }

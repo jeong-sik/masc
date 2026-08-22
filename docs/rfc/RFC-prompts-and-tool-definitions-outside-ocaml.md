@@ -16,7 +16,7 @@ implementation_prs: []
 ## 0. Summary
 
 모델이 읽는 글(시스템 프롬프트 절, 턴 컨텍스트 머리말, 도구 설명과 파라미터 설명, 심판·요약
-프롬프트, 도구 결과 안내문)은 지금 약 75% 가 OCaml 문자열 리터럴에 있다. 운영자는 그 글을
+프롬프트, 도구 결과 안내문)은 지금 약 77% 가 OCaml 문자열 리터럴에 있다. 운영자는 그 글을
 재빌드 없이 바꿀 수 없고, 대시보드는 그 글이 어디서 왔는지 보여줄 수 없다. 이 RFC 는 그 글
 전부를 `<config-root>` 의 파일로 옮기고, OCaml 에는 **typed handler 바인딩만** 남기며,
 "OCaml 안 모델 대면 산문 바이트" 를 0 으로 내리는 래칫으로 완료를 정의한다.
@@ -24,55 +24,95 @@ implementation_prs: []
 RFC-0389 가 도구의 *선택*(Keeper 별 표면)을 다루고, 이 RFC 는 도구의 *정의*(본문)와
 프롬프트의 *소유*를 다룬다. 둘 다 같은 선언 축(`<config-root>` TOML/markdown)을 쓴다.
 
-## 1. 관측 (main `1c6d91deef`, 2026-08-22)
+## 1. 관측 (main `1c6d91deef`, 2026-08-22; §1.1 은 `b0f56b0e2d` 에서 재측정)
 
-측정 방법: `lib/` + `packages/agent_core/lib/` + `bin/` 의 주석 제외 문자열 리터럴 72,189개를
-추출해 파일 역할별로 분류했다. 입력 검증 오류("must be a string" 류 약 20 KB), 로그, 대시보드
-문구는 제외했다. 분류는 휴리스틱 + 수작업이라 ±5% 를 가정한다.
+### 1.1 OCaml 에 남은 모델 대면 산문 — 98,577 B / 1,025 리터럴 (main `b0f56b0e2d`)
 
-### 1.1 OCaml 에 남은 모델 대면 산문 — 약 93.8 KB / 874 리터럴
+비교: `config/prompts/*.md` 16개 = 29,075 B. 모델이 읽는 산문의 약 77% 가 OCaml 에 있다.
 
-비교: `config/prompts/*.md` 17개 = 30,961 B. 모델이 읽는 산문의 약 75% 가 OCaml 에 있다.
-
-**A. 도구·리소스·MCP 프롬프트 표면 — 78,582 B / 712개.** 소비자는 `Config.raw_all_tool_schemas`
+**A. 도구·리소스·MCP 프롬프트 표면 — 76,906 B / 688개, 37개 파일.** 소비자는 `Config.raw_all_tool_schemas`
 (`lib/config.ml:5`, 9개 모듈 연결) → MCP `tools/list`, 그리고
-`Keeper_tool_descriptor.model_visible_schemas` → agent-core tools 파라미터.
+`Keeper_tool_descriptor.model_visible_schemas` → agent-core tools 파라미터. 아래 표에서 B·C·D 에 들지 않는
+행 전부 — 규칙 (i) 행과, 필드명이 description 이 아니라 규칙 (ii) 로 재는 `tool_help_registry.ml`
+(`short_description`/`when_to_use`/`details_markdown`), `operator_tool.ml`, `mcp_server_eio_tool_profile.ml`
+(MCP initialize `instructions` 2종 + title 25개).
 
-| 파일 | bytes | n | 내용 |
-|---|---:|---:|---|
-| `lib/board_tool_adapter/board_tool_schemas.ml` | 6,995 | 76 | Board 공개 도구 17개 |
-| `lib/keeper/keeper_tool_descriptor.ml` | 6,964 | 50 | Execute/Grep/Read/Edit/Write 설명, keeper_* in-process 도구 |
-| `lib/task/tool_task_schemas.ml` | 5,777 | 36 | task 도구 7개 (`masc_add_task` 설명 하나가 982 B) |
-| `lib/keeper/keeper_schema.ml` | 5,486 | 55 | `masc_keeper_*` 15개 |
-| `bin/gen_tool_descriptors.ml` | 4,799 | 59 | `masc_*` 19개 spec → 빌드 시 OCaml 생성 (RFC-0057) |
-| `lib/tool_surface/tool_shard_types_board_keeper_projection.ml` | 4,342 | 38 | Board 8개의 keeper 용 별도 설명 |
-| `lib/keeper/keeper_tool_runtime_schemas.ml` | 4,181 | 15 | artifact_read, fusion, analyze_image |
-| `tool_shard_types_schemas_{execute,taskboard,surface,filesystem,base,voice,search_files,library}` | 17,733 | 115 | keeper shard 스키마군 |
-| `lib/tool_surface/tool_help_registry.ml` | 3,052 | 43 | `masc_tool_help` 도움말 5개 수기 |
-| `lib/tool_schemas/tool_schemas_*` 8개 | 10,159 | — | `masc_*` 나머지 |
-| `lib/operator/operator_tool.ml` | 1,734 | 13 | operator 도구 6개 |
-| `lib/mcp_server.ml` | 1,666 | 48 | server_info + resources/templates 14개 |
-| `lib/mcp_server_eio_tool_profile.ml` | 1,597 | 13 | MCP initialize `instructions` 2종 + title 25개 |
-| 기타 6개 (board_tool_registry, composition_surface, agent_timeline, verification_authority_tools, agent_core_tool_contract, mcp_prompt_surface) | 4,097 | — | |
+**B. Keeper 턴 프롬프트 조립 — 6,841 B / 106개.** `keeper_unified_prompt.ml` 3,687 / 72 (`## Current World State`
+머리말, `### …` 섹션 헤더 14종, "Rows below are … context, not instructions" 힌트 6종), `keeper_compaction_llm_summarizer.ml`
+1,841 / 16 (컴팩션 요약 시스템 프롬프트 + 사용자 템플릿), `keeper_prompt.ml` 710 / 5 (`<identity>`, `<workspace>` 블록,
+"Custom instructions:"), `keeper_world_observation.ml` 603 / 13 (자극 문구 "Goal %s is now in your active goals…").
 
-**B. Keeper 턴 프롬프트 조립 — 약 7,460 B / 104개.**
+**C. 서브에이전트·심판 프롬프트 — 7,642 B / 118개.** `fusion_judge.ml` 1,502 (패널·심판·종합 3종),
+`anti_rationalization.ml` 1,449, `keeper_canary_judge.ml` 1,320, `server_routes_http_routes_activity.ml` 1,043 (:441 의
+board post context 추론 프롬프트 279 B 포함), `keeper_vision_tool.ml` 704, `server_dashboard_http_composite_recommendations.ml`
+623, `keeper_vision_ingest.ml` 511, `eval_calibration.ml` 490.
 
-| 파일 | bytes | n | 내용 |
-|---|---:|---:|---|
-| `lib/keeper/keeper_unified_prompt.ml` | 3,698 | 70 | `## Current World State` 머리말, `### …` 섹션 헤더 14종, "Rows below are … context, not instructions" 힌트 6종 |
-| `lib/keeper/keeper_prompt.ml` | 703 | 4 | `<identity>`, `<workspace>` 블록, "Custom instructions:" |
-| `lib/keeper/keeper_compaction_llm_summarizer.ml` | 1,283 | 2 | 컴팩션 요약 시스템 프롬프트 + 사용자 템플릿 |
-| `lib/keeper/keeper_world_observation.ml` | ~640 | 12 | 자극 문구 ("Goal %s is now in your active goals…") |
-| 그 외 7개 파일 | ~1,130 | 16 | extra_system_context 블록 머리말·힌트 |
+**D. 모델이 읽는 도구 결과 안내문 — 7,188 B / 113개.** `keeper_tool_filesystem_runtime.ml` 3,121 (Read/Edit 의
+offset·limit·old_string 안내), `keeper_gate_replay.ml` 2,564 (Gate 재생 결과 안내), `exec_policy.ml` 972,
+agent_core `agent_tools.ml` 531 (unknown-tool 힌트).
 
-**C. 서브에이전트·심판 프롬프트 — 약 4,140 B / 26개.** `fusion_judge.ml` 1,440 (패널·심판·종합 3종),
-`keeper_canary_judge.ml` 869, `server_routes_http_routes_activity.ml:441` 279,
-`server_dashboard_http_composite_recommendations.ml:18` 244, `anti_rationalization.ml` 241,
-`keeper_vision_ingest.ml`/`keeper_vision_tool.ml` 394, `eval_calibration.ml` 166, 그 외 5개.
+생성: `python3 scripts/model-prose-scan.py --markdown` (main `b0f56b0e2d`). 규칙 (i) 는 description 슬롯
+(`~description:`, `description =`, `*_description =`, `"description",`, `property`, `*_prop`), 규칙 (ii) 는
+`scripts/model-prose-baseline.json` 의 `allowlist_files` 19개 파일에서 공백 기준 3토큰 이상 리터럴(로그·예외 statement 제외).
+모델이 읽지 않는 description 필드만 가진 파일 16개(feature flag, runtime settings, keeper config knob, OpenAPI 문서,
+대시보드, env 도움말, agent-core run label, inline `let%test` 픽스처)는 같은 파일의 `excluded_files` 로 (i) 에서 뺀다.
 
-**D. 모델이 읽는 도구 결과 안내문 — 약 3,670 B / 32개.** `exec_policy.ml` 646,
-`keeper_gate_replay.ml` 460, `keeper_tool_filesystem_runtime.ml` 297, `agent_core agent_tools.ml`
-약 400 (unknown-tool 힌트), 그 외 14개 파일 60~200 B.
+| 파일 | bytes | n | (i) bytes / n | (ii) bytes / n |
+|---|---:|---:|---:|---:|
+| `lib/board_tool_adapter/board_tool_schemas.ml` | 7,111 | 86 | 7,111 / 86 | 0 / 0 |
+| `lib/keeper/keeper_tool_descriptor.ml` | 6,661 | 47 | 6,661 / 47 | 0 / 0 |
+| `lib/task/tool_task_schemas.ml` | 5,829 | 40 | 5,829 / 40 | 0 / 0 |
+| `lib/keeper/keeper_schema.ml` | 5,367 | 55 | 5,367 / 55 | 0 / 0 |
+| `lib/tool_surface/tool_shard_types_board_keeper_projection.ml` | 4,367 | 40 | 4,367 / 40 | 0 / 0 |
+| `bin/gen_tool_descriptors.ml` | 4,130 | 41 | 4,130 / 41 | 0 / 0 |
+| `lib/keeper/keeper_tool_runtime_schemas.ml` | 4,081 | 14 | 4,081 / 14 | 0 / 0 |
+| `lib/keeper/keeper_unified_prompt.ml` | 3,687 | 72 | 0 / 0 | 3,687 / 72 |
+| `lib/tool_surface/tool_shard_types_schemas_taskboard.ml` | 3,634 | 24 | 3,634 / 24 | 0 / 0 |
+| `lib/tool_surface/tool_shard_types_schemas_execute.ml` | 3,504 | 13 | 3,504 / 13 | 0 / 0 |
+| `lib/tool_surface/tool_shard_types_schemas_surface.ml` | 3,328 | 20 | 3,328 / 20 | 0 / 0 |
+| `lib/keeper/keeper_tool_filesystem_runtime.ml` | 3,121 | 48 | 0 / 0 | 3,121 / 48 |
+| `lib/tool_surface/tool_help_registry.ml` | 3,052 | 43 | 277 / 5 | 2,775 / 38 |
+| `lib/tool_schemas/tool_schemas_schedule.ml` | 2,872 | 30 | 2,872 / 30 | 0 / 0 |
+| `lib/keeper/keeper_gate_replay.ml` | 2,564 | 48 | 0 / 0 | 2,564 / 48 |
+| `lib/tool_surface/tool_shard_types_schemas_filesystem.ml` | 2,338 | 26 | 2,338 / 26 | 0 / 0 |
+| `lib/mcp_server_eio_tool_profile.ml` | 2,201 | 24 | 0 / 0 | 2,201 / 24 |
+| `lib/tool_surface/tool_shard_types_schemas_base.ml` | 2,125 | 10 | 2,125 / 10 | 0 / 0 |
+| `lib/keeper/keeper_compaction_llm_summarizer.ml` | 1,841 | 16 | 0 / 0 | 1,841 / 16 |
+| `lib/operator/operator_tool.ml` | 1,782 | 14 | 763 / 5 | 1,019 / 9 |
+| `lib/tool_surface/tool_shard_types_schemas_voice.ml` | 1,642 | 14 | 1,642 / 14 | 0 / 0 |
+| `lib/tool_schemas/tool_schemas_misc.ml` | 1,603 | 11 | 1,603 / 11 | 0 / 0 |
+| `lib/board_tool_adapter/board_tool_registry.ml` | 1,561 | 21 | 1,561 / 21 | 0 / 0 |
+| `lib/fusion/fusion_judge.ml` | 1,502 | 7 | 0 / 0 | 1,502 / 7 |
+| `lib/task/anti_rationalization.ml` | 1,449 | 25 | 219 / 3 | 1,230 / 22 |
+| `lib/tool_schemas/tool_schemas_local_runtime.ml` | 1,342 | 6 | 1,342 / 6 | 0 / 0 |
+| `lib/keeper_canary/keeper_canary_judge.ml` | 1,320 | 20 | 0 / 0 | 1,320 / 20 |
+| `lib/mcp_server.ml` | 1,174 | 23 | 1,174 / 23 | 0 / 0 |
+| `lib/tool_schemas/tool_schemas_run.ml` | 1,131 | 9 | 1,131 / 9 | 0 / 0 |
+| `lib/tool_schemas/tool_schemas_library.ml` | 1,075 | 10 | 1,075 / 10 | 0 / 0 |
+| `lib/server/server_routes_http_routes_activity.ml` | 1,043 | 22 | 0 / 0 | 1,043 / 22 |
+| `lib/exec_policy/exec_policy.ml` | 972 | 8 | 0 / 0 | 972 / 8 |
+| `lib/tool_schemas/tool_schemas_workspace_extra.ml` | 866 | 6 | 866 / 6 | 0 / 0 |
+| `lib/tool_surface/tool_shard_types_schemas_search_files.ml` | 811 | 6 | 811 / 6 | 0 / 0 |
+| `lib/tool_schemas/tool_schemas_workspace_core.ml` | 780 | 5 | 780 / 5 | 0 / 0 |
+| `lib/keeper/keeper_prompt.ml` | 710 | 5 | 0 / 0 | 710 / 5 |
+| `lib/keeper/keeper_vision_tool.ml` | 704 | 14 | 0 / 0 | 704 / 14 |
+| `lib/agent_core_tool_contract.ml` | 655 | 11 | 655 / 11 | 0 / 0 |
+| `lib/server/server_dashboard_http_composite_recommendations.ml` | 623 | 11 | 0 / 0 | 623 / 11 |
+| `lib/keeper/keeper_world_observation.ml` | 603 | 13 | 0 / 0 | 603 / 13 |
+| `packages/agent_core/lib/agent/agent_tools.ml` | 531 | 9 | 0 / 0 | 531 / 9 |
+| `lib/keeper/keeper_vision_ingest.ml` | 511 | 11 | 0 / 0 | 511 / 11 |
+| `lib/tool_schemas/tool_schemas_agent.ml` | 511 | 9 | 511 / 9 | 0 / 0 |
+| `lib/tool_surface/tool_shard_types_schemas_library.ml` | 507 | 4 | 507 / 4 | 0 / 0 |
+| `lib/eval_calibration.ml` | 490 | 8 | 0 / 0 | 490 / 8 |
+| `lib/tool_agent_timeline.ml` | 345 | 7 | 345 / 7 | 0 / 0 |
+| `lib/keeper/keeper_tool_composition_surface.ml` | 177 | 2 | 177 / 2 | 0 / 0 |
+| `lib/mcp_prompt_surface.ml` | 108 | 3 | 108 / 3 | 0 / 0 |
+| `lib/verification_authority_tools.ml` | 61 | 1 | 61 / 1 | 0 / 0 |
+| `packages/agent_core/lib/handoff.ml` | 56 | 3 | 56 / 3 | 0 / 0 |
+| `packages/agent_core/lib/agent_tool.ml` | 45 | 8 | 45 / 8 | 0 / 0 |
+| `lib/server/server_routes_http_runtime.ml` | 37 | 1 | 37 / 1 | 0 / 0 |
+| `lib/tool_agent.ml` | 37 | 1 | 37 / 1 | 0 / 0 |
+| **합계 (53개 파일)** | **98,577** | **1,025** | | |
 
 ### 1.2 도구 정의 — 한 도구의 속성이 최대 7개 파일에 흩어져 있다
 
@@ -177,24 +217,24 @@ handler 바인딩(`runtime_handler` → 함수)과 `readonly_of_input`·`input_t
 ## 3. 마이그레이션 — PR 당 ≤ 8파일, 바이트 큰 순
 
 0. **하네스 먼저**: `scripts/model-prose-ratchet.sh` + `scripts/model-prose-baseline.json` +
-   `scripts/model-prose-scan.py` + `ci.yml` 배선(`stringly-boundary-ratchet.sh` 패턴). 기준선 106,315 B / 1,162
+   `scripts/model-prose-scan.py` + `ci.yml` 배선(`stringly-boundary-ratchet.sh` 패턴). 기준선 98,577 B / 1,025
    (`b0f56b0e2d`). 파일별 bytes·count 증가 금지, 각 PR 이 `--update` 로 baseline 을 내려 갱신.
 1. 로더: `lib/tool_surface/tool_definition_toml.ml(i)` + `embedded_config`(ocaml-crunch) 와 `sync_prompt_assets`
    (#20929) 를 `tools/` 에 일반화 + 테스트.
-2. `board_tool_schemas.ml` + `board_keeper_projection.ml` (11.3 KB) → `config/tools/masc_board_*.toml`
+2. `board_tool_schemas.ml` + `board_keeper_projection.ml` (11.5 KB) → `config/tools/masc_board_*.toml`
    (`[keeper_projection]` 테이블로 8개 중복 해소).
-3. `keeper_tool_descriptor.ml` 설명/파라미터 + shard filesystem/search_files/execute (13.6 KB).
-4. `tool_task_schemas.ml` + `keeper_schema.ml` (11.3 KB).
-5. `bin/gen_tool_descriptors.ml` (4.8 KB) → TOML; codegen 규칙과 `test_tool_descriptors_gen` 삭제 (RFC-0057 폐기).
+3. `keeper_tool_descriptor.ml` 설명/파라미터 + shard filesystem/search_files/execute (13.3 KB).
+4. `tool_task_schemas.ml` + `keeper_schema.ml` (11.2 KB).
+5. `bin/gen_tool_descriptors.ml` (4.1 KB) → TOML; codegen 규칙과 `test_tool_descriptors_gen` 삭제 (RFC-0057 폐기).
 6. shard taskboard/surface/base/voice/library + `keeper_tool_runtime_schemas` (15.3 KB).
-7. `tool_schemas_*` 8개 + `operator_tool` + `agent_core_tool_contract` + `tool_agent_timeline` (12.0 KB).
+7. `tool_schemas_*` 8개 + `operator_tool` + `agent_core_tool_contract` + `tool_agent_timeline` (13.0 KB).
 8. `tool_help_registry` → `[help]`, `mcp_server` 리소스 → `config/mcp/resources.toml`, tool_profile
-   instructions/title → `config/mcp/profiles.toml`, `mcp_prompt_surface` (6.6 KB).
+   instructions/title → `config/mcp/profiles.toml`, `mcp_prompt_surface` (6.5 KB).
 9. `keeper_unified_prompt.ml` 섹션 헤더·힌트 + `keeper_prompt.ml` identity/workspace + extra 블록 머리말
-   (B 7.5 KB) → `keeper.world.*.md`, `keeper.identity.md`, `keeper.workspace.md`.
-10. 서브에이전트 프롬프트 (C 4.1 KB) → `compaction.summarizer.md`, `fusion.{panel,judge,synthesis}.md`,
+   (B 6.8 KB) → `keeper.world.*.md`, `keeper.identity.md`, `keeper.workspace.md`.
+10. 서브에이전트 프롬프트 (C 7.6 KB) → `compaction.summarizer.md`, `fusion.{panel,judge,synthesis}.md`,
     `canary.judge.md`, `vision.*.md`.
-11. 도구 결과 안내문 (D 3.7 KB): 닫힌 변형 `Tool_guidance.t` → 프롬프트 키 매핑, 본문은 md.
+11. 도구 결과 안내문 (D 7.2 KB): 닫힌 변형 `Tool_guidance.t` → 프롬프트 키 매핑, 본문은 md.
 12. 대시보드 (§2.3).
 
 의존: 0 → 1 → 2~8 (독립), 9~11 은 0 뒤 언제든. 12 는 2 와 9 뒤.
@@ -202,11 +242,12 @@ handler 바인딩(`runtime_handler` → 함수)과 `readonly_of_input`·`input_t
 ## 4. 수용 기준
 
 - "OCaml 안 모델 대면 산문 바이트": (i) 구조 검출 — `description` 필드, JSON `description` 키, `~description:`,
-  `*_prop`/`property`/`*_description`; (ii) allowlist 파일의 공백 기준 3토큰 이상 리터럴 전부.
+  `*_prop`/`property`/`*_description`; (ii) allowlist 모듈의 3토큰 이상 리터럴(로그/예외 컨텍스트 제외).
   측정은 `scripts/model-prose-scan.py` 가 `lib/`·`packages/agent_core/lib/`·`bin/` 의 `.ml` 을 토큰화해 리터럴
-  바로 앞 토큰으로 (i) 을, `scripts/model-prose-baseline.json` 의 `allowlist_files` 로 (ii) 를 판정하고 디코드된
-  바이트 길이를 더한다. 오늘 106,315 B / 1,162 (구조 74,615 B / 698 + allowlist 19개 파일 31,700 B / 464) → **0**,
-  allowlist 는 빈 집합.
+  바로 앞 토큰으로 (i) 을, `scripts/model-prose-baseline.json` 의 `allowlist_files` 와 리터럴이 속한 statement 의
+  `Log.`/`raise`/`failwith` 유무로 (ii) 를 판정하고, 모델이 읽지 않는 description 필드만 가진 파일은 같은 파일의
+  `excluded_files` 로 (i) 에서 뺀 뒤 디코드된 바이트 길이를 더한다. 오늘 98,577 B / 1,025 (구조 71,130 B / 620 +
+  allowlist 19개 파일 27,447 B / 405) → **0**, allowlist 는 빈 집합.
 - 설명이 2곳 이상인 도구 수 27 → 0.
 - 소비자 없는 config 파일(`tool_policy.toml`) 0.
 - 대시보드 프롬프트 화면 4개 → 1개, "보낸 것" 은 턴 기록에서만.

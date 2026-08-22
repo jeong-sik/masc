@@ -37,16 +37,34 @@ A literal is counted when EITHER rule matches:
        Not slots: `x.description = "..."` is an equality test; `~doc:` only
        occurs as Cmdliner CLI help in bin/main_eio.ml, which operators read;
        `title` values are labels, not prose, and are not measured. An empty
-       literal is never counted. The rule does not know who reads a slot:
-       `description` fields of feature flags, runtime settings and keeper
-       config knobs are counted too (about 3 KB today) because the token
-       shape is the same.
+       literal is never counted.
+
+       The rule does not know who reads a slot, so the baseline JSON carries
+       `excluded_files`: files whose description fields no model ever reads
+       (operator dashboard and settings text, CLI/env help, the HTTP API's
+       OpenAPI document, agent-core run labels, inline `let%test` fixtures).
+       Each entry maps the path to a one-line reason. Rule (i) is not applied
+       there; the slots are still found and reported, and when a file has
+       none left --check and --write-baseline say to drop it from the list.
 
   (ii) ALLOWLIST -- in files listed under `allowlist_files` in the baseline
        JSON, every literal with at least ALLOWLIST_MIN_TOKENS whitespace-
-       separated tokens is counted, whatever precedes it. These are the
-       prompt-assembly, judge and tool-result files of RFC section 1.1
-       B/C/D whose prose is not behind a description slot.
+       separated tokens is counted, whatever precedes it, unless it sits in
+       a log or exception statement. These are the prompt-assembly, judge and
+       tool-result files of RFC section 1.1 B/C/D whose prose is not behind a
+       description slot.
+
+       Log/exception context is decided per statement: walking back from the
+       literal stops at the nearest boundary token (`let`, `in`, `;`, `;;`,
+       `->`, `begin`, `then`, `else`, `match`, `with`, `fun`, `try`); if the
+       tokens in between contain an identifier chain starting with `Log.` or
+       `Logs.`, or `failwith`, `invalid_arg`, `raise`, `prerr_endline`,
+       `Printf.eprintf`, `Fmt.failwith`, the literal is not counted. So
+       `| x -> Log.info "..."`, `if c then Log.warn "..."` and
+       `Log.info (render "...")` are all excluded, while `Error "..."` and
+       `Error (Printf.sprintf "...")` -- tool results the model reads -- are
+       not. Because `->` is a boundary, the `Logs`-style `(fun m -> m "...")`
+       idiom would not be recognised; the tree has no such log call.
 
 Bytes are the length of the literal's decoded byte sequence, which is what
 OCaml stores (escape sequences resolved, `\<newline>` continuations removed,
@@ -56,17 +74,18 @@ open a string.
 
 Usage:
     scripts/model-prose-scan.py                       # per-file table, bytes descending
-    scripts/model-prose-scan.py --json                # {"files": {path: {bytes, count}}, "total": {...}}
-    scripts/model-prose-scan.py --list                # one line per counted literal (file:line kind bytes)
+    scripts/model-prose-scan.py --json                # {"files": {path: {bytes, count, structural, allowlist}}, "total"}
+    scripts/model-prose-scan.py --markdown            # the same table as Markdown, for the RFC observation section
+    scripts/model-prose-scan.py --list                # one line per classified literal (file:line kind bytes)
     scripts/model-prose-scan.py --check               # table + compare against the baseline; exit 0 ok / 2 drift up
     scripts/model-prose-scan.py --write-baseline --commit SHA
     scripts/model-prose-scan.py --self-test           # fixture-based checks of lexer, rules and compare
 
-All modes read `allowlist_files` from --baseline (default
-scripts/model-prose-baseline.json) and fail when it is missing, because the
-allowlist is half of the metric. --write-baseline keeps that list and records
-the scan plus the given commit; to change the list, edit `allowlist_files`
-and run --write-baseline again. Output ordering is fixed; no environment
+All modes read `allowlist_files` and `excluded_files` from --baseline
+(default scripts/model-prose-baseline.json) and fail when either is missing,
+because the lists are part of the metric. --write-baseline keeps both lists
+and records the scan plus the given commit; to change a list, edit it and
+run --write-baseline again. Output ordering is fixed; no environment
 variable is consulted.
 """
 
@@ -88,6 +107,18 @@ LOOKBACK_TOKENS = 64
 
 KIND_STRUCTURAL = "structural"
 KIND_ALLOWLIST = "allowlist"
+KIND_EXCLUDED_SLOT = "excluded-slot"  # a rule (i) slot in an excluded file; reported, never counted
+COUNTED_KINDS = (KIND_STRUCTURAL, KIND_ALLOWLIST)
+
+# Rule (ii) log/exception exclusion: walking back from a literal stops at the
+# nearest statement boundary; the tokens in between are the statement.
+STATEMENT_BOUNDARY_IDENTS = frozenset(
+    {"let", "in", "begin", "then", "else", "match", "with", "fun", "try"}
+)
+STATEMENT_BOUNDARY_PUNCTS = frozenset({";", "->"})
+LOG_MODULES = frozenset({"Log", "Logs"})
+EXCEPTION_CALLS = frozenset({"failwith", "invalid_arg", "raise", "prerr_endline"})
+EXCEPTION_CALL_CHAINS = (("Printf", ".", "eprintf"), ("Fmt", ".", "failwith"))
 
 # --- lexer -------------------------------------------------------------------
 
@@ -351,7 +382,51 @@ class Hit:
     preview: str
 
 
-def scan_source(src: str, allowlisted: bool) -> list[Hit]:
+def statement_tokens(tokens: list[Token], idx: int) -> list[Token]:
+    """Tokens between the nearest statement boundary and tokens[idx]."""
+    j = idx - 1
+    while j >= 0:
+        tok = tokens[j]
+        if tok.kind == TOK_IDENT and tok.text in STATEMENT_BOUNDARY_IDENTS:
+            break
+        if tok.kind == TOK_PUNCT and tok.text in STATEMENT_BOUNDARY_PUNCTS:
+            break
+        j -= 1
+    return tokens[j + 1 : idx]
+
+
+def log_or_exception_context(statement: list[Token]) -> bool:
+    """True when the statement calls a logger or raises.
+
+    Recognised: an identifier chain starting with `Log.`/`Logs.`, the bare
+    calls `failwith`/`invalid_arg`/`raise`/`prerr_endline`, and
+    `Printf.eprintf`/`Fmt.failwith`.
+    """
+    for k, tok in enumerate(statement):
+        if tok.kind != TOK_IDENT:
+            continue
+        if tok.text in EXCEPTION_CALLS:
+            return True
+        nxt = statement[k + 1] if k + 1 < len(statement) else None
+        if tok.text in LOG_MODULES and nxt is not None and _is(nxt, TOK_PUNCT, "."):
+            return True
+        for chain in EXCEPTION_CALL_CHAINS:
+            if tok.text == chain[0] and len(statement) - k >= len(chain):
+                if all(
+                    (t.kind == (TOK_PUNCT if text == "." else TOK_IDENT) and t.text == text)
+                    for t, text in zip(statement[k : k + len(chain)], chain)
+                ):
+                    return True
+    return False
+
+
+def scan_source(src: str, allowlisted: bool = False, excluded: bool = False) -> list[Hit]:
+    """Classify every literal of one source file.
+
+    Counted kinds: rule (i) `structural` and rule (ii) `allowlist`. In an
+    excluded file a rule (i) slot is reported as `excluded-slot` so the
+    ratchet can say when the file no longer needs the exclusion.
+    """
     tokens = tokenize(src)
     hits: list[Hit] = []
     for idx, tok in enumerate(tokens):
@@ -362,8 +437,12 @@ def scan_source(src: str, allowlisted: bool) -> list[Hit]:
             continue
         window = tokens[max(0, idx - LOOKBACK_TOKENS) : idx]
         if structural_slot(window):
-            kind = KIND_STRUCTURAL
-        elif allowlisted and len(tok.text.split()) >= ALLOWLIST_MIN_TOKENS:
+            kind = KIND_EXCLUDED_SLOT if excluded else KIND_STRUCTURAL
+        elif (
+            allowlisted
+            and len(tok.text.split()) >= ALLOWLIST_MIN_TOKENS
+            and not log_or_exception_context(statement_tokens(tokens, idx))
+        ):
             kind = KIND_ALLOWLIST
         else:
             continue
@@ -382,14 +461,22 @@ def iter_source_files(repo_root: str) -> Iterable[str]:
                     yield os.path.relpath(os.path.join(dirpath, name), repo_root)
 
 
-def scan_tree(repo_root: str, allowlist: frozenset[str]) -> dict[str, list[Hit]]:
+@dataclass(frozen=True)
+class Lists:
+    """The two file lists that complete the metric definition."""
+
+    allowlist: frozenset[str]
+    excluded: dict[str, str]  # path -> one-line reason
+
+
+def scan_tree(repo_root: str, lists: Lists) -> dict[str, list[Hit]]:
     results: dict[str, list[Hit]] = {}
     for rel in iter_source_files(repo_root):
         # surrogateescape keeps undecodable bytes so literal byte counts stay exact.
         with open(os.path.join(repo_root, rel), encoding="utf-8", errors="surrogateescape") as f:
             src = f.read()
         try:
-            hits = scan_source(src, rel in allowlist)
+            hits = scan_source(src, allowlisted=rel in lists.allowlist, excluded=rel in lists.excluded)
         except LexError as exc:
             raise LexError(f"{rel}: {exc}") from None
         if hits:
@@ -397,16 +484,41 @@ def scan_tree(repo_root: str, allowlist: frozenset[str]) -> dict[str, list[Hit]]
     return results
 
 
+def _bucket(hits: list[Hit], kind: str) -> dict:
+    chosen = [h for h in hits if h.kind == kind]
+    return {"bytes": sum(h.nbytes for h in chosen), "count": len(chosen)}
+
+
 def summarize(results: dict[str, list[Hit]]) -> dict:
-    files = {
-        rel: {"bytes": sum(h.nbytes for h in hits), "count": len(hits)}
-        for rel, hits in sorted(results.items())
-    }
+    """Per-file totals over the counted kinds, plus the rule (i)/(ii) split."""
+    files = {}
+    for rel, hits in sorted(results.items()):
+        counted = [h for h in hits if h.kind in COUNTED_KINDS]
+        if not counted:
+            continue
+        files[rel] = {
+            "bytes": sum(h.nbytes for h in counted),
+            "count": len(counted),
+            "structural": _bucket(hits, KIND_STRUCTURAL),
+            "allowlist": _bucket(hits, KIND_ALLOWLIST),
+        }
     total = {
         "bytes": sum(v["bytes"] for v in files.values()),
         "count": sum(v["count"] for v in files.values()),
     }
     return {"files": files, "total": total}
+
+
+def list_advisories(results: dict[str, list[Hit]], lists: Lists) -> list[str]:
+    """Entries of either list that no longer earn their place."""
+    out: list[str] = []
+    for rel in sorted(lists.excluded):
+        if not any(h.kind == KIND_EXCLUDED_SLOT for h in results.get(rel, [])):
+            out.append(f"excluded file has no description slot left: remove it from excluded_files: {rel}")
+    for rel in sorted(lists.allowlist):
+        if not any(h.kind in COUNTED_KINDS for h in results.get(rel, [])):
+            out.append(f"allowlisted file has no prose left: remove it from allowlist_files: {rel}")
+    return out
 
 
 # --- baseline ------------------------------------------------------------------
@@ -415,21 +527,33 @@ def summarize(results: dict[str, list[Hit]]) -> dict:
 def load_baseline(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    for key in ("allowlist_files", "files", "total"):
+    for key in ("allowlist_files", "excluded_files", "files", "total"):
         if key not in data:
             raise ValueError(f"{path}: missing key {key!r}")
     return data
 
 
-def load_allowlist(path: str) -> frozenset[str]:
-    """The allowlist is part of the metric definition, so a missing baseline is
-    an error rather than an empty set: a scan without it would silently report
-    rule (i) alone."""
+def lists_of(data: dict, path: str) -> Lists:
+    """The lists are part of the metric definition, so a baseline without them
+    is an error rather than an empty set: a scan without them would silently
+    report rule (i) alone over every file."""
+    for key in ("allowlist_files", "excluded_files"):
+        if key not in data:
+            raise ValueError(f"{path}: missing key {key!r}")
+    allowlist = frozenset(data["allowlist_files"])
+    excluded = data["excluded_files"]
+    if not isinstance(excluded, dict) or not all(isinstance(v, str) and v for v in excluded.values()):
+        raise ValueError(f"{path}: excluded_files must map each path to a one-line reason")
+    both = sorted(allowlist & set(excluded))
+    if both:
+        raise ValueError(f"{path}: listed as both allowlisted and excluded: {', '.join(both)}")
+    return Lists(allowlist=allowlist, excluded=dict(sorted(excluded.items())))
+
+
+def load_lists(path: str) -> Lists:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    if "allowlist_files" not in data:
-        raise ValueError(f"{path}: missing key 'allowlist_files'")
-    return frozenset(data["allowlist_files"])
+    return lists_of(data, path)
 
 
 def compare(current: dict, baseline: dict) -> tuple[list[str], list[str]]:
@@ -454,17 +578,18 @@ def compare(current: dict, baseline: dict) -> tuple[list[str], list[str]]:
     return drift_up, lowered
 
 
-def render_baseline(current: dict, allowlist: frozenset[str], commit: str) -> str:
+def render_baseline(current: dict, lists: Lists, commit: str) -> str:
     data = {
         "_comment": "Model-facing prose inside OCaml. Regenerate with scripts/model-prose-ratchet.sh --update.",
         "_scanner": "scripts/model-prose-scan.py (rules (i) structural slots, (ii) allowlist files)",
         "_rfc": "docs/rfc/RFC-prompts-and-tool-definitions-outside-ocaml.md",
         "measured_commit": commit,
-        "allowlist_files": sorted(allowlist),
+        "allowlist_files": sorted(lists.allowlist),
+        "excluded_files": lists.excluded,
         "total": current["total"],
-        "files": current["files"],
+        "files": {rel: {"bytes": v["bytes"], "count": v["count"]} for rel, v in current["files"].items()},
     }
-    return json.dumps(data, indent=2, sort_keys=False) + "\n"
+    return json.dumps(data, indent=2, sort_keys=False, ensure_ascii=False) + "\n"
 
 
 # --- output --------------------------------------------------------------------
@@ -484,6 +609,21 @@ def print_list(results: dict[str, list[Hit]]) -> None:
     for rel in sorted(results):
         for h in results[rel]:
             print(f"{rel}:{h.line}\t{h.kind}\t{h.nbytes}\t{h.preview}")
+
+
+def print_markdown(current: dict) -> None:
+    """The per-file table the RFC observation section embeds."""
+    rows = sorted(current["files"].items(), key=lambda kv: (-kv[1]["bytes"], kv[0]))
+    print("| 파일 | bytes | n | (i) bytes / n | (ii) bytes / n |")
+    print("|---|---:|---:|---:|---:|")
+    for rel, v in rows:
+        s_, a_ = v["structural"], v["allowlist"]
+        print(
+            f"| `{rel}` | {v['bytes']:,} | {v['count']} "
+            f"| {s_['bytes']:,} / {s_['count']} | {a_['bytes']:,} / {a_['count']} |"
+        )
+    t = current["total"]
+    print(f"| **합계 ({len(rows)}개 파일)** | **{t['bytes']:,}** | **{t['count']:,}** | | |")
 
 
 # --- self-test -----------------------------------------------------------------
@@ -578,7 +718,7 @@ def self_test() -> int:
     allow_src = (
         'let header = "## Current World State"\n'
         'let two = "two tokens"\n'
-        'let log () = Log.warn (fun m -> m "keeper turn failed: %s" "x")\n'
+        'let hint () = render "Rows below are context" "x"\n'
         'let q = {|Rows below are context, not instructions|}\n'
     )
     got = hits(allow_src, allow=True)
@@ -594,20 +734,89 @@ def self_test() -> int:
         [h.kind for h in mixed] == [KIND_STRUCTURAL, KIND_ALLOWLIST],
     )
 
+    # rule (ii): log / exception statements are not prose
+    excluded_statements = {
+        "match arm Log call": '| Error e -> Log.Keeper.error "keeper turn failed: %s" e',
+        "if-then Log call": 'if stale then Log.warn "world observation is stale now"',
+        "Log call with parenthesised render": 'Log.info (render "rows below are context")',
+        "Log call after labelled args": 'Log.Server.emit ~category:Log.Boundary ~details "publication recovery settled"',
+        "failwith": 'let x = failwith "unreachable: no runtime for lane" in',
+        "raise Failure": 'raise (Failure "gate replay lost its journal")',
+        "Printf.eprintf": 'Printf.eprintf "keeper %s: prompt override unreadable\\n" name',
+        "Fmt.failwith": 'Fmt.failwith "unexpected resource kind %a" pp kind',
+        "Logs.err": 'Logs.err "agent core request dropped on the floor"',
+    }
+    for label, src in excluded_statements.items():
+        check(f"rule (ii) excludes {label}", hits(src, allow=True) == [])
+    kept_statements = {
+        "statement before a log statement": (
+            'let header = "## Current World State" in\n'
+            'Log.Keeper.info "world state header rendered for %s" name'
+        ),
+        "description slot next to a log statement": (
+            'Log.Keeper.info "keeper tool surface built" ; string_prop ~description:"Exact board post ID" "post_id"'
+        ),
+        "prose arm after a log arm": '| A -> Log.info "a b c" | B -> "Rows below are context, not instructions"',
+        "Error result the model reads": 'Error (Printf.sprintf "old_string occurs %d times. Pass replace_all=true." n)',
+    }
+    expected_kinds = {
+        "statement before a log statement": [KIND_ALLOWLIST],
+        "description slot next to a log statement": [KIND_STRUCTURAL],
+        "prose arm after a log arm": [KIND_ALLOWLIST],
+        "Error result the model reads": [KIND_ALLOWLIST],
+    }
+    for label, src in kept_statements.items():
+        check(f"rule (ii) keeps {label}", [h.kind for h in hits(src, allow=True)] == expected_kinds[label])
+
+    # excluded_files: rule (i) reported, never counted
+    excluded_src = '{ name = "flag"; description = "Route Execute commands through Docker container" }'
+    got = scan_source(excluded_src, allowlisted=False, excluded=True)
+    check(
+        "excluded file reports the slot as excluded-slot",
+        [h.kind for h in got] == [KIND_EXCLUDED_SLOT] and summarize({"lib/x.ml": got})["files"] == {},
+    )
+    lists = Lists(allowlist=frozenset(["lib/p.ml"]), excluded={"lib/x.ml": "operator text", "lib/y.ml": "gone"})
+    advice = list_advisories({"lib/x.ml": got, "lib/p.ml": [Hit(1, KIND_ALLOWLIST, 9, "")]}, lists)
+    check(
+        "advisory names an excluded file with no slot left and nothing else",
+        advice == ["excluded file has no description slot left: remove it from excluded_files: lib/y.ml"],
+    )
+    advice = list_advisories({}, lists)
+    check(
+        "advisory names an allowlisted file with no prose left",
+        "allowlisted file has no prose left: remove it from allowlist_files: lib/p.ml" in advice,
+    )
+    try:
+        lists_of({"allowlist_files": ["lib/x.ml"], "excluded_files": {"lib/x.ml": "r"}}, "b.json")
+    except ValueError:
+        check("a file in both lists is rejected", True)
+    else:
+        check("a file in both lists is rejected", False)
+    try:
+        lists_of({"allowlist_files": [], "excluded_files": {"lib/x.ml": ""}}, "b.json")
+    except ValueError:
+        check("an excluded file without a reason is rejected", True)
+    else:
+        check("an excluded file without a reason is rejected", False)
+
     # summarize + compare
     results = {
         "lib/b.ml": [Hit(1, KIND_STRUCTURAL, 10, ""), Hit(2, KIND_STRUCTURAL, 5, "")],
-        "lib/a.ml": [Hit(1, KIND_ALLOWLIST, 7, "")],
+        "lib/a.ml": [Hit(1, KIND_ALLOWLIST, 7, ""), Hit(2, KIND_STRUCTURAL, 4, "")],
     }
     cur = summarize(results)
     check(
-        "summarize is sorted by path with totals",
-        list(cur["files"]) == ["lib/a.ml", "lib/b.ml"] and cur["total"] == {"bytes": 22, "count": 3},
+        "summarize is sorted by path with totals and the rule split",
+        list(cur["files"]) == ["lib/a.ml", "lib/b.ml"]
+        and cur["total"] == {"bytes": 26, "count": 4}
+        and cur["files"]["lib/a.ml"]["structural"] == {"bytes": 4, "count": 1}
+        and cur["files"]["lib/a.ml"]["allowlist"] == {"bytes": 7, "count": 1},
     )
     base = {
         "allowlist_files": ["lib/a.ml"],
-        "files": {"lib/a.ml": {"bytes": 7, "count": 1}, "lib/b.ml": {"bytes": 15, "count": 2}},
-        "total": {"bytes": 22, "count": 3},
+        "excluded_files": {},
+        "files": {"lib/a.ml": {"bytes": 11, "count": 2}, "lib/b.ml": {"bytes": 15, "count": 2}},
+        "total": {"bytes": 26, "count": 4},
     }
     check("compare: equal tree has no drift", compare(cur, base) == ([], []))
     up = summarize({**results, "lib/b.ml": results["lib/b.ml"] + [Hit(3, KIND_STRUCTURAL, 1, "")]})
@@ -626,14 +835,15 @@ def self_test() -> int:
     drift, lowered = compare(down, base)
     check(
         "compare: decrease passes and reports lowerable files",
-        drift == [] and lowered == ["lib/a.ml bytes 7->0 count 1->0", "lib/b.ml bytes 15->10 count 2->1"],
+        drift == [] and lowered == ["lib/a.ml bytes 11->0 count 2->0", "lib/b.ml bytes 15->10 count 2->1"],
     )
-    rendered = json.loads(render_baseline(cur, frozenset(["lib/a.ml"]), "abc123"))
+    rendered = json.loads(render_baseline(cur, Lists(frozenset(["lib/a.ml"]), {"lib/z.ml": "why"}), "abc123"))
     check(
-        "baseline JSON carries allowlist, commit, files and total",
+        "baseline JSON carries both lists, commit, bytes/count per file and total",
         rendered["allowlist_files"] == ["lib/a.ml"]
+        and rendered["excluded_files"] == {"lib/z.ml": "why"}
         and rendered["measured_commit"] == "abc123"
-        and rendered["files"] == cur["files"]
+        and rendered["files"] == {"lib/a.ml": {"bytes": 11, "count": 2}, "lib/b.ml": {"bytes": 15, "count": 2}}
         and rendered["total"] == cur["total"],
     )
     try:
@@ -656,8 +866,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--baseline", default=None, help=f"baseline JSON (default: {DEFAULT_BASELINE})")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--json", action="store_true", help="emit the current measurement as JSON")
-    mode.add_argument("--list", action="store_true", help="emit one line per counted literal")
-    mode.add_argument("--check", action="store_true", help="compare against the baseline (exit 2 on drift up)")
+    mode.add_argument("--markdown", action="store_true", help="emit the per-file table as Markdown")
+    mode.add_argument("--list", action="store_true", help="emit one line per classified literal")
+    mode.add_argument("--check", action="store_true", help="table + compare against the baseline (exit 2 on drift up)")
     mode.add_argument("--write-baseline", action="store_true", help="rewrite the baseline from the current tree")
     mode.add_argument("--self-test", action="store_true", help="run fixture-based checks")
     ap.add_argument("--commit", default=None, help="commit SHA recorded by --write-baseline")
@@ -669,19 +880,23 @@ def main(argv: list[str]) -> int:
     repo_root = args.root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     baseline_path = args.baseline or os.path.join(repo_root, DEFAULT_BASELINE)
     try:
-        allowlist = load_allowlist(baseline_path)
+        lists = load_lists(baseline_path)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"[model-prose-scan] baseline unreadable: {exc}", file=sys.stderr)
         return 1
     try:
-        results = scan_tree(repo_root, allowlist)
+        results = scan_tree(repo_root, lists)
     except LexError as exc:
         print(f"[model-prose-scan] lex error: {exc}", file=sys.stderr)
         return 1
     current = summarize(results)
+    advisories = list_advisories(results, lists)
 
     if args.json:
         print(json.dumps(current, indent=2))
+        return 0
+    if args.markdown:
+        print_markdown(current)
         return 0
     if args.list:
         print_list(results)
@@ -691,8 +906,10 @@ def main(argv: list[str]) -> int:
             print("[model-prose-scan] --write-baseline requires --commit SHA", file=sys.stderr)
             return 1
         with open(baseline_path, "w", encoding="utf-8") as f:
-            f.write(render_baseline(current, allowlist, args.commit))
+            f.write(render_baseline(current, lists, args.commit))
         print(f"[model-prose-scan] wrote {baseline_path}")
+        for line in advisories:
+            print(f"[model-prose-scan] {line}")
         return 0
     if args.check:
         try:
@@ -709,6 +926,8 @@ def main(argv: list[str]) -> int:
             return 2
         for line in lowered:
             print(f"[model-prose-scan] lowered: {line}")
+        for line in advisories:
+            print(f"[model-prose-scan] {line}")
         return 0
     print_table(current)
     return 0

@@ -2,7 +2,7 @@
   "_comment": "Model-facing prose inside OCaml. Regenerate with scripts/model-prose-ratchet.sh --update.",
   "_scanner": "scripts/model-prose-scan.py (rules (i) structural slots, (ii) allowlist files)",
   "_rfc": "docs/rfc/RFC-prompts-and-tool-definitions-outside-ocaml.md",
-  "measured_commit": "b0f56b0e2d99a2f752b76240417c5b1f1016d67e",
+  "measured_commit": "8b7ef3f0c9f64364b36571ae98c52d07f6fedb9e",
   "allowlist_files": [
     "lib/eval_calibration.ml",
     "lib/exec_policy/exec_policy.ml",
@@ -24,9 +24,27 @@
     "lib/tool_surface/tool_help_registry.ml",
     "packages/agent_core/lib/agent/agent_tools.ml"
   ],
+  "excluded_files": {
+    "lib/config/env_config_runtime.ml": "env/CLI help text for the HTTP mode setting",
+    "lib/config/feature_flag_registry.ml": "feature flag descriptions shown in the operator dashboard",
+    "lib/config/masc_grpc_transport.ml": "env help text for the transport setting",
+    "lib/dashboard/dashboard_execution_fixture.ml": "dashboard fixture data",
+    "lib/dashboard/dashboard_harness_health.ml": "dashboard panel descriptions",
+    "lib/keeper/keeper_config.ml": "keeper config knob descriptions for operators",
+    "lib/keeper/keeper_turn_driver_try_provider.ml": "agent-core request label (runtime:%s/runtime), observability only",
+    "lib/keeper/keeper_turn_driver_wrappers.ml": "agent-core request label (model_label:%s), observability only",
+    "lib/operator/operator_pending_confirm.ml": "pending-confirm action descriptions for the operator UI",
+    "lib/runtime_settings.ml": "runtime setting descriptions for the operator settings panel",
+    "lib/transport.ml": "OpenAPI response descriptions of the HTTP API",
+    "packages/agent_core/lib/llm_provider/backend_glm.ml": "inline let%test fixtures",
+    "packages/agent_core/lib/llm_provider/backend_openai.ml": "inline let%test fixtures",
+    "packages/agent_core/lib/protocol/mcp.ml": "inline let%test fixtures",
+    "packages/agent_core/lib/protocol/mcp_schema.ml": "inline let%test fixtures",
+    "packages/agent_core/lib/sessions_types.ml": "inline let%test fixtures"
+  },
   "total": {
-    "bytes": 106315,
-    "count": 1162
+    "bytes": 98577,
+    "count": 1025
   },
   "files": {
     "bin/gen_tool_descriptors.ml": {
@@ -45,29 +63,9 @@
       "bytes": 7111,
       "count": 86
     },
-    "lib/config/env_config_runtime.ml": {
-      "bytes": 36,
-      "count": 1
-    },
-    "lib/config/feature_flag_registry.ml": {
-      "bytes": 799,
-      "count": 17
-    },
-    "lib/config/masc_grpc_transport.ml": {
-      "bytes": 36,
-      "count": 1
-    },
-    "lib/dashboard/dashboard_execution_fixture.ml": {
-      "bytes": 88,
-      "count": 3
-    },
-    "lib/dashboard/dashboard_harness_health.ml": {
-      "bytes": 167,
-      "count": 2
-    },
     "lib/eval_calibration.ml": {
-      "bytes": 547,
-      "count": 9
+      "bytes": 490,
+      "count": 8
     },
     "lib/exec_policy/exec_policy.ml": {
       "bytes": 972,
@@ -78,16 +76,12 @@
       "count": 7
     },
     "lib/keeper/keeper_compaction_llm_summarizer.ml": {
-      "bytes": 2700,
-      "count": 28
-    },
-    "lib/keeper/keeper_config.ml": {
-      "bytes": 654,
-      "count": 10
+      "bytes": 1841,
+      "count": 16
     },
     "lib/keeper/keeper_gate_replay.ml": {
-      "bytes": 2895,
-      "count": 53
+      "bytes": 2564,
+      "count": 48
     },
     "lib/keeper/keeper_prompt.ml": {
       "bytes": 710,
@@ -106,24 +100,16 @@
       "count": 47
     },
     "lib/keeper/keeper_tool_filesystem_runtime.ml": {
-      "bytes": 4766,
-      "count": 67
+      "bytes": 3121,
+      "count": 48
     },
     "lib/keeper/keeper_tool_runtime_schemas.ml": {
       "bytes": 4081,
       "count": 14
     },
-    "lib/keeper/keeper_turn_driver_try_provider.ml": {
-      "bytes": 18,
-      "count": 1
-    },
-    "lib/keeper/keeper_turn_driver_wrappers.ml": {
-      "bytes": 28,
-      "count": 2
-    },
     "lib/keeper/keeper_unified_prompt.ml": {
-      "bytes": 3772,
-      "count": 73
+      "bytes": 3687,
+      "count": 72
     },
     "lib/keeper/keeper_vision_ingest.ml": {
       "bytes": 511,
@@ -134,8 +120,8 @@
       "count": 14
     },
     "lib/keeper/keeper_world_observation.ml": {
-      "bytes": 1329,
-      "count": 24
+      "bytes": 603,
+      "count": 13
     },
     "lib/keeper_canary/keeper_canary_judge.ml": {
       "bytes": 1320,
@@ -153,25 +139,17 @@
       "bytes": 2201,
       "count": 24
     },
-    "lib/operator/operator_pending_confirm.ml": {
-      "bytes": 269,
-      "count": 7
-    },
     "lib/operator/operator_tool.ml": {
-      "bytes": 1926,
-      "count": 17
-    },
-    "lib/runtime_settings.ml": {
-      "bytes": 770,
-      "count": 17
+      "bytes": 1782,
+      "count": 14
     },
     "lib/server/server_dashboard_http_composite_recommendations.ml": {
       "bytes": 623,
       "count": 11
     },
     "lib/server/server_routes_http_routes_activity.ml": {
-      "bytes": 1350,
-      "count": 25
+      "bytes": 1043,
+      "count": 22
     },
     "lib/server/server_routes_http_runtime.ml": {
       "bytes": 37,
@@ -265,17 +243,13 @@
       "bytes": 1642,
       "count": 14
     },
-    "lib/transport.ml": {
-      "bytes": 549,
-      "count": 8
-    },
     "lib/verification_authority_tools.ml": {
       "bytes": 61,
       "count": 1
     },
     "packages/agent_core/lib/agent/agent_tools.ml": {
-      "bytes": 630,
-      "count": 13
+      "bytes": 531,
+      "count": 9
     },
     "packages/agent_core/lib/agent_tool.ml": {
       "bytes": 45,
@@ -284,26 +258,6 @@
     "packages/agent_core/lib/handoff.ml": {
       "bytes": 56,
       "count": 3
-    },
-    "packages/agent_core/lib/llm_provider/backend_glm.ml": {
-      "bytes": 22,
-      "count": 2
-    },
-    "packages/agent_core/lib/llm_provider/backend_openai.ml": {
-      "bytes": 4,
-      "count": 1
-    },
-    "packages/agent_core/lib/protocol/mcp.ml": {
-      "bytes": 18,
-      "count": 2
-    },
-    "packages/agent_core/lib/protocol/mcp_schema.ml": {
-      "bytes": 26,
-      "count": 3
-    },
-    "packages/agent_core/lib/sessions_types.ml": {
-      "bytes": 1,
-      "count": 1
     }
   }
 }

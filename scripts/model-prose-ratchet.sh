@@ -5,14 +5,17 @@
 # item 0: the bytes and count of model-facing prose (tool descriptions,
 # prompt fragments, judge prompts, tool-result guidance) still written as
 # OCaml string literals may only go down. scripts/model-prose-scan.py owns
-# the measurement (rules (i) structural description slots and (ii)
-# allowlisted prompt files); this script compares it per file against
+# the measurement (rule (i) structural description slots outside the
+# baseline's excluded_files, rule (ii) allowlisted prompt files minus log and
+# exception statements); this script compares it per file against
 # scripts/model-prose-baseline.json.
 #
 # Any file whose bytes or count exceeds its baseline entry fails, and so
 # does a file that has no baseline entry at all. When a file drops below its
 # entry the check still passes and names the file so the baseline can be
-# lowered with --update.
+# lowered with --update. The check and --update also name list entries that
+# earn nothing any more (an excluded file with no description slot left, an
+# allowlisted file with no prose left) so the lists shrink with the code.
 #
 # Usage:
 #   scripts/model-prose-ratchet.sh            # check; exit 0 ok / 2 drift up / 1 error

@@ -30,7 +30,6 @@ let prompt_dir () =
    than a silently unchecked template. *)
 let review_prompt_keys =
   [ Prompt_names.verification
-  ; Prompt_names.goal_verification_criterion
   ; Prompt_names.goal_verification_proof
   ]
 ;;

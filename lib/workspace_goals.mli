@@ -42,8 +42,6 @@ val handle_goal_transition
   -> Tool_result.result
 
 type verifier_decision =
-  | Criterion_viable
-  | Criterion_unreachable of { reason : string }
   | Proof_proven
   | Proof_refuted of { reason : string }
 

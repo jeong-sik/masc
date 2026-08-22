@@ -1,7 +1,7 @@
 (** RFC-0387 stage 2 PR-2 — the goal verifier caller.
 
     The lane drains the ledger's durable pending requests
-    ([Criterion_pending] / [Proof_pending]) through
+    ([Proof_pending]) through
     [Task.Anti_rationalization.review] on the stubbed verifier_exact lane and
     commits verdicts via the application-owned typed boundary, under the fixed
     identity [verifier_exact]. Typed non-verdicts (evaluator
@@ -129,9 +129,9 @@ let producer_playground (config : Workspace.config) producer =
   ensure_producer_playground config producer
 ;;
 
-(* A completion proof is admitted only when the Goal has a linked Task -- the
-   rollup is the evidence and the performers are the trees. Tests that drive a
-   proof verdict need one; they do not all need an artifact to read. *)
+(* The linked-task rollup is the evidence the judge reads and the performers
+   are the trees it may open. Tests that drive a proof verdict give it one; they
+   do not all need an artifact to read. *)
 let link_bare_task config ~goal_id =
   let producer = "proof-producer" in
   ignore (ensure_producer_playground config producer);
@@ -414,45 +414,6 @@ let test_proof_pending_drains_to_completed () =
   | _ -> fail "ledger must hold the proven verdict"
 ;;
 
-(* A Goal with no linked Task carries no evidence: the rollup is empty and no
-   performer tree exists. Its metric and target are the CLAIM under review, so
-   admitting the review would let the judge approve the claim by reading the
-   claim. The request is not consumed -- it stays pending, and the first linked
-   Task makes the next drain admissible. *)
-let test_proof_without_a_linked_task_is_not_judged () =
-  with_workspace
-  @@ fun config ->
-  let ctx = workspace_ctx config in
-  let goal_id = create_goal ctx "Goal with nothing linked" in
-  ignore
-    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
-  let calls = ref [] in
-  with_lane_and_reviewer
-    ~slots:(fun () -> Ok [ "verifier-a" ])
-    ~reviewer:(recording_reviewer calls [ "verifier-a", Stub_approve "looks done" ])
-    (fun () -> drain config);
-  (* One call, and it is the creation-time criterion check -- that one is
-     legitimately about the declared condition. The proof is never handed to an
-     evaluator, so the claim is never rated against itself. *)
-  check (list string) "only the criterion was judged, never the proof"
-    [ "verifier-a" ] !calls;
-  check string "the goal stays in verifying" "verifying" (stored_phase config goal_id);
-  check string "the durable proof request survives" "proof_pending"
-    (match (ledger_record config goal_id).completion with
-     | Goal_verification.Proof_pending _ -> "proof_pending"
-     | Goal_verification.Proof_proven _ -> "proof_proven"
-     | Goal_verification.Proof_refuted _ -> "proof_refuted"
-     | Goal_verification.Completion_idle -> "idle");
-  (* Linking a Task makes the same request admissible on the next drain. *)
-  ignore (link_bare_task config ~goal_id);
-  with_lane_and_reviewer
-    ~slots:(fun () -> Ok [ "verifier-a" ])
-    ~reviewer:(recording_reviewer (ref []) [ "verifier-a", Stub_approve "task evidence holds" ])
-    (fun () -> drain config);
-  check string "with evidence the same request completes" "completed"
-    (stored_phase config goal_id)
-;;
-
 let test_goal_proof_reads_linked_task_producer_artifact () =
   with_workspace
   @@ fun config ->
@@ -495,8 +456,7 @@ let test_goal_proof_reads_linked_task_producer_artifact () =
       String.equal run.Goal_verification_run_registry.goal_id goal_id
       &&
       match run.review_kind with
-      | Goal_verification_run_registry.Proof -> true
-      | Goal_verification_run_registry.Criterion -> false)
+      | Goal_verification_run_registry.Proof -> true)
   in
   match proof_runs with
   | [ { Goal_verification_run_registry.run_id
@@ -556,27 +516,6 @@ let test_refuted_proof_returns_to_executing () =
 
 (* (c) A pending criterion check drains to a viable verdict — phase-neutral,
    the goal stays Executing. *)
-let test_criterion_pending_drains_to_viable () =
-  with_workspace
-  @@ fun config ->
-  let ctx = workspace_ctx config in
-  let goal_id = create_goal ctx "Checked goal" in
-  (match (ledger_record config goal_id).criterion with
-   | Goal_verification.Criterion_pending _ -> ()
-   | _ -> fail "creation must record the durable criterion request");
-  with_lane_and_reviewer
-    ~slots:(fun () -> Ok [ "verifier-a" ])
-    ~reviewer:
-      (recording_reviewer (ref []) [ "verifier-a", Stub_approve "criterion is measurable" ])
-    (fun () -> drain config);
-  check string "the goal is unmoved" "executing" (stored_phase config goal_id);
-  match (ledger_record config goal_id).criterion with
-  | Goal_verification.Criterion_viable verdict ->
-    check string "the model's stated reason is the evidence"
-      "criterion is measurable" verdict.Goal_verification.evidence
-  | _ -> fail "ledger must hold the viable verdict"
-;;
-
 (* (d) An unavailable evaluator is a typed non-verdict: the row stays
    pending, the phase stays Verifying, and the outcome names why. *)
 let test_lane_unavailable_keeps_the_pending_row () =
@@ -633,9 +572,7 @@ let test_malformed_reply_fails_over_to_the_next_slot () =
          ])
     (fun () -> drain config);
   check (list string) "failover follows the declared slot order"
-    (* The creation-time criterion check drains in the same scan and also
-       fails over, so the attempt log reads [a; b] per review. *)
-    [ "verifier-a"; "verifier-b"; "verifier-a"; "verifier-b" ]
+    [ "verifier-a"; "verifier-b" ]
     !calls;
   check string "the second slot's verdict completed the goal" "completed"
     (stored_phase config goal_id)
@@ -664,47 +601,6 @@ let test_all_slots_failed_keeps_the_pending_row () =
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_pending _ -> ()
   | _ -> fail "all-slots-fail must not consume the pending row"
-;;
-
-let test_unreachable_criterion_blocks_the_pending_proof () =
-  with_workspace
-  @@ fun config ->
-  let ctx = workspace_ctx config in
-  let goal_id = create_goal ctx "Unreachable criterion goal" in
-  ignore
-    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
-  let calls = ref [] in
-  with_lane_and_reviewer
-    ~slots:(fun () -> Ok [ "verifier-a" ])
-    ~reviewer:
-      (recording_reviewer
-         calls
-         [ "verifier-a", Stub_reject "metric cannot be measured" ])
-    (fun () -> drain config);
-  check (list string) "proof reviewer was never called"
-    [ "verifier-a" ] !calls;
-  (match (ledger_record config goal_id).criterion with
-   | Goal_verification.Criterion_unreachable _ -> ()
-   | _ -> fail "criterion must hold the unreachable verdict");
-  (match (ledger_record config goal_id).completion with
-   | Goal_verification.Proof_pending _ -> ()
-   | _ -> fail "blocked proof must remain durable");
-  check string "proof cannot complete the goal" "verifying"
-    (stored_phase config goal_id)
-;;
-
-let test_group_pending_orders_criterion_before_proof () =
-  let proof : Agent.pending_work =
-    { goal_id = "goal-a"; kind = Agent.Completion_proof }
-  in
-  let criterion : Agent.pending_work =
-    { goal_id = "goal-a"; kind = Agent.Criterion_check }
-  in
-  match Agent.group_pending_by_goal [ proof; criterion ] with
-  | [ [ { Agent.kind = Agent.Criterion_check; _ }
-        ; { Agent.kind = Agent.Completion_proof; _ }
-        ] ] -> ()
-  | _ -> fail "one goal worker must run criterion before proof"
 ;;
 
 (* (f) An APPROVE without the model's stated reason is not a judgment:
@@ -743,9 +639,12 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
    with
    | Ok _ -> ()
    | Error msg -> fail msg);
-  (match (ledger_record config goal_id).completion with
-   | Goal_verification.Completion_idle -> ()
-   | _ -> fail "test setup: the wedge needs an idle ledger");
+  (* Creation writes no ledger row, so the wedge starts with none at all —
+     the same hole the scan re-arms, reached without a row to empty. *)
+  (match Goal_verification.get_record config ~goal_id with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "test setup: the wedge needs no durable request"
+   | Error msg -> fail msg);
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
     ~reviewer:
@@ -788,11 +687,7 @@ let set_up_committed_proof_crash config ~outcome ~evidence =
 ;;
 
 let has_completion_work goal_id work =
-  List.exists
-    (fun item ->
-       String.equal item.Agent.goal_id goal_id
-       && item.kind = Agent.Completion_proof)
-    work
+  List.exists (fun item -> String.equal item.Agent.goal_id goal_id) work
 ;;
 
 let test_committed_proven_proof_reconciles_without_review () =
@@ -852,16 +747,12 @@ let () =
     [ ( "drain"
       , [ test_case "proof pending drains to completed" `Quick
             test_proof_pending_drains_to_completed
-        ; test_case "proof without a linked Task is not judged" `Quick
-            test_proof_without_a_linked_task_is_not_judged
         ; test_case
             "Goal proof reads linked Task producer artifact"
             `Quick
             test_goal_proof_reads_linked_task_producer_artifact
         ; test_case "refuted proof returns to executing with reason" `Quick
             test_refuted_proof_returns_to_executing
-        ; test_case "criterion pending drains to viable" `Quick
-            test_criterion_pending_drains_to_viable
         ] )
     ; ( "non-verdicts keep evidence"
       , [ test_case "lane unavailable keeps the pending row" `Quick
@@ -870,14 +761,8 @@ let () =
             test_malformed_reply_fails_over_to_the_next_slot
         ; test_case "all slots failed keeps the pending row" `Quick
             test_all_slots_failed_keeps_the_pending_row
-        ; test_case "unreachable criterion blocks the pending proof" `Quick
-            test_unreachable_criterion_blocks_the_pending_proof
         ; test_case "approve without a stated reason does not commit" `Quick
             test_approve_without_a_stated_reason_does_not_commit
-        ] )
-    ; ( "scheduling"
-      , [ test_case "groups criterion before proof per goal" `Quick
-            test_group_pending_orders_criterion_before_proof
         ] )
     ; ( "re-arm"
       , [ test_case

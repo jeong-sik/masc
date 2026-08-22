@@ -2,7 +2,6 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
-    "goal_verification.criterion.md",
     "goal_verification.proof.md",
     "judge.board.md",
     "judge.catchup.md",

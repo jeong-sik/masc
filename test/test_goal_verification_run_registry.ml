@@ -71,7 +71,7 @@ let test_running_attempt_is_not_claimed_after_restart () =
     registry
     ~run_id:"goal-run-interrupted"
     ~goal_id:"goal-interrupted"
-    ~review_kind:R.Criterion
+    ~review_kind:R.Proof
     ~authority_actor:"verifier_exact"
     ~started_at:20.0;
   check int "replayed running attempts are dropped" 0

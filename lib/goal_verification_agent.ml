@@ -2,10 +2,9 @@
 
     The goal-side analogue of {!Completion_authority_agent}: an
     application-owned LLM agent, not a Keeper, with no Keeper identity, task
-    action, or lifecycle. It drains the durable verification requests the gate
-    persists BEFORE any model call — [Criterion_pending] rows written at goal
-    creation (B2) and [Proof_pending] rows written before the phase enters
-    [Verifying] (B3) — judges each through
+    action, or lifecycle. It drains the durable [Proof_pending] rows the gate
+    persists BEFORE any model call, written before the phase enters
+    [Verifying] (B3), judges each through
     {!Task.Anti_rationalization.review} (so provider selection is the
     [verifier_exact] exact-output lane with frozen-order failover), and
     commits the verdict through the typed internal boundary
@@ -19,10 +18,9 @@
     context names the lane. Evidence is the model's stated reason; the
     verdict channel drops the reason for [Approve], so it is captured from
     the successful [report_review_verdict] tool call via [on_tool_result],
-    and the goal templates (config/prompts/goal_verification.proof.md and
-    goal_verification.criterion.md) make the reason mandatory for both
-    outcomes. A verdict without a stated reason is not a judgment: nothing is
-    committed and the pending row stays durable.
+    and config/prompts/goal_verification.proof.md makes the reason mandatory
+    for both outcomes. A verdict without a stated reason is not a judgment:
+    nothing is committed and the pending row stays durable.
 
     Failure keeps evidence: an unavailable evaluator, a malformed reply after
     all slots failed, or a refused commit leaves the pending row durable and
@@ -30,34 +28,15 @@
     from a Keeper requesting completion or from another review committing a
     verdict. No wall-clock expiry and no retry timer anywhere. *)
 
-type pending_kind =
-  | Criterion_check
-  | Completion_proof
-
-type pending_work =
-  { goal_id : string
-  ; kind : pending_kind
-  }
+type pending_work = { goal_id : string }
 
 type process_outcome =
   | Committed
   | Deferred of string
 
-let pending_kind_to_string = function
-  | Criterion_check -> "criterion"
-  | Completion_proof -> "proof"
-;;
-
 let pending_work_same_goal left right = String.equal left.goal_id right.goal_id
 
-let pending_kind_rank = function
-  | Criterion_check -> 0
-  | Completion_proof -> 1
-;;
-
-(* A goal's criterion must settle before its completion proof can run. Keep
-   ledger order within each goal (the scanner emits criterion before proof)
-   while preserving first-goal order for deterministic worker admission. *)
+(* Preserve first-goal order for deterministic worker admission. *)
 let group_pending_by_goal work =
   let groups = Hashtbl.create (List.length work) in
   let goal_order = ref [] in
@@ -69,12 +48,7 @@ let group_pending_by_goal work =
          goal_order := item.goal_id :: !goal_order;
          Hashtbl.add groups item.goal_id [ item ])
     work;
-  List.rev_map
-    (fun goal_id ->
-       Hashtbl.find groups goal_id
-       |> List.stable_sort (fun left right ->
-         Int.compare (pending_kind_rank left.kind) (pending_kind_rank right.kind)))
-    !goal_order
+  List.rev_map (fun goal_id -> Hashtbl.find groups goal_id) !goal_order
 ;;
 
 (* {1 Scan}
@@ -95,23 +69,12 @@ let collect_pending config : (pending_work list, string) result =
     let from_rows =
       List.concat_map
         (fun (record : Goal_verification.record) ->
-           let criterion =
-             match record.criterion with
-             | Goal_verification.Criterion_pending _ ->
-               [ { goal_id = record.goal_id; kind = Criterion_check } ]
-             | Goal_verification.Criterion_unchecked
-             | Goal_verification.Criterion_viable _
-             | Goal_verification.Criterion_unreachable _ -> []
-           in
-           let proof =
-             match record.completion with
-             | Goal_verification.Proof_pending _ ->
-               [ { goal_id = record.goal_id; kind = Completion_proof } ]
-             | Goal_verification.Completion_idle
-             | Goal_verification.Proof_proven _
-             | Goal_verification.Proof_refuted _ -> []
-           in
-           criterion @ proof)
+           match record.completion with
+           | Goal_verification.Proof_pending _ ->
+             [ { goal_id = record.goal_id } ]
+           | Goal_verification.Completion_idle
+           | Goal_verification.Proof_proven _
+           | Goal_verification.Proof_refuted _ -> [])
         records
     in
     let rec reconcile_verifying acc = function
@@ -119,11 +82,7 @@ let collect_pending config : (pending_work list, string) result =
       | (goal : Goal_store.goal) :: rest ->
         if
           List.exists
-            (fun work ->
-               (match work.kind with
-                | Completion_proof -> true
-                | Criterion_check -> false)
-               && String.equal work.goal_id goal.id)
+            (fun work -> String.equal work.goal_id goal.id)
             from_rows
         then reconcile_verifying acc rest
         else
@@ -178,7 +137,7 @@ let collect_pending config : (pending_work list, string) result =
                  "goal verifier re-armed a missing proof request (P0-2) goal_id=%s"
                  goal.id;
                reconcile_verifying
-                 ({ goal_id = goal.id; kind = Completion_proof } :: acc)
+                 ({ goal_id = goal.id } :: acc)
                  rest
              | Error msg ->
                Error
@@ -200,13 +159,10 @@ let collect_pending config : (pending_work list, string) result =
 (* {1 Review request construction}
 
    The request rides the task-shaped {!Task.Anti_rationalization.review_request}
-   record; the goal shape lives in the prompt templates
-   (config/prompts/goal_verification.proof.md and
-   goal_verification.criterion.md), which render [task_title] as the
-   goal title, [task_description] as the declared success criterion
-   (B1 makes metric/target_value mandatory at creation), and
-   [completion_notes] as the goal record (criterion review) or the
-   linked-task rollup (proof review). *)
+   record; the goal shape lives in config/prompts/goal_verification.proof.md,
+   which renders [task_title] as the goal title, [task_description] as the
+   declared success condition (B1 makes metric/target_value mandatory at
+   creation), and [completion_notes] as the linked-task rollup. *)
 
 let criterion_description (goal : Goal_store.goal) =
   let field name = function
@@ -334,7 +290,7 @@ let linked_task_lookup config tasks =
        })
 ;;
 
-let build_review_request config (goal : Goal_store.goal) kind
+let build_review_request config (goal : Goal_store.goal)
   : ( Task.Anti_rationalization.review_request
       * string
       * Task.Anti_rationalization.lookup_surface
@@ -350,34 +306,24 @@ let build_review_request config (goal : Goal_store.goal) kind
     ; evidence_refs = []
     }
   in
-  match kind with
-  | Criterion_check ->
-    (* The creation-time check judges the declared success condition itself --
-       whether it names something a verifier could later measure. No tree
-       answers that, and there is no producer to name: nobody has done work on
-       a Goal that was just created. [No_lookup_surface] states that the
-       criterion text is the whole of what was checked. *)
-    Ok
-      ( { base with
-          Task.Anti_rationalization.completion_notes =
-            Yojson.Safe.pretty_to_string (Goal_store.goal_to_yojson goal)
-        }
-      , Prompt_names.goal_verification_criterion
-      , Task.Anti_rationalization.No_lookup_surface )
-  | Completion_proof ->
-    (match linked_task_rollup config ~goal_id:goal.id with
+  (match linked_task_rollup config ~goal_id:goal.id with
      | Error _ as error -> error
-     (* [admit_proof_against_criterion] refuses a proof with no linked Task, so
-        this is unreachable. It fails loudly rather than building a review with
-        no evidence and no tree: if the admission ever stops covering this, the
-        judge must not silently rate the claim against itself. *)
-     | Ok (_, _, []) ->
-       Error
-         "proof review reached build with no linked Task; admission should \
-          have refused it"
+     (* An empty rollup is handed to the judge like any other. Nothing here
+        counts tasks and decides on the count: the prompt asks whether the
+        rollup's substance shows the declared metric reaching its target, and
+        an empty rollup shows nothing, so the judge says so and states why.
+        Refusing to run the review instead would move the decision out of the
+        verdict and into this branch, where it leaves no durable reason. *)
      | Ok (rollup, evidence_refs, tasks) ->
        let open Result.Syntax in
-       let* lookup = linked_task_lookup config tasks in
+       let* lookup =
+         match tasks with
+         (* No producer has a tree to open, so there is no forest to build.
+            [No_lookup_surface] states that the rollup is the whole of what
+            was available — it is not a verdict about the goal. *)
+         | [] -> Ok Task.Anti_rationalization.No_lookup_surface
+         | _ :: _ -> linked_task_lookup config tasks
+       in
        Ok
          ( { base with
              Task.Anti_rationalization.completion_notes = rollup
@@ -413,49 +359,16 @@ let commit_gate_verdict config ~goal_id ~verification_run_id ~decision ~evidence
 
 (* {1 Processing} *)
 
-let defer ~goal_id ~kind ~reason =
-  Log.Misc.warn
-    "goal verifier deferred goal_id=%s kind=%s reason=%s"
-    goal_id
-    (pending_kind_to_string kind)
-    reason;
+let defer ~goal_id ~reason =
+  Log.Misc.warn "goal verifier deferred goal_id=%s reason=%s" goal_id reason;
   Deferred reason
 ;;
 
-let admit_proof_against_criterion config (work : pending_work) =
-  match work.kind with
-  | Criterion_check -> Ok ()
-  | Completion_proof ->
-    (match Goal_verification.get_record config ~goal_id:work.goal_id with
-     | Error detail -> Error detail
-     | Ok None -> Error "proof request has no verification ledger record"
-
-     | Ok (Some record) ->
-       (match record.Goal_verification.criterion with
-        | Goal_verification.Criterion_viable _ ->
-          (* A completion proof is judged against the linked Tasks: their
-             rollup is the evidence and their performers are the trees the
-             judge may open. With no linked Task there is neither. The Goal's
-             own metric and target are the CLAIM under review, so letting the
-             review proceed on those alone would let the judge approve the
-             claim by reading the claim -- the independent proof gate would be
-             satisfied by prose.
-
-             The pending row stays durable, and the first linked Task makes
-             the next drain admissible. *)
-          (match linked_task_rollup config ~goal_id:work.goal_id with
-           | Error detail -> Error detail
-           | Ok (_, _, []) ->
-             Error
-               "proof has no linked Task: the Goal's own metric and target \
-                are the claim under review, not evidence for it"
-           | Ok (_, _, _ :: _) -> Ok ())
-        | Goal_verification.Criterion_pending _
-        | Goal_verification.Criterion_unchecked ->
-          Error "proof waits until the durable criterion verdict is viable"
-        | Goal_verification.Criterion_unreachable _ ->
-          Error "proof refused because the durable criterion is unreachable"))
-;;
+(* Nothing stands between a pending proof request and the review. Whether the
+   goal reached its target is the verdict's answer to give; a branch here that
+   declined to run the review would be making that call without recording a
+   reason, and without the judge ever reading the rollup it claims to know
+   about. *)
 
 let process_pending_work_inner
       ?(sw : Eio.Switch.t option = None)
@@ -467,27 +380,19 @@ let process_pending_work_inner
       (work : pending_work)
   : process_outcome
   =
-  match admit_proof_against_criterion config work with
-  | Error reason -> defer ~goal_id:work.goal_id ~kind:work.kind ~reason
-  | Ok () ->
   match Goal_store.get_goal config ~goal_id:work.goal_id with
   | None ->
     (* The row stays durable — failure keeps evidence — but retrying cannot
        conjure the goal back; the next wake rescan reports the same. *)
     defer
       ~goal_id:work.goal_id
-      ~kind:work.kind
       ~reason:"pending verification row names a goal that does not exist"
   | Some goal ->
-    (match work.kind, goal.Goal_store.phase with
-     | Completion_proof, Goal_phase.Verifying
-     | Criterion_check, Goal_phase.Executing
-     | Criterion_check, Goal_phase.Blocked
-     | Criterion_check, Goal_phase.Paused
-     | Criterion_check, Goal_phase.Verifying ->
-       (match build_review_request config goal work.kind with
+    (match goal.Goal_store.phase with
+     | Goal_phase.Verifying ->
+       (match build_review_request config goal with
         | Error detail ->
-          defer ~goal_id:work.goal_id ~kind:work.kind ~reason:detail
+          defer ~goal_id:work.goal_id ~reason:detail
         | Ok (review_request, prompt_name, lookup) ->
           (* The verdict channel drops the reason for [Approve]; capture the
              stated reason from the successful verdict tool call — exactly one
@@ -530,7 +435,6 @@ let process_pending_work_inner
                 worker slot coming free with work still queued. *)
              defer
                ~goal_id:work.goal_id
-               ~kind:work.kind
                ~reason:detail
            | Some review_verdict ->
              let evidence =
@@ -541,15 +445,11 @@ let process_pending_work_inner
              (match evidence with
               | Some evidence when String.trim evidence <> "" ->
                 let decision =
-                  match work.kind, review_verdict with
-                  | Completion_proof, Task.Anti_rationalization.Approve ->
+                  match review_verdict with
+                  | Task.Anti_rationalization.Approve ->
                     Workspace_goals.Proof_proven
-                  | Completion_proof, Task.Anti_rationalization.Reject reason ->
+                  | Task.Anti_rationalization.Reject reason ->
                     Workspace_goals.Proof_refuted { reason }
-                  | Criterion_check, Task.Anti_rationalization.Approve ->
-                    Workspace_goals.Criterion_viable
-                  | Criterion_check, Task.Anti_rationalization.Reject reason ->
-                    Workspace_goals.Criterion_unreachable { reason }
                 in
                 persist_reviewed ();
                 (match
@@ -562,9 +462,8 @@ let process_pending_work_inner
                  with
                  | Ok () ->
                    Log.Misc.info
-                     "goal verifier committed goal_id=%s kind=%s verdict=%s"
+                     "goal verifier committed goal_id=%s verdict=%s"
                      work.goal_id
-                     (pending_kind_to_string work.kind)
                      (Task.Anti_rationalization.verdict_constructor_name
                         review_verdict);
                    Committed
@@ -574,18 +473,14 @@ let process_pending_work_inner
                       row stays durable and the next pulse re-reads it. *)
                    defer
                      ~goal_id:work.goal_id
-                     ~kind:work.kind
                      ~reason:detail)
               | Some _ | None ->
                 defer
                   ~goal_id:work.goal_id
-                  ~kind:work.kind
                   ~reason:
                     "verdict without a stated reason is not a judgment; the \
                      pending row stays durable")))
-     | Completion_proof, Goal_phase.Executing
-     | Completion_proof, Goal_phase.Blocked
-     | Completion_proof, Goal_phase.Paused ->
+     | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused ->
        (* The crash window of persist-before-model-call: the durable request
           exists but the phase write never landed. Reviewing now would produce
           a verdict the FSM must refuse ([Executing, Record_proof_*] is
@@ -593,30 +488,13 @@ let process_pending_work_inner
           [request_complete] re-converges the phase onto the pending row. *)
        defer
          ~goal_id:work.goal_id
-         ~kind:work.kind
          ~reason:
            "proof request is pending but the phase never entered verifying; \
             waiting for the gate to re-converge"
-     | Completion_proof, Goal_phase.Completed
-     | Completion_proof, Goal_phase.Dropped ->
+     | Goal_phase.Completed | Goal_phase.Dropped ->
        defer
          ~goal_id:work.goal_id
-         ~kind:work.kind
-         ~reason:"proof request pending on a terminal goal; left durable"
-     | Criterion_check, Goal_phase.Completed
-     | Criterion_check, Goal_phase.Dropped ->
-       (* Criterion verdicts are invalid on terminal goals — the creation-time
-          declaration is settled history (RFC-0387 §5). The row stays durable
-          as the honest record of a request that was never judged. *)
-       defer
-         ~goal_id:work.goal_id
-         ~kind:work.kind
-         ~reason:"criterion request pending on a terminal goal; left durable")
-;;
-
-let registry_review_kind = function
-  | Criterion_check -> Goal_verification_run_registry.Criterion
-  | Completion_proof -> Goal_verification_run_registry.Proof
+         ~reason:"proof request pending on a terminal goal; left durable")
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
@@ -631,7 +509,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
     registry
     ~run_id
     ~goal_id:work.goal_id
-    ~review_kind:(registry_review_kind work.kind)
+    ~review_kind:Goal_verification_run_registry.Proof
     ~authority_actor:Runtime.verifier_exact_lane_id
     ~started_at;
   let observe_tool ~input result =
@@ -908,14 +786,7 @@ module For_testing = struct
   let process_pending_work = process_pending_work
   let drain_once = drain_once
 
-  type nonrec pending_kind = pending_kind =
-    | Criterion_check
-    | Completion_proof
-
-  type nonrec pending_work = pending_work = {
-    goal_id : string;
-    kind : pending_kind;
-  }
+  type nonrec pending_work = pending_work = { goal_id : string }
 
   type nonrec process_outcome = process_outcome =
     | Committed

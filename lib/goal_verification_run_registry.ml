@@ -1,6 +1,4 @@
-type review_kind =
-  | Criterion
-  | Proof
+type review_kind = Proof
 
 type outcome =
   | Reviewed
@@ -30,12 +28,10 @@ type run =
 let storage_filename = "goal-verification-runs.jsonl"
 
 let review_kind_label = function
-  | Criterion -> "criterion"
   | Proof -> "proof"
 ;;
 
 let review_kind_of_label = function
-  | "criterion" -> Ok Criterion
   | "proof" -> Ok Proof
   | label -> Error (Printf.sprintf "unknown Goal review kind %S" label)
 ;;

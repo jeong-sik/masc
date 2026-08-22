@@ -87,7 +87,7 @@ function GoalVerificationRunRow({ row }: { row: GoalVerificationRunRecord }) {
         />
       </td>
       <td class="py-2 pr-2"><code title=${row.goalId}>${truncate(row.goalId, 24)}</code></td>
-      <td class="py-2 pr-2">${row.reviewKind === 'criterion' ? '성공조건' : '완료증명'}</td>
+      <td class="py-2 pr-2">완료증명</td>
       <td class="py-2 pr-2" title=${row.authorityActor}>${row.evaluatorRuntime ?? '—'}</td>
       <td class="py-2 pr-2 tabular-nums">${formatElapsed(row.elapsedSeconds)}</td>
       <td class="py-2 pr-2 whitespace-nowrap">${relativeTime(new Date(row.startedAt * 1000).toISOString())}</td>

@@ -70,8 +70,6 @@ type action =
   | Reopen
   | Record_proof_proven
   | Record_proof_refuted
-  | Record_criterion_viable
-  | Record_criterion_unreachable
 
 let action_to_string = function
   | Request_complete -> "request_complete"
@@ -83,8 +81,6 @@ let action_to_string = function
   | Reopen -> "reopen"
   | Record_proof_proven -> "record_proof_proven"
   | Record_proof_refuted -> "record_proof_refuted"
-  | Record_criterion_viable -> "record_criterion_viable"
-  | Record_criterion_unreachable -> "record_criterion_unreachable"
 
 (* Every action, declaration order. SSOT for the schema/validator action enum
    (see [all]). [action_to_string] is the exhaustive witness. *)
@@ -98,8 +94,6 @@ let all_actions =
   ; Reopen
   ; Record_proof_proven
   ; Record_proof_refuted
-  ; Record_criterion_viable
-  ; Record_criterion_unreachable
   ]
 
 let action_of_string = function
@@ -112,8 +106,6 @@ let action_of_string = function
   | "reopen" -> Some Reopen
   | "record_proof_proven" -> Some Record_proof_proven
   | "record_proof_refuted" -> Some Record_proof_refuted
-  | "record_criterion_viable" -> Some Record_criterion_viable
-  | "record_criterion_unreachable" -> Some Record_criterion_unreachable
   | _ -> None
 
 let parse_action s =
@@ -204,14 +196,10 @@ let decide_transition ~phase ~(action : action) =
   | Executing, Drop -> Ok (Move_to Dropped)
   | Executing, (Resume | Unblock | Reopen) -> Ok (Already Executing)
   | Executing, (Record_proof_proven | Record_proof_refuted) -> invalid
-  | Executing, (Record_criterion_viable | Record_criterion_unreachable) ->
-      Ok (Already Executing)
   (* Paused: resumes or drops; it is not blocked and not finished. *)
   | Paused, Resume -> Ok (Move_to Executing)
   | Paused, Drop -> Ok (Move_to Dropped)
   | Paused, Pause -> Ok (Already Paused)
-  | Paused, (Record_criterion_viable | Record_criterion_unreachable) ->
-      Ok (Already Paused)
   | Paused,
     ( Request_complete | Block | Unblock | Reopen
     | Record_proof_proven | Record_proof_refuted ) -> invalid
@@ -220,8 +208,6 @@ let decide_transition ~phase ~(action : action) =
   | Blocked, Unblock -> Ok (Move_to Executing)
   | Blocked, Drop -> Ok (Move_to Dropped)
   | Blocked, Block -> Ok (Already Blocked)
-  | Blocked, (Record_criterion_viable | Record_criterion_unreachable) ->
-      Ok (Already Blocked)
   | Blocked,
     ( Request_complete | Pause | Resume | Reopen
     | Record_proof_proven | Record_proof_refuted ) -> invalid
@@ -234,25 +220,19 @@ let decide_transition ~phase ~(action : action) =
   | Verifying, Record_proof_proven -> Ok (Move_to Completed)
   | Verifying, Record_proof_refuted -> Ok (Move_to Executing)
   | Verifying, Request_complete -> Ok (Already Verifying)
-  | Verifying, (Record_criterion_viable | Record_criterion_unreachable) ->
-      Ok (Already Verifying)
   | Verifying, (Pause | Resume | Block | Unblock | Drop | Reopen) -> invalid
   (* Completed and Dropped are terminal: only reopening leaves them.
      [Dropped, Request_complete] stays invalid -- completion is not the phase a
      dropped goal is in, so it is a real request for a state change, not a
-     restatement. Reopen first. Criterion verdicts are invalid here too: the
-     creation-time declaration of a finished goal is settled history, not a
-     phase-neutral ledger update (RFC-0387 §5). *)
+     restatement. Reopen first. *)
   | Completed, Reopen -> Ok (Move_to Executing)
   | Completed, Drop -> Ok (Move_to Dropped)
   | Completed, Request_complete -> Ok (Already Completed)
   | Completed,
     ( Pause | Resume | Block | Unblock
-    | Record_proof_proven | Record_proof_refuted
-    | Record_criterion_viable | Record_criterion_unreachable ) -> invalid
+    | Record_proof_proven | Record_proof_refuted ) -> invalid
   | Dropped, Reopen -> Ok (Move_to Executing)
   | Dropped, Drop -> Ok (Already Dropped)
   | Dropped,
     ( Request_complete | Pause | Resume | Block | Unblock
-    | Record_proof_proven | Record_proof_refuted
-    | Record_criterion_viable | Record_criterion_unreachable ) -> invalid
+    | Record_proof_proven | Record_proof_refuted ) -> invalid

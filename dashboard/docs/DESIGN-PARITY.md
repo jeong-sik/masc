@@ -13,6 +13,15 @@ mock data twice**: once with the prototype's stylesheets, once with the
 dashboard's compiled stylesheet set. Same markup, same strings, same viewport;
 the only difference is CSS. What is left is skin drift.
 
+**What this cannot see.** Fixing the DOM is what makes the number mean something,
+and it is also the number's boundary: a surface the dashboard rebuilt under
+different markup can never lower this score, because the parity page never
+renders the dashboard's markup. Every number in this file measures the skin.
+Whether the dashboard renders the design's components at all is a separate
+question with separate probes — `DESIGN-COMPONENT-PARITY.md`. It stands at 55.2%,
+against 0.9487 here, and `lanes.css` shows how far the two can drift apart: the
+Lane Queue sub-view scores 0.959 and not one `dl-` class exists in `src`.
+
 ## Running it
 
 ```bash

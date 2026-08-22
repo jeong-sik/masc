@@ -986,7 +986,7 @@ let connector_post_replay_of_gate_input input =
     | _ ->
       Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
-  let optional_string_list key fields =
+  let required_string_list key fields =
     match
       List.filter_map
         (fun (name, value) -> if String.equal name key then Some value else None)
@@ -1008,7 +1008,7 @@ let connector_post_replay_of_gate_input input =
       decode [] values
     | [ _ ] ->
       Error (Printf.sprintf "approved connector_post %s must be an array" key)
-    | [] -> Ok []
+    | [] -> Error (Printf.sprintf "approved connector_post is missing %s" key)
     | _ -> Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
   let reject_unknown ~allowed fields =
@@ -1031,11 +1031,9 @@ let connector_post_replay_of_gate_input input =
     let* connector = required_string "connector" fields in
     let* channel_id = required_string "channel_id" fields in
     let* content = required_string "content" fields in
-    (* Approvals persisted before rich mentions have no field at all. New
-       producers always write the canonical empty list, while replay keeps the
-       exact old no-mention meaning instead of making an approved effect
-       undecodable across the upgrade. *)
-    let* mention_user_ids = optional_string_list "mention_user_ids" fields in
+    (* [connector_post_gate_input] always writes the list (empty when there
+       are no mentions), so an absent field is a malformed request. *)
+    let* mention_user_ids = required_string_list "mention_user_ids" fields in
     let* validated_mention_user_ids =
       Keeper_surface_post.user_mentions_of_args
         ~surface:connector

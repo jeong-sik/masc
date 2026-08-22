@@ -577,7 +577,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # 526 -> 522: the agent JSON repair path (#29396 A15) removed four more
 # exports (normalize_agent_last_seen, short_json_repr,
 # agent_json_needs_repair, read_agent_with_repair_result).
-DEAD_EXPORT_BASELINE = 522
+# 522 -> 520: dropping server_routes_http_common.state_switch_opt and
+# state_clock_opt removed two more dead exports.
+DEAD_EXPORT_BASELINE = 520
 
 
 def run_ratchet(count: int) -> int:

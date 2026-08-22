@@ -2,6 +2,16 @@ open Alcotest
 
 module Projection = Masc_tui_operator_projection
 
+let contains_substring text substring =
+  let text_length = String.length text in
+  let substring_length = String.length substring in
+  let rec loop index =
+    if index + substring_length > text_length then false
+    else if String.sub text index substring_length = substring then true
+    else loop (index + 1)
+  in
+  loop 0
+
 let string_option_to_json = function
   | Some value -> `String value
   | None -> `Null
@@ -78,6 +88,21 @@ let test_current_contract () =
              probe.ap_target_id;
            check (option string) "nullable expiry" None probe.ap_expires_at
        | _ -> fail "expected two approval items")
+
+let test_payload_terminal_projection () =
+  let rendered =
+    Projection.approval_payload_for_terminal
+      (`Assoc
+        [ "reason", `String "safe\027]0;owned\007\155\194\155done" ])
+  in
+  check bool "payload contains no ESC" false (String.contains rendered '\027');
+  check bool "payload contains no BEL" false (String.contains rendered '\007');
+  check bool "payload contains no raw or encoded C1 byte" false
+    (String.contains rendered '\155');
+  check bool "raw C1 byte is visible as inert evidence" true
+    (contains_substring rendered "\\x9B");
+  check bool "UTF-8 C1 code point is visible as inert evidence" true
+    (contains_substring rendered "\\u009B")
 
 let test_fails_closed () =
   let malformed =
@@ -288,6 +313,8 @@ let () =
   run "tui_operator_projection"
     [ ( "operator approvals"
       , [ test_case "current contract" `Quick test_current_contract
+        ; test_case "payload terminal projection" `Quick
+            test_payload_terminal_projection
         ; test_case "fails closed" `Quick test_fails_closed
         ; test_case "semantic confirm status" `Quick
             test_confirm_response_status

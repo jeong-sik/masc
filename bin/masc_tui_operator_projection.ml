@@ -109,6 +109,9 @@ let approval_decision_wire = function
   | Confirm -> "confirm"
   | Deny -> "deny"
 
+let approval_payload_for_terminal payload =
+  Masc.Tui_decode.sanitize_terminal_text (Yojson.Safe.to_string payload)
+
 let approval_gate_transition ~inflight ~pending ~token ~decision =
   if inflight then Gate_blocked_inflight
   else

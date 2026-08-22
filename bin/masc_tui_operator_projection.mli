@@ -54,6 +54,9 @@ end
 
 val decode_snapshot : Yojson.Safe.t -> (approval_snapshot, string) result
 val approval_decision_wire : approval_decision -> string
+val approval_payload_for_terminal : Yojson.Safe.t -> string
+(** Serialize the raw typed payload, then escape terminal control code points.
+    The raw payload remains unchanged for confirmation semantics. *)
 val approval_gate_transition :
   inflight:bool ->
   pending:pending_approval_action option ->

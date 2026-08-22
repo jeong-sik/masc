@@ -120,6 +120,58 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_render.ml"
        ~needle:"  %spayload=%s%s");
+  check bool "approval renderer sanitizes direct external text" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_approvals"
+       ~callee:"Terminal_text.single_line"
+     >= 7);
+  check int "approval renderer sanitizes optional text with defaults" 3
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_approvals"
+       ~callee:"Terminal_text.single_line_or");
+  check int "approval renderer sanitizes optional error text" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_approvals"
+       ~callee:"Terminal_text.optional_single_line");
+  check int "terminal text boundary delegates to the typed sanitizer" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_ansi.ml"
+       ~binding_name:"single_line"
+       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+  check int "approval payload uses its terminal projection" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_approvals"
+       ~callee:
+         "Masc_tui_operator_projection.approval_payload_for_terminal");
+  check int "approval payload projection serializes once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_operator_projection.ml"
+       ~binding_name:"approval_payload_for_terminal"
+       ~callee:"Yojson.Safe.to_string");
+  check int "approval payload projection sanitizes once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_operator_projection.ml"
+       ~binding_name:"approval_payload_for_terminal"
+       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+  check int "approval renderer never serializes a raw payload" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_approvals"
+       ~callee:"Yojson.Safe.to_string");
+  check int "dashboard event text crosses the terminal boundary" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_dashboard"
+       ~callee:"Terminal_text.single_line");
+  check int "overview event text crosses the terminal boundary" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_overview"
+       ~callee:"Terminal_text.single_line");
   check int "briefing is not an approval source" 0
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_loader.ml"

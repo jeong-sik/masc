@@ -126,7 +126,7 @@ let render_dashboard (state : state) =
         let e = List.nth state.events i in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
-          (fit_width e.content (panel_width - 12))
+          (fit_width (Terminal_text.single_line e.content) (panel_width - 12))
       else ""
     in
     Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
@@ -269,7 +269,7 @@ let render_overview (state : state) =
         let e = List.nth state.events i in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
-          (fit_width e.content (panel_width - 12))
+          (fit_width (Terminal_text.single_line e.content) (panel_width - 12))
       else ""
     in
     Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
@@ -331,7 +331,8 @@ let render_approvals (state : state) =
     | None -> "-", "?", "?", "?"
     | Some snapshot ->
         ( (if snapshot.aps_filter_active then
-             Option.value ~default:"?" snapshot.aps_actor_filter
+             Terminal_text.single_line_or ~default:"?"
+               snapshot.aps_actor_filter
            else "all")
         , string_of_int snapshot.aps_visible_count
         , string_of_int snapshot.aps_total_count
@@ -353,8 +354,11 @@ let render_approvals (state : state) =
   box_line buf cols header;
   box_divider buf cols;
 
+  let approvals_error =
+    Terminal_text.optional_single_line state.approvals_error
+  in
   if count = 0 then begin
-    (match state.approval_snapshot, state.approvals_error with
+    (match state.approval_snapshot, approvals_error with
      | _, Some err ->
          box_line buf cols
            (Ansi.red ^ "  (data unreliable: "
@@ -382,12 +386,14 @@ let render_approvals (state : state) =
       if idx < count then begin
         let a = List.nth approvals idx in
         let is_selected = idx = state.approval_cursor in
-        let target_id = Option.value ~default:"-" a.ap_target_id in
+        let target_id =
+          Terminal_text.single_line_or ~default:"-" a.ap_target_id
+        in
         let line =
           Printf.sprintf "  %s  %s  %s  %s"
-            (fit_width a.ap_actor 16)
-            (fit_width a.ap_action_type 20)
-            (fit_width a.ap_target_type 16)
+            (fit_width (Terminal_text.single_line a.ap_actor) 16)
+            (fit_width (Terminal_text.single_line a.ap_action_type) 20)
+            (fit_width (Terminal_text.single_line a.ap_target_type) 16)
             target_id
         in
         let content =
@@ -420,11 +426,13 @@ let render_approvals (state : state) =
             | Deny -> "n"
           in
           Printf.sprintf "  %sPress %s again: %s%s" Ansi.yellow key
-            (fit_width a.ap_summary (cols - 22))
+            (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
             Ansi.reset
       | _ ->
           Printf.sprintf "  %s%s%s"
-            Ansi.dim (fit_width a.ap_summary (cols - 6)) Ansi.reset
+            Ansi.dim
+            (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
+            Ansi.reset
     else
       ""
   in
@@ -434,11 +442,17 @@ let render_approvals (state : state) =
     match List.nth_opt approvals state.approval_cursor with
     | None -> "", ""
     | Some approval ->
-        let expires = Option.value ~default:"-" approval.ap_expires_at in
-        let payload = Yojson.Safe.to_string approval.ap_payload in
+        let expires =
+          Terminal_text.single_line_or ~default:"-" approval.ap_expires_at
+        in
+        let payload =
+          Masc_tui_operator_projection.approval_payload_for_terminal
+            approval.ap_payload
+        in
         ( Printf.sprintf "  %strace=%s  created=%s  expires=%s%s" Ansi.dim
-            (fit_width approval.ap_trace_id 18)
-            approval.ap_created_at expires Ansi.reset
+            (fit_width (Terminal_text.single_line approval.ap_trace_id) 18)
+            (Terminal_text.single_line approval.ap_created_at)
+            expires Ansi.reset
         , Printf.sprintf "  %spayload=%s%s" Ansi.dim
             (fit_width payload (max 8 (cols - 12)))
             Ansi.reset )

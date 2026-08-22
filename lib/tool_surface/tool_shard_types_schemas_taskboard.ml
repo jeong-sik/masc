@@ -3,9 +3,12 @@
 let taskboard_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_tasks_list"
     ; description =
-        "List tasks on the MASC backlog. Returns task_id, title, status, assignee, and \
-         priority for each task. For awaiting_verification, report that the task \
-         is pending a verdict from the system LLM agent at the \
+        "List tasks on the MASC backlog. Each row carries id, title, priority, \
+         created_at, status, and the assignee/timestamps of that status. Pass \
+         projection \"full\" to also receive description, files, contract, \
+         handoff_context, and execution_links — use it with a status filter for \
+         the task you are about to work on. For awaiting_verification, report \
+         that the task is pending a verdict from the system LLM agent at the \
          completion-authority boundary and is not claimable by any Keeper; never \
          Read producer sandbox paths directly."
     ; input_schema =
@@ -46,6 +49,15 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                 ; ( "description"
                                   , `String
                                       "Optional producer revision from the previous keeper_tasks_list snapshot; matching revisions return unchanged." )
+                                ] )
+                          ; ( "projection"
+                            , `Assoc
+                                [ "type", `String "string"
+                                ; "enum", `List [ `String "compact"; `String "full" ]
+                                ; "default", `String "compact"
+                                ; ( "description"
+                                  , `String
+                                      "Row shape: compact (default) omits description, files, contract, handoff_context, and execution_links; full returns the whole task record." )
                                 ] )
                           ] )
           ]

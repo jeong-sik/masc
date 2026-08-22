@@ -296,6 +296,88 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
          (Yojson.Safe.to_string unchanged_data)
        unchanged.raw_output)
 
+let test_tasks_list_projection_compact_by_default_full_on_request () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       ignore
+         (Task.handle_keeper_task_tool
+            ~config
+            ~meta
+            ~name:"keeper_task_create"
+            ~args:
+              (`Assoc
+                [ "title", `String "Projection fixture"
+                ; "description", `String "a body the compact row must not carry"
+                ; "priority", `Int 2
+                ]));
+       let list args =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args)
+             .data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let only_row data =
+         match U.(data |> member "snapshot" |> to_list) with
+         | [ row ] -> row
+         | rows -> failf "expected one row, got %d" (List.length rows)
+       in
+       let compact = list (`Assoc []) in
+       check string "default projection is compact" "compact"
+         U.(compact |> member "projection" |> to_string);
+       let compact_row = only_row compact in
+       check string "compact row keeps the title" "Projection fixture"
+         U.(compact_row |> member "title" |> to_string);
+       check string "compact row keeps the status" "todo"
+         U.(compact_row |> member "status" |> to_string);
+       check int "compact row keeps the priority" 2
+         U.(compact_row |> member "priority" |> to_int);
+       List.iter
+         (fun field ->
+            check bool (field ^ " is absent from the compact row") true
+              (U.member field compact_row = `Null))
+         [ "description"; "files"; "contract"; "handoff_context"; "execution_links" ];
+       let full = list (`Assoc [ "projection", `String "full" ]) in
+       check string "requested projection is echoed" "full"
+         U.(full |> member "projection" |> to_string);
+       let full_row = only_row full in
+       check string "full row carries the description"
+         "a body the compact row must not carry"
+         U.(full_row |> member "description" |> to_string);
+       check bool "full row carries files" true
+         (U.member "files" full_row <> `Null);
+       check bool "the two projections have distinct revisions" true
+         (U.(compact |> member "revision" |> to_string)
+          <> U.(full |> member "revision" |> to_string));
+       let rejected =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc [ "projection", `String "summary" ])
+       in
+       check bool "unknown projection is rejected, not defaulted" true
+         (rejected.data = None);
+       check bool "rejection names the accepted values" true
+         (let message = rejected.raw_output in
+          let contains needle =
+            let n = String.length needle and h = String.length message in
+            let rec go i = i + n <= h && (String.sub message i n = needle || go (i + 1)) in
+            go 0
+          in
+          contains "compact" && contains "full" && contains "summary"))
+;;
+
 let test_tasks_list_recovery_is_degraded_and_never_unchanged () =
   let base_path = temp_dir () in
   Fun.protect
@@ -723,6 +805,10 @@ let () =
             "keeper_tasks_list recovery is degraded and never unchanged"
             `Quick
             test_tasks_list_recovery_is_degraded_and_never_unchanged
+        ; test_case
+            "keeper_tasks_list is compact by default and full on request"
+            `Quick
+            test_tasks_list_projection_compact_by_default_full_on_request
         ; test_case "response finalization keeps visible reply only" `Quick
             test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

@@ -185,9 +185,10 @@ let manual_help_entry name =
             [
               "include_done defaults to false.";
               "Use status to narrow the list when inspecting a specific lifecycle state.";
+              "projection defaults to compact; pass full only for the task(s) you are about to work on.";
             ];
           details_markdown =
-            "Returns task_id, title, status, assignee, and priority for backlog tasks visible to the keeper.";
+            "Returns id, title, priority, created_at, status, and the assignee/timestamps of that status for backlog tasks visible to the keeper. projection \"full\" adds description, files, contract, handoff_context, and execution_links.";
           doc_refs = [];
           prompt_hints = [];
           examples = [ "status='todo' include_done=false limit=20" ];

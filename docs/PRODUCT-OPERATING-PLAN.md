@@ -83,6 +83,13 @@ if the repository drifts from the SSOT the run fails and names the missing label
 | `root` | zero or more | `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt` |
 | `must-do` | flag | `true` when the product promise is broken right now |
 
+Two rules settle the overlaps the table cannot spell out:
+
+- `area` is where the fix lands, not where the symptom shows. A panel rendering a stale metric is
+  `dashboard` when the panel is wrong and `observability` when the metric is.
+- `impact` takes the highest row that applies. The values are ordered, so an issue that both blinds the
+  operator and stops turns is `breaks-continuity`.
+
 ### Priority comes from impact, not from an assertion
 
 `impact` is ordered, and that order is the priority order:
@@ -97,16 +104,35 @@ There is no separate priority or scheduling label. Severity is derived from whic
 causes, so it can be argued about with evidence instead of asserted. A roadmap decides *when* work happens;
 a label decides *what is at stake*.
 
-`root` is optional and follows `docs/spec/16-root-cause-rubric.md`. Multiple values are expected:
-the 2026-04-19 sweep found 60% of issues match two or more categories, for example a boundary violation
-that also swallows errors. A missing `root` is not a triage violation; the rubric only applies when a
-structural marker actually matches.
+`root` is optional and follows `docs/spec/16-root-cause-rubric.md`. A missing `root` is not a triage
+violation; the rubric only applies when a structural marker actually matches. Multiple values are allowed,
+and overlap is real - a boundary violation that also swallows errors takes both - but it is rare in the
+intake we actually have: on 2026-08-22, 48 of the 820 open issues that declare `root` name two or more,
+and 401 declare none. This paragraph used to quote 60% from the 2026-04-19 sweep; that number stopped
+describing the repository.
 
 ### Issue intake
 
 Humans file through the issue form; keepers file with `gh issue create`. Both produce the same fenced
 `masc-triage` block, so there is one format and one parser. An issue filed without the block gets a comment
 naming the expected shape, and no labels.
+
+### PR status labels
+
+Pull requests carry no taxonomy. `kind`/`area`/`impact` describe a problem and a PR is an answer, so the
+`Issue Taxonomy` workflow skips them outright. What a PR does carry is `pr/*`, projected from GitHub's own
+view of it by the `PR Status Labels` workflow out of `.github/pull-request-labels.json`.
+
+| Label | Set when |
+|-------|----------|
+| `pr/conflict` | `mergeable` is `CONFLICTING`. No `pull_request` workflow runs in that state, so the PR shows zero checks and reads as a slow queue |
+| `pr/review-changes` | the review decision is `CHANGES_REQUESTED` |
+| `pr/review-approved` | the review decision is `APPROVED` |
+| `pr/unresolved` | at least one review thread is still open |
+
+Nothing gates on these and nobody sets them by hand. Conflict flips when main moves and resolving a thread
+emits no webhook at all, so the workflow sweeps every open PR on push-to-main and once an hour as well as
+on PR and review events.
 
 ### PR rules
 

@@ -1,4 +1,4 @@
-import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
+import { currentDashboardActor, get, post, del, put, runRequest, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
@@ -961,7 +961,7 @@ export async function fetchBoard(
     blindVotes?: boolean
   },
 ): Promise<{ posts: BoardPost[] }> {
-  return timeBoardRequest('list', () => withRetries('fetchBoard', async () => {
+  return timeBoardRequest('list', () => runRequest('fetchBoard', async () => {
     const params = new URLSearchParams()
     if (sortBy) params.set('sort_by', sortBy)
     if (options?.excludeSystem) params.set('exclude_system', 'true')
@@ -984,7 +984,7 @@ export async function fetchBoardHearths(options: {
   excludeSystem?: boolean
   excludeAutomation?: boolean
 } = {}): Promise<BoardHearth[]> {
-  return withRetries('fetchBoardHearths', async () => {
+  return runRequest('fetchBoardHearths', async () => {
     const params = new URLSearchParams()
     if (options.excludeSystem) params.set('exclude_system', 'true')
     if (options.excludeAutomation) params.set('exclude_automation', 'true')
@@ -997,7 +997,7 @@ export async function fetchBoardHearths(options: {
 }
 
 export async function fetchBoardFlairs(): Promise<BoardFlair[]> {
-  return withRetries('fetchBoardFlairs', async () => {
+  return runRequest('fetchBoardFlairs', async () => {
     const raw = await get<{ flairs?: unknown[] }>('/api/v1/board/flairs')
     return Array.isArray(raw.flairs)
       ? raw.flairs.map(normalizeBoardFlair).filter((row): row is BoardFlair => row !== null)
@@ -1006,14 +1006,14 @@ export async function fetchBoardFlairs(): Promise<BoardFlair[]> {
 }
 
 export async function fetchBoardCuration(): Promise<BoardCurationSnapshot | null> {
-  return withRetries('fetchBoardCuration', async () => {
+  return runRequest('fetchBoardCuration', async () => {
     const raw = await get<{ snapshot?: unknown }>('/api/v1/board/curation')
     return raw.snapshot != null ? normalizeBoardCurationSnapshot(raw.snapshot) : null
   })
 }
 
 export async function fetchBoardKarmaLedger(options: { agent?: string; limit?: number } = {}): Promise<BoardKarmaLedger> {
-  return withRetries('fetchBoardKarmaLedger', async () => {
+  return runRequest('fetchBoardKarmaLedger', async () => {
     const params = new URLSearchParams()
     const agent = options.agent?.trim()
     if (agent) params.set('agent', agent)
@@ -1030,7 +1030,7 @@ export async function fetchBoardReactionState(
   targetType: BoardReactionTargetType,
   targetId: string,
 ): Promise<BoardReactionState> {
-  return timeBoardRequest('reaction_summary', () => withRetries('fetchBoardReactionState', async () => {
+  return timeBoardRequest('reaction_summary', () => runRequest('fetchBoardReactionState', async () => {
     const params = new URLSearchParams({
       target_type: targetType,
       target_id: targetId,
@@ -1055,7 +1055,7 @@ export async function fetchBoardReactionState(
 }
 
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
-  return timeBoardRequest('detail', () => withRetries('fetchBoardPost', async () => {
+  return timeBoardRequest('detail', () => runRequest('fetchBoardPost', async () => {
     const params = new URLSearchParams({
       format: 'flat',
       voter: currentDashboardActor(),
@@ -1198,7 +1198,7 @@ export function normalizeSubBoard(raw: unknown): SubBoard | null {
 }
 
 export async function fetchSubBoards(): Promise<SubBoard[]> {
-  const data = await withRetries('fetchSubBoards', () => get('/api/v1/board/sub-boards'))
+  const data = await runRequest('fetchSubBoards', () => get('/api/v1/board/sub-boards'))
   if (!isRecord(data)) return []
   const raw = Array.isArray(data.sub_boards) ? data.sub_boards : []
   return raw.flatMap((r: unknown) => {
@@ -1208,7 +1208,7 @@ export async function fetchSubBoards(): Promise<SubBoard[]> {
 }
 
 export async function fetchSubBoard(subBoardId: string): Promise<SubBoard | null> {
-  const data = await withRetries('fetchSubBoard', () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`))
+  const data = await runRequest('fetchSubBoard', () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`))
   return normalizeSubBoard(data)
 }
 

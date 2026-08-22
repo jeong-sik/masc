@@ -11,7 +11,6 @@ import {
 } from './core'
 
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
-const DEV_TOKEN_WARMUP_RETRY_MS = 1_000
 
 let devTokenBootstrapPromise: Promise<void> | null = null
 let devTokenRefreshPromise: Promise<boolean> | null = null
@@ -21,7 +20,7 @@ let devTokenRefreshPromise: Promise<boolean> | null = null
  * distinguish "auth required but no token" from "network error" etc.
  *   idle       — not yet attempted
  *   fetching   — in-flight
- *   warming    — server accepted HTTP but has not installed runtime state yet
+ *   warming    — server is initializing or explicitly reports temporary unavailability
  *   ok         — token stored
  *   no_endpoint — /dev-token returned 404 (loopback disabled or strict auth)
  *   invalid_response — endpoint response violated the exact token contract
@@ -39,15 +38,17 @@ export type DevTokenBootstrapStatus =
 export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> =
   signal<DevTokenBootstrapStatus>('idle')
 
+export function devTokenBootstrapNeedsReadinessProbe(): boolean {
+  return shouldRefreshDevToken()
+    && (devTokenBootstrapStatus.value === 'warming'
+      || devTokenBootstrapStatus.value === 'network')
+}
+
 interface DevTokenBootstrapPayload {
   token?: unknown
   actor?: unknown
   role?: unknown
   status?: unknown
-}
-
-function waitForWarmupRetry(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, DEV_TOKEN_WARMUP_RETRY_MS))
 }
 
 const REFRESHABLE_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
@@ -61,10 +62,6 @@ export function isRefreshableDashboardAuthCode(
 ): value is DashboardAuthErrorCode {
   return typeof value === 'string'
     && REFRESHABLE_AUTH_CODES.has(value as DashboardAuthErrorCode)
-}
-
-function isRetryableDevTokenStatus(status: number): boolean {
-  return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
 function shouldRefreshDevToken(): boolean {
@@ -94,9 +91,8 @@ export async function ensureDevToken(): Promise<void> {
   devTokenBootstrapPromise = (async () => {
     const storedMeta = getStoredTokenMeta()
     ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'fetching'
-    while (true) {
-      if (getStoredTokenMeta()?.source === 'manual' && getStoredToken()) return
-      try {
+    if (getStoredTokenMeta()?.source === 'manual' && getStoredToken()) return
+    try {
         const res = await fetchWithTimeout(
           '/api/v1/dashboard/dev-token',
           { method: 'GET', headers: { Accept: 'application/json' } },
@@ -106,22 +102,25 @@ export async function ensureDevToken(): Promise<void> {
           if (res.status === 404 && storedMeta?.source === 'dev') {
             clearStoredToken()
           }
-          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
-          if (isRetryableDevTokenStatus(res.status)) {
+          if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
+            ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
             devTokenBootstrapPromise = null
+          } else {
+            ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = res.status === 404
+              ? 'no_endpoint'
+              : 'invalid_response'
           }
           return
         }
         const payload = (await res.json()) as DevTokenBootstrapPayload
         if (payload.status === 'initializing') {
           ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
-          await waitForWarmupRetry()
-          continue
+          devTokenBootstrapPromise = null
+          return
         }
         const token = typeof payload.token === 'string' ? payload.token.trim() : ''
         if (!token || payload.actor !== 'dashboard' || payload.role !== 'admin') {
           ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'invalid_response'
-          devTokenBootstrapPromise = null
           return
         }
         const currentMeta = getStoredTokenMeta()
@@ -145,11 +144,10 @@ export async function ensureDevToken(): Promise<void> {
         }
         ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
         return
-      } catch {
-        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
-        devTokenBootstrapPromise = null
-        return
-      }
+    } catch {
+      ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
+      devTokenBootstrapPromise = null
+      return
     }
   })()
   return devTokenBootstrapPromise

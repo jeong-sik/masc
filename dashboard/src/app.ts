@@ -21,7 +21,10 @@ import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionR
 import { initNotificationDelivery } from './notifications'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
-import { ensureDevToken } from './api/dev-token'
+import {
+  devTokenBootstrapNeedsReadinessProbe,
+  ensureDevToken,
+} from './api/dev-token'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
@@ -158,6 +161,7 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
+    let devTokenReadinessTimer: number | null = null
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -167,9 +171,18 @@ export function App() {
         console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
       })
 
+    const scheduleDevTokenReadinessProbe = () => {
+      if (cancelled || !devTokenBootstrapNeedsReadinessProbe()) return
+      devTokenReadinessTimer = window.setTimeout(() => {
+        devTokenReadinessTimer = null
+        void ensureLoopbackAuth().finally(scheduleDevTokenReadinessProbe)
+      }, 1_000)
+    }
+
     void ensureLoopbackAuth()
       .finally(() => {
         if (cancelled) return
+        scheduleDevTokenReadinessProbe()
         void refreshShell({ light: true })
         requestNamespaceTruthNow()
 
@@ -229,6 +242,10 @@ export function App() {
 
     return () => {
       cancelled = true
+      if (devTokenReadinessTimer !== null) {
+        window.clearTimeout(devTokenReadinessTimer)
+        devTokenReadinessTimer = null
+      }
       disconnectDashboardWS()
       unsubscribeServerPush()
       unsubNotify()

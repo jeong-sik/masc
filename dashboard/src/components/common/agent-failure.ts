@@ -1,15 +1,13 @@
-// AgentFailure — AX atom that renders an error state with type-aware styling.
+// AgentFailure — AX atom that renders an observed failure state.
 //
-// MASC dashboard sec05 reference: icons + color-coded borders for retryable,
-// non-retryable, human-required and degraded failure types. The compact alert
-// card lets operators instantly grasp severity and required action.
-//
+// The dashboard displays typed operator state only. It does not infer a replay
+// policy from a generic `recoverable` boolean or maintain a local attempt budget.
 import { html } from 'htm/preact'
-import { AlertTriangle, RefreshCcw, UserRound, XCircle } from 'lucide-preact'
+import { AlertTriangle, UserRound, XCircle } from 'lucide-preact'
 import type { LucideIcon } from 'lucide-preact'
 
-export type FailureType = 'retryable' | 'non_retryable' | 'human_required' | 'degraded'
-export type AgentFailureStatus = 'retrying' | 'retry_exhausted' | 'blocked' | 'waiting_for_human' | 'degraded'
+export type FailureType = 'blocked' | 'human_required' | 'degraded'
+export type AgentFailureStatus = 'blocked' | 'waiting_for_human' | 'degraded'
 
 export interface FailureConfig {
   Icon: LucideIcon
@@ -18,34 +16,18 @@ export interface FailureConfig {
   action: string
 }
 
-export interface AgentFailureRetryBudget {
-  readonly current: number
-  readonly max: number
-  readonly remaining: number
-  readonly percent: number
-  readonly exhausted: boolean
-  readonly visible: boolean
-}
-
 export interface AgentFailureSummary {
   readonly type: FailureType
   readonly label: string
   readonly action: string
   readonly status: AgentFailureStatus
-  readonly retry: AgentFailureRetryBudget
 }
 
 const FAILURE_CONFIG: Record<FailureType, FailureConfig> = {
-  retryable: {
-    Icon: RefreshCcw,
-    colorVar: 'var(--color-status-warn)',
-    label: '재시도 가능',
-    action: '자동 재시도 중...',
-  },
-  non_retryable: {
+  blocked: {
     Icon: XCircle,
     colorVar: 'var(--color-status-err)',
-    label: '재시도 불가',
+    label: '진행 차단',
     action: '수동 개입 필요',
   },
   human_required: {
@@ -62,97 +44,33 @@ const FAILURE_CONFIG: Record<FailureType, FailureConfig> = {
   },
 }
 
-/** Pure: lookup a failure type's display config. */
 export function failureConfig(type: FailureType): FailureConfig {
   return FAILURE_CONFIG[type]
 }
 
-export function summarizeRetryBudget(
-  retryCount: number | undefined,
-  maxRetries: number | undefined,
-): AgentFailureRetryBudget {
-  const finiteRetryCount =
-    typeof retryCount === 'number' && Number.isFinite(retryCount) ? retryCount : undefined
-  const finiteMaxRetries =
-    typeof maxRetries === 'number' && Number.isFinite(maxRetries) ? maxRetries : undefined
-  if (finiteRetryCount === undefined || finiteMaxRetries === undefined || finiteMaxRetries <= 0) {
-    return {
-      current: 0,
-      max: 0,
-      remaining: 0,
-      percent: 0,
-      exhausted: false,
-      visible: false,
-    }
-  }
-  const current = Math.max(0, Math.floor(finiteRetryCount))
-  const max = Math.max(1, Math.floor(finiteMaxRetries))
-  const clampedCurrent = max > 0 ? Math.min(current, max) : 0
-  return {
-    current,
-    max,
-    remaining: Math.max(0, max - clampedCurrent),
-    percent: max > 0 ? Math.round((clampedCurrent / max) * 100) : 0,
-    exhausted: max > 0 && current >= max,
-    visible: true,
-  }
-}
-
-export function summarizeAgentFailure(
-  type: FailureType,
-  retryCount?: number,
-  maxRetries?: number,
-): AgentFailureSummary {
+export function summarizeAgentFailure(type: FailureType): AgentFailureSummary {
   const cfg = failureConfig(type)
-  const retry = summarizeRetryBudget(retryCount, maxRetries)
-  const status: AgentFailureStatus =
-    type === 'retryable'
-      ? retry.exhausted
-        ? 'retry_exhausted'
-        : 'retrying'
-      : type === 'human_required'
-        ? 'waiting_for_human'
-        : type === 'degraded'
-          ? 'degraded'
-          : 'blocked'
-  return {
-    type,
-    label: cfg.label,
-    action: cfg.action,
-    status,
-    retry,
-  }
+  const status: AgentFailureStatus = type === 'human_required'
+    ? 'waiting_for_human'
+    : type
+  return { type, label: cfg.label, action: cfg.action, status }
 }
 
-/** Pure: map a diagnostic error + recoverable flag to a failure type.
-    Defaults to degraded when no error is present, and non_retryable
-    when recoverable is false or undefined. */
 export function failureTypeFromDiagnostic(
   lastError: string | null | undefined,
-  recoverable: boolean | undefined,
 ): FailureType {
-  if (!lastError) return 'degraded'
-  if (recoverable === true) return 'retryable'
-  return 'non_retryable'
+  return lastError ? 'blocked' : 'degraded'
 }
 
 interface AgentFailureProps {
   type: FailureType
   message: string
-  retryCount?: number
-  maxRetries?: number
   testId?: string
 }
 
-export function AgentFailure({
-  type,
-  message,
-  retryCount,
-  maxRetries,
-  testId,
-}: AgentFailureProps) {
+export function AgentFailure({ type, message, testId }: AgentFailureProps) {
   const cfg = FAILURE_CONFIG[type]
-  const summary = summarizeAgentFailure(type, retryCount, maxRetries)
+  const summary = summarizeAgentFailure(type)
   const Icon = cfg.Icon
 
   return html`
@@ -166,12 +84,6 @@ export function AgentFailure({
       data-agent-failure-status=${summary.status}
       data-agent-failure-label=${summary.label}
       data-agent-failure-action=${summary.action}
-      data-agent-failure-retry-current=${summary.retry.current}
-      data-agent-failure-retry-max=${summary.retry.max}
-      data-agent-failure-retry-remaining=${summary.retry.remaining}
-      data-agent-failure-retry-percent=${summary.retry.percent}
-      data-agent-failure-retry-exhausted=${summary.retry.exhausted}
-      data-agent-failure-retry-visible=${summary.retry.visible}
       data-testid=${testId}
     >
       <span class="mt-0.5 shrink-0 leading-none" style="color: ${cfg.colorVar};" aria-hidden="true">
@@ -184,13 +96,6 @@ export function AgentFailure({
         <div class="break-words text-xs text-[var(--color-fg-muted)]">
           ${message}
         </div>
-        ${summary.retry.visible
-          ? html`
-              <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
-                재시도: ${summary.retry.current}/${summary.retry.max}
-              </div>
-            `
-          : null}
       </div>
       <span class="col-start-2 text-xs text-[var(--color-fg-muted)] sm:col-start-auto sm:shrink-0 sm:text-right">
         ${cfg.action}

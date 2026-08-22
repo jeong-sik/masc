@@ -359,7 +359,7 @@ export function KeeperDiagnosticSummary({
       </div>
       ${diagnostic?.last_error
         ? html`<${AgentFailure}
-            type=${failureTypeFromDiagnostic(diagnostic.last_error, diagnostic.recoverable)}
+            type=${failureTypeFromDiagnostic(diagnostic.last_error)}
             message=${diagnostic.last_error}
           />`
         : null}

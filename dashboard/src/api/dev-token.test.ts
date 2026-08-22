@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   devTokenBootstrapStatus,
+  devTokenBootstrapNeedsReadinessProbe,
   ensureDevToken,
   refreshDevTokenAfterAuthError,
   resetDevTokenBootstrap,
@@ -61,8 +62,7 @@ describe('ensureDevToken', () => {
     vi.useRealTimers()
   })
 
-  it('waits through the exact server warm-up payload and continues bootstrap', async () => {
-    vi.useFakeTimers()
+  it('requires an explicit bootstrap call after the server warm-up payload', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(jsonResponse({
         status: 'initializing',
@@ -74,9 +74,12 @@ describe('ensureDevToken', () => {
         role: 'admin',
       }))
 
-    const bootstrap = ensureDevToken()
-    await vi.advanceTimersByTimeAsync(1_000)
-    await bootstrap
+    await ensureDevToken()
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    expect(setStoredToken).not.toHaveBeenCalled()
+    expect(devTokenBootstrapStatus.value).toBe('warming')
+
+    await ensureDevToken()
 
     expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
     expect(setStoredToken).toHaveBeenCalledWith('ready-dev-token', {
@@ -86,6 +89,27 @@ describe('ensureDevToken', () => {
     })
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
+
+  it.each([408, 425, 429, 500, 503])(
+    'exposes HTTP %s as a readiness state without pinning the in-flight promise',
+    async status => {
+      fetchWithTimeout
+        .mockResolvedValueOnce(new Response('not ready', { status }))
+        .mockResolvedValueOnce(jsonResponse({
+          token: 'ready-dev-token',
+          actor: 'dashboard',
+          role: 'admin',
+        }))
+
+      await ensureDevToken()
+      expect(devTokenBootstrapStatus.value).toBe('warming')
+      expect(devTokenBootstrapNeedsReadinessProbe()).toBe(true)
+
+      await ensureDevToken()
+      expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
+      expect(devTokenBootstrapStatus.value).toBe('ok')
+    },
+  )
 
   it('does not overwrite a manual token entered while the server is warming', async () => {
     vi.useFakeTimers()
@@ -108,7 +132,7 @@ describe('ensureDevToken', () => {
     expect(token).toBe('operator-token')
   })
 
-  it('retries after a transient network bootstrap failure in the same page load', async () => {
+  it('allows a later explicit bootstrap after a network failure', async () => {
     fetchWithTimeout
       .mockRejectedValueOnce(new Error('server not ready'))
       .mockResolvedValueOnce(jsonResponse({
@@ -148,7 +172,7 @@ describe('ensureDevToken', () => {
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
 
-  it('does not keep retrying a disabled loopback dev-token endpoint', async () => {
+  it('memoizes a disabled loopback dev-token endpoint as terminal', async () => {
     fetchWithTimeout.mockResolvedValueOnce(new Response('not found', { status: 404 }))
 
     await ensureDevToken()

@@ -226,7 +226,6 @@ export {
   DEFAULT_MCP_TIMEOUT_MS,
   NAMESPACE_TRUTH_GET_TIMEOUT_MS,
 } from '../config/constants'
-const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
 
 export class ApiRequestError extends Error {
   method: string
@@ -765,58 +764,8 @@ export async function getWithResponse<T>(
   return { data, headers: res.headers }
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function parseStatusFromMessage(message: string): number | null {
-  const match = message.match(/\b(\d{3})\b/)
-  if (!match) return null
-  const statusToken = match[1]
-  if (!statusToken) return null
-  const status = Number.parseInt(statusToken, 10)
-  return Number.isFinite(status) ? status : null
-}
-
-function isRetryableError(err: unknown): boolean {
-  if (err instanceof ApiRequestError) {
-    if (err.errorCode === 'computation_timeout' || err.errorCode === 'timeout') {
-      return false
-    }
-    return err.timeout || (typeof err.status === 'number' && RETRYABLE_STATUS_CODES.has(err.status))
-  }
-
-  if (!(err instanceof Error)) return false
-  if (/timeout after \d+ms/i.test(err.message)) return true
-
-  // Network-level failures (server unreachable, connection reset, DNS failure).
-  // Browser fetch() throws TypeError on these — they are transient.
-  if (err instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(err.message)) {
-    return true
-  }
-
-  const parsedStatus = parseStatusFromMessage(err.message)
-  return parsedStatus !== null && RETRYABLE_STATUS_CODES.has(parsedStatus)
-}
-
-export async function withRetries<T>(
-  operation: string,
-  run: () => Promise<T>,
-  retries = 2,
-): Promise<T> {
-  let attempt = 0
-
-  while (true) {
-    try {
-      return await run()
-    } catch (err) {
-      if (!isRetryableError(err) || attempt >= retries) throw err
-      const delayMs = 250 * (attempt + 1)
-      console.warn(`[dashboard/api] ${operation} failed (attempt ${attempt + 1}), retrying in ${delayMs}ms`, err)
-      await sleep(delayMs)
-      attempt += 1
-    }
-  }
+export function runRequest<T>(_operation: string, run: () => Promise<T>): Promise<T> {
+  return run()
 }
 
 export async function post<T>(

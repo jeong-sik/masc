@@ -1,4 +1,4 @@
-import { get, post, withRetries } from './core'
+import { get, post, runRequest } from './core'
 import {
   asBoolean,
   asInt,
@@ -159,7 +159,7 @@ export function normalizeBoardModerationAuditEntry(raw: unknown): BoardModeratio
 export async function fetchBoardModerationQueue(
   options: { resolved?: boolean; signal?: AbortSignal } = {},
 ): Promise<BoardModerationQueue> {
-  return withRetries('fetchBoardModerationQueue', async () => {
+  return runRequest('fetchBoardModerationQueue', async () => {
     const params = new URLSearchParams()
     if (typeof options.resolved === 'boolean') {
       params.set('resolved', options.resolved ? 'true' : 'false')

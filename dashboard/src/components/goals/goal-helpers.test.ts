@@ -301,7 +301,7 @@ describe('task completion display truth', () => {
     expect(formatProgressPct({ done: 0, total: 0, ratio: 0 })).toBe('no linked tasks')
   })
 
-  it('formats linked task counts instead of a goal-attainment percentage', () => {
+  it('formats linked task counts and says they are not a metric measurement', () => {
     expect(formatProgressPct({ done: 2, total: 5, ratio: 0.4 })).toBe('2/5 tasks')
   })
 
@@ -312,7 +312,7 @@ describe('task completion display truth', () => {
     const meter = container.querySelector('[data-task-count-meter]') as HTMLElement | null
     expect(meter).not.toBeNull()
     expect(meter?.getAttribute('data-task-count-meter-pct')).toBe('25')
-    expect(meter?.getAttribute('title')).toContain('not a goal-attainment metric')
+    expect(meter?.getAttribute('title')).toContain('목표 지표를 잰 값이 아닙니다')
     const fill = meter?.firstElementChild as HTMLElement | null
     expect(fill?.className).toContain('bg-[var(--color-accent-fg)]')
     expect(fill?.className).not.toContain('status-ok')

@@ -260,9 +260,18 @@
   font-family: var(--font-mono);
 }
 
+/* The chip prints `metric · target_value`. Nothing bounds what a goal may
+   declare as its metric: on the live workspace the longest is 292 characters
+   of prose, 380 with its target appended, against a median of 35. With
+   `flex: none` and no cap that one goal stretched the header row past every
+   other card. Clipped here, with the full text on the element's `title`. */
 .wk-metric {
   margin-left: auto;
   flex: none;
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-11);
   color: var(--text-dim);
   font-family: var(--font-mono);

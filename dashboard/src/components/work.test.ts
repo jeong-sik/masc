@@ -130,21 +130,6 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     target_value: null,
     due_date: null,
     owner: null,
-    attainment: {
-      state: 'unmeasured',
-      basis: 'unmeasured',
-      metric: null,
-      metric_evaluation: 'absent',
-      target_value: null,
-      target_parse_status: 'absent',
-      unit: 'unknown',
-      observed_value: null,
-      target_numeric: null,
-      attainment_pct: null,
-      task_done_count: 0,
-      task_count: 0,
-      note: '',
-    },
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -1540,6 +1525,12 @@ describe('Work', () => {
             created_at: '2026-01-01',
             updated_at: '2026-01-04',
             last_review_note: 'metric 미충족 — merged PR은 1건뿐',
+            // The card header reads the goals feed, not the tree — `displayGoals`
+            // lets a goals-feed row win over the tree node of the same id. Live
+            // both feeds carry these: /api/v1/dashboard/planning serves metric
+            // on 35 of 48 goals and target_value on 32.
+            metric: 'merged PR count',
+            target_value: '5 PRs',
           },
         ]
         tasks.value = []
@@ -1553,21 +1544,6 @@ describe('Work', () => {
               owner: 'dancer',
               metric: 'merged PR count',
               target_value: '5 PRs',
-              attainment: {
-                state: 'attained',
-                basis: 'metric_target_count',
-                metric: 'merged PR count',
-                metric_evaluation: 'unevaluated',
-                target_value: '5 PRs',
-                target_parse_status: 'parseable',
-                unit: 'count',
-                observed_value: 6,
-                target_numeric: 5,
-                attainment_pct: 100,
-                task_done_count: 3,
-                task_count: 4,
-                note: 'Derived from completed linked tasks against a count target.',
-              },
               task_summary: {
                 total: 4,
                 done: 3,
@@ -1578,20 +1554,6 @@ describe('Work', () => {
                 unassigned: 0,
                 completion_pct: 75,
                 by_status: {},
-              },
-              completion_summary: {
-                state: 'ready_for_completion',
-                pct: 100,
-                pct_source: 'attainment',
-                attainment_state: 'attained',
-                attainment_basis: 'metric_target_count',
-                metric_evaluation: 'unevaluated',
-                task_total: 4,
-                task_done: 3,
-                task_open: 0,
-                is_complete: false,
-                is_terminal: false,
-                ready_to_request_completion: true,
               },
               timeline_events: [{
                 ts: '2026-01-04T10:00:00Z',
@@ -1619,98 +1581,59 @@ describe('Work', () => {
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         expect(dossier).toHaveAttribute('data-goal-dossier', 'G-1')
-        expect(dossier).toHaveAttribute('data-goal-dossier-attainment-state', 'attained')
+        expect(dossier).toHaveAttribute('data-goal-dossier-phase', 'executing')
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
 
         const text = dossier.textContent ?? ''
         // What the goal is.
         expect(text).toContain('G-1')
         expect(text).toContain('dancer')
-        // What counts as done — declared metric, target, observed value.
-        expect(text).toContain('merged PR count')
-        expect(text).toContain('5 PRs')
-        expect(text).toContain('숫자로는 5건')
-        expect(text).toContain('6건')
-        expect(text).toContain('지표 목표치(건수) 대비')
-        expect(text).toContain('Derived from completed linked tasks against a count target.')
-        // Cancelled tasks are named so the done/total gap is not a mystery.
-        expect(text).toContain('끝남 3 · 남음 0 · 취소 1 · 전체 4')
-        expect(text).toContain('지금 완료를 요청할 수 있어요.')
         // Why the goal sits where it does.
         expect(text).toContain('metric 미충족 — merged PR은 1건뿐')
         // Where to go next.
         expect(text).toContain('sangsu')
         expect(text).toContain('턴 42')
         expect(text).toContain('2건 승인 대기')
+
+        // What counts as done is declared once, in the card header, next to the
+        // progress bar it qualifies.
+        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
+          .toBe('merged PR count · 5 PRs')
+        expect(text).not.toContain('merged PR count')
       })
 
-      it('gives the phase reason a goal cannot request completion, not a conditions verdict', () => {
+      it('declares the metric once in the header and never a second task tally', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-04' },
+          {
+            id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked',
+            created_at: '2026-01-01', updated_at: '2026-01-04',
+            metric: 'merged PR count', target_value: '5 PRs',
+          },
         ]
-        tasks.value = []
+        // Six done, one cancelled. The header excludes cancelled from the
+        // denominator on purpose (see goalProgressCounts) and reads 6/6.
+        tasks.value = [
+          ...Array.from({ length: 6 }, (_, i) => ({
+            id: `J-${i}`, title: `Done ${i}`, goal_id: 'G-1', status: 'done' as const,
+          })),
+          { id: 'J-X', title: 'Called off', goal_id: 'G-1', status: 'cancelled' as const },
+        ]
         goalTreeData.value = {
           tree: [
             goalTreeNode({
               id: 'G-1',
               phase: 'blocked',
-              completion_summary: {
-                state: 'blocked',
-                pct: null,
-                pct_source: 'none',
-                attainment_state: 'unmeasured',
-                attainment_basis: 'unmeasured',
-                metric_evaluation: 'absent',
-                task_total: 0,
-                task_done: 0,
-                task_open: 0,
-                is_complete: false,
-                is_terminal: false,
-                ready_to_request_completion: false,
-              },
-            }),
-          ],
-          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
-        }
-
-        render(html`<${Work} />`)
-        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
-
-        // The backend's `ready_to_request_completion` is `phase = Executing`
-        // and nothing else — no metric, target, or task count is consulted.
-        // Rendering its false branch as "conditions unmet" would state a check
-        // that never ran.
-        const row = screen.getByTestId('goal-dossier')
-          .querySelector('[data-goal-detail-row="ready"]')
-        expect(row?.textContent).toContain('막혀 있는 동안에는 완료를 요청할 수 없어요.')
-        expect(row?.textContent).not.toContain('조건')
-      })
-
-      it('marks a declared-but-unmeasured metric as unevaluated instead of attained', () => {
-        goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
-        ]
-        tasks.value = []
-        goalTreeData.value = {
-          tree: [
-            goalTreeNode({
-              id: 'G-1',
               metric: 'merged PR count',
               target_value: '5 PRs',
-              attainment: {
-                state: 'attained',
-                basis: 'metric_target_count',
-                metric: 'merged PR count',
-                metric_evaluation: 'unevaluated',
-                target_value: '5 PRs',
-                target_parse_status: 'parseable',
-                unit: 'count',
-                observed_value: 6,
-                target_numeric: 5,
-                attainment_pct: 100,
-                task_done_count: 6,
-                task_count: 7,
-                note: 'Derived from completed linked tasks against a count target.',
+              task_count: 7,
+              task_done_count: 6,
+              // task_summary keeps cancelled in `total`. The panel used to
+              // print this alongside the header's 6/6, so one card answered
+              // "how many tasks" twice, with 6 and with 7, and nothing said
+              // which rule applied. The panel no longer answers it at all.
+              task_summary: {
+                total: 7, done: 6, open: 0, terminal: 7, awaiting_verification: 0,
+                cancelled: 1, unassigned: 0, completion_pct: 85, by_status: {},
               },
             }),
           ],
@@ -1718,68 +1641,37 @@ describe('Work', () => {
         }
 
         render(html`<${Work} />`)
-        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        // The declaration sits next to the bar it qualifies, stated once.
+        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
+          .toBe('merged PR count · 5 PRs')
+        expect(goalCard.querySelector('.wk-prog-lbl')?.textContent).toContain('6/6')
 
         const dossier = screen.getByTestId('goal-dossier')
-        // The backend calls this goal attained on a task-derived count. The
-        // panel must not present that as a metric result: the verdict reads
-        // 미평가 and carries the reason.
-        const verdict = dossier.querySelector('[data-goal-detail-row="verdict"]')!
-        expect(verdict.className).toContain('warn')
-        expect(verdict.textContent).toContain('미평가')
-        // The backend's own state token is `attained`; printing it would state
-        // a measurement that was never taken.
-        expect(verdict.textContent).not.toContain('달성')
-        expect(verdict.textContent).toContain('하위 작업 기준으로는 100%')
-        const caveat = dossier.querySelector('[data-goal-detail-caveat]')
-        expect(caveat?.textContent).toContain('직접 잰 값이 아니라')
+        const text = dossier.textContent ?? ''
+        expect(text).not.toContain('merged PR count')
+        expect(text).not.toContain('5 PRs')
+        expect(text).not.toContain('전체 7')
+        expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="tasks"]')).toBeNull()
+
+        // No verdict. The backend used to answer `attained` at 100% here, from
+        // observed=6 (finished linked tasks) against a target scraped out of
+        // "5 PRs" — a task count wearing the metric's name. Nothing computes
+        // that any more, and nothing in this panel may reintroduce it.
+        expect(dossier.querySelector('[data-goal-detail-row="verdict"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="basis"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="observed"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="ready"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-caveat]')).toBeNull()
+        expect(text).not.toContain('%')
+        expect(text).not.toContain('달성')
       })
 
-      it('states the problem when the declared target cannot drive completion', () => {
-        goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-04' },
-        ]
-        tasks.value = []
-        goalTreeData.value = {
-          tree: [
-            goalTreeNode({
-              id: 'G-1',
-              phase: 'blocked',
-              metric: 'unclaimed_tasks',
-              target_value: '0',
-              attainment: {
-                state: 'unmeasured',
-                basis: 'unmeasured',
-                metric: 'unclaimed_tasks',
-                metric_evaluation: 'unevaluated',
-                target_value: '0',
-                target_parse_status: 'invalid_target',
-                unit: 'unknown',
-                observed_value: null,
-                target_numeric: null,
-                attainment_pct: null,
-                task_done_count: 1,
-                task_count: 2,
-                note: 'Target value must be greater than zero.',
-              },
-            }),
-          ],
-          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
-        }
-
-        render(html`<${Work} />`)
-        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
-
-        const dossier = screen.getByTestId('goal-dossier')
-        const target = dossier.querySelector('[data-goal-detail-row="target"]')!
-        expect(target.className).toContain('warn')
-        expect(target.textContent).toContain('목표치가 완료 판정에 쓸 수 없는 값이에요.')
-        expect(dossier.querySelector('[data-goal-detail-caveat]')?.textContent)
-          .toContain('완료 여부를 아직 판정하지 못했어요')
-        expect(dossier.textContent).toContain('Target value must be greater than zero.')
-      })
-
-      it('says a metricless goal is finished by its linked tasks instead of listing three empty fields', () => {
+      it('shows no metric chip at all when the goal declares none', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
         ]
@@ -1790,13 +1682,16 @@ describe('Work', () => {
         }
 
         render(html`<${Work} />`)
-        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
 
+        // A goal with nothing declared gets no chip. There is no "정해진 지표가
+        // 없어요" row any more — a placeholder telling the operator a field is
+        // empty costs a line and settles nothing.
+        expect(goalCard.querySelector('[data-goal-metric]')).toBeNull()
         const dossier = screen.getByTestId('goal-dossier')
-        expect(dossier.querySelector('[data-goal-detail-row="metric"]')?.textContent)
-          .toContain('완료 지표가 정해져 있지 않아요')
+        expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
         expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
-        expect(dossier.querySelector('[data-goal-detail-row="observed"]')).toBeNull()
       })
 
       it('drops the goal_fsm projection tokens from the goal detail panel', () => {

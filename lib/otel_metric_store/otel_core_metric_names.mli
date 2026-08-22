@@ -35,15 +35,6 @@ val metric_pending_tasks : string
 (** RFC-0294 PR-4: gauge of orphaned tasks, labeled by status_class. *)
 val metric_orphan_tasks : string
 
-(** Goal attainment percentage by [goal_id]. Companion
-    {!metric_goal_attainment_measured} distinguishes real 0% from
-    unmeasured goals. *)
-val metric_goal_attainment_pct : string
-
-(** Gauge by [goal_id]: [1] when goal attainment percentage is measured,
-    [0] when the dashboard projection is currently unmeasured. *)
-val metric_goal_attainment_measured : string
-
 val metric_sse_reconnects : string
 val metric_sse_idle_evictions : string
 val metric_sse_rejects : string

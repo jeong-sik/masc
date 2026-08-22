@@ -217,47 +217,6 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[1]!.timeline_events).toEqual([])
   })
 
-  it('backfills missing attainment metric_evaluation from metric presence', async () => {
-    getMock.mockResolvedValue({
-      ...readyApprovalQueue,
-      tree: [
-        validNode('goal-metric', 'Metric goal', {
-          metric: 'coverage %',
-          target_value: '80%',
-          attainment: {
-            state: 'attained',
-            basis: 'metric_target_percent',
-            metric: 'coverage %',
-            attainment_pct: 100,
-          },
-        }),
-      ],
-      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
-    })
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]!.attainment.metric_evaluation).toBe('unevaluated')
-  })
-
-  it('marks missing attainment payload with declared metric as unevaluated', async () => {
-    getMock.mockResolvedValue({
-      ...readyApprovalQueue,
-      tree: [
-        validNode('goal-missing-attainment', 'Missing attainment', {
-          metric: 'coverage %',
-          target_value: '80%',
-        }),
-      ],
-      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
-    })
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]!.attainment.metric_evaluation).toBe('unevaluated')
-    expect(result.tree[0]!.attainment.note).toBe('Attainment projection missing from payload.')
-  })
-
   it('rejects a typed unavailable approval queue instead of decoding an empty tree', async () => {
     getMock.mockResolvedValue({
       generated_at: '2026-07-27T00:00:00Z',

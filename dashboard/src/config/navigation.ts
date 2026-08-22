@@ -69,7 +69,6 @@ type SurfaceSectionId =
   | 'work'           // Goal/job breakdown surface
   | 'board'
   | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
-  | 'moderation'     // Board moderation queue and actions
   | 'planning'       // Phase 1: absorbs goals
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'verification'   // Contract follow-up (#7531): Mission detail verification table
@@ -414,13 +413,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Sub-Boards',
       description: 'Named spaces within the board with distinct access policies.',
       params: { section: 'sub-boards' },
-      hidden: true,
-    },
-    {
-      id: 'moderation',
-      label: 'Moderation',
-      description: 'Flagged board posts and moderation actions.',
-      params: { section: 'moderation' },
       hidden: true,
     },
     {

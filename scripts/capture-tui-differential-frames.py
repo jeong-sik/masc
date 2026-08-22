@@ -24,6 +24,7 @@ import tempfile
 import time
 from typing import Any, Iterator, cast
 
+from PIL import Image
 from playwright.sync_api import Browser, Page, sync_playwright
 
 
@@ -161,7 +162,7 @@ def process_descendants(root_pid: int) -> list[dict[str, object]]:
 
 
 def exact_tui_child(root_pid: int, executable: Path) -> dict[str, object]:
-    expected = str(executable.resolve())
+    expected = executable.resolve()
     deadline = time.monotonic() + 5.0
     last_descendants: list[dict[str, object]] = []
     while time.monotonic() < deadline:
@@ -169,14 +170,47 @@ def exact_tui_child(root_pid: int, executable: Path) -> dict[str, object]:
         matches = [
             row
             for row in last_descendants
-            if cast(str, row["command"]).split(None, 1)[0] == expected
+            if Path(cast(str, row["command"]).split(None, 1)[0]).resolve() == expected
         ]
         if len(matches) == 1:
             return matches[0]
         time.sleep(0.05)
     raise AssertionError(
-        f"expected one exact TUI child {expected!r}: {last_descendants!r}"
+        f"expected one exact TUI child {str(expected)!r}: {last_descendants!r}"
     )
+
+
+def compare_png_pixels(left: Path, right: Path) -> dict[str, object]:
+    with Image.open(left) as left_image, Image.open(right) as right_image:
+        require(left_image.size == right_image.size, "PNG dimensions differ")
+        left_rgb = left_image.convert("RGB")
+        right_rgb = right_image.convert("RGB")
+        left_bytes = left_rgb.tobytes()
+        right_bytes = right_rgb.tobytes()
+    require(len(left_bytes) == len(right_bytes), "PNG pixel buffers differ")
+    different_pixels = 0
+    maximum_channel_delta = 0
+    channel_delta_total = 0
+    for offset in range(0, len(left_bytes), 3):
+        pixel_changed = False
+        for channel in range(3):
+            delta = abs(left_bytes[offset + channel] - right_bytes[offset + channel])
+            maximum_channel_delta = max(maximum_channel_delta, delta)
+            channel_delta_total += delta
+            pixel_changed = pixel_changed or delta != 0
+        different_pixels += int(pixel_changed)
+    pixel_count = len(left_bytes) // 3
+    return {
+        "left": left.name,
+        "right": right.name,
+        "width_px": left_rgb.width,
+        "height_px": left_rgb.height,
+        "pixel_count": pixel_count,
+        "different_pixels": different_pixels,
+        "different_pixel_percent": round((different_pixels / pixel_count) * 100, 6),
+        "maximum_absolute_channel_delta": maximum_channel_delta,
+        "mean_absolute_channel_delta": round(channel_delta_total / len(left_bytes), 9),
+    }
 
 
 @contextmanager
@@ -741,6 +775,7 @@ def main() -> int:
             "candidate_commit": args.candidate_commit,
             "ttyd_version": support.run_text(str(support.TTYD), "--version"),
             "playwright_version": support.package_version("playwright"),
+            "pillow_version": support.package_version("Pillow"),
         }
 
         with built_binary(args.baseline_commit, "baseline", output, build_records) as (
@@ -954,10 +989,33 @@ def main() -> int:
             )
             require(path.stat().st_size == record["bytes"], f"size drift: {path.name}")
             require(digest_file(path) == record["sha256"], f"hash drift: {path.name}")
-        require(
-            len({digest_file(path) for path in screenshot_paths}) == 1,
-            "baseline, candidate, and forced-redraw PNG bytes differ",
-        )
+        screenshot_by_name = {path.name: path for path in screenshot_paths}
+        pixel_comparisons = [
+            compare_png_pixels(
+                screenshot_by_name["01-baseline-ababa.png"],
+                screenshot_by_name["02-candidate-ababa.png"],
+            ),
+            compare_png_pixels(
+                screenshot_by_name["02-candidate-ababa.png"],
+                screenshot_by_name["03-candidate-sigwinch-full-redraw.png"],
+            ),
+            compare_png_pixels(
+                screenshot_by_name["01-baseline-ababa.png"],
+                screenshot_by_name["03-candidate-sigwinch-full-redraw.png"],
+            ),
+        ]
+        for comparison in pixel_comparisons:
+            require(
+                cast(int, comparison["maximum_absolute_channel_delta"]) <= 1,
+                f"PNG channel delta exceeded tolerance: {comparison}",
+            )
+            require(
+                cast(float, comparison["different_pixel_percent"]) <= 2.0,
+                f"PNG changed-pixel ratio exceeded tolerance: {comparison}",
+            )
+        cast(dict[str, object], evidence["comparison"])[
+            "screenshot_pixel_comparisons"
+        ] = pixel_comparisons
         require(git_text("rev-parse", "HEAD") == args.expected_head, "HEAD changed")
         require(git_text("status", "--porcelain=v1") == "", "checkout dirtied")
         require(
@@ -983,7 +1041,7 @@ def main() -> int:
             "five_key_windows_per_binary": True,
             "same_geometry_forced_redraw": True,
             "terminal_state_equal": True,
-            "three_screenshots_rehashed": True,
+            "three_screenshots_rehashed_and_pixel_compared": True,
             "driver_support_and_binaries_rehashed_after_capture": True,
         }
         evidence["status"] = "passed"

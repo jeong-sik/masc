@@ -1273,7 +1273,7 @@ export function IdeShell() {
       data-tree-width=${String(treeWidth)}
     >
       <h1 class="sr-only">MASC IDE</h1>
-      <div class="ide-v2-top">
+      <div class="ide-top">
         <button
           type="button"
           class="ide-v2-action ide-v2-tree-toggle"
@@ -1356,12 +1356,12 @@ export function IdeShell() {
         >${railsCollapsed ? '⊢' : '⊣'}</button>
       </div>
       <div
-        class="ide-plane-grid ide-v2-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
+        class="ide-plane-grid ide-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
         role="presentation"
         style=${`--ide-tree-width: ${treeWidth}px;`}
       >
         ${treeCollapsed ? null : html`
-          <div id="ide-file-tree" class="ide-plane-tree ide-v2-tree v2-ide-panel" data-testid="ide-file-tree">
+          <div id="ide-file-tree" class="ide-plane-tree ide-tree v2-ide-panel" data-testid="ide-file-tree">
             <${IdeExplorer}
               fileTreeStore=${workspaceStore.fileTreeStore}
               workspaceSource=${workspaceStore.workspaceSource}
@@ -1388,7 +1388,7 @@ export function IdeShell() {
           </div>
         `}
         <div
-          class="ide-plane-editor ide-v2-editor v2-ide-panel"
+          class="ide-plane-editor ide-ed v2-ide-panel"
         >
           ${reviewFocusActive
             ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
@@ -1432,7 +1432,7 @@ export function IdeShell() {
           ? null
           : html`
             <div
-              class="ide-plane-conversation ide-v2-rail v2-ide-panel"
+              class="ide-plane-conversation ide-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
               <div class="ide-rail-tabs" role="tablist" aria-label="IDE right rail">
@@ -1449,7 +1449,7 @@ export function IdeShell() {
                   >${tab.label}</button>
                 `)}
               </div>
-              <div class="ide-v2-rail-scroll">
+              <div class="ide-rail-scroll">
                 ${rightRailTab === 'activity' ? html`
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}

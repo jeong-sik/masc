@@ -4,9 +4,16 @@
  * using the existing semantic token ladder and the keeper-v2 token bridge
  * aliases defined in variables.css.
  *
- * The layout is intentionally scoped to .ide-v2-* so legacy surfaces are not
- * affected. Existing dashboard IDE components keep their legacy class names
- * for test compatibility; this stylesheet layers v2 chrome on top.
+ * Naming rule: a component the design draws carries the design's own name, so
+ * keeper-v2/surfaces.css reaches it — .ide-body, .ide-top, .ide-tree, .ide-ed,
+ * .ide-rail, .ide-rail-scroll, .ide-crumb, .ide-view(s), .ide-presence. The
+ * .ide-v2-* prefix is reserved for chrome the design has no counterpart for: the
+ * compact toolbar, the terminal drawer, operational status, the connection dot,
+ * the tree and rail toggles.
+ *
+ * It used to scope everything, which is why 23 of the kit's .ide-* rules matched
+ * nothing while this sheet restated them under parallel names. Where the two now
+ * overlap the kit wins, because it loads later — that is the point.
  */
 
 /* ── Surface shell ─────────────────────────────────────────────────────────── */
@@ -39,13 +46,13 @@
   z-index: var(--z-base);
 }
 
-.ide-v2-surface[data-terminal-open="true"] .ide-v2-body {
+.ide-v2-surface[data-terminal-open="true"] .ide-body {
   /* Terminal drawer lives below the body and steals vertical space. */
 }
 
 /* ── Top chrome ────────────────────────────────────────────────────────────── */
 
-.ide-v2-top {
+.ide-top {
   flex: none;
   display: flex;
   align-items: center;
@@ -57,7 +64,7 @@
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
 }
 
-.ide-v2-top > .ide-repo {
+.ide-top > .ide-repo {
   flex: 0 1 auto;
   min-width: 12rem;
   max-width: 34rem;
@@ -66,16 +73,16 @@
   white-space: nowrap;
 }
 
-.ide-v2-top > .ide-toolbar[data-compact="true"] {
+.ide-top > .ide-toolbar[data-compact="true"] {
   flex: none;
   width: auto;
 }
 
-.ide-v2-top > .ide-toolbar[data-compact="true"] .ide-toolbar-command-cluster,
-.ide-v2-top > .ide-toolbar[data-compact="true"] .ide-toolbar-layers,
-.ide-v2-top > .ide-toolbar[data-compact="true"] [data-view="unified"],
-.ide-v2-top > .ide-toolbar[data-compact="true"] [data-view="blame"],
-.ide-v2-top > .ide-toolbar[data-compact="true"] > .v2-ide-action {
+.ide-top > .ide-toolbar[data-compact="true"] .ide-toolbar-command-cluster,
+.ide-top > .ide-toolbar[data-compact="true"] .ide-toolbar-layers,
+.ide-top > .ide-toolbar[data-compact="true"] [data-view="unified"],
+.ide-top > .ide-toolbar[data-compact="true"] [data-view="blame"],
+.ide-top > .ide-toolbar[data-compact="true"] > .v2-ide-action {
   display: none !important;
 }
 
@@ -158,7 +165,7 @@
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.42);
 }
 
-.ide-v2-presence-compact {
+.ide-presence {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -167,14 +174,14 @@
   color: var(--text-dim);
 }
 
-.ide-v2-presence-compact .lbl {
+.ide-presence .lbl {
   font-family: var(--font-mono);
   font-size: var(--fs-9);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-.ide-v2-presence-compact ul {
+.ide-presence ul {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -185,7 +192,7 @@
   list-style: none;
 }
 
-.ide-v2-presence-compact li {
+.ide-presence li {
   display: inline-flex;
   flex: none;
 }
@@ -200,22 +207,22 @@
   color: var(--status-warn);
 }
 
-.ide-v2-top .ide-plane-statusbar,
-.ide-v2-top .ide-toolbar {
+.ide-top .ide-plane-statusbar,
+.ide-top .ide-toolbar {
   background: transparent;
   border: 0;
   padding: 0;
   min-height: 0;
 }
 
-.ide-v2-top .ide-plane-statusbar {
+.ide-top .ide-plane-statusbar {
   flex: 0 1 auto;
   gap: 10px;
   min-width: 0;
   overflow: hidden;
 }
 
-.ide-v2-top .ide-plane-statusbar-title {
+.ide-top .ide-plane-statusbar-title {
   color: var(--text-bright);
   font-family: var(--font-display);
   font-size: var(--fs-12);
@@ -223,15 +230,15 @@
   text-transform: uppercase;
 }
 
-.ide-v2-top .ide-plane-statusbar-meta {
+.ide-top .ide-plane-statusbar-meta {
   gap: 6px;
 }
 
-.ide-v2-top .ide-plane-statusbar-meta .tag-chip {
+.ide-top .ide-plane-statusbar-meta .tag-chip {
   max-width: 10rem;
 }
 
-.ide-v2-top .ide-toolbar {
+.ide-top .ide-toolbar {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
@@ -239,36 +246,36 @@
   min-width: 0;
 }
 
-.ide-v2-top .ide-toolbar-tabs {
+.ide-top .ide-toolbar-tabs {
   flex: none;
   gap: 3px;
 }
 
-.ide-v2-top .ide-toolbar-command-cluster {
+.ide-top .ide-toolbar-command-cluster {
   flex: 1 1 auto;
   min-width: 120px;
   max-width: 360px;
 }
 
-.ide-v2-top .ide-toolbar-layers {
+.ide-top .ide-toolbar-layers {
   flex: none;
   gap: 3px;
   margin-left: auto;
 }
 
-.ide-v2-top .ide-plane-connection {
+.ide-top .ide-plane-connection {
   margin-left: 0;
   flex: none;
 }
 
 /* ── View tabs (keeper-v2 style) ───────────────────────────────────────────── */
 
-.ide-v2-views {
+.ide-views {
   display: flex;
   gap: 3px;
 }
 
-.ide-v2-view {
+.ide-view {
   font-family: var(--font-ui);
   font-size: var(--fs-11);
   padding: 6px 12px;
@@ -280,19 +287,19 @@
   transition: 0.13s;
 }
 
-.ide-v2-view:hover {
+.ide-view:hover {
   color: var(--text-mid);
   background: var(--bg-card);
 }
 
-.ide-v2-view[aria-selected="true"],
-.ide-v2-view.on {
+.ide-view[aria-selected="true"],
+.ide-view.on {
   color: var(--volt-strong);
   background: var(--bg-card);
   border-color: var(--border-main);
 }
 
-.ide-v2-top .spacer {
+.ide-top .spacer {
   flex: 1;
 }
 
@@ -302,7 +309,7 @@
 
 /* ── Three-pane body ───────────────────────────────────────────────────────── */
 
-.ide-v2-body {
+.ide-body {
   flex: 1;
   min-height: 0;
   display: grid;
@@ -310,71 +317,71 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
-.ide-v2-body.no-tree {
+.ide-body.no-tree {
   grid-template-columns: 0 minmax(0, 1fr) minmax(270px, 320px);
 }
 
-.ide-v2-body.no-rail {
+.ide-body.no-rail {
   grid-template-columns: var(--ide-tree-width, 230px) minmax(0, 1fr) 0;
 }
 
-.ide-v2-body.no-tree.no-rail {
+.ide-body.no-tree.no-rail {
   grid-template-columns: 0 minmax(0, 1fr) 0;
 }
 
 /* Override the legacy dashboard.css grid placement so the right-hand
    conversation + activity panels collapse into a single v2 rail column. */
-.ide-v2-body.ide-plane-grid {
+.ide-body.ide-plane-grid {
   grid-template-columns: var(--ide-tree-width, 230px) minmax(0, 1fr) minmax(270px, 320px);
   grid-template-rows: minmax(0, 1fr);
 }
 
-.ide-plane-shell[data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid {
+.ide-plane-shell[data-tree-collapsed="true"] .ide-body.ide-plane-grid {
   grid-template-columns: minmax(0, 1fr) minmax(270px, 320px);
 }
 
-.ide-plane-shell[data-tree-collapsed="true"][data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid {
+.ide-plane-shell[data-tree-collapsed="true"][data-rails-collapsed="true"] .ide-body.ide-plane-grid {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.ide-plane-shell[data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid {
+.ide-plane-shell[data-rails-collapsed="true"] .ide-body.ide-plane-grid {
   grid-template-columns: var(--ide-tree-width, 230px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
 }
 
-.ide-v2-body.ide-plane-grid .ide-plane-tree {
+.ide-body.ide-plane-grid .ide-plane-tree {
   grid-column: 1;
   grid-row: 1;
 }
 
-.ide-v2-body.ide-plane-grid .ide-plane-editor {
+.ide-body.ide-plane-grid .ide-plane-editor {
   grid-column: 2;
   grid-row: 1;
   display: flex;
   flex-direction: column;
 }
 
-.ide-plane-shell[data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+.ide-plane-shell[data-tree-collapsed="true"] .ide-body.ide-plane-grid .ide-plane-editor {
   grid-column: 1;
 }
 
-.ide-plane-shell[data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-conversation {
+.ide-plane-shell[data-tree-collapsed="true"] .ide-body.ide-plane-grid .ide-plane-conversation {
   grid-column: 2;
 }
 
-.ide-v2-body.ide-plane-grid .ide-plane-conversation {
+.ide-body.ide-plane-grid .ide-plane-conversation {
   grid-column: 3;
   grid-row: 1;
 }
 
-.ide-plane-shell[data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-tree,
-.ide-plane-shell[data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+.ide-plane-shell[data-rails-collapsed="true"] .ide-body.ide-plane-grid .ide-plane-tree,
+.ide-plane-shell[data-rails-collapsed="true"] .ide-body.ide-plane-grid .ide-plane-editor {
   grid-row: 1;
 }
 
 /* ── Left keeper/file rail ─────────────────────────────────────────────────── */
 
-.ide-v2-tree {
+.ide-tree {
   position: relative;
   border-right: 1px solid var(--border-main);
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%);
@@ -418,7 +425,7 @@
   outline-offset: -2px;
 }
 
-.ide-v2-tree .ide-explorer {
+.ide-tree .ide-explorer {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -430,7 +437,7 @@
   overflow: hidden;
 }
 
-.ide-v2-tree .ide-explorer > header {
+.ide-tree .ide-explorer > header {
   padding-bottom: 8px;
   margin-bottom: 8px;
   border-bottom: 1px solid var(--border-soft);
@@ -440,7 +447,7 @@
   color: var(--text-dim);
 }
 
-.ide-v2-tree .ide-explorer-scroll {
+.ide-tree .ide-explorer-scroll {
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
@@ -449,7 +456,7 @@
   overscroll-behavior: contain;
 }
 
-.ide-v2-tree .ide-explorer-row {
+.ide-tree .ide-explorer-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -468,18 +475,18 @@
   transition: 0.12s;
 }
 
-.ide-v2-tree .ide-explorer-row:hover {
+.ide-tree .ide-explorer-row:hover {
   background: var(--bg-card);
   color: var(--text-bright);
 }
 
-.ide-v2-tree .ide-explorer-row[aria-selected="true"] {
+.ide-tree .ide-explorer-row[aria-selected="true"] {
   background: var(--bg-card);
   color: var(--volt-strong);
   border-left-color: transparent;
 }
 
-.ide-v2-tree .ide-explorer-row-label {
+.ide-tree .ide-explorer-row-label {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -488,7 +495,7 @@
 
 /* ── Center editor ─────────────────────────────────────────────────────────── */
 
-.ide-v2-editor {
+.ide-ed {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -502,7 +509,7 @@
 }
 
 /* Breadcrumb */
-.ide-v2-crumb {
+.ide-crumb {
   flex: none;
   display: flex;
   align-items: center;
@@ -517,15 +524,15 @@
   white-space: nowrap;
 }
 
-.ide-v2-crumb .seg {
+.ide-crumb .seg {
   color: var(--text-dim);
 }
 
-.ide-v2-crumb .seg.last {
+.ide-crumb .seg.last {
   color: var(--text-mid);
 }
 
-.ide-v2-crumb .own {
+.ide-crumb .own {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -535,9 +542,9 @@
 }
 
 /* Editor content area */
-.ide-v2-editor > .ide-codemirror-shell,
-.ide-v2-editor > [role="region"][aria-label^="에디터"],
-.ide-v2-editor > [data-testid="ide-editor-empty"] {
+.ide-ed > .ide-codemirror-shell,
+.ide-ed > [role="region"][aria-label^="에디터"],
+.ide-ed > [data-testid="ide-editor-empty"] {
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -545,7 +552,7 @@
 
 /* ── Right context lens / activity rail ────────────────────────────────────── */
 
-.ide-v2-rail {
+.ide-rail {
   border-left: 1px solid var(--border-main);
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%);
   display: flex;
@@ -559,7 +566,7 @@
    activity).  The reference surface has one continuous activity rail, so make
    the v2 modifier authoritative even when the legacy stylesheet is emitted
    later by the CSS bundler. */
-.ide-v2-surface .ide-v2-rail.ide-plane-conversation {
+.ide-v2-surface .ide-rail.ide-plane-conversation {
   display: flex;
   flex-direction: column;
   grid-template-rows: none;
@@ -592,7 +599,7 @@
   color: var(--volt-strong);
 }
 
-.ide-v2-rail-scroll {
+.ide-rail-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 0;
@@ -601,39 +608,39 @@
   min-height: 0;
 }
 
-.ide-v2-surface .ide-v2-rail-scroll {
+.ide-v2-surface .ide-rail-scroll {
   min-height: 0;
 }
 
 /* Map existing context-stack / conversation / activity panels into the rail. */
-.ide-v2-rail .ide-plane-context-stack,
-.ide-v2-rail .ide-plane-primary-rail,
-.ide-v2-rail .ide-plane-activity,
-.ide-v2-rail .ide-plane-annotations,
-.ide-v2-rail .ide-plane-cursors {
+.ide-rail .ide-plane-context-stack,
+.ide-rail .ide-plane-primary-rail,
+.ide-rail .ide-plane-activity,
+.ide-rail .ide-plane-annotations,
+.ide-rail .ide-plane-cursors {
   border: 0;
   background: transparent;
   min-height: 0;
 }
 
-.ide-v2-rail .ide-plane-context-stack {
+.ide-rail .ide-plane-context-stack {
   padding: 12px 12px;
   overflow-y: visible;
   border-bottom: 1px solid var(--border-soft);
 }
 
-.ide-v2-rail .ide-plane-primary-rail {
+.ide-rail .ide-plane-primary-rail {
   padding: 12px 12px;
   border-bottom: 1px solid var(--border-soft);
 }
 
-.ide-v2-rail .ide-plane-activity {
+.ide-rail .ide-plane-activity {
   padding: 12px 12px;
   flex: 1;
   min-height: 0;
 }
 
-.ide-v2-rail .ide-activity-panel.is-compact {
+.ide-rail .ide-activity-panel.is-compact {
   min-height: 100%;
 }
 
@@ -682,11 +689,11 @@
   border-top: 1px solid var(--border-soft);
 }
 
-.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-list {
+.ide-rail .ide-activity-panel.is-compact .ide-activity-list {
   gap: 9px;
 }
 
-.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-row {
+.ide-rail .ide-activity-panel.is-compact .ide-activity-row {
   position: relative;
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 9px;
@@ -694,7 +701,7 @@
   padding: 10px;
 }
 
-.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-time {
+.ide-rail .ide-activity-panel.is-compact .ide-activity-time {
   position: absolute;
   top: 10px;
   right: 10px;
@@ -702,7 +709,7 @@
   color: var(--text-dim);
 }
 
-.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-dot {
+.ide-rail .ide-activity-panel.is-compact .ide-activity-dot {
   grid-column: 1;
   align-self: start;
   width: 24px;
@@ -714,13 +721,13 @@
   box-shadow: inset 0 0 0 6px var(--bg-deep);
 }
 
-.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-row > div {
+.ide-rail .ide-activity-panel.is-compact .ide-activity-row > div {
   grid-column: 2;
   padding-right: 34px;
   overflow-wrap: anywhere;
 }
 
-.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-row > div > span:first-child {
+.ide-rail .ide-activity-panel.is-compact .ide-activity-row > div > span:first-child {
   flex-wrap: wrap;
 }
 
@@ -745,14 +752,14 @@
   cursor: pointer;
 }
 
-.ide-v2-rail .ide-plane-annotations {
+.ide-rail .ide-plane-annotations {
   padding: 12px;
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
-.ide-v2-rail .ide-activity-list {
+.ide-rail .ide-activity-list {
   display: grid;
   gap: 8px;
   padding: 0;
@@ -760,7 +767,7 @@
 
 /* The reference rail presents recent activity as independently scannable
    cards, not a single uninterrupted text log. */
-.ide-v2-rail .ide-activity-row {
+.ide-rail .ide-activity-row {
   grid-template-columns: 42px 7px minmax(0, 1fr);
   gap: 8px;
   padding: 9px 10px;
@@ -770,7 +777,7 @@
   box-shadow: 0 1px 0 rgb(0 0 0 / 0.22);
 }
 
-.ide-v2-rail .ide-activity-row:hover {
+.ide-rail .ide-activity-row:hover {
   border-color: var(--border-main);
   background: color-mix(in srgb, var(--bg-card) 86%, var(--volt-wash));
 }
@@ -882,7 +889,7 @@
   flex: none;
 }
 
-.ide-v2-rail .ide-plane-cursors {
+.ide-rail .ide-plane-cursors {
   padding: 12px 12px;
   display: grid;
   gap: 10px;
@@ -1008,7 +1015,7 @@
 /* The live drawer retains the existing stream contract, while this v2 shell
    gives it the compact, always-present execution-output geometry of the
    reference IDE. */
-.ide-v2-editor > .execute-output-drawer {
+.ide-ed > .execute-output-drawer {
   flex: none;
   max-height: 200px;
   min-height: 30px;
@@ -1016,21 +1023,21 @@
   background: var(--bg-well);
 }
 
-.ide-v2-editor > .execute-output-drawer .execute-output-drawer-header {
+.ide-ed > .execute-output-drawer .execute-output-drawer-header {
   min-height: 30px;
   padding: 5px 14px;
   border-bottom-color: var(--border-soft);
   background: var(--bg-sunken);
 }
 
-.ide-v2-editor > .execute-output-drawer [data-terminal] {
+.ide-ed > .execute-output-drawer [data-terminal] {
   height: auto !important;
   min-height: 48px;
   max-height: 168px;
   background: var(--bg-well) !important;
 }
 
-.ide-v2-editor > .execute-output-drawer.is-collapsed {
+.ide-ed > .execute-output-drawer.is-collapsed {
   max-height: 30px;
 }
 
@@ -1166,26 +1173,26 @@
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 
 @media (max-width: 1180px) {
-  .ide-plane-shell[data-mobile-viewport="false"][data-rails-collapsed="false"] .ide-v2-body.ide-plane-grid {
+  .ide-plane-shell[data-mobile-viewport="false"][data-rails-collapsed="false"] .ide-body.ide-plane-grid {
     grid-template-columns: minmax(0, 1fr) minmax(270px, 320px) !important;
   }
 
-  .ide-plane-shell[data-mobile-viewport="false"][data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid {
+  .ide-plane-shell[data-mobile-viewport="false"][data-rails-collapsed="true"] .ide-body.ide-plane-grid {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
-  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-tree,
-  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-body.ide-plane-grid .ide-plane-tree {
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-tree,
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-body.ide-plane-grid .ide-plane-tree {
     display: none;
   }
 
-  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-body.ide-plane-grid .ide-plane-editor,
-  .ide-plane-shell[data-mobile-viewport="false"][data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-body.ide-plane-grid .ide-plane-editor,
+  .ide-plane-shell[data-mobile-viewport="false"][data-tree-collapsed="true"] .ide-body.ide-plane-grid .ide-plane-editor {
     grid-column: 1;
   }
 
-  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-body.ide-plane-grid .ide-plane-conversation,
-  .ide-plane-shell[data-mobile-viewport="false"][data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-conversation {
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-body.ide-plane-grid .ide-plane-conversation,
+  .ide-plane-shell[data-mobile-viewport="false"][data-tree-collapsed="true"] .ide-body.ide-plane-grid .ide-plane-conversation {
     grid-column: 2;
   }
 
@@ -1194,14 +1201,14 @@
   }
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-top {
+.ide-plane-shell[data-mobile-viewport="true"] .ide-top {
   height: auto;
   min-height: 42px;
   flex-wrap: wrap;
   padding: 6px 10px;
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-top .ide-toolbar-command-cluster {
+.ide-plane-shell[data-mobile-viewport="true"] .ide-top .ide-toolbar-command-cluster {
   display: none;
 }
 
@@ -1215,17 +1222,17 @@
   overflow: auto;
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body,
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid {
+.ide-plane-shell[data-mobile-viewport="true"] .ide-body,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-body.ide-plane-grid {
   grid-template-columns: minmax(0, 1fr) !important;
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid {
+.ide-plane-shell[data-mobile-viewport="true"] .ide-body.ide-plane-grid {
   position: relative;
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree,
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid .ide-plane-tree {
+.ide-plane-shell[data-mobile-viewport="true"] .ide-tree,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-body.ide-plane-grid .ide-plane-tree {
   position: absolute;
   inset: 0 auto 0 0;
   z-index: var(--z-overlay);
@@ -1240,11 +1247,11 @@
   display: none;
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree .ide-explorer-row {
+.ide-plane-shell[data-mobile-viewport="true"] .ide-tree .ide-explorer-row {
   min-height: var(--mobile-touch-target-min);
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+.ide-plane-shell[data-mobile-viewport="true"] .ide-body.ide-plane-grid .ide-plane-editor {
   grid-column: 1;
 }
 

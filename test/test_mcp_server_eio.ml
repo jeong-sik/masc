@@ -1996,18 +1996,18 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
     result.token;
   cleanup_dir base_path
 
-let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
+let test_execute_tool_argument_token_ignored_without_http_auth () =
   let base_path = temp_dir () in
   let config = Masc.Workspace.default_config base_path in
   let identity =
     test_agent_identity
-      ~uuid:"legacy-token-ignored-test"
-      ~session_key:"legacy-token-ignored-session"
+      ~uuid:"argument-token-ignored-test"
+      ~session_key:"argument-token-ignored-session"
   in
   let result =
     Masc.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_status"
-      ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
+      ~arguments:(`Assoc [ ("token", `String "argument-token") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
@@ -2015,7 +2015,7 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
-    "legacy argument token ignored without HTTP auth"
+    "argument token ignored without HTTP auth"
     None
     result.token;
   cleanup_dir base_path
@@ -3209,8 +3209,8 @@ let eio_tests = [
     test_execute_tool_add_task_with_admin_token_without_join;
   "http auth token overrides stale argument token", `Quick,
     test_execute_tool_http_auth_token_overrides_stale_argument_token;
-  "legacy argument token ignored without http auth", `Quick,
-    test_execute_tool_legacy_argument_token_ignored_without_http_auth;
+  "argument token ignored without http auth", `Quick,
+    test_execute_tool_argument_token_ignored_without_http_auth;
   "without mcp session uses generated identity", `Quick,
     test_execute_tool_without_mcp_session_uses_generated_identity;
 ]

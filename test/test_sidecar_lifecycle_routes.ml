@@ -437,8 +437,8 @@ let test_desired_store_increments_generation () =
         ~updated_by:"test"
         Routes.Desired_stopped
     in
-    match first, second, Routes.read_desired_record ~base_path "discord" with
-    | Ok first, Ok second, Some persisted ->
+    match first, second, Routes.read_desired_record_result ~base_path "discord" with
+    | Ok first, Ok second, Ok (Some persisted) ->
       check int "first generation" 1 first.generation;
       check int "second generation" 2 second.generation;
       check int "persisted generation" 2 persisted.generation;
@@ -1023,7 +1023,7 @@ let test_isoish_lexical_matches_chronological () =
 (* ── retry_backoff_active (#8930 / #22246) ─────────────────────────────
    [retry_backoff_active] parses [now] at the boundary and delegates the
    deadline check to [Attempt_state.is_backoff_active]. Malformed persisted
-   [next_retry_at] values are rejected by [attempt_record_of_json] instead
+   [next_retry_at] values are rejected by [attempt_record_of_json_result] instead
    of entering the in-memory state. *)
 
 let make_attempt ~next_retry_at =
@@ -1071,15 +1071,93 @@ let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
       ]
   in
   (match Routes.attempt_record_of_json_result json with
-   | Error (Routes.Attempt_record_invalid_timestamp { field; value }) ->
+   | Error (Routes.Record_invalid_timestamp { field; value }) ->
      check string "field" "next_retry_at" field;
      check string "value" "not-an-iso-stamp" value
    | Error error ->
      failf
        "unexpected decode error: %s"
-       (Routes.attempt_record_decode_error_to_string error)
-   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary");
-  check bool "compat option wrapper still rejects" true (Routes.attempt_record_of_json json = None)
+       (Routes.record_decode_error_to_string error)
+   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary")
+;;
+
+let test_desired_record_of_json_rejects_unknown_state () =
+  let json =
+    `Assoc
+      [ "connector_id", `String "discord"
+      ; "desired_state", `String "sideways"
+      ; "generation", `Int 1
+      ; "updated_by", `String "test"
+      ; "updated_at", `String "2026-01-01T00:00:00Z"
+      ]
+  in
+  match Routes.desired_record_of_json_result json with
+  | Error (Routes.Record_unknown_value { field; value }) ->
+    check string "field" "desired_state" field;
+    check string "value" "sideways" value
+  | Error error ->
+    failf
+      "unexpected decode error: %s"
+      (Routes.record_decode_error_to_string error)
+  | Ok _ -> failf "unknown desired_state should be rejected at boundary"
+;;
+
+let corrupt_desired_record_json =
+  {|{"connector_id":"discord","desired_state":"sideways","generation":1,"updated_by":"test","updated_at":"2026-01-01T00:00:00Z"}|}
+;;
+
+let test_read_desired_record_result_reports_semantic_corruption () =
+  with_temp_dir "sidecar-desired-corrupt-read" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "discord" in
+    write_file path corrupt_desired_record_json;
+    match Routes.read_desired_record_result ~base_path "discord" with
+    | Error msg ->
+      check bool "mentions field" true (String_util.contains_substring msg "desired_state");
+      check bool "mentions bad value" true (String_util.contains_substring msg "sideways")
+    | Ok None -> failf "corrupt persisted desired state must not look absent"
+    | Ok (Some _) -> failf "corrupt persisted desired state should not decode")
+;;
+
+let test_write_desired_record_fails_closed_on_corrupt_previous () =
+  with_temp_dir "sidecar-desired-corrupt-write" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "discord" in
+    write_file path corrupt_desired_record_json;
+    (match
+       Routes.write_desired_record
+         ~updated_at:"2026-04-20T00:00:00Z"
+         ~base_path
+         ~id:"discord"
+         ~updated_by:"test"
+         Routes.Desired_running
+     with
+     | Error msg ->
+       check bool "mentions field" true (String_util.contains_substring msg "desired_state")
+     | Ok record ->
+       failf "write over corrupt desired state must fail closed, got generation %d" record.generation);
+    check
+      string
+      "corrupt file left untouched"
+      corrupt_desired_record_json
+      (In_channel.with_open_bin path In_channel.input_all))
+;;
+
+let test_status_json_surfaces_invalid_desired_state () =
+  with_temp_dir "sidecar-desired-corrupt-status" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "discord" in
+    write_file path corrupt_desired_record_json;
+    let json = Routes.read_status_json ~base_path "discord" in
+    let open Yojson.Safe.Util in
+    let lifecycle = json |> member "sidecar_lifecycle" in
+    (match lifecycle |> member "desired_state" with
+     | `Null -> ()
+     | other -> failf "corrupt desired state must not render, got %s" (Yojson.Safe.to_string other));
+    let error =
+      match lifecycle |> member "desired_read_error" with
+      | `String msg -> msg
+      | other -> failf "expected desired_read_error string, got %s" (Yojson.Safe.to_string other)
+    in
+    check bool "mentions field" true (String_util.contains_substring error "desired_state");
+    check bool "mentions bad value" true (String_util.contains_substring error "sideways"))
 ;;
 
 let test_read_attempt_record_result_reports_semantic_corruption () =
@@ -1400,6 +1478,22 @@ let () =
             "malformed persisted attempt → status error"
             `Quick
             test_status_json_surfaces_invalid_attempt_state
+        ; test_case
+            "unknown desired_state → rejected at boundary"
+            `Quick
+            test_desired_record_of_json_rejects_unknown_state
+        ; test_case
+            "malformed persisted desired → read error"
+            `Quick
+            test_read_desired_record_result_reports_semantic_corruption
+        ; test_case
+            "malformed persisted desired → write fails closed"
+            `Quick
+            test_write_desired_record_fails_closed_on_corrupt_previous
+        ; test_case
+            "malformed persisted desired → status error"
+            `Quick
+            test_status_json_surfaces_invalid_desired_state
         ; test_case
             "malformed now → fail-closed"
             `Quick

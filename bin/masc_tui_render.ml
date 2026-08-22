@@ -4,6 +4,9 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
+module Message_layout = Masc_tui_message_layout
+module Keeper_chat = Masc_tui_keeper_chat_projection
+
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
 let connection_badge : Masc_tui_types.connection_status -> string = function
@@ -1159,74 +1162,101 @@ let render_keeper_message (state : state) =
   let buf = Buffer.create 4096 in
 
   Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.show_cursor;  (* Show cursor for text input *)
+  Buffer.add_string buf Ansi.hide_cursor;
 
-  if state.keeper_cursor >= List.length state.keepers then begin
+  match state.msg_target_keeper_name with
+  | None ->
     Buffer.add_string buf "No keeper selected.\n";
     print_string (Buffer.contents buf);
     flush stdout
-  end else begin
-    let k = List.nth state.keepers state.keeper_cursor in
-
+  | Some keeper_name ->
+    let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
+    let header =
+      Printf.sprintf " Message to: %s  (port %d)" display_keeper_name state.port
+    in
+    let target_registered =
+      keeper_message_target_registered state keeper_name
+    in
+    let reconciling =
+      match state.msg_inflight, state.msg_unverified with
+      | Some inflight, Some unverified ->
+          Keeper_chat.same_request_identity inflight unverified
+      | Some _, None | None, Some _ | None, None -> false
+    in
+    let status_rows = keeper_message_status_rows state in
+    if
+      not
+        (Message_layout.message_viewport_supported ~terminal_rows:rows
+           ~terminal_cols:cols ~status_rows)
+    then begin
+      let notice =
+        " Keeper chat needs a larger terminal; resize to continue (Esc:back)"
+      in
+      Buffer.add_string buf
+        (Message_layout.fit_width notice (max 1 (cols - 1)));
+      print_string (Buffer.contents buf);
+      flush stdout
+    end else begin
     (* Header *)
-    let header = Printf.sprintf " Message to: %s%s%s  (port %d)"
-      Ansi.bold k.k_name Ansi.reset state.port in
-
     box_top buf cols;
-    box_line buf cols header;
+    box_line_styled buf cols ~style:Ansi.bold header;
     box_divider buf cols;
 
     (* Message history *)
-    let history_height = rows - 10 in  (* Reserve space for input area *)
-    let msg_count = List.length state.msg_history in
-    let start_idx = max 0 (msg_count - history_height) in
+    let history_height = max 0 (rows - 10 - status_rows) in
+    let messages =
+      List.filter
+        (fun message -> String.equal message.me_keeper_name keeper_name)
+        state.msg_history
+    in
+    let layout_entries =
+      List.map
+        (fun message ->
+          let style, role_label =
+            match message.me_role with
+            | Message_user -> Message_layout.User, "you"
+            | Message_keeper ->
+                ( Message_layout.Keeper
+                , Keeper_chat.terminal_safe_text message.me_keeper_name )
+            | Message_status -> Message_layout.Status, "status"
+            | Message_error -> Message_layout.Error, "error"
+          in
+          ({ style;
+             timestamp = message.me_timestamp;
+             role_label;
+             request_label =
+               Keeper_chat.compact_request_id message.me_request_id;
+             body = message.me_text;
+           }
+            : Message_layout.entry))
+        messages
+    in
+    let visible_rows =
+      Message_layout.visible_rows ~inner_width:(max 1 (cols - 4))
+        ~height:history_height layout_entries
+    in
 
-    if msg_count = 0 then begin
-      box_line buf cols (Ansi.dim ^ "  (no messages yet -- type below and press Enter)" ^ Ansi.reset);
+    if visible_rows = [] then begin
+      if history_height > 0 then
+        box_line_styled buf cols ~style:Ansi.dim
+          "  (no messages yet -- type below and press Enter)";
       for _ = 1 to history_height - 1 do
         box_empty buf cols
       done
     end else begin
-      let displayed = ref 0 in
-      List.iteri (fun i m ->
-        if i >= start_idx && !displayed < history_height then begin
-          let role_color = match m.me_role with
-            | "user" -> Ansi.cyan
-            | "assistant" -> Ansi.green
-            | _ -> Ansi.white
+      List.iter
+        (fun (row : Message_layout.row) ->
+          let style =
+            match row.style with
+            | Message_layout.User -> Ansi.cyan
+            | Message_layout.Keeper -> Ansi.green
+            | Message_layout.Status -> Ansi.yellow
+            | Message_layout.Error -> Ansi.red
           in
-          let role_label = match m.me_role with
-            | "user" -> "you"
-            | "assistant" -> k.k_name
-            | s -> s
-          in
-          let prefix = Printf.sprintf "  %s[%s] %s:%s "
-            role_color m.me_timestamp role_label Ansi.reset in
-          (* Word-wrap the message text across multiple lines *)
-          let text_width = max 20 (cols - 30) in
-          let text = m.me_text in
-          let text_len = String.length text in
-          if text_len <= text_width then begin
-            box_line buf cols (prefix ^ text);
-            incr displayed
-          end else begin
-            (* First line with prefix *)
-            box_line buf cols (prefix ^ String.sub text 0 text_width);
-            incr displayed;
-            (* Continuation lines *)
-            let indent = String.make (String.length "  [HH:MM:SS] xxxxxxx: ") ' ' in
-            let pos = ref text_width in
-            while !pos < text_len && !displayed < history_height do
-              let chunk_len = min text_width (text_len - !pos) in
-              box_line buf cols (indent ^ String.sub text !pos chunk_len);
-              pos := !pos + chunk_len;
-              incr displayed
-            done
-          end
-        end
-      ) state.msg_history;
+          box_line_styled buf cols ~style row.text)
+        visible_rows;
       (* Fill remaining space *)
-      for _ = !displayed to history_height - 1 do
+      for _ = List.length visible_rows to history_height - 1 do
         box_empty buf cols
       done
     end;
@@ -1235,24 +1265,83 @@ let render_keeper_message (state : state) =
     box_divider buf cols;
 
     (* Input line *)
-    let input_text = Buffer.contents state.msg_input in
-    let prompt =
-      if state.msg_sending then
-        Printf.sprintf "  %s(sending...)%s" Ansi.yellow Ansi.reset
-      else
-        Printf.sprintf "  %s>%s %s" Ansi.cyan Ansi.reset input_text
+    (match state.msg_inflight with
+     | Some request when reconciling ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf "  (reconciling exact operation %s…)"
+              (Keeper_chat.compact_request_id request.request_id))
+     | Some request when String.equal request.keeper_name keeper_name ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf "  (sending %s…)"
+              (Keeper_chat.compact_request_id request.request_id))
+     | Some request ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf "  (sending to %s: %s)"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
+     | None -> ());
+    (match state.msg_unverified with
+     | Some request ->
+         box_line_styled buf cols ~style:Ansi.red
+           (Printf.sprintf
+              "  outcome unverified: %s %s; Ctrl-R polls the exact operation"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
+     | None -> ());
+    (match state.msg_recovery_error with
+     | Some detail ->
+         box_line_styled buf cols ~style:Ansi.red
+           ("  recovery fence invalid; new sends blocked: "
+          ^ Keeper_chat.terminal_safe_text detail)
+     | None -> ());
+    if not target_registered then
+      box_line_styled buf cols ~style:Ansi.red
+        (Printf.sprintf
+           "  Keeper %s is no longer registered; draft retained; Esc to choose another"
+           display_keeper_name);
+    let input = Buffer.contents state.msg_input in
+    let visible_input =
+      Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)) input
     in
-    box_line buf cols prompt;
+    let input_row =
+      Message_layout.input_cursor_row ~terminal_rows:rows ~history_height
+        ~status_rows
+    in
+    box_line_styled buf cols ~style:Ansi.cyan
+      (Printf.sprintf "  > %s" visible_input);
 
     box_bottom buf cols;
 
     (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  Enter:send  Esc:back  Ctrl-U:clear line%s\n"
-      Ansi.dim Ansi.reset);
+    let enter_hint =
+      match state.msg_recovery_error with
+      | Some _ -> "Enter:blocked (recovery fence invalid)"
+      | None ->
+      match state.msg_inflight, state.msg_unverified, target_registered with
+      | Some _, Some _, _ -> "reconciling exact operation  Enter:blocked"
+      | Some _, None, _ -> "Enter:wait for current request"
+      | None, Some _, _ -> "Ctrl-R:reconcile  Enter:blocked"
+      | None, None, false -> "Enter:disabled (Keeper unavailable)"
+      | None, None, true -> "Enter:send"
+    in
+    let footer =
+      Printf.sprintf "%s  %s  Esc:back  Ctrl-U:clear line%s" Ansi.dim
+        enter_hint Ansi.reset
+    in
+    Buffer.add_string buf
+      (Message_layout.fit_width footer (max 1 (cols - 1)));
+    Buffer.add_char buf '\n';
+
+    let input_column =
+      Message_layout.input_cursor_column ~terminal_cols:cols
+        ~input:visible_input
+    in
+    Buffer.add_string buf (Ansi.move_to input_row input_column);
+    Buffer.add_string buf Ansi.show_cursor;
 
     print_string (Buffer.contents buf);
     flush stdout
-  end
+    end
 
 (** Dispatch render based on current surface *)
 let render (state : state) =

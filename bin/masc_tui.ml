@@ -4,38 +4,11 @@ open Masc_tui_render
 open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
+module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
-
-(** Send a message through the Keeper chat streaming endpoint. *)
-let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
-  try
-    let host = Env_config_core.masc_host () in
-    let port = state.port in
-    let body =
-      Yojson.Safe.to_string
-        (`Assoc
-          [
-            ("name", `String keeper_name);
-            ("message", `String message);
-          ])
-    in
-    match
-      Masc_tui_http.post_raw_json ~host ~port
-        ~path:"/api/v1/keepers/chat/stream" ~body
-    with
-    | Ok response -> (
-        match Tui_decode.parse_keeper_chat_response response with
-        | Ok reply -> reply
-        | Error err -> "(response parsing failed: " ^ err ^ ")")
-    | Error err -> err
-  with
-  | Unix.Unix_error (err, _, _) ->
-    Printf.sprintf "(connection failed: %s -- is MASC server running on port %d?)"
-      (Unix.error_message err) state.port
-  | exn ->
-    Printf.sprintf "(error: %s)" (Printexc.to_string exn)
 
 (** Read a single byte from stdin, returning Some char or None. *)
 let read_byte_unix ?(timeout = 0.1) () : char option =
@@ -52,23 +25,63 @@ let read_byte_unix ?(timeout = 0.1) () : char option =
 let read_byte () : char option =
   Eio_guard.run_in_systhread (fun () -> read_byte_unix ())
 
+(** One byte of pushback keeps an invalid UTF-8 continuation from swallowing
+    the next independent ASCII key. *)
+type input_reader = { mutable pending_byte : char option }
+
+let create_input_reader () = { pending_byte = None }
+
+let take_input_byte reader ~timeout =
+  match reader.pending_byte with
+  | Some byte ->
+      reader.pending_byte <- None;
+      Some byte
+  | None -> read_byte_unix ~timeout ()
+
+let is_utf8_continuation byte =
+  let code = Char.code byte in
+  code >= 0x80 && code <= 0xBF
+
+let read_utf8_scalar reader first expected_length =
+  let bytes = Bytes.create expected_length in
+  Bytes.set bytes 0 first;
+  let rec fill index =
+    if index >= expected_length then
+      let scalar = Bytes.to_string bytes in
+      if String.is_valid_utf_8 scalar then Some scalar else Some "invalid-utf8"
+    else
+      match take_input_byte reader ~timeout:0.05 with
+      | None -> Some "invalid-utf8"
+      | Some byte when is_utf8_continuation byte ->
+          Bytes.set bytes index byte;
+          fill (index + 1)
+      | Some byte ->
+          reader.pending_byte <- Some byte;
+          Some "invalid-utf8"
+  in
+  fill 1
+
 (** Try to read an escape sequence. Returns a key description. *)
-let read_key () : string option =
+let read_key reader () : string option =
   Eio_guard.run_in_systhread (fun () ->
-      match read_byte_unix () with
+      match take_input_byte reader ~timeout:0.1 with
       | None -> None
       | Some '\027' -> (
           (* Escape sequence: try to read [ and then the code. *)
-          match read_byte_unix ~timeout:0.05 () with
+          match take_input_byte reader ~timeout:0.05 with
           | Some '[' -> (
-              match read_byte_unix ~timeout:0.05 () with
+              match take_input_byte reader ~timeout:0.05 with
               | Some 'A' -> Some "up"
               | Some 'B' -> Some "down"
               | Some 'Z' -> Some "shift-tab"
               | Some _ -> Some "unknown-esc"
               | None -> Some "esc")
           | Some _ | None -> Some "esc")
-      | Some c -> Some (String.make 1 c))
+      | Some byte -> (
+          match Masc_tui_message_layout.utf8_scalar_byte_length byte with
+          | Some 1 -> Some (String.make 1 byte)
+          | Some expected_length -> read_utf8_scalar reader byte expected_length
+          | None -> Some "invalid-utf8"))
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -109,78 +122,73 @@ let parse_args () =
 
   (base, r, !port, !refresh)
 
-(** Handle key input for message mode *)
-let handle_message_key (state : state) (base_path : string) (key : string) : bool =
+let save_message_draft state =
+  match state.msg_target_keeper_name with
+  | None -> ()
+  | Some keeper_name ->
+      let other_drafts =
+        List.filter
+          (fun (name, _) -> not (String.equal name keeper_name))
+          state.msg_drafts
+      in
+      let text = Buffer.contents state.msg_input in
+      state.msg_drafts <-
+        if String.equal text "" then other_drafts
+        else (keeper_name, text) :: other_drafts
+
+let open_message_for_keeper state keeper_name =
+  save_message_draft state;
+  state.msg_target_keeper_name <- Some keeper_name;
+  Buffer.clear state.msg_input;
+  List.assoc_opt keeper_name state.msg_drafts
+  |> Option.iter (Buffer.add_string state.msg_input)
+
+let clear_current_message_draft state =
+  Buffer.clear state.msg_input;
+  save_message_draft state
+
+(** Handle local editing keys for message mode. Network submission is injected
+    so the input path never owns a blocking HTTP effect. *)
+let handle_message_key (state : state) ~(submit_message : string -> unit)
+    ~(retry_message : unit -> unit) (key : string) : bool =
   match key with
   | "esc" ->
+    save_message_draft state;
     state.view <- Keepers Keeper_detail;
     state.detail_scroll <- 0;
     true
   | "\r" | "\n" ->
-    (* Send the message *)
     let text = Buffer.contents state.msg_input in
-    if String.length (String.trim text) > 0 then begin
-      let keeper_name =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some k -> k.k_name
-        | None -> "unknown"
-      in
-      (* Add user message to history *)
-      let now = Unix.localtime (Unix.gettimeofday ()) in
-      let ts = Printf.sprintf "%02d:%02d:%02d"
-        now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-      state.msg_history <- state.msg_history @ [{
-        me_role = "user";
-        me_text = text;
-        me_timestamp = ts;
-      }];
-      Buffer.clear state.msg_input;
-
-      (* Render to show "sending..." *)
-      state.msg_sending <- true;
-      render state;
-
-      (* Send and get reply *)
-      let reply = send_keeper_message state keeper_name text in
-
-      (* Add reply to history *)
-      let now2 = Unix.localtime (Unix.gettimeofday ()) in
-      let ts2 = Printf.sprintf "%02d:%02d:%02d"
-        now2.Unix.tm_hour now2.Unix.tm_min now2.Unix.tm_sec in
-      state.msg_history <- state.msg_history @ [{
-        me_role = "assistant";
-        me_text = reply;
-        me_timestamp = ts2;
-      }];
-      state.msg_sending <- false;
-      add_event state "message" (Printf.sprintf "Sent to %s" keeper_name);
-
-      (* Refresh data after message *)
-      load_from_masc_dir state base_path
-    end;
+    if String.trim text <> "" then submit_message text;
     true
   | "\127" | "\b" ->
-    (* Backspace: delete last character *)
-    let len = Buffer.length state.msg_input in
-    if len > 0 then begin
-      let new_content = Buffer.sub state.msg_input 0 (len - 1) in
-      Buffer.clear state.msg_input;
-      Buffer.add_string state.msg_input new_content
-    end;
+    let new_content =
+      Buffer.contents state.msg_input
+      |> Masc_tui_message_layout.drop_last_utf8_scalar
+    in
+    Buffer.clear state.msg_input;
+    Buffer.add_string state.msg_input new_content;
     true
-  | s when String.length s = 1 ->
-    let c = Char.code s.[0] in
-    if c = 21 then begin
+  | s ->
+    let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
+    if c = Some 18 then begin
+      (* Ctrl-R: reconnect using the exact unverified request identity. *)
+      retry_message ();
+      true
+    end else if c = Some 21 then begin
       (* Ctrl-U: clear line *)
       Buffer.clear state.msg_input;
       true
-    end else if c >= 32 && c < 127 then begin
-      (* Printable character *)
+    end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       Buffer.add_string state.msg_input s;
       true
     end else
       true  (* Consume but ignore other control chars *)
-  | _ -> true
+
+let keeper_message_input_supported state =
+  let rows, cols = get_terminal_size () in
+  Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
+    ~terminal_cols:cols ~status_rows:(keeper_message_status_rows state)
 
 let approval_decision_key = function
   | Confirm -> "y"
@@ -216,8 +224,321 @@ type async_msg =
       * approval_decision
       * (Approval.confirm_outcome, string) result
       * approval_observation
+  | Keeper_chat_done of
+      Keeper_chat.request * (Keeper_chat.response, Keeper_chat.error) result
+  | Keeper_chat_reconciled of
+      Keeper_chat.request
+      * (Keeper_chat.operation_reconciliation, Keeper_chat.error) result
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
+
+let current_clock_text () =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+    now.Unix.tm_sec
+
+let append_chat_history state request role text =
+  let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
+  state.msg_history <-
+    state.msg_history
+    @ [ {
+          me_role = role;
+          me_text = text;
+          me_timestamp = current_clock_text ();
+          me_keeper_name = request.Keeper_chat.keeper_name;
+          me_request_id = request.request_id;
+        } ]
+
+let launch_keeper_request state ~mailbox request =
+  state.msg_inflight <- Some request;
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_chat
+          ~host:(Env_config_core.masc_host ()) ~port:state.port request
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
+    in
+    enqueue_async mailbox (Keeper_chat_done (request, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_chat_done
+           ( request
+           , Error
+               (Keeper_chat.Transport_error "Eio switch is unavailable") ))
+
+let start_keeper_message state ~base_path ~mailbox text =
+  match state.msg_recovery_error with
+  | Some detail ->
+      add_event state "error"
+        ("Cannot send while Keeper chat recovery is invalid: " ^ detail)
+  | None ->
+  match state.msg_inflight with
+  | Some request ->
+      add_event state "system"
+        (Printf.sprintf "Keeper message already in progress: %s"
+           request.request_id)
+  | None -> (
+      match state.msg_unverified with
+      | Some request ->
+          add_event state "error"
+            (Printf.sprintf
+               "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
+               request.request_id)
+      | None ->
+      match state.msg_target_keeper_name with
+      | None -> add_event state "error" "Cannot send: no Keeper is selected"
+      | Some keeper_name
+        when not
+               (List.exists
+                  (fun (keeper : keeper) ->
+                    String.equal keeper.k_name keeper_name)
+                  state.keepers) ->
+          add_event state "error"
+            (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
+               (Keeper_chat.terminal_safe_text keeper_name))
+      | Some keeper_name ->
+          let request =
+            Keeper_chat.create_request ~keeper_name ~message:text
+          in
+          (match Keeper_chat_recovery.persist_pending ~base_path request with
+           | Error detail ->
+               state.msg_recovery_error <- Some detail;
+               add_event state "error"
+                 ("Keeper message was not sent because its recovery fence could not be persisted: "
+                ^ detail)
+           | Ok () ->
+               append_chat_history state request Message_user text;
+               clear_current_message_draft state;
+               add_event state "message"
+                 (Printf.sprintf "Keeper message durably fenced: %s"
+                    request.request_id);
+               launch_keeper_request state ~mailbox request))
+
+let launch_keeper_reconciliation state ~mailbox request =
+  state.msg_inflight <- Some request;
+  let run clock =
+    let rec poll remaining =
+      let result =
+        try
+          Masc_tui_http.fetch_keeper_chat_operation
+            ~host:(Env_config_core.masc_host ()) ~port:state.port request
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
+      in
+      match result with
+      | Ok (Keeper_chat.Operation_pending _ as pending) ->
+          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
+           | `Poll remaining ->
+               Eio.Time.sleep clock 1.5;
+               poll remaining
+           | `Stop ->
+               enqueue_async mailbox
+                 (Keeper_chat_reconciled (request, Ok pending)))
+      | Error (Keeper_chat.Http_error { status = 404; _ })
+        as not_found ->
+          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
+           | `Poll remaining ->
+               Eio.Time.sleep clock 1.5;
+               poll remaining
+           | `Stop ->
+               enqueue_async mailbox
+                 (Keeper_chat_reconciled (request, not_found)))
+      | (Ok
+          (Keeper_chat.Operation_succeeded _ | Keeper_chat.Operation_failed _
+          | Keeper_chat.Operation_cancelled)
+        | Error _) as settled ->
+          enqueue_async mailbox (Keeper_chat_reconciled (request, settled))
+    in
+    poll Keeper_chat_recovery.max_reconciliation_polls
+  in
+  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+  | Some sw, Some clock ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run clock;
+          `Stop_daemon)
+  | Some _, None | None, Some _ | None, None ->
+      enqueue_async mailbox
+        (Keeper_chat_reconciled
+           ( request
+           , Error
+               (Keeper_chat.Transport_error
+                  "Eio switch or clock is unavailable") ))
+
+let retry_keeper_message state ~mailbox =
+  match state.msg_inflight, state.msg_unverified with
+  | Some request, _ ->
+      add_event state "system"
+        (Printf.sprintf "Keeper message already in progress: %s"
+           request.request_id)
+  | None, None ->
+      add_event state "system" "No unverified Keeper request to reconnect"
+  | None, Some request ->
+      add_event state "message"
+        (Printf.sprintf "Reconciling Keeper request by exact ID: %s"
+           request.request_id);
+      launch_keeper_reconciliation state ~mailbox request
+
+let chat_status_text completed =
+  let turn_ref = completed.Keeper_chat.turn_ref in
+  match completed.turn_outcome with
+  | Keeper_chat.Visible_reply when String.trim completed.reply <> "" ->
+      completed.reply
+  | Keeper_chat.Visible_reply ->
+      Printf.sprintf "Turn completed with non-text visible content (turn %s)"
+        turn_ref
+  | Keeper_chat.Continuation_checkpoint ->
+      Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
+  | Keeper_chat.External_effect_completed ->
+      Printf.sprintf "External effect completed (turn %s)" turn_ref
+  | Keeper_chat.External_effect_pending ->
+      Printf.sprintf "External effect remains pending (turn %s)" turn_ref
+  | Keeper_chat.No_visible_reply ->
+      Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
+
+let clear_keeper_chat_recovery state ~base_path request =
+  match Keeper_chat_recovery.clear_pending ~base_path request with
+  | Ok () -> state.msg_recovery_error <- None
+  | Error detail ->
+      state.msg_recovery_error <- Some detail;
+      add_event state "error"
+        ("Keeper chat settled, but its recovery fence could not be cleared: "
+       ^ detail)
+
+let apply_keeper_chat_result state ~base_path request result =
+  match state.msg_inflight with
+  | Some current when Keeper_chat.same_request_identity current request ->
+      let reconnecting_unverified =
+        match state.msg_unverified with
+        | Some pending -> Keeper_chat.same_request_identity pending request
+        | None -> false
+      in
+      state.msg_inflight <- None;
+      (match result with
+       | Ok (Keeper_chat.Turn_completed completed) ->
+           state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
+           let role =
+             match completed.turn_outcome with
+             | Keeper_chat.Visible_reply
+               when String.trim completed.reply <> "" ->
+                 Message_keeper
+             | Keeper_chat.Visible_reply
+             | Keeper_chat.Continuation_checkpoint
+             | Keeper_chat.External_effect_completed
+             | Keeper_chat.External_effect_pending
+             | Keeper_chat.No_visible_reply -> Message_status
+           in
+           append_chat_history state request role (chat_status_text completed);
+           add_event state "message"
+             (Printf.sprintf "Keeper turn finished: %s" request.request_id)
+       | Ok (Keeper_chat.Replayed_succeeded _) ->
+           state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
+           append_chat_history state request Message_status
+             "Request was already completed; canonical reply is not present in this replay stream";
+           add_event state "message"
+             (Printf.sprintf "Keeper request already completed: %s"
+                request.request_id)
+       | Error error ->
+           let certainty =
+             Keeper_chat.error_certainty
+               ~was_unverified:reconnecting_unverified error
+           in
+           let detail =
+             Keeper_chat.error_to_string error
+             |> Keeper_chat.terminal_safe_text
+           in
+           let detail =
+             match certainty with
+             | Keeper_chat.Verified_rejected | Keeper_chat.Verified_failed ->
+                 state.msg_unverified <- None;
+                 clear_keeper_chat_recovery state ~base_path request;
+                 detail
+             | Keeper_chat.Outcome_unverified ->
+                 state.msg_unverified <- Some request;
+                 Printf.sprintf
+                   "Outcome unverified for %s; the operation may still execute. Do not resend with a new ID; use Ctrl-R to reconnect. %s"
+                   request.request_id detail
+           in
+           append_chat_history state request Message_error detail;
+           add_event state "error"
+             (Printf.sprintf "Keeper message %s: %s" request.request_id detail));
+      true
+  | Some _ | None -> false
+
+let apply_keeper_chat_reconciliation state ~base_path request result =
+  match state.msg_inflight with
+  | Some current when Keeper_chat.same_request_identity current request ->
+      state.msg_inflight <- None;
+      (match result with
+       | Ok (Keeper_chat.Operation_succeeded { outcome_ref }) ->
+           state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
+           append_chat_history state request Message_status
+             (Printf.sprintf
+                "Operation settled successfully (%s); canonical reply is unavailable after transport recovery"
+                outcome_ref);
+           add_event state "message"
+             (Printf.sprintf "Keeper operation reconciled: %s"
+                request.request_id)
+       | Ok
+           (Keeper_chat.Operation_failed
+             { failure_kind; detail; outcome_ref }) ->
+           state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
+           let outcome =
+             match outcome_ref with
+             | None -> ""
+             | Some value -> "; outcome " ^ value
+           in
+           let detail =
+             Printf.sprintf "Operation failed (%s%s): %s" failure_kind outcome
+               detail
+           in
+           append_chat_history state request Message_error detail;
+           add_event state "error"
+             (Printf.sprintf "Keeper operation failed: %s" request.request_id)
+       | Ok Keeper_chat.Operation_cancelled ->
+           state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
+           append_chat_history state request Message_status
+             "Operation was cancelled";
+           add_event state "message"
+             (Printf.sprintf "Keeper operation cancelled: %s"
+                request.request_id)
+       | Ok (Keeper_chat.Operation_pending state_value) ->
+           state.msg_unverified <- Some request;
+           append_chat_history state request Message_error
+             (Printf.sprintf
+                "Operation reconciliation stopped while still %s; outcome remains unverified"
+                (match state_value with
+                 | Keeper_chat.Queued -> "queued"
+                 | Keeper_chat.Running -> "running"
+                 | Keeper_chat.Succeeded | Keeper_chat.Failed
+                 | Keeper_chat.Cancelled -> "in an unexpected terminal state"))
+       | Error error ->
+           state.msg_unverified <- Some request;
+           let detail =
+             Keeper_chat.error_to_string error
+             |> Keeper_chat.terminal_safe_text
+           in
+           append_chat_history state request Message_error
+             ("Operation reconciliation failed; outcome remains unverified. "
+            ^ detail);
+           add_event state "error"
+             (Printf.sprintf "Keeper operation reconciliation failed: %s"
+                request.request_id));
+      true
+  | Some _ | None -> false
 
 let remember_surface_error state ~surface ~current_error ~set_error err =
   let changed =
@@ -531,7 +852,7 @@ let handle_approval_decision state approval decision ~mailbox =
            (approval_decision_key decision)
            approval.ap_summary)
 
-let apply_async_message state ~http_refresh_inflight
+let apply_async_message state ~base_path ~http_refresh_inflight
     ~board_post_refresh_inflight = function
   | Http_refresh_done results ->
       http_refresh_inflight := false;
@@ -560,14 +881,20 @@ let apply_async_message state ~http_refresh_inflight
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
+  | Keeper_chat_done (request, result) ->
+      if apply_keeper_chat_result state ~base_path request result then
+        load_from_masc_dir state base_path
+  | Keeper_chat_reconciled (request, result) ->
+      if apply_keeper_chat_reconciliation state ~base_path request result then
+        load_from_masc_dir state base_path
 
-let drain_async_messages state ~http_refresh_inflight
+let drain_async_messages state ~base_path ~http_refresh_inflight
     ~board_post_refresh_inflight mailbox =
   let rec loop () =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> ()
     | Some msg ->
-        apply_async_message state ~http_refresh_inflight
+        apply_async_message state ~base_path ~http_refresh_inflight
           ~board_post_refresh_inflight msg;
         loop ()
   in
@@ -601,26 +928,49 @@ let main () =
   let http_refresh_inflight = ref false in
   let board_post_refresh_inflight = ref None in
   let async_messages = Eio.Stream.create 32 in
+  (match Keeper_chat_recovery.load_pending ~base_path with
+   | Ok None -> ()
+   | Error detail ->
+       state.msg_recovery_error <- Some detail;
+       add_event state "error"
+         ("Keeper chat recovery is invalid; new sends are blocked: " ^ detail)
+   | Ok (Some request) ->
+       state.msg_unverified <- Some request;
+       append_chat_history state request Message_status
+         "Recovered an unsettled request; reconciling the exact durable operation";
+       add_event state "message"
+         (Printf.sprintf "Recovered Keeper request: %s" request.request_id);
+       launch_keeper_reconciliation state ~mailbox:async_messages request);
   start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight
     ~mailbox:async_messages;
   add_event state "system" "TUI started";
 
   (* Main loop *)
   let last_check = ref (Unix.gettimeofday ()) in
+  let input_reader = create_input_reader () in
   try
     while true do
-      drain_async_messages state ~http_refresh_inflight
+      drain_async_messages state ~base_path ~http_refresh_inflight
         ~board_post_refresh_inflight async_messages;
       (* Check for input *)
-      let key = read_key () in
+      let key = read_key input_reader () in
       (match state.view, key with
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None
        | _ -> ());
       (match key with
        | Some k when state.view = Keepers Keeper_message ->
-           let _handled = handle_message_key state base_path k in
-           ()
+           if keeper_message_input_supported state || String.equal k "esc" then
+             let _handled =
+               handle_message_key state
+                 ~submit_message:
+                   (start_keeper_message state ~base_path
+                      ~mailbox:async_messages)
+                 ~retry_message:(fun () ->
+                   retry_keeper_message state ~mailbox:async_messages)
+                 k
+             in
+             ()
        | Some "q" | Some "Q" -> raise Break
        | Some "y" | Some "Y" ->
            (match state.view with
@@ -844,14 +1194,15 @@ let main () =
            (* M opens message view from detail *)
            (match state.view with
             | Keepers Keeper_detail when state.keeper_cursor < List.length state.keepers ->
-                Buffer.clear state.msg_input;
+                let keeper = List.nth state.keepers state.keeper_cursor in
+                open_message_for_keeper state keeper.k_name;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
-      drain_async_messages state ~http_refresh_inflight
+      drain_async_messages state ~base_path ~http_refresh_inflight
         ~board_post_refresh_inflight async_messages;
 
       (* Periodic refresh *)

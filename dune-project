@@ -95,6 +95,8 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (markup (>= 1.0.3))
+  (uucp (>= 17.0.0))
+  (uuseg (>= 17.0.0))
   (uuidm (>= 0.9.10))
   ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
   ; atdgen runs at build-time (codegen for sse_event.atd →

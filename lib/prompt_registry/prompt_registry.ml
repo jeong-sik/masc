@@ -37,34 +37,12 @@
 
 module Types = Prompt_registry_types
 
-type prompt_metrics = Types.prompt_metrics = {
-  usage_count: int;      (** Number of times this prompt has been used *)
-  avg_score: float;      (** Average quality score (0.0 - 1.0) *)
-  last_used: float;      (** Unix timestamp of last usage *)
-}
-
-let prompt_metrics_to_yojson = Types.prompt_metrics_to_yojson
-let prompt_metrics_of_yojson = Types.prompt_metrics_of_yojson
-
 type prompt_entry = Types.prompt_entry = {
   id: string;                     (** Unique identifier *)
   template: string;               (** Prompt template with {{var}} placeholders *)
   version: string;                (** Semantic version string *)
   variables: string list;         (** Extracted variable names from template *)
-  metrics: prompt_metrics option; (** Optional usage metrics *)
   created_at: float;              (** Unix timestamp of creation *)
-  deprecated: bool;               (** Whether this prompt is deprecated *)
-}
-
-let prompt_entry_to_yojson = Types.prompt_entry_to_yojson
-let prompt_entry_of_yojson = Types.prompt_entry_of_yojson
-
-type registry_stats = Types.registry_stats = {
-  total_prompts: int;
-  active_prompts: int;
-  deprecated_prompts: int;
-  most_used: string option;
-  avg_usage: float;
 }
 
 type prompt_meta = Types.prompt_meta = {

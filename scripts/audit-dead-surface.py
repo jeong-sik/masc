@@ -568,7 +568,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # workspace_utils_paths_backend tasks_dirname / backlog_filename) were
 # dropped from their .mli in the same PR, implementations kept where still
 # used internally.
-DEAD_EXPORT_BASELINE = 532
+# 532 -> 529: tightened to the measured count (measured 2026-08-22: 531
+# before, 529 after the prompt_registry purge). Two are
+# prompt_registry.prompt_metrics_of_yojson / prompt_metrics_to_yojson, whose
+# type left with the purge; the remaining count of slack predates it.
+DEAD_EXPORT_BASELINE = 529
 
 
 def run_ratchet(count: int) -> int:

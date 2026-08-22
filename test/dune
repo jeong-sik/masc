@@ -2585,6 +2585,7 @@
  (modules test_tui_keeper_chat_recovery)
  (libraries
   alcotest
+  eio
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_recovery
   fs_compat

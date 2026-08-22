@@ -355,6 +355,12 @@ let test_error_certainty () =
           (Chat.Run_failed
              { accepted = false; message = "bad"; code = Some "invalid_input" }))
      = Chat.Verified_rejected);
+  check bool "ambiguous replay keeps invalid-input rejection unverified" true
+    (Chat.error_certainty ~was_unverified:true
+       (Chat.Protocol_error
+          (Chat.Run_failed
+             { accepted = false; message = "bad"; code = Some "invalid_input" }))
+     = Chat.Outcome_unverified);
   check bool "store uncertainty is not a verified rejection" true
     (Chat.error_certainty
        (Chat.Protocol_error
@@ -362,6 +368,15 @@ let test_error_certainty () =
              { accepted = false
              ; message = "store unavailable"
              ; code = Some "store_unavailable"
+             }))
+     = Chat.Outcome_unverified);
+  check bool "changed-source idempotency conflict keeps the fence" true
+    (Chat.error_certainty
+       (Chat.Protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "idempotency conflict"
+             ; code = Some "idempotency_conflict"
              }))
      = Chat.Outcome_unverified);
   check bool "uncertain retry keeps pre-accept rejection unverified" true

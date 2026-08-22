@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-17
+last_verified: 2026-08-22
 code_refs:
   - bin/masc_tui.ml
   - bin/masc_tui_render.ml
@@ -145,7 +145,11 @@ Message to: sangsu  (port 8935)
 [Enter] Send  [Esc] Back  [Ctrl-U] Clear line
 ```
 
-Only a request-correlated terminal Keeper result is shown as a reply. Interrupted streams, protocol errors, rejected turns, and terminal outcomes without visible text are rendered as explicit status/error rows; partial text is never promoted to a successful reply. One request may be in flight at a time. If delivery becomes uncertain after submission, new sends are blocked and `Ctrl-R` polls the exact durable operation until it settles—never a fresh implicit retry or a second POST. Drafts are retained per Keeper while navigating.
+Only a request-correlated terminal Keeper result is shown as a reply. Interrupted streams, protocol errors, rejected turns, and terminal outcomes without visible text are rendered as explicit status/error rows; partial text is never promoted to a successful reply. One request may be in flight at a time.
+
+Before the TUI issues a POST, it writes a `prepared` recovery fence and requires any newly created directory chain, the file, and the parent-directory entry to be durably synced. If the rename is visible but the parent sync is unconfirmed in the current process, no POST is issued; `Ctrl-R` rewrites that same request ID and payload until durability is confirmed. A `prepared` fence found after restart is ambiguous because the prior process may have crossed the POST boundary without durably observing acceptance. The TUI therefore preserves the unverified state, fsyncs the exact fence again, and replays only that same request ID and payload. The server treats a replay as idempotent only when both the operation input and authorized source identity still match. An identity change produces an idempotency conflict and keeps the fence instead of silently replacing it.
+
+Once the stream proves server acceptance, the fence becomes `accepted`. If delivery then becomes uncertain, new sends are blocked and `Ctrl-R` polls the exact durable operation until it settles; it does not mint a fresh ID or issue another chat POST. Fence removal also fsyncs its parent directory. If that cleanup is incomplete, the settled request gets a separate cleanup-pending state and `Ctrl-R` retries only durable removal—zero POSTs and zero GETs. Other transient recovery failures keep the exact request identity blocked for reload instead of enabling a new send. `Ctrl-R` remains available even when extra status rows make the terminal too small for normal message input. Drafts are retained per Keeper while navigating.
 
 ## Keybindings
 
@@ -161,9 +165,9 @@ Only a request-correlated terminal Keeper result is shown as a reply. Interrupte
 | `Esc` | Detail | Back to keeper list |
 | `Esc` | Logs / Message | Back to detail |
 | `Enter` | Message | Send message |
-| `Ctrl-R` | Message | Reconcile an outcome-unverified request by its exact durable ID |
+| `Ctrl-R` | Message | Retry a prepared fence, reconcile an accepted request, or finish settled-request cleanup by exact durable ID |
 | `Ctrl-U` | Message | Clear input line |
-| `Backspace` | Message | Delete last character |
+| `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
 | `r` | All (except message) | Force refresh |
 | `q` | All (except message) | Quit |
 
@@ -200,5 +204,8 @@ Dashboard <--Tab--> Keeper List
 ## Requirements
 
 - OCaml 5.x
-- Dependencies: `unix`, `yojson` (no additional libraries)
-- Terminal with ANSI escape support
+- Project opam dependencies, including `unix`, `yojson`, `eio`, `uucp`, and
+  `uuseg`
+- UTF-8 terminal with ANSI escapes and xterm Unicode-11-compatible cell-width
+  behavior. ttyd `1.7.7-unknown` with its DOM renderer is the measured target;
+  other ANSI terminals may differ for compound emoji cursor placement.

@@ -237,7 +237,9 @@
   masc.masc_core
   masc.masc_process
   masc.masc_random_id
+  masc
   masc_tui_keeper_chat_projection
+  eio
   fs_compat
   yojson
   unix))

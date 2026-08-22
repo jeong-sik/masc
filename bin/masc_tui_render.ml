@@ -1202,12 +1202,6 @@ let render_keeper_message (state : state) =
     let target_registered =
       keeper_message_target_registered state keeper_name
     in
-    let reconciling =
-      match state.msg_inflight, state.msg_unverified with
-      | Some inflight, Some unverified ->
-          Keeper_chat.same_request_identity inflight unverified
-      | Some _, None | None, Some _ | None, None -> false
-    in
     let status_rows = keeper_message_status_rows state in
     if
       not
@@ -1215,7 +1209,7 @@ let render_keeper_message (state : state) =
            ~terminal_cols:cols ~status_rows)
     then begin
       let notice =
-        " Keeper chat needs a larger terminal; resize to continue (Esc:back)"
+        " Keeper chat needs a larger terminal; resize to type (Ctrl-R:recover, Esc:back)"
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
@@ -1290,35 +1284,85 @@ let render_keeper_message (state : state) =
     box_divider buf cols;
 
     (* Input line *)
-    (match state.msg_inflight with
-     | Some request when reconciling ->
+    (match state.msg_inflight, state.msg_inflight_kind with
+     | Some request, Some Operation_get ->
          box_line_styled buf cols ~style:Ansi.yellow
            (Printf.sprintf "  (reconciling exact operation %s…)"
               (Keeper_chat.compact_request_id request.request_id))
-     | Some request when String.equal request.keeper_name keeper_name ->
+     | Some request, Some Chat_post
+       when Option.exists
+              (Keeper_chat.same_request_identity request)
+              state.msg_unverified ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf "  (replaying exact request %s…)"
+              (Keeper_chat.compact_request_id request.request_id))
+     | Some request, Some Chat_post
+       when String.equal request.keeper_name keeper_name ->
          box_line_styled buf cols ~style:Ansi.yellow
            (Printf.sprintf "  (sending %s…)"
               (Keeper_chat.compact_request_id request.request_id))
-     | Some request ->
+     | Some request, Some Chat_post ->
          box_line_styled buf cols ~style:Ansi.yellow
            (Printf.sprintf "  (sending to %s: %s)"
               (Keeper_chat.terminal_safe_text request.keeper_name)
               (Keeper_chat.compact_request_id request.request_id))
-     | None -> ());
-    (match state.msg_unverified with
+     | Some request, None ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf "  (processing %s…)"
+              (Keeper_chat.compact_request_id request.request_id))
+     | None, Some _ | None, None -> ());
+    (match state.msg_prepared with
      | Some request ->
-         box_line_styled buf cols ~style:Ansi.red
+         box_line_styled buf cols ~style:Ansi.yellow
            (Printf.sprintf
-              "  outcome unverified: %s %s; Ctrl-R polls the exact operation"
+              "  prepared fence: %s %s; Ctrl-R retries durability before dispatch/replay"
               (Keeper_chat.terminal_safe_text request.keeper_name)
               (Keeper_chat.compact_request_id request.request_id))
      | None -> ());
-    (match state.msg_recovery_error with
-     | Some detail ->
+    (match state.msg_unverified, state.msg_inflight_kind with
+     | Some request, Some Chat_post ->
          box_line_styled buf cols ~style:Ansi.red
-           ("  recovery fence invalid; new sends blocked: "
-          ^ Keeper_chat.terminal_safe_text detail)
+           (Printf.sprintf
+              "  prior outcome unverified: %s %s; replaying the same request ID"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
+     | Some request, Some Operation_get ->
+         box_line_styled buf cols ~style:Ansi.red
+           (Printf.sprintf
+              "  outcome unverified: %s %s; polling the exact operation"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
+     | Some request, None ->
+         box_line_styled buf cols ~style:Ansi.red
+           (Printf.sprintf
+              "  outcome unverified: %s %s; Ctrl-R resumes the exact request"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
+     | None, Some _ | None, None -> ());
+    (match state.msg_cleanup_pending with
+     | Some request ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           (Printf.sprintf
+              "  request settled: %s %s; Ctrl-R finishes durable cleanup"
+              (Keeper_chat.terminal_safe_text request.keeper_name)
+              (Keeper_chat.compact_request_id request.request_id))
      | None -> ());
+    (match
+       state.msg_prepared, state.msg_cleanup_pending, state.msg_recovery_error
+     with
+     | Some _, _, Some (Recovery_blocked detail) ->
+         box_line_styled buf cols ~style:Ansi.red
+           ("  prepared recovery blocked; no new request may start: "
+          ^ Keeper_chat.terminal_safe_text detail)
+     | None, Some _, Some (Recovery_blocked detail) ->
+         box_line_styled buf cols ~style:Ansi.red
+           ("  cleanup retry failed; no POST or GET will be issued: "
+          ^ Keeper_chat.terminal_safe_text detail)
+     | None, None, Some (Recovery_blocked detail) ->
+         box_line_styled buf cols ~style:Ansi.red
+           ("  recovery needs retry; Ctrl-R reloads durable recovery state: "
+          ^ Keeper_chat.terminal_safe_text detail)
+     | Some _, _, None | None, Some _, None | None, None, None -> ());
     if not target_registered then
       box_line_styled buf cols ~style:Ansi.red
         (Printf.sprintf
@@ -1339,15 +1383,27 @@ let render_keeper_message (state : state) =
 
     (* Footer *)
     let enter_hint =
-      match state.msg_recovery_error with
-      | Some _ -> "Enter:blocked (recovery fence invalid)"
-      | None ->
-      match state.msg_inflight, state.msg_unverified, target_registered with
-      | Some _, Some _, _ -> "reconciling exact operation  Enter:blocked"
-      | Some _, None, _ -> "Enter:wait for current request"
-      | None, Some _, _ -> "Ctrl-R:reconcile  Enter:blocked"
-      | None, None, false -> "Enter:disabled (Keeper unavailable)"
-      | None, None, true -> "Enter:send"
+      match
+        state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
+      with
+      | Some _, _, _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
+      | None, Some _, _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
+      | None, None, Some (Recovery_blocked _) ->
+          "Ctrl-R:reload exact recovery  Enter:blocked"
+      | None, None, None ->
+      match
+        state.msg_inflight, state.msg_inflight_kind, state.msg_unverified,
+        target_registered
+      with
+      | Some _, Some Operation_get, _, _ ->
+          "reconciling exact operation  Enter:blocked"
+      | Some _, Some Chat_post, Some _, _ ->
+          "replaying exact request  Enter:blocked"
+      | Some _, (Some Chat_post | None), _, _ ->
+          "Enter:wait for current request"
+      | None, _, Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
+      | None, _, None, false -> "Enter:disabled (Keeper unavailable)"
+      | None, _, None, true -> "Enter:send"
     in
     let footer =
       Printf.sprintf "%s  %s  Esc:back  Ctrl-U:clear line%s" Ansi.dim

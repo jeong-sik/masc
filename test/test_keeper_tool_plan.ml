@@ -513,11 +513,21 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
       ; "claimed_at", `String "2026-08-18T00:00:01Z"
       ]
   in
+  let compact_task_item =
+    `Assoc
+      [ "id", `String "task-2"
+      ; "title", `String "t"
+      ; "priority", `Int 2
+      ; "created_at", `String "2026-08-18T00:00:00Z"
+      ; "status", `String "todo"
+      ]
+  in
   accepts
     "keeper_tasks_list"
     (`Assoc
        [ "backlog_authority", `String "primary"
        ; "degraded", `Bool false
+       ; "projection", `String "full"
        ; "kind", `String "snapshot"
        ; "revision", `String "tasks:r1"
        ; "snapshot", `List [ task_item ]
@@ -527,6 +537,17 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
     (`Assoc
        [ "backlog_authority", `String "primary"
        ; "degraded", `Bool false
+       ; "projection", `String "compact"
+       ; "kind", `String "snapshot"
+       ; "revision", `String "tasks:r1"
+       ; "snapshot", `List [ compact_task_item ]
+       ]);
+  accepts
+    "keeper_tasks_list"
+    (`Assoc
+       [ "backlog_authority", `String "primary"
+       ; "degraded", `Bool false
+       ; "projection", `String "compact"
        ; "kind", `String "unchanged"
        ; "revision", `String "tasks:r1"
        ]);
@@ -536,6 +557,15 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        [ "backlog_authority", `String "primary"
        ; "degraded", `Bool false
        ; "kind", `String "snapshot"
+       ]);
+  rejects
+    "keeper_tasks_list"
+    (`Assoc
+       [ "backlog_authority", `String "primary"
+       ; "degraded", `Bool false
+       ; "kind", `String "snapshot"
+       ; "revision", `String "tasks:r1"
+       ; "snapshot", `List [ compact_task_item ]
        ]);
   accepts
     "keeper_artifact_read"

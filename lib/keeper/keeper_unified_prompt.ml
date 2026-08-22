@@ -270,7 +270,6 @@ let board_event_kind_label = function
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Schedule_due _ -> "schedule_due"
   | Keeper_world_observation.External_attention _ -> "external_attention"
-  | Keeper_world_observation.Goal_assigned -> "goal_assigned"
   | Keeper_world_observation.Goal_reconciliation_ready ->
     "goal_reconciliation_ready"
   | Keeper_world_observation.Completion_authority_rejected _ ->
@@ -402,7 +401,6 @@ let board_event_note_fields = function
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Schedule_due _
-  | Keeper_world_observation.Goal_assigned
   | Keeper_world_observation.Goal_reconciliation_ready
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_cancelled _ -> []
@@ -574,7 +572,6 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_cancelled _ -> ())
@@ -608,7 +605,6 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready
          | Keeper_world_observation.Task_cancelled _ -> None)
       events
@@ -660,7 +656,6 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready
          | Keeper_world_observation.Completion_authority_rejected _ -> None)
       events

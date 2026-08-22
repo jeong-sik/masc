@@ -89,7 +89,6 @@ type stimulus_payload =
   | Manual_compaction_requested
       (** Operator-requested MASC compaction. The tool only enqueues this
           stimulus; the owning Keeper consumes it in its Owner child. *)
-  | Goal_assigned of goal_assignment
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
   | Goal_reconciliation_ready of goal_reconciliation_ready
       (** Every Task linked to an executing Goal is terminal. This wakes a
@@ -188,13 +187,6 @@ and scheduled_wake = {
     schedule creation captured an authorized originating continuation.
     [occurrence_id] is the exact schedule occurrence correlation key. *)
 
-and goal_assignment = {
-  ga_goal_id : string;
-  ga_goal_title : string;
-  ga_assigned_by : string;
-}
-(** Payload for [Goal_assigned]. *)
-
 and goal_reconciliation_ready = {
   gr_goal_id : string;
   gr_triggering_task_id : string;
@@ -245,8 +237,6 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
     window. *)
 
 val manual_compaction_post_id : post_id
-
-val goal_assignment_post_id : goal_assignment -> post_id
 
 val goal_reconciliation_ready_post_id :
   goal_reconciliation_ready -> post_id

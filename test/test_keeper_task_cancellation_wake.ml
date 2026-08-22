@@ -106,7 +106,6 @@ let queued_cancellations ~base_path ~keeper_name =
     | Event_queue.Connector_attention _
     | Event_queue.Hitl_resolved _
     | Event_queue.Manual_compaction_requested
-    | Event_queue.Goal_assigned _
     | Event_queue.Goal_reconciliation_ready _
     | Event_queue.Completion_authority_rejected _
     | Event_queue.Workspace_message _ -> None)

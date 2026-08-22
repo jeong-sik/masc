@@ -124,7 +124,6 @@ let pending_page ~after ~limit pending =
              | Keeper_event_queue.Connector_attention _
              | Keeper_event_queue.Hitl_resolved _
              | Keeper_event_queue.Manual_compaction_requested
-             | Keeper_event_queue.Goal_assigned _
              | Keeper_event_queue.Goal_reconciliation_ready _ -> []))
       in
       loop (index + 1) (remaining - 1) (item :: page_rev) rest

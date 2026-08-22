@@ -63,7 +63,6 @@ type stimulus_payload =
          [Fusion_completed]: a HITL decision is an async completion the
          waiting keeper must be notified of. *)
   | Manual_compaction_requested
-  | Goal_assigned of goal_assignment
       (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
          (keeper_up tool args or TOML reconcile). Wakes the keeper ONCE at
          the assignment edge so the new standing objective arrives as
@@ -142,16 +141,6 @@ and scheduled_wake = {
   result_delivery : Keeper_continuation_channel.t option;
 }
 
-and goal_assignment = {
-  ga_goal_id : string;
-  ga_goal_title : string;
-  (* display-only title resolved from Goal_store at enqueue time. *)
-  ga_assigned_by : string;
-  (* actor label for the prompt line: tool caller name or
-     "toml_reconcile". Display-only; stripped from queue identity so
-     repeat assignments of the same goal dedup regardless of actor. *)
-}
-
 and goal_reconciliation_ready = {
   gr_goal_id : string;
   gr_triggering_task_id : string;
@@ -183,11 +172,6 @@ let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let manual_compaction_post_id = "manual-compaction-request"
-
-let goal_assignment_post_id (ga : goal_assignment) =
-  (* Stable per goal: re-assigning the same goal before the keeper consumes
-     the first wake collapses under queue identity dedup. *)
-  "goal-assigned:" ^ ga.ga_goal_id
 
 let goal_reconciliation_ready_post_id (ready : goal_reconciliation_ready) =
   "goal-reconciliation-ready:" ^ ready.gr_goal_id
@@ -236,8 +220,6 @@ let enqueue (queue : t) (s : stimulus) : t =
    Exhaustive on purpose: a new
    payload kind must decide its identity fields here at compile time. *)
 let identity_payload = function
-  | Goal_assigned ga ->
-    Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | Task_cancelled cancellation ->
     (* The reason is operator-facing prose whose wording can vary between
        retries of the same cancellation; identity is the task and who ended
@@ -361,7 +343,6 @@ let payload_kind_label = function
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
   | Manual_compaction_requested -> "manual_compaction_requested"
-  | Goal_assigned _ -> "goal_assigned"
   | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
@@ -371,7 +352,7 @@ let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Manual_compaction_requested | Goal_assigned _
+  | Manual_compaction_requested
   | Goal_reconciliation_ready _ | Completion_authority_rejected _
   | Task_cancelled _ | Workspace_message _ ->
     false
@@ -384,7 +365,7 @@ let connector_attention_channel = function
   | Connector_attention { channel; _ } -> Some channel
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
-  | Goal_assigned _ | Goal_reconciliation_ready _
+  | Goal_reconciliation_ready _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _ ->
     None
 
@@ -585,13 +566,6 @@ let payload_to_yojson = function
        | Hitl_rejected rationale -> [ "rationale", `String rationale ])
   | Manual_compaction_requested ->
     `Assoc [ "kind", `String "manual_compaction_requested" ]
-  | Goal_assigned ga ->
-    `Assoc
-      [ "kind", `String "goal_assigned"
-      ; "goal_id", `String ga.ga_goal_id
-      ; "goal_title", `String ga.ga_goal_title
-      ; "assigned_by", `String ga.ga_assigned_by
-      ]
   | Goal_reconciliation_ready ready ->
     `Assoc
       [ "kind", `String "goal_reconciliation_ready"
@@ -819,16 +793,6 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
   | "manual_compaction_requested" -> Ok Manual_compaction_requested
-  | "goal_assigned" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* goal_title = string_field ~context "goal_title" fields in
-    let* assigned_by = string_field ~context "assigned_by" fields in
-    Ok
-      (Goal_assigned
-         { ga_goal_id = goal_id
-         ; ga_goal_title = goal_title
-         ; ga_assigned_by = assigned_by
-         })
   | "goal_reconciliation_ready" ->
     let* goal_id = string_field ~context "goal_id" fields in
     let* triggering_task_id =
@@ -976,7 +940,6 @@ let continuation_channel_of_payload = function
   | Board_attention _
   | Bootstrap
   | Manual_compaction_requested
-  | Goal_assigned _
   | Goal_reconciliation_ready _
   | Completion_authority_rejected _
   | Task_cancelled _

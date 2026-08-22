@@ -25,7 +25,6 @@ type pending_board_event_kind =
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
-  | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
   | Task_cancelled of Keeper_event_queue.task_cancellation
@@ -55,11 +54,9 @@ let is_board_activity_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Fusion_completed
   | External_attention _
-  | Goal_assigned
-  (* Goal-lifecycle signal, not a schedule dispatch, so it sits with
-     [Goal_assigned]. The [false] arm would also compile but would route the
-     event to the Scheduled Automation renderer and drop it from
-     [board_activity_count]. *)
+  (* Goal-lifecycle signal, not a schedule dispatch. The [false] arm would
+     also compile but would route the event to the Scheduled Automation
+     renderer and drop it from [board_activity_count]. *)
   | Goal_reconciliation_ready -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer. *)
@@ -74,7 +71,6 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Fusion_completed
   | External_attention _
-  | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected _
   | Task_cancelled _ -> false
@@ -89,7 +85,6 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Fusion_completed
   | Schedule_due _
   | External_attention _
-  | Goal_assigned
   | Goal_reconciliation_ready
   | Task_cancelled _ -> false
 ;;
@@ -106,7 +101,6 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Fusion_completed
   | Schedule_due _
   | External_attention _
-  | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected _ -> false
 ;;
@@ -621,39 +615,6 @@ let pending_board_event_of_external_attention
   }
 ;;
 
-(* RFC-0315 P3 W0: surface a fresh goal assignment as actionable turn input.
-   Author is the assigning actor (tool caller or "toml_reconcile"); the event
-   records the assignment context and the keeper decides what to do with it. *)
-let pending_board_event_of_goal_assignment
-      ~meta:(_ : keeper_meta)
-      ~(arrived_at : float)
-      (ga : Keeper_event_queue.goal_assignment)
-  : pending_board_event
-  =
-  let author = ga.ga_assigned_by in
-  { event_kind = Goal_assigned
-  ; post_id = Keeper_event_queue.goal_assignment_post_id ga
-  ; author
-  ; title = Printf.sprintf "Goal assigned: %s" ga.ga_goal_title
-  ; preview =
-      short_preview
-        ~max_len:fusion_result_preview_max_len
-        (Printf.sprintf
-           "Goal %s is now in your active goals (assigned by %s)."
-           ga.ga_goal_id
-           ga.ga_assigned_by)
-  ; hearth = None
-  ; post_kind = Board.System_post
-  ; updated_at = arrived_at
-  ; explicit_mention = false
-  ; matched_targets = []
-  ; self_commented = false
-  ; new_external_since = 1
-  ; latest_external_author = Some ga.ga_assigned_by
-  ; latest_external_preview = None
-  }
-;;
-
 let pending_board_event_of_goal_reconciliation_ready
       ~meta
       ~(arrived_at : float)
@@ -787,13 +748,6 @@ let pending_board_event_of_stimulus
             ~post_id:stimulus.post_id
             ~arrived_at:stimulus.arrived_at
             sw))
-  | Keeper_event_queue.Goal_assigned ga ->
-    Ok
-      (Some
-         (pending_board_event_of_goal_assignment
-            ~meta
-            ~arrived_at:stimulus.arrived_at
-            ga))
   | Keeper_event_queue.Goal_reconciliation_ready ready ->
     Ok
       (Some

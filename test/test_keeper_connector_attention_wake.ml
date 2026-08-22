@@ -308,7 +308,6 @@ let test_external_attention_projects_to_prompt_event () =
    | WO.Board_reaction_changed _
    | WO.Fusion_completed
    | WO.Schedule_due _
-   | WO.Goal_assigned
    | WO.Goal_reconciliation_ready
    | WO.Completion_authority_rejected _
    | WO.Task_cancelled _ ->

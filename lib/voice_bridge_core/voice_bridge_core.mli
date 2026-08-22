@@ -1,4 +1,4 @@
-(** Voice_bridge_core — voice config, retry knobs, local playback,
+(** Voice_bridge_core — voice config, request timeout, local playback,
     and TTS helper utilities shared by {!Voice_bridge}.
 
     Internal helpers ([log_prefix], [split_path_env],
@@ -13,18 +13,12 @@
 
     @since voice extraction (issue cluster #voice-bridge-split). *)
 
-(** {1 Retry knobs} *)
+(** {1 Request timeout} *)
 
 val default_timeout_seconds : float
-val default_max_retries : int
-val default_initial_backoff_seconds : float
-val default_backoff_multiplier : float
 val playback_dedup_window_sec : float
 
 val request_timeout_seconds : unit -> float
-val max_retries : unit -> int
-val initial_backoff_seconds : unit -> float
-val backoff_multiplier : unit -> float
 
 (** {1 Voice config} *)
 

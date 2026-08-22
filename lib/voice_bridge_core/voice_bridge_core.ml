@@ -17,9 +17,6 @@
     ============================================ *)
 
 let default_timeout_seconds = 5.0
-let default_max_retries = 3
-let default_initial_backoff_seconds = 1.0
-let default_backoff_multiplier = 2.0
 
 let playback_dedup_window_sec = 30.0
 
@@ -52,9 +49,6 @@ let default_agent_voices () = Voice_runtime_overlay.default_agent_voices ()
 let load_voice_config () = Voice_config.load ()
 
 let request_timeout_seconds () = default_timeout_seconds
-let max_retries () = default_max_retries
-let initial_backoff_seconds () = default_initial_backoff_seconds
-let backoff_multiplier () = default_backoff_multiplier
 
 let agent_voices () =
   match load_voice_config () with

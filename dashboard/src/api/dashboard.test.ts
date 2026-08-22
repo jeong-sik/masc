@@ -524,7 +524,6 @@ describe('keeper tool telemetry fetchers', () => {
               },
               eval_tags: [],
               readonly: true,
-              retryable: true,
               cwd_scope: null,
               polling_read: false,
               tool_name: 'keeper_time_now',
@@ -568,7 +567,6 @@ describe('keeper tool telemetry fetchers', () => {
       backend: 'ocaml_runtime',
       runtime_handler: 'tool_time_now',
       readonly: true,
-      retryable: true,
     })
     expect(entry?.route_evidence?.receipt_labels).toEqual({
       descriptor_id: 'keeper.time.now',

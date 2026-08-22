@@ -359,19 +359,17 @@ let test_registered_cluster_model_projections_are_explicit () =
     ]
 ;;
 
-let test_local_runtime_effect_policy_is_explicit () =
+let test_local_runtime_effect_metadata_is_explicit () =
   let verify = required_internal_descriptor "masc_runtime_verify" in
   Alcotest.(check (option bool))
     "verify is not read-only"
     (Some false)
     verify.policy.readonly_hint;
-  Alcotest.(check bool) "verify is not retryable" false verify.policy.retryable;
   let probe = required_internal_descriptor "masc_runtime_ollama_probe" in
   Alcotest.(check (option bool))
     "native probe is not read-only"
     (Some false)
-    probe.policy.readonly_hint;
-  Alcotest.(check bool) "native probe is not retryable" false probe.policy.retryable
+    probe.policy.readonly_hint
 ;;
 
 let test_keeper_management_projection_is_explicit () =
@@ -1747,9 +1745,9 @@ let () =
             `Quick
             test_registered_cluster_model_projections_are_explicit
         ; test_case
-            "local runtime effect policy is explicit"
+            "local runtime effect metadata is explicit"
             `Quick
-            test_local_runtime_effect_policy_is_explicit
+            test_local_runtime_effect_metadata_is_explicit
         ; test_case
             "Keeper management projection is explicit"
             `Quick

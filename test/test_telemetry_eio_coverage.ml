@@ -242,6 +242,49 @@ let test_parse_event_records_tool_called_missing_options () =
   check_one_tool_called_record "missing options" json ~operation_id:None
     ~worker_run_id:None
 
+let test_parse_event_records_legacy_transient_failure_class () =
+  let json =
+    `Assoc
+      [ "timestamp", `Float 1777120367.858374
+      ; ( "event"
+        , `List
+            [ `String "Tool_called"
+            ; `Assoc
+                [ "tool_name", `String "tool_execute"
+                ; "success", `Bool false
+                ; "duration_ms", `Int 658
+                ; "failure_class", `List [ `String "Transient_error" ]
+                ]
+            ] )
+      ]
+  in
+  match Telemetry_eio.parse_event_records [ json ] with
+  | [ { event = Telemetry_eio.Tool_called event; _ } ] ->
+    Alcotest.(check (option string))
+      "legacy constructor is preserved as dependency_unavailable"
+      (Some "dependency_unavailable")
+      (Option.map Tool_result.tool_failure_class_to_string event.failure_class);
+    let canonical = Telemetry_eio.event_to_json (Telemetry_eio.Tool_called event) in
+    let failure_class =
+      let open Yojson.Safe.Util in
+      canonical |> member "event" |> index 1 |> member "failure_class"
+    in
+    Alcotest.(check string)
+      "rewritten row uses the canonical derived constructor"
+      {|["Dependency_unavailable"]|}
+      (Yojson.Safe.to_string failure_class);
+    (match Telemetry_eio.parse_event_records [ canonical ] with
+     | [ { event = Telemetry_eio.Tool_called _; _ } ] -> ()
+     | records ->
+       Alcotest.failf
+         "expected canonical round-trip row, got %d"
+         (List.length records))
+  | records ->
+    Alcotest.failf
+      "expected one legacy Tool_called record, got %d"
+      (List.length records)
+;;
+
 let check_one_tool_assigned_record label json =
   match Telemetry_eio.parse_event_records [json] with
   | [ record ] -> (
@@ -678,6 +721,8 @@ let () =
         test_parse_event_records_tool_called_null_options;
       test_case "tool_called missing option fields" `Quick
         test_parse_event_records_tool_called_missing_options;
+      test_case "legacy transient failure class" `Quick
+        test_parse_event_records_legacy_transient_failure_class;
       test_case "tool_assigned minimal payload" `Quick
         test_parse_event_records_tool_assigned_minimal_payload;
       test_case "tool_assigned missing optional fields" `Quick

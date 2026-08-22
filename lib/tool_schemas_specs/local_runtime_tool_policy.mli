@@ -10,7 +10,6 @@ type t =
   { required_permission : Masc_domain.permission
   ; read_only : bool
   ; idempotent : bool
-  ; retryable : bool
   }
 
 val operation_id : operation -> string

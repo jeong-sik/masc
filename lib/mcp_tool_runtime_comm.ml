@@ -37,12 +37,12 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
     (* RFC-0189: rate-limit hit — caller should retry after [wait_secs].
-       [Transient_error] is the closest existing variant for
+       [Dependency_unavailable] is the closest existing variant for
        retry-friendly failure, mirroring the same tag used by
        [tool_misc_web_fetch] / [tool_misc_web_search] for rate
        limits. *)
     Some (Tool_result.error
-            ~failure_class:Tool_result.Transient_error
+            ~failure_class:Tool_result.Dependency_unavailable
             ~tool_name ~start_time
             (Printf.sprintf "Rate limited. %d sec remaining." wait_secs))
   else

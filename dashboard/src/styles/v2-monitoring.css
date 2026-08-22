@@ -178,7 +178,6 @@
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.005em;
-  line-height: 1.1;
 }
 
 .v2-monitoring-surface .fl-tick {
@@ -382,5 +381,19 @@
 
   .v2-monitoring-surface .fl-hpill {
     white-space: normal;
+  }
+}
+
+/* Roster column track for the live surface. The dashboard's row carries a
+   `.fl-runtime` cell between context and recent-tool that the design's row does
+   not have, and its action group is three text buttons (멈춤/깨움/종료) rendering
+   ~156px, so the last track needs 160px or the buttons slide under the context
+   value on a selected row. The shared `--fl-cols` in keeper-v2/fleet.css stays
+   the design's five tracks; this restates six for this surface only. Bounded to
+   the widths above the shed-a-column tier so that tier keeps its own set. */
+@media (min-width: 1501px) {
+  .v2-monitoring-surface.fl-shell,
+  .v2-monitoring-surface .fl-shell {
+    --fl-cols: minmax(196px, 1.3fr) 184px 152px 120px minmax(96px, 1fr) 160px;
   }
 }

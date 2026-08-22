@@ -64,10 +64,11 @@ type terminal_class =
   | Provider_integration
       (** provider response unparseable / unknown variant / provider-terminal
           / sub-500 unclassified server errors *)
-  | Terminal_effect_transient_failure
+  | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
+  | Terminal_effect_operator_cancelled
   | Provider_attempt_effect_fenced
   | Tool_correction_lost
   | Internal_opaque

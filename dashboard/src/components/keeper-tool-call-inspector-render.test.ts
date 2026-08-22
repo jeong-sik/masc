@@ -470,7 +470,6 @@ describe('KeeperToolCallInspector render', () => {
             backend: 'ocaml_runtime',
             runtime_handler: 'tool_time_now',
             readonly: true,
-            retryable: true,
             receipt_labels: { keeper_tool_group: 'meta' },
           },
         },

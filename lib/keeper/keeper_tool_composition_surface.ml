@@ -847,7 +847,6 @@ let make_tools
       ~descriptor
       ~base_path:config.base_path
       ?on_externalization_error:tool_externalization_error
-      ~externalization_error_recoverable:false
       ~name:tool_name
       ~description:
         (Option.value
@@ -1011,7 +1010,6 @@ let make_tools
         (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
       ~base_path:config.base_path
       ?on_externalization_error
-      ~externalization_error_recoverable:false
       ~name:tool_name
       ~description:plan_execute_description
       ~input_schema:plan_execute_input_schema

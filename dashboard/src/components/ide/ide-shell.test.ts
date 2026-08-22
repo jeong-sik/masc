@@ -1036,7 +1036,7 @@ describe('IdeShell', () => {
     expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
     expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('false')
-    expect(container.querySelectorAll('.ide-v2-rail-tab')).toHaveLength(3)
+    expect(container.querySelectorAll('.ide-rail-tab')).toHaveLength(3)
     expect(container.querySelector('.ide-activity-compact-status')?.getAttribute('role')).toBe('status')
     expect(container.querySelector('.ide-v2-presence-state')?.getAttribute('aria-label')).toBeTruthy()
     expect(container.querySelector('.ide-v2-connection-dot')?.getAttribute('aria-label')).toBeTruthy()

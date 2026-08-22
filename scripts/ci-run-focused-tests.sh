@@ -159,6 +159,7 @@ normal_targets=(
   @test/runtest-test_dashboard_feature_health
   @test/runtest-test_dashboard_gate_metrics
   @test/runtest-test_dashboard_goal_id_projection
+  @test/runtest-test_goal_timeline_projection
   @test/runtest-test_dashboard_k2_feeds
   @test/runtest-test_dashboard_keeper_cost_aggregates
   @test/runtest-test_dashboard_keeper_metrics_10286

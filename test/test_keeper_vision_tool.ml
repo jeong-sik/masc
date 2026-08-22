@@ -780,7 +780,7 @@ let test_candidate_failover_is_not_cut_off_by_local_deadline () =
       assert (!calls = 2);
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
-      assert (String.equal (assoc_string "failure_class" json) "transient_error")))
+      assert (String.equal (assoc_string "failure_class" json) "dependency_unavailable")))
 
 let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->

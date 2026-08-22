@@ -7,6 +7,10 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(* The failure-reason / turn-phase clusters live in Keeper_registry_types;
+   keeper_registry.mli re-exports them with [include module type of], so the
+   values and types must come through this structure. *)
+include Keeper_registry_types
 include Keeper_registry_setup
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =

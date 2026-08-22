@@ -75,23 +75,7 @@ let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session
 
-(** Prefer runtime capabilities captured in [server_state] and only fall back to
-    the legacy global Eio context for compatibility with older test helpers. *)
 let current_server_state_opt () = current_server_state ()
-
-let state_switch_opt = function
-  | Some state -> (
-      match state.Mcp_server.sw with
-      | Some sw -> Some sw
-      | None -> Eio_context.get_switch_opt ())
-  | None -> Eio_context.get_switch_opt ()
-
-let state_clock_opt = function
-  | Some state -> (
-      match state.Mcp_server.clock with
-      | Some clock -> Some clock
-      | None -> Eio_context.get_clock_opt ())
-  | None -> Eio_context.get_clock_opt ()
 
 
 (** Requests that enter the MCP transport surface.  [/]'s GET representation
@@ -147,7 +131,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
         match current_server_state_opt () with
         | None -> Error "Server state not initialized"
         | Some state -> (
-            match (state_switch_opt (Some state), state_clock_opt (Some state)) with
+            match (state.Mcp_server.sw, state.Mcp_server.clock) with
             | Some sw, Some clock ->
                 Ok
                   {

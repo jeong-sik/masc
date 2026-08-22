@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-08-21T17:20:00Z",
+  "captured_at": "2026-08-22T03:38:15Z",
   "live_observation_started_at": "2026-08-21T02:00:00Z",
   "kind": "keeper_goal_verifier_matrix_delta",
   "authority": "source_ci_and_operator_observation_separated",
@@ -11,7 +11,7 @@
     "catalog_validation": "passed",
     "browser": "chromium_full_page",
     "screenshot_path": "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.png",
-    "screenshot_sha256": "00f6eb3b16f351edd46e1269d6f12fa4ffce984db25cfaf7ed460bd6fa148ed1",
+    "screenshot_sha256": "fa5b3cfb5aa5b8ae4624979abf69a890be4e16df0020ee4db3d086a1888d4a89",
     "screenshot_width_px": 1280,
     "screenshot_height_px": 21649,
     "screenshot_semantics": "Document-render evidence only; it is not product runtime or Goal verifier evidence."
@@ -37,7 +37,12 @@
     "ownerless_rw23_pr": 29305,
     "completion_authority_retry_pr": 29318,
     "verifier_retryability_aggregation_pr": 29321,
-    "final_source_sha": "f4c974e8549d4811f0e1ff0d063ebfe58291c237",
+    "nested_runtime_retryability_pr": 29403,
+    "goal_convergence_budget_pr": 29415,
+    "browser_parent_budget_pr": 29465,
+    "hosted_ci_lane_removal_pr": 29458,
+    "hosted_ci_lane_status": "removed_requires_capable_replacement_environment",
+    "final_source_sha": "3301257200755bc7cea0fa85192e0102aab87f57",
     "final_source_ci": "passed",
     "final_source_product_acceptance": "failed",
     "public_goal_transition_actions": [
@@ -63,7 +68,7 @@
     "mission_count": 23,
     "assertion_count": 48,
     "acceptance_authority": "real_world_product_outcomes",
-    "execution_claim": "protected_main_runs_32488329492_32495075086_and_32501162788_failed",
+    "execution_claim": "protected_main_attempts_1_through_8_failed_as_complete_cells_attempt_8_completed_goal_chain_without_browser",
     "protected_main_evidence": "docs/evidence/keeper-rw23-protected-main-2026-08-21.json",
     "latest_failed_observations": "docs/evidence/keeper-rw23-r2-heterogeneous-r1-2026-08-21.json",
     "latest_protected_main_attempts": "docs/evidence/keeper-goal-verifier-protected-main-2026-08-22.json",
@@ -110,11 +115,13 @@
   "limitations": [
     "Catalog validation proves definitions only, not a real execution.",
     "Historical green observations from different runs are not unioned.",
-    "RW23 defines Task rejection, Goal refutation, Task approval, Goal proof, durable run join, and real-backend browser evidence. Runs 32488329492 and 32495075086 exposed missing transient retry and last-error retryability masking; PRs 29318 and 29321 repaired those typed daemon contracts.",
-    "Run 32501162788 reached criterion approval, bad-artifact Task rejection, and Goal proof refutation. It still failed because the producer released task-009, created task-010, and left the claimed PASS artifact outside the canonical producer artifact path; the independent verifier correctly rejected the missing artifact.",
+    "RW23 defines Task rejection, Goal refutation, Task approval, Goal proof, durable run join, and real-backend browser evidence. Protected-main attempts 1 through 8 remain separate failed cells; the exact attempt records are in keeper-goal-verifier-protected-main-2026-08-22.json.",
+    "Run 32542846399 at source 1c6d91de completed criterion viable, bad-artifact Task rejection, Goal proof refutation, corrected Task approval, Goal proof proven, and Goal Completed with distinct durable run IDs in one execution. It then failed because the Python parent killed the Node browser proof at 120 seconds while the child readiness contract was 240 seconds, so no causally joined browser screenshot exists.",
+    "Run 32536862056 proves a typed retryable Goal-verifier deferral after a connection reset. It did not remain alive long enough for the default maintenance-pulse retry to commit, so retry-deferral-to-commit remains unproven in one bundle.",
     "The best single five-provider run passed four of five roles. All roles had exact serving receipts, but Codex recall failed in three bounded model attempts (Terra 8/9, Sol 7/9, Luna 8/9). Runs are not unioned.",
     "No 23-of-23 tracked PASS bundle exists at this refresh.",
-    "No protected-main attempt produced the complete Goal refute-reenter-prove browser chain. Source and exact-head CI cover transient retry, but no live bundle yet shows retryable deferral followed by a retry commit.",
+    "The independent Goal refute-reenter-prove chain is now observed through Completed, but no protected-main attempt produced its matching real-backend browser screenshot. No live bundle yet shows retryable deferral followed by a retry commit.",
+    "PR 29458 removed the hosted 4-vCPU acceptance CI lane after issue 29183 attributed persistent Dashboard starvation to the shared two-domain Dashboard/Keeper pool. The harness remains, but current protected main has no automatic real-world execution authority; a capable replacement environment is required.",
     "Current-source integrated 1h, 2h, 4h, and 24h tiers remain missing; historical duration observations are not promoted into the current Goal-verifier cell."
   ]
 }

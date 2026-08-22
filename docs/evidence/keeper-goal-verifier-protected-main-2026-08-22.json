@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-08-22T02:20:00+09:00",
+  "captured_at": "2026-08-22T12:35:00+09:00",
   "kind": "keeper_goal_verifier_protected_main_attempts",
   "authority": "exact_source_ci_live_execution_separated",
   "completion_claim": "failed_no_complete_cell",
@@ -11,6 +11,19 @@
     "task_verifier_retry_merge_sha": "61e2f04b7fb69a6662edcfc6c103208bcbc518f4",
     "retryability_aggregation_pr": 29321,
     "retryability_aggregation_merge_sha": "f4c974e8549d4811f0e1ff0d063ebfe58291c237",
+    "nested_runtime_retryability_pr": 29403,
+    "nested_runtime_retryability_merge_sha": "c07ae18fa10b1db69a4829107470b74a2203ad4d",
+    "goal_convergence_budget_pr": 29415,
+    "goal_convergence_budget_merge_sha": "1c6d91deefd79330e29a1e14e3f04a941addd052",
+    "browser_parent_budget_pr": 29465,
+    "browser_parent_budget_merge_sha": "3301257200755bc7cea0fa85192e0102aab87f57",
+    "hosted_ci_lane": {
+      "status": "removed",
+      "pr": 29458,
+      "merge_sha": "1a8c012716b7bca0dfe4e89677ff5e6db70ca05b",
+      "reason_issue": 29183,
+      "note": "The required hosted 4-vCPU lane was removed after shared two-domain dashboard/Keeper starvation blocked CI. The harness remains, but current protected main no longer runs it automatically."
+    },
     "exact_head_ci": [
       {
         "pr": 29318,
@@ -20,6 +33,21 @@
       {
         "pr": 29321,
         "run_id": 32499028564,
+        "status": "passed"
+      },
+      {
+        "pr": 29403,
+        "run_id": 32535486255,
+        "status": "passed"
+      },
+      {
+        "pr": 29415,
+        "run_id": 32541787276,
+        "status": "passed"
+      },
+      {
+        "pr": 29465,
+        "run_id": 32548088743,
         "status": "passed"
       }
     ]
@@ -70,16 +98,100 @@
       "task_bad_artifact_verification_id": "vrf-26892a4d76593973abe01cd7facc77a7",
       "task_corrected_artifact_verification_id": "vrf-224484108066b18a40c9922b8a1de3e3",
       "blocker": "The producer released task-009, created task-010, and wrote the claimed PASS artifact outside the canonical producer artifact path. The independent verifier correctly rejected the second task-009 submission because the required artifact was missing."
+    },
+    {
+      "attempt": 4,
+      "source_sha": "a11eed002ecf2fc04abda958d151ddb1cc1a942e",
+      "workflow_run_id": 32513643102,
+      "evidence_artifact_id": 9459874828,
+      "trusted_macos_artifact_id": 9458857308,
+      "status": "failed",
+      "reached": [
+        "goal_criterion_viable",
+        "task_bad_artifact_rejected",
+        "goal_proof_refuted",
+        "task_corrected_artifact_rejected"
+      ],
+      "blocker": "The producer still claimed an artifact that was absent from the canonical producer tree, so task-009 was independently rejected twice and never reached done."
+    },
+    {
+      "attempt": 5,
+      "source_sha": "d7abd90633bcac261843613e6d6d0a306006287d",
+      "workflow_run_id": 32517449248,
+      "evidence_artifact_id": 9461250583,
+      "trusted_macos_artifact_id": 9460198754,
+      "status": "failed",
+      "reached": [
+        "goal_criterion_viable",
+        "task_bad_artifact_rejected",
+        "goal_proof_refuted",
+        "task_corrected_artifact_approved",
+        "goal_proof_proven",
+        "goal_completed"
+      ],
+      "blocker": "The complete independent Goal chain reached Completed, but the real-backend browser proof failed while waiting for the Keeper composer during dashboard warm-up."
+    },
+    {
+      "attempt": 6,
+      "source_sha": "3fef8295703e7e4e258d434044a7044d9b592860",
+      "workflow_run_id": 32526569275,
+      "evidence_artifact_id": 9464093499,
+      "trusted_macos_artifact_id": 9463411207,
+      "status": "failed",
+      "reached": [
+        "rw23_verifier_goal_created"
+      ],
+      "blocker": "A nested retryable GLM failure was still masked by the terminal unauthorized fallback, so the Goal criterion stayed pending for the five-minute convergence window."
+    },
+    {
+      "attempt": 7,
+      "source_sha": "c07ae18fa10b1db69a4829107470b74a2203ad4d",
+      "workflow_run_id": 32536862056,
+      "evidence_artifact_id": 9466817687,
+      "trusted_macos_artifact_id": 9466249044,
+      "status": "failed",
+      "reached": [
+        "goal_criterion_viable",
+        "proof_pending",
+        "retryable_goal_verifier_deferral"
+      ],
+      "blocker": "The typed nested observer preserved retryable=true after a connection reset, but the 300-second harness convergence deadline expired about 22 seconds later, before the default 60-second maintenance retry pulse."
+    },
+    {
+      "attempt": 8,
+      "source_sha": "1c6d91deefd79330e29a1e14e3f04a941addd052",
+      "workflow_run_id": 32542846399,
+      "evidence_artifact_id": 9468829673,
+      "trusted_macos_artifact_id": 9467999001,
+      "status": "failed",
+      "goal_id": "goal-keeper-collab-rw-3254-c6be0cc8-verifier",
+      "criterion_run_id": "01a02744-7070-7000-a350-7479299abaf0",
+      "refuted_proof_run_id": "01a02745-9691-7000-b229-fc188dbf2c98",
+      "proven_proof_run_id": "01a02748-dcd1-7000-8001-d9332c0cc545",
+      "task_rejection_verification_id": "vrf-785d20652e6644adb3092618e62c30e1",
+      "task_approval_verification_id": "vrf-4db787e302306130326adfce3ee19896",
+      "reached": [
+        "goal_criterion_viable",
+        "task_bad_artifact_rejected",
+        "goal_proof_refuted",
+        "task_corrected_artifact_approved",
+        "goal_proof_proven",
+        "goal_completed",
+        "browser_proof_started"
+      ],
+      "blocker": "The same run completed the independent Goal refute-reenter-prove chain, but the Python parent killed the Node browser proof at 120 seconds while the child's declared Keeper-ready window was 240 seconds. No matching browser screenshot was produced."
     }
   ],
   "verifier_conclusions": {
     "independent_task_rejection_observed": true,
     "independent_goal_criterion_observed": true,
     "independent_goal_refutation_observed": true,
-    "goal_proof_proven_observed": false,
+    "goal_proof_proven_observed": true,
+    "same_run_goal_refute_reenter_prove_observed": true,
     "same_run_browser_observed": false,
-    "retry_live_execution_observed": false,
-    "note": "Attempt 3 did not need the retry branch: the admitted GLM verifier returned verdicts. Source and exact-head CI cover retry classification, but no protected-main bundle yet proves a transient deferral followed by a retry commit."
+    "retryable_deferral_observed": true,
+    "retry_deferral_to_commit_observed": false,
+    "note": "Attempt 8 proves the independent Goal chain through Completed with distinct criterion/refuted/proven run IDs. Attempt 7 proves a typed retryable deferral, but no single protected-main bundle proves that deferral later committed. Attempt 8 still lacks the causally joined real-backend browser screenshot, so CELL-01 remains incomplete."
   },
   "five_provider_ten_turn": {
     "best_single_run": "five-provider-canary-64e02b2-r6",

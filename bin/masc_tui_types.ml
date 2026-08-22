@@ -252,8 +252,9 @@ type state = {
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
   mutable board_posts: board_post list;
-  mutable board_comments: board_comment list;
-  mutable board_error: string option;
+  mutable board_detail:
+    (board_post * board_comment list) Masc_tui_board_detail.t;
+  mutable board_list_error: string option;
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
@@ -303,8 +304,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   approval_cursor = 0;
   pending_approval_action = None;
   board_posts = [];
-  board_comments = [];
-  board_error = None;
+  board_detail = Masc_tui_board_detail.initial;
+  board_list_error = None;
   board_cursor = 0;
   board_scroll = 0;
   board_mode = Board_list;

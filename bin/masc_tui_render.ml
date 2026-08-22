@@ -5,6 +5,7 @@ open Tui_decode
 open Masc_tui_ansi
 
 module Frame_presenter = Masc_tui_frame_presenter
+module Board_detail = Masc_tui_board_detail
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
@@ -266,6 +267,7 @@ let render_overview (state : state) =
     Render_schedule.allocate_overview ~terminal_rows:rows
       ~has_cluster:(Option.is_some ov)
       ~attention_count:(List.length attention_items)
+      ~event_count:(List.length state.events)
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
   in
@@ -510,21 +512,27 @@ let render_board_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
 
-  let board_error = Terminal_text.optional_single_line state.board_error in
+  let board_list_error =
+    Terminal_text.optional_single_line state.board_list_error
+  in
+  let render_list_error err =
+    box_line buf cols
+      (Ansi.red ^ "  (data unreliable: "
+      ^ fit_width err (max 1 (cols - 24))
+      ^ ")" ^ Ansi.reset)
+  in
   if count = 0 then begin
-    (match board_error with
-     | Some err ->
-         box_line buf cols
-           (Ansi.red ^ "  (data unreliable: "
-           ^ fit_width err (cols - 24)
-           ^ ")" ^ Ansi.reset)
+    (match board_list_error with
+     | Some err -> render_list_error err
      | None ->
          box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset));
     for _ = 1 to rows - 7 do
       box_empty buf cols
     done
   end else begin
-    let content_height = rows - 7 in
+    Option.iter render_list_error board_list_error;
+    let error_rows = if Option.is_some board_list_error then 1 else 0 in
+    let content_height = max 0 (rows - 7 - error_rows) in
     let scroll_offset =
       if state.board_cursor >= content_height then
         state.board_cursor - content_height + 1
@@ -564,9 +572,19 @@ let render_board_list (state : state) =
     ~cols buf
 
 (** Render the Board surface (read view). *)
-let render_board_read (state : state) (post : board_post) =
+let render_board_read (state : state) (list_post : board_post) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
+
+  let detail =
+    Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
+  in
+  let post =
+    match detail with
+    | Board_detail.Ready (detail_post, _) -> detail_post
+    | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+        list_post
+  in
 
   let header = Printf.sprintf " MASC Board  %s[%s]%s  by %s  +%d  c%d"
     Ansi.cyan
@@ -599,17 +617,37 @@ let render_board_read (state : state) (post : board_post) =
       (Terminal_text.single_line post.bp_body)
   in
   let total_lines = List.length body_lines in
+  let detail_lines =
+    match detail with
+    | Board_detail.Absent ->
+        [Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset]
+    | Board_detail.Loading ->
+        [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
+    | Board_detail.Failed error ->
+        [ Ansi.red ^ "  Board detail unavailable: "
+          ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
+          ^ Ansi.reset
+        ]
+    | Board_detail.Ready (_, comments) ->
+        List.map
+          (fun c ->
+             Printf.sprintf "  %s: %s"
+               (fit_width (Terminal_text.single_line c.bc_author) 16)
+               (fit_width (Terminal_text.single_line c.bc_content) (cols - 24)))
+          comments
+  in
+  let detail_line_count = List.length detail_lines in
   let row_budget =
     Render_schedule.allocate_board_read ~terminal_rows:rows
       ~body_line_count:total_lines
-      ~comment_count:(List.length state.board_comments)
+      ~comment_count:detail_line_count
   in
   let content_height = row_budget.body_rows in
   let comment_height = row_budget.comment_rows in
   let scroll =
     Render_schedule.project_board_read_scroll ~body_line_count:total_lines
       ~body_rows:content_height
-      ~comment_count:(List.length state.board_comments)
+      ~comment_count:detail_line_count
       ~comment_rows:comment_height state.board_scroll
   in
   state.board_scroll <- scroll.normalized_scroll;
@@ -625,12 +663,7 @@ let render_board_read (state : state) (post : board_post) =
     box_divider buf cols;
     box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
     for i = 0 to comment_height - 1 do
-      let c = List.nth state.board_comments (i + scroll.comment_offset) in
-      let line = Printf.sprintf "  %s: %s"
-        (fit_width (Terminal_text.single_line c.bc_author) 16)
-        (fit_width (Terminal_text.single_line c.bc_content) (cols - 24))
-      in
-      box_line buf cols line
+      box_line buf cols (List.nth detail_lines (i + scroll.comment_offset))
     done
   end;
 
@@ -1093,9 +1126,13 @@ let render_keeper_detail (state : state) =
     box_divider buf cols;
 
     (* Content area with scrolling *)
-    let content_height = rows - 6 in  (* header + title + divider + bottom + footer + extra *)
+    let content_height = max 0 (rows - 6) in  (* header + title + divider + bottom + footer + extra *)
     let visible_lines = min content_height total_lines in
-    let scroll = min state.detail_scroll (max 0 (total_lines - content_height)) in
+    let scroll =
+      Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
+        ~content_height state.detail_scroll
+    in
+    state.detail_scroll <- scroll;
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in

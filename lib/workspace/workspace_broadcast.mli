@@ -45,6 +45,13 @@ type task_cache_signal =
   ; task_id : string
   }
 
+val task_cache_signal_of_args :
+  Yojson.Safe.t -> (task_cache_signal option, string) result
+(** Read [task_cache_subject_agent] and [task_cache_task_id] out of a tool
+    call. Both blank or absent is [Ok None]; one without the other is an
+    [Error] carrying the message the caller reports, so every tool surface
+    rejects a half-given signal in the same words. *)
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int

@@ -443,6 +443,27 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     (Some "task-002")
     (current_task_for subject);
 
+  (* A subject record we cannot decode is a failure to look, not a subject
+     that disagrees. Rejecting it would tell a correct observer its report was
+     wrong and leave the stale cache in place. *)
+  let readable_subject_json = Workspace.read_json config agent_file in
+  Workspace.write_json config agent_file (`String "not an agent record");
+  let unreadable_result =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-002" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:"typed signal whose subject record cannot be decoded"
+  in
+  Alcotest.(check bool)
+    "an undecodable subject record reports a dependency failure"
+    true
+    (match unreadable_result with
+     | Error (Workspace_broadcast.Broadcast_dependency_unavailable _) -> true
+     | Error _ | Ok _ -> false);
+  Workspace.write_json config agent_file readable_subject_json;
+
   let normal_update =
     "Normal update: blocked by task-001 while I wait for review context."
   in

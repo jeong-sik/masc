@@ -55,6 +55,18 @@ type task_cache_signal = Workspace_task_cache_invariant.signal =
   ; task_id : string
   }
 
+let task_cache_signal_partial_error =
+  "task_cache_subject_agent and task_cache_task_id must be supplied together"
+;;
+
+let task_cache_signal_of_args args =
+  let field name = Safe_ops.json_string_opt name args |> String_util.option_trim in
+  match field "task_cache_subject_agent", field "task_cache_task_id" with
+  | None, None -> Ok None
+  | Some subject_agent, Some task_id -> Ok (Some { subject_agent; task_id })
+  | Some _, None | None, Some _ -> Error task_cache_signal_partial_error
+;;
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -782,20 +794,30 @@ let reconcile_pending_mentions config =
 
 let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
   match task_cache_signal with
-  | Some signal when String.equal msg_type "broadcast" ->
-    (match
-       Workspace_task_cache_invariant.rewrite_signal
-         ~config
-         ~module_name:"workspace_broadcast"
-         ~signal
-         ~content
-     with
-     | Unchanged content -> Ok (content, msg_type)
-     | Invalidated content -> Ok (content, "cache_invalidated")
-     | Rejected detail -> Error (Broadcast_policy_rejected detail)
-     | Dependency_unavailable detail ->
-       Error (Broadcast_dependency_unavailable detail))
-  | Some _ | None -> Ok (content, msg_type)
+  | None -> Ok (content, msg_type)
+  | Some signal ->
+    if not (String.equal msg_type "broadcast")
+    then
+      (* Only a broadcast carries the invalidation replacement, so accepting a
+         signal here would drop it after the caller was told it was applied. *)
+      Error
+        (Broadcast_policy_rejected
+           (Printf.sprintf
+              "task cache signal is carried by a broadcast, not by %s"
+              msg_type))
+    else (
+      match
+        Workspace_task_cache_invariant.rewrite_signal
+          ~config
+          ~module_name:"workspace_broadcast"
+          ~signal
+          ~content
+      with
+      | Unchanged content -> Ok (content, msg_type)
+      | Invalidated content -> Ok (content, "cache_invalidated")
+      | Rejected detail -> Error (Broadcast_policy_rejected detail)
+      | Dependency_unavailable detail ->
+        Error (Broadcast_dependency_unavailable detail))
 ;;
 
 let broadcast_with_mention ?trace_context ~msg_type ~audience

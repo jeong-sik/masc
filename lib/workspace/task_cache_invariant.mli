@@ -1,9 +1,8 @@
-(** Task_cache_invariant — Fleet-wide guard against stale task-cache emissions.
+(** Task_cache_invariant — reads canonical task state and the subject's own
+    record, keeping absence, unreadability, and disagreement apart.
 
-    Any keeper module that maintains its own task-state cache MUST use
-    [with_fresh_task_status] before emitting broadcasts, mentions, or
-    transitions tied to a specific task ID.  Callers that need finer control
-    can compose [fresh_task_status] and [is_terminal] directly.
+    Neither lookup decides what happens next: the caller reads the returned
+    variant and chooses to suppress, reject, or report a dependency failure.
 
     @since #13397 *)
 
@@ -19,11 +18,14 @@ type fresh_task_lookup =
 val read_fresh_task_status :
   Workspace_utils_backend_setup.config -> task_id:string -> fresh_task_lookup
 
-(** Compatibility projection for callers that intentionally treat both
-    [Absent] and [Unavailable _] as [None]. New invariant code should use
-    {!read_fresh_task_status}. *)
-val fresh_task_status :
-  Workspace_utils_backend_setup.config -> task_id:string -> Masc_domain.task_status option
+(** What one agent record says about a task.  [Unreadable] carries the read or
+    decode failure so a caller never reports a store it could not read as a
+    subject that disagrees. *)
+type agent_task_match =
+  | Matches
+  | Mismatch
+  | Missing
+  | Unreadable of string
 
 (** [is_terminal status] returns [true] iff [status] is [Done _] or
     [Cancelled _]. *)
@@ -43,23 +45,23 @@ val clear_stale_agent_task :
   unit
 
 (** Atomically clear the subject only when its current task exactly matches
-    [task_id]. Returns [true] only after a matching record was rewritten and
-    the desynchronization event was emitted. *)
+    [task_id]. [Matches] is returned only after the record was rewritten and
+    the desynchronization event was emitted; the other variants mean nothing
+    was written. *)
 val clear_stale_agent_task_if_matching :
   Workspace_utils_backend_setup.config ->
   agent_name:string ->
   task_id:string ->
   status_label:string ->
   module_name:string ->
-  bool
+  agent_task_match
 
-(** Check the subject's current task under its per-agent file lock. Missing,
-    malformed, or mismatched records return [false]. *)
-val agent_current_task_matches :
+(** Read the subject's current task under its per-agent file lock. *)
+val agent_current_task_match :
   Workspace_utils_backend_setup.config ->
   agent_name:string ->
   task_id:string ->
-  bool
+  agent_task_match
 
 (** Scan every on-disk agent record and clear [current_task] when it equals
     [task_id].  Use this when the backlog no longer references the task
@@ -74,21 +76,3 @@ val clear_stale_agent_task_for_task :
   status:Masc_domain.task_status ->
   module_name:string ->
   unit
-
-(** Core invariant wrapper.
-
-    [with_fresh_task_status config ~agent_name ~task_id ~module_name f]
-    verifies that [task_id] is non-terminal before calling [f].
-
-    - If the backlog shows [task_id] as terminal: clears agent state, logs the
-      desync, and returns [None].  Callers MUST skip the original emission.
-    - If the task is active: calls [f status] and returns [Some result].
-    - If the task is not found: returns [None] (conservative; callers that need
-      to distinguish terminal from absent should use [fresh_task_status] directly). *)
-val with_fresh_task_status :
-  Workspace_utils_backend_setup.config ->
-  agent_name:string ->
-  task_id:string ->
-  module_name:string ->
-  (Masc_domain.task_status -> 'a) ->
-  'a option

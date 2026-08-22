@@ -25,13 +25,8 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let state = ctx.state in
   let content = arg_get_string ctx "content" "" in
   let trimmed = String.trim content in
-  let task_cache_subject_agent =
-    Safe_ops.json_string_opt "task_cache_subject_agent" ctx.arguments
-    |> String_util.option_trim
-  in
-  let task_cache_task_id =
-    Safe_ops.json_string_opt "task_cache_task_id" ctx.arguments
-    |> String_util.option_trim
+  let task_cache_signal_result =
+    Workspace_broadcast.task_cache_signal_of_args ctx.arguments
   in
   if String.equal trimmed "" then
     (* RFC-0189: caller-input violation (empty broadcast content).
@@ -41,22 +36,16 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
             ~failure_class:Tool_result.Workflow_rejection
             ~tool_name ~start_time
             "Broadcast content cannot be empty")
-  else if Option.is_some task_cache_subject_agent <> Option.is_some task_cache_task_id
-  then
-    Some
-      (Tool_result.error
-         ~failure_class:Tool_result.Workflow_rejection
-         ~tool_name
-         ~start_time
-         "task_cache_subject_agent and task_cache_task_id must be supplied together")
   else
-  let task_cache_signal =
-    match task_cache_subject_agent, task_cache_task_id with
-    | Some subject_agent, Some task_id ->
-      Some Workspace_broadcast.{ subject_agent; task_id }
-    | None, None -> None
-    | Some _, None | None, Some _ -> None
-  in
+    match task_cache_signal_result with
+    | Error detail ->
+      Some
+        (Tool_result.error
+           ~failure_class:Tool_result.Workflow_rejection
+           ~tool_name
+           ~start_time
+           detail)
+    | Ok task_cache_signal ->
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
     (* RFC-0189: rate-limit hit — caller should retry after [wait_secs].

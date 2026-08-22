@@ -29,51 +29,67 @@ let reject_mismatch signal =
        signal.task_id)
 ;;
 
+let reject_missing_subject signal =
+  Rejected
+    (Printf.sprintf
+       "task cache signal rejected: subject %s has no agent record"
+       signal.subject_agent)
+;;
+
+let subject_unreadable signal detail =
+  Dependency_unavailable
+    (Printf.sprintf
+       "task cache signal subject record unreadable for %s: %s"
+       signal.subject_agent
+       detail)
+;;
+
+(* Clearing and reporting are the same decision on both terminal and absent
+   canonical state, so they read one match. An unreadable subject record is a
+   failure to look, never a subject that disagrees. *)
+let clear_and_report ~config ~module_name ~signal ~status_label =
+  match
+    Task_cache_invariant.clear_stale_agent_task_if_matching
+      config
+      ~agent_name:signal.subject_agent
+      ~task_id:signal.task_id
+      ~status_label
+      ~module_name
+  with
+  | Task_cache_invariant.Matches ->
+    (Atomic.get Workspace_hooks.cache_desync_cleared_fn)
+      config
+      ~module_name
+      ~task_id:signal.task_id
+      ~status:status_label;
+    Invalidated (invalidated_content ~module_name ~signal ~status_label)
+  | Task_cache_invariant.Mismatch -> reject_mismatch signal
+  | Task_cache_invariant.Missing -> reject_missing_subject signal
+  | Task_cache_invariant.Unreadable detail -> subject_unreadable signal detail
+;;
+
 let rewrite_signal ~config ~module_name ~signal ~content =
   match Task_cache_invariant.read_fresh_task_status config ~task_id:signal.task_id with
   | Task_cache_invariant.Unavailable detail ->
     Dependency_unavailable
       (Printf.sprintf "task cache signal canonical backlog unavailable: %s" detail)
   | Task_cache_invariant.Found status when Task_cache_invariant.is_terminal status ->
-    let status_label = Masc_domain.task_status_to_string status in
-    if
-      Task_cache_invariant.clear_stale_agent_task_if_matching
-        config
-        ~agent_name:signal.subject_agent
-        ~task_id:signal.task_id
-        ~status_label
-        ~module_name
-    then (
-      (Atomic.get Workspace_hooks.cache_desync_cleared_fn)
-        config
-        ~module_name
-        ~task_id:signal.task_id
-        ~status:status_label;
-      Invalidated (invalidated_content ~module_name ~signal ~status_label))
-    else reject_mismatch signal
+    clear_and_report
+      ~config
+      ~module_name
+      ~signal
+      ~status_label:(Masc_domain.task_status_to_string status)
   | Task_cache_invariant.Found _ ->
-    if
-      Task_cache_invariant.agent_current_task_matches
-        config
-        ~agent_name:signal.subject_agent
-        ~task_id:signal.task_id
-    then Unchanged content
-    else reject_mismatch signal
+    (match
+       Task_cache_invariant.agent_current_task_match
+         config
+         ~agent_name:signal.subject_agent
+         ~task_id:signal.task_id
+     with
+     | Task_cache_invariant.Matches -> Unchanged content
+     | Task_cache_invariant.Mismatch -> reject_mismatch signal
+     | Task_cache_invariant.Missing -> reject_missing_subject signal
+     | Task_cache_invariant.Unreadable detail -> subject_unreadable signal detail)
   | Task_cache_invariant.Absent ->
-    let status_label = "absent" in
-    if
-      Task_cache_invariant.clear_stale_agent_task_if_matching
-        config
-        ~agent_name:signal.subject_agent
-        ~task_id:signal.task_id
-        ~status_label
-        ~module_name
-    then (
-      (Atomic.get Workspace_hooks.cache_desync_cleared_fn)
-        config
-        ~module_name
-        ~task_id:signal.task_id
-        ~status:status_label;
-      Invalidated (invalidated_content ~module_name ~signal ~status_label))
-    else reject_mismatch signal
+    clear_and_report ~config ~module_name ~signal ~status_label:"absent"
 ;;

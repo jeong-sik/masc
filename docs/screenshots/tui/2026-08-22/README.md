@@ -44,6 +44,8 @@ The screenshots prove the fixture-backed terminal rendering. The PTY regression
 tests remain the behavior proof. Neither claims that this PR is deployed or that
 a production API served the snapshots.
 
+Related evidence: [Keeper selection identity and message authority](keeper-selection-identity/README.md).
+
 [근거] The exact executable SHA-256, terminal dimensions, browser terminal
 buffer assertions, PNG dimensions, and PNG SHA-256 values were read during the
 capture on 2026-08-22 KST; confidence High.

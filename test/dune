@@ -946,7 +946,6 @@
   test_keeper_state_machine_pbt
   test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
-  test_prompt_registry_pbt
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt
@@ -958,7 +957,6 @@
   test_keeper_state_machine_pbt
   test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
-  test_prompt_registry_pbt
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt

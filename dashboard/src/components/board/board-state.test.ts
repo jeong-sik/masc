@@ -198,14 +198,13 @@ describe('visibilityLabel', () => {
 })
 
 describe('postVisibilityAuditLabel', () => {
-  it('summarizes visible, scoped, hidden-score, and updated state', () => {
+  it('summarizes visible, scoped, and updated state', () => {
     expect(postVisibilityAuditLabel(makePost({
       visibility: 'internal',
       comment_count: 13,
-      votes: null,
-      vote_blind: true,
+      votes: 3,
       updated_at: '2026-04-17T01:00:00Z',
-    }))).toBe('표시 중 · 내부 · 댓글 13개 · 점수 투표 후 공개 · 최근 갱신됨')
+    }))).toBe('표시 중 · 내부 · 댓글 13개 · 점수 3 · 최근 갱신됨')
   })
 
   it('uses public scope and numeric score for ordinary posts', () => {

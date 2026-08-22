@@ -542,15 +542,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
             raise
               (Env_config_core.Config_error
                  "MASC_KEEPER_MEMORY_OS_LIBRARIAN is malformed"))
-       | "MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT" ->
-         display_int Env_config_keeper.KeeperCompactionSnapshots.default_limit
-       | "MASC_KEEPER_COMPACTION_SNAPSHOT_MAX_LIMIT" ->
-         display_int Env_config_keeper.KeeperCompactionSnapshots.max_limit
-       | "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES" ->
-         display_int Env_config_keeper.KeeperCompactionSnapshots.manifest_scan_min_files
-       | "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER" ->
-         display_int
-           Env_config_keeper.KeeperCompactionSnapshots.manifest_scan_limit_multiplier
        | "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" ->
          display_int (Env_config_keeper.KeeperVision.max_image_bytes ())
        | "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" ->

@@ -75,7 +75,7 @@ function fusionPost(id: string): BoardPost {
     content: '',
     meta: { source: 'fusion', run_id: id },
     tags: [],
-    votes: null,
+    votes: 0,
     comment_count: 0,
     created_at: '2026-07-06T04:00:00Z',
     updated_at: '2026-07-06T04:00:00Z',

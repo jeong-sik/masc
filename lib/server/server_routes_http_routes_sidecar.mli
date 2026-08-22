@@ -188,20 +188,24 @@ type attempt_record = {
     [attempt] is the shared {!Attempt_state.t} SSOT; ISO timestamps and
     string result tokens are only used at the JSON wire boundary. *)
 
-type attempt_record_decode_error =
-  | Attempt_record_not_object of string
-  | Attempt_record_invalid_field of {
+(** Decode failure for a persisted desired or attempt record. *)
+type record_decode_error =
+  | Record_not_object of string
+  | Record_invalid_field of {
       field : string;
       expected : string;
       actual : string;
     }
-  | Attempt_record_unknown_result of string
-  | Attempt_record_invalid_timestamp of {
+  | Record_unknown_value of {
+      field : string;
+      value : string;
+    }
+  | Record_invalid_timestamp of {
       field : string;
       value : string;
     }
 
-val attempt_record_decode_error_to_string : attempt_record_decode_error -> string
+val record_decode_error_to_string : record_decode_error -> string
 
 val desired_state_to_string : desired_state -> string
 val desired_state_of_string : string -> desired_state option
@@ -209,10 +213,16 @@ val observed_state_to_string : observed_state -> string
 val reconcile_result_to_string : reconcile_result -> string
 
 val attempt_record_of_json_result :
-  Yojson.Safe.t -> (attempt_record, attempt_record_decode_error) result
-val attempt_record_of_json : Yojson.Safe.t -> attempt_record option
+  Yojson.Safe.t -> (attempt_record, record_decode_error) result
+val desired_record_of_json_result :
+  Yojson.Safe.t -> (desired_record, record_decode_error) result
+val sidecar_desired_path : base_path:string -> string -> string
 val sidecar_attempt_path : base_path:string -> string -> string
-val read_desired_record : base_path:string -> string -> desired_record option
+
+(** [Ok None] when the file is absent; [Error] when it exists but cannot be
+    read, is not JSON, or does not decode. *)
+val read_desired_record_result :
+  base_path:string -> string -> (desired_record option, string) result
 val read_attempt_record_result :
   base_path:string -> string -> (attempt_record option, string) result
 val ensure_parent_dir : string -> unit

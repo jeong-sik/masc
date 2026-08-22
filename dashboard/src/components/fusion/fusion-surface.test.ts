@@ -66,7 +66,7 @@ function boardPost(overrides: Partial<BoardPost> & { id: string; meta: BoardPost
     content: 'Fusion content',
     meta,
     tags: [],
-    votes: null,
+    votes: 0,
     comment_count: 0,
     created_at: '2026-06-19T01:00:00Z',
     updated_at: '2026-06-19T01:02:00Z',

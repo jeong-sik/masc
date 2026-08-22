@@ -235,25 +235,3 @@ val memory_os_fact_json :
 (** One current fact's read-only dashboard projection. [current] is derived
     from snapshot membership; no retention, score, or legacy kind field is
     serialized. *)
-
-val compaction_snapshots_json :
-  config:Workspace.config -> keeper_id:string -> limit:int -> Yojson.Safe.t
-(** Durable compaction snapshot payload for
-    [GET /api/v1/keepers/:name/compaction-snapshots]. Reads runtime manifests
-    first, then keeper meta as a latest-only fallback, and emits only event
-    metadata/token counts/provenance — never raw prompt or compacted context
-    text. Exported for JSON contract tests. *)
-
-val cached_compaction_snapshots_json :
-  config:Workspace.config ->
-  keeper_id:string ->
-  limit:int ->
-  force_refresh:bool ->
-  Yojson.Safe.t
-(** Non-blocking HTTP projection. Returns a cached snapshot immediately, or a
-    typed [warming] envelope on a cold miss, and performs the manifest scan on
-    the shared IO pool from a background fiber. A completed refresh broadcasts
-    [keeper_compaction_snapshots_changed] so mounted clients re-read once.
-    Concurrent reads share one scan; a force refresh received during that scan
-    preserves exactly one trailing scan so the final source change is not
-    lost. *)

@@ -588,7 +588,9 @@ let test_goal_summaries_render_titles () =
   check bool "bare id has no title" false
     (contains ~needle:"Improve wake context" bare)
 
-let test_partial_goal_summaries_preserve_missing_ids () =
+(* The heading and the list are read off one list, so the keeper is never told
+   it holds goals the block does not name. *)
+let test_goal_heading_counts_what_the_block_lists () =
   let observation =
     { base_observation with active_goals = [ "goal-a"; "goal-b" ] }
   in
@@ -602,12 +604,12 @@ let test_partial_goal_summaries_preserve_missing_ids () =
         ]
       observation
   in
-  check bool "header keeps full active-goal count" true
-    (contains ~needle:"### Active Goals (2)" user);
-  check bool "resolved goal title renders" true
+  check bool "heading counts the rendered goals" true
+    (contains ~needle:"### Active Goals (1)" user);
+  check bool "the rendered goal carries its title" true
     (contains ~needle:"- goal-a — Improve wake context" user);
-  check bool "missing title falls back to bare id" true
-    (contains ~needle:"- goal-b" user)
+  check bool "no goal is counted without being named" false
+    (contains ~needle:"goal-b" user)
 
 let () =
   init_prompt_config_for_tests ();
@@ -656,7 +658,7 @@ let () =
         [
           test_case "summaries render titles, unresolved ids stay bare" `Quick
             test_goal_summaries_render_titles;
-          test_case "partial summaries preserve missing goal ids" `Quick
-            test_partial_goal_summaries_preserve_missing_ids;
+          test_case "the heading counts what the block lists" `Quick
+            test_goal_heading_counts_what_the_block_lists;
         ] );
     ]

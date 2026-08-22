@@ -319,7 +319,6 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** {1 Board} *)
 
 val board_post_detail_json :
-  blind_votes:bool ->
   config:Workspace.config option ->
   voter:string option ->
   reaction_actor:string option ->
@@ -333,8 +332,6 @@ val board_post_detail_json :
     reaction state and must come from authenticated credential identity,
     never a query parameter. When [config] is supplied, post rows include
     contributor-quality projection fields.
-    When [blind_votes] is [true], rows hide score fields until that
-    voter has voted.
 
     [response_format] is decoded once at the HTTP boundary by
     {!Server_board_post_response_format.of_query}; unsupported wire values are

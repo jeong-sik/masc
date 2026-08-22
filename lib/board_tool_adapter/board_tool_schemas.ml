@@ -408,7 +408,13 @@ let tool_comment_add : Masc_domain.tool_schema =
               ; ( "parent_id"
                 , `Assoc
                     [ "type", `String "string"
-                    ; "description", `String "Parent comment ID for replies (optional)"
+                    ; "pattern", `String Board.Comment_id.json_schema_pattern
+                    ; ( "description"
+                      , `String
+                          (Printf.sprintf
+                             "Parent comment ID for replies (optional; format: %s, as \
+                              returned by masc_board_post_get or masc_board_comment)"
+                             Board.Comment_id.accepted_format) )
                     ] )
               ; ( "ttl_hours"
                 , `Assoc
@@ -514,8 +520,17 @@ let tool_comment_vote : Masc_domain.tool_schema =
         ; ( "properties"
           , `Assoc
               [ ( "comment_id"
-                , `Assoc [ "type", `String "string"; "description", `String "Comment ID" ]
-                )
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "pattern", `String Board.Comment_id.json_schema_pattern
+                    ; ( "description"
+                      , `String
+                          (Printf.sprintf
+                             "Required exact comment ID (format: %s). Get it from \
+                              masc_board_post_get or the masc_board_comment result; \
+                              invented ids are rejected."
+                             Board.Comment_id.accepted_format) )
+                    ] )
               ; ( "voter"
                 , `Assoc [ "type", `String "string"; "description", `String "Voter name" ]
                 )

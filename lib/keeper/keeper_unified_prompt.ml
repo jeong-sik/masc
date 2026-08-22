@@ -141,21 +141,6 @@ let format_goal_summaries (summaries : goal_summary list) : string =
          | None -> base)
        summaries)
 
-let format_goal_summaries_for_active_goals
-    ~(active_goal_ids : string list)
-    (summaries : goal_summary list) : string =
-  let summary_for goal_id =
-    match
-      List.find_opt
-        (fun (s : goal_summary) -> String.equal s.summary_goal_id goal_id)
-        summaries
-    with
-    | Some summary -> summary
-    | None ->
-      { summary_goal_id = goal_id; summary_title = ""; summary_phase = None }
-  in
-  format_goal_summaries (List.map summary_for active_goal_ids)
-
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
@@ -267,6 +252,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_post_created -> "post_created"
   | Keeper_world_observation.Board_comment_added -> "comment_added"
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
+  | Keeper_world_observation.Board_vote_cast _ -> "vote_cast"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Schedule_due _ -> "schedule_due"
   | Keeper_world_observation.External_attention _ -> "external_attention"
@@ -376,9 +362,23 @@ let board_reaction_fields
   ]
 ;;
 
+(* Who voted which way on what. [author] on the row is already the voter
+   (the signal's actor); [voter] is repeated here so the vote row reads on its
+   own, the way the reaction row carries [user]. *)
+let board_vote_fields (vote : Board_dispatch.board_vote_change) =
+  [ "vote", Board.vote_direction_to_string vote.direction
+  ; ( "target"
+    , match vote.target with
+      | Board_dispatch.Vote_on_post post_id -> "post:" ^ post_id
+      | Board_dispatch.Vote_on_comment comment_id -> "comment:" ^ comment_id )
+  ; "voter", vote.voter
+  ]
+;;
+
 let board_event_note_fields = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_fields reaction
+  | Keeper_world_observation.Board_vote_cast vote -> board_vote_fields vote
   | Keeper_world_observation.External_attention observation ->
     [ "external_origin"
     , Keeper_counterpart_observation.origin_to_string observation.origin
@@ -567,6 +567,7 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
@@ -598,6 +599,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
@@ -648,6 +650,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
@@ -753,10 +756,8 @@ let format_own_board_post_text (post : Board.post) : string =
     ; "updated_at", Masc_domain.iso8601_of_unix_seconds post.updated_at
       (* What the Board did with it. The record carries these; the row dropped
          them, so a Keeper reading its own posts could not tell an answered one
-         from an ignored one. The prompt tells a Keeper that a vote or comment
-         is how agreement reaches whoever posted, and votes reach no wake path
-         at all — [Board_dispatch.vote] emits only the dashboard SSE event, not
-         a board signal — so this row is where the response becomes visible.
+         from an ignored one. A new vote also arrives as a [vote_cast] Board
+         Activity row the moment it lands; this row is the running total.
          Counts, not advice: the rows stay data. *)
     ; "replies", string_of_int post.reply_count
     ; "votes", Printf.sprintf "+%d/-%d" post.votes_up post.votes_down
@@ -835,14 +836,11 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
   effective_autonomous_instructions ~meta ?profile_defaults ?channel ()
 ;;
 
-(* Titles and phases for the goals the world observation already narrowed to
-   the ones a keeper can still progress. [meta.active_goal_ids] records
-   assignment and is never cleared when a goal reaches a terminal phase, so
-   this resolves the same phase question the observation does — a keeper must
-   not be handed a Completed goal under a heading that calls it available. The
-   phase rides along so the Active Goals block can annotate a [Verifying] goal
-   (RFC-0387 stage 2: the gate must not make the goal read as ordinary open
-   work, nor disappear — review P0-1). *)
+(* Titles and phases for the Goals that are still open, read from the store
+   under the same phase predicate the world observation uses. The phase rides
+   along so the Active Goals block can annotate a [Verifying] goal (RFC-0387
+   stage 2: the gate must not make the goal read as ordinary open work, nor
+   disappear — review P0-1). *)
 let active_goal_summaries_of_store ~(config : Workspace.config) =
   List.filter_map
     (fun (goal : Goal_store.goal) ->
@@ -975,24 +973,19 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
-       resolved them (RFC-0315); every id from the world observation remains
-       rendered even when title enrichment is partial. *)
+       resolved them (RFC-0315). The count and the list are read off the same
+       list, so the heading can never claim goals the body does not show. *)
     | Keeper_context_layers.Active_goals ->
-      let active_block =
-        if observation.active_goals <> [] then
-          Some
-            (Printf.sprintf "### Active Goals (%d)\n"
-               (List.length observation.active_goals)
-            ^ (match active_goal_summaries with
-               | Some summaries ->
-                   format_goal_summaries_for_active_goals
-                     ~active_goal_ids:observation.active_goals
-                     summaries
-               | None -> format_goals observation.active_goals)
-            ^ "\n\n")
-        else None
+      let count, body =
+        match active_goal_summaries with
+        | Some summaries -> List.length summaries, format_goal_summaries summaries
+        | None ->
+          ( List.length observation.active_goals
+          , format_goals observation.active_goals )
       in
-      active_block
+      if count = 0
+      then None
+      else Some (Printf.sprintf "### Active Goals (%d)\n" count ^ body ^ "\n\n")
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->

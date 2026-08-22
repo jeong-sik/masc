@@ -228,6 +228,12 @@ type task =
 val task_last_transition_at : task -> string
 
 val task_to_yojson : task -> Yojson.Safe.t
+
+(** Listing row without the task body: [id], [title], [priority], [created_at]
+    and the status fields ([status], [assignee], timestamps). [task_to_yojson]
+    is the full record. *)
+val task_compact_to_yojson : task -> Yojson.Safe.t
+
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
 
 type task_claim_readiness =

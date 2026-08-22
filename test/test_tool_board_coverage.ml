@@ -217,11 +217,6 @@ let json_member_bool json key =
   | `Bool value -> value
   | _ -> Alcotest.failf "expected bool field %s" key
 
-let json_member_null json key =
-  match Yojson.Safe.Util.member key json with
-  | `Null -> ()
-  | _ -> Alcotest.failf "expected null field %s" key
-
 let json_member_list json key =
   match Yojson.Safe.Util.member key json with
   | `List values -> values
@@ -320,87 +315,6 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     (json_member_string comment_summary "emoji");
   Alcotest.(check bool) "comment reaction selected" true
     (json_member_bool comment_summary "has_reacted")
-
-let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let post =
-    match
-      Board_dispatch.create_post ~author:"blind-author"
-        ~content:"vote blind post" ~post_kind:Board.Human_post ()
-    with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let post_id = Board.Post_id.to_string post.id in
-  (match Board_dispatch.vote ~voter:"peer" ~post_id ~direction:Board.Up with
-  | Ok _ -> ()
-  | Error e -> Alcotest.fail (Board.show_board_error e));
-  let post =
-    match Board_dispatch.get_post ~post_id with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let comment =
-    match
-      Board_dispatch.add_comment ~post_id ~author:"blind-commenter"
-        ~content:"vote blind comment" ()
-    with
-    | Ok comment -> comment
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let comment_id = Board.Comment_id.to_string comment.id in
-  (match
-     Board_dispatch.vote_comment ~voter:"peer" ~comment_id
-       ~direction:Board.Up
-   with
-   | Ok _ -> ()
-   | Error e -> Alcotest.fail (Board.show_board_error e));
-  let comment =
-    match Board_dispatch.get_comments ~post_id with
-    | Ok (comment :: _) -> comment
-    | Ok [] -> Alcotest.fail "expected comment"
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let hidden_post_json =
-    Server_utils.board_post_dashboard_json ~blind_votes:true
-      ~current_vote:None ~author_karma:0 post
-  in
-  Alcotest.(check bool) "post vote blind" true
-    (json_member_bool hidden_post_json "vote_blind");
-  json_member_null hidden_post_json "votes";
-  json_member_null hidden_post_json "score";
-  json_member_null hidden_post_json "votes_up";
-  json_member_null hidden_post_json "votes_down";
-  Alcotest.(check string) "post blind reason" "vote_before_score"
-    (json_member_string hidden_post_json "vote_blind_reason");
-  let revealed_post_json =
-    Server_utils.board_post_dashboard_json ~blind_votes:true
-      ~current_vote:(Some Board.Up) ~author_karma:0 post
-  in
-  Alcotest.(check bool) "post vote revealed" false
-    (json_member_bool revealed_post_json "vote_blind");
-  Alcotest.(check int) "post revealed votes" 1
-    (json_member_int revealed_post_json "votes");
-  let hidden_comment_json =
-    Server_utils.board_comment_dashboard_json ~blind_votes:true
-      ~current_vote:None comment
-  in
-  Alcotest.(check bool) "comment vote blind" true
-    (json_member_bool hidden_comment_json "vote_blind");
-  json_member_null hidden_comment_json "votes";
-  json_member_null hidden_comment_json "score";
-  json_member_null hidden_comment_json "votes_up";
-  json_member_null hidden_comment_json "votes_down";
-  let revealed_comment_json =
-    Server_utils.board_comment_dashboard_json ~blind_votes:true
-      ~current_vote:(Some Board.Up) comment
-  in
-  Alcotest.(check bool) "comment vote revealed" false
-    (json_member_bool revealed_comment_json "vote_blind");
-  Alcotest.(check int) "comment revealed score" 1
-    (json_member_int revealed_comment_json "score")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -1664,11 +1578,13 @@ let test_comment_vote_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* Well-formed id that no comment carries: the store lookup misses. *)
+  let missing_comment_id = "c-" ^ String.make 32 '0' in
   let result =
     dispatch_result "masc_board_comment_vote"
       (make_args
          [
-           ("comment_id", `String "missing-comment");
+           ("comment_id", `String missing_comment_id);
            ("voter", `String "v");
            ("direction", `String "up");
          ])
@@ -1679,7 +1595,38 @@ let test_comment_vote_not_found () =
     "missing comment vote is workflow rejection"
     (Some "workflow_rejection")
     result;
-  Alcotest.(check bool) "error msg" true (String.length body > 0)
+  Alcotest.(check bool) "error names the miss" true
+    (String_util.contains_substring body "Comment not found")
+
+(* #29457: 109 of 134 masc_board_comment_vote calls in August 2026 carried an
+   invented id ("c-placeholder", "c-b1", "BUILDER_A_DONE"). The typed id parser
+   refuses them before any store lookup, and the message names the accepted
+   shape so the caller can correct itself. *)
+let test_comment_vote_rejects_invented_id () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  List.iter
+    (fun invented ->
+      let result =
+        dispatch_result "masc_board_comment_vote"
+          (make_args
+             [
+               ("comment_id", `String invented);
+               ("voter", `String "v");
+               ("direction", `String "up");
+             ])
+      in
+      let body = Tool_result.message result in
+      Alcotest.(check bool) (invented ^ " is refused") false
+        (Tool_result.is_success result);
+      check_failure_class
+        (invented ^ " is a workflow rejection")
+        (Some "workflow_rejection")
+        result;
+      Alcotest.(check bool) (invented ^ " error names the accepted shape") true
+        (String_util.contains_substring body Board.Comment_id.accepted_format))
+    [ "c-placeholder"; "c-b1"; "BUILDER_A_DONE"; "C-" ^ String.make 32 '0' ]
 
 (** {2 Group 6: Search / Stats / Profile / Hearths} *)
 
@@ -1885,8 +1832,6 @@ let () =
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
-          Alcotest.test_case "board dashboard json hides blind vote scores"
-            `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"
@@ -1978,6 +1923,8 @@ let () =
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;
+          Alcotest.test_case "comment vote rejects invented id" `Quick
+            test_comment_vote_rejects_invented_id;
         ] );
       ( "search_stats",
         [

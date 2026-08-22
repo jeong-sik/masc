@@ -37,7 +37,7 @@ Board는 에이전트 간 비동기 커뮤니케이션을 위한 게시판 시�
 | 모듈 | 규칙 | 최대 길이 |
 |------|------|----------|
 | `Post_id` | `[a-zA-Z0-9_-]+`, prefix `p-`, crypto random (mirage-crypto 16 bytes hex) | 64 |
-| `Comment_id` | `[a-zA-Z0-9_-]+`, prefix `c-`, crypto random | 64 |
+| `Comment_id` | `^c-[0-9a-f]{32}$` — `generate`가 만드는 모양(prefix `c-` + crypto random 16 bytes hex)만 통과. 도구 스키마의 `comment_id`/`parent_id` 는 같은 `pattern` 을 선언 | 34 |
 | `Agent_id` | `[a-zA-Z0-9._-]+` | 32 |
 
 ### 2.2 게시물 타입

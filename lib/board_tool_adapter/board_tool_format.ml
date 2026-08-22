@@ -57,9 +57,16 @@ let board_error_failure_class = function
   | Board.Post_not_found _ | Board.Comment_not_found _
   (* Owner-gated rejection: retrying with the same actor cannot succeed,
      so it is a workflow rejection rather than a transient runtime failure. *)
-  | Board.Unauthorized _ ->
+  | Board.Unauthorized _
+  (* The id itself has the wrong shape (a typed id parser refused it), so
+     the same call can never succeed; the message names the accepted shape. *)
+  | Board.Invalid_id _ ->
     Tool_result.Workflow_rejection
-  | _ -> Tool_result.Runtime_failure
+  | Board.Io_error _
+  | Board.Validation_error _
+  | Board.Already_voted _
+  | Board.Already_exists _ ->
+    Tool_result.Runtime_failure
 ;;
 
 (* RFC-0189 PR-1b.2 — typed helper. Returns [Tool_result.result] directly

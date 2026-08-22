@@ -188,10 +188,9 @@ let should_stream_post_tools_call request body_str accept_mode =
       | None -> false)
   | _ -> false
 
-let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = false)
-    ~agent_name body_str =
+let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str =
   Server_mcp_actor_injection.inject_agent_name_into_body ~rewrite_existing
-    ~strip_token ~agent_name body_str
+    ~agent_name body_str
 
 let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
   let actor = Server_auth.dashboard_actor_for_request ~base_path request in

@@ -42,6 +42,12 @@ let full_fields
     ]
   in
   let fields =
+    match meta.autonomous_instructions with
+    | Some value ->
+      ("autonomous_instructions", Keeper_toml_loader.Toml_string value) :: fields
+    | None -> fields
+  in
+  let fields =
     match meta.max_context_override with
     | Some value ->
       ("max_context_override", Keeper_toml_loader.Toml_int value) :: fields

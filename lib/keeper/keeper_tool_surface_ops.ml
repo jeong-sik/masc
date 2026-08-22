@@ -247,6 +247,10 @@ let keeper_list_effective_meta_error_json name err =
       ("severity", `String "error");
       ("operator_action_required", `Bool true);
       ("next_action", `String "fix_keeper_toml_or_keeper_instructions");
+      ( "hint"
+      , `String
+          "Check the keeper TOML profile and instructions fields, including \
+           autonomous_instructions, for a valid value." );
     ]
 
 let keeper_list_error_row_json ~runtime_class config name err =

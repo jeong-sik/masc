@@ -208,7 +208,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  (if String.trim old.instructions <> "" then old.instructions
                   else Option.value ~default:"" p.profile_defaults.instructions)
                p.instructions_opt);
-    autonomous_instructions = p.autonomous_instructions_opt;
+    autonomous_instructions =
+      (match p.autonomous_instructions_opt with
+       | Some v -> v
+       | None -> old.autonomous_instructions);
     allowed_paths;
     sandbox_profile;
     network_mode;

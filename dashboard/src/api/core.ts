@@ -577,8 +577,13 @@ async function parseJsonResponse<T>(
   }
 }
 
+// The server answers a warm-up read with `{"status":"initializing"}` on
+// /api/v1/dashboard/* paths and `{"error":"not initialized"}` elsewhere
+// (lib/server/server_auth.ml not_initialized_response). Both mean the same
+// thing: no state yet, try again.
 function isNotInitializedEnvelope(raw: unknown): boolean {
   if (!isRecord(raw)) return false
+  if (typeof raw.status === 'string' && raw.status === 'initializing') return true
   return typeof raw.error === 'string' && raw.error.trim().toLowerCase() === 'not initialized'
 }
 

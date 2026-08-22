@@ -18,10 +18,10 @@ vi.mock('../keeper-detail-helpers', () => ({
 }))
 
 import { navigate } from '../../router'
-import { keepers } from '../../store'
+import { keepers, executionError, executionLoaded } from '../../store'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { runKeeperAction } from '../keeper-action-panel'
-import { KeeperWorkspaceRoster, rosterFilterPref, rosterFleetSummary, rosterSortPref } from './keeper-workspace-roster'
+import { KeeperWorkspaceRoster, rosterEmptyText, rosterFilterPref, rosterFleetSummary, rosterSortPref } from './keeper-workspace-roster'
 import { keeperBucket } from './keeper-workspace-shared'
 import type { Keeper } from '../../types'
 
@@ -53,6 +53,30 @@ afterEach(() => {
   render(null, host)
   host.remove()
   keepers.value = []
+})
+
+describe('rosterEmptyText', () => {
+  afterEach(() => {
+    executionLoaded.value = false
+    executionError.value = null
+  })
+
+  it('says loading before the fleet has hydrated', () => {
+    executionLoaded.value = false
+    expect(rosterEmptyText(0)).toBe('키퍼 목록을 불러오는 중…')
+  })
+
+  it('says the load failed when the execution fetch errored', () => {
+    executionLoaded.value = true
+    executionError.value = 'boom'
+    expect(rosterEmptyText(0)).toContain('불러오지 못했습니다')
+  })
+
+  it('distinguishes an empty fleet from a filter that matched nothing', () => {
+    executionLoaded.value = true
+    expect(rosterEmptyText(0)).toBe('등록된 키퍼가 없습니다')
+    expect(rosterEmptyText(3)).toBe('일치하는 키퍼가 없습니다')
+  })
 })
 
 describe('KeeperWorkspaceRoster', () => {

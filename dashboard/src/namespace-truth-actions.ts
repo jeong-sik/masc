@@ -10,29 +10,12 @@ import {
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
 import { mergeServerStatus } from './store-normalizers'
 import { FetchScheduler } from './lib/fetch-scheduler'
+import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
 
 // --- Warm-up retry state ---
-//
-// Phase 2 Action 6 — exponential backoff replaces the fixed 3 000 ms cadence.
-// The fixed cadence kept beating the server at 3 s intervals during cold
-// starts, which interacted poorly with Dashboard_cache stampede protection
-// (every retry races to start a fresh compute).  The schedule below
-// (3 s / 5 s / 10 s / 20 s / cap 30 s) preserves the worst-case warm-up
-// budget (WARM_MAX_RETRIES retries) while smoothing client load.
 
-export const WARM_RETRY_DELAYS_MS = [3_000, 5_000, 10_000, 20_000, 30_000]
-export const WARM_RETRY_CAP_MS = 30_000
+export { WARM_RETRY_DELAYS_MS, WARM_RETRY_CAP_MS, warmRetryDelayFor } from './lib/warm-retry'
 
-export function warmRetryDelayFor(attempt: number): number {
-  // attempt is 1-indexed by callers; clamp to the schedule, falling back
-  // to the cap so a misuse never produces 0 / NaN / negative delay.
-  if (!Number.isFinite(attempt) || attempt < 1) return WARM_RETRY_DELAYS_MS[0] ?? WARM_RETRY_CAP_MS
-  const idx = Math.min(attempt - 1, WARM_RETRY_DELAYS_MS.length - 1)
-  const delay = WARM_RETRY_DELAYS_MS[idx]
-  return delay ?? WARM_RETRY_CAP_MS
-}
-
-const WARM_MAX_RETRIES = 10
 let warmRetryAttempt = 0
 let warmRetryTimer: ReturnType<typeof setTimeout> | null = null
 

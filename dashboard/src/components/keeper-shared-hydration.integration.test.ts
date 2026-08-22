@@ -86,7 +86,6 @@ import {
 } from '../tool-call-output-store'
 import { _clearTrackedKeeperChatOperationsForTests } from '../keeper-chat-operations-local'
 import { _resetChatStoreForTests } from '../keeper-chat-store'
-import { keeperCatchupDigests } from '../keeper-digest-signals'
 
 describe('KeeperConversationPanel hydration wiring', () => {
   let container: HTMLDivElement
@@ -113,7 +112,6 @@ describe('KeeperConversationPanel hydration wiring', () => {
     keeperStreamStartedAt.value = {}
     keeperStreamLastEventAt.value = {}
     activeKeeperName.value = ''
-    keeperCatchupDigests.value = {}
     _resetChatHydrationForTests()
     _clearTrackedKeeperChatOperationsForTests()
     _resetChatStoreForTests()

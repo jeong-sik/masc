@@ -29,7 +29,7 @@
 | `monitoring` | `runtime`, `runtime-config`, `agents`, `fleet-health`, `diagnostics`, `transport-health`, `feature-health`, `observatory`, `cognition`; hidden diagnostics: `journey` |
 | `command` | `operations` |
 | `connectors` | `connector-status` |
-| `workspace` | `board`, `sub-boards`, `moderation`, `planning`, `repositories`, `verification` |
+| `workspace` | `board`, `sub-boards`, `planning`, `repositories`, `verification` |
 | `lab` | `tools`, `harness` |
 | `code` | `ide-shell` |
 | `logs` | none |

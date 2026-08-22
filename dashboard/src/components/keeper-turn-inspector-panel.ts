@@ -230,8 +230,10 @@ function RawTurns({ keeper }: { keeper: string }) {
   `
 }
 
-/** The system context that will be assembled into the keeper's next turn. */
-function NextPrompt({ keeper }: { keeper: string }) {
+/** The keeper's most recently captured turn prompt, block by block, read from
+    `GET /api/v1/keepers/{name}/last-prompt`. Also mounted by the memory inspector's
+    recall chain so both surfaces show the same capture. */
+export function KeeperPromptCapture({ keeper }: { keeper: string }) {
   const [capture, setCapture] = useState<PromptCapture | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
@@ -448,7 +450,7 @@ export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string
       <${Muted}>${active.hint}<//>
 
       ${tab === 'raw' ? html`<${RawTurns} keeper=${keeper} />` : null}
-      ${tab === 'prompt' ? html`<${NextPrompt} keeper=${keeper} />` : null}
+      ${tab === 'prompt' ? html`<${KeeperPromptCapture} keeper=${keeper} />` : null}
       ${tab === 'note' ? html`<${NoteEditor} keeper=${keeper} />` : null}
     </section>
   `

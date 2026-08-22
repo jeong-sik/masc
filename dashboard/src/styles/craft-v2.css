@@ -199,7 +199,7 @@
 }
 
 /* Specific v2 controls that need the same transition package. */
-.v2-app .act, .v2-app .send, .v2-app .rfilter, .v2-app .bd-filter,
+.v2-app .act, .v2-app .send, .v2-app .rfilter,
 .v2-app .bd-sub, .v2-app .log-f, .v2-app .set-verify, .v2-app .set-seg-b,
 .v2-app .cp-mode, .v2-app .fbk-btn, .v2-app .chip, .v2-app .tps-range,
 .v2-app .set-add, .v2-app .ctool, .v2-app .nav-item, .v2-app .turn-tab,
@@ -224,7 +224,6 @@
 .v2-app[data-motion]:not([data-motion="off"]) .act:active,
 .v2-app[data-motion]:not([data-motion="off"]) .send:not(:disabled):active,
 .v2-app[data-motion]:not([data-motion="off"]) .rfilter:active,
-.v2-app[data-motion]:not([data-motion="off"]) .bd-filter:active,
 .v2-app[data-motion]:not([data-motion="off"]) .bd-sub:active,
 .v2-app[data-motion]:not([data-motion="off"]) .log-f:active,
 .v2-app[data-motion]:not([data-motion="off"]) .set-verify:active,
@@ -439,7 +438,7 @@
 /* Disabled send reads clearly inert. */
 .v2-app .send:disabled { transform: none; }
 
-/* Compaction-snapshot trigger sub-label alignment. */
+/* Context-rail overlay trigger sub-label alignment. */
 .v2-app .cmp-open { flex-wrap: wrap; align-items: baseline; row-gap: 3px; }
 .v2-app .cmp-open-sub { margin-left: auto; }
 

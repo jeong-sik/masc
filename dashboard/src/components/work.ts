@@ -10,7 +10,6 @@ import { goals, tasks, keepers, executionTaskTotal } from '../store'
 import { goalTreeData } from '../goal-tree-state'
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
-import { BoardModerationSurface } from './board/board-moderation-surface'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
 import { PlanningPanel } from './planning-panel'
@@ -33,14 +32,14 @@ import { showToast } from './common/toast'
 import { errorToString } from '../lib/format-string'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 
-type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
+type WorkSection = 'work' | 'board' | 'sub-boards' | 'planning' | 'repositories' | 'verification'
 
 const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
 }))
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'moderation' || v === 'planning' || v === 'repositories' || v === 'verification'
+  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'planning' || v === 'repositories' || v === 'verification'
 }
 
 // ── Task state mapping ──────────────────────────────────────────────────────
@@ -1732,7 +1731,6 @@ export function Work() {
         ${current === 'work' ? html`<${WorkSurfaceV2} />`
           : current === 'board' ? html`<${BoardSurface} />`
           : current === 'sub-boards' ? html`<${SubBoardSurface} />`
-          : current === 'moderation' ? html`<${BoardModerationSurface} />`
           : current === 'planning' ? html`<${PlanningPanel} />`
           : current === 'repositories' ? html`
             <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>

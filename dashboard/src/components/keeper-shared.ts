@@ -46,12 +46,6 @@ import {
   advanceKeeperLastSeen,
   newestConversationEntryUnix,
 } from '../keeper-last-seen'
-import { refreshKeeperCatchupDigest } from '../keeper-digest-actions'
-import { keeperCatchupDigests } from '../keeper-digest-signals'
-import {
-  KeeperCatchupDigestCard,
-  shouldShowKeeperCatchupDigest,
-} from './keeper-catchup-digest-card'
 import { stableAttachmentId } from './chat/attachments'
 import { ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
@@ -777,21 +771,22 @@ export function KeeperConversationPanel({
     return inv.keepers.find(k => k.keeper_name === keeperName) ?? null
   }, [keeperName, inventoryState.inventory])
 
+  // The unread divider anchors on the last-seen cursor as it stood when this
+  // keeper's panel was entered. Captured during the first render for the
+  // keeper — before ChatTranscript's layout effect or the hydration below can
+  // advance the cursor — and held for the whole visit, so advances while the
+  // operator reads do not move the "여기까지 읽음" line. A keeper switch on
+  // the same panel instance is a new visit and re-captures.
+  const unreadAfterTs = useMemo(() => getKeeperLastSeen(keeperName), [keeperName])
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
   // survives full page reloads. Once-per-keeper inside the action.
   useEffect(() => {
-    // Capture the last-seen cursor BEFORE anything advances it, and fetch the
-    // since-last-seen digest against that frozen baseline. The card and the
-    // unread divider anchor on the server's echoed since_unix, not the live
-    // cursor, so the advance below does not move them mid-visit.
-    const baseline = getKeeperLastSeen(keeperName)
-    if (baseline !== null) void refreshKeeperCatchupDigest(keeperName, baseline)
     void (async () => {
       await hydrateKeeperChatHistory(keeperName)
       // The server transcript is now merged: mark the newest merged entry as
-      // seen so the NEXT visit's baseline is current. First-ever visits (no
-      // prior cursor) also land here, seeding the cursor without a card.
+      // seen so the NEXT visit's anchor is current. First-ever visits (no
+      // prior cursor) also land here, seeding the cursor without a divider.
       const newest = newestConversationEntryUnix(keeperThreads.value[keeperName] ?? [])
       if (newest !== null) advanceKeeperLastSeen(keeperName, newest)
     })()
@@ -832,14 +827,6 @@ export function KeeperConversationPanel({
     () => filterConversationEntries(visibleThread, searchQuery),
     [visibleThread, searchQuery],
   )
-  // Since-last-seen digest (fetched once on mount against the frozen baseline).
-  // Reading the signal here subscribes the panel so the card appears when the
-  // fetch resolves. Card + divider anchor on digest.since_unix, not the cursor.
-  const catchupDigest = keeperCatchupDigests.value[keeperName] ?? null
-  const digestCard = shouldShowKeeperCatchupDigest(catchupDigest)
-    ? html`<${KeeperCatchupDigestCard} digest=${catchupDigest} />`
-    : null
-  const unreadAfterTs = catchupDigest?.since_unix ?? null
   const newestEntryTsUnix = useMemo(
     () => newestConversationEntryUnix(transcriptEntries),
     [transcriptEntries],
@@ -1033,8 +1020,6 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        ${digestCard ? html`<div class="mx-10 mt-3">${digestCard}</div>` : null}
-
         <div class="kw-thread v2-monitoring-panel">
           <div class="kw-thread-inner v2-monitoring-panel">
             <${ChatTranscript}
@@ -1151,8 +1136,6 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        ${digestCard ? html`<div class="shrink-0">${digestCard}</div>` : null}
-
         <${ChatTranscript}
           entries=${transcriptEntries}
           emptyText=${transcriptEmptyText}
@@ -1258,7 +1241,6 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
-          ${digestCard ? html`<div class="mb-4">${digestCard}</div>` : null}
           <${ChatTranscript}
             entries=${transcriptEntries}
             emptyText=${transcriptEmptyText}

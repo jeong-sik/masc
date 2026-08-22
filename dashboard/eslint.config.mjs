@@ -124,7 +124,6 @@ const LEGACY_VALIBOT_FILES = [
   'src/api/schemas/drift-error.ts',
   'src/api/schemas/gate-connectors.ts',
   'src/api/schemas/gate-status.ts',
-  'src/api/schemas/keeper-catchup-digest.ts',
   'src/api/schemas/keeper-chat-history.ts',
   'src/api/schemas/keeper-composite.ts',
   'src/api/schemas/keeper-transitions.ts',

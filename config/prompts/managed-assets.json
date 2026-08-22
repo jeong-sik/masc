@@ -4,7 +4,6 @@
   "paths": [
     "goal_verification.proof.md",
     "judge.board.md",
-    "judge.catchup.md",
     "judge.effect.md",
     "keeper.md",
     "keeper.observation.current_task_absent.md",

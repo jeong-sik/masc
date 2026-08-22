@@ -2,7 +2,7 @@
   "_comment": "Model-facing prose inside OCaml. Regenerate with scripts/model-prose-ratchet.sh --update.",
   "_scanner": "scripts/model-prose-scan.py (rules (i) structural slots, (ii) allowlist files)",
   "_rfc": "docs/rfc/RFC-prompts-and-tool-definitions-outside-ocaml.md",
-  "measured_commit": "8b7ef3f0c9f64364b36571ae98c52d07f6fedb9e",
+  "measured_commit": "46982ca2c099da0bb131af8b5852f84cb61bbf03",
   "allowlist_files": [
     "lib/eval_calibration.ml",
     "lib/exec_policy/exec_policy.ml",
@@ -43,7 +43,7 @@
     "packages/agent_core/lib/sessions_types.ml": "inline let%test fixtures"
   },
   "total": {
-    "bytes": 98577,
+    "bytes": 98856,
     "count": 1025
   },
   "files": {
@@ -60,7 +60,7 @@
       "count": 21
     },
     "lib/board_tool_adapter/board_tool_schemas.ml": {
-      "bytes": 7111,
+      "bytes": 7303,
       "count": 86
     },
     "lib/eval_calibration.ml": {
@@ -204,11 +204,11 @@
       "count": 6
     },
     "lib/tool_surface/tool_help_registry.ml": {
-      "bytes": 3052,
+      "bytes": 3049,
       "count": 43
     },
     "lib/tool_surface/tool_shard_types_board_keeper_projection.ml": {
-      "bytes": 4367,
+      "bytes": 4464,
       "count": 40
     },
     "lib/tool_surface/tool_shard_types_schemas_base.ml": {
@@ -236,7 +236,7 @@
       "count": 20
     },
     "lib/tool_surface/tool_shard_types_schemas_taskboard.ml": {
-      "bytes": 3634,
+      "bytes": 3627,
       "count": 24
     },
     "lib/tool_surface/tool_shard_types_schemas_voice.ml": {

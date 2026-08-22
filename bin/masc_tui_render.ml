@@ -666,8 +666,8 @@ let render_planning_list (state : state) =
    | Some p ->
        let rollup =
          Printf.sprintf
-           "  Executing: %d  Paused/Blocked: %d  Verifying: %d  Done: %d  Dropped: %d"
-           p.pl_rollup.pr_active p.pl_rollup.pr_paused
+           "  Executing: %d  Verifying: %d  Done: %d  Dropped: %d"
+           p.pl_rollup.pr_active
            p.pl_rollup.pr_verifying p.pl_rollup.pr_done
            p.pl_rollup.pr_dropped
        in

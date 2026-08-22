@@ -34,6 +34,13 @@ mirror image: **42% of its 2870 selectors (1216) style nothing in the app.**
 which reads as "the vendoring landed" — and not one `dl-` class exists anywhere
 in `src`. The stylesheet is correct for a DOM the app does not render.
 
+Orphan is not the same as wrong, though, and I got that backwards for a while.
+The kit is a vendored copy of the design's stylesheets; a rule with no consumer
+today is the copy being faithful, and is what makes the component buildable later
+without re-deriving its CSS by hand. What `design-parity-orphans.mjs` measures is
+therefore a fact about the app, not a defect in the kit: 42% of the design's
+components have no markup on this side yet.
+
 | Design file | Implemented | |
 |---|---|---|
 | palette | 0.0% | 0/16 |

@@ -97,27 +97,34 @@ Two independent full-fleet runs, identical to four decimals.
 
 | Surface | SSIM | | Surface | SSIM |
 |---|---|---|---|---|
+| board | 0.996 | | work | 0.975 |
 | logs | 0.996 | | approvals | 0.966 |
 | monitor | 0.995 | | registry | 0.955 |
-| ide | 0.995 | | schedule | 0.945 |
-| lab | 0.987 | | keepers | 0.909 |
-| connectors | 0.986 | | work | 0.897 |
-| command | 0.979 | | board | 0.853 |
-| fusion | 0.978 | | overview | 0.842 |
-| | | | **mean** | **0.949** |
+| ide | 0.994 | | schedule | 0.945 |
+| lab | 0.987 | | keepers | 0.913 |
+| connectors | 0.986 | | overview | 0.842 |
+| command | 0.979 | | | |
+| fusion | 0.978 | | **mean** | **0.965** |
 
-Ten of the fourteen sit at 0.95 or above. The four that do not — overview,
-board, work, keepers — are each held there by one named cause, ledgered
-underneath, and none of the four is skin drift. **Across the ten surfaces where
-the two sides agree on structure the mean is 0.979**; that is the figure to read
-as "does the skin match". The 0.949 fleet mean includes the four and is the
-figure to read as "how close is the whole dashboard to the mock".
+Twelve of the fourteen sit at 0.95 or above.
+
+The two that do not are named causes, ledgered underneath, and neither is skin
+drift. **overview** is the surface width decision — the design centres at 1280px,
+the dashboard is full-width, and that was settled twice after seeing the
+measurement. **schedule** is the one still worth digging into.
+
+The board and work entries used to sit down here too, at 0.853 and 0.897, and
+both were wrong for the same reason: the kit had been vendored selectively, so
+rules for components the dashboard does not render were left out, and the design's
+DOM rendered them unstyled. That was my rule, not the repo's — `audit-dead-surface.py`
+covers OCaml exports and says nothing about CSS. The kit is a copy now, and the
+two surfaces moved to 0.996 and 0.975 without a line of component work.
 
 Style conformance — `getComputedStyle` compared property by property across every
-classed element on ten surfaces — is **96.93%** (41,201 of 42,504 declarations),
-from 85.85% before this pass. The largest remaining group is `font-family` (263),
-which is the UA fallback the dashboard deliberately does not reproduce (see
-below); without it the figure is 97.6%.
+classed element on all fourteen surfaces — is **97.51%** (52,444 of 53,781
+declarations), from 85.85% before this pass. The largest remaining group is
+`font-family`, which is the UA fallback the dashboard deliberately does not
+reproduce (see below).
 
 `settings` is not measurable: the prototype's `SURFACES` registry has no entry for
 it, so `?surface=settings` is rejected and the page renders keepers.
@@ -253,19 +260,24 @@ the top-bar attention chips each stand 2–3px taller than the mock because
 Arial's. Substituting a numeric leading was measured and rejected — it inherits
 into the grid cells and cost the fleet 8.7pp.
 
-### Board — `.bd-stateblock` is a design component the dashboard has not built
+### Board — resolved: the kit had dropped `.bd-stateblock`, not the design
 
 The design's board renders a state-transition post (`Running → Overflowed`,
 context 100%, `restart` pending) as a `.bd-stateblock`, reading three fields off
-`post.stateBlock`. `BoardPost` in `types/core.ts` has no counterpart — no
-from/to state, no context figure, no pending action — so the backend does not
-emit the data the block displays. Vendoring the four CSS rules would move the
-number without changing anything the app renders, and building the block without
-the fields would mean inventing them; both are the fake this repo's
-*mark-don't-fake* rule exists to prevent. Not vendored.
+`post.stateBlock`. `BoardPost` in `types/core.ts` has no counterpart, so the
+dashboard does not build the component — and that still holds; inventing the
+fields to draw it would be the fake *mark-don't-fake* exists to prevent.
 
-Cost: the second mock post is 56px shorter, and every post below it shifts.
-board measures **0.853**.
+What did not hold is the conclusion I drew from it: that the kit should therefore
+not carry the four CSS rules either. The kit is a vendored copy of the design's
+stylesheets, and a copy that leaves rules out cannot be diffed against its
+source. I had filed the omission under the repo's dead-surface policy;
+`audit-dead-surface.py` audits OCaml modules and `.mli` exports and does not
+mention CSS. Vendored now, in place.
+
+board went **0.853 → 0.996**. The component is still unbuilt, and the stylesheet
+is ready for the day the fields exist.
+
 
 ### Monitor — resolved: the roster grid had six tracks, the design has five
 
@@ -296,23 +308,27 @@ the way the design draws it and still shrinks under pressure.
 
 ide went **0.935 → 0.995**.
 
-### Work — the dashboard moved past the design here
+### Work — resolved the same way, plus the design's own note rule
 
 `#29300` rebuilt the Work goal detail while this sync was in flight. The expanded
 card used to print one undifferentiated strip of mono chips, including a
 completion percentage that read 100% for a goal no evaluator had ever measured;
 it is now four labelled sections built around the declared completion criteria,
-and the prototype's `.wk-note` strip is gone with it.
+and the prototype's `.wk-note` strip is gone with it. Nothing here should be
+pulled back toward the prototype.
 
-The v5 export predates that, so the design still draws the old strip. This is the
-design being behind the dashboard, not the dashboard drifting from the design —
-nothing here should be pulled back toward the prototype. The claimable-backlog
-double-inset fixed in this pass is separate and still holds (the backlog measures
-identically to the design).
+The 26px this cost on the parity page was not that, though, and the entry used to
+say it was. The parity page renders **the design's DOM** — a markup change in the
+dashboard cannot appear there at all. What appeared was `.wk-note` rendering with
+no padding, border or margin, because the kit had dropped the rule when the
+component lost its consumer. Same omission as board.
 
-Cost: the goal detail is ~26px shorter than the mock's per open goal, so every
-goal below the first sits high. work measures **0.891**, down from 0.965 before
-`#29300` landed.
+`work-v2.css` also carried two additions the design does not draw: a pill on
+`.wk-bl-goal`, and five rules restating the segmented control as an
+accent-filled pill under `.wk-viewseg` — which has no consumer anywhere in src.
+
+work went **0.891 → 0.975**.
+
 
 ### Systemic: the prototype ships no CSS reset
 

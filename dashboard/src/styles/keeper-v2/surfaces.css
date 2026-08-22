@@ -338,6 +338,7 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-av-link:hover { box-shadow: 0 0 0 2px var(--volt); }
 .bd-post-h .ts { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); margin-left: auto; flex: none; }
 .bd-badge { font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 6px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); color: var(--text-dim); background: var(--bg-deep); white-space: nowrap; }
+.bd-badge.state { color: var(--info); border-color: color-mix(in oklab, var(--info) 35%, transparent); }
 .bd-badge.pin { color: var(--volt-strong); border-color: var(--volt-dim); }
 .bd-badge.mod { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 40%, transparent); }
 .bd-post-title { font-size: 13.5px; font-weight: 600; color: var(--text-bright); margin-top: 8px; line-height: 1.4; }
@@ -351,6 +352,10 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-post-foot .replies { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
 .bd-post-foot .karma { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
 .bd-post-foot .karma b { color: var(--volt-strong); font-weight: 600; }
+.bd-stateblock .sv.hl { color: var(--info); }
+.bd-stateblock .sv { color: var(--text-mid); }
+.bd-stateblock .sk { color: var(--text-dim); }
+.bd-stateblock { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin-top: 9px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--bg-sunken); border: 1px dashed var(--border-main); font-family: var(--font-mono); font-size: var(--fs-11); }
 
 /* board composer */
 .bd-composer { flex: none; border-top: 1px solid var(--border-main); background: linear-gradient(0deg, var(--bg-panel), var(--bg-deep)); padding: 10px 18px 14px; }
@@ -957,6 +962,12 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .ap-spacer { flex: 1; }
 .ap-log-undo { font-family: var(--font-ui); font-size: 10.5px; color: var(--text-dim); background: none; border: 0; cursor: pointer; padding: 2px 4px; }
 .ap-log-undo:hover { color: var(--volt-strong); }
+.ap-viewbtn-n { font-size: 10.5px; color: var(--status-warn); }
+.ap-viewbtn.on { background: var(--volt-wash); color: var(--volt-strong); }
+.ap-viewbtn:hover { color: var(--text-mid); }
+.ap-viewbtn + .ap-viewbtn { border-left: 1px solid var(--border-main); }
+.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 15px; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; transition: 0.14s; }
+.ap-viewseg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-pill); overflow: hidden; flex: none; }
 
 /* ── 큐↔이력 뷰 전환 ── */
 
@@ -964,8 +975,11 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 /* The earlier sync kept this section's header and its @media tail but dropped
    every base rule, because nothing rendered `.ap-hist-row` at the time — leaving
    a responsive override for a grid no rule declared. The rows speak the design's
-   names now, so the base is here. `dec-warn` is not vendored: the resolved
-   decision type is `approve | reject`, so nothing can produce it. */
+   names now, so the base is here — the design's whole block, `dec-warn`
+   included. The dashboard's resolved decision type is `approve | reject` and
+   cannot produce that tone today, but this file is a copy of the design's
+   stylesheet, and a copy that leaves rules out is the thing that produced the
+   orphaned @media above. */
 .ap-hist { margin-top: 4px; }
 .ap-hist-summary { display: flex; gap: 22px; flex-wrap: wrap; padding: 14px 0 16px; border-bottom: 1px solid var(--border-main); margin-bottom: 14px; }
 .ap-hist-stat { font-size: var(--fs-11); color: var(--text-dim); display: flex; align-items: baseline; gap: 6px; }
@@ -979,12 +993,14 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .ap-hist-row { display: grid; grid-template-columns: 48px 84px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 6px; border-bottom: 1px solid var(--border-soft); border-left: 2px solid var(--tone, transparent); padding-left: 10px; }
 .ap-hist-row.dec-ok { --tone: color-mix(in oklab, var(--status-ok) 45%, transparent); }
 .ap-hist-row.dec-bad { --tone: color-mix(in oklab, var(--status-bad) 50%, transparent); }
+.ap-hist-row.dec-warn { --tone: color-mix(in oklab, var(--status-warn) 45%, transparent); }
 .ap-hist-row:last-child { border-bottom: 0; }
 .ap-hist-at { font-size: var(--fs-11); color: var(--text-dim); padding-top: 2px; }
 .ap-hist-dec { font-family: var(--font-mono); font-size: var(--fs-11); white-space: nowrap; padding-top: 1px; }
 .ap-hist-dec.ok { color: var(--status-ok); } .ap-hist-dec.bad { color: var(--status-bad); }
 .ap-hist-body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .ap-hist-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ap-hist-kind { font-size: 11.5px; color: var(--text-bright); }
 .ap-hist-id { font-size: var(--fs-10); color: var(--text-dim); }
 .ap-hist-keeper { font-size: var(--fs-11); color: var(--text-mid); }
 .ap-hist-tool { font-size: var(--fs-10); color: var(--text-dim); background: var(--bg-sunken); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 1px 6px; }
@@ -1047,3 +1063,4 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .kc-tool-risk.write { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 38%, transparent); }
 .kc-tool-risk.lifecycle { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 42%, transparent); }
 .kc-tool-desc { font-size: 10.5px; color: var(--text-dim); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-hist-dec.warn { color: var(--status-warn); }

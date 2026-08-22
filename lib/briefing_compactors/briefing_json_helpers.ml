@@ -26,7 +26,7 @@ let string_json_opt ?(max_len = 96) json =
   match json with
   | `String value ->
       compact_text ~max_len value
-      |> String_util.trim_to_option
+      |> String_util.trim_nonempty
       |> Json_util.string_opt_to_json
   | _ -> `Null
 

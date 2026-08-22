@@ -27,7 +27,6 @@
 
 (tests
  (names
-  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
@@ -329,7 +328,6 @@
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink)
  (modules
-  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
@@ -1032,7 +1030,7 @@
   test_with_process_coverage
   test_process_eio_detached
   test_voice_runtime_overlay
-  test_voice_bridge_retry
+  test_voice_bridge_error
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1173,7 +1171,7 @@
   test_with_process_coverage
   test_process_eio_detached
   test_voice_runtime_overlay
-  test_voice_bridge_retry
+  test_voice_bridge_error
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1697,6 +1695,7 @@
 (include stanzas/test_discord_wss_lifecycle.inc)
 
 (include stanzas/test_keeper_chat_discord.inc)
+(include stanzas/test_keeper_chat_tool_trail.inc)
 
 (test
  (name test_keeper_chat_slack)

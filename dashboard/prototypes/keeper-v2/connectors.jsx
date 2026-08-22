@@ -25,7 +25,7 @@ function ConnectorConfig({ c, onClose }) {
         <div className="turn-hd">
           <h3>{c.glyph} {c.name} 설정</h3>
           <span className="tid mono">{c.id}</span>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           <div className="turn-sec">
@@ -33,7 +33,7 @@ function ConnectorConfig({ c, onClose }) {
             <div className="set-row"><div className="set-row-l"><div className="set-label">게이트 활성화</div><div className="set-hint">{enabled ? '연결됨' : '비활성'}</div></div>
               <div className="set-row-c"><button className={`set-toggle ${enabled ? 'on' : ''}`} onClick={() => setEnabled(e => !e)}><span className="knob"></span></button></div></div>
             <div className="set-row"><div className="set-row-l"><div className="set-label">Bot</div></div><div className="set-row-c"><input className="set-input mono" value={bot} onChange={e => setBot(e.target.value)} /></div></div>
-            <div className="set-row"><div className="set-row-l"><div className="set-label">{c.channel === 'webhook' ? 'Base URL' : 'Guilds'}</div></div><div className="set-row-c"><span className="mono" style={{ fontSize: 12, color: 'var(--text-mid)' }}>{c.baseUrl || c.guilds}</span></div></div>
+            <div className="set-row"><div className="set-row-l"><div className="set-label">{CN_SCOPE[c.channel] ? CN_SCOPE[c.channel][0] : '범위'}</div></div><div className="set-row-c"><span className="mono" style={{ fontSize: 12, color: 'var(--text-mid)' }}>{c.baseUrl || c.guilds}</span></div></div>
             <div className="set-row"><div className="set-row-l"><div className="set-label">토큰</div></div><div className="set-row-c"><div className="set-path"><input className="set-input mono" readOnly value="••••••••••" style={{ width: 150 }} /><button className="set-verify idle">재발급</button></div></div></div>
           </div>
           <div className="turn-sec">
@@ -50,14 +50,14 @@ function ConnectorConfig({ c, onClose }) {
                 <div key={b.id} className={`cn-be ${b.on ? '' : 'off'}`}>
                   <div className="cn-be-main">
                     <input className="cn-be-chn mono" value={b.channel} onChange={e => setBind(b.id, { channel: e.target.value })} />
-                    <span className="cn-be-arr">{'→'}</span>
+                    <span className="cn-be-arr">{'\u2192'}</span>
                     <span className="cn-be-kp">
                       {k && <SigilBadge k={k} size={18} />}
                       <select className="cn-be-sel mono" value={b.keeper} onChange={e => setBind(b.id, { keeper: e.target.value })}>
                         {freeKeepers.map(id => <option key={id} value={id}>{id}</option>)}
                       </select>
                     </span>
-                    <button className="cn-be-del" title="바인딩 삭제" onClick={() => delBind(b.id)}>{'✕'}</button>
+                    <button className="cn-be-del" title="바인딩 삭제" onClick={() => delBind(b.id)}>{'\u2715'}</button>
                   </div>
                   <div className="cn-be-opts">
                     <div className="cn-be-dir">{dirOpts.map(d => <button key={d} className={`cn-dir-b ${b.dir === d ? 'on' : ''}`} onClick={() => setBind(b.id, { dir: d })}>{d}</button>)}</div>
@@ -74,6 +74,15 @@ function ConnectorConfig({ c, onClose }) {
     </div>
   );
 }
+
+// 채널마다 '범위'의 뜻이 다르다 — 디스코드만 길드(서버)다.
+const CN_SCOPE = {
+  discord:  ['서버 (길드)', c => `${c.guilds}개`],
+  slack:    ['워크스페이스', c => `${c.guilds}개`],
+  imessage: ['대상', c => c.selfChat ? '본인 채팅' : '—'],
+  webhook:  ['Base URL', c => c.baseUrl || '—'],
+  telegram: ['채팅', c => `${c.guilds}개`],
+};
 
 function CnCard({ c, onConfig, onOpenKeeper }) {
   const dotStatus = c.stale ? 'pause' : c.status === 'connected' ? 'run' : 'off';
@@ -93,7 +102,7 @@ function CnCard({ c, onConfig, onOpenKeeper }) {
       <div className="cn-kv">
         <div className="cell"><div className="k">Bot</div><div className="v hl">{c.bot}</div></div>
         <div className="cell"><div className="k">Reply mode</div><div className="v">{c.replyMode}</div></div>
-        <div className="cell"><div className="k">{c.channel === 'webhook' ? 'Base URL' : 'Guilds'}</div><div className="v">{c.baseUrl || c.guilds}</div></div>
+        <div className="cell"><div className="k">{CN_SCOPE[c.channel] ? CN_SCOPE[c.channel][0] : '범위'}</div><div className="v">{c.baseUrl || (CN_SCOPE[c.channel] ? CN_SCOPE[c.channel][1](c) : '—')}</div></div>
         <div className="cell"><div className="k">Transport</div><div className="v">{c.transport === 'in-process' ? 'in-process WSS' : c.transport === 'sidecar' ? 'sidecar' : c.transport === 'http' ? 'HTTP 엔드포인트' : `PID ${c.pid}`}</div></div>
         <div className="cell"><div className="k">Last ready</div><div className="v">{c.lastReady}</div></div>
         <div className="cell"><div className="k">Updated</div><div className="v">{c.updated}</div></div>
@@ -137,26 +146,19 @@ function ConnectorsSurface({ onNav, onOpenKeeper }) {
       <div className="surf-scroll">
         <header className="surf-head">
           <div>
-            <div className="eyebrow">Gate</div>
-            <h1>커넥터</h1>
-            <div className="surf-sub">외부 게이트 {CONNECTORS.length}개 · <b>{active} active</b> · <span className="mono">GET /api/v1/gate/connectors</span></div>
+            <h1>외부 커넥터</h1>
+            <div className="surf-sub">{CONNECTORS.length}개 연결 · <b>{active}개 동작 중</b></div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <window.KV.WireBadge tone="partial" label="일부 live" title="Discord = 인프로세스 WSS 게이트웨이(live) · Slack/iMessage/Telegram = sidecar 필요" />
             <button className="act" onClick={() => { onNav && onNav('settings'); }}>설정 열기 →</button>
             <button className="act">게이트 새로고침 ↻</button>
           </div>
         </header>
 
         <div className="gate-strip">
-          <span><StatusDot status="run" pulse /> gate <b>healthy</b></span>
+          <span><StatusDot status="run" pulse /> 게이트 <b>정상</b></span>
           <span className="sep"></span>
-          <span className="mono">base https://gate.masc.local</span>
-          <span className="sep"></span>
-          <span>health check <b className="mono" style={{ fontWeight: 500 }}>14:29:14</b></span>
-          <span className="sep"></span>
-          <span>binding source <b>store + runtime</b></span>
-          <span style={{ marginLeft: 'auto' }} className="mono">generated_at 2026-06-10T14:29:14+09:00</span>
+          <span>마지막 확인 <b className="mono" style={{ fontWeight: 500 }}>14:29:14</b></span>
         </div>
 
         <div className="cn-grid">

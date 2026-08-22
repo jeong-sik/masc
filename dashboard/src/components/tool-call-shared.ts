@@ -141,3 +141,91 @@ export function prettyJson(s: string): string | null {
 export function normalizeToolName(name: string): string {
   return name.replace(/^(keeper_|masc_)/, '')
 }
+
+// ── Tool subject ────────────────────────────────────────
+// A row that carries only the tool name cannot be told apart from the row above
+// it: a keeper that runs `Execute` six times renders six identical lines. The
+// subject is the argument a reader uses to tell them apart — the command for a
+// shell call, the path for a file call, the pattern for a search.
+//
+// Keys are ordered, not matched by tool name, because the same key means the
+// same thing across tools and a name table would need an entry per tool. An
+// argument shape with none of these keys returns null and the caller falls back
+// to formatArgs, so no call renders with less than it does today.
+
+const SUBJECT_MAX_CHARS = 72
+
+const SUBJECT_KEYS = [
+  'argv',        // Execute: ['git', 'fetch', 'origin']
+  'command',
+  'cmd',
+  'file_path',   // Read / Edit / Write
+  'pattern',     // Grep — what it looked for, before where it looked
+  'path',        // Grep scope, and the subject for tools that carry no pattern
+  'query',       // board search, web search
+  'url',
+  'target',      // delegate
+  'task_id',
+  'post_id',
+  'operation_id',
+  'sha256',      // artifact read
+  'title',
+  'action',      // transition
+  'status',      // task list filters
+  'content',
+] as const
+
+/** Render one argument value as the row's subject text. */
+function subjectValue(v: unknown): string | null {
+  if (typeof v === 'string') return v.trim() || null
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  if (Array.isArray(v)) {
+    // argv: show it the way it was run, not as JSON.
+    const parts = v.map(p => (typeof p === 'string' ? p : JSON.stringify(p) ?? '')).filter(Boolean)
+    return parts.length > 0 ? parts.join(' ') : null
+  }
+  if (v && typeof v === 'object') {
+    try {
+      const s = JSON.stringify(v)
+      return s && s !== '{}' ? s : null
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/** Keep the tail of an over-long path: the file name identifies it, the root does not. */
+function truncateSubject(s: string): string {
+  const flat = s.replace(/\s+/g, ' ').trim()
+  if (flat.length <= SUBJECT_MAX_CHARS) return flat
+  if (flat.includes('/')) return `…${flat.slice(flat.length - (SUBJECT_MAX_CHARS - 1))}`
+  return `${flat.slice(0, SUBJECT_MAX_CHARS - 1)}…`
+}
+
+/**
+ * The one argument that identifies what a tool call acted on, or null when the
+ * argument shape carries none of the known keys.
+ */
+export function toolSubject(args: Record<string, unknown> | string | undefined | null): string | null {
+  if (args === undefined || args === null) return null
+  if (typeof args === 'string') {
+    const trimmed = args.trim()
+    if (!trimmed) return null
+    if (!trimmed.startsWith('{')) return truncateSubject(trimmed)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      return truncateSubject(trimmed)
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return truncateSubject(trimmed)
+    return toolSubject(parsed as Record<string, unknown>)
+  }
+  for (const key of SUBJECT_KEYS) {
+    if (!(key in args)) continue
+    const rendered = subjectValue(args[key])
+    if (rendered) return truncateSubject(rendered)
+  }
+  return null
+}

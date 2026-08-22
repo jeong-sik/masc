@@ -137,6 +137,21 @@
   white-space: nowrap;
 }
 
+/* What a collapsed run actually did. Takes the header's spare width so the time
+   range stays pinned right, and truncates rather than wraps: a header that grows
+   to two lines defeats the fold it labels. */
+.chat-block-trace-tools {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--color-fg-muted);
+}
+
 .chat-block-trace-meta {
   display: inline-flex;
   align-items: center;
@@ -169,13 +184,45 @@
   margin-top: 8px;
 }
 
+/* Tools are what a turn did, not steps beside it. Indenting them under one
+   continuous line makes a run of six Execute calls read as one turn's work.
+   Consecutive tools drop the gap so the line does not break between them. */
+.chat-block-tstep.tool {
+  margin-left: 13px;
+  padding-left: 11px;
+  border-left: 1px solid var(--color-border-default);
+}
+
+.chat-block-tstep.tool + .chat-block-tstep.tool {
+  margin-top: 0;
+  padding-top: 8px;
+}
+
+.chat-block-tstep.tool .chat-block-tnode::before {
+  width: 8px;
+}
+
 .chat-block-tnode {
+  position: relative;
   width: 7px;
   height: 7px;
   margin-top: 6px;
   border-radius: 50%;
   background: var(--color-border-strong);
   flex-shrink: 0;
+}
+
+/* The rail sits at 12px and the steps start at 28px, so without this the dots
+   float beside the line instead of hanging off it. The branch closes that gap:
+   16px of padding minus the 3px the dot's own radius already covers. */
+.chat-block-tnode::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 13px;
+  height: 1px;
+  background: var(--color-border-default);
 }
 .chat-block-tstep.think .chat-block-tnode,
 .chat-block-tstep.reason .chat-block-tnode {
@@ -252,6 +299,21 @@
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--chat-tool-fg, var(--color-fg-secondary));
+  flex-shrink: 0;
+}
+
+/* The argument the call acted on. It takes the row's spare width and truncates,
+   because a path or a command is identified by its tail as much as its head and
+   a wrapped row would cost the scan-ability the subject exists to give. */
+.chat-block-tstep-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--color-fg-muted);
 }
 
 .chat-block-tstep-status {

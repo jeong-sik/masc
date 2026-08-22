@@ -134,9 +134,9 @@ function OneKeeperMemory({ keeper }) {
           <React.Fragment>
             <div className="cmp-trigger"><span className="sub-k">최근 컴팩션</span>{lastCmp.at} · {lastCmp.trigger}</div>
             <div className="cmp-diff">
-              <div className="cmp-col kept"><div className="cmp-col-h">{'◈'} 유지</div>{lastCmp.kept.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
-              <div className="cmp-col summ"><div className="cmp-col-h">{'◉'} 요약</div>{lastCmp.summarized.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
-              <div className="cmp-col drop"><div className="cmp-col-h">{'◌'} 폐기</div>{lastCmp.dropped.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
+              <div className="cmp-col kept"><div className="cmp-col-h">{'\u25C8'} 유지</div>{lastCmp.kept.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
+              <div className="cmp-col summ"><div className="cmp-col-h">{'\u25C9'} 요약</div>{lastCmp.summarized.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
+              <div className="cmp-col drop"><div className="cmp-col-h">{'\u25CC'} 폐기</div>{lastCmp.dropped.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
             </div>
           </React.Fragment>
         ) : <div className="mem-empty">컴팩션 이력 없음 — 메모리가 압축된 적 없음.</div>}
@@ -220,7 +220,7 @@ function MemoryInspector({ keeper, onClose }) {
             <button className={scope === 'one' ? 'on' : ''} onClick={() => setScope('one')}>이 keeper</button>
             <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>전체</button>
           </div>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           {scope === 'one'

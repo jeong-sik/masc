@@ -82,12 +82,12 @@ let record_wake_payload
 let register_record_wake_payload f = Atomic.set record_wake_payload_callback f
 
 let record_tool_skipped_callback
-    : (keeper_name:string -> tool_name:string -> reason_code:string -> unit) Atomic.t
+    : (tool_name:string -> reason_code:string -> unit) Atomic.t
   =
-  Atomic.make (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ())
+  Atomic.make (fun ~tool_name:_ ~reason_code:_ -> ())
 
-let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  (Atomic.get record_tool_skipped_callback) ~keeper_name ~tool_name ~reason_code
+let record_tool_skipped ~tool_name ~reason_code =
+  (Atomic.get record_tool_skipped_callback) ~tool_name ~reason_code
 ;;
 
 let register_record_tool_skipped f = Atomic.set record_tool_skipped_callback f

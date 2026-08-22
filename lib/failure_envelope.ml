@@ -61,7 +61,7 @@ let to_severity : severity -> Severity.t = function
   | Critical -> Critical
 
 let first_non_empty values =
-  List.find_map (fun value -> Option.bind value String_util.trim_to_option) values
+  List.find_map (fun value -> Option.bind value String_util.trim_nonempty) values
 
 let operator_action_for_tool_host_cause = function
   | Tool_host_timeout | Tool_host_transport_unavailable ->
@@ -97,10 +97,10 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
              Some ("tool_name", `String tool_name);
              Some ("transport", `String transport);
              Some ("message", `String message);
-             Option.map (fun value -> ("phase", `String value)) (Option.bind phase String_util.trim_to_option);
-             Option.map (fun value -> ("request_id", `String value)) (Option.bind request_id String_util.trim_to_option);
-             Option.map (fun value -> ("session_id", `String value)) (Option.bind session_id String_util.trim_to_option);
-             Option.map (fun value -> ("trace_id", `String value)) (Option.bind trace_id String_util.trim_to_option);
+             Option.map (fun value -> ("phase", `String value)) (Option.bind phase String_util.trim_nonempty);
+             Option.map (fun value -> ("request_id", `String value)) (Option.bind request_id String_util.trim_nonempty);
+             Option.map (fun value -> ("session_id", `String value)) (Option.bind session_id String_util.trim_nonempty);
+             Option.map (fun value -> ("trace_id", `String value)) (Option.bind trace_id String_util.trim_nonempty);
              Option.map (fun value -> ("timeout_ms", `Int value)) timeout_ms;
            ]);
   }
@@ -131,7 +131,7 @@ let required_string json key =
 
 let optional_string json key =
   match Json_util.assoc_member_opt key json with
-  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`String value) -> String_util.trim_nonempty value
   | _ -> None
 
 let of_yojson json =

@@ -210,15 +210,12 @@ type agent_speak_result =
   }
 
 (** ============================================
-    HTTP Client with Timeout and Retry (Eio-native)
+    HTTP Client with Timeout (Eio-native)
     ============================================ *)
 
-(** The four ways a Voice MCP call can fail. Retryability used to be decided by
-    sniffing the rendered message — [starts_with "connection"], [starts_with
-    "timeout"], [Scanf "http %d"] — over strings this same module produces. The
-    timeout branch never fired: [with_timeout] renders "Request timeout after
-    30.0s", which starts with "request", so the retry loop refused to retry its
-    own timeouts. Deciding on the constructor removes the round trip. *)
+(** The four ways a Voice MCP call can fail. The caller receives the exact
+    typed observation from one endpoint attempt; this module does not infer a
+    replay policy from the constructor or rendered message. *)
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string
@@ -228,18 +225,21 @@ type mcp_call_error =
       }
   | Malformed_body of string
 
+type effect_disposition =
+  | Proven_pre_effect
+  | Remote_effect_unresolved
+
+let mcp_call_effect_disposition = function
+  | Timed_out _ | Connection_failed _ | Http_status _ | Malformed_body _ ->
+    Remote_effect_unresolved
+;;
+
 let mcp_call_error_to_string = function
   | Timed_out seconds -> Printf.sprintf "Request timeout after %.1fs" seconds
   | Connection_failed detail -> Printf.sprintf "Connection error: %s" detail
   | Http_status { code; body } -> Printf.sprintf "HTTP %d: %s" code body
   | Malformed_body detail ->
     Printf.sprintf "Voice MCP: invalid JSON body: %s" detail
-;;
-
-let is_retryable_error = function
-  | Timed_out _ | Connection_failed _ -> true
-  | Http_status { code; _ } -> code >= 500 && code < 600
-  | Malformed_body _ -> false
 ;;
 
 (** Timeout helper using Eio.Fiber.first - returns Error after specified seconds *)
@@ -254,31 +254,6 @@ let with_timeout ~clock ?timeout operation =
     (fun () ->
        Eio.Time.sleep clock timeout_sec;
        Error (Timed_out timeout_sec))
-;;
-
-(** Retry with exponential backoff - Eio version *)
-let rec retry_with_backoff ~clock ~attempt ~max_attempts ~backoff_sec operation =
-  let result = operation () in
-  match result with
-  | Ok _ as success -> success
-  | Error e when attempt < max_attempts && is_retryable_error e ->
-    log_info
-      (Printf.sprintf
-         "Retry %d/%d after %.1fs (error: %s)"
-         attempt
-         max_attempts
-         backoff_sec
-         (mcp_call_error_to_string e));
-    Eio.Time.sleep clock backoff_sec;
-    retry_with_backoff
-      ~clock
-      ~attempt:(attempt + 1)
-      ~max_attempts
-      ~backoff_sec:(backoff_sec *. backoff_multiplier ())
-      operation
-  | Error _ as failure ->
-    log_error (Printf.sprintf "All %d retries exhausted" max_attempts);
-    failure
 ;;
 
 let parse_json_response body =
@@ -367,15 +342,7 @@ let call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments =
     with_timeout ~clock ~timeout (fun () ->
       single_voice_mcp_call ~net ~uri ~headers_list ~body_str)
   in
-  (* The typed error stays inside the retry decision; callers keep the string
-     surface they already consume. *)
-  retry_with_backoff
-    ~clock
-    ~attempt:1
-    ~max_attempts:(Option.value endpoint.max_retries ~default:(max_retries ()))
-    ~backoff_sec:(initial_backoff_seconds ())
-    operation
-  |> Result.map_error mcp_call_error_to_string
+  operation ()
 ;;
 
 let attempt_tts_endpoint
@@ -480,7 +447,7 @@ let attempt_tts_endpoint
      | Error error ->
        (try Sys.remove audio_file with
         | Sys_error _ -> ());
-       Error error)
+       Error (`Proven_pre_effect error))
   | Voice_runtime_overlay.Voice_mcp ->
     let args =
       `Assoc
@@ -491,42 +458,51 @@ let attempt_tts_endpoint
         ]
     in
     with_voice_output_turn ~agent_id (fun () ->
-      let* json =
+      match
         call_voice_mcp_endpoint
           ~clock
           ~net
           ~endpoint
           ~tool_name:"agent_speak"
           ~arguments:args
-      in
-      let* data = extract_mcp_result json in
-      (* Voice_mcp plays audio locally but does not expose a file for the
-         dashboard. Try to synthesize a parallel HTTP TTS clip so the
-         browser can also play it. *)
-      let data =
-        match
-          try_http_tts_for_dashboard
-            ~config
-            ~agent_id
-            ~message
-            ~voice
-            ~model
-            ~audio_device
-            ()
-        with
-        | Some (audio_file, file_size) ->
-          let audio_fields =
-            [ "audio_file", `String audio_file
-            ; "audio_size", `Int file_size
-            ]
-            @ audio_payload_fields ~audio_file ~audio_device
-          in
-          (match data with
-           | `Assoc fields -> `Assoc (fields @ audio_fields)
-           | other -> other)
-        | None -> data
-      in
-      Ok (append_provider_metadata data endpoint))
+      with
+      | Error error ->
+        (match mcp_call_effect_disposition error with
+         | Proven_pre_effect ->
+           Error (`Proven_pre_effect (mcp_call_error_to_string error))
+         | Remote_effect_unresolved ->
+           Error (`Outcome_unknown (mcp_call_error_to_string error)))
+      | Ok json ->
+        (match extract_mcp_result json with
+         | Error error -> Error (`Outcome_unknown error)
+         | Ok data ->
+           (* Voice_mcp plays audio locally but does not expose a file for the
+              dashboard. Try to synthesize a parallel HTTP TTS clip so the
+              browser can also play it. *)
+           let data =
+             match
+               try_http_tts_for_dashboard
+                 ~config
+                 ~agent_id
+                 ~message
+                 ~voice
+                 ~model
+                 ~audio_device
+                 ()
+             with
+             | Some (audio_file, file_size) ->
+               let audio_fields =
+                 [ "audio_file", `String audio_file
+                 ; "audio_size", `Int file_size
+                 ]
+                 @ audio_payload_fields ~audio_file ~audio_device
+               in
+               (match data with
+                | `Assoc fields -> `Assoc (fields @ audio_fields)
+                | other -> other)
+             | None -> data
+           in
+           Ok (append_provider_metadata data endpoint)))
 ;;
 
 (** Try HTTP TTS endpoints to synthesize a browser-playable MP3 clip.
@@ -661,7 +637,7 @@ let agent_speak_json
                endpoint
            with
            | Ok _ as ok -> ok
-           | Error error ->
+           | Error (`Proven_pre_effect error) ->
              let attempt = Printf.sprintf "%s: %s" endpoint.id error in
              (if rest <> []
               then
@@ -670,7 +646,13 @@ let agent_speak_json
                      "TTS endpoint %s failed; trying next endpoint: %s"
                      endpoint.id
                      error));
-             try_endpoints (attempt :: attempted) rest)
+             try_endpoints (attempt :: attempted) rest
+           | Error (`Outcome_unknown error) ->
+             Error
+               (Printf.sprintf
+                  "TTS endpoint %s outcome is unknown; failover stopped: %s"
+                  endpoint.id
+                  error))
       in
       if endpoints = []
       then Error "no configured TTS endpoint"

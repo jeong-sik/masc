@@ -1179,10 +1179,9 @@ describe('voteComment', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/tools/masc_board_comment_vote')
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    expect(JSON.parse(String(init.body))).toEqual({
       comment_id: 'comment-1',
       direction: 'down',
-      vote: 'down',
       voter: 'dashboard-reviewer',
     })
   })

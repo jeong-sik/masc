@@ -15,11 +15,11 @@ function CommandPalette({ open, onClose, keepers, onNav, onOpenKeeper, onToggleD
   const base = usePalMemo(() => {
     const cmds = [];
     // 빠른 명령
-    cmds.push({ group: '명령', kind: 'action', t: 'Chat 열기', sub: '⌘J · 보조 패널', glyph: '◈', run: () => onToggleDock() });
-    cmds.push({ group: '명령', kind: 'action', t: 'Gate 큐 열기', sub: openApprovals ? `${openApprovals}건 대기` : '비어 있음', glyph: '✓', run: () => onNav('approvals') });
+    cmds.push({ group: '명령', kind: 'action', t: 'Chat 열기', sub: '⌘J · 보조 패널', glyph: '\u25C8', run: () => onToggleDock() });
+    cmds.push({ group: '명령', kind: 'action', t: 'Gate 큐 열기', sub: openApprovals ? `${openApprovals}건 대기` : '비어 있음', glyph: '\u2713', run: () => onNav('approvals') });
     // 표면 이동
     surfaces.forEach(([id, lbl]) => {
-      cmds.push({ group: '이동', kind: 'surface', t: lbl, sub: `${id} 표면으로`, glyph: '→', run: () => onNav(id) });
+      cmds.push({ group: '이동', kind: 'surface', t: lbl, sub: `${id} 표면으로`, glyph: '\u2192', run: () => onNav(id) });
     });
     // keeper 전환
     (keepers || []).forEach(k => {
@@ -33,23 +33,23 @@ function CommandPalette({ open, onClose, keepers, onNav, onOpenKeeper, onToggleD
     const cmds = [];
     const TS = window.TASK_STATUS || {};
     (window.GOALS || []).forEach(g => {
-      cmds.push({ group: '목표', kind: 'goal', t: g.title, sub: `${g.id} · P${g.priority}`, glyph: '◎', run: () => (window.__navWork ? window.__navWork(g.id) : onNav('work')) });
+      cmds.push({ group: '목표', kind: 'goal', t: g.title, sub: `${g.id} · P${g.priority}`, glyph: '\u25CE', run: () => (window.__navWork ? window.__navWork(g.id) : onNav('work')) });
       (g.tasks || []).forEach(tk => {
-        cmds.push({ group: 'Task', kind: 'task', t: tk.title, sub: `${tk.id} · ${(TS[tk.status] || {}).lbl || tk.status} · ${tk.assignee || '미배정'}`, glyph: '▣', run: () => (window.__navWork ? window.__navWork(g.id) : onNav('work')) });
+        cmds.push({ group: 'Task', kind: 'task', t: tk.title, sub: `${tk.id} · ${(TS[tk.status] || {}).lbl || tk.status} · ${tk.assignee || '미배정'}`, glyph: '\u25A3', run: () => (window.__navWork ? window.__navWork(g.id) : onNav('work')) });
       });
     });
     (window.APPROVALS || []).forEach(a => {
       const st = (apprStatus || {})[a.id] || 'open';
-      cmds.push({ group: 'Gate', kind: 'approval', t: a.title, sub: `${a.id} · ${a.keeper} · ${st === 'open' ? '대기' : st}`, glyph: '✓', run: () => onNav('approvals') });
+      cmds.push({ group: 'Gate', kind: 'approval', t: a.title, sub: `${a.id} · ${a.keeper} · ${st === 'open' ? '대기' : st}`, glyph: '\u2713', run: () => onNav('approvals') });
     });
     (window.FUSION_RUNS || []).forEach(r => {
-      cmds.push({ group: 'Fusion', kind: 'fusion', t: r.prompt ? r.prompt.slice(0, 56) : r.run_id, sub: `${r.run_id} · ${r.keeper} · ${r.status}`, glyph: '◈', run: () => (window.__navFusion ? window.__navFusion(r.run_id) : onNav('fusion')) });
+      cmds.push({ group: 'Fusion', kind: 'fusion', t: r.prompt ? r.prompt.slice(0, 56) : r.run_id, sub: `${r.run_id} · ${r.keeper} · ${r.status}`, glyph: '\u25C8', run: () => (window.__navFusion ? window.__navFusion(r.run_id) : onNav('fusion')) });
     });
     (window.BOARD_POSTS || []).forEach(p => {
-      cmds.push({ group: '보드', kind: 'post', t: p.title || (p.body || '').replace(/<[^>]+>/g, '').slice(0, 56), sub: `${p.board} · ${p.author} · ${p.ts}`, glyph: '⌗', run: () => onNav('board') });
+      cmds.push({ group: '보드', kind: 'post', t: p.title || (p.body || '').replace(/<[^>]+>/g, '').slice(0, 56), sub: `${p.board} · ${p.author} · ${p.ts}`, glyph: '\u2317', run: () => onNav('board') });
     });
     (window.CONNECTORS || []).forEach(c => {
-      cmds.push({ group: '커넥터', kind: 'connector', t: c.name, sub: `${c.channel} · ${c.stale ? 'stale' : c.status}`, glyph: c.glyph || '⌗', run: () => onNav('connectors') });
+      cmds.push({ group: '커넥터', kind: 'connector', t: c.name, sub: `${c.channel} · ${c.stale ? 'stale' : c.status}`, glyph: c.glyph || '\u2317', run: () => onNav('connectors') });
     });
     return cmds;
   }, [apprStatus]);
@@ -87,7 +87,7 @@ function CommandPalette({ open, onClose, keepers, onNav, onOpenKeeper, onToggleD
     <div className="cmdk-backdrop" onClick={onClose}>
       <div className="cmdk" onClick={(e) => e.stopPropagation()}>
         <div className="cmdk-input-row">
-          <span className="cmdk-glyph">{'⌘K'}</span>
+          <span className="cmdk-glyph">{'\u2318K'}</span>
           <input ref={inputRef} className="cmdk-input" placeholder="keeper · task · 승인 · fusion · 보드 … 검색"
             value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
           <kbd className="cmdk-esc">esc</kbd>
@@ -107,7 +107,7 @@ function CommandPalette({ open, onClose, keepers, onNav, onOpenKeeper, onToggleD
                     <div className="cmdk-item-t">{c.t}</div>
                     <div className="cmdk-item-sub">{c.sub}</div>
                   </div>
-                  <span className="cmdk-chord">{i === sel ? '↵' : ''}</span>
+                  <span className="cmdk-chord">{i === sel ? '\u21B5' : ''}</span>
                 </div>
               </React.Fragment>
             );

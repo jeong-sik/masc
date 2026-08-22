@@ -1691,7 +1691,7 @@ let keeper_meta_for_self_filter agent_name =
   | Error err -> Alcotest.fail ("keeper_meta_for_self_filter failed: " ^ err)
 
 (* Same canonical-name requirement as [keeper_meta_for_self_filter]. *)
-let keeper_meta_for_goal_filter agent_name active_goal_ids =
+let keeper_meta_for_goal_filter agent_name =
   let name =
     match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
     | Some keeper -> keeper
@@ -1735,7 +1735,7 @@ let test_read_backlog_snapshot_falls_back_to_unscoped_claimable_task () =
       Workspace.add_task config ~goal_id:"goal-b" ~title:"Goal B work"
         ~priority:1 ~description:""
     in
-    let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
+    let meta = keeper_meta_for_goal_filter keeper in
     let snapshot =
       Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
@@ -1918,7 +1918,7 @@ let test_read_current_task_preserves_unavailable_and_missing () =
 let test_self_authored_scoped_task_does_not_hide_peer_work () =
   with_test_env (fun config ->
     let keeper = "keeper-goal-filter-agent" in
-    let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
+    let meta = keeper_meta_for_goal_filter keeper in
     let _ =
       Workspace.add_task config ~goal_id:"goal-a" ~created_by:meta.name
         ~title:"Own goal routing task" ~priority:1 ~description:""

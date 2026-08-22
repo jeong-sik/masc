@@ -18,7 +18,7 @@
   color: var(--text-primary);
   font-family: var(--font-ui);
   /* shared roster column track — header + rows + group dividers align to this */
-  --fl-cols: minmax(196px, 1.3fr) 184px 140px minmax(108px, 1fr) 128px;
+  --fl-cols: minmax(196px, 1.3fr) 184px 152px minmax(96px, 1fr) 128px;
   --fl-gap: 14px;
 }
 
@@ -57,7 +57,7 @@
 .fl-top-btn:hover { border-color: var(--volt-dim); color: var(--volt-strong); background: var(--volt-wash); }
 .fl-top-btn.primary { color: var(--volt-strong); border-color: color-mix(in oklab, var(--volt) 40%, var(--border-main)); background: var(--volt-wash); }
 .fl-top-btn.primary:hover { border-color: var(--volt); background: color-mix(in oklab, var(--volt) 15%, transparent); }
-.fl-meta { display: flex; align-items: center; gap: 14px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.fl-meta { display: flex; align-items: center; flex: none; gap: 14px; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
 .fl-meta .live { color: var(--status-ok); }
 
 /* ── body: roster + aside ── */
@@ -124,7 +124,8 @@
   border: 1px solid color-mix(in oklab, var(--status-bad) 34%, transparent);
   padding: 0 6px; border-radius: var(--radius-pill);
 }
-.fl-ns { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-ns { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help; }
+.fl-ns .fl-sandbox { margin-left: 0; flex: none; }
 
 /* state cell */
 .fl-state { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -143,11 +144,12 @@
 .fl-gloss { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* context cell */
-.fl-ctx { display: flex; align-items: center; gap: 9px; }
+.fl-ctx { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .fl-ctx-bar { flex: 1; height: 5px; border-radius: var(--radius-pill); background: var(--bg-sunken); border: 1px solid var(--border-soft); overflow: hidden; }
 .fl-ctx-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--volt-dim), var(--volt)); }
 .fl-ctx-bar > span.hot { background: linear-gradient(90deg, var(--status-warn), var(--status-bad)); }
-.fl-ctx-val { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-mid); flex: none; width: 34px; text-align: right; }
+.fl-ctx-val { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-mid); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-ctx-win { font-style: normal; color: var(--text-dim); }
 .fl-ctx-val.hot { color: var(--status-bad); }
 .fl-ctx-val.zero { color: var(--text-dim); }
 
@@ -272,11 +274,11 @@
 
 /* ── lane / admission queue band (fleet-wide WFQ) ─────────────── */
 .fl-lanes { border-bottom: 1px solid var(--border-main); background: var(--bg-deep); flex: none; }
-.fl-lanes-h { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 22px; border: 0; background: none; color: var(--text-mid); cursor: pointer; font-size: 12px; text-align: left; }
+.fl-lanes-h { display: flex; align-items: center; flex-wrap: nowrap; gap: 12px; min-width: 0; width: 100%; padding: 9px 22px; border: 0; background: none; color: var(--text-mid); cursor: pointer; font-size: 12px; text-align: left; }
 .fl-lanes-h:hover { color: var(--text-bright); }
 .fl-lanes-t { font-family: var(--font-ui); letter-spacing: 0.04em; color: var(--text-bright); }
-.fl-lanes-sum { font-size: 10.5px; color: var(--text-dim); }
-.fl-lanes-bp { font-size: 10px; color: var(--status-warn); border: 1px solid color-mix(in oklab, var(--status-warn) 40%, transparent); border-radius: var(--radius-pill); padding: 2px 8px; }
+.fl-lanes-sum { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-lanes-bp { flex: none; white-space: nowrap; font-size: 10px; color: var(--status-warn); border: 1px solid color-mix(in oklab, var(--status-warn) 40%, transparent); border-radius: var(--radius-pill); padding: 2px 8px; }
 .fl-lanes-spacer { margin-left: auto; }
 .fl-lanes-chev { color: var(--text-dim); font-size: 10px; }
 .fl-lanes-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; padding: 2px 22px 14px; }
@@ -291,7 +293,8 @@
 .fl-lane-wait { background: color-mix(in oklab, var(--status-warn) 60%, transparent); height: 100%; opacity: 0.6; }
 .fl-lane-foot { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 10px; color: var(--text-dim); }
 .fl-lane-waiting.on { color: var(--status-warn); }
-.fl-lane-bpf { margin-left: auto; color: var(--status-warn); }
+.fl-lane-bpf { margin-left: auto; white-space: nowrap; color: var(--status-warn); }
+.fl-lane-okf, .fl-lane-waiting { white-space: nowrap; }
 .fl-lane-okf { margin-left: auto; color: var(--status-ok); }
 
 /* ── aside: event queue + heartbeat ───────────────────────────── */
@@ -326,7 +329,7 @@
 .fl-rot-ev.backpressure .fl-rot-ev-out { color: var(--status-warn); }
 .fl-as-tag { margin-left: 7px; font-size: 9px; font-family: var(--font-mono); letter-spacing: 0.04em; padding: 1px 6px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); color: var(--text-dim); }
 .fl-as-tag.bad { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
-.fl-lanes-note { grid-column: 1 / -1; font-size: 9.5px; color: var(--text-dim); padding: 0 0 2px; }
+.fl-lanes-note { grid-column: 1 / -1; font-size: 10.5px; color: var(--text-dim); padding: 0 0 4px; text-wrap: pretty; }
 .fl-rot-ev-t { color: var(--text-dim); }
 
 /* narrow — collapse the row to identity · state · action; ctx/tool move out of the way */
@@ -339,4 +342,7 @@
   .fl-health { width: 100%; order: 3; }
   .fl-rhead, .fl-row, .fl-group { padding-left: 16px; padding-right: 16px; }
   .fl-foot { gap: 14px; overflow-x: auto; }
+  .fl-lanes-h { padding-left: 16px; padding-right: 16px; }
+  .fl-lanes-sum { display: none; }
+  .fl-lanes-row { padding-left: 16px; padding-right: 16px; grid-template-columns: 1fr; }
 }

@@ -134,6 +134,7 @@ let producer_playground (config : Workspace.config) producer =
    proof verdict need one; they do not all need an artifact to read. *)
 let link_bare_task config ~goal_id =
   let producer = "proof-producer" in
+  ignore (ensure_producer_playground config producer);
   let created =
     match
       Workspace.add_task_with_result config ~goal_id ~created_by:producer
@@ -272,7 +273,7 @@ type stub_behavior =
 
 let recording_reviewer calls behaviors =
   fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ~report_tool_schema:_ ~lookup:_
-      ~on_tool_result () ->
+      ~on_tool_result ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     let answer verdict_json verdict =
       on_tool_result
@@ -303,7 +304,7 @@ let recording_reviewer calls behaviors =
 
 let inspecting_goal_reviewer ~producer ~file_name ~expected ~forest_reads =
   fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_
-      ~lookup ~on_tool_result () ->
+      ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
     let report reason =
       let input =
         `Assoc [ "verdict", `String "APPROVE"; "reason", `String reason ]

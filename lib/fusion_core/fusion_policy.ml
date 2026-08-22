@@ -49,8 +49,6 @@ type preset =
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; min_answered : int
       (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
-  ; fallback_judge_model : string option
-      (** Legacy observed value. Failures never trigger an automatic fallback call. *)
   }
 [@@deriving show, eq]
 

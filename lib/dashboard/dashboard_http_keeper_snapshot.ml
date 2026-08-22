@@ -90,45 +90,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          in
          `OK, with_keeper_config_field_presence body
        | Ok (defaults, m) ->
-      (* Goals name no keeper: the open set is the same fact for everyone. *)
-      let active_goals =
-        Goal_store.list_goals config ()
-        |> List.filter_map (fun (g : Goal_store.goal) ->
-             if Goal_phase.admits_self_directed_progress g.phase
-             then Some (g.id, g.title)
-             else None)
-      in
-      let active_goal_ids_json =
-        `List (List.map (fun (id, _) -> `String id) active_goals)
-      in
-      let active_goals_json =
-        `List
-          (List.map
-             (fun (id, title) ->
-                `Assoc [
-                  ("id", `String id);
-                  ("title", `String title);
-                ])
-             active_goals)
-      in
-      let missing_active_goal_ids = [] in
-      let workspace =
-        match workspace_surface_json m with
-        | `Assoc fields ->
-            `Assoc
-              (fields
-               @ [
-                   ("active_goal_ids", active_goal_ids_json);
-                   ("active_goals", active_goals_json);
-                   ("active_goal_count", `Int (List.length active_goals));
-                   ( "missing_active_goal_ids",
-                     `List
-                       (List.map
-                          (fun goal_id -> `String goal_id)
-                          missing_active_goal_ids) );
-                 ])
-        | other -> other
-      in
+      let workspace = workspace_surface_json m in
       let runtime_trust =
         Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
@@ -289,7 +251,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let body =
        `Assoc [
          ("name", `String m.name);
-         ("active_goal_ids", active_goal_ids_json);
          ("autoboot_enabled", `Bool m.autoboot_enabled);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
          (* Keeper-level override only ([None] = inherit the fleet

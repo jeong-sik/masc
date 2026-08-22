@@ -1,9 +1,9 @@
 # masc Roadmap
 
-> Current package version: v0.23.0
-> Latest changelog entry: v0.23.0 (2026-08-16)
-> Latest published GitHub release: v0.21.1 (2026-07-20)
-> Updated: 2026-08-16
+> Current package version: v0.24.0
+> Latest changelog entry: v0.24.0 (2026-08-22)
+> Latest published GitHub release: v0.24.0 (2026-08-22)
+> Updated: 2026-08-22
 
 This roadmap is the 6-8 week operating view for `masc`. It is a planning document, not a release promise.
 For the product scope and GitHub planning model, see [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).
@@ -24,10 +24,10 @@ Scope levels:
 | Track | Goal | Why now | Primary references |
 |------|------|---------|--------------------|
 | Product truth and onboarding | Make the product easy to describe and start correctly | front-door docs and product posture are still fragmented | `README.md`, `docs/PRODUCT-OPERATING-PLAN.md`, `docs/PRODUCT-REVIEW.md` |
-| GitHub planning hygiene | Make issues, PRs, and releases reflect product reality instead of drifting | `type:*` exists, but `target:*` and release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
+| GitHub planning hygiene | Make issues, PRs, and releases reflect product reality instead of drifting | Issues declare a `masc-triage` block; release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
 | Scope hardening | Tighten the parts of the product users actually depend on first | CI truth, transport truth, config visibility, and release truth are blocking trust | `CHANGELOG.md`, `docs/spec/SPEC-INDEX.md`, open issues below |
 
-## target:now
+## Now
 
 Items that directly affect the current product scope:
 
@@ -45,7 +45,7 @@ Items that directly affect the current product scope:
   - README / roadmap / changelog alignment
   - issue / PR / release hygiene automation
 
-## target:next
+## Next
 
 Items that improve advanced workflows after the front-door scope is cleaner:
 
@@ -55,7 +55,7 @@ Items that improve advanced workflows after the front-door scope is cleaner:
   - clearer runtime / model visibility in proof
 - richer operator diagnosis bundles and deeper read confidence
 
-## target:later
+## Later
 
 Important work that stays visible but does not drive the next 6-8 weeks:
 
@@ -77,9 +77,9 @@ Important work that stays visible but does not drive the next 6-8 weeks:
 - The active release line is pre-1.0: `0.y.0` opens a user-visible train and `0.y.z` stabilizes it.
 - Do not open `1.0.0` until repo workspace collaboration, release truth, and the core operator path are trustworthy without caveats.
 - Historical `v2.*` tags remain audit history only; they do not define the active SemVer policy.
-- Do not tag a release while `release-blocker` issues remain open.
+- Do not tag a release while `must-do` issues remain open.
 - Do not tag a release while version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
-- Prefer `target:now`, `target:next`, and `target:later` over vague backlog buckets.
+- Order the backlog by `impact/*`, which is ranked by which product failure the issue causes.
 
 ## Completed Reference Points
 

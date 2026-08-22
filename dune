@@ -15,13 +15,20 @@
 ; before anyone could see it. Setting it centrally means the build stops the
 ; moment a value loses its last caller, in the same edit that removed it.
 ; scripts/ci/check-ocaml-compile-authority.sh asserts both flags stay here.
+;
+; Warning 69 (unused record field) joins it for the same reason, one level
+; down: 32 stops a value that lost its last caller, 69 stops a field that lost
+; its last reader. A field that only ever meets polymorphic [=] or
+; [Hashtbl.hash] counts as unread, because neither names the field; the
+; compiler cannot see that participation, so such records compare field by
+; field.
 (env
  (dev
   (flags
-   (:standard -w +32 -warn-error +a)))
+   (:standard -w +32+69 -warn-error +a)))
  (release
   (flags
-   (:standard -w +32 -warn-error +a))))
+   (:standard -w +32+69 -warn-error +a))))
 
 (install
  (package masc)

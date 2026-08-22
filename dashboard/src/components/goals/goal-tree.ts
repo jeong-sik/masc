@@ -22,6 +22,7 @@ import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
 import { executionOutcomeLabel } from '../fsm-hub-types'
 import { operatorDispositionReasonLabel } from '../fsm-hub-types'
+import { attainmentTone, attainmentValueLabel } from '../../lib/goal-attainment'
 import { runtimeOutcomeLabel } from '../fsm-hub-types'
 import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
@@ -309,25 +310,6 @@ async function refreshGoalDetail(goalId: string) {
   } finally {
     if (detailRequestSeq === reqId) detailLoading.value = false
   }
-}
-
-// Task-derived attainment_pct must not read as a metric result when the goal
-// declares a metric that no evaluator measures (task-1743): show "미평가"
-// rather than a percentage. Distinct from "미측정" (no task data at all).
-export function attainmentValueLabel(attainment: GoalTreeNode['attainment']): string {
-  if (attainment.metric_evaluation === 'unevaluated') return '미평가'
-  if (attainment.attainment_pct == null) return '미측정'
-  return `${attainment.attainment_pct}%`
-}
-
-function attainmentTone(attainment: GoalTreeNode['attainment']): 'default' | 'ok' | 'warn' | 'bad' {
-  // A declared-but-unevaluated metric is never "attained": the pct is
-  // task-derived, so surface it as attention (warn), not success (ok).
-  if (attainment.metric_evaluation === 'unevaluated') return 'warn'
-  if (attainment.state === 'attained') return 'ok'
-  if (attainment.state === 'unmeasured') return 'warn'
-  if (attainment.state === 'not_started') return 'bad'
-  return 'default'
 }
 
 function attainmentClass(attainment: GoalTreeNode['attainment']): string {

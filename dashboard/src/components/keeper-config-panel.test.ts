@@ -34,7 +34,6 @@ function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
 function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
-    active_goal_ids: ['goal-runtime'],
     autoboot_enabled: true,
     max_context_override: null,
     autonomous_wake_prompt: null,
@@ -77,12 +76,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     workspace: {
       mention_targets: ['sangsu'],
       bound_workspace_ids: ['default'],
-      active_goal_ids: ['goal-runtime'],
-      active_goals: [
-        { id: 'goal-runtime', title: 'Ship runtime clarity' },
-      ],
-      active_goal_count: 1,
-      missing_active_goal_ids: [],
     },
     sources: {
       live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -316,11 +309,6 @@ describe('keeperConfigControlInventory', () => {
       method: 'GET',
       endpoint: '/api/v1/providers',
     })
-    expect(findItem('goals', c, 'kcf-goals-catalog-filter').contracts).toContainEqual({
-      kind: 'api',
-      method: 'GET',
-      endpoint: '/api/v1/dashboard/goals',
-    })
     expect(findItem('health', c, 'kcf-health-directives').contracts).toContainEqual({
       kind: 'api',
       method: 'POST',
@@ -413,7 +401,6 @@ describe('keeperConfigControlInventory', () => {
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   const base: KeeperConfig = {
     name: 'test-keeper',
-    active_goal_ids: [],
     autoboot_enabled: true,
     max_context_override: null,
     autonomous_wake_prompt: null,
@@ -430,10 +417,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     workspace: {
       mention_targets: [],
       bound_workspace_ids: [],
-      active_goal_ids: [],
-      active_goals: [],
-      active_goal_count: 0,
-      missing_active_goal_ids: [],
     },
     sources: {} as KeeperConfig['sources'],
     metrics: {} as KeeperConfig['metrics'],
@@ -571,34 +554,12 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.sandbox_profile).toBeUndefined()
   })
 
-  it('emits active_goal_ids when goal bindings change', () => {
-    const c = makeKeeperConfigForSandbox({
-      active_goal_ids: ['goal-a'],
-      workspace: {
-        mention_targets: [],
-        bound_workspace_ids: [],
-        active_goal_ids: ['goal-a'],
-        active_goals: [{ id: 'goal-a', title: 'Goal A' }],
-        active_goal_count: 1,
-        missing_active_goal_ids: [],
-      },
-    })
-    const payload = buildRuntimePayload(draftFrom(c, {
-      active_goal_ids: ['goal-b', 'goal-c'],
-    }), c)
-    expect(payload.active_goal_ids).toEqual(['goal-b', 'goal-c'])
-  })
-
   it('normalizes line-based runtime list drafts through one path', () => {
     const c = makeKeeperConfigForSandbox({
       allowed_paths: ['workspace/masc'],
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
-        active_goal_ids: [],
-        active_goals: [],
-        active_goal_count: 0,
-        missing_active_goal_ids: [],
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -615,10 +576,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
-        active_goal_ids: [],
-        active_goals: [],
-        active_goal_count: 0,
-        missing_active_goal_ids: [],
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -749,7 +706,6 @@ const mocks = vi.hoisted(() => {
       ],
       summary: {
         total_goals: 1,
-        active_goals: 1,
         phase_counts: { executing: 1 },
         total_tasks: 0,
         done_tasks: 0,
@@ -953,13 +909,11 @@ vi.mock('../api/dashboard-keeper-github', () => ({
 import {
   KeeperConfigPanel,
   buildKcfAssemblySegments,
-  filterGoalOptions,
   keeperConfigSubscriptionCountsForTests,
   loadKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
-import type { GoalTreeNode } from '../types'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -1038,7 +992,6 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
-    expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(mocks.fetchRuntimeProfiles).not.toHaveBeenCalled()
 
     // identity tab (default): edit-scope callout + source provenance.
@@ -1062,12 +1015,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('policy')
     expect(container.textContent).toContain('wire:chat_template_kwargs')
     expect(container.textContent).toContain('활성 런타임')
-
-    // goals tab: assigned goal-store bindings.
-    selectKcfTab(container, '목표')
-    await flush()
-    expect(container.textContent).toContain('active_goal_ids')
-    expect(container.textContent).toContain('Ship runtime clarity')
 
     // health tab: runtime liveness / registry diagnostics.
     selectKcfTab(container, '상태·진단')
@@ -1212,13 +1159,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.querySelector('textarea[aria-label="mention_targets"]')).not.toBeNull()
     expect(container.textContent).toContain('allowed_paths')
     expect(container.textContent).toContain('/tmp/workspace')
-
-    selectKcfTab(container, '목표')
-    await flush()
-    expect(container.querySelector('input[aria-label="goal 검색"]')).not.toBeNull()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-    expect(container.textContent).toContain('goal-runtime')
-    expect(container.textContent).toContain('live write')
 
     const runtimeSave = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('런타임 설정 저장'),
@@ -1569,35 +1509,6 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
   })
 
-  it('filters the goals catalogue by the search input and shows an empty state', async () => {
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '목표')
-    await flush()
-
-    const search = container.querySelector('input[aria-label="goal 검색"]') as HTMLInputElement | null
-    expect(search).not.toBeNull()
-    // default fixture goal (goal-runtime · Ship runtime clarity) is shown
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-
-    // non-matching query → empty state + "0 표시"
-    search!.value = 'zzz-no-match'
-    search!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(0)
-    expect(container.textContent).toContain('검색 결과 없음')
-    expect(container.textContent).toContain('0 표시')
-
-    // matching id substring → goal reappears, counter updates
-    search!.value = 'goal-runtime'
-    search!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-    expect(container.textContent).toContain('1 표시')
-  })
-
   it('renders the keeper-scoped prompt assembly trace with an override win badge', async () => {
     // Real server override_fields are dot-namespaced; mark instructions.
     const base = makeKeeperConfig()
@@ -1616,7 +1527,7 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('조립 추적')
     expect(container.querySelector('.kasm')).not.toBeNull()
     // 3 base blocks + instructions + goals = 5 segments
-    expect(container.querySelectorAll('.kasm-seg').length).toBe(3)
+    expect(container.querySelectorAll('.kasm-seg').length).toBe(2)
     // only prompt.instructions is overridden → exactly one win badge
     const winBadges = container.querySelectorAll('.kasm-seg-win')
     expect(winBadges.length).toBe(1)
@@ -1678,43 +1589,23 @@ describe('KeeperConfigPanel', () => {
   })
 })
 
-describe('filterGoalOptions', () => {
-  const goals = [
-    { id: 'goal-alpha', title: 'Stabilize runtime' },
-    { id: 'goal-beta', title: 'Improve dashboard' },
-  ] as unknown as GoalTreeNode[]
-
-  it('returns all goals for an empty or whitespace query', () => {
-    expect(filterGoalOptions(goals, '')).toHaveLength(2)
-    expect(filterGoalOptions(goals, '   ')).toHaveLength(2)
-  })
-
-  it('matches title or id case-insensitively', () => {
-    expect(filterGoalOptions(goals, 'RUNTIME').map((g) => g.id)).toEqual(['goal-alpha'])
-    expect(filterGoalOptions(goals, 'beta').map((g) => g.id)).toEqual(['goal-beta'])
-    expect(filterGoalOptions(goals, 'dashboard').map((g) => g.id)).toEqual(['goal-beta'])
-    expect(filterGoalOptions(goals, 'zzz')).toHaveLength(0)
-  })
-})
-
 describe('buildKcfAssemblySegments', () => {
-  it('builds base + manifest/override + goals segments from real config provenance', () => {
+  it('builds base + manifest/override segments from real config provenance', () => {
     const base = makeKeeperConfig()
     const c = makeKeeperConfig({
       sources: { ...base.sources, override_fields: ['prompt.instructions'] },
     })
     const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.src)).toEqual(['base', 'override', 'goals'])
+    expect(segs.map((s) => s.src)).toEqual(['base', 'override'])
     const instrSeg = segs.find((s) => s.field.includes('instructions'))
     expect(instrSeg?.win).toBe(true)
     expect(instrSeg?.src).toBe('override')
   })
 
-  it('omits empty prompt fields and the goals segment when there are no active goals', () => {
+  it('omits empty prompt fields', () => {
     const base = makeKeeperConfig()
     const c = makeKeeperConfig({
       prompt: { ...base.prompt, instructions: '' },
-      workspace: { ...base.workspace, active_goals: [] },
     })
     const segs = buildKcfAssemblySegments(c)
     expect(segs.map((s) => s.field)).toEqual(['공유 시스템'])

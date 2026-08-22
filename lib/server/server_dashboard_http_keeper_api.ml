@@ -1783,10 +1783,9 @@ let handle_keeper_get_subroutes state req request reqd =
               Time_compat.now ()
               -. (float_of_int window_hours *. Masc_time_constants.hour)
             in
-            let read_result =
-              Trajectory.read_entries_since_result ~masc_root ~keeper_name:name ~since
+            let entries =
+              Trajectory.read_entries_since ~masc_root ~keeper_name:name ~since
             in
-            let entries = read_result.Trajectory.entries in
             let tools = Trajectory.aggregate_tool_stats entries in
             let timeline = Trajectory.hourly_timeline entries in
             let latest_ts =
@@ -1849,14 +1848,6 @@ let handle_keeper_get_subroutes state req request reqd =
               ("health", `String health);
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
-              ( "gate_decode",
-                `Assoc
-                  [
-                    ( "parsed_gate_count",
-                      `Int read_result.Trajectory.gate_decode.parsed_gate_count );
-                    ( "legacy_default_count",
-                      `Int read_result.Trajectory.gate_decode.legacy_default_count );
-                  ] );
               ("coverage_gaps", `List coverage_gaps);
               ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
               ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));

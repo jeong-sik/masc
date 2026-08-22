@@ -577,9 +577,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "task_id field"
       (Some "task-runtime-trust")
       (Safe_ops.json_string_opt "task_id" entry);
-    Alcotest.(check (list string)) "goal_ids field"
-      ["goal-short"; "goal-long"]
-      Yojson.Safe.Util.(entry |> member "goal_ids" |> to_list |> List.map to_string);
     Alcotest.(check (option string)) "sandbox_profile field"
       (Some "docker")
       (Safe_ops.json_string_opt "sandbox_profile" entry);

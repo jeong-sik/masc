@@ -46,7 +46,6 @@ let base_policy : Fusion_policy.t =
   ; judge_timeout_s = None
           ; judges = []
           ; min_answered = Fusion_policy.default_min_answered
-          ; fallback_judge_model = None
           }
       ]
   }
@@ -963,7 +962,7 @@ let test_config_disabled_with_preset () =
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
     ?(judges = []) ?(min_answered = Fusion_policy.default_min_answered)
-    ?(fallback_judge_model = None) (name : string) : Fusion_policy.preset =
+    (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
   ; panels
   ; judge
@@ -972,7 +971,6 @@ let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthe
   ; judge_timeout_s = None
   ; judges
   ; min_answered
-  ; fallback_judge_model
   }
 
 let test_validated_ok () =

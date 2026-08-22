@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-08-21T09:52:12Z",
+  "captured_at": "2026-08-21T17:20:00Z",
   "live_observation_started_at": "2026-08-21T02:00:00Z",
   "kind": "keeper_goal_verifier_matrix_delta",
   "authority": "source_ci_and_operator_observation_separated",
@@ -11,9 +11,9 @@
     "catalog_validation": "passed",
     "browser": "chromium_full_page",
     "screenshot_path": "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.png",
-    "screenshot_sha256": "f947519da8c13bbdcfad676a389454ae2165a97ba8114ed8bb7f9d76baa5ce19",
+    "screenshot_sha256": "00f6eb3b16f351edd46e1269d6f12fa4ffce984db25cfaf7ed460bd6fa148ed1",
     "screenshot_width_px": 1280,
-    "screenshot_height_px": 21498,
+    "screenshot_height_px": 21649,
     "screenshot_semantics": "Document-render evidence only; it is not product runtime or Goal verifier evidence."
   },
   "implementation": {
@@ -34,8 +34,12 @@
     "runtime_serving_receipt_pr": 29280,
     "rw23_typed_verdict_fix_pr": 29281,
     "trusted_canary_artifact_pr": 29283,
-    "final_source_sha": "c884017be761e1d614305b32e53aac7285f62470",
+    "ownerless_rw23_pr": 29305,
+    "completion_authority_retry_pr": 29318,
+    "verifier_retryability_aggregation_pr": 29321,
+    "final_source_sha": "f4c974e8549d4811f0e1ff0d063ebfe58291c237",
     "final_source_ci": "passed",
+    "final_source_product_acceptance": "failed",
     "public_goal_transition_actions": [
       "request_complete",
       "pause",
@@ -59,9 +63,10 @@
     "mission_count": 23,
     "assertion_count": 48,
     "acceptance_authority": "real_world_product_outcomes",
-    "execution_claim": "protected_main_runs_32455741544_and_32464464661_failed",
+    "execution_claim": "protected_main_runs_32488329492_32495075086_and_32501162788_failed",
     "protected_main_evidence": "docs/evidence/keeper-rw23-protected-main-2026-08-21.json",
     "latest_failed_observations": "docs/evidence/keeper-rw23-r2-heterogeneous-r1-2026-08-21.json",
+    "latest_protected_main_attempts": "docs/evidence/keeper-goal-verifier-protected-main-2026-08-22.json",
     "latest_tracked_complete_bundle": "docs/evidence/keeper-e0-campaign-r6-2026-08-18.json",
     "latest_tracked_complete_bundle_result": {
       "status": "failed",
@@ -75,11 +80,17 @@
       "heterogeneous_mode_requires_distinct_runtime_count": 5,
       "fallback_and_role_map_are_mutually_exclusive": true,
       "bundle_projects_exact_mapping": true,
-      "execution_claim": "failed_4_of_5_distinct_runtimes_served",
-      "heterogeneous_run_id": "hetero-386a517d01-20260821T091539Z",
+      "execution_claim": "best_single_run_failed_4_of_5_roles_after_exact_serving",
+      "heterogeneous_run_id": "five-provider-canary-64e02b2-r6",
       "configured_distinct_runtime_count": 5,
-      "observed_distinct_runtime_count": 4,
-      "roles_with_ten_exact_successes": 2
+      "observed_distinct_runtime_count": 5,
+      "roles_with_ten_exact_serving_receipts": 5,
+      "roles_passing_exact_recall_and_independent_judge": 4,
+      "codex_attempts": [
+        "terra_8_of_9",
+        "sol_7_of_9",
+        "luna_8_of_9"
+      ]
     }
   },
   "live_goal_observation": {
@@ -99,9 +110,11 @@
   "limitations": [
     "Catalog validation proves definitions only, not a real execution.",
     "Historical green observations from different runs are not unioned.",
-    "RW23 defines Task rejection, Goal refutation, Task approval, Goal proof, durable run join, and real-backend browser evidence. Protected-main run 32455741544 failed because autonomous work completed the verifier Task before directed refutation. Run 32464464661 correctly produced a typed rejection verdict, then the harness falsely searched a human Board string for a task object.",
-    "The heterogeneous exact-artifact run configured five distinct runtimes but observed exact successful serving receipts from only four; only Codex and Claude roles reached ten exact successes.",
+    "RW23 defines Task rejection, Goal refutation, Task approval, Goal proof, durable run join, and real-backend browser evidence. Runs 32488329492 and 32495075086 exposed missing transient retry and last-error retryability masking; PRs 29318 and 29321 repaired those typed daemon contracts.",
+    "Run 32501162788 reached criterion approval, bad-artifact Task rejection, and Goal proof refutation. It still failed because the producer released task-009, created task-010, and left the claimed PASS artifact outside the canonical producer artifact path; the independent verifier correctly rejected the missing artifact.",
+    "The best single five-provider run passed four of five roles. All roles had exact serving receipts, but Codex recall failed in three bounded model attempts (Terra 8/9, Sol 7/9, Luna 8/9). Runs are not unioned.",
     "No 23-of-23 tracked PASS bundle exists at this refresh.",
-    "Neither protected-main attempt produced the complete Goal refute-reenter-prove browser chain. PR 29281 removes the Board-text parser and defers verifier Goal ownership; PR 29283 packages the exact-source canary runner."
+    "No protected-main attempt produced the complete Goal refute-reenter-prove browser chain. Source and exact-head CI cover transient retry, but no live bundle yet shows retryable deferral followed by a retry commit.",
+    "Current-source integrated 1h, 2h, 4h, and 24h tiers remain missing; historical duration observations are not promoted into the current Goal-verifier cell."
   ]
 }

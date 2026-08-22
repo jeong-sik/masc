@@ -179,7 +179,7 @@ let keeper_get_permission req_path =
   then Some Masc_domain.CanAdmin
   else None
 
-let trim_to_opt = String_util.trim_to_option
+let trim_to_opt = String_util.trim_nonempty
 
 let truncate_text ~max_chars text =
   let len = String.length text in
@@ -221,7 +221,7 @@ let unique_present_paths paths =
   paths
   |> List.filter_map (fun value ->
        match value with
-       | Some path -> String_util.trim_to_option path
+       | Some path -> String_util.trim_nonempty path
        | _ -> None)
   |> Json_util.dedupe_keep_order
 

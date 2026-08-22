@@ -28,7 +28,12 @@ type provider_error =
   | `Server_error of int * string (** status, message *)
   | `Network_error of string
   | `Provider_timeout of Llm_provider.Http_client.timeout_phase option * string
-  | `Streaming_timeout of Llm_provider.Http_client.timeout_phase * string
+  | `Streaming_timeout of
+      Llm_provider.Http_client.timeout_phase * string * string option
+    (** phase, message, and the provider that stalled when one is known.
+            [None] is an API-level timeout, which has no provider to name; it
+            converts back to an API error rather than a provider error wearing a
+            placeholder name. *)
   | `Overloaded
   | `Invalid_request of Llm_provider.Retry.invalid_request_reason * string
     (** Typed reason first, mirroring [`Input_capacity]. The reason used to be

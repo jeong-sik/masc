@@ -37,11 +37,10 @@ val register_record_wake_payload :
    unit) ->
   unit
 
-val record_tool_skipped :
-  keeper_name:string -> tool_name:string -> reason_code:string -> unit
+val record_tool_skipped : tool_name:string -> reason_code:string -> unit
 
 val register_record_tool_skipped :
-  (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ->
+  (tool_name:string -> reason_code:string -> unit) ->
   unit
 
 val record_execute_output :

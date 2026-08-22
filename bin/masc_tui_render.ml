@@ -793,10 +793,6 @@ let render_keeper_list (state : state) =
         else
           Ansi.gray ^ "--" ^ Ansi.reset
         in
-        let goal_ids_width = max 10 (cols - 68) in
-        let goal_ids_trunc =
-          fit_width (String.concat "," k.k_active_goal_ids) goal_ids_width
-        in
         let name_col = Printf.sprintf "%-16s" k.k_name in
         let gen_col = Printf.sprintf "%5d" k.k_generation in
         let model_col = Printf.sprintf "%-20s" model_short in
@@ -807,14 +803,12 @@ let render_keeper_list (state : state) =
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
           else
             " "
             ^ "  " ^ name_col
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
         in
         Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
           Ansi.gray Ansi.box_v Ansi.reset
@@ -874,12 +868,6 @@ let render_keeper_detail (state : state) =
     add_row "Generation:" (string_of_int k.k_generation);
     add_row "Trigger Mode:" k.k_trigger_mode;
     add_row "Verify:" (bool_indicator k.k_verify);
-    add_empty ();
-
-    (* Goals section *)
-    add_section "Goals";
-    add_row "Active Goal IDs:"
-      (fit_width (String.concat ", " k.k_active_goal_ids) (inner - 26));
     add_empty ();
 
     (* Live Context section (Phase 2) *)

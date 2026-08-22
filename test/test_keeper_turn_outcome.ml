@@ -105,15 +105,16 @@ let test_external_effect_completed_has_no_direct_reply_error () =
 
 let test_canonical_payload_carries_delivery_target () =
   let turn_ref = Ids.Turn_ref.make ~trace_id:"post-target" ~absolute_turn:3 in
-  let body_with target_json =
+  let body_for outcome target_json =
     `Assoc
       ([ "reply", `String ""
-       ; TO.wire_key, `String (TO.to_label TO.External_effect_completed)
+       ; TO.wire_key, `String (TO.to_label outcome)
        ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
        ]
        @ target_json)
     |> Yojson.Safe.to_string
   in
+  let body_with = body_for TO.External_effect_completed in
   (match
      Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
        (body_with
@@ -130,14 +131,31 @@ let test_canonical_payload_carries_delivery_target () =
      fail
        (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
           error));
+  (* The outcome and the receipt come from the same terminal_effect_state
+     (keeper_agent_run.ml:1064-1076), so a completed external effect always
+     serializes its target. A payload claiming the outcome without one predates
+     the field and is rejected rather than projected as a null destination. *)
   (match
      Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
        (body_with [])
    with
+   | Error (Server_routes_http_keeper_stream.Missing_payload_field field) ->
+     check string "the missing field is named" "external_effect_target" field
+   | Error other ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          other)
+   | Ok _ ->
+     fail "External_effect_completed without a target must be rejected");
+  (* Absence is the ordinary shape for every other outcome. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_for TO.Visible_reply [])
+   with
    | Ok canonical ->
      (match canonical.external_effect_target with
       | None -> ()
-      | Some _ -> fail "legacy payload without the field must decode to None")
+      | Some _ -> fail "a visible reply carries no delivery target")
    | Error error ->
      fail
        (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string

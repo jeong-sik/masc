@@ -254,7 +254,7 @@ flag_lines="$(grep -F -- '(:standard -' "${dune_root}" || true)"
 flag_line_count="$(grep -c . <<<"${flag_lines}" || true)"
 [ "${flag_line_count}" -eq 2 ] \
   || fail "root dune env must have exactly 2 (:standard …) flag lists (dev, release), found ${flag_line_count}"
-for required_flag in '-w +32' '-warn-error +a'; do
+for required_flag in '-w +32' '+69' '-warn-error +a'; do
   present="$(grep -Fc -- "${required_flag}" <<<"${flag_lines}" || true)"
   [ "${present}" -eq 2 ] \
     || fail "root dune env must set ${required_flag} in dev and release, found it in ${present} of 2"

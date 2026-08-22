@@ -43,7 +43,7 @@ let review () =
 
 (* A reviewer that answers per slot and records the attempt order. *)
 let recording_reviewer calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
     | Some behavior -> behavior
@@ -133,7 +133,7 @@ let test_invalid_verdict_fails_over () =
        | None -> Alcotest.fail "failover lost the second slot's verdict")
 ;;
 
-let test_exhaustion_reports_the_last_attempt () =
+let test_exhaustion_preserves_any_retryable_attempt () =
   let calls = ref [] in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "slot-a"; "slot-b" ])
@@ -151,10 +151,55 @@ let test_exhaustion_reports_the_last_attempt () =
          "slot-b"
          result.evaluator_runtime;
        Alcotest.(check (option bool))
-         "the last attempt's non-retryable classification wins"
-         (Some false)
+         "a transient slot is not masked by a later non-retryable fallback"
+         (Some true)
          result.evaluator_error_retryable;
        Alcotest.(check bool) "no fabricated verdict" true (Option.is_none result.verdict))
+;;
+
+let test_nested_runtime_retryable_attempt_survives_terminal_error () =
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "slot-a" ])
+    ~reviewer:
+      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_
+           ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+           ~on_runtime_attempt_error () ->
+         on_runtime_attempt_error
+           ~runtime_id:"glm.test-model"
+           ~attempt:0
+           (Agent_core.Error.Api
+              (Agent_core.Error.Retry.RateLimited
+                 { retry_after = None; message = "rate limited" }));
+         budget_refusal)
+    (fun () ->
+       let result = review () in
+       Alcotest.(check (option bool))
+         "a nested transient candidate is not masked by its terminal fallback"
+         (Some true)
+         result.evaluator_error_retryable;
+       Alcotest.(check string)
+         "terminal fallback remains the reported reason"
+         (match budget_refusal with
+          | Error error -> Agent_core.Error.to_string error
+          | Ok _ -> Alcotest.fail "budget refusal fixture must be an error")
+         (Option.value result.fallback_reason ~default:""))
+;;
+
+let test_exhaustion_reports_all_nonretryable_attempts () =
+  let calls = ref [] in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "slot-a"; "slot-b" ])
+    ~reviewer:
+      (recording_reviewer
+         calls
+         [ "slot-a", budget_refusal; "slot-b", budget_refusal ])
+    (fun () ->
+       let result = review () in
+       Alcotest.(check (list string)) "both slots tried" [ "slot-a"; "slot-b" ] !calls;
+       Alcotest.(check (option bool))
+         "all typed evaluator errors are non-retryable"
+         (Some false)
+         result.evaluator_error_retryable)
 ;;
 
 let test_unconfigured_lane_is_unavailable_not_rerouted () =
@@ -316,9 +361,17 @@ let () =
             `Quick
             test_invalid_verdict_fails_over
         ; Alcotest.test_case
-            "exhaustion reports the last attempt"
+            "exhaustion preserves any retryable attempt"
             `Quick
-            test_exhaustion_reports_the_last_attempt
+            test_exhaustion_preserves_any_retryable_attempt
+        ; Alcotest.test_case
+            "exhaustion reports all non-retryable attempts"
+            `Quick
+            test_exhaustion_reports_all_nonretryable_attempts
+        ; Alcotest.test_case
+            "nested runtime retryable attempt survives terminal error"
+            `Quick
+            test_nested_runtime_retryable_attempt_survives_terminal_error
         ; Alcotest.test_case
             "unconfigured lane is unavailable, not rerouted"
             `Quick

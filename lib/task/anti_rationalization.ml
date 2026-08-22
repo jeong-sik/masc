@@ -52,8 +52,10 @@ let run_llm_reviewer_fn
      report_tool_schema:Types_core.tool_schema ->
      lookup:lookup_surface ->
      on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+     on_runtime_attempt_error:
+       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
      unit -> (verdict option, Agent_core.Error.t) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: schema enum used to be hand-rolled as a 2-element
@@ -404,31 +406,45 @@ let review
           compaction lanes: each slot is tried at most once, in declaration
           order, and a slot that produces no usable verdict — provider error or
           a reply without exactly one valid verdict tool call — yields to the
-          next slot. The terminal result describes the last attempt, so a
-          single-slot lane reports exactly what the pre-lane path reported. *)
+          next slot. The terminal runtime/reason describes the last attempt,
+          while retryability aggregates every typed evaluator error: one
+          transient slot must not be masked by a later statically unavailable
+          fallback. The same aggregation includes typed failures from the
+          runtime candidates inside each slot, while the slot's terminal error
+          remains the operator-facing reason. A single-slot lane still reports
+          exactly what the pre-lane path reported. *)
        let run_attempt slot =
+         let nested_retryable_error_seen = ref false in
          try
-           (Atomic.get run_llm_reviewer_fn)
-             ~base_path
-             ?sw
-             ~evaluator_runtime:slot
-             ~prompt
-             ~report_tool_schema:report_review_verdict_schema
-             ~lookup
-             ~on_tool_result
-             ()
+           let result =
+             (Atomic.get run_llm_reviewer_fn)
+               ~base_path
+               ?sw
+               ~evaluator_runtime:slot
+               ~prompt
+               ~report_tool_schema:report_review_verdict_schema
+               ~lookup
+               ~on_tool_result
+               ~on_runtime_attempt_error:
+                 (fun ~runtime_id:_ ~attempt:_ error ->
+                    if Agent_core.Error.is_retryable error
+                    then nested_retryable_error_seen := true)
+               ()
+           in
+           result, !nested_retryable_error_seen
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
-           Error
-             (Agent_core.Error.Internal
-                (Printf.sprintf
-                   "task completion evaluator raised unexpectedly: %s"
-                   (Printexc.to_string exn)))
+           ( Error
+               (Agent_core.Error.Internal
+                  (Printf.sprintf
+                     "task completion evaluator raised unexpectedly: %s"
+                     (Printexc.to_string exn)))
+           , !nested_retryable_error_seen )
        in
-       let rec attempt slot remaining =
+       let rec attempt ~retryable_error_seen slot remaining =
          match run_attempt slot with
-         | Ok (Some verdict) ->
+         | Ok (Some verdict), _nested_retryable_error_seen ->
            (match verdict with
             | Approve ->
               task_info
@@ -447,7 +463,7 @@ let review
              ; fallback_reason = None
              ; evaluator_error_retryable = None
              }
-         | Ok None ->
+         | Ok None, nested_retryable_error_seen ->
            let detail =
              "task completion evaluator did not call report_review_verdict exactly once"
            in
@@ -461,7 +477,7 @@ let review
                 detail
                 slot
                 next;
-              attempt next rest
+              attempt ~retryable_error_seen next rest
             | [] ->
               task_warn "[task-completion-review] %s" detail;
               emit
@@ -470,11 +486,17 @@ let review
                 ; generator_runtime
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
-                ; evaluator_error_retryable = None
+                ; evaluator_error_retryable =
+                    (if retryable_error_seen || nested_retryable_error_seen
+                     then Some true
+                     else None)
                 })
-         | Error error ->
+         | Error error, nested_retryable_error_seen ->
            let detail = Agent_core.Error.to_string error in
-           let retryable = Agent_core.Error.is_retryable error in
+           let retryable =
+             nested_retryable_error_seen
+             || Agent_core.Error.is_retryable error
+           in
            (Atomic.get outcome_observer_fn)
              ~outcome:"unavailable"
              ~runtime:slot;
@@ -486,12 +508,16 @@ let review
                 retryable
                 next
                 detail;
-              attempt next rest
+              attempt
+                ~retryable_error_seen:(retryable_error_seen || retryable)
+                next
+                rest
             | [] ->
+              let exhausted_retryable = retryable_error_seen || retryable in
               task_warn
                 "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; task remains nonterminal: %s"
                 slot
-                retryable
+                exhausted_retryable
                 detail;
               emit
                 { verdict = None
@@ -499,8 +525,9 @@ let review
                 ; generator_runtime
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
-                ; evaluator_error_retryable = Some retryable
+                ; evaluator_error_retryable =
+                    Some exhausted_retryable
                 })
        in
-       attempt first_slot rest_slots)
+       attempt ~retryable_error_seen:false first_slot rest_slots)
 ;;

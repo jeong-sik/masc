@@ -600,7 +600,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -1678,7 +1678,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v8 snapshot" 8 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v9 snapshot" 9 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -3085,7 +3085,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 8
+            [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -3120,7 +3120,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 8
+               [ "version", `Int 9
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -3145,7 +3145,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 7
+            [ "version", `Int 8
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -3155,7 +3155,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 7 is unsupported (current 8); reset \
+                  "gate_pending.version 8 is unsupported (current 9); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -3366,7 +3366,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -3575,7 +3575,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"

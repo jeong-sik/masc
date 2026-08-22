@@ -12,8 +12,8 @@ let with_fresh f () =
 
 let now = 1_000_000.0
 
-let inject ~tool ~reason ?(keeper="k1") ?(ts=now) () =
-  GM.inject_for_testing ~keeper_name:keeper ~tool_name:tool ~reason_code:reason ~ts
+let inject ~tool ~reason ?(ts=now) () =
+  GM.inject_for_testing ~tool_name:tool ~reason_code:reason ~ts
 
 let test_empty_ring () =
   let counts = GM.tool_rejection_counts ~now_ts:now ~window_minutes:60 () in
@@ -129,7 +129,6 @@ let test_record_failure_is_metric_visible () =
   in
   GM.record_tool_skipped_with_append_for_testing
     ~append:(fun () -> raise (Failure "synthetic ring failure"))
-    ~keeper_name:"k1"
     ~tool_name:"bash"
     ~reason_code:"policy";
   let after =

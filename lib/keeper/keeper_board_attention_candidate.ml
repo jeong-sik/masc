@@ -1106,21 +1106,81 @@ let optional_string_of_yojson ~context = function
     Ok ()
 ;;
 
+let keeper_context_current_fields =
+  [ "lane_keeper_name"
+  ; "agent_name"
+  ; "keeper_record_id"
+  ; "keeper_runtime_uid"
+  ; "instructions"
+  ; "current_task_id"
+  ; "mention_keeper_ids"
+  ]
+;;
+
+(* [active_goal_ids] was emitted by early v4 writers before Goal ownership
+   moved to the canonical Goal/Task stores. Keep this tombstone normalization
+   on the v4 ledger read boundary only: in-memory candidates and every current
+   write still have to satisfy the exact seven-field schema below. *)
+let normalize_legacy_v4_keeper_context json =
+  let context = "candidate.judgment_request.keeper_context" in
+  let* fields = assoc ~context json in
+  let retired_fields =
+    List.filter
+      (fun (name, _) -> String.equal name "active_goal_ids")
+      fields
+  in
+  match retired_fields with
+  | [] -> Ok json
+  | [ (_, active_goal_ids) ] ->
+    let* () =
+      exact_fields
+        ~context
+        ("active_goal_ids" :: keeper_context_current_fields)
+        fields
+    in
+    let* () =
+      string_list_of_yojson
+        ~context:(context ^ ".active_goal_ids")
+        active_goal_ids
+    in
+    Ok
+      (`Assoc
+         (List.filter
+            (fun (name, _) -> not (String.equal name "active_goal_ids"))
+            fields))
+  | _ -> Error (context ^ ".active_goal_ids must occur exactly once")
+;;
+
+let normalize_legacy_v4_judgment_request json =
+  let context = "candidate.judgment_request" in
+  let* fields = assoc ~context json in
+  let keeper_contexts =
+    List.filter_map
+      (fun (name, value) ->
+         if String.equal name "keeper_context" then Some value else None)
+      fields
+  in
+  match keeper_contexts with
+  | [ keeper_context ] ->
+    let* normalized = normalize_legacy_v4_keeper_context keeper_context in
+    Ok
+      (`Assoc
+         (List.map
+            (fun (name, value) ->
+               if String.equal name "keeper_context"
+               then name, normalized
+               else name, value)
+            fields))
+  | [] | _ :: _ :: _ -> Ok json
+;;
+
 let validate_keeper_context ~keeper_name json =
   let context = "candidate.judgment_request.keeper_context" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
       ~context
-      [ "lane_keeper_name"
-      ; "agent_name"
-      ; "keeper_record_id"
-      ; "keeper_runtime_uid"
-      ; "instructions"
-      ; "active_goal_ids"
-      ; "current_task_id"
-      ; "mention_keeper_ids"
-      ]
+      keeper_context_current_fields
       fields
   in
   let* lane_keeper_name_json = field ~context "lane_keeper_name" fields in
@@ -1153,12 +1213,6 @@ let validate_keeper_context ~keeper_name json =
     optional_string_of_yojson
       ~context:(context ^ ".keeper_runtime_uid")
       keeper_runtime_uid
-  in
-  let* active_goal_ids = field ~context "active_goal_ids" fields in
-  let* () =
-    string_list_of_yojson
-      ~context:(context ^ ".active_goal_ids")
-      active_goal_ids
   in
   let* current_task_id = field ~context "current_task_id" fields in
   let* () =
@@ -1326,7 +1380,10 @@ let candidate_of_json json =
     then Ok ()
     else Error "candidate_id does not match the exact Keeper and Board signal identity"
   in
-  let* judgment_request = field ~context "judgment_request" fields in
+  let* judgment_request_json = field ~context "judgment_request" fields in
+  let* judgment_request =
+    normalize_legacy_v4_judgment_request judgment_request_json
+  in
   let* recorded_at_json = field ~context "recorded_at" fields in
   let* recorded_at =
     finite_float_json ~context:(context ^ ".recorded_at") recorded_at_json
@@ -1432,6 +1489,15 @@ type ledger_stat_key =
   ; stat_size : int
   }
 
+(* Compared field by field rather than with [=], so each field has a named
+   reader the compiler can see. *)
+let ledger_stat_key_equal left right =
+  Int.equal left.stat_dev right.stat_dev
+  && Int.equal left.stat_ino right.stat_ino
+  && Float.equal left.stat_mtime right.stat_mtime
+  && Int.equal left.stat_size right.stat_size
+;;
+
 let ledger_stat_key_opt path =
   match Unix.stat path with
   | stats ->
@@ -1472,7 +1538,8 @@ let load_candidates ~base_path ~keeper_name =
        the read; a concurrent rewrite lands as a new inode and skips the
        store, so the next call re-reads. *)
     (match before, ledger_stat_key_opt path with
-     | Some key_before, Some key_after when key_before = key_after ->
+     | Some key_before, Some key_after
+       when ledger_stat_key_equal key_before key_after ->
        Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
          Hashtbl.replace candidate_read_memo path (key_before, candidates))
      | Some _, (Some _ | None) | None, (Some _ | None) -> ());

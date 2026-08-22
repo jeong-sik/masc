@@ -3,9 +3,10 @@
 
     Two data sources:
     1. In-memory ring of recent tool-skip events recorded via
-       [record_tool_skipped]. Called from [Keeper_hooks_agent_core.broadcast_tool_skipped]
-       to capture the same (tool_name, reason_code) emitted on SSE. The ring
-       gives operators a "last N minutes" view without tailing JSONL.
+       [record_tool_skipped], registered at module initialisation as the
+       [Keeper_keepalive_signal.record_tool_skipped] callback so the ring
+       carries the same (tool_name, reason_code) the SSE stream emits. The
+       ring gives operators a "last N minutes" view without tailing JSONL.
     2. Live approval queue state returned by
        [Keeper_approval_queue.list_pending_entries_for_workspace]. Approval queue metrics
        are computed from the current pending set; this module does not parse
@@ -23,9 +24,7 @@ type rejection_event = {
   ts : float;
   tool_name : string;
   reason_code : string;
-  keeper_name : string;
 }
-
 let max_ring_size = 43200
 (** Bounded ring buffer to prevent unbounded memory growth.
     43200 events at ~1 skip/sec sustained covers 12 hours, matching
@@ -67,28 +66,21 @@ let append_rejection_event event =
         ; count = max_ring_size
         })
 
-let record_tool_skipped_with_append ~append
-    ~keeper_name ~tool_name ~reason_code =
-  let event = {
-    ts = Unix.gettimeofday ();
-    tool_name;
-    reason_code;
-    keeper_name;
-  } in
+let record_tool_skipped_with_append ~append ~tool_name ~reason_code =
+  (* NDT-OK: observation boundary. The ring stamps when the skip was seen; no
+     branch reads [ts] back, only the window filter in the projection does. *)
+  let event = { ts = Unix.gettimeofday (); tool_name; reason_code } in
   try
     append event
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> record_tool_skipped_failure exn
 
-(** Record a tool-skip event. Called from [Keeper_hooks_agent_core.broadcast_tool_skipped]
-    so the in-memory ring stays in sync with the SSE event stream. *)
-let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  record_tool_skipped_with_append
-    ~append:append_rejection_event
-    ~keeper_name
-    ~tool_name
-    ~reason_code
+(** Record a tool-skip event. Installed as the
+    [Keeper_keepalive_signal.record_tool_skipped] callback so the in-memory
+    ring stays in sync with the SSE event stream. *)
+let record_tool_skipped ~tool_name ~reason_code =
+  record_tool_skipped_with_append ~append:append_rejection_event ~tool_name ~reason_code
 
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)
@@ -99,8 +91,8 @@ let snapshot_ring () =
   Safe_ops.protect ~default:[] (fun () ->
     Eio.Mutex.use_ro ring_mu (fun () -> (!ring).events))
 
-let inject_for_testing ~keeper_name ~tool_name ~reason_code ~ts =
-  let event = { ts; tool_name; reason_code; keeper_name } in
+let inject_for_testing ~tool_name ~reason_code ~ts =
+  let event = { ts; tool_name; reason_code } in
   append_rejection_event event
 
 let max_ring_size_for_testing = max_ring_size
@@ -108,11 +100,9 @@ let max_ring_size_for_testing = max_ring_size
 let ring_size_for_testing () =
   Eio.Mutex.use_ro ring_mu (fun () -> (!ring).count)
 
-let record_tool_skipped_with_append_for_testing
-    ~append ~keeper_name ~tool_name ~reason_code =
+let record_tool_skipped_with_append_for_testing ~append ~tool_name ~reason_code =
   record_tool_skipped_with_append
     ~append:(fun _event -> append ())
-    ~keeper_name
     ~tool_name
     ~reason_code
 
@@ -263,8 +253,4 @@ let gate_tool_events_json ~base_path ~window_minutes () : Yojson.Safe.t =
 let gate_tool_events_json_with_pending_result_for_testing =
   gate_tool_events_json_with_pending_result
 
-let () =
-  Keeper_keepalive_signal.register_record_tool_skipped (fun ~keeper_name ~tool_name ~reason_code ->
-    ignore (record_tool_skipped ~keeper_name ~tool_name ~reason_code)
-  )
-;;
+let () = Keeper_keepalive_signal.register_record_tool_skipped record_tool_skipped

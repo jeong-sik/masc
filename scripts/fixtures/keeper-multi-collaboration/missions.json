@@ -38,7 +38,6 @@
     "masc_keeper_status",
     "masc_agent_timeline",
     "masc_goal_upsert",
-    "masc_goal_assign",
     "masc_goal_list",
     "masc_goal_transition",
     "masc_add_task",
@@ -81,11 +80,11 @@
     {
       "id": "RW02",
       "phase": "bootstrap",
-      "name": "shared_goal_assignment",
+      "name": "shared_goal_open_set",
       "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
       "capabilities": ["Goal", "Task"],
-      "user_story": "공유 Goal이 coordinator에게 배정되고 모든 작업이 그 Goal identity를 유지한다.",
-      "assertions": ["goal_visible", "goal_assignment_visible", "tasks_linked_to_goal"],
+      "user_story": "owner 없는 공유 Goal이 모든 Keeper에게 같은 open set으로 보이고 모든 작업이 그 Goal identity를 유지한다.",
+      "assertions": ["goal_visible", "goal_shared_open_set_visible", "tasks_linked_to_goal"],
       "evidence": ["observations/goals.json", "observations/tasks.json"]
     },
     {

@@ -1773,11 +1773,14 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
 
 let test_attempt_loop_preserves_last_core_error () =
   let events = ref [] in
+  let observed_errors = ref [] in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~on_attempt_error:(fun ~runtime_id ~attempt error ->
+        observed_errors := (runtime_id, attempt, error) :: !observed_errors)
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempt_without_effect
           (Error (retryable_network_error (runtime_id ^ " failed")))
@@ -1805,6 +1808,18 @@ let test_attempt_loop_preserves_last_core_error () =
        | Runtime_manifest.Runtime_failed -> true
        | _ -> false)
      |> List.map decision_runtime_id)
+  ;
+  let observed_errors = List.rev !observed_errors in
+  Alcotest.(check (list (pair string int)))
+    "typed attempt observer sees every candidate without changing the terminal error"
+    [ "primary.test_model", 0; "fallback.test_model", 1 ]
+    (List.map (fun (runtime_id, attempt, _) -> runtime_id, attempt) observed_errors);
+  Alcotest.(check bool)
+    "attempt observer preserves typed retryability"
+    true
+    (List.exists
+       (fun (_, _, error) -> Agent_core.Error.is_retryable error)
+       observed_errors)
 
 let context_overflow_error message =
   Agent_core.Error.Api

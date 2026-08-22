@@ -266,6 +266,7 @@ let render_overview (state : state) =
     Render_schedule.allocate_overview ~terminal_rows:rows
       ~has_cluster:(Option.is_some ov)
       ~attention_count:(List.length attention_items)
+      ~event_count:(List.length state.events)
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
   in

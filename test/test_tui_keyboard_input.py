@@ -495,6 +495,67 @@ def row_budget_http_fixtures() -> HttpFixtures:
     }
 
 
+def overview_event_http_fixtures() -> HttpFixtures:
+    return {
+        "/api/v1/dashboard/briefing": (
+            200,
+            {
+                "summary": {
+                    "workspace_health": "ok",
+                    "cluster": "cluster-a",
+                    "project": "project-a",
+                    "active_agents": 2,
+                    "incident_count": 0,
+                },
+                "generated_at": "2026-08-22T00:00:00Z",
+                "incidents": [],
+                "attention_queue": [],
+                "attention_items": [],
+                "agent_briefs": [],
+            },
+        ),
+        "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
+            200,
+            {
+                "pending_confirm_envelope": {
+                    "items": [],
+                    "summary": {
+                        "actor_filter": "masc-tui",
+                        "filter_active": True,
+                        "visible_count": 0,
+                        "total_count": 0,
+                        "hidden_count": 0,
+                        "hidden_actors": [],
+                        "confirm_required_actions": [],
+                    },
+                }
+            },
+        ),
+        "/api/v1/board": (200, {"posts": []}),
+        "/api/v1/dashboard/planning": (
+            200,
+            {
+                "goals": [],
+                "rollup": {
+                    "active_count": 0,
+                    "paused_count": 0,
+                    "verifying_count": 0,
+                    "done_count": 0,
+                    "dropped_count": 0,
+                },
+                "task_backlog": {
+                    "todo": 0,
+                    "claimed": 0,
+                    "in_progress": 0,
+                    "done": 0,
+                    "cancelled": 0,
+                },
+                "generated_at": "2026-08-22T00:00:00Z",
+            },
+        ),
+    }
+
+
 def wait_for_stop(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -940,6 +1001,72 @@ def assert_row_budgeted_surfaces(
     os.write(master_fd, b"q")
 
 
+def assert_overview_event_rows(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    wait_for_output(process, master_fd, output, b"TUI started", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"task-5", start=0, timeout=3.0)
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=3.0)
+    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=cluster_end,
+        timeout=3.0,
+    )
+
+    send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\t\t\t\t", b"MASC Overview")
+
+    overview = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=22,
+        columns=100,
+        needle=b"MASC Overview",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
+        if expected not in overview:
+            raise AssertionError(f"22-row Overview omitted {expected!r}: {overview!r}")
+    if overview.count(b"Manual refresh") != 5:
+        raise AssertionError(
+            f"22-row Overview did not show all five refresh events: {overview!r}"
+        )
+
+    overview = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"MASC Overview",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for expected in (b"Manual refresh", b"task-1", b"q:quit"):
+        if expected not in overview:
+            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
+    if overview.count(b"Manual refresh") != 2:
+        raise AssertionError(
+            f"14-row Overview did not cap the shared panel at two events: {overview!r}"
+        )
+    if b"TUI started" in overview or b"task-2" in overview:
+        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
+    if "└".encode() not in overview:
+        raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
+
+    os.write(master_fd, b"q")
+
+
 def wait_for_http_request(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1109,6 +1236,13 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=utf8_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="event-budgeted Overview",
+        interact=assert_overview_event_rows,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_row_budget_workspace,
     )
     run_terminal_scenario(
         executable,

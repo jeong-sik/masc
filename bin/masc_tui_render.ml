@@ -1126,9 +1126,13 @@ let render_keeper_detail (state : state) =
     box_divider buf cols;
 
     (* Content area with scrolling *)
-    let content_height = rows - 6 in  (* header + title + divider + bottom + footer + extra *)
+    let content_height = max 0 (rows - 6) in  (* header + title + divider + bottom + footer + extra *)
     let visible_lines = min content_height total_lines in
-    let scroll = min state.detail_scroll (max 0 (total_lines - content_height)) in
+    let scroll =
+      Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
+        ~content_height state.detail_scroll
+    in
+    state.detail_scroll <- scroll;
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in

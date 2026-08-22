@@ -64,7 +64,11 @@
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
 }
 
-.ide-top > .ide-repo {
+/* A live-only guard: the design's mock repo path is short, real ones are URLs
+   that would push the view tabs off the bar. Scoped to the app's own surface
+   value — the prototype's is `ide`, the dashboard's is `code` — so it constrains
+   the cell it was written for and leaves the design's sizing alone. */
+.v2-app[data-surface="code"] .ide-top > .ide-repo {
   flex: 0 1 auto;
   min-width: 12rem;
   max-width: 34rem;

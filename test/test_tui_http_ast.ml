@@ -200,11 +200,16 @@ let test_keeper_chat_uses_current_async_contract () =
         (Ast_grep.count_calls_in_value_binding ~module_path:render_path
            ~binding_name:"render_keeper_message" ~callee
          >= 1))
+    (* [Ansi.move_to] is gone from this binding on purpose: the renderer no
+       longer writes a cursor escape inline. It hands the position to
+       [finish_frame ~cursor:(Frame_presenter.Visible_at ...)], and the frame
+       presenter emits the move when it paints. Asserting the old escape here
+       would pin the pre-differential-frame renderer. *)
     [ "Message_layout.input_viewport"
     ; "Message_layout.input_cursor_row"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
-    ; "Ansi.move_to"
+    ; "finish_frame"
     ];
   check bool "message input uses the same viewport gate as rendering" true
     (Ast_grep.count_calls_in_value_binding ~module_path
@@ -337,12 +342,19 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"
        ~callee:"Yojson.Safe.to_string");
-  check int "dashboard event text crosses the terminal boundary" 1
+  (* Four, not one: besides the event content this binding also crosses
+     [state.workspace] and each agent's [name] / [status]. They are all values
+     the renderer received from outside, so each one goes through the boundary
+     rather than reaching [fit_width] raw. *)
+  check int "dashboard event text crosses the terminal boundary" 4
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_dashboard"
        ~callee:"Terminal_text.single_line");
-  check int "overview event text crosses the terminal boundary" 1
+  (* Five: [state.workspace], each row's [ov_cluster] / [ov_project], the
+     agent [ai_summary], and the event content. Every one arrives from outside
+     the renderer. *)
+  check int "overview event text crosses the terminal boundary" 5
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_overview"
@@ -627,7 +639,394 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"read_byte_unix"
        ~callee:"Render_schedule.Input_wait.await"
-     = 1)
+     = 1);
+  check int "surface renderers perform no direct stdout writes" 0
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml" ~callee:"print_string");
+  check int "surface renderers perform no direct flushes" 0
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml" ~callee:"flush");
+  check int "main has one frame presentation boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Frame_presenter.present");
+  check int "main gates input once on the compact viewport" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "render owns one compact viewport gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "compact render has one fallback branch" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
+       ~callee:"render_terminal_too_small");
+  check int "compact render has one normal-surface branch" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
+       ~callee:"render_surface");
+  check int "resize invalidation and Force request share one boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"Frame_presenter.invalidate");
+  check int "resize boundary owns terminal-size cache invalidation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"invalidate_terminal_size");
+  check int "resize boundary requests one forced frame" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"Render_schedule.request");
+  check int "resize request's reason is exactly Force" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"Render_schedule.request" ~position:1
+       ~constructor:"Render_schedule.Force");
+  check int "main uses the coupled resize boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"invalidate_frame_for_resize");
+  check int "presentation consumes the external-write marker as invalidation" 1
+    (Ast_grep
+     .count_applications_with_exact_labelled_unit_call_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callee:"Frame_presenter.present" ~label:"invalidate_before"
+       ~nested_callee:"consume_terminal_write_outside_frame");
+  check int "TTY gate validates stdin and stdout" 2
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"require_interactive_terminal" ~callee:"Unix.isatty");
+  check int "loader marks its direct diagnostic write" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"report"
+       ~callee:"Masc_tui_ansi.note_terminal_write_outside_frame");
+  let signal_handler signal handler =
+    Ast_grep.count_applications_with_exact_signal_handler_in_value_binding
+      ~module_path:main_path ~binding_name:"enter_terminal_session" ~signal
+      ~handler
+  in
+  check bool "startup registers cleanup and handlers before raw mode" true
+    (Ast_grep.direct_call_sequence_matches_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callees:
+         [ "at_exit"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Unix.tcsetattr"
+         ]);
+  check int "startup registers the real cleanup callback" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callee:"at_exit" ~position:0 ~identifier:"cleanup");
+  check int "main enters the guarded terminal session once" 1
+    (Ast_grep
+     .count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callee:"enter_terminal_session"
+       ~arguments:
+         [ "cleanup", "cleanup"
+         ; "terminate", "terminate"
+         ; "request_full_repaint", "request_full_repaint"
+         ; "suspend", "suspend"
+         ; "new_term", "new_term"
+         ]);
+  check int "SIGINT terminates through cleanup" 1
+    (signal_handler "Sys.sigint" "terminate");
+  check int "SIGTERM terminates through cleanup" 1
+    (signal_handler "Sys.sigterm" "terminate");
+  check int "SIGHUP terminates through cleanup" 1
+    (signal_handler "Sys.sighup" "terminate");
+  check int "SIGQUIT terminates through cleanup" 1
+    (signal_handler "Sys.sigquit" "terminate");
+  check int "SIGWINCH requests a full repaint" 1
+    (signal_handler "Sys.sigwinch" "request_full_repaint");
+  check int "SIGCONT requests a full repaint" 1
+    (signal_handler "Sys.sigcont" "request_full_repaint");
+  check int "SIGTSTP initially installs the suspend handler" 1
+    (signal_handler "Sys.sigtstp" "suspend");
+  check int "resume reinstalls the suspend handler" 1
+    (Ast_grep.count_applications_with_exact_signal_handler_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend" ~signal:"Sys.sigtstp"
+       ~handler:"suspend");
+  check int "startup raw mode uses new termios" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
+  check int "terminal restoration cleans presenter state" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"restore_terminal" ~callee:"Frame_presenter.cleanup");
+  check int "terminal restoration reapplies old termios" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"restore_terminal"
+       ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"old_term");
+  check int "suspend restores the shell terminal first" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"suspend" ~callee:"restore_terminal");
+  check int "suspend temporarily installs the default action" 1
+    (Ast_grep
+     .count_applications_with_exact_identifier_and_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~callee:"Sys.set_signal" ~identifier_position:0
+       ~identifier:"Sys.sigtstp" ~constructor_position:1
+       ~constructor:"Sys.Signal_default");
+  check int "suspend self-signals SIGTSTP" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend" ~callee:"Unix.kill"
+       ~position:1 ~identifier:"Sys.sigtstp");
+  check int "resume reapplies raw termios" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
+  check int "resume requests a repaint" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"suspend" ~callee:"request_full_repaint");
+  check bool "suspend reaches self-stop only after terminal restoration" true
+    (Ast_grep.direct_call_sequence_matches_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~callees:[ "restore_terminal"; "Sys.set_signal"; "Fun.protect" ]);
+  check bool "resume lifecycle is confined to Fun.protect finally" true
+    (Ast_grep.fun_protect_sequences_match_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~body_callees:[ "Unix.kill" ]
+       ~finally_callees:
+         [ "Sys.set_signal"; "Unix.tcsetattr"; "request_full_repaint" ]);
+  check int "the local input loop propagates one Break" 1
+    (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"run_loop" ~callee:"raise"
+       ~position:0 ~constructor:"Break");
+  check bool "Break is converted to success outside the root Eio switch" true
+    (Ast_grep.try_handler_wraps_nested_callback_in_value_binding
+       ~module_path:main_path ~binding_name:"run_with_eio_context"
+       ~exception_constructor:"Break" ~outer_callee:"Eio_main.run"
+       ~inner_callee:"Eio.Switch.run" ~callback_callee:"f");
+  check int "main passes its message mode to q classification" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"run_loop"
+       ~callee:"Render_schedule.Input_shortcut.is_quit"
+       ~arguments:[ "message_mode", "message_mode" ]);
+  check int "main passes its message mode to Keeper classification" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"run_loop"
+       ~callee:"Render_schedule.Input_shortcut.opens_keepers"
+       ~arguments:[ "message_mode", "message_mode" ])
+;;
+
+let test_renderers_sanitize_untrusted_terminal_fields () =
+  let render_path = "bin/masc_tui_render.ml" in
+  let sanitizer_calls =
+    [ "Terminal_text.single_line"
+    ; "Terminal_text.optional_single_line"
+    ; "Terminal_text.single_line_or"
+    ; "Terminal_text.single_lines"
+    ; "Terminal_text.short_timestamp"
+    ; "Terminal_text.clock_timestamp"
+      (* Not a [Terminal_text] name, but it is a boundary crossing all the
+         same: it serializes the approval payload and hands the result to
+         [Masc.Tui_decode.sanitize_terminal_text] before returning
+         (masc_tui_operator_projection.ml). This list matches on the call
+         site's spelling, so a wrapper that sanitizes internally has to be
+         named here or the guard reads it as a raw access. *)
+    ; "Masc_tui_operator_projection.approval_payload_for_terminal"
+    ]
+  in
+  let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in
+  check int "field boundary helper catches the unwrapped fixture field" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:fixture_path ~binding_name:"render"
+       ~callees:sanitizer_calls ~fields:[ "safe"; "raw" ]);
+  check int "identifier boundary helper catches the unwrapped fixture value" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:fixture_path ~binding_name:"report"
+       ~callees:[ "Terminal_text.single_line" ]
+       ~identifiers:[ "path"; "err" ]);
+  let check_binding module_path binding =
+    check int (binding ^ " exists exactly once") 1
+      (Ast_grep.count_value_bindings ~module_path ~name:binding)
+  in
+  let check_fields binding fields =
+    check_binding render_path binding;
+    List.iter
+      (fun field ->
+        let total =
+          Ast_grep.count_field_accesses_outside_calls_in_value_binding
+            ~module_path:render_path ~binding_name:binding ~callees:[]
+            ~fields:[ field ]
+        in
+        if total = 0 then
+          failf "%s no longer accesses expected untrusted field %s" binding field;
+        let outside =
+          Ast_grep.count_field_accesses_outside_calls_in_value_binding
+            ~module_path:render_path ~binding_name:binding
+            ~callees:sanitizer_calls ~fields:[ field ]
+        in
+        if outside <> 0 then
+          failf
+            "%s has %d %s access(es) outside Terminal_text"
+            binding outside field)
+      fields
+  in
+  let check_identifiers ~module_path ~binding ~callees identifiers =
+    check_binding module_path binding;
+    List.iter
+      (fun identifier ->
+        let total =
+          Ast_grep.count_identifiers_outside_calls_in_value_binding
+            ~module_path ~binding_name:binding ~callees:[]
+            ~identifiers:[ identifier ]
+        in
+        if total = 0 then
+          failf "%s no longer references expected untrusted value %s" binding
+            identifier;
+        let outside =
+          Ast_grep.count_identifiers_outside_calls_in_value_binding
+            ~module_path ~binding_name:binding ~callees
+            ~identifiers:[ identifier ]
+        in
+        if outside <> 0 then
+          failf "%s has %d raw %s reference(s) outside Terminal_text" binding
+            outside identifier)
+      identifiers
+  in
+  check_fields "task_line" [ "id"; "title" ];
+  check_identifiers ~module_path:render_path ~binding:"task_line"
+    ~callees:sanitizer_calls [ "name" ];
+  check_fields "render_dashboard" [ "workspace"; "name"; "status"; "content" ];
+  check_fields "render_overview"
+    [ "workspace"
+    ; "overview_error"
+    ; "ov_cluster"
+    ; "ov_project"
+    ; "ai_summary"
+    ; "content"
+    ; "tasks_error"
+    ];
+  check_fields "render_approvals"
+    [ "aps_actor_filter"
+    ; "approvals_error"
+    ; "ap_target_id"
+    ; "ap_actor"
+    ; "ap_action_type"
+    ; "ap_target_type"
+    ; "ap_summary"
+    ; "ap_expires_at"
+    ; "ap_payload"
+    ; "ap_trace_id"
+    ; "ap_created_at"
+    ];
+  check_fields "render_board_list"
+    [ "board_error"; "bp_id"; "bp_author"; "bp_title" ];
+  check_fields "render_board_read"
+    [ "bp_id"
+    ; "bp_author"
+    ; "bp_title"
+    ; "bp_created_at"
+    ; "bp_body"
+    ; "bc_author"
+    ; "bc_content"
+    ];
+  check_fields "render_planning_list"
+    [ "planning_error"; "pg_due_date"; "pg_title" ];
+  check_fields "render_planning_detail"
+    [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
+  check_fields "render_keeper_list"
+    [ "keepers_error"; "k_current_task_id"; "k_name" ];
+  check_fields "render_keeper_detail"
+    [ "k_name"
+    ; "k_current_task_id"
+    ; "live_context_error"
+    ; "observed_at"
+    ; "turn_ref"
+    ; "k_last_turn_ts"
+    ; "k_created_at"
+    ; "k_updated_at"
+    ];
+  check_fields "render_keeper_logs"
+    [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  let ansi_path = "bin/masc_tui_ansi.ml" in
+  [ "single_line"
+  ; "optional_single_line"
+  ; "single_line_or"
+  ; "single_lines"
+  ; "short_timestamp"
+  ; "clock_timestamp"
+  ]
+  |> List.iter (check_binding ansi_path);
+  let check_direct_result binding callee =
+    check bool (binding ^ " returns its trusted projection directly") true
+      (Ast_grep.direct_call_sequence_matches_in_value_binding
+         ~module_path:ansi_path ~binding_name:binding ~callees:[ callee ])
+  in
+  check_direct_result "single_line"
+    "Masc.Tui_decode.sanitize_terminal_text";
+  check_direct_result "optional_single_line" "Option.map";
+  check_direct_result "single_line_or" "Option.value";
+  check_direct_result "single_lines" "List.map";
+  check_direct_result "short_timestamp"
+    "Masc.Tui_decode.short_timestamp_for_terminal";
+  check_direct_result "clock_timestamp"
+    "Masc.Tui_decode.clock_timestamp_for_terminal";
+  check int "shared terminal boundary delegates to the typed sanitizer" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:ansi_path ~binding_name:"single_line"
+       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+  check int "optional boundary maps the sanitizer" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:ansi_path ~binding_name:"optional_single_line"
+       ~callee:"Option.map" ~position:0 ~identifier:"single_line");
+  check int "defaulted boundary uses the optional sanitizer" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"single_line_or" ~callee:"optional_single_line");
+  check int "list boundary maps the sanitizer" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:ansi_path ~binding_name:"single_lines" ~callee:"List.map"
+       ~position:0 ~identifier:"single_line");
+  check int "short timestamp delegates to slice-then-sanitize helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"short_timestamp"
+       ~callee:"Masc.Tui_decode.short_timestamp_for_terminal");
+  check int "clock timestamp delegates to slice-then-sanitize helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"clock_timestamp"
+       ~callee:"Masc.Tui_decode.clock_timestamp_for_terminal");
+  let decode_path = "lib/tui_decode.ml" in
+  [ "short_timestamp_for_terminal"; "clock_timestamp_for_terminal" ]
+  |> List.iter (fun binding ->
+       check_binding decode_path binding;
+       check bool (binding ^ " returns the final sanitizer result") true
+         (Ast_grep.direct_call_sequence_matches_in_value_binding
+            ~module_path:decode_path ~binding_name:binding
+            ~callees:[ "sanitize_terminal_text" ]);
+       check int (binding ^ " has one final sanitizer") 1
+         (Ast_grep.count_calls_in_value_binding ~module_path:decode_path
+            ~binding_name:binding ~callee:"sanitize_terminal_text");
+       check int (binding ^ " never uses raw text after sanitizing") 0
+         (Ast_grep.count_identifiers_outside_calls_in_value_binding
+            ~module_path:decode_path ~binding_name:binding
+            ~callees:[ "sanitize_terminal_text" ] ~identifiers:[ "text" ]));
+  check int "log renderer does not slice sanitized timestamp bytes" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs" ~callee:"String.sub");
+  check int "log renderer uses the safe clock projection once" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Terminal_text.clock_timestamp");
+  check int "keeper detail uses safe short projections for every timestamp" 5
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_detail"
+       ~callee:"Terminal_text.short_timestamp");
+  check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
+    ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
 ;;
 
 let () =
@@ -668,6 +1067,10 @@ let () =
           "render loop uses monotonic dirty scheduling"
           `Quick
           test_render_loop_uses_monotonic_dirty_schedule;
+        test_case
+          "renderers sanitize untrusted terminal fields"
+          `Quick
+          test_renderers_sanitize_untrusted_terminal_fields;
       ]
     )
   ]

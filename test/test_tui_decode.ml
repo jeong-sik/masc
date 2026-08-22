@@ -188,6 +188,66 @@ let test_terminal_text_preserves_printable_utf8 () =
     "정상 blocker — café"
     (Tui_decode.sanitize_terminal_text "정상 blocker — café")
 
+let test_terminal_text_escapes_malformed_utf8_bytes () =
+  [ ( "isolated illegal bytes"
+    , "\128\160\192\193\194\245\255"
+    , "\\x80\\xA0\\xC0\\xC1\\xC2\\xF5\\xFF" )
+  ; ("overlong two-byte sequence", "\192\128", "\\xC0\\x80")
+  ; ("overlong three-byte sequence", "\224\128\128", "\\xE0\\x80\\x80")
+  ; ( "overlong four-byte sequence"
+    , "\240\128\128\128"
+    , "\\xF0\\x80\\x80\\x80" )
+  ; ("UTF-16 surrogate", "\237\160\128", "\\xED\\xA0\\x80")
+  ; ( "code point above U+10FFFF"
+    , "\244\144\128\128"
+    , "\\xF4\\x90\\x80\\x80" )
+  ; ("truncated three-byte sequence", "\226\130", "\\xE2\\x82")
+  ; ( "bad three-byte continuation"
+    , "\226(\161"
+    , "\\xE2(\\xA1" )
+  ; ( "truncated four-byte sequence"
+    , "\240\159\146"
+    , "\\xF0\\x9F\\x92" )
+  ]
+  |> List.iter (fun (label, input, expected) ->
+       Alcotest.(check string) label expected
+         (Tui_decode.sanitize_terminal_text input))
+
+let test_terminal_text_is_idempotent_and_single_line () =
+  let once =
+    Tui_decode.sanitize_terminal_text
+      "safe\000\007\009\010\013\027\127\128\159\194\128done"
+  in
+  Alcotest.(check string)
+    "all C0, DEL, raw C1, and encoded C1 controls are inert"
+    "safe\\x00\\x07\\x09\\x0A\\x0D\\x1B\\x7F\\x80\\x9F\\u0080done"
+    once;
+  Alcotest.(check bool) "sanitized output is one logical row" false
+    (String.contains once '\n');
+  Alcotest.(check string) "sanitization is idempotent" once
+    (Tui_decode.sanitize_terminal_text once)
+
+let test_timestamp_slices_are_sanitized_after_selection () =
+  Alcotest.(check string) "normal clock timestamp" "04:05:06"
+    (Tui_decode.clock_timestamp_for_terminal "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "empty short timestamp" "(never)"
+    (Tui_decode.short_timestamp_for_terminal "");
+  Alcotest.(check string)
+    "clock slice cannot expose a UTF-8 continuation as raw C1"
+    "\\x9B31mOWNE"
+    (Tui_decode.clock_timestamp_for_terminal
+       "0123456789Û31mOWNED!!");
+  Alcotest.(check string)
+    "short timestamp cannot leave a split UTF-8 lead byte"
+    "123456789012345678\\xE2"
+    (Tui_decode.short_timestamp_for_terminal
+       "123456789012345678€");
+  Alcotest.(check string)
+    "clock slice escapes selected terminal controls"
+    "0\\x1B]2;Xab"
+    (Tui_decode.clock_timestamp_for_terminal
+       "2026-08-22T0\027]2;Xabcd")
+
 let test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe () =
   let detail = "queue\027]8;;https://attacker.invalid\007owned\027]8;;\007" in
   match Tui_decode.decode_keeper (current_keeper_json ~blocker_detail:detail ()) with
@@ -903,6 +963,12 @@ let () =
           test_terminal_text_escapes_control_sequences
       ; Alcotest.test_case "preserves printable UTF-8" `Quick
           test_terminal_text_preserves_printable_utf8
+      ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
+          test_terminal_text_escapes_malformed_utf8_bytes
+      ; Alcotest.test_case "is idempotent and single-line" `Quick
+          test_terminal_text_is_idempotent_and_single_line
+      ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
+          test_timestamp_slices_are_sanitized_after_selection
       ; Alcotest.test_case "keeper blocker keeps raw and renders safe" `Quick
           test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe
       ] );

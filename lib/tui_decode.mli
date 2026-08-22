@@ -36,10 +36,20 @@ type keeper = {
 }
 
 val sanitize_terminal_text : string -> string
-(** Escape C0, DEL, C1 bytes, and UTF-8 encoded C1 code points so external
-    diagnostics cannot emit terminal control sequences. Call at the terminal
-    rendering boundary; decoded records intentionally retain their raw typed
-    diagnostic for non-terminal consumers. *)
+(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, and malformed
+    UTF-8 bytes so external values form one printable terminal row. Call at the
+    terminal rendering boundary; decoded records intentionally retain their raw
+    typed value for non-terminal consumers. *)
+
+val short_timestamp_for_terminal : string -> string
+(** Keep at most the first 19 source bytes, then sanitize the result. Slicing
+    before the terminal boundary ensures a split UTF-8 scalar cannot recreate a
+    raw C1 byte. Empty timestamps render as [(never)]. *)
+
+val clock_timestamp_for_terminal : string -> string
+(** Select the conventional eight-byte clock portion of a timestamp when it is
+    present, then sanitize the result. The final sanitizer makes arbitrary
+    external timestamp bytes safe even when the byte slice splits UTF-8. *)
 
 val keeper_blocker_for_terminal : keeper -> string
 (** Terminal-boundary projection for the raw typed blocker stored in

@@ -4,6 +4,7 @@ open Masc_tui_render
 open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
+module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Metrics_tail = Masc_tui_metrics_tail
@@ -17,6 +18,31 @@ exception Break
 let frame_interval_ns = 16_000_000L
 let maximum_input_wait_seconds = 0.016
 let nanoseconds_per_second = 1_000_000_000.0
+
+let synchronized_output_enabled () =
+  match Sys.getenv_opt "MASC_TUI_SYNC" with
+  | Some value ->
+      (match String.lowercase_ascii (String.trim value) with
+       | "0" | "false" | "no" | "off" -> false
+       | "" | "1" | "true" | "yes" | "on" | _ -> true)
+  | None -> true
+
+let require_interactive_terminal () =
+  let term =
+    Sys.getenv_opt "TERM"
+    |> Option.value ~default:""
+    |> String.lowercase_ascii
+    |> String.trim
+  in
+  if
+    (not (Unix.isatty Unix.stdin))
+    || not (Unix.isatty Unix.stdout)
+    || String.equal term "dumb"
+  then begin
+    prerr_endline
+      "masc-tui requires interactive TTY stdin/stdout and TERM other than dumb";
+    exit 2
+  end
 
 let keeper_log_content_height (state : state) =
   let rows, _columns = get_terminal_size () in
@@ -1431,30 +1457,69 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   in
   loop false
 
+let invalidate_frame_for_resize frame_presenter render_schedule =
+  invalidate_terminal_size ();
+  Frame_presenter.invalidate frame_presenter;
+  Render_schedule.request render_schedule Render_schedule.Force
+
+let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
+    ~new_term =
+  at_exit cleanup;
+  Sys.set_signal Sys.sigint (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sighup (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sigquit (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sigwinch (Sys.Signal_handle request_full_repaint);
+  Sys.set_signal Sys.sigcont (Sys.Signal_handle request_full_repaint);
+  Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
+  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term
+
 (** Main loop *)
 let main () =
   let (base_path, workspace, port, refresh) = parse_args () in
+  require_interactive_terminal ();
   let state = create_state ~workspace ~port ~refresh_interval:refresh in
   state.view <- Overview;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
   let new_term = { old_term with Unix.c_icanon = false; c_echo = false } in
-  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+
+  let frame_presenter =
+    Frame_presenter.create
+      ~synchronized_output:(synchronized_output_enabled ()) ()
+  in
+  let resize_requested = Atomic.make false in
+
+  let restore_terminal () =
+    Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout);
+    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
+  in
 
   (* Cleanup on exit *)
+  let cleanup_started = Atomic.make false in
   let cleanup () =
-    print_string Ansi.show_cursor;
-    print_string Ansi.clear;
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
-    print_endline "Goodbye!"
+    if Atomic.compare_and_set cleanup_started false true then begin
+      restore_terminal ();
+      print_endline "Goodbye!"
+    end
   in
-  at_exit cleanup;
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> exit 0));
 
-  let resize_requested = Atomic.make false in
-  Sys.set_signal Sys.sigwinch
-    (Sys.Signal_handle (fun _ -> Atomic.set resize_requested true));
+  let request_full_repaint _ = Atomic.set resize_requested true in
+  let terminate _ = exit 0 in
+  let rec suspend _ =
+    restore_terminal ();
+    Sys.set_signal Sys.sigtstp Sys.Signal_default;
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
+        Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+        request_full_repaint 0)
+      (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
+  in
+  enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
+    ~new_term;
   let render_schedule =
     Render_schedule.create ~min_interval_ns:frame_interval_ns ()
   in
@@ -1531,11 +1596,10 @@ let main () =
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let input_reader = create_input_reader () in
-  try
+  let run_loop () =
     while true do
       if Atomic.exchange resize_requested false then begin
-        invalidate_terminal_size ();
-        Render_schedule.request render_schedule Render_schedule.Force
+        invalidate_frame_for_resize frame_presenter render_schedule
       end;
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
@@ -1550,12 +1614,23 @@ let main () =
       let key = read_key ~timeout:input_timeout input_reader () in
       if Option.is_some key then
         Render_schedule.request render_schedule Render_schedule.Input;
+      let terminal_rows, _terminal_columns = get_terminal_size () in
+      let compact_viewport =
+        Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
+      in
+      let message_mode =
+        (not compact_viewport) && state.view = Keepers Keeper_message
+      in
       (match state.view, key with
+       | _ when compact_viewport -> ()
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None
        | _ -> ());
       (match key with
-       | Some k when state.view = Keepers Keeper_message ->
+       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
+           raise Break
+       | Some _ when compact_viewport -> ()
+       | Some k when message_mode ->
            let recovery_key =
              String.length k = 1 && Char.code k.[0] = 18
            in
@@ -1575,7 +1650,8 @@ let main () =
                  k
              in
              ()
-       | Some "q" | Some "Q" -> raise Break
+       | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
+           state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
            (match state.view with
             | Approvals ->
@@ -1866,22 +1942,30 @@ let main () =
          Render_schedule.take render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
-       | Render_schedule.Render -> render state
+       | Render_schedule.Render ->
+           let frame = render state in
+           Frame_presenter.present frame_presenter
+             ~invalidate_before:(consume_terminal_write_outside_frame ())
+             ~write:(output_string stdout)
+             ~flush:(fun () -> flush stdout) frame
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
-  with Break -> ()
+  in
+  run_loop ()
 
 let run_with_eio_context f =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  Eio_guard.enable ();
-  Eio.Switch.on_release sw Eio_guard.disable;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_context.set_env env;
-  Eio_context.set_switch sw;
-  Eio_context.set_net (Eio.Stdenv.net env);
-  Eio_context.set_clock (Eio.Stdenv.clock env);
-  Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-  f ()
+  try
+    Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+            Eio_guard.enable ();
+            Eio.Switch.on_release sw Eio_guard.disable;
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            Eio_context.set_env env;
+            Eio_context.set_switch sw;
+            Eio_context.set_net (Eio.Stdenv.net env);
+            Eio_context.set_clock (Eio.Stdenv.clock env);
+            Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
+            f ()))
+  with Break -> ()
 
 let () = run_with_eio_context main

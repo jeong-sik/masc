@@ -53,6 +53,16 @@ let terminal_size_cache =
 let invalidate_terminal_size () =
   Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
 
+(** Direct writes outside the frame presenter make its cached screen
+    untrustworthy. Producers mark that boundary before touching the TTY. *)
+let terminal_write_outside_frame = Atomic.make false
+
+let note_terminal_write_outside_frame () =
+  Atomic.set terminal_write_outside_frame true
+
+let consume_terminal_write_outside_frame () =
+  Atomic.exchange terminal_write_outside_frame false
+
 let probe_terminal_size () =
   let read_tput arg =
     try
@@ -89,6 +99,10 @@ module Terminal_text = struct
 
   let single_line_or ~default value =
     Option.value ~default (optional_single_line value)
+
+  let single_lines values = List.map single_line values
+  let short_timestamp text = Masc.Tui_decode.short_timestamp_for_terminal text
+  let clock_timestamp text = Masc.Tui_decode.clock_timestamp_for_terminal text
 end
 
 let is_keeper name =
@@ -140,12 +154,6 @@ let soul_color profile =
   | "balanced" -> Ansi.cyan
   | "creative" -> Ansi.yellow
   | _ -> Ansi.white
-
-(** Format a timestamp for display (show date portion or relative) *)
-let short_ts s =
-  if String.length s > 19 then String.sub s 0 19
-  else if String.length s = 0 then "(never)"
-  else s
 
 (** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
 let ctx_color ratio =

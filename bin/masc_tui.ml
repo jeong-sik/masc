@@ -10,6 +10,7 @@ module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Metrics_tail = Masc_tui_metrics_tail
+module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
 module Terminal_write_repair = Masc_tui_terminal_write_repair
 
@@ -1069,14 +1070,41 @@ let apply_board_list_load state = function
 
 let apply_planning_load state = function
   | Ok planning ->
+      let goal_ids planning =
+        planning_visible_goals planning.pl_goals
+        |> List.map (fun goal -> goal.pg_id)
+      in
+      let current =
+        match state.planning_mode with
+        | Planning_list ->
+            Planning_selection.List_cursor state.planning_cursor
+        | Planning_detail goal_id ->
+            Planning_selection.Detail_goal
+              { goal_id; cursor = state.planning_cursor }
+      in
+      let current_ids =
+        match state.planning with
+        | None -> []
+        | Some current_planning -> goal_ids current_planning
+      in
+      let navigation =
+        Planning_selection.reconcile ~current_ids
+          ~next_ids:(goal_ids planning) ~current
+      in
       state.planning <- Some planning;
       state.planning_error <- None;
-      let goals = planning_visible_goals planning.pl_goals in
-      if state.planning_cursor >= List.length goals then
-        state.planning_cursor <- max 0 (List.length goals - 1)
+      (match navigation with
+       | Planning_selection.List_cursor cursor ->
+           state.planning_cursor <- cursor;
+           state.planning_mode <- Planning_list;
+           state.planning_scroll <- 0
+       | Planning_selection.Detail_goal { goal_id; cursor } ->
+           state.planning_cursor <- cursor;
+           state.planning_mode <- Planning_detail goal_id)
   | Error err ->
       state.planning <- None;
       state.planning_mode <- Planning_list;
+      state.planning_scroll <- 0;
       remember_surface_error state ~surface:"planning"
         ~current_error:state.planning_error
         ~set_error:(fun value -> state.planning_error <- value)
@@ -1720,7 +1748,7 @@ let main () =
            start_http_refresh state ~host ~port
              ~refresh_inflight:http_refresh_inflight
              ~mailbox:async_messages;
-           (* Also reload logs / board / planning detail if viewing them *)
+           (* Also reload logs / Board detail if viewing them. *)
            (match state.view with
             | Keepers Keeper_logs ->
                 load_selected_keeper_logs state base_path 200
@@ -1731,18 +1759,8 @@ let main () =
                      start_board_post_refresh state ~host ~port ~post_id
                        ~mailbox:async_messages
                  | Board_list -> ())
-            | Planning ->
-                (match state.planning_mode with
-                 | Planning_detail goal_id ->
-                     (match state.planning with
-                      | Some p ->
-                          (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
-                           | Some _ -> ()
-                           | None -> state.planning_mode <- Planning_list)
-                      | None -> state.planning_mode <- Planning_list)
-                 | Planning_list -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-            | Approvals -> ());
+            | Approvals | Planning -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab cycles through primary surfaces *)
@@ -1967,7 +1985,7 @@ let main () =
         start_http_refresh state ~host ~port
           ~refresh_inflight:http_refresh_inflight
           ~mailbox:async_messages;
-        (* Also refresh logs / board / planning detail if viewing them *)
+        (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Keepers Keeper_logs ->
              load_selected_keeper_logs state base_path 200
@@ -1978,18 +1996,8 @@ let main () =
                   start_board_post_refresh state ~host ~port ~post_id
                     ~mailbox:async_messages
               | Board_list -> ())
-         | Planning ->
-             (match state.planning_mode with
-              | Planning_detail goal_id ->
-                  (match state.planning with
-                   | Some p ->
-                       (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
-                        | Some _ -> ()
-                        | None -> state.planning_mode <- Planning_list)
-                   | None -> state.planning_mode <- Planning_list)
-              | Planning_list -> ())
          | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-         | Approvals -> ());
+         | Approvals | Planning -> ());
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background
       end;

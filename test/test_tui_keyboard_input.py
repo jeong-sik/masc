@@ -608,6 +608,54 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
+PLANNING_PATH = "/api/v1/dashboard/planning"
+
+
+def planning_goal(goal_id: str, title: str) -> dict[str, object]:
+    return {
+        "id": goal_id,
+        "title": title,
+        "phase": "executing",
+        "priority": 1,
+    }
+
+
+def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
+    return (
+        200,
+        {
+            "goals": goals,
+            "rollup": {
+                "active_count": len(goals),
+                "paused_count": 0,
+                "verifying_count": 0,
+                "done_count": 0,
+                "dropped_count": 0,
+            },
+            "task_backlog": {
+                "todo": 0,
+                "claimed": 0,
+                "in_progress": 0,
+                "done": 0,
+                "cancelled": 0,
+            },
+            "generated_at": "2026-08-22T00:00:00Z",
+        },
+    )
+
+
+def planning_selection_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures[PLANNING_PATH] = planning_snapshot(
+        [
+            planning_goal("goal-a-29424", "plan-alpha-29424"),
+            planning_goal("goal-b-29424", "plan-beta-29424"),
+            planning_goal("goal-c-29424", "plan-charlie-29424"),
+        ]
+    )
+    return fixtures
+
+
 def approval_selection_item(
     token: str,
     *,
@@ -1641,6 +1689,160 @@ def approval_selection_identity_interaction(
     return interact
 
 
+def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
+    plain = CSI_RE.sub(b"", frame)
+    selected_row = re.compile(
+        rb">[ \t]+\[[^\]\r\n]+\][ \t]+P1[ \t]+" + re.escape(title)
+    )
+    if selected_row.search(plain) is None:
+        raise AssertionError(f"Planning did not select {title!r}: {frame!r}")
+
+
+def open_loaded_planning(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+) -> None:
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=cluster_end,
+        timeout=3.0,
+    )
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Board (0)")
+    send_and_wait(process, master_fd, output, b"\t", b"plan-alpha-29424")
+
+
+def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        open_loaded_planning(process, master_fd, output)
+        selected = send_and_wait(process, master_fd, output, b"j", b"plan-beta-29424")
+        assert_planning_goal_selected(
+            frame_containing(selected, b"plan-beta-29424"),
+            b"plan-beta-29424",
+        )
+
+        fixtures[PLANNING_PATH] = planning_snapshot(
+            [
+                planning_goal("goal-new-29424", "plan-new-reorder-applied-29424"),
+                planning_goal("goal-a-29424", "plan-alpha-29424"),
+                planning_goal("goal-b-29424", "plan-beta-29424"),
+                planning_goal("goal-c-29424", "plan-charlie-29424"),
+            ]
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"plan-new-reorder-applied-29424",
+        )
+        refreshed = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=99,
+            needle=b"plan-new-reorder-applied-29424",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        assert_planning_goal_selected(refreshed, b"plan-beta-29424")
+
+        detail = send_and_wait(process, master_fd, output, b"\r", b"goal-b-29424")
+        if b"plan-beta-29424" not in detail or b"Esc:back" not in detail:
+            raise AssertionError(
+                f"Planning refresh opened a different goal detail: {detail!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        open_loaded_planning(process, master_fd, output)
+        selected = send_and_wait(process, master_fd, output, b"j", b"plan-beta-29424")
+        assert_planning_goal_selected(
+            frame_containing(selected, b"plan-beta-29424"),
+            b"plan-beta-29424",
+        )
+        detail = send_and_wait(process, master_fd, output, b"\r", b"goal-b-29424")
+        if b"plan-beta-29424" not in detail or b"Esc:back" not in detail:
+            raise AssertionError(f"fixture did not open Planning B detail: {detail!r}")
+
+        fixtures[PLANNING_PATH] = planning_snapshot(
+            [
+                planning_goal("goal-a-29424", "plan-alpha-29424"),
+                planning_goal("goal-c-29424", "plan-charlie-29424"),
+                planning_goal("goal-d-29424", "plan-delta-missing-applied-29424"),
+            ]
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"plan-delta-missing-applied-29424",
+        )
+        recovered = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=99,
+            needle=b"plan-delta-missing-applied-29424",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        assert_planning_goal_selected(recovered, b"plan-charlie-29424")
+        if b"Enter:detail" not in recovered or b"Esc:back" in recovered:
+            raise AssertionError(
+                f"missing Planning detail did not render list mode: {recovered!r}"
+            )
+
+        moved = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            b"plan-delta-missing-applied-29424",
+        )
+        assert_planning_goal_selected(
+            frame_containing(moved, b"plan-delta-missing-applied-29424"),
+            b"plan-delta-missing-applied-29424",
+        )
+        delta_detail = send_and_wait(process, master_fd, output, b"\r", b"goal-d-29424")
+        if (
+            b"plan-delta-missing-applied-29424" not in delta_detail
+            or b"Esc:back" not in delta_detail
+        ):
+            raise AssertionError(
+                f"recovered Planning list did not open D detail: {delta_detail!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -2076,6 +2278,8 @@ def run_keyboard_regression(executable: str) -> None:
     keeper_scroll_fixtures = overview_event_http_fixtures()
     keeper_scroll_gate = GatedHttpResponse((200, {"posts": []}))
     approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
+    planning_reorder_fixtures = planning_selection_http_fixtures()
+    planning_missing_fixtures = planning_selection_http_fixtures()
     board_selection_fixtures = board_selection_http_fixtures()
     board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
@@ -2117,6 +2321,18 @@ def run_keyboard_regression(executable: str) -> None:
             approval_new,
         ),
         http_fixtures=approval_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Planning selection identity",
+        interact=planning_reorder_identity_interaction(planning_reorder_fixtures),
+        http_fixtures=planning_reorder_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Planning missing detail recovery",
+        interact=planning_missing_detail_interaction(planning_missing_fixtures),
+        http_fixtures=planning_missing_fixtures,
     )
     run_terminal_scenario(
         executable,

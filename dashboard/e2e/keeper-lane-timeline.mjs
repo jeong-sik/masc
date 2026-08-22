@@ -17,25 +17,39 @@ try {
   const rows = page.getByTestId('keeper-lane-waiting-row')
   if (await rows.count() !== 3) throw new Error('the fixture did not render all queue rows')
 
+  // Oldest first: the fixture's 2026-08-06 row leads, and its bar spans the
+  // whole age axis because it is the oldest wait on the strip.
   const firstRow = rows.first()
-  const card = firstRow.locator(':scope > div').nth(1)
-  const timestamp = page.getByTestId('keeper-lane-waiting-time').first()
-  if (!(await card.locator('[data-testid="keeper-lane-waiting-time"]').count())) {
-    throw new Error('the timestamp is not inside the widened queue card')
+  if (await firstRow.getAttribute('data-waiting-on') !== 'discord:incident-room') {
+    throw new Error('the oldest wait is not the first row')
   }
-  const rowBox = await firstRow.boundingBox()
-  const cardBox = await card.boundingBox()
-  if (!rowBox || !cardBox || cardBox.width / rowBox.width < 0.9) {
-    throw new Error('the queue card did not receive the timeline width')
+  const bars = page.getByTestId('keeper-lane-waiting-bar')
+  const widths = await bars.evaluateAll((nodes) => nodes.map((node) => Number.parseFloat(node.style.width)))
+  if (widths[0] !== 100 || !(widths[1] < widths[0]) || !(widths[2] < widths[1])) {
+    throw new Error(`bar widths do not fall with age: ${widths.join(', ')}`)
   }
-  await timestamp.locator('time').waitFor()
+  const axisTicks = await page.getByTestId('keeper-lane-age-axis').locator('[data-axis-tick]').allTextContents()
+  if (axisTicks[0] !== '지금' || !axisTicks.includes('1시간') || !axisTicks.includes('1일')) {
+    throw new Error(`the age axis is missing its ticks: ${axisTicks.join(', ')}`)
+  }
 
-  const evidence = firstRow.locator('details')
-  await evidence.getByText('Typed queue evidence', { exact: true }).click()
-  if (!(await evidence.evaluate((node) => node.open))) {
-    throw new Error('the typed queue evidence disclosure did not open')
+  // The operator sentence is the default reading; the wire enum is not.
+  const firstBar = bars.first()
+  await firstBar.getByText('discord:incident-room 멘션', { exact: true }).waitFor()
+  if (await firstRow.getByText('external_attention_store', { exact: true }).count()) {
+    throw new Error('the wake producer leaked into the default reading')
   }
-  await evidence.getByText('external_attention_store', { exact: true }).waitFor()
+
+  // Opening a row discloses the timestamp; the 기술 상세 toggle discloses the
+  // wire vocabulary and the typed detail.
+  await firstBar.click()
+  if (!(await firstRow.evaluate((node) => node.open))) {
+    throw new Error('the queue row did not open')
+  }
+  await firstRow.locator('[data-testid="keeper-lane-waiting-time"] time').waitFor()
+  await page.getByTestId('keeper-lane-dev-toggle').click()
+  await firstRow.getByText('external_attention_store', { exact: true }).waitFor()
+  await firstRow.getByText('keeper_process_external_attention', { exact: true }).waitFor()
   await page.screenshot({ path: desktopScreenshot, fullPage: true })
 
   for (const width of [390, 360, 320]) {

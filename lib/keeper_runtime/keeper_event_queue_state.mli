@@ -283,4 +283,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v15"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v16"] is the only accepted schema. *)

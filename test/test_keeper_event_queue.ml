@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v15.json"
+    "event-queue-v16.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -1577,7 +1577,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v15.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v16.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
@@ -2058,3 +2058,28 @@ let () =
       with
       | Error msg -> assert (String.length msg > 0)
       | Ok () -> Alcotest.fail "durable enqueue overwrote a corrupt snapshot");
+
+  (* --- version contract: a snapshot written under the previous envelope is
+     rejected, never decoded. Dropping a durable stimulus variant changes the
+     persisted shape, so the cut rides on the schema version; a reader that
+     still accepted the older string would meet payload kinds the current sum
+     no longer carries. #29490 removed Goal_reconciliation_ready without
+     turning this crank and four keepers could not boot. --- *)
+  (match
+     Keeper_event_queue_state.of_yojson
+       (`Assoc
+           [ "schema", `String "keeper.event_queue.state.v15"
+           ; "revision", `Int 1
+           ; "pending", `List []
+           ; "last_transition", `Null
+           ; "projected_dispositions", `List []
+           ; "transition_outbox", `List []
+           ; "accepted_transfer_projections", `List []
+           ])
+   with
+   | Ok _ -> Alcotest.fail "prior-schema event queue snapshot was accepted"
+   | Error message ->
+     assert (
+       String.equal
+         message
+         "unsupported keeper event queue state schema: keeper.event_queue.state.v15"))

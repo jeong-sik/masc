@@ -242,7 +242,7 @@ val make_health_response_json :
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  request_authority:Server_request_authority.request_context ->
+  request_authority:Server_request_authority.authority ->
   unit
 (** Starts the Eio background refresh loop for cached [/health?full=1]
     diagnostics.  The loop keeps heavy durable scans out of the HTTP request

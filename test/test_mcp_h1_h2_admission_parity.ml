@@ -296,8 +296,6 @@ let test_session_id_parsing_uses_uri_and_cookie_contracts () =
   check (option string) "first duplicate query value" (Some "first")
     (Transport.get_session_id_query
        "/mcp?session_id=first&session_id=second");
-  check (option string) "legacy camel-case query key" (Some "legacy")
-    (Transport.get_session_id_query "/mcp?sessionId=legacy");
   let cookie_request =
     request ~headers:[ ("cookie", "mcp-session-id=exact=value; Other=x") ]
       "/mcp"

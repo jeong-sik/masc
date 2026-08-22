@@ -114,14 +114,6 @@ let to_json envelope =
           ; "latest_age_s", Json_util.float_opt_to_json envelope.cache.latest_age_s
           ; "health", Json_util.string_opt_to_json envelope.cache.health
           ] )
-    ; ( "migration"
-      , `Assoc
-          [ "body_shape", `String "root_fields_preserved"
-          ; ( "rule"
-            , `String
-                "New dashboard read models add this envelope before versioning or removing existing root fields."
-            )
-          ] )
     ]
 ;;
 

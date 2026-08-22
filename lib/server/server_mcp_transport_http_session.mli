@@ -154,10 +154,9 @@ val protocol_version_from_body : string -> string option
     initialise request body. *)
 
 val get_session_id_query : string -> string option
-(** [get_session_id_query target] extracts a [session_id=...]
-    or [sessionId=...] query parameter from the URL target.
-    Returns [None] when not found.  Both casings are accepted
-    as a backward-compat alias. *)
+(** [get_session_id_query target] extracts the [session_id=...]
+    query parameter from the URL target.  Returns [None] when
+    not found. *)
 
 val title_case_header_name : string -> string
 (** Internal but exposed because the {!get_header_any_case}

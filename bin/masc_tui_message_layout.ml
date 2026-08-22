@@ -72,41 +72,31 @@ let ansi_csi_end text offset =
 let scalar_cell_width scalar =
   let code = Uchar.to_int scalar in
   if code >= 0x20 && code <= 0x7E then 1
+  else if Uucp.Func.is_regional_indicator scalar then 1
   else if Uucp.Emoji.is_emoji_presentation scalar then 2
   else max 0 (Uucp.Break.tty_width_hint scalar)
 
 let grapheme_cell_width grapheme =
-  let rec loop offset max_width has_vs16 has_keycap has_zwj
-      has_extended_pictographic has_emoji regional_count =
+  let rec loop offset width max_width has_hangul_l has_hangul_vt =
     if offset >= String.length grapheme then
-      let emoji_cluster =
-        has_vs16 || has_keycap || has_emoji || regional_count >= 2
-        || (has_zwj && has_extended_pictographic)
-      in
-      if emoji_cluster then max 2 max_width else max_width
+      if has_hangul_l && has_hangul_vt then max_width else width
     else
       let decoded = String.get_utf_8_uchar grapheme offset in
       let valid = Uchar.utf_decode_is_valid decoded in
       let scalar_length = max 1 (Uchar.utf_decode_length decoded) in
       if not valid then
-        loop (offset + scalar_length) (max 1 max_width) has_vs16 has_keycap
-          has_zwj has_extended_pictographic has_emoji regional_count
+        loop (offset + scalar_length) (width + 1) (max 1 max_width)
+          has_hangul_l has_hangul_vt
       else
         let scalar = Uchar.utf_decode_uchar decoded in
-        let code = Uchar.to_int scalar in
-        loop (offset + scalar_length)
-          (max max_width (scalar_cell_width scalar))
-          (has_vs16 || code = 0xFE0F)
-          (has_keycap || code = 0x20E3)
-          (has_zwj || code = 0x200D)
-          (has_extended_pictographic
-          || Uucp.Emoji.is_extended_pictographic scalar)
-          (has_emoji || Uucp.Emoji.is_emoji_presentation scalar
-          || Uucp.Emoji.is_emoji_modifier scalar)
-          (regional_count
-          + if Uucp.Func.is_regional_indicator scalar then 1 else 0)
+        let scalar_width = scalar_cell_width scalar in
+        let hangul_type = Uucp.Hangul.syllable_type scalar in
+        loop (offset + scalar_length) (width + scalar_width)
+          (max max_width scalar_width)
+          (has_hangul_l || hangul_type = `L)
+          (has_hangul_vt || hangul_type = `V || hangul_type = `T)
   in
-  loop 0 0 false false false false false 0
+  loop 0 0 0 false false
 
 type display_piece = {
   start_offset : int;

@@ -30,9 +30,9 @@ val drop_last_utf8_scalar : string -> string
     preserved rather than truncated into a different malformed value. *)
 
 val display_width : string -> int
-(** Approximate the terminal display-cell width of UTF-8 text. Renderer-owned
-    ANSI CSI sequences have zero width, combining marks have zero width, and
-    common wide or emoji-presentation scalars have width two. *)
+(** Approximate xterm Unicode-11 display cells while preserving extended
+    grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,
+    combining marks, variation selectors, and joiners have zero width. *)
 
 val fit_width : string -> int -> string
 (** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar

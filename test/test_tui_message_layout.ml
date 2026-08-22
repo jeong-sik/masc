@@ -63,13 +63,13 @@ let test_terminal_cell_width_and_fit () =
     ; "🙂", 2
     ; "Aé한🙂", 6
     ; "\x1B[31m한\x1B[0m", 2
-    ; "👍🏽", 2
+    ; "👍🏽", 4
     ; "🇰🇷", 2
-    ; "❤️", 2
-    ; "👩‍👩‍👧‍👦", 2
-    ; "1️⃣", 2
+    ; "❤️", 1
+    ; "👩‍👩‍👧‍👦", 8
+    ; "1️⃣", 1
     ; "한", 2
-    ; "\x1B[31m❤️\x1B[0m", 2
+    ; "\x1B[31m❤️\x1B[0m", 1
     ];
   check string "exact-width text is unchanged" "12345"
     (Layout.fit_width "12345" 5);
@@ -157,15 +157,21 @@ let test_input_viewport_keeps_latest_complete_scalars () =
   check string "detached combining mark is not rendered" "~"
     (viewport 2 "A한\xCC\x81");
   List.iter
-    (fun grapheme ->
+    (fun (grapheme, cells) ->
       check string ("overflow keeps complete grapheme " ^ grapheme)
-        ("~" ^ grapheme) (viewport 3 ("AB" ^ grapheme)))
-    [ "👍🏽"; "🇰🇷"; "❤️"; "👩‍👩‍👧‍👦"; "1️⃣"; "한" ];
+        ("~" ^ grapheme) (viewport (cells + 1) ("AB" ^ grapheme)))
+    [ "👍🏽", 4
+    ; "🇰🇷", 2
+    ; "❤️", 1
+    ; "👩‍👩‍👧‍👦", 8
+    ; "1️⃣", 1
+    ; "한", 2
+    ];
   let repeated_hearts = String.concat "" (List.init 10 (fun _ -> "❤️")) in
   let heart_viewport = viewport 7 repeated_hearts in
   check int "repeated emoji viewport fills its cell budget" 7
     (Layout.display_width heart_viewport);
-  check string "repeated emoji viewport keeps whole clusters" "~❤️❤️❤️"
+  check string "repeated emoji viewport keeps whole clusters" "~❤️❤️❤️❤️❤️❤️"
     heart_viewport;
   let before = "abcdefghi" in
   let after = Layout.drop_last_utf8_scalar before in
@@ -184,10 +190,10 @@ let test_input_cursor_uses_visible_terminal_cells () =
   check int "empty input starts after the prompt" 7 (column 80 "");
   check int "mixed UTF-8 input advances by cells" 13
     (column 80 "Aé한🙂");
-  check int "emoji modifier cluster advances by two cells" 10
+  check int "emoji modifier follows xterm scalar cells" 12
     (column 80 "A👍🏽");
   check int "flag cluster advances by two cells" 9 (column 80 "🇰🇷");
-  check int "VS16 cluster advances by two cells" 9 (column 80 "❤️");
+  check int "VS16 cluster follows xterm's one cell" 8 (column 80 "❤️");
   check int "exact boundary reaches the pre-border spacer" 79
     (column 80 (String.make 72 'a'));
   check int "visible overflow remains in the pre-border spacer" 79
@@ -247,7 +253,7 @@ let test_history_never_splits_grapheme_clusters () =
     |> List.map (fun (row : Layout.row) -> row.text)
   in
   check (list string) "grapheme clusters stay on one physical row"
-    [ "  A👍🏽"; "  🇰🇷❤️"; "  B" ] body_rows;
+    [ "  A"; "  👍🏽"; "  🇰🇷❤️B" ] body_rows;
   let reconstructed =
     body_rows
     |> List.map (fun text -> String.sub text 2 (String.length text - 2))

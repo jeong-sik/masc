@@ -148,6 +148,41 @@ let take_with_truncation limit rows =
   loop limit [] rows
 ;;
 
+(* [payload_kind] collapses every payload to a constant label, so the fields
+   that say why a keeper is blocked travel separately: the rejection's reason,
+   the cancellation's author and reason, the workspace message's sender and
+   request id. The whole payload is never serialized here (a board stimulus
+   carries post text). Every kind is enumerated so a new payload has to decide
+   its own visibility. *)
+let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string * Yojson.Safe.t) list =
+  function
+  | Completion_authority_rejected rejection ->
+    [ "rejection_reason", `String rejection.car_reason
+    ; "rejection_task_id", `String rejection.car_task_id
+    ]
+  | Task_cancelled cancellation ->
+    (* The reason is emitted only when the canceller gave one, so an operator
+       can tell an unexplained cancellation from one whose reason was empty. *)
+    [ "cancelled_task_id", `String cancellation.tc_task_id
+    ; "cancelled_by", `String cancellation.tc_cancelled_by
+    ]
+    @ (match cancellation.tc_reason with
+       | None -> []
+       | Some reason -> [ "cancelled_reason", `String reason ])
+  | Workspace_message message ->
+    [ "message_request_id", `String message.wmsg_request_id
+    ; "message_from", `String message.wmsg_from
+    ]
+  | Board_signal _
+  | Board_attention _
+  | Bootstrap
+  | Fusion_completed _
+  | Schedule_due _
+  | Connector_attention _
+  | Hitl_resolved _
+  | Manual_compaction_requested -> []
+;;
+
 let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
   List.mapi
     (fun queue_index (selection : Keeper_event_queue_state.pending_selection) ->
@@ -160,17 +195,18 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
           a SHA-256 hex and the incarnation a decimal int64. *)
        let detail =
          `Assoc
-           [ "queue_index", `Int queue_index
-           ; "post_id", `String stimulus.post_id
-           ; ( "source_ref"
-             , `String (Keeper_event_queue_state.source_snapshot_ref stimulus) )
-           ; ( "source_incarnation"
-             , `String (Int64.to_string selection.admitted_revision) )
-           ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
-           ; "arrived_at_unix", `Float stimulus.arrived_at
-           ; "payload_kind",
-             `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-           ]
+           ([ "queue_index", `Int queue_index
+            ; "post_id", `String stimulus.post_id
+            ; ( "source_ref"
+              , `String (Keeper_event_queue_state.source_snapshot_ref stimulus) )
+            ; ( "source_incarnation"
+              , `String (Int64.to_string selection.admitted_revision) )
+            ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+            ; "arrived_at_unix", `Float stimulus.arrived_at
+            ; "payload_kind",
+              `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+            ]
+            @ queue_payload_detail_fields stimulus.payload)
        in
        { keeper_name = Some keeper_name
        ; source

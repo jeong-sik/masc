@@ -279,6 +279,73 @@ let test_event_queue_pending_is_visible () =
      | rows -> failf "expected one queue row, got %d" (List.length rows))
 ;;
 
+let test_event_queue_pending_rows_carry_operator_visible_fields () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "waiting-inventory-kinds" in
+  ensure_keeper config keeper_name;
+  let message =
+    stimulus ~post_id:"workspace-message:wmsg-1" ~arrived_at:100.0
+      (Keeper_event_queue.Workspace_message
+         ({ wmsg_request_id = "wmsg-1"; wmsg_from = "nick0cave" }
+          : Keeper_event_queue.workspace_message))
+  in
+  let cancelled =
+    stimulus ~post_id:"task-cancelled:T-1" ~arrived_at:101.0
+      (Keeper_event_queue.Task_cancelled
+         ({ tc_task_id = "T-1"; tc_cancelled_by = "sangsu"; tc_reason = None }
+          : Keeper_event_queue.task_cancellation))
+  in
+  let rejected =
+    stimulus ~post_id:"completion-authority-rejected:T-2" ~arrived_at:102.0
+      (Keeper_event_queue.Completion_authority_rejected
+         ({ car_task_id = "T-2"
+          ; car_verification_id = "verification-2"
+          ; car_reason = "evidence lacks a test run"
+          ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "run-2" }
+          }
+          : Keeper_event_queue.completion_authority_rejection))
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name
+    (queue_of_list [ message; cancelled; rejected ]);
+  let json =
+    Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name
+  in
+  let keeper =
+    match find_keeper json keeper_name with
+    | Some keeper -> keeper
+    | None -> fail "keeper row missing"
+  in
+  let detail_of post_id =
+    U.(keeper |> member "waiting_on" |> to_list)
+    |> List.find_opt (fun row ->
+      String.equal post_id U.(row |> member "detail" |> member "post_id" |> to_string))
+    |> function
+    | Some row -> U.member "detail" row
+    | None -> failf "queue row missing for %s" post_id
+  in
+  let message_detail = detail_of message.Keeper_event_queue.post_id in
+  check string "workspace message sender" "nick0cave"
+    (json_string_member "message_from" message_detail);
+  check string "workspace message request id" "wmsg-1"
+    (json_string_member "message_request_id" message_detail);
+  let cancelled_detail = detail_of cancelled.Keeper_event_queue.post_id in
+  check string "cancelled task id" "T-1"
+    (json_string_member "cancelled_task_id" cancelled_detail);
+  check string "cancelled by" "sangsu" (json_string_member "cancelled_by" cancelled_detail);
+  check bool "absent cancellation reason stays absent" true
+    (U.member "cancelled_reason" cancelled_detail = `Null);
+  let rejected_detail = detail_of rejected.Keeper_event_queue.post_id in
+  check string "rejection reason" "evidence lacks a test run"
+    (json_string_member "rejection_reason" rejected_detail);
+  check string "rejection task id" "T-2"
+    (json_string_member "rejection_task_id" rejected_detail);
+  check bool "rejection row does not serialize the authority payload" true
+    (U.member "car_authority" rejected_detail = `Null)
+;;
+
 let test_keeper_scoped_projection_excludes_other_keepers () =
   with_workspace
   @@ fun config ->
@@ -779,6 +846,8 @@ let () =
     [ ( "dashboard_json"
       , [ test_case "event queue pending is visible" `Quick
             test_event_queue_pending_is_visible
+        ; test_case "event queue rows carry operator-visible payload fields" `Quick
+            test_event_queue_pending_rows_carry_operator_visible_fields
         ; test_case "manual compaction producer is typed" `Quick
             test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "keeper-scoped projection excludes other keepers" `Quick

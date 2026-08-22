@@ -188,7 +188,7 @@ type chat_message = {
          are rejected at the read boundary. *)
   role : Role.t;
   content : string;
-  ts : float option;
+  ts : float;
   attachments : attachment list option;
   tool_call_id : string option;
   tool_call_name : string option;
@@ -1322,8 +1322,10 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     let content = Json_util.get_string_with_default json ~key:"content" ~default:"" in
     let ts =
-      (try Some ((match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | _ -> 0.0))
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None) in
+      match Json_util.assoc_member_opt "ts" json with
+      | Some (`Float f) -> Some f
+      | Some _ | None -> None
+    in
     let opt_string key =
       match Json_util.assoc_member_opt key json with
       | Some (`String value) when String.trim value <> "" -> Some value
@@ -1576,14 +1578,22 @@ let parse_line ~file_path (line : string) : chat_message option =
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
       | Some role ->
-          (match opt_string "id" with
-           | None ->
+          (match opt_string "id", ts with
+           | None, _ ->
                report_persistence_read_drop
                  ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                  ~path:file_path
                  ~detail:"chat row missing nonblank id";
                None
-           | Some id ->
+           | Some _, None ->
+               (* [encode_line] always writes a float [ts]; a row without one
+                  cannot be ordered, paged or joined, so it is dropped. *)
+               report_persistence_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path:file_path
+                 ~detail:"chat row missing float ts";
+               None
+           | Some id, Some ts ->
                Some
                  { id; role; content; ts; attachments; tool_call_id;
                    tool_call_name; surface; conversation_id;
@@ -1708,12 +1718,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
       match before with
       | None -> (size, fun (_ : chat_message) -> true)
       | Some b ->
-          (* Rows without ts (legacy) are unorderable and stay
-             unreachable through paging; the tail window still serves
-             them. *)
-          ( find_cut ~path ~size ~before:b,
-            fun (m : chat_message) ->
-              match m.ts with Some t -> t < b | None -> false )
+          (find_cut ~path ~size ~before:b, fun (m : chat_message) -> m.ts < b)
     in
     let from = if upto > tail_read_bytes then upto - tail_read_bytes else 0 in
     (* Single pass: keep a running window of the last [max_history]
@@ -1916,9 +1921,8 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
            ([ ("id", `String m.id);
               ("role", `String (Role.to_label m.role));
               ("content", `String m.content);
-            ] @ (match m.ts with
-                 | Some t -> [("ts", `Float t)]
-                 | None -> [])
+              ("ts", `Float m.ts);
+            ]
               (* Dashboard history: surface the writer-declared kind for
                  non-utterance rows so a reload can tell a transport
                  failure apart from keeper speech. *)
@@ -2031,8 +2035,8 @@ let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
   `Assoc
     ([ ("role", `String (Role.to_label m.role));
        ("content", `String m.content);
+       ("ts", `Float m.ts);
      ]
-    @ (match m.ts with Some t -> [ ("ts", `Float t) ] | None -> [])
       (* Surface the writer-declared kind so the inspector can tell a
          transport failure apart from a real keeper utterance, exactly as
          the chat history endpoint does — a failure marker is never quoted

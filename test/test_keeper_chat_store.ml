@@ -234,6 +234,32 @@ let test_missing_id_rows_are_rejected () =
       Alcotest.(check int) "rows without current id are dropped" 0
         (K.load ~base_dir ~keeper_name |> List.length))
 
+(* [encode_line] always writes a float [ts]; a row without one cannot be
+   ordered, paged or joined, so the reader drops it as an invalid payload
+   instead of stamping it with a default. *)
+let test_rows_without_float_ts_are_dropped_and_counted () =
+  let base_dir = temp_base_path "keeper-chat-store-missing-ts" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-missing-ts" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"id":"no-ts","role":"user","content":"hello"}|} ^ "\n"
+        ^ {|{"id":"string-ts","role":"assistant","content":"world","ts":"1.0"}|} ^ "\n"
+        ^ {|{"id":"int-ts","role":"user","content":"again","ts":1}|} ^ "\n"
+        ^ {|{"id":"float-ts","role":"assistant","content":"kept","ts":2.0}|} ^ "\n");
+      (match K.load ~base_dir ~keeper_name with
+       | [ m ] ->
+           Alcotest.(check string) "only the float-ts row loads" "float-ts" m.K.id;
+           Alcotest.(check (float 0.0)) "ts reads back as written" 2.0 m.K.ts
+       | messages ->
+           Alcotest.failf "expected one row, got %d" (List.length messages));
+      Alcotest.(check (float 0.0)) "each ts-less row is one invalid_payload drop"
+        (before +. 3.0) (drop_value invalid_payload))
+
 (* R3: every persisted row carries a producer-assigned id that is
    non-empty, unique within a turn, and stable across reloads. *)
 let test_message_id_minted_unique_and_stable () =
@@ -2360,6 +2386,8 @@ let () =
             `Quick test_structured_only_assistant_row_survives_reload;
           Alcotest.test_case "missing-id rows rejected" `Quick
             test_missing_id_rows_are_rejected;
+          Alcotest.test_case "rows without a float ts are dropped and counted" `Quick
+            test_rows_without_float_ts_are_dropped_and_counted;
           Alcotest.test_case "message id minted unique and stable (R3)" `Quick
             test_message_id_minted_unique_and_stable;
           Alcotest.test_case "chat_path size grows on append (cache key)" `Quick

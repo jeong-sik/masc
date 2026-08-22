@@ -43,7 +43,7 @@ let test_empty_targets () =
        (Lane.mention_ids_of_content "@alice"))
 ;;
 
-let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(surface = None) ?(speaker = None)
+let msg ~role ?(id = "test-msg") ?(ts = 1.0) ?(surface = None) ?(speaker = None)
     ?(audio = None)
     ?(kind = Store.Row_kind.Utterance) ?(turn_ref = None) content
   : Store.chat_message
@@ -75,7 +75,7 @@ let contents pms = List.map snd pms
 let turn_ref n = Some (Ids.Turn_ref.make ~trace_id:"trace-scope" ~absolute_turn:n)
 
 let test_unanswered_mention_is_pending () =
-  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look" ] in
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 "@alice please look" ] in
   check (list string) "no later own line -> pending" [ "@alice please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
@@ -83,8 +83,8 @@ let test_unanswered_mention_is_pending () =
 let test_answered_mention_is_cleared () =
   let turn_ref = turn_ref 1 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice please look"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "on it"
+    [ msg ~role:Store.Role.User ~ts:10.0 ~turn_ref "@alice please look"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "on it"
     ]
   in
   check (list string) "own line after mention -> cleared" []
@@ -94,9 +94,9 @@ let test_answered_mention_is_cleared () =
 let test_rementioned_after_reply_is_pending () =
   let turn_ref = turn_ref 2 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice first"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "done"
-    ; msg ~role:Store.Role.User ~ts:(Some 12.0) "@alice again"
+    [ msg ~role:Store.Role.User ~ts:10.0 ~turn_ref "@alice first"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "done"
+    ; msg ~role:Store.Role.User ~ts:12.0 "@alice again"
     ]
   in
   check (list string) "new mention after reply -> pending" [ "@alice again" ]
@@ -104,7 +104,7 @@ let test_rementioned_after_reply_is_pending () =
 ;;
 
 let test_assistant_self_mention_ignored () =
-  let messages = [ msg ~role:Store.Role.Assistant ~ts:(Some 10.0) "@alice note to self" ] in
+  let messages = [ msg ~role:Store.Role.Assistant ~ts:10.0 "@alice note to self" ] in
   check (list string) "own assistant line is never a pending mention" []
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
@@ -127,7 +127,7 @@ let fleet ~limit messages = MS.fleet_messages_of_messages ~limit ~targets messag
 
 let test_projected_broadcast_reaches_the_layer () =
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
         ~speaker:external_ "deploy is green"
     ]
   in
@@ -138,7 +138,7 @@ let test_projected_broadcast_reaches_the_layer () =
 
 let test_addressed_row_is_not_fleet () =
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
         ~speaker:external_ "@alice take this"
     ]
   in
@@ -150,7 +150,7 @@ let test_addressed_row_is_not_fleet () =
 
 let test_owner_row_is_not_fleet () =
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface ~speaker:owner
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface ~speaker:owner
         "status?"
     ]
   in
@@ -169,7 +169,7 @@ let test_connector_row_is_not_fleet () =
          })
   in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:discord ~speaker:external_
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:discord ~speaker:external_
         "channel chatter"
     ]
   in
@@ -179,7 +179,7 @@ let test_connector_row_is_not_fleet () =
 
 let test_own_assistant_line_is_not_fleet () =
   let messages =
-    [ msg ~role:Store.Role.Assistant ~ts:(Some 10.0) ~surface:agent_surface "I said this" ]
+    [ msg ~role:Store.Role.Assistant ~ts:10.0 ~surface:agent_surface "I said this" ]
   in
   check (list string) "the keeper's own output is not inbound fleet speech" []
     (fleet_contents (fleet ~limit:10 messages))
@@ -187,7 +187,7 @@ let test_own_assistant_line_is_not_fleet () =
 
 let test_zero_limit_disables_the_layer () =
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
         ~speaker:external_ "deploy is green"
     ]
   in
@@ -198,7 +198,7 @@ let test_zero_limit_disables_the_layer () =
 let test_limit_keeps_the_newest_in_arrival_order () =
   let row n =
     msg ~role:Store.Role.User ~id:(Printf.sprintf "row-%d" n)
-      ~ts:(Some (float_of_int n)) ~surface:agent_surface ~speaker:external_
+      ~ts:(float_of_int n) ~surface:agent_surface ~speaker:external_
       (Printf.sprintf "note %d" n)
   in
   let messages = List.map row [ 1; 2; 3; 4; 5 ] in
@@ -212,11 +212,11 @@ let test_limit_keeps_the_newest_in_arrival_order () =
    [Some], the fleet layer its [None]. *)
 let test_rows_partition_across_lanes_and_fleet () =
   let messages =
-    [ msg ~role:Store.Role.User ~id:"m1" ~ts:(Some 10.0) ~surface:agent_surface
+    [ msg ~role:Store.Role.User ~id:"m1" ~ts:10.0 ~surface:agent_surface
         ~speaker:external_ "@alice take this"
-    ; msg ~role:Store.Role.User ~id:"m2" ~ts:(Some 11.0) ~surface:agent_surface
+    ; msg ~role:Store.Role.User ~id:"m2" ~ts:11.0 ~surface:agent_surface
         ~speaker:owner "status?"
-    ; msg ~role:Store.Role.User ~id:"m3" ~ts:(Some 12.0) ~surface:agent_surface
+    ; msg ~role:Store.Role.User ~id:"m3" ~ts:12.0 ~surface:agent_surface
         ~speaker:external_ "fleet note"
     ]
   in
@@ -235,20 +235,20 @@ let test_rows_partition_across_lanes_and_fleet () =
 ;;
 
 let test_owner_unmentioned_line_is_scope () =
-  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner "can you check the deploy" ] in
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner "can you check the deploy" ] in
   check (list string) "operator without @ -> scope" [ "can you check the deploy" ]
     (contents (MS.pending_scope_of_messages ~targets messages))
 ;;
 
 let test_owner_mention_is_not_scope () =
   (* an owner line that mentions is a mention, not a scope message (disjoint) *)
-  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner "@alice check it" ] in
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner "@alice check it" ] in
   check (list string) "owner mention excluded from scope" []
     (contents (MS.pending_scope_of_messages ~targets messages))
 ;;
 
 let test_external_unmentioned_is_not_scope () =
-  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:external_ "random channel chatter" ] in
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:external_ "random channel chatter" ] in
   check (list string) "external without @ -> ignored" []
     (contents (MS.pending_scope_of_messages ~targets messages))
 ;;
@@ -256,8 +256,8 @@ let test_external_unmentioned_is_not_scope () =
 let test_answered_owner_line_is_cleared () =
   let turn_ref = turn_ref 3 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner ~turn_ref "please check"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "done"
+    [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner ~turn_ref "please check"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "done"
     ]
   in
   check (list string) "answered owner line -> cleared" []
@@ -273,8 +273,8 @@ let test_skewed_clock_cannot_unanswer () =
      user row. *)
   let turn_ref = turn_ref 4 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 100.0) ~turn_ref "@alice please look"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 5.0) ~turn_ref "on it"
+    [ msg ~role:Store.Role.User ~ts:100.0 ~turn_ref "@alice please look"
+    ; msg ~role:Store.Role.Assistant ~ts:5.0 ~turn_ref "on it"
     ]
   in
   check (list string) "skewed reply ts still clears" []
@@ -282,8 +282,8 @@ let test_skewed_clock_cannot_unanswer () =
 ;;
 
 let test_ts_fuzz_does_not_change_pending () =
-  (* Same lane, three ts assignments (ordered, reversed, absent): the
-     pending set depends on lane order alone. *)
+  (* Same lane, two ts assignments (ordered, reversed): the pending set
+     depends on lane order alone. *)
   let lane ts_of =
     let turn_ref = turn_ref 5 in
     [ msg ~role:Store.Role.User ~ts:(ts_of 0) ~turn_ref "@alice first"
@@ -296,30 +296,16 @@ let test_ts_fuzz_does_not_change_pending () =
     (fun (label, ts_of) ->
       check (list string) label expected
         (contents (MS.pending_mentions_of_messages ~targets (lane ts_of))))
-    [ ("ordered ts", fun i -> Some (float_of_int (10 + i)))
-    ; ("reversed ts", fun i -> Some (float_of_int (10 - i)))
-    ; ("absent ts", fun _ -> None)
+    [ ("ordered ts", fun i -> float_of_int (10 + i))
+    ; ("reversed ts", fun i -> float_of_int (10 - i))
     ]
-;;
-
-let test_none_ts_assistant_still_clears () =
-  (* A paired assistant line without a timestamp still acknowledges the
-     user row because the typed [turn_ref] is the causal join. *)
-  let turn_ref = turn_ref 6 in
-  let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice please look"
-    ; msg ~role:Store.Role.Assistant ~ts:None ~turn_ref "on it"
-    ]
-  in
-  check (list string) "ts-less reply clears" []
-    (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
 
 let tool_line : Store.chat_message =
   { id = "test-tool"
   ; role = Store.Role.Tool
   ; content = "{}"
-  ; ts = Some 10.5
+  ; ts = 10.5
   ; attachments = None
   ; tool_call_id = Some "tc-0"
   ; tool_call_name = Some "Read"
@@ -341,7 +327,7 @@ let tool_line : Store.chat_message =
 let test_tool_lines_do_not_clear () =
   (* Tool lines are the keeper *working*, not a causal acknowledgement. *)
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"; tool_line ]
+    [ msg ~role:Store.Role.User ~ts:10.0 "@alice please look"; tool_line ]
   in
   check (list string) "tool line is not an answer" [ "@alice please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages))
@@ -354,18 +340,18 @@ let test_transport_failure_does_not_clear () =
      turn. A real utterance afterwards still clears. *)
   let turn_ref = turn_ref 7 in
   let failure =
-    msg ~role:Store.Role.Assistant ~ts:(Some 10.5)
+    msg ~role:Store.Role.Assistant ~ts:10.5
       ~turn_ref
       ~kind:Store.Row_kind.Transport_failure
       "Keeper request failed: Idle detected"
   in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice please look"; failure ]
+    [ msg ~role:Store.Role.User ~ts:10.0 ~turn_ref "@alice please look"; failure ]
   in
   check (list string) "failure marker is not an answer" [ "@alice please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages));
   let answered =
-    messages @ [ msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "done" ]
+    messages @ [ msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "done" ]
   in
   check (list string) "a real utterance still clears" []
     (contents (MS.pending_mentions_of_messages ~targets answered))
@@ -384,10 +370,10 @@ let test_voice_audio_self_output_is_not_recent_context () =
       }
   in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "please say it out loud"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~audio
+    [ msg ~role:Store.Role.User ~ts:10.0 "please say it out loud"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~audio
         "saying this out loud"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 12.0) "text follow-up"
+    ; msg ~role:Store.Role.Assistant ~ts:12.0 "text follow-up"
     ]
   in
   let lines = MS.recent_direct_conversation_of_messages messages in
@@ -472,7 +458,6 @@ let () =
     ; ( "causal_acknowledgement"
       , [ test_case "skewed_clock_cannot_unanswer" `Quick test_skewed_clock_cannot_unanswer
         ; test_case "ts_fuzz_invariant" `Quick test_ts_fuzz_does_not_change_pending
-        ; test_case "none_ts_assistant_clears" `Quick test_none_ts_assistant_still_clears
         ; test_case "tool_lines_do_not_clear" `Quick test_tool_lines_do_not_clear
         ; test_case "transport_failure_does_not_clear" `Quick
             test_transport_failure_does_not_clear

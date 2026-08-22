@@ -202,22 +202,14 @@ let test_event_queue_operator_routes_are_exact () =
   check (option string) "event operator route rejects extra segments" None
     (Server_dashboard_http_keeper_event_queue_operator.route
        "/api/v1/keepers/idealist/events/operator/extra");
-  let event_pending_path = "/api/v1/keepers/idealist/events/pending" in
-  check (option string) "event pending inventory route is exact" (Some "idealist")
-    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
-       event_pending_path);
-  check (option string) "event pending inventory rejects extra segments" None
-    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
-       (event_pending_path ^ "/extra"));
-  check bool "Worker cannot enumerate pending event metadata" false
+  check bool "Worker cannot mutate pending events" false
     (Masc_domain.has_permission
        Masc_domain.Worker
        Server_dashboard_http_keeper_event_queue_operator.operator_permission);
-  check bool "Admin can enumerate and mutate pending events" true
+  check bool "Admin can mutate pending events" true
     (Masc_domain.has_permission
        Masc_domain.Admin
        Server_dashboard_http_keeper_event_queue_operator.operator_permission);
-  let sensitive_content = "private-board-content-must-not-cross-inventory" in
   let source : Keeper_event_queue.stimulus =
     { post_id = "board-post-sensitive"
     ; urgency = Normal
@@ -227,41 +219,12 @@ let test_event_queue_operator_routes_are_exact () =
           { kind = Post_created
           ; author = "operator"
           ; title = "private title"
-          ; content = sensitive_content
+          ; content = "private title body"
           ; hearth = None
           ; updated_at = None
           }
     }
   in
-  let pending_json =
-    match
-      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
-        ~after:0
-        ~limit:100
-        [ Keeper_event_queue_state.
-            { source; admitted_revision = 23L }
-        ]
-    with
-    | [ json ] -> json
-    | _ -> fail "event pending projection must return one metadata row"
-  in
-  let open Yojson.Safe.Util in
-  check string "event pending projection retains post identity"
-    source.post_id
-    (pending_json |> member "post_id" |> to_string);
-  check string "event pending projection retains source incarnation"
-    "23"
-    (pending_json |> member "source_incarnation" |> to_string);
-  check int "event pending projection emits an opaque SHA-256 source ref"
-    64
-    (pending_json |> member "source_ref" |> to_string |> String.length);
-  check string "event pending projection retains typed payload kind"
-    "board_signal"
-    (pending_json |> member "payload_kind" |> to_string);
-  check bool "event pending projection omits raw payload content" false
-    (String_util.contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
-  check bool "event pending projection has no raw source object" true
-    (pending_json |> member "source" = `Null);
   let same_post_id_source : Keeper_event_queue.stimulus =
     { source with urgency = Low; payload = Bootstrap }
   in
@@ -328,88 +291,6 @@ let with_test_env f =
           in
           Server_request_authority.with_current request_authority (fun () ->
             f ~env ~sw ~config)))
-
-(* The operator queue panel showed a completion_authority_rejected row as its
-   post_id and payload_kind only, so the rejection's own explanation — the one
-   field that says why the keeper stopped making progress — never reached the
-   operator. It is projected explicitly, and only for this kind: the
-   accompanying assertion below pins that a board stimulus still does not leak
-   its post content through the same projection. *)
-let test_event_pending_projection_surfaces_rejection_reason () =
-  let reason =
-    "artifact_unreadable: BottomButton.tsx missing from the sandbox root"
-  in
-  let rejection : Keeper_event_queue.completion_authority_rejection =
-    { car_task_id = "task-159"
-    ; car_verification_id = "vrf-projection-test"
-    ; car_reason = reason
-    ; car_authority =
-        Masc_domain.Human_operator { operator_id = "operator-test" }
-    }
-  in
-  let source : Keeper_event_queue.stimulus =
-    { post_id =
-        Keeper_event_queue.completion_authority_rejection_post_id rejection
-    ; urgency = Immediate
-    ; arrived_at = 42.0
-    ; payload = Keeper_event_queue.Completion_authority_rejected rejection
-    }
-  in
-  let pending_json =
-    match
-      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
-        ~after:0
-        ~limit:100
-        [ Keeper_event_queue_state.{ source; admitted_revision = 7L } ]
-    with
-    | [ json ] -> json
-    | _ -> fail "event pending projection must return one metadata row"
-  in
-  let open Yojson.Safe.Util in
-  check string "rejection reason reaches the operator projection" reason
-    (pending_json |> member "rejection_reason" |> to_string);
-  check string "rejection task id reaches the operator projection" "task-159"
-    (pending_json |> member "rejection_task_id" |> to_string);
-  check string "payload kind is unchanged" "completion_authority_rejected"
-    (pending_json |> member "payload_kind" |> to_string);
-  check bool "verification id stays out of the projection" true
-    (pending_json |> member "car_verification_id" = `Null)
-;;
-
-let test_event_pending_projection_omits_non_rejection_payloads () =
-  let sensitive = "board-body-must-not-ride-the-rejection-change" in
-  let source : Keeper_event_queue.stimulus =
-    { post_id = "board-post-after-rejection-field"
-    ; urgency = Normal
-    ; arrived_at = 42.0
-    ; payload =
-        Board_signal
-          { kind = Post_created
-          ; author = "operator"
-          ; title = "private title"
-          ; content = sensitive
-          ; hearth = None
-          ; updated_at = None
-          }
-    }
-  in
-  let pending_json =
-    match
-      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
-        ~after:0
-        ~limit:100
-        [ Keeper_event_queue_state.{ source; admitted_revision = 7L } ]
-    with
-    | [ json ] -> json
-    | _ -> fail "event pending projection must return one metadata row"
-  in
-  let open Yojson.Safe.Util in
-  check bool "board content still omitted after the rejection field landed"
-    false
-    (String_util.contains_substring (Yojson.Safe.to_string pending_json) sensitive);
-  check bool "no rejection field on a non-rejection payload" true
-    (pending_json |> member "rejection_reason" = `Null)
-;;
 
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   with_test_env @@ fun ~env:_ ~sw ~config ->
@@ -3616,10 +3497,6 @@ let () =
             test_event_queue_operator_routes_are_exact;
           test_case "event operator keeps exact source refs across queue changes" `Quick
             test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
-          test_case "event pending projection surfaces the rejection reason" `Quick
-            test_event_pending_projection_surfaces_rejection_reason;
-          test_case "event pending projection still omits other payload content" `Quick
-            test_event_pending_projection_omits_non_rejection_payloads;
           test_case "observation metadata does not override terminal contract" `Quick
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );

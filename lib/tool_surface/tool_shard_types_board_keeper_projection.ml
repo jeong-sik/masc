@@ -223,10 +223,13 @@ let schemas : Masc_domain.tool_schema list =
                 ; ( "parent_id"
                   , `Assoc
                       [ "type", `String "string"
+                      ; "pattern", `String comment_id_pattern
                       ; ( "description"
                         , `String
-                            "Optional comment ID to reply under, threading this comment \
-                             beneath another Keeper's instead of flat on the post." )
+                            "Optional comment ID to reply under (format: c-<32 lowercase \
+                             hex>, as returned by masc_board_post_get or a prior \
+                             masc_board_comment), threading this comment beneath another \
+                             Keeper's instead of flat on the post." )
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]

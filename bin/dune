@@ -205,6 +205,12 @@
 
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
 
+(library
+ (name masc_tui_operator_projection)
+ (wrapped false)
+ (modules masc_tui_operator_projection)
+ (libraries masc masc.operator masc.masc_core yojson))
+
 (executable
  (name masc_tui)
  (modules
@@ -218,6 +224,7 @@
  (package masc)
  (libraries
   masc
+  masc_tui_operator_projection
   masc.dashboard
   masc.server
   masc.config

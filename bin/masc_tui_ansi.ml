@@ -72,6 +72,16 @@ let fit_width s width =
   if len >= width then String.sub s 0 (max 0 (width - 1)) ^ (if len > width then "~" else "")
   else s ^ String.make (width - len) ' '
 
+(** External values become one printable logical row before renderer-owned ANSI
+    styling or width calculation is applied. *)
+module Terminal_text = struct
+  let single_line text = Masc.Tui_decode.sanitize_terminal_text text
+  let optional_single_line = Option.map single_line
+
+  let single_line_or ~default value =
+    Option.value ~default (optional_single_line value)
+end
+
 let is_keeper name =
   String.length name >= 7 && String.sub name 0 7 = "keeper-"
 

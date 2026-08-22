@@ -179,6 +179,7 @@ Dashboard <--Tab--> Keeper List
 | Live context status | `<name>/metrics/YYYY-MM/DD.jsonl` (latest entry) | No |
 | Keeper logs | `<name>/metrics/YYYY-MM/DD.jsonl` (last 200 entries) | No |
 | Goal planning | `GET /api/v1/dashboard/planning` | Yes |
+| Actor-scoped approvals | `GET /api/v1/operator?view=summary&include_messages=0&include_keepers=0` | Yes |
 | Send messages | `POST /api/v1/keepers/chat/stream` | Yes |
 
 ## Requirements

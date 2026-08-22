@@ -176,9 +176,9 @@ handler 바인딩(`runtime_handler` → 함수)과 `readonly_of_input`·`input_t
 
 ## 3. 마이그레이션 — PR 당 ≤ 8파일, 바이트 큰 순
 
-0. **하네스 먼저**: `scripts/model-prose-ratchet.sh` + `scripts/model-prose-baseline.json` + 스캐너 +
-   `ci.yml` 배선(`stringly-boundary-ratchet.sh` 패턴). 기준선 93.8 KB / 874. 증가 금지, 각 PR 이 baseline 을
-   내려 갱신.
+0. **하네스 먼저**: `scripts/model-prose-ratchet.sh` + `scripts/model-prose-baseline.json` +
+   `scripts/model-prose-scan.py` + `ci.yml` 배선(`stringly-boundary-ratchet.sh` 패턴). 기준선 106,315 B / 1,162
+   (`b0f56b0e2d`). 파일별 bytes·count 증가 금지, 각 PR 이 `--update` 로 baseline 을 내려 갱신.
 1. 로더: `lib/tool_surface/tool_definition_toml.ml(i)` + `embedded_config`(ocaml-crunch) 와 `sync_prompt_assets`
    (#20929) 를 `tools/` 에 일반화 + 테스트.
 2. `board_tool_schemas.ml` + `board_keeper_projection.ml` (11.3 KB) → `config/tools/masc_board_*.toml`
@@ -202,8 +202,11 @@ handler 바인딩(`runtime_handler` → 함수)과 `readonly_of_input`·`input_t
 ## 4. 수용 기준
 
 - "OCaml 안 모델 대면 산문 바이트": (i) 구조 검출 — `description` 필드, JSON `description` 키, `~description:`,
-  `*_prop`/`property`/`p_description`; (ii) allowlist 모듈의 3토큰 이상 리터럴(로그/예외 컨텍스트 제외).
-  오늘 93.8 KB / 874 → **0**, allowlist 는 빈 집합.
+  `*_prop`/`property`/`*_description`; (ii) allowlist 파일의 공백 기준 3토큰 이상 리터럴 전부.
+  측정은 `scripts/model-prose-scan.py` 가 `lib/`·`packages/agent_core/lib/`·`bin/` 의 `.ml` 을 토큰화해 리터럴
+  바로 앞 토큰으로 (i) 을, `scripts/model-prose-baseline.json` 의 `allowlist_files` 로 (ii) 를 판정하고 디코드된
+  바이트 길이를 더한다. 오늘 106,315 B / 1,162 (구조 74,615 B / 698 + allowlist 19개 파일 31,700 B / 464) → **0**,
+  allowlist 는 빈 집합.
 - 설명이 2곳 이상인 도구 수 27 → 0.
 - 소비자 없는 config 파일(`tool_policy.toml`) 0.
 - 대시보드 프롬프트 화면 4개 → 1개, "보낸 것" 은 턴 기록에서만.

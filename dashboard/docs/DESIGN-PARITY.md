@@ -244,6 +244,17 @@ Two halves, decided separately:
   not: rows and segments the design leaves square because they sit inside a
   container that already owns the corner. Those are named in `craft-v2.css`
   rather than dropping the default the other 1,309 depend on.
+- **The body face is the same one — on this machine.** Width triangulation on a
+  Korean string (40px, stack vs `Noto Sans KR` alone vs a last-resort control)
+  returns 622.41px on both pages, against 585.17px for the fallback. So the
+  chrome outside buttons matches. But the prototype loads Noto Sans KR as a
+  webfont (`styles/fonts/`) and the dashboard does not — `fonts.css` keeps the
+  9.9MB TTF off the hot path deliberately — so the dashboard is resolving it
+  from the system. On a machine without it installed the dashboard falls back to
+  585.17px metrics while the prototype still renders at 622.41px, and every
+  measurement in this document shifts. Re-measure on a clean machine before
+  treating these numbers as machine-independent.
+
 - **The font fallback is not.** Matching the design's `Arial` on buttons would
   put Korean UI text through a Latin fallback, and the design system's own
   specification names Noto Sans KR for chrome. The dashboard's normalisation

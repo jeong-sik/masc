@@ -22,7 +22,6 @@ val goal_verification_proof : string
 (** Goal completion proof review (RFC-0387 B3): does the linked-task rollup
     prove the declared success criterion? *)
 
-val goal_verification_criterion : string
 val verification_lookup_none : string
 val verification_lookup_producer_tree : string
 val verification_lookup_producer_forest : string

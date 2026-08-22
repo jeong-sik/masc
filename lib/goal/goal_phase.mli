@@ -58,8 +58,6 @@ type action =
       (** Verifier commit: the completion proof failed. [Verifying ->
           Executing]; the refutation reason stays in the ledger and
           goal_events. *)
-  | Record_criterion_viable
-  | Record_criterion_unreachable
       (** Phase-neutral creation-time criterion verdicts (RFC-0387 B2): legal
           in every non-terminal phase as [Already <same phase>] — the handler
           commits the ledger and never writes the phase. *)

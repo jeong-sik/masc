@@ -190,7 +190,7 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
 ;;
 
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable
-   [Criterion_pending] / [Proof_pending] request committed. The wake is
+   [Proof_pending] request committed. The wake is
    scheduling only — the same discipline as the task-side
    [verification_submitted_fn] call: a raised hook must not fail (or roll
    back) a commit that already landed. A repeated [request_complete] on a
@@ -302,30 +302,12 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `created -> "created"
             | `updated -> "updated"
           in
-          (* RFC-0387 §3.2 (B2): creation records the durable criterion-check
-             request BEFORE any verifier model call consumes it. The goal is
-             already committed, so a failed write does not fail the creation
-             (the cross-file best-effort precedent of [delete_goal]) — it is
-             reported in [criterion_check] instead. Updates carry no hook:
-             the declaration obligation is creation-time only. *)
-          let criterion_check =
-            match action with
-            | `updated -> `String "not_applicable_update"
-            | `created ->
-              (match Goal_verification.mark_criterion_pending ctx.config ~goal_id:goal.id with
-               | Ok _ ->
-                 notify_goal_verification_pending ctx ~goal_id:goal.id;
-                 `String "criterion_pending"
-               | Error msg -> `Assoc [ "state", `String "criterion_check_failed"
-                                     ; "detail", `String msg ])
-          in
           ok_result
             ~tool_name
             ~start_time
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
-            ; "criterion_check", criterion_check
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf
@@ -348,13 +330,11 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
    vetoes the phase write (persist-before-model-call), which is what keeps a
    crashed write reconcilable instead of wedged (stage-2 review P0-2). *)
 
-(* The four gate actions carry a verdict; a verdict without evidence is not a
+(* The gate actions carry a verdict; a verdict without evidence is not a
    judgment, so [evidence] is required non-blank (RFC-0387 §3.3/§4). *)
 let gate_action_requires_evidence = function
   | Goal_phase.Record_proof_proven
-  | Goal_phase.Record_proof_refuted
-  | Goal_phase.Record_criterion_viable
-  | Goal_phase.Record_criterion_unreachable -> true
+  | Goal_phase.Record_proof_refuted -> true
   | Goal_phase.Request_complete
   | Goal_phase.Pause
   | Goal_phase.Resume
@@ -386,8 +366,6 @@ let validate_gate_evidence args action =
 ;;
 
 type verifier_decision =
-  | Criterion_viable
-  | Criterion_unreachable of { reason : string }
   | Proof_proven
   | Proof_refuted of { reason : string }
 
@@ -463,26 +441,7 @@ let already_goal_response ~tool_name ~start_time ~goal_id ~action ~phase goal ve
      | None -> [])
 ;;
 
-(* Phase-neutral criterion commit (RFC-0387 §3.3): the FSM answered [Already]
-   for a non-terminal phase, so there is no phase write and no phase event —
-   the ledger is the whole effect. *)
-let commit_criterion_verdict_response
-      ~tool_name ~start_time (ctx : context) ~goal_id ~action ~phase goal verdict
-  =
-  match Goal_verification.record_criterion_verdict ctx.config ~goal_id verdict with
-  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
-  | Ok record ->
-    already_goal_response
-      ~tool_name ~start_time ~goal_id ~action ~phase goal (Some record)
-;;
-
 let verifier_decision_parts = function
-  | Criterion_viable ->
-    Goal_phase.Record_criterion_viable, Goal_verification.Proven, None
-  | Criterion_unreachable { reason } ->
-    ( Goal_phase.Record_criterion_unreachable
-    , Goal_verification.Refuted { reason }
-    , Some reason )
   | Proof_proven ->
     Goal_phase.Record_proof_proven, Goal_verification.Proven, None
   | Proof_refuted { reason } ->
@@ -518,32 +477,14 @@ let commit_verifier_decision
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
-        | Ok (Goal_phase.Already phase) ->
-          (match decision with
-           | Criterion_viable | Criterion_unreachable _ ->
-             commit_criterion_verdict_response
-               ~tool_name
-               ~start_time
-               ctx
-               ~goal_id
-               ~action
-               ~phase
-               goal
-               (gate_verdict verdict_outcome ~verification_run_id ~evidence)
-           | Proof_proven | Proof_refuted _ ->
-             error_result_typed
-               ~tool_name
-               ~start_time
-               ~code:Conflict
-               "proof verdict did not name a phase transition")
+        | Ok (Goal_phase.Already _) ->
+          error_result_typed
+            ~tool_name
+            ~start_time
+            ~code:Conflict
+            "proof verdict did not name a phase transition"
         | Ok (Goal_phase.Move_to phase) ->
           (match decision with
-           | Criterion_viable | Criterion_unreachable _ ->
-             error_result_typed
-               ~tool_name
-               ~start_time
-               ~code:Internal_error
-               "criterion verdicts are phase-neutral; decide_transition never moves"
            | Proof_proven | Proof_refuted _ ->
              let verdict =
                gate_verdict verdict_outcome ~verification_run_id ~evidence
@@ -775,29 +716,15 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
         | Ok (Goal_phase.Move_to phase) ->
           (match public_action with
            | Goal_phase.Public_action.Request_complete ->
-                (* Executing -> Verifying (RFC-0387 §4): gate on the criterion
-                   verdict, then persist the proof request BEFORE the phase
-                   write — if the ledger write fails the phase does not move.
-                   A ledger that does not decode is a typed error, never read
-                   as "not unreachable" (P1-1). *)
-                (match Goal_verification.get_record ctx.config ~goal_id with
-                 | Error msg ->
-                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
-                 | Ok
-                     (Some
-                       { Goal_verification.criterion =
-                           Goal_verification.Criterion_unreachable _
-                       ; _
-                       }) ->
-                   error_result_typed
-                     ~tool_name
-                     ~start_time
-                     ~code:Conflict
-                     (Printf.sprintf
-                        "goal %s criterion was judged unreachable; \
-                         request_complete is refused (RFC-0387 B2)"
-                        goal_id)
-                 | Ok _ ->
+                (* Executing -> Verifying (RFC-0387 §4): persist the proof
+                   request BEFORE the phase write — if the ledger write fails
+                   the phase does not move, so a crash between the two leaves a
+                   request the verifier can still pick up.
+
+                   Nothing is consulted here to decide whether the request is
+                   allowed. Asking to be judged is not a claim; the judgement is
+                   the verdict, and refusing the request only hides the goal
+                   from the thing that would judge it. *)
                    (match
                       Goal_verification.mark_proof_pending ctx.config ~goal_id
                     with
@@ -832,7 +759,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                            ; "goal", Goal_store.goal_to_yojson updated_goal
                            ; ( "verification"
                              , Goal_verification.record_to_yojson record )
-                           ])))
+                           ]))
            | Goal_phase.Public_action.Pause
            | Goal_phase.Public_action.Resume
            | Goal_phase.Public_action.Block

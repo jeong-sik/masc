@@ -192,8 +192,8 @@ val verification_submitted_fn :
    unit) Atomic.t
 
 (** Notify the goal verifier lane (RFC-0387 stage 2) after a durable
-    verification request committed on the goal ledger — [Criterion_pending]
-    at goal creation, [Proof_pending] before/at the [Verifying] phase. The
+    verification request committed on the goal ledger — the [Proof_pending]
+    row written before the phase enters [Verifying]. The
     goal-side analogue of {!verification_submitted_fn}: the callback only
     schedules the out-of-band review; it is never a Keeper wake-up. *)
 val goal_verification_pending_fn :

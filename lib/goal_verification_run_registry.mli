@@ -3,9 +3,7 @@
     independent reviewer did, including lookup tool calls, without becoming a
     second lifecycle store. *)
 
-type review_kind =
-  | Criterion
-  | Proof
+type review_kind = Proof
 
 type outcome =
   | Reviewed

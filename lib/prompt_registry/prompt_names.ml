@@ -10,7 +10,6 @@ let judge_effect = "judge.effect"
 let judge_catchup = "judge.catchup"
 let verification = "verification"
 let goal_verification_proof = "goal_verification.proof"
-let goal_verification_criterion = "goal_verification.criterion"
 
 (* Review sections rendered as their own templates and injected into the review
    prompt. They live as files so the prose is editable and overridable through

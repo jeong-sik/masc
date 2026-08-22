@@ -9,7 +9,7 @@ import {
   type VerificationToolObservation,
 } from './dashboard-verification-runs'
 
-export type GoalVerificationReviewKind = 'criterion' | 'proof'
+export type GoalVerificationReviewKind = 'proof'
 export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | 'deferred' | 'raised'
 
 export interface GoalVerificationRunRecord {
@@ -72,7 +72,7 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
     protocolError(`${context}.status has unknown value ${JSON.stringify(status)}`)
   }
   const reviewKind = raw.review_kind
-  if (reviewKind !== 'criterion' && reviewKind !== 'proof') {
+  if (reviewKind !== 'proof') {
     protocolError(`${context}.review_kind has unknown value ${JSON.stringify(reviewKind)}`)
   }
   const baseFields = [

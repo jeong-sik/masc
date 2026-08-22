@@ -1,8 +1,8 @@
 (** Goal_verification_agent — the RFC-0387 stage-2 verifier caller.
 
     Application-owned LLM agent (not a Keeper) that drains the goal
-    verification ledger's durable pending requests — [Criterion_pending] (B2)
-    and [Proof_pending] (B3) — judges each through
+    verification ledger's durable [Proof_pending] requests (B3), judges each
+    through
     {!Task.Anti_rationalization.review} on the [verifier_exact] lane, and
     commits the verdict through {!Workspace_goals.commit_verifier_decision},
     the typed internal FSM+ledger+phase+event boundary, under the fixed
@@ -21,14 +21,7 @@ val start :
   unit
 
 module For_testing : sig
-  type pending_kind =
-    | Criterion_check
-    | Completion_proof
-
-  type pending_work = {
-    goal_id : string;
-    kind : pending_kind;
-  }
+  type pending_work = { goal_id : string }
 
   (** How one review ended. [Deferred] carries the reason no verdict was
       committed; the pending row it names is still durable. *)
@@ -37,8 +30,8 @@ module For_testing : sig
     | Deferred of string
 
   val group_pending_by_goal : pending_work list -> pending_work list list
-  (** Stable grouping used by the daemon: criterion work precedes proof work
-      for the same goal, so no goal has concurrent verifier transitions. *)
+  (** Stable grouping used by the daemon: one group per goal, so no goal has
+      concurrent verifier transitions. *)
 
   val collect_pending :
     Workspace_utils_backend_setup.config ->

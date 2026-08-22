@@ -110,6 +110,9 @@
 .mem-prompt-n { width: 20px; height: 20px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: var(--fs-10); font-family: var(--font-mono); }
 .mem-prompt-step b { display: block; color: var(--text-bright); font-size: 11.5px; font-weight: 600; }
 .mem-prompt-step span:last-child { display: block; margin-top: 2px; color: var(--text-dim); font-size: 10.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.mem-prompt-toggle { margin-top: 4px; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 4px; background: transparent; color: var(--text-bright); font-size: 10.5px; cursor: pointer; }
+.mem-prompt-toggle:hover { border-color: var(--text-dim); }
+.mem-prompt-capture { padding: 8px 0 4px 30px; }
 .mem-prompt-foot { margin-top: 3px; padding-top: 8px; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: var(--fs-10); }
 
 /* ── context composition — keeper-v2/styles/memory.css:23-33 ── */

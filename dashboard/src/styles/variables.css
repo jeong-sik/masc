@@ -718,10 +718,16 @@ html:not([data-theme="paper"]) {
    generator (design-system/tokens/build.ts) is absent, so the generated file
    can't be regenerated — bump the scale here at :root instead (variables.css
    loads after tokens.generated.css). Scoped to desktop so the mobile
-   scale-down in responsive.css stays authoritative on small screens. The
-   --fs-* aliases above follow --font-size-* via var(); --type-* composites
-   use the numeric --fs-9..56 ladder, bumped in parallel. Aligns with RFC-0253
-   (dashboard keeper-v2 token scale).
+   scale-down in responsive.css stays authoritative on small screens. Aligns
+   with RFC-0253 (dashboard keeper-v2 token scale).
+
+   Only --font-size-* is bumped here. The numeric --fs-9..56 ladder used to be
+   bumped alongside it and never took effect: tokens.css redefines the whole
+   ladder unconditionally at :root and main.ts loads it after global.css, so a
+   media-scoped value in this file always loses. Measured on both the app and
+   the parity page, --fs-12 resolves to 12px. The dead lines are gone rather
+   than fixed — the ladder resolving to the design's own sizes is what the
+   keeper-v2 surfaces are drawn against.
    ══════════════════════════════════════════════════════════════ */
 @media (min-width: 769px) {
   :root {
@@ -733,8 +739,5 @@ html:not([data-theme="paper"]) {
     --font-size-md:  17px;
     --font-size-lg:  18px;
 
-    --fs-9:  11px; --fs-10: 12px; --fs-11: 13px; --fs-12: 14px;
-    --fs-13: 15px; --fs-14: 16px; --fs-16: 18px; --fs-20: 22px;
-    --fs-28: 30px; --fs-36: 38px; --fs-56: 58px;
   }
 }

@@ -180,6 +180,8 @@ select.kcf-inline-control {
 }
 .kcf-text.mono { font-family: var(--font-mono); font-size: var(--fs-12); }
 .kcf-text:focus { outline: none; border-color: var(--volt-dim); }
+.kcf-trait { font-size: 10.5px; color: var(--volt); padding: 3px 9px; border: 1px solid color-mix(in oklab, var(--volt) 32%, transparent); border-radius: var(--radius-pill); }
+.kcf-traits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 /* ── prompt assembly trace (cc-6): layered system-prompt lineage ── */
 .kasm { display: flex; flex-direction: column; gap: 12px; }
 .kasm-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
@@ -306,6 +308,10 @@ select.kcf-inline-control {
 .kcf-goal-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .kcf-goal-title { font-size: var(--fs-13); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kcf-goal-id { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kcf-goal-hz.hz-long { color: var(--info); border-color: color-mix(in oklab, var(--info) 34%, transparent); }
+.kcf-goal-hz.hz-mid { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 32%, transparent); }
+.kcf-goal-hz.hz-short { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 30%, transparent); }
+.kcf-goal-hz { font-size: var(--fs-10); letter-spacing: 0.04em; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); color: var(--text-dim); white-space: nowrap; }
 
 .kcf-goals-empty, .kcf-goals-empty { padding: 30px; text-align: center; color: var(--text-dim); font-size: var(--fs-13); background: var(--bg-card); }
 

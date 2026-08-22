@@ -67,6 +67,7 @@
 .rt-caps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
 .rt-cap { font-family: var(--font-mono); font-size: var(--fs-10); padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); color: var(--text-dim); }
 .rt-cap.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 32%, transparent); }
+.rt-cap.tcf { color: var(--info); border-color: color-mix(in oklab, var(--info) 28%, transparent); }
 
 /* provider 호출 테스트 */
 .rt-test { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border-soft); }

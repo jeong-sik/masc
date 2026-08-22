@@ -735,6 +735,8 @@
 /* keeper config drawer */
 .kc-text { width: 100%; font-family: var(--font-body); font-size: var(--fs-13); line-height: 1.55; padding: 10px 12px; background: var(--bg-sunken); color: var(--text-primary); border: 1px solid var(--border-main); border-radius: var(--radius-sm); outline: none; resize: vertical; }
 .kc-text:focus { border-color: var(--volt-dim); box-shadow: 0 0 0 2px var(--volt-wash); }
+.kc-trait { font-family: var(--font-ui); font-size: 10.5px; color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); padding: 2px 9px; border-radius: var(--radius-pill); }
+.kc-traits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .kc-save { width: 100%; margin-top: 4px; padding: 11px; background: var(--volt); color: var(--volt-ink); border: 0; border-radius: var(--radius-sm); font-family: var(--font-ui); font-weight: 600; font-size: var(--fs-13); cursor: pointer; transition: 0.14s; }
 .kc-save:hover { filter: brightness(1.06); }
 .turn-sec .set-row { padding: 8px 0; }
@@ -821,6 +823,7 @@
 .wk-prog-lbl { flex: none; font-size: var(--fs-11); color: var(--text-mid); }
 .wk-metric { margin-left: auto; flex: none; font-size: var(--fs-11); color: var(--text-dim); }
 .wk-jobs { border-top: 1px solid var(--border-soft); padding: 10px 15px 13px; display: flex; flex-direction: column; gap: 2px; }
+.wk-note { font-size: var(--fs-12); color: var(--text-mid); line-height: 1.5; padding: 2px 0 9px; border-bottom: 1px dashed var(--border-soft); margin-bottom: 7px; }
 .wk-job { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: var(--radius-xs); }
 .wk-job:hover { background: var(--bg-sunken); }
 .wk-job-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
@@ -957,6 +960,7 @@
 .wk-gstatus.bad { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 42%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
 .wk-gstatus.volt { color: var(--volt-strong); border-color: var(--volt-dim); background: var(--volt-wash); }
 .wk-approval { flex: none; font-size: var(--fs-10); color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); border-radius: var(--radius-pill); padding: 2px 8px; }
+.wk-goal-phase { flex: none; font-size: 10.5px; color: var(--text-dim); }
 .wk-seg.verify { background: var(--volt-strong); }
 
 .wk-tasks { border-top: 1px solid var(--border-soft); padding: 10px 15px 13px; display: flex; flex-direction: column; gap: 3px; }
@@ -1355,6 +1359,10 @@
 .meter.hot > span { background: linear-gradient(90deg, var(--status-warn), var(--status-bad)); }
 .meter-wrap { position: relative; margin-top: 7px; }
 .meter-wrap .meter { margin-top: 0; }
+.meter-mark.hot .meter-mark-lbl { color: var(--status-bad); }
+.meter-mark-lbl { position: absolute; bottom: 100%; right: 1px; margin-bottom: 3px; font-size: 8.5px; font-style: normal; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; color: color-mix(in oklab, var(--status-warn) 80%, var(--text-dim)); }
+.meter-mark.hot { background: var(--status-bad); }
+.meter-mark { position: absolute; top: -2px; width: 1px; height: 11px; background: color-mix(in oklab, var(--status-warn) 75%, transparent); transform: translateX(-50%); pointer-events: none; }
 
 /* fsm list */
 .fsm { display: flex; flex-direction: column; gap: 0; }

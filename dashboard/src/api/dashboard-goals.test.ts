@@ -164,23 +164,15 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[0]!.children[0]!.id).toBe('goal-child')
   })
 
-  it('decodes goal owner from the tree node payload', async () => {
-    getMock.mockResolvedValue({
-      ...readyApprovalQueue,
-      tree: [
-        validNode('goal-owned', 'Owned goal', { owner: 'dancer' }),
-        validNode('goal-unowned', 'Unowned goal'),
-      ],
-      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
-    })
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]!.owner).toBe('dancer')
-    expect(result.tree[1]!.owner).toBeNull()
-  })
-
-  it('decodes typed timeline events on tree nodes and drops malformed entries', async () => {
+  it('decodes timeline events in the shape the goals endpoint serves and drops anything else', async () => {
+    // Wire shape: `tree_node_to_json` (lib/dashboard/dashboard_goals.ml) maps
+    // each goal_events.jsonl row through `goal_event_timeline_json`
+    // (lib/dashboard/dashboard_goals_types_timeline.ml), which emits
+    // {ts, kind, lane, title, summary, severity}. The first two rows below
+    // are that output verbatim for a goal_phase event and for an event type
+    // the normalizer has no title for. The third row is a ledger row as
+    // written by `emit_goal_event` (lib/workspace_goals.ml), which never
+    // reaches the wire; the decoder does not read that shape.
     getMock.mockResolvedValue({
       ...readyApprovalQueue,
       tree: [
@@ -188,13 +180,26 @@ describe('fetchDashboardGoalsTree decoding', () => {
           timeline_events: [
             {
               ts: '2026-08-05T01:00:00Z',
+              kind: 'goal_phase',
+              lane: 'goal',
+              title: 'Goal Phase',
+              summary: 'phase=blocked by sangsu',
+              severity: 'bad',
+            },
+            {
+              ts: '2026-08-07T18:42:22Z',
               kind: 'goal_owner',
               lane: 'goal',
-              title: 'Goal Owner',
-              summary: 'owner: <unassigned> -> dancer by operator',
+              title: 'Goal Event',
+              summary: 'goal_owner',
               severity: 'ok',
             },
-            { kind: 'goal_owner' },
+            {
+              ts: '2026-08-05T01:00:00Z',
+              goal_id: 'goal-1',
+              event_type: 'goal_phase',
+              payload: { phase: 'blocked', actor: 'sangsu' },
+            },
           ],
         }),
         validNode('goal-2', 'Goal two'),
@@ -207,10 +212,18 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[0]!.timeline_events).toEqual([
       {
         ts: '2026-08-05T01:00:00Z',
+        kind: 'goal_phase',
+        lane: 'goal',
+        title: 'Goal Phase',
+        summary: 'phase=blocked by sangsu',
+        severity: 'bad',
+      },
+      {
+        ts: '2026-08-07T18:42:22Z',
         kind: 'goal_owner',
         lane: 'goal',
-        title: 'Goal Owner',
-        summary: 'owner: <unassigned> -> dancer by operator',
+        title: 'Goal Event',
+        summary: 'goal_owner',
         severity: 'ok',
       },
     ])

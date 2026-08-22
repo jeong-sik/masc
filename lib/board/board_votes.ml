@@ -64,7 +64,7 @@ let vote_log_jsonl store =
   Buffer.contents buf
 
 (* Full snapshot rewrite of the vote log, used by [flush_dirty] (compaction)
-   and [delete_post]/[delete_comment] (removing a target's votes). Returns
+   and [delete_post] (removing a target's votes). Returns
    [Error (Io_error _)] instead of only logging, on the same contract as
    [append_vote_log] — the previous unit-returning version logged via
    [Log.BoardLog.error] directly, which meant this write's failures never
@@ -696,86 +696,6 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
             rewrite I/O failure here is logged + counted inside
             [save_vote_log_jsonl] and self-heals on the next successful
             flush/delete rewrite. *)
-         (match save_vote_log_jsonl votes_jsonl with Ok () | Error _ -> ());
-         save_jsonl_snapshot
-           ~where:"rewrite_reactions"
-           ~path:(reactions_path ())
-           reactions_jsonl);
-       Ok ())
-
-let delete_comment store ~comment_id : (unit, board_error) Result.t =
-  match Comment_id.of_string comment_id with
-  | Error e -> Error e
-  | Ok cid ->
-    let snapshot =
-      with_lock store (fun () ->
-      let comment_key = Comment_id.to_string cid in
-      match Hashtbl.find_opt store.comments comment_key with
-      | None -> Error (Comment_not_found comment_id)
-      | Some comment ->
-        let post_key = Post_id.to_string comment.post_id in
-        (* Remove from comments_by_post index *)
-        let remaining =
-          (* DET-OK: absent index entry = "nothing to remove" (sound-partial). *)
-          Hashtbl.find_opt store.comments_by_post post_key
-          |> Option.value ~default:[]
-          |> List.filter (fun k -> not (String.equal k comment_key))
-        in
-        (if remaining = [] then Hashtbl.remove store.comments_by_post post_key
-         else Hashtbl.replace store.comments_by_post post_key remaining);
-        Hashtbl.remove store.comments comment_key;
-        (* Remove votes targeting this comment *)
-        let vote_keys =
-          Hashtbl.fold
-            (fun key _ acc ->
-               match Board_vote_key.of_string key with
-               | Some vote ->
-                 (match Board_vote_key.target_kind vote with
-                  | Board_vote_key.Comment
-                    when String.equal (Board_vote_key.target_id vote) comment_key ->
-                    key :: acc
-                  | Board_vote_key.Post | Board_vote_key.Comment -> acc)
-               | None -> acc)
-            store.vote_log
-            []
-        in
-        (* Remove reactions targeting this comment *)
-        let reaction_keys =
-          Hashtbl.fold
-            (fun key (reaction : reaction) acc ->
-               if (=) reaction.target_type Reaction_comment
-                  && String.equal reaction.target_id comment_key
-               then key :: acc
-               else acc)
-            store.reactions
-            []
-        in
-        List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
-        List.iter (fun key -> Hashtbl.remove store.reactions key) reaction_keys;
-        (* Decrement the parent post's reply_count *)
-        (match Hashtbl.find_opt store.posts post_key with
-         | Some post ->
-             Hashtbl.replace store.posts post_key
-               { post with reply_count = max 0 (post.reply_count - 1) }
-         | None -> ());
-        invalidate_comment_caches store;
-        store.dirty_comments <- false;
-        Hashtbl.clear store.dirty_comment_ids;
-        store.last_flush <- Time_compat.now ();
-        let comments_jsonl = comments_jsonl_snapshot store in
-        let votes_jsonl = vote_log_jsonl store in
-        let reactions_jsonl = reactions_jsonl_snapshot store in
-        Ok (comments_jsonl, votes_jsonl, reactions_jsonl))
-    in
-    (match snapshot with
-     | Error _ as e -> e
-     | Ok (comments_jsonl, votes_jsonl, reactions_jsonl) ->
-       with_persist_lock store (fun () ->
-         save_jsonl_snapshot
-           ~where:"rewrite_comments"
-           ~path:(comments_path ())
-           comments_jsonl;
-         (* Same log-and-continue contract as [delete_post] above. *)
          (match save_vote_log_jsonl votes_jsonl with Ok () | Error _ -> ());
          save_jsonl_snapshot
            ~where:"rewrite_reactions"

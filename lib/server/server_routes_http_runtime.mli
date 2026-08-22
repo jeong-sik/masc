@@ -242,7 +242,7 @@ val make_health_response_json :
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  request_authority:Server_request_authority.request_context ->
+  request_authority:Server_request_authority.authority ->
   unit
 (** Starts the Eio background refresh loop for cached [/health?full=1]
     diagnostics.  The loop keeps heavy durable scans out of the HTTP request
@@ -319,7 +319,6 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** {1 Board} *)
 
 val board_post_detail_json :
-  include_moderation:bool ->
   blind_votes:bool ->
   config:Workspace.config option ->
   voter:string option ->
@@ -332,9 +331,8 @@ val board_post_detail_json :
     When [voter] is supplied, post/comment rows include vote state for
     that voter. [reaction_actor] independently selects the actor-aware
     reaction state and must come from authenticated credential identity,
-    never a query parameter. When [include_moderation] is [true], rows also
-    include operator-only moderation projection fields. When [config] is
-    supplied, post rows include contributor-quality projection fields.
+    never a query parameter. When [config] is supplied, post rows include
+    contributor-quality projection fields.
     When [blind_votes] is [true], rows hide score fields until that
     voter has voted.
 

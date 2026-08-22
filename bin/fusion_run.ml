@@ -165,9 +165,9 @@ let judge_role_label : Fusion_types.judge_role -> string = function
 (* [--topology] 심의 모드. [run_harness] 는 arm 비교 도구라 topology 분기를 타지
    않는다: single/self-consistency/Self-MoA/fusion 을 같은 plumbing 으로 돌려 비교할
    뿐이다. 그래서 judge_of_judges / staged_judge_of_judges 는 이 바이너리로도,
-   HTTP 로도 실행할 수 없었고(운영 표면은 catchup-judge 가 simple 고정), 오직 키퍼가
-   스스로 호출할 때만 실행됐다. 이 모드는 [Fusion_orchestrator.compute] 를 그대로
-   호출해 실제 분기를 태우고 증거를 덤프한다. sink/wake 는 타지 않는다 — 그 구간은
+   HTTP 로도 실행할 수 없었고, 오직 키퍼가 스스로 호출할 때만 실행됐다. 이 모드는
+   [Fusion_orchestrator.compute] 를 그대로 호출해 실제 분기를 태우고 증거를
+   덤프한다. sink/wake 는 타지 않는다 — 그 구간은
    도구 경로가 소유하며, 여기서 흉내내면 durable 상태에 쓰는 측정 하네스가 된다. *)
 let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt ~web_tools =
   let request : Fusion_types.fusion_request =

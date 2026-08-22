@@ -162,11 +162,3 @@ let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
     in
     if cached_surface_has_success surface then cached_surface_json surface
     else json
-
-(* Projection-diagnostics helpers: SSOT is Server_dashboard_http_core_cache.
-   Re-exported here for backward compatibility with modules that include
-   this module. *)
-let attach_projection_diagnostics = Server_dashboard_http_core_cache.attach_projection_diagnostics
-let projection_diagnostics_json = Server_dashboard_http_core_cache.projection_diagnostics_json
-let with_projection_diagnostics = Server_dashboard_http_core_cache.with_projection_diagnostics
-let initialized_json_opt = Server_dashboard_http_core_cache.initialized_json_opt

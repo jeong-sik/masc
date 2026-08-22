@@ -7,7 +7,6 @@
     - get_timestamps / set_timestamps
     - Burst counters: burst_used, last_burst_reset (direct field access)
     - McpSessionStore: generate_id, to_json
-    - extract_mcp_session_id
 *)
 
 open Alcotest
@@ -241,46 +240,6 @@ let test_mcp_session_list_all () =
   check bool "list increased" true (after > before || after >= 0)
 
 (* ============================================================
-   extract_mcp_session_id Tests
-   ============================================================ *)
-
-let test_extract_mcp_session_id_present () =
-  let headers = Cohttp.Header.init_with "Mcp-Session-Id" "test-session-123" in
-  match Session.extract_mcp_session_id headers with
-  | Some id -> check string "extracted id" "test-session-123" id
-  | None -> fail "expected Some"
-
-let test_extract_mcp_session_id_x_prefix () =
-  let headers = Cohttp.Header.init_with "X-MCP-Session-ID" "session-456" in
-  match Session.extract_mcp_session_id headers with
-  | Some id -> check string "extracted x-prefix id" "session-456" id
-  | None -> fail "expected Some"
-
-let test_extract_mcp_session_id_prefers_mcp () =
-  let headers = Cohttp.Header.init ()
-    |> fun h -> Cohttp.Header.add h "Mcp-Session-Id" "preferred"
-    |> fun h -> Cohttp.Header.add h "X-MCP-Session-ID" "fallback"
-  in
-  match Session.extract_mcp_session_id headers with
-  | Some id -> check string "prefers Mcp-Session-Id" "preferred" id
-  | None -> fail "expected Some"
-
-let test_extract_mcp_session_id_missing () =
-  let headers = Cohttp.Header.init () in
-  match Session.extract_mcp_session_id headers with
-  | None -> ()
-  | Some _ -> fail "expected None"
-
-let test_extract_mcp_session_id_other_headers () =
-  let headers = Cohttp.Header.init ()
-    |> fun h -> Cohttp.Header.add h "Content-Type" "application/json"
-    |> fun h -> Cohttp.Header.add h "Authorization" "Bearer token"
-  in
-  match Session.extract_mcp_session_id headers with
-  | None -> ()
-  | Some _ -> fail "expected None"
-
-(* ============================================================
    status_string Tests (requires Eio runtime - basic only)
    ============================================================ *)
 
@@ -441,13 +400,6 @@ let () =
       test_case "remove" `Quick test_mcp_session_remove;
       test_case "remove nonexistent" `Quick test_mcp_session_remove_nonexistent;
       test_case "list all" `Quick test_mcp_session_list_all;
-    ];
-    "extract_mcp_session_id", [
-      test_case "present" `Quick test_extract_mcp_session_id_present;
-      test_case "x-prefix" `Quick test_extract_mcp_session_id_x_prefix;
-      test_case "prefers mcp" `Quick test_extract_mcp_session_id_prefers_mcp;
-      test_case "missing" `Quick test_extract_mcp_session_id_missing;
-      test_case "other headers" `Quick test_extract_mcp_session_id_other_headers;
     ];
     "status_string", [
       test_case "empty" `Quick test_status_string_empty;

@@ -141,8 +141,7 @@ function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
     message: 'booted',
     keeperName: 'system',
     hasTurn: false,
-    category: 'uncategorized',
-    hasExplicitCategory: false,
+    category: null,
     details: {},
     ...overrides,
   }
@@ -1480,7 +1479,6 @@ describe('SettingsSurface', () => {
           level: 'INFO',
           message: 'shell exec completed',
           category: 'tool',
-          hasExplicitCategory: true,
           details: { tool_name: 'shell.exec' },
         }),
         makeLogEntry({ seq: 6, level: 'INFO', message: 'masc_start 완료' }),
@@ -1676,7 +1674,6 @@ describe('settings read-surface helpers', () => {
     const row = logEntryToSysRow(
       makeLogEntry({
         category: 'tool',
-        hasExplicitCategory: true,
         details: { tool_name: 'shell.exec' },
         message: 'shell exec completed',
       }),

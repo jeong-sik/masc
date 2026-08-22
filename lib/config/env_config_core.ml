@@ -552,10 +552,9 @@ let pubsub_max_messages () =
 
 (** Day-file retention for the JSONL stores under [.masc]. Default: 30.
 
-    Read by the startup prune, the periodic maintenance prune, and the
-    catch-up digest's look-back clamp. Those three decide which day files
-    are deleted and how far a digest may scan; a default that differed
-    between them would delete data one of them still expects to read.
+    Read by the startup prune and the periodic maintenance prune. Both decide
+    which day files are deleted; a default that differed between them would
+    let one prune delete files the other still expects to keep.
 
     @category Policies @ops_class operator *)
 let default_jsonl_retention_days = 30

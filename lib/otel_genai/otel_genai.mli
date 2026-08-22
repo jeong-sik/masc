@@ -44,7 +44,6 @@ module Attr_key : sig
 
   val official_gen_ai : string list
   val masc_extensions : string list
-  val legacy : string list
   val is_official_gen_ai : string -> bool
   val is_masc_extension : string -> bool
 end

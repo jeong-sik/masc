@@ -123,11 +123,10 @@ Two, not four.
    dashboard `IN_PROCESS_CONNECTOR_IDS` + `IN_PROCESS_CONFIG_GUIDES`, and
    deletion of `sidecars/telegram-bot/`.
 
-RFC-0317 split the same work four ways and PR-4 — the deletion — has not
-landed in five weeks. `sidecars/slack-bot/` is still on disk while
-`channel_gate_slack_state.ml:7` says it was removed. A migration whose last
-step is optional does not finish; the deletion belongs in the PR that makes
-it correct.
+RFC-0317 split the same work four ways and PR-4 — the deletion — landed six
+weeks after the gateway, while the state module already described the
+sidecar as gone. A migration whose last step is optional does not finish; the
+deletion belongs in the PR that makes it correct.
 
 ## Costs
 

@@ -126,6 +126,17 @@ type json_shape =
 
 val json_shape_of_json : Yojson.Safe.t -> json_shape
 val json_shape_to_string : json_shape -> string
+
+(** Exact object-shape check for a manual decoder. [Error] names the missing
+    required fields, the fields outside [required @ optional], and the
+    duplicated keys, prefixed with [scope]. *)
+val exact_object_fields
+  :  scope:string
+  -> required:string list
+  -> ?optional:string list
+  -> (string * Yojson.Safe.t) list
+  -> (unit, string) result
+
 val json_schema_type_to_param_type_result : string -> (param_type, string) result
 
 (** Derive the parameter view of a JSON Schema. Keeps only the parts a

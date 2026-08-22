@@ -15,7 +15,6 @@
   board_curation
   board_dispatch
   board_metrics_hooks
-  board_moderation
   board_paths
   board_sort
   board_sub_board_json

@@ -203,7 +203,8 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
           ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
-        |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
+        |> Server_dashboard_http_core_cache.with_projection_diagnostics
+             ~surface:"namespace_truth" ~started_at
              ~extra:
                [
                  ("parallel_ms", `Int (int_of_float parallel_ms));
@@ -223,7 +224,8 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
       Namespace_truth_support.compose_namespace_truth_snapshot ~config
         ~initialized:(Workspace.is_initialized config)
         ~shell_json ~execution_json
-      |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
+      |> Server_dashboard_http_core_cache.with_projection_diagnostics
+           ~surface:"namespace_truth" ~started_at
            ~extra:
              [
                ("parallel_ms", `Int 0);

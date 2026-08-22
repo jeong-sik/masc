@@ -185,13 +185,6 @@ val delete_post :
     rows; the rewriter on next flush overwrites the file
     without them. *)
 
-val delete_comment :
-  store -> comment_id:string -> (unit, board_error) Result.t
-(** Removes a single comment (and its votes/reactions) from the
-    in-memory store and decrements the parent post's reply_count.
-    The JSONL log keeps the original rows; the rewriter on next
-    flush overwrites the file without them. *)
-
 (** {1 Global store + lifecycle} *)
 
 val global : unit -> store

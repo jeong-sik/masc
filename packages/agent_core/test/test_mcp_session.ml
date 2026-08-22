@@ -224,6 +224,9 @@ let () =
                 ; "command", `String "c"
                 ; "args", `List []
                 ; "env", `List []
+                ; "http_base_url", `Null
+                ; "http_headers", `List []
+                ; "transport_kind", `String "stdio"
                 ; ( "tool_schemas"
                   , `List
                       [ `Assoc
@@ -250,6 +253,8 @@ let () =
                 ; "command", `String "http"
                 ; "args", `List []
                 ; "env", `List []
+                ; "http_base_url", `Null
+                ; "http_headers", `List []
                 ; "tool_schemas", `List []
                 ; "transport_kind", `String "http"
                 ]
@@ -259,6 +264,24 @@ let () =
               "error"
               true
               (Result.is_error (Mcp_session.info_of_json missing_endpoint)))
+        ; test_case "unknown info field rejected" `Quick (fun () ->
+            let json =
+              match
+                Mcp_session.info_to_json (make_info ~server_name:"s" ~command:"c" ())
+              with
+              | `Assoc fields -> `Assoc (fields @ [ "extra", `String "x" ])
+              | _ -> fail "info_to_json must encode an object"
+            in
+            match Mcp_session.info_of_json json with
+            | Error (Error.Serialization (Error.JsonParseError { detail })) ->
+              check
+                string
+                "fields mismatch detail"
+                "Mcp_session.info_of_json fields mismatch (missing=[], unknown=[extra], \
+                 duplicates=[])"
+                detail
+            | Error _ -> fail "expected a JsonParseError"
+            | Ok _ -> fail "unknown field must be rejected")
         ] )
     ; ( "spec_roundtrip"
       , [ test_case "to_server_spec preserves all fields" `Quick (fun () ->

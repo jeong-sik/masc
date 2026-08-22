@@ -148,28 +148,40 @@ let take_with_truncation limit rows =
   loop limit [] rows
 ;;
 
-let rows_for_queue_snapshot ~keeper_name ~source ~next_action queue =
-  Keeper_event_queue.to_list queue
-  |> List.mapi (fun queue_index (stimulus : Keeper_event_queue.stimulus) ->
-    let detail =
-      `Assoc
-        [ "queue_index", `Int queue_index
-        ; "post_id", `String stimulus.post_id
-        ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
-        ; "arrived_at_unix", `Float stimulus.arrived_at
-        ; "payload_kind",
-          `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-        ]
-    in
-    { keeper_name = Some keeper_name
-    ; source
-    ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
-    ; wake_producer = wake_producer_of_payload stimulus.payload
-    ; since = Some stimulus.arrived_at
-    ; due_at = None
-    ; next_action
-    ; detail
-    })
+let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
+  List.mapi
+    (fun queue_index (selection : Keeper_event_queue_state.pending_selection) ->
+       let stimulus : Keeper_event_queue.stimulus = selection.source in
+       (* [source_ref] + [source_incarnation] are the exact-entry address the
+          operator boundary ([Server_dashboard_http_keeper_event_queue_operator])
+          resolves through [Keeper_event_queue_state.resolve_pending_selection],
+          so a row read here can be cancelled, transferred, or reprioritized
+          without a second queue projection. Both are wire strings: the ref is
+          a SHA-256 hex and the incarnation a decimal int64. *)
+       let detail =
+         `Assoc
+           [ "queue_index", `Int queue_index
+           ; "post_id", `String stimulus.post_id
+           ; ( "source_ref"
+             , `String (Keeper_event_queue_state.source_snapshot_ref stimulus) )
+           ; ( "source_incarnation"
+             , `String (Int64.to_string selection.admitted_revision) )
+           ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+           ; "arrived_at_unix", `Float stimulus.arrived_at
+           ; "payload_kind",
+             `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+           ]
+       in
+       { keeper_name = Some keeper_name
+       ; source
+       ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
+       ; wake_producer = wake_producer_of_payload stimulus.payload
+       ; since = Some stimulus.arrived_at
+       ; due_at = None
+       ; next_action
+       ; detail
+       })
+    selections
 ;;
 
 let read_error_row ?keeper_name ~waiting_on ~next_action detail =
@@ -208,7 +220,7 @@ let queue_read_error_rows ~keeper_name errors =
 
 let event_queue_rows ~base_path ~keeper_name =
   let snapshot =
-    Keeper_event_queue_persistence.load_snapshot_with_errors ~base_path ~keeper_name
+    Keeper_event_queue_persistence.load_selections_with_errors ~base_path ~keeper_name
   in
   rows_for_queue_snapshot
     ~keeper_name

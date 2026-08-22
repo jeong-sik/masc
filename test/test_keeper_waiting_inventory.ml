@@ -240,7 +240,42 @@ let test_event_queue_pending_is_visible () =
        check string "public row retains typed payload label" "bootstrap"
          (json_string_member "payload_kind" detail);
        check bool "public row does not enumerate the exact event payload" true
-         (U.member "payload" detail = `Null)
+         (U.member "payload" detail = `Null);
+       (* The row carries the exact-entry address the operator boundary
+          resolves, so the inventory is the only queue projection a control
+          surface needs. *)
+       let source_ref = json_string_member "source_ref" detail in
+       let source_incarnation = json_string_member "source_incarnation" detail in
+       check string "source_ref is the typed source snapshot digest"
+         (Keeper_event_queue_state.source_snapshot_ref pending)
+         source_ref;
+       let state =
+         match
+           Keeper_event_queue_persistence.load_state_result
+             ~base_path:config.Workspace_utils_backend_setup.base_path
+             ~keeper_name
+         with
+         | Ok state -> state
+         | Error detail -> fail ("durable queue state read failed: " ^ detail)
+       in
+       (match Keeper_event_queue_state.pending_selections state with
+        | [ selection ] ->
+          check string "source_incarnation is the entry's admitted revision"
+            (Int64.to_string selection.admitted_revision)
+            source_incarnation
+        | selections ->
+          failf "expected one pending selection, got %d" (List.length selections));
+       (match
+          Keeper_event_queue_state.resolve_pending_selection
+            ~source_ref
+            ~source_incarnation:(Int64.of_string source_incarnation)
+            state
+        with
+        | Ok selection ->
+          check string "resolved selection is the queued stimulus"
+            pending.Keeper_event_queue.post_id
+            selection.Keeper_event_queue_state.source.Keeper_event_queue.post_id
+        | Error detail -> fail ("row address did not resolve: " ^ detail))
      | rows -> failf "expected one queue row, got %d" (List.length rows))
 ;;
 

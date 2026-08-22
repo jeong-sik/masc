@@ -305,11 +305,11 @@
   min-width: 0;
 }
 
-/* Section headings mix Korean with product nouns ("이 Goal 은"). base.css puts
-   every h1-h4 in the Cinzel display face, which has no lowercase glyphs and so
-   renders "Goal" as "GOAL" while leaving the Korean alone — the UI face keeps
-   both halves in one voice. No uppercase transform either, for the same
-   reason. */
+/* Section headings are Korean UI text ("진행 판정 메모"). base.css puts every
+   h1-h4 in the Cinzel display face, which has no lowercase glyphs and no
+   Hangul, so the heading would fall back to a different face than the rows
+   under it — the UI face keeps the panel in one voice. No uppercase transform
+   either, for the same reason. */
 .wk-dossier-h {
   margin: 0 0 3px;
   font-family: var(--font-ui);

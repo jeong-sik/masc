@@ -129,7 +129,6 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     metric: null,
     target_value: null,
     due_date: null,
-    owner: null,
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -1541,7 +1540,6 @@ describe('Work', () => {
               title: 'Goal One',
               priority: 5,
               phase: 'executing',
-              owner: 'dancer',
               metric: 'merged PR count',
               target_value: '5 PRs',
               task_summary: {
@@ -1585,15 +1583,23 @@ describe('Work', () => {
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
 
         const text = dossier.textContent ?? ''
-        // What the goal is.
-        expect(text).toContain('G-1')
-        expect(text).toContain('dancer')
         // Why the goal sits where it does.
         expect(text).toContain('metric 미충족 — merged PR은 1건뿐')
         // Where to go next.
         expect(text).toContain('sangsu')
-        expect(text).toContain('턴 42')
         expect(text).toContain('2건 승인 대기')
+        // What the card header already states is not restated below it: the id
+        // rides `data-goal-id` on the card, and the goals endpoint serves no
+        // owner, so there is no 담당 row to fill or to excuse as empty.
+        expect(dossier.querySelector('[data-goal-detail-row="id"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="owner"]')).toBeNull()
+        expect(text).not.toContain('G-1')
+        expect(text).not.toContain('담당')
+        // The latest keeper/turn pair is not a row of its own; the keeper link
+        // above is the way to that keeper.
+        expect(dossier.querySelector('[data-goal-detail-row="latest-run"]')).toBeNull()
+        expect(text).not.toContain('턴 42')
+        expect(text).not.toContain('최근 실행')
 
         // What counts as done is declared once, in the card header, next to the
         // progress bar it qualifies.
@@ -1798,6 +1804,55 @@ describe('Work', () => {
         expect(rows[0]!.textContent).toContain('owner: <unassigned> -> dancer by operator')
         // The count hook stays put while the list opens.
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
+      })
+
+      it('folds created, last changed and last active into one relative-time activity row', () => {
+        const now = Date.now()
+        const createdAt = new Date(now - 3 * 24 * 60 * 60 * 1000)
+        const updatedAt = new Date(now - 2 * 60 * 60 * 1000)
+        const lastActivityAt = new Date(now - 5 * 60 * 1000)
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: createdAt.toISOString(), updated_at: updatedAt.toISOString() },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              created_at: createdAt.toISOString(),
+              updated_at: updatedAt.toISOString(),
+              last_activity_at: lastActivityAt.toISOString(),
+              // The live maximum (#29472). It is not printed anywhere.
+              stagnation_seconds: 2154748,
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        const dossier = within(goalCard).getByTestId('goal-dossier')
+        const activity = dossier.querySelector('[data-goal-detail-row="activity"]')
+        expect(activity).not.toBeNull()
+        // Three instants on the one row, each a <time> carrying the absolute
+        // instant while the row text reads relative.
+        expect(Array.from(activity!.querySelectorAll('[data-goal-detail-when]'), el => el.getAttribute('data-goal-detail-when')))
+          .toEqual(['created', 'updated', 'last-activity'])
+        expect(Array.from(activity!.querySelectorAll('time'), el => el.getAttribute('datetime')))
+          .toEqual([createdAt.toISOString(), updatedAt.toISOString(), lastActivityAt.toISOString()])
+        const text = activity!.textContent ?? ''
+        expect(text).toContain('만든 날 3일 전')
+        expect(text).toContain('마지막 변경 2시간 전')
+        expect(text).toContain('마지막 활동 5분 전')
+        expect(text).not.toContain(createdAt.toISOString())
+        // No raw-seconds stagnation figure, and no separate created/changed rows.
+        expect(text).not.toContain('초째')
+        expect(text).not.toContain('2154748')
+        expect(dossier.querySelector('[data-goal-detail-row="created"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="updated"]')).toBeNull()
+        expect(dossier.querySelectorAll('[data-goal-detail-row]')).toHaveLength(1)
       })
 
       it('renders tree-only Goal Store goals in the list without an execution goal mirror', () => {

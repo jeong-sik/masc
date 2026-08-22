@@ -484,58 +484,11 @@ let install () =
        let cancellation_degraded =
          deliver_task_cancellation config ~agent_name ~task_id
        in
-       let goal_delivery =
-         match
-           Keeper_goal_reconciliation_wake.enqueue_if_ready
-             ~config
-             ~completing_agent_name:agent_name
-             ~task_id
-         with
-         | Keeper_goal_reconciliation_wake.Not_ready
-         | Keeper_goal_reconciliation_wake.Enqueued _
-         | Keeper_goal_reconciliation_wake.Already_present _ -> None
-         | Keeper_goal_reconciliation_wake.Backlog_read_failed { detail } ->
-           Some { degraded_kind = "backlog_read_failed"; degraded_detail = detail }
-         | Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
-           Some
-             { degraded_kind = "no_keeper_target"
-             ; degraded_detail = "goal_id=" ^ goal_id
-             }
-         | Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
-             { goal_id; detail } ->
-           Some
-             { degraded_kind = "keeper_target_lookup_failed"
-             ; degraded_detail = Printf.sprintf "goal_id=%s: %s" goal_id detail
-             }
-         | Keeper_goal_reconciliation_wake.Enqueue_failed
-             { goal_id; keeper_name; detail } ->
-           Some
-             { degraded_kind = "storage_error"
-             ; degraded_detail =
-                 Printf.sprintf "keeper=%s goal_id=%s: %s" keeper_name goal_id detail
-             }
-       in
-       match cancellation_degraded, goal_delivery with
-       | None, None -> Workspace_hooks.Task_terminal_delivered
-       | Some degraded, None | None, Some degraded ->
+       match cancellation_degraded with
+       | None -> Workspace_hooks.Task_terminal_delivered
+       | Some degraded ->
          Workspace_hooks.Task_terminal_delivery_degraded
-           { kind = degraded.degraded_kind; detail = degraded.degraded_detail }
-       | Some cancellation, Some goal ->
-         (* Both paths degraded. Reporting one would hide the other, and the
-            result type carries a single record, so the kinds and details are
-            joined rather than picked between. *)
-         Workspace_hooks.Task_terminal_delivery_degraded
-           { kind =
-               Printf.sprintf
-                 "%s+%s"
-                 cancellation.degraded_kind
-                 goal.degraded_kind
-           ; detail =
-               Printf.sprintf
-                 "%s; %s"
-                 cancellation.degraded_detail
-                 goal.degraded_detail
-           });
+           { kind = degraded.degraded_kind; detail = degraded.degraded_detail });
 
   Atomic.set Workspace_hooks.verification_submit_request_fn
     (fun config ~task ~assignee ~verification_id ~evidence_refs ->

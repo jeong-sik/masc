@@ -70,11 +70,9 @@ type stimulus_payload =
          discovered only if some unrelated stimulus happened to fire.
          Uses the same no-dedicated-reason pattern as async completions:
          turn_reason; the injected pending observation drives the turn. *)
-  | Goal_reconciliation_ready of goal_reconciliation_ready
   | Completion_authority_rejected of completion_authority_rejection
-  (* Cancellation is the one terminal outcome with no Board projection, and
-     Goal_reconciliation_ready targets the Goal owner — a Task with no Goal
-     link reaches no one. This carries the cancellation to the Task's author. *)
+  (* Cancellation is the one terminal outcome with no Board projection. This
+     carries the cancellation to the Task's author. *)
   | Task_cancelled of task_cancellation
   (* A committed workspace message named this Keeper. The transcript row is the
      content SSOT; this payload carries the workspace request identity so the
@@ -141,11 +139,6 @@ and scheduled_wake = {
   result_delivery : Keeper_continuation_channel.t option;
 }
 
-and goal_reconciliation_ready = {
-  gr_goal_id : string;
-  gr_triggering_task_id : string;
-}
-
 and completion_authority_rejection = {
   car_task_id : string;
   car_verification_id : string;
@@ -172,9 +165,6 @@ let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let manual_compaction_post_id = "manual-compaction-request"
-
-let goal_reconciliation_ready_post_id (ready : goal_reconciliation_ready) =
-  "goal-reconciliation-ready:" ^ ready.gr_goal_id
 
 let completion_authority_rejection_post_id
       (rejection : completion_authority_rejection)
@@ -227,7 +217,7 @@ let identity_payload = function
     Task_cancelled { cancellation with tc_reason = None }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-    | Manual_compaction_requested | Goal_reconciliation_ready _
+    | Manual_compaction_requested
     | Completion_authority_rejected _ | Workspace_message _
     ) as payload ->
     payload
@@ -343,7 +333,6 @@ let payload_kind_label = function
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
   | Manual_compaction_requested -> "manual_compaction_requested"
-  | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
   | Workspace_message _ -> "workspace_message"
@@ -353,7 +342,7 @@ let is_board_signal = function
   | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested
-  | Goal_reconciliation_ready _ | Completion_authority_rejected _
+  | Completion_authority_rejected _
   | Task_cancelled _ | Workspace_message _ ->
     false
 
@@ -365,7 +354,6 @@ let connector_attention_channel = function
   | Connector_attention { channel; _ } -> Some channel
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
-  | Goal_reconciliation_ready _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _ ->
     None
 
@@ -566,12 +554,6 @@ let payload_to_yojson = function
        | Hitl_rejected rationale -> [ "rationale", `String rationale ])
   | Manual_compaction_requested ->
     `Assoc [ "kind", `String "manual_compaction_requested" ]
-  | Goal_reconciliation_ready ready ->
-    `Assoc
-      [ "kind", `String "goal_reconciliation_ready"
-      ; "goal_id", `String ready.gr_goal_id
-      ; "triggering_task_id", `String ready.gr_triggering_task_id
-      ]
   | Completion_authority_rejected rejection ->
     `Assoc
       [ "kind", `String "completion_authority_rejected"
@@ -793,14 +775,6 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
   | "manual_compaction_requested" -> Ok Manual_compaction_requested
-  | "goal_reconciliation_ready" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* triggering_task_id =
-      string_field ~context "triggering_task_id" fields
-    in
-    Ok
-      (Goal_reconciliation_ready
-         { gr_goal_id = goal_id; gr_triggering_task_id = triggering_task_id })
   | "completion_authority_rejected" ->
     let* () =
       exact_fields
@@ -940,7 +914,6 @@ let continuation_channel_of_payload = function
   | Board_attention _
   | Bootstrap
   | Manual_compaction_requested
-  | Goal_reconciliation_ready _
   | Completion_authority_rejected _
   | Task_cancelled _
   | Workspace_message _ -> None

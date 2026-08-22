@@ -63,7 +63,6 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _ ->
@@ -206,8 +205,7 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Manual_compaction_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
-  | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Goal_reconciliation_ready _ ->
+  | Keeper_event_queue.Fusion_completed _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle and proceed on its
        own state. *)
@@ -256,14 +254,6 @@ let consume_single_heartbeat_stimulus
         "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
         sw.schedule_id
         sw.due_at
-        meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~meta_after_triage stim
-    | Keeper_event_queue.Goal_reconciliation_ready ready ->
-      Log.Keeper.info
-        "turn entry: goal reconciliation ready goal_id=%s triggering_task_id=%s \
-         (keeper=%s)"
-        ready.gr_goal_id
-        ready.gr_triggering_task_id
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~meta_after_triage stim
     | Keeper_event_queue.Completion_authority_rejected rejection ->
@@ -386,7 +376,6 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _ ->
@@ -419,7 +408,6 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
          | Keeper_event_queue.Schedule_due _
          | Keeper_event_queue.Connector_attention _
          | Keeper_event_queue.Manual_compaction_requested
-         | Keeper_event_queue.Goal_reconciliation_ready _
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
          | Keeper_event_queue.Workspace_message _ -> None)
@@ -494,7 +482,6 @@ let reconcile_spent_selection
   | Fusion_completed _
   | Connector_attention _
   | Manual_compaction_requested
-  | Goal_reconciliation_ready _
   | Completion_authority_rejected _
   (* A committed cancellation cannot be undone or settled elsewhere, so the
      selection is always still worth a turn. *)
@@ -552,7 +539,6 @@ let heartbeat_event_intake
       | Keeper_event_queue.Schedule_due _
       | Keeper_event_queue.Connector_attention _
       | Keeper_event_queue.Hitl_resolved _
-      | Keeper_event_queue.Goal_reconciliation_ready _
       | Keeper_event_queue.Completion_authority_rejected _
       | Keeper_event_queue.Task_cancelled _
       | Keeper_event_queue.Workspace_message _ ->
@@ -622,7 +608,6 @@ let heartbeat_event_intake
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Manual_compaction_requested
-    | Keeper_event_queue.Goal_reconciliation_ready _
     | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _
     | Keeper_event_queue.Workspace_message _ ->
@@ -778,7 +763,6 @@ let heartbeat_event_intake
             | Keeper_world_observation.Board_reaction_changed _
             | Keeper_world_observation.Fusion_completed
             | Keeper_world_observation.External_attention _
-            | Keeper_world_observation.Goal_reconciliation_ready
             | Keeper_world_observation.Completion_authority_rejected _
             | Keeper_world_observation.Task_cancelled _ ->
               Log.Keeper.info

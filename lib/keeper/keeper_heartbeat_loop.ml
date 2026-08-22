@@ -163,7 +163,6 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Manual_compaction_requested
-      | Keeper_event_queue.Goal_reconciliation_ready _
       | Keeper_event_queue.Completion_authority_rejected _
       | Keeper_event_queue.Task_cancelled _
       | Keeper_event_queue.Workspace_message _ ->
@@ -184,7 +183,6 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Bootstrap
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Manual_compaction_requested
-       | Keeper_event_queue.Goal_reconciliation_ready _
        | Keeper_event_queue.Completion_authority_rejected _
        | Keeper_event_queue.Task_cancelled _
        | Keeper_event_queue.Workspace_message _ -> ())

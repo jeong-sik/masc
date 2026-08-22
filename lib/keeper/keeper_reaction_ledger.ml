@@ -8,7 +8,6 @@ type stimulus_kind =
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Manual_compaction
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
-  | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message
@@ -35,7 +34,6 @@ let stimulus_kind_to_string = function
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
   | Manual_compaction -> "manual_compaction"
-  | Goal_reconciliation_ready -> "goal_reconciliation_ready"
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
   | Workspace_message -> "workspace_message"
@@ -53,7 +51,6 @@ let stimulus_kind_of_string = function
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
   | "manual_compaction" -> Some Manual_compaction
-  | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
   | "workspace_message" -> Some Workspace_message
@@ -88,8 +85,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
-  | Keeper_event_queue.Goal_reconciliation_ready _ ->
-    Goal_reconciliation_ready
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
@@ -185,11 +180,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
   | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
-  | Keeper_event_queue.Goal_reconciliation_ready ready ->
-    Printf.sprintf
-      "goal_reconciliation_ready goal_id=%s triggering_task_id=%s"
-      ready.gr_goal_id
-      ready.gr_triggering_task_id
   | Keeper_event_queue.Completion_authority_rejected rejection ->
     Printf.sprintf
       "completion_authority_rejected task_id=%s verification_id=%s"
@@ -221,7 +211,6 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Manual_compaction_requested
-    | Keeper_event_queue.Goal_reconciliation_ready _ -> None
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
     | Keeper_event_queue.Workspace_message _ -> None
@@ -834,7 +823,6 @@ let decode_current_row ~keeper_name row =
       | ( Bootstrap | Fusion_completed | Schedule_due
         | Connector_attention | Hitl_resolved
         | Manual_compaction
-        | Goal_reconciliation_ready
         | Completion_authority_rejected
         | Task_cancelled
         | Workspace_message ),
@@ -1304,7 +1292,6 @@ let board_stimulus_token metadata stimulus_kind =
   | Bootstrap | Fusion_completed | Schedule_due
   | Connector_attention | Hitl_resolved
   | Manual_compaction
-  | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message -> None

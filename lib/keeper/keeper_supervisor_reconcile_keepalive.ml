@@ -128,30 +128,6 @@ let reconcile_keepalive_keepers
        reconcile_one name;
        Eio_guard.yield_step reconcile_ym)
     names;
-  (try
-     let summary =
-       Keeper_goal_reconciliation_wake.reconcile_startup ~config:ctx.config
-     in
-     if
-       summary.enqueued_count > 0
-       || summary.unresolved_count > 0
-       || summary.failed_count > 0
-     then
-       Log.Keeper.info
-         "goal reconciliation startup scan ready=%d enqueued=%d already_present=%d \
-          unresolved=%d failed=%d"
-         summary.ready_count
-         summary.enqueued_count
-         summary.already_present_count
-         summary.unresolved_count
-         summary.failed_count
-   with
-   | Eio.Cancel.Cancelled _ as exn -> raise exn
-   | exn ->
-     inc_reconcile_failure ~name:"fleet" ~operation:"goal_reconciliation";
-     Log.Keeper.warn
-       "goal reconciliation startup scan failed non-fatally and will retry: %s"
-       (Printexc.to_string exn));
   Log.Keeper.debug
     "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
     (int_of_float ((Time_compat.now () -. t0) *. 1000.0))

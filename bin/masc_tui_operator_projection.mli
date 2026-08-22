@@ -60,6 +60,13 @@ val approval_gate_transition :
   token:string ->
   decision:approval_decision ->
   approval_gate_transition
+(** Reindex the selected approval across a snapshot replacement, falling back
+    to the bounded numeric cursor only when that token is absent. *)
+val reconcile_cursor :
+  current_items:approval_item list ->
+  cursor:int ->
+  next_items:approval_item list ->
+  int
 val decode_confirm_response :
   expected_token:string ->
   expected_decision:approval_decision ->

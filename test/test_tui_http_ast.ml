@@ -99,6 +99,11 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"Approval.approval_gate_transition"
      >= 1);
+  check int "approval refresh preserves selected token identity" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"apply_approvals_load"
+       ~callee:"Approval.reconcile_cursor");
   check int "deferred confirmation has truthful operator copy" 1
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui.ml"

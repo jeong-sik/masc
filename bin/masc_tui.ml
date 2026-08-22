@@ -243,10 +243,13 @@ let apply_overview_load state = function
 
 let apply_approvals_load state = function
   | Ok snapshot ->
+      let approval_cursor =
+        Approval.reconcile_cursor ~current_items:(approval_items state)
+          ~cursor:state.approval_cursor ~next_items:snapshot.aps_items
+      in
       state.approval_snapshot <- Some snapshot;
       state.approvals_error <- None;
-      if state.approval_cursor >= List.length snapshot.aps_items then
-        state.approval_cursor <- max 0 (List.length snapshot.aps_items - 1);
+      state.approval_cursor <- approval_cursor;
       (match state.pending_approval_action with
        | Some pending
          when not

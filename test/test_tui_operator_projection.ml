@@ -255,6 +255,35 @@ let test_two_key_gate () =
    | Projection.Gate_arm _ | Projection.Gate_submit ->
        fail "inflight key was not blocked")
 
+let decode_approval_items tokens =
+  let items = List.map approval_item_json tokens in
+  let count = List.length items in
+  match
+    Projection.decode_snapshot
+      (snapshot_json ~items ~visible_count:count ~total_count:count
+         ~hidden_count:0 ())
+  with
+  | Ok snapshot -> snapshot.aps_items
+  | Error err -> fail err
+
+let reconcile ~current_tokens ~cursor next_tokens =
+  Projection.reconcile_cursor
+    ~current_items:(decode_approval_items current_tokens)
+    ~cursor ~next_items:(decode_approval_items next_tokens)
+
+let test_refresh_preserves_selected_token () =
+  check int "B moves after newest prepend" 2
+    (reconcile ~current_tokens:[ "A"; "B"; "C" ] ~cursor:1
+       [ "NEW"; "A"; "B"; "C" ]);
+  check int "missing token keeps valid cursor" 1
+    (reconcile ~current_tokens:[ "A"; "B"; "C" ] ~cursor:1 [ "A"; "C" ]);
+  check int "shrunk list clamps missing token" 0
+    (reconcile ~current_tokens:[ "A"; "B"; "C" ] ~cursor:2 [ "A" ]);
+  check int "empty list resets cursor" 0
+    (reconcile ~current_tokens:[ "A" ] ~cursor:0 []);
+  check int "negative cursor is normalized" 0
+    (reconcile ~current_tokens:[ "A" ] ~cursor:(-1) [ "A" ])
+
 let () =
   run "tui_operator_projection"
     [ ( "operator approvals"
@@ -267,5 +296,7 @@ let () =
         ; test_case "stale request generations" `Quick
             test_approval_flow_rejects_stale_results
         ; test_case "two-key safety gate" `Quick test_two_key_gate
+        ; test_case "refresh preserves selected token" `Quick
+            test_refresh_preserves_selected_token
         ] )
     ]

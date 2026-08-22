@@ -119,6 +119,25 @@ let approval_gate_transition ~inflight ~pending ~token ~decision =
         Gate_submit
     | Some _ | None -> Gate_arm { paa_token = token; paa_decision = decision }
 
+let fallback_cursor ~cursor items =
+  min (max 0 cursor) (max 0 (List.length items - 1))
+
+let reconcile_cursor ~current_items ~cursor ~next_items =
+  let selected_token =
+    if cursor < 0 then None
+    else Option.map (fun item -> item.ap_token) (List.nth_opt current_items cursor)
+  in
+  match selected_token with
+  | Some token ->
+      (match
+         List.find_index
+           (fun item -> String.equal token item.ap_token)
+           next_items
+       with
+       | Some index -> index
+       | None -> fallback_cursor ~cursor next_items)
+  | None -> fallback_cursor ~cursor next_items
+
 let decode_string_list label values =
   Masc.Tui_decode.decode_list label
     (function

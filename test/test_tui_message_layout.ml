@@ -56,6 +56,53 @@ let test_exact_width_and_utf8_fit () =
   check int "truncated UTF-8 fills the byte budget" 5 (String.length fitted);
   check bool "truncated UTF-8 stays valid" true (String.is_valid_utf_8 fitted)
 
+let test_utf8_scalar_input_contract () =
+  List.iter
+    (fun (lead, expected) ->
+      check (option int) (Printf.sprintf "lead %02X" (Char.code lead)) expected
+        (Layout.utf8_scalar_byte_length lead))
+    [ 'A', Some 1
+    ; '\xC2', Some 2
+    ; '\xDF', Some 2
+    ; '\xE0', Some 3
+    ; '\xEF', Some 3
+    ; '\xF0', Some 4
+    ; '\xF4', Some 4
+    ; '\x80', None
+    ; '\xC0', None
+    ; '\xC1', None
+    ; '\xF5', None
+    ; '\xFF', None
+    ];
+  List.iter
+    (fun scalar ->
+      check bool ("printable scalar " ^ scalar) true
+        (Layout.is_printable_utf8_scalar scalar))
+    [ "A"; "é"; "한"; "🙂"; "\xCC\x81" ];
+  List.iter
+    (fun value ->
+      check bool "invalid or control scalar" false
+        (Layout.is_printable_utf8_scalar value))
+    [ ""; "AB"; "\x1B"; "\x7F"; "\xC2\x80"; "\x80"; "\xC0\xAF"
+    ; "\xED\xA0\x80"; "\xF4\x90\x80\x80"
+    ]
+
+let test_backspace_removes_one_utf8_scalar () =
+  let rec remove expected current =
+    match expected with
+    | [] -> ()
+    | next :: rest ->
+        let actual = Layout.drop_last_utf8_scalar current in
+        check string "one scalar removed" next actual;
+        check bool "remaining draft is valid UTF-8" true
+          (String.is_valid_utf_8 actual);
+        remove rest actual
+  in
+  remove [ "Aé한"; "Aé"; "A"; ""; "" ] "Aé한🙂";
+  let invalid = "A\xE2" in
+  check string "invalid buffer is preserved" invalid
+    (Layout.drop_last_utf8_scalar invalid)
+
 let test_trailing_newlines_do_not_hide_reply () =
   let entries =
     [ entry Layout.User "you" "tui-..aaaaaaaa" (String.make 300 'u')
@@ -90,6 +137,10 @@ let () =
             test_keeps_newest_metadata_and_bytes
         ; test_case "exact width and UTF-8 fit" `Quick
             test_exact_width_and_utf8_fit
+        ; test_case "UTF-8 scalar input contract" `Quick
+            test_utf8_scalar_input_contract
+        ; test_case "backspace removes one UTF-8 scalar" `Quick
+            test_backspace_removes_one_utf8_scalar
         ; test_case "trailing newlines keep reply visible" `Quick
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick

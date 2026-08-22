@@ -17,6 +17,43 @@ type row = {
   text : string;
 }
 
+let utf8_scalar_byte_length first =
+  let byte = Char.code first in
+  if byte < 0x80 then Some 1
+  else if byte >= 0xC2 && byte <= 0xDF then Some 2
+  else if byte >= 0xE0 && byte <= 0xEF then Some 3
+  else if byte >= 0xF0 && byte <= 0xF4 then Some 4
+  else None
+
+let is_single_utf8_scalar text =
+  if String.equal text "" || not (String.is_valid_utf_8 text) then false
+  else
+    let decoded = String.get_utf_8_uchar text 0 in
+    Uchar.utf_decode_is_valid decoded
+    && Uchar.utf_decode_length decoded = String.length text
+
+let is_printable_utf8_scalar text =
+  if not (is_single_utf8_scalar text) then false
+  else
+    let code =
+      String.get_utf_8_uchar text 0 |> Uchar.utf_decode_uchar |> Uchar.to_int
+    in
+    code >= 0x20 && code <> 0x7F && not (code >= 0x80 && code <= 0x9F)
+
+let drop_last_utf8_scalar text =
+  if String.equal text "" || not (String.is_valid_utf_8 text) then text
+  else
+    let length = String.length text in
+    let rec find_last offset previous =
+      if offset >= length then previous
+      else
+        let scalar_length =
+          String.get_utf_8_uchar text offset |> Uchar.utf_decode_length
+        in
+        find_last (offset + scalar_length) offset
+    in
+    String.sub text 0 (find_last 0 0)
+
 let fit_width text width =
   if width <= 0 then ""
   else

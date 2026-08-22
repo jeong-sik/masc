@@ -25,23 +25,63 @@ let read_byte_unix ?(timeout = 0.1) () : char option =
 let read_byte () : char option =
   Eio_guard.run_in_systhread (fun () -> read_byte_unix ())
 
+(** One byte of pushback keeps an invalid UTF-8 continuation from swallowing
+    the next independent ASCII key. *)
+type input_reader = { mutable pending_byte : char option }
+
+let create_input_reader () = { pending_byte = None }
+
+let take_input_byte reader ~timeout =
+  match reader.pending_byte with
+  | Some byte ->
+      reader.pending_byte <- None;
+      Some byte
+  | None -> read_byte_unix ~timeout ()
+
+let is_utf8_continuation byte =
+  let code = Char.code byte in
+  code >= 0x80 && code <= 0xBF
+
+let read_utf8_scalar reader first expected_length =
+  let bytes = Bytes.create expected_length in
+  Bytes.set bytes 0 first;
+  let rec fill index =
+    if index >= expected_length then
+      let scalar = Bytes.to_string bytes in
+      if String.is_valid_utf_8 scalar then Some scalar else Some "invalid-utf8"
+    else
+      match take_input_byte reader ~timeout:0.05 with
+      | None -> Some "invalid-utf8"
+      | Some byte when is_utf8_continuation byte ->
+          Bytes.set bytes index byte;
+          fill (index + 1)
+      | Some byte ->
+          reader.pending_byte <- Some byte;
+          Some "invalid-utf8"
+  in
+  fill 1
+
 (** Try to read an escape sequence. Returns a key description. *)
-let read_key () : string option =
+let read_key reader () : string option =
   Eio_guard.run_in_systhread (fun () ->
-      match read_byte_unix () with
+      match take_input_byte reader ~timeout:0.1 with
       | None -> None
       | Some '\027' -> (
           (* Escape sequence: try to read [ and then the code. *)
-          match read_byte_unix ~timeout:0.05 () with
+          match take_input_byte reader ~timeout:0.05 with
           | Some '[' -> (
-              match read_byte_unix ~timeout:0.05 () with
+              match take_input_byte reader ~timeout:0.05 with
               | Some 'A' -> Some "up"
               | Some 'B' -> Some "down"
               | Some 'Z' -> Some "shift-tab"
               | Some _ -> Some "unknown-esc"
               | None -> Some "esc")
           | Some _ | None -> Some "esc")
-      | Some c -> Some (String.make 1 c))
+      | Some byte -> (
+          match Masc_tui_message_layout.utf8_scalar_byte_length byte with
+          | Some 1 -> Some (String.make 1 byte)
+          | Some expected_length -> read_utf8_scalar reader byte expected_length
+          | None -> Some "invalid-utf8"))
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -122,31 +162,28 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     if String.trim text <> "" then submit_message text;
     true
   | "\127" | "\b" ->
-    (* Backspace: delete last character *)
-    let len = Buffer.length state.msg_input in
-    if len > 0 then begin
-      let new_content = Buffer.sub state.msg_input 0 (len - 1) in
-      Buffer.clear state.msg_input;
-      Buffer.add_string state.msg_input new_content
-    end;
+    let new_content =
+      Buffer.contents state.msg_input
+      |> Masc_tui_message_layout.drop_last_utf8_scalar
+    in
+    Buffer.clear state.msg_input;
+    Buffer.add_string state.msg_input new_content;
     true
-  | s when String.length s = 1 ->
-    let c = Char.code s.[0] in
-    if c = 18 then begin
+  | s ->
+    let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
+    if c = Some 18 then begin
       (* Ctrl-R: reconnect using the exact unverified request identity. *)
       retry_message ();
       true
-    end else if c = 21 then begin
+    end else if c = Some 21 then begin
       (* Ctrl-U: clear line *)
       Buffer.clear state.msg_input;
       true
-    end else if c >= 32 && c < 127 then begin
-      (* Printable character *)
+    end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       Buffer.add_string state.msg_input s;
       true
     end else
       true  (* Consume but ignore other control chars *)
-  | _ -> true
 
 let approval_decision_key = function
   | Confirm -> "y"
@@ -905,12 +942,13 @@ let main () =
 
   (* Main loop *)
   let last_check = ref (Unix.gettimeofday ()) in
+  let input_reader = create_input_reader () in
   try
     while true do
       drain_async_messages state ~base_path ~http_refresh_inflight
         ~board_post_refresh_inflight async_messages;
       (* Check for input *)
-      let key = read_key () in
+      let key = read_key input_reader () in
       (match state.view, key with
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None

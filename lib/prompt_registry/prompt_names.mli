@@ -12,9 +12,6 @@ val judge_board : string
 val judge_effect : string
 (** Approve, deny, or escalate one exact Keeper external effect. *)
 
-val judge_catchup : string
-(** Assess a Keeper's recent activity digest for the operator. *)
-
 val verification : string
 (** Task completion review against the submitted evidence snapshot. *)
 

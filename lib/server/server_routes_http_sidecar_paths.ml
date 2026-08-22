@@ -1,9 +1,11 @@
 (** Sidecar id, root, status, and script path helpers. *)
 
-(** Whitelist of sidecars the backend will spawn or signal. Anything else
+(** Whitelist of sidecars the backend will spawn or signal: the connectors
+    that run as external processes under [sidecars/<id>-bot/]. Discord and
+    Slack run in-process and are not sidecar ids. Anything else
     short-circuits at the request boundary before any process dispatch can see
     an attacker-controlled id. *)
-let known_ids = [ "discord"; "imessage"; "slack"; "telegram" ]
+let known_ids = [ "imessage"; "telegram" ]
 
 (** Pure whitelist check; exposed so unit tests can confirm shell-meta and
     path traversal in [name=] are rejected before any process dispatch is
@@ -108,7 +110,7 @@ let missing_sidecar_dir_message ?sidecar_root ?project_root ~base_path id =
 
 (* Local time on purpose, and the one place in this repository where that is
    the correct answer for a filename. The names this has to match are produced
-   by the sidecar launchers — sidecars/{slack,telegram,imessage}-bot/run.sh all
+   by the sidecar launchers — sidecars/{telegram,imessage}-bot/run.sh both
    build "$LOG_DIR/<id>-sidecar-$(date +%Y%m%d).log", and `date` without -u is
    the host's calendar. Switching this to UTC would make the lookup miss the
    live file for the whole UTC-offset window, which is #10392's failure with
@@ -133,20 +135,10 @@ type sidecar_status_config =
   }
 
 let sidecar_status_config = function
-  | "discord" ->
-    { env_names = [ "DISCORD_STATUS_PATH"; "discord_status_path" ]
-    ; toml_keys = [ "discord_status_path"; "status_path" ]
-    ; stale_after_env_name = "MASC_DISCORD_STATUS_STALE_SEC"
-    }
   | "imessage" ->
     { env_names = [ "IMESSAGE_STATUS_PATH"; "status_path" ]
     ; toml_keys = [ "status_path" ]
     ; stale_after_env_name = "MASC_IMESSAGE_STATUS_STALE_SEC"
-    }
-  | "slack" ->
-    { env_names = [ "SLACK_STATUS_PATH"; "MASC_SLACK_STATUS_PATH"; "status_path" ]
-    ; toml_keys = [ "status_path" ]
-    ; stale_after_env_name = "MASC_SLACK_STATUS_STALE_SEC"
     }
   | "telegram" ->
     { env_names = [ "TELEGRAM_STATUS_PATH"; "MASC_TELEGRAM_STATUS_PATH"; "status_path" ]

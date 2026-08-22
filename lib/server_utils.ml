@@ -217,20 +217,9 @@ let board_reaction_fields = function
                Board.board_reaction_emojis) )
       ]
 
-let board_moderation_fields ~include_moderation ~target_kind ~target_id =
-  if not include_moderation then []
-  else
-    let summary = Board_moderation.target_summary ~target_kind ~target_id in
-    [
-      ("report_count", `Int summary.Board_moderation.report_count);
-      ("moderation_status", `String summary.Board_moderation.moderation_status);
-    ]
-
-let board_comment_dashboard_json ?(include_moderation = false)
-    ?(blind_votes = false) ?current_vote ?reactions (c : Board.comment) :
-    Yojson.Safe.t =
+let board_comment_dashboard_json ?(blind_votes = false) ?current_vote
+    ?reactions (c : Board.comment) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string c.author in
-  let comment_id = Board.Comment_id.to_string c.id in
   match Board.comment_to_yojson c with
   | `Assoc fields ->
       let blind_active = board_vote_blind_active ~blind_votes current_vote in
@@ -247,20 +236,15 @@ let board_comment_dashboard_json ?(include_moderation = false)
       `Assoc
         (fields
          @ [ ("author_identity", board_actor_identity_json author) ]
-         @ board_moderation_fields ~include_moderation
-             ~target_kind:Board_moderation.Target_comment
-             ~target_id:comment_id
          @ (if blind_active then [ ("votes", `Null) ] else [])
          @ board_vote_blind_fields ~blind_active
          @ board_vote_state_fields current_vote
          @ board_reaction_fields reactions)
   | other -> other
 
-let board_post_dashboard_json ?(include_moderation = false)
-    ?(blind_votes = false) ?current_vote
+let board_post_dashboard_json ?(blind_votes = false) ?current_vote
     ?reactions ~author_karma (p : Board.post) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string p.author in
-  let post_id = Board.Post_id.to_string p.id in
   let base_fields =
     match Board_dispatch.post_to_yojson_with_karma p ~author_karma with
     | `Assoc fields -> fields
@@ -299,9 +283,6 @@ let board_post_dashboard_json ?(include_moderation = false)
           ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
           ("author_identity", board_actor_identity_json author);
         ]
-      @ board_moderation_fields ~include_moderation
-          ~target_kind:Board_moderation.Target_post
-          ~target_id:post_id
       @ board_vote_blind_fields ~blind_active
       @ board_vote_state_fields current_vote
       @ board_reaction_fields reactions )

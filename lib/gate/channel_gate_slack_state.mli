@@ -2,10 +2,10 @@
 
     Implements {!Channel_gate_connector.S} so it can be registered at server
     startup via [Channel_gate_connector.register (module Channel_gate_slack_state)].
-    The in-process Slack gateway ({!Slack_socket_client}, RFC-0317 PR-1) is the
-    only transport; the Python sidecar is removed in PR-4. Internal helpers are
-    hidden — only the {!Channel_gate_connector.S} surface plus the in-process
-    gateway support is public. *)
+    The in-process Slack gateway ({!Slack_socket_client}, RFC-0317) is the
+    only transport. Internal helpers are hidden — only the
+    {!Channel_gate_connector.S} surface plus the in-process gateway support is
+    public. *)
 
 include Channel_gate_connector.S
 

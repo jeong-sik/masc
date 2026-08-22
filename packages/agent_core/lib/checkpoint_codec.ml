@@ -110,12 +110,6 @@ let usage_to_json u =
 let usage_of_json json =
   let open Yojson.Safe.Util in
   match json with
-  | `Assoc fields when List.mem_assoc "unpriced_model" fields ->
-    Error
-      (Error.Serialization
-         (JsonParseError
-            { detail = "Checkpoint.usage_of_json: legacy unpriced_model is not supported"
-            }))
   | `Assoc _ ->
     let* () =
       validate_exact_object_fields

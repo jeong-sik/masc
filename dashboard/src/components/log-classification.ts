@@ -6,8 +6,6 @@ export type LogDisplayKind =
   | 'lifecycle'
   | 'approval'
   | 'broadcast'
-  | 'telemetry'
-  | 'task'
   | 'log'
 
 export function entryDetails(entry: LogEntry): Record<string, unknown> | null {
@@ -22,29 +20,25 @@ export function detailLabel(details: Record<string, unknown> | null, key: string
   return null
 }
 
+/** The chip a row belongs to is a projection of the producer's typed
+    category alone: no detail-key sniffing, no turn_id fallback. */
 export function logDisplayKind(entry: LogEntry): LogDisplayKind {
-  const details = entryDetails(entry)
-  const toolName = detailLabel(details, 'tool_name') ?? detailLabel(details, 'tool')
-  if (toolName) return 'tool'
   switch (entry.category) {
     case 'tool':
       return 'tool'
-    case 'task':
-      return 'task'
+    case 'turn':
+      return 'turn'
     case 'lifecycle':
     case 'fsm':
     case 'heartbeat':
-    case 'presence':
       return 'lifecycle'
     case 'directive':
     case 'boundary':
       return 'approval'
-    case 'telemetry':
-    case 'memory':
-      return 'telemetry'
+    case 'broadcast':
+      return 'broadcast'
     case 'routine':
-      return entry.hasTurn ? 'turn' : 'log'
-    default:
-      return entry.hasTurn ? 'turn' : 'log'
+    case null:
+      return 'log'
   }
 }

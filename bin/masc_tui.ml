@@ -828,6 +828,7 @@ let run_with_eio_context f =
   Eio.Switch.run @@ fun sw ->
   Eio_guard.enable ();
   Eio.Switch.on_release sw Eio_guard.disable;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_context.set_env env;
   Eio_context.set_switch sw;
   Eio_context.set_net (Eio.Stdenv.net env);

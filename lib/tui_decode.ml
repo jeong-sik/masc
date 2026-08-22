@@ -10,31 +10,63 @@ type agent = {
 type task = {
   id : string;
   title : string;
-  status : string;
+  status : Masc_domain.task_status;
   priority : int;
-  claimed_by : string option;
-  parent_task_id : string option;
-  goal_id : string option;
 }
 
 type keeper = {
   k_name : string;
   k_generation : int;
-  k_active_model : string option;
-  k_models : string list;
-  k_proactive_enabled : bool;
-  k_initiative_enabled : bool option;
+  k_paused : bool;
+  k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_trigger_mode : string;
-  k_context_budget : int;
-  k_drift_enabled : bool;
-  k_verify : bool;
+  k_autonomous_turn_count : int;
+  k_autonomous_text_turn_count : int;
+  k_autonomous_tool_turn_count : int;
+  k_board_reactive_turn_count : int;
+  k_mention_reactive_turn_count : int;
+  k_noop_turn_count : int;
+  k_last_proactive_outcome : string;
+  k_last_blocker : string option;
   k_created_at : string;
   k_updated_at : string;
+}
+
+type planning_goal = {
+  pg_id : string;
+  pg_title : string;
+  pg_phase : Goal_phase.t;
+  pg_priority : int;
+  pg_due_date : string option;
+  pg_metric : string option;
+  pg_target_value : string option;
+}
+
+type planning_rollup = {
+  pr_active : int;
+  pr_paused : int;
+  pr_verifying : int;
+  pr_done : int;
+  pr_dropped : int;
+}
+
+type planning_backlog = {
+  pb_todo : int;
+  pb_claimed : int;
+  pb_running : int;
+  pb_done : int;
+  pb_cancelled : int;
+}
+
+type planning_snapshot = {
+  pl_goals : planning_goal list;
+  pl_rollup : planning_rollup;
+  pl_backlog : planning_backlog;
+  pl_generated_at : string;
 }
 
 type log_entry = {
@@ -106,8 +138,6 @@ let optional_bool json key =
 let require_string_field json key = require_string json key
 let require_int_field json key = require_int json key
 let require_float_field json key = require_float json key
-let require_bool_field json key = require_bool json key
-
 let require_string_list json key =
   match member key json with
   | `List items ->
@@ -134,14 +164,6 @@ let require_string_list json key =
         (Printf.sprintf "field '%s' must be an array (received %s)" key
            (Json_util.kind_name other))
 
-let string_of_intlike_float_field key f =
-  if not (Float.is_finite f) then
-    Error (Printf.sprintf "field '%s' must be a finite number" key)
-  else
-    try Ok (string_of_int (int_of_float f))
-    with Invalid_argument _ ->
-      Error (Printf.sprintf "field '%s' is out of range for int" key)
-
 let decode_status json =
   match member "status" json with
   | `String s -> Ok s
@@ -167,90 +189,157 @@ let decode_agent json =
   let* last_seen = require_string_field json "last_seen" in
   Ok { name; status; current_task; last_seen }
 
-let decode_task json =
-  let* id = require_string_field json "id" in
-  let* title = require_string_field json "title" in
-  let* status = require_string_field json "status" in
-  let* priority = optional_int json "priority" in
-  let* claimed_by = optional_string json "claimed_by" in
-  let* parent_task_id = optional_string json "parent_task_id" in
-  let* goal_id = optional_string json "goal_id" in
-  Ok
-    {
-      id;
-      title;
-      status;
-      priority = Option.value priority ~default:3;
-      claimed_by;
-      parent_task_id;
-      goal_id;
-    }
+let task_of_domain (task : Masc_domain.task) =
+  {
+    id = task.id;
+    title = task.title;
+    status = task.task_status;
+    priority = task.priority;
+  }
 
-let decode_keeper ~filename json =
-  let* k_generation = require_int_field json "generation" in
-  let* k_active_model = optional_string json "active_model" in
-  let* k_models =
-    match member "models" json with
-    | `Null -> Ok []
-    | `List _ -> require_string_list json "models"
-    | other ->
-        Error
-          (Printf.sprintf
-             "field 'models' must be a list of strings (received %s)"
-             (Json_util.kind_name other))
+let active_tasks_of_domain tasks =
+  tasks
+  |> List.map task_of_domain
+  |> List.filter (fun task ->
+       not (Masc_domain.task_status_is_terminal task.status))
+  |> List.stable_sort (fun left right ->
+       Int.compare left.priority right.priority)
+
+let decode_task json =
+  let* task = Masc_domain.task_of_yojson json in
+  Ok (task_of_domain task)
+
+let blocker_summary (blocker : Keeper_meta_contract.blocker_info) =
+  let label = Keeper_meta_contract.blocker_class_to_string blocker.klass in
+  match String.trim blocker.detail with
+  | "" -> label
+  | detail -> label ^ ": " ^ detail
+
+let sanitize_terminal_text text =
+  let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
+  let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
+  let output = Buffer.create (String.length text) in
+  let byte_at index = Char.code text.[index] in
+  let is_continuation byte = byte >= 0x80 && byte <= 0xBF in
+  let valid_utf8_length index =
+    let remaining = String.length text - index in
+    let first = byte_at index in
+    if first >= 0xC2 && first <= 0xDF && remaining >= 2
+       && is_continuation (byte_at (index + 1))
+    then Some 2
+    else if first = 0xE0 && remaining >= 3
+            && byte_at (index + 1) >= 0xA0
+            && byte_at (index + 1) <= 0xBF
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first >= 0xE1 && first <= 0xEC && remaining >= 3
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first = 0xED && remaining >= 3
+            && byte_at (index + 1) >= 0x80
+            && byte_at (index + 1) <= 0x9F
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first >= 0xEE && first <= 0xEF && remaining >= 3
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first = 0xF0 && remaining >= 4
+            && byte_at (index + 1) >= 0x90
+            && byte_at (index + 1) <= 0xBF
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else if first >= 0xF1 && first <= 0xF3 && remaining >= 4
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else if first = 0xF4 && remaining >= 4
+            && byte_at (index + 1) >= 0x80
+            && byte_at (index + 1) <= 0x8F
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else None
   in
-  let* k_proactive_enabled = require_bool_field json "proactive_enabled" in
-  let* k_initiative_enabled = optional_bool json "initiative_enabled" in
-  let* k_total_turns = require_int_field json "total_turns" in
-  let* k_total_tokens = require_int_field json "total_tokens" in
-  let* k_total_cost_usd = require_float_field json "total_cost_usd" in
-  let* k_last_turn_ts =
-    match member "last_turn_ts" json with
-    | `String s -> Ok s
-    | `Float f -> string_of_intlike_float_field "last_turn_ts" f
-    | `Int n -> Ok (string_of_int n)
-    | `Null -> Ok ""
-    | other ->
-        Error
-          (Printf.sprintf
-             "field 'last_turn_ts' must be a string, number, or null \
-              (received %s)"
-             (Json_util.kind_name other))
+  let rec append index =
+    if index < String.length text
+    then (
+      let byte = Char.code text.[index] in
+      if
+        byte = 0xC2
+        && index + 1 < String.length text
+        && let next = Char.code text.[index + 1] in
+           next >= 0x80 && next <= 0x9F
+      then (
+        Buffer.add_string output (escaped_codepoint (Char.code text.[index + 1]));
+        append (index + 2))
+      else if byte >= 0xC2
+      then (
+        match valid_utf8_length index with
+        | Some length ->
+          Buffer.add_substring output text index length;
+          append (index + length)
+        | None ->
+          Buffer.add_char output text.[index];
+          append (index + 1))
+      else if byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
+      then (
+        Buffer.add_string output (escaped_byte byte);
+        append (index + 1))
+      else (
+        Buffer.add_char output text.[index];
+        append (index + 1)))
   in
-  let* k_compaction_count = require_int_field json "compaction_count" in
-  let* k_trigger_mode = require_string_field json "trigger_mode" in
-  let* k_context_budget = require_int_field json "context_budget" in
-  let* k_drift_enabled = require_bool_field json "drift_enabled" in
-  let* k_verify = require_bool_field json "verify" in
-  let* k_created_at = require_string_field json "created_at" in
-  let* k_updated_at = require_string_field json "updated_at" in
-  let default_name =
-    if Filename.check_suffix filename ".json" then
-      Filename.chop_suffix filename ".json"
-    else
-      Filename.remove_extension filename
+  append 0;
+  Buffer.contents output
+;;
+
+let keeper_blocker_for_terminal keeper =
+  match keeper.k_last_blocker with
+  | None -> "-"
+  | Some blocker -> sanitize_terminal_text blocker
+;;
+
+let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
+  let runtime = meta.runtime in
+  let usage = runtime.usage in
+  let compaction = runtime.compaction_rt in
+  let proactive = runtime.proactive_rt in
+  let k_last_turn_ts =
+    if Float.compare usage.last_turn_ts 0.0 <= 0 then ""
+    else Masc_domain.iso8601_of_unix_seconds usage.last_turn_ts
   in
-  let k_name = Option.value (get_string json "name") ~default:default_name in
-  Ok
-    {
-      k_name;
-      k_generation;
-      k_active_model;
-      k_models;
-      k_proactive_enabled;
-      k_initiative_enabled;
-      k_total_turns;
-      k_total_tokens;
-      k_total_cost_usd;
-      k_last_turn_ts;
-      k_compaction_count;
-      k_trigger_mode;
-      k_context_budget;
-      k_drift_enabled;
-      k_verify;
-      k_created_at;
-      k_updated_at;
-    }
+  {
+    k_name = meta.name;
+    k_generation = runtime.nonce;
+    k_paused = meta.paused;
+    k_current_task_id =
+      Option.map Keeper_id.Task_id.to_string meta.current_task_id;
+    k_total_turns = usage.total_turns;
+    k_total_tokens = usage.total_tokens;
+    k_total_cost_usd = usage.total_cost_usd;
+    k_last_turn_ts;
+    k_compaction_count = compaction.count;
+    k_autonomous_turn_count = runtime.autonomous_turn_count;
+    k_autonomous_text_turn_count = runtime.autonomous_text_turn_count;
+    k_autonomous_tool_turn_count = runtime.autonomous_tool_turn_count;
+    k_board_reactive_turn_count = runtime.board_reactive_turn_count;
+    k_mention_reactive_turn_count = runtime.mention_reactive_turn_count;
+    k_noop_turn_count = runtime.noop_turn_count;
+    k_last_proactive_outcome =
+      Keeper_meta_contract.proactive_cycle_outcome_to_string
+        proactive.last_outcome;
+    k_last_blocker = Option.map blocker_summary runtime.last_blocker;
+    k_created_at = meta.created_at;
+    k_updated_at = meta.updated_at;
+  }
+
+let decode_keeper json =
+  let* meta = Keeper_meta_json_parse.meta_of_json json in
+  Ok (keeper_of_meta meta)
 
 let parse_log_entry line =
   let json =
@@ -375,19 +464,6 @@ let required_int_field json key =
   | `Null -> missing_field key
   | bad -> field_type_error key "an int" bad
 
-let required_int_any_field json keys =
-  let rec loop = function
-    | [] ->
-        Error
-          (Printf.sprintf "missing required field '%s'"
-             (String.concat "' or '" keys))
-    | key :: rest -> (
-        match member key json with
-        | `Null -> loop rest
-        | _ -> required_int_field json key)
-  in
-  loop keys
-
 let int_field_or json key ~default =
   match member key json with
   | `Null -> Ok default
@@ -464,6 +540,56 @@ let decode_list label decode items =
         | Error err -> Error (Printf.sprintf "%s[%d]: %s" label idx err))
   in
   loop 0 [] items
+
+let decode_planning_goal json =
+  let* pg_id = required_string_field json "id" in
+  let* pg_title = required_string_field json "title" in
+  let* raw_phase = required_string_field json "phase" in
+  let* pg_phase =
+    match Goal_phase.parse raw_phase with
+    | Some phase -> Ok phase
+    | None -> Error (Printf.sprintf "unknown planning goal phase %S" raw_phase)
+  in
+  let* pg_priority = required_int_field json "priority" in
+  let* pg_due_date = optional_string_field json "due_date" in
+  let* pg_metric = optional_string_field json "metric" in
+  let* pg_target_value = optional_string_field json "target_value" in
+  Ok
+    {
+      pg_id;
+      pg_title;
+      pg_phase;
+      pg_priority;
+      pg_due_date;
+      pg_metric;
+      pg_target_value;
+    }
+
+let decode_planning_rollup json =
+  let* pr_active = required_int_field json "active_count" in
+  let* pr_paused = required_int_field json "paused_count" in
+  let* pr_verifying = required_int_field json "verifying_count" in
+  let* pr_done = required_int_field json "done_count" in
+  let* pr_dropped = required_int_field json "dropped_count" in
+  Ok { pr_active; pr_paused; pr_verifying; pr_done; pr_dropped }
+
+let decode_planning_backlog json =
+  let* pb_todo = required_int_field json "todo" in
+  let* pb_claimed = required_int_field json "claimed" in
+  let* pb_running = required_int_field json "in_progress" in
+  let* pb_done = required_int_field json "done" in
+  let* pb_cancelled = required_int_field json "cancelled" in
+  Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
+
+let decode_planning_snapshot json =
+  let* goals_json = required_list_field json "goals" in
+  let* pl_goals = decode_list "goals" decode_planning_goal goals_json in
+  let* rollup_json = required_object_field json "rollup" in
+  let* pl_rollup = decode_planning_rollup rollup_json in
+  let* backlog_json = required_object_field json "task_backlog" in
+  let* pl_backlog = decode_planning_backlog backlog_json in
+  let* pl_generated_at = required_string_field json "generated_at" in
+  Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =

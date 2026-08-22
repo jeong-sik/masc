@@ -53,11 +53,12 @@ Press `Tab` to switch. Shows all registered keepers with status.
 ```
 MASC Keepers (5 registered)
 
-> dm-keeper        gen=0  model=qwen3.5  proactive=true
-  qa-ui-smoke      gen=0  model=qwen3.5  proactive=true
-  qa-surface       gen=0  model=qwen3.5  proactive=true
-  qa-harness       gen=0  model=qwen3.5  proactive=true
-  sangsu           gen=0  model=qwen3.5  proactive=true
+  Name                   Gen  Paused        Turns  Current Task
+> dm-keeper                2  no              128  task-42
+  qa-ui-smoke              1  yes              31  -
+  qa-surface               3  no              204  task-57
+  qa-harness               1  no               89  -
+  sangsu                   1  no            30317  -
 
 [j/k] Navigate  [Enter] Detail  [Tab] Dashboard  [q] Quit
 ```
@@ -71,17 +72,26 @@ Keeper: sangsu
 
   Identity
   Name:                  sangsu
-  Generation:            0
+  Generation:            1
+  Paused:                no
+
+  Current Work
+  Task:                  -
+  Last Blocker:          -
 
   Live Context
   Context:               55.2%  ########-----------  70629 / 128000 tokens
   Messages:              430
 
-  Goals
-  Goal:                  keeper for Vincent
+  Runtime Stats
+  Total Turns:           30317
+  Total Tokens:          2046321197
+  Compactions:           18
 
-  Model
-  Active Model:          llama:qwen3.5-35b-a3b-ud-q8-xl
+  Autonomy
+  Autonomous Turns:      22023
+  Text / Tool:           14457 / 7565
+  Board / Mention:       1187 / 56
 
 [j/k] Scroll  [l] Logs  [m] Message  [Esc] Back  [q] Quit
 ```
@@ -164,9 +174,11 @@ Dashboard <--Tab--> Keeper List
 
 | Feature | Source | Server Required |
 |---------|--------|-----------------|
-| Keeper list/detail | `.masc/keepers/*.json` | No |
+| Active task list | `.masc/tasks/backlog.json` | No |
+| Keeper list/detail | current-schema `.masc/keepers/*.json` | No |
 | Live context status | `<name>/metrics/YYYY-MM/DD.jsonl` (latest entry) | No |
 | Keeper logs | `<name>/metrics/YYYY-MM/DD.jsonl` (last 200 entries) | No |
+| Goal planning | `GET /api/v1/dashboard/planning` | Yes |
 | Send messages | `POST /api/v1/keepers/chat/stream` | Yes |
 
 ## Requirements

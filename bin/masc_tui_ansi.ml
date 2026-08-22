@@ -99,10 +99,12 @@ let status_color status =
 (** Task status icon *)
 let task_status_icon status =
   match status with
-  | "done" | "completed" -> "\xe2\x97\x8f"  (* filled circle *)
-  | "in_progress" | "claimed" -> "\xe2\x97\x90"  (* half circle *)
-  | "pending" | "todo" -> "\xe2\x97\x8b"  (* empty circle *)
-  | _ -> "\xe2\x97\x8b"
+  | Masc_domain.Done _ -> "\xe2\x97\x8f"  (* filled circle *)
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.AwaitingVerification _ -> "\xe2\x97\x90"  (* half circle *)
+  | Masc_domain.Todo -> "\xe2\x97\x8b"  (* empty circle *)
+  | Masc_domain.Cancelled _ -> "\xc3\x97"
 
 (** Priority indicator *)
 let priority_indicator p =
@@ -119,21 +121,6 @@ let soul_color profile =
   | "balanced" -> Ansi.cyan
   | "creative" -> Ansi.yellow
   | _ -> Ansi.white
-
-(** Shorten model string for display *)
-let short_model s =
-  (* Extract the part after the last colon, or last slash, keeping it short *)
-  let s = match String.index_opt s ':' with
-    | Some i -> String.sub s (i + 1) (String.length s - i - 1)
-    | None -> s
-  in
-  if String.length s > 24 then String.sub s 0 21 ^ "..."
-  else s
-
-(** Format a boolean as on/off indicator *)
-let bool_indicator b =
-  if b then Ansi.green ^ "on" ^ Ansi.reset
-  else Ansi.gray ^ "off" ^ Ansi.reset
 
 (** Format a timestamp for display (show date portion or relative) *)
 let short_ts s =

@@ -190,7 +190,7 @@ def stream_payload(request: dict[str, str], complete: bool) -> bytes:
     if complete:
         values.extend([
             event(request, "CUSTOM", runId=run_id, name="KEEPER_REPLY_DETAILS",
-                  value={"reply": "reply-v3", "turn_outcome": "visible_reply", "turn_ref": "trace-chat#v3"}),
+                  value={"reply": "reply-v3", "turn_outcome": "visible_reply", "turn_ref": "trace-chat#1"}),
             event(request, "TEXT_MESSAGE_END", runId=run_id, messageId=message_id),
             event(request, "RUN_FINISHED", runId=run_id),
         ])

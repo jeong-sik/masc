@@ -90,10 +90,6 @@ type stimulus_payload =
       (** Operator-requested MASC compaction. The tool only enqueues this
           stimulus; the owning Keeper consumes it in its Owner child. *)
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
-  | Goal_reconciliation_ready of goal_reconciliation_ready
-      (** Every Task linked to an executing Goal is terminal. This wakes a
-          Keeper to re-read SSOT and choose a Goal action; it does not authorize
-          automatic completion. *)
   | Completion_authority_rejected of completion_authority_rejection
       (** A system completion authority rejected this Keeper's submitted
           evidence. The event is delivered to the producer Keeper as typed
@@ -102,9 +98,7 @@ type stimulus_payload =
       (** Another Keeper cancelled a Task this Keeper authored. Cancellation is
           the one terminal outcome with no Board projection — completion posts a
           verdict, submission posts a request, but a cancellation left only a
-          backlog field and an activity row. [Goal_reconciliation_ready] does
-          not cover this: it targets the owner of the Task's Goal, and a Task
-          with no Goal link reaches no one. The cancelling Keeper's reason is
+          backlog field and an activity row. The cancelling Keeper's reason is
           carried here because it is the author's only account of why the work
           it asked for stopped. *)
   | Workspace_message of workspace_message
@@ -187,12 +181,6 @@ and scheduled_wake = {
     schedule creation captured an authorized originating continuation.
     [occurrence_id] is the exact schedule occurrence correlation key. *)
 
-and goal_reconciliation_ready = {
-  gr_goal_id : string;
-  gr_triggering_task_id : string;
-}
-(** Identifier-only payload for [Goal_reconciliation_ready]. *)
-
 and completion_authority_rejection = {
   car_task_id : string;
   car_verification_id : string;
@@ -238,8 +226,6 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 
 val manual_compaction_post_id : post_id
 
-val goal_reconciliation_ready_post_id :
-  goal_reconciliation_ready -> post_id
 
 val completion_authority_rejection_post_id :
   completion_authority_rejection -> post_id

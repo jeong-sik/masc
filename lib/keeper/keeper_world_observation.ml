@@ -25,7 +25,6 @@ type pending_board_event_kind =
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
-  | Goal_reconciliation_ready
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
   | Task_cancelled of Keeper_event_queue.task_cancellation
 
@@ -53,11 +52,7 @@ let is_board_activity_event (event : pending_board_event) =
   | Board_comment_added
   | Board_reaction_changed _
   | Fusion_completed
-  | External_attention _
-  (* Goal-lifecycle signal, not a schedule dispatch. The [false] arm would
-     also compile but would route the event to the Scheduled Automation
-     renderer and drop it from [board_activity_count]. *)
-  | Goal_reconciliation_ready -> true
+  | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer. *)
   | Completion_authority_rejected _ | Task_cancelled _ -> false
@@ -71,7 +66,6 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Fusion_completed
   | External_attention _
-  | Goal_reconciliation_ready
   | Completion_authority_rejected _
   | Task_cancelled _ -> false
 ;;
@@ -85,7 +79,6 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Fusion_completed
   | Schedule_due _
   | External_attention _
-  | Goal_reconciliation_ready
   | Task_cancelled _ -> false
 ;;
 
@@ -101,7 +94,6 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Fusion_completed
   | Schedule_due _
   | External_attention _
-  | Goal_reconciliation_ready
   | Completion_authority_rejected _ -> false
 ;;
 
@@ -615,35 +607,6 @@ let pending_board_event_of_external_attention
   }
 ;;
 
-let pending_board_event_of_goal_reconciliation_ready
-      ~meta
-      ~(arrived_at : float)
-      (ready : Keeper_event_queue.goal_reconciliation_ready)
-  : pending_board_event
-  =
-  { event_kind = Goal_reconciliation_ready
-  ; post_id = Keeper_event_queue.goal_reconciliation_ready_post_id ready
-  ; author = "masc"
-  ; title = Printf.sprintf "Goal reconciliation ready: %s" ready.gr_goal_id
-  ; preview =
-      short_preview
-        ~max_len:fusion_result_preview_max_len
-        (Printf.sprintf
-           "Task %s made every linked Task terminal for goal %s. Re-read Goal and Task SSOT before choosing completion, blocking, or follow-up work."
-           ready.gr_triggering_task_id
-           ready.gr_goal_id)
-  ; hearth = None
-  ; post_kind = Board.System_post
-  ; updated_at = arrived_at
-  ; explicit_mention = true
-  ; matched_targets = [ meta.name; ready.gr_goal_id ]
-  ; self_commented = false
-  ; new_external_since = 0
-  ; latest_external_author = None
-  ; latest_external_preview = None
-  }
-;;
-
 let pending_board_event_of_completion_authority_rejection
       ~(arrived_at : float)
       (rejection : Keeper_event_queue.completion_authority_rejection)
@@ -748,13 +711,6 @@ let pending_board_event_of_stimulus
             ~post_id:stimulus.post_id
             ~arrived_at:stimulus.arrived_at
             sw))
-  | Keeper_event_queue.Goal_reconciliation_ready ready ->
-    Ok
-      (Some
-         (pending_board_event_of_goal_reconciliation_ready
-            ~meta
-            ~arrived_at:stimulus.arrived_at
-            ready))
   | Keeper_event_queue.Completion_authority_rejected rejection ->
     Ok
       (Some

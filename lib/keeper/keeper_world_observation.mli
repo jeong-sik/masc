@@ -38,7 +38,6 @@ type pending_board_event_kind =
           projection. *)
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)
-  | Goal_reconciliation_ready
       (** All linked Tasks are terminal; the Keeper must re-read SSOT and
           choose completion, blocking, or follow-up work. *)
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
@@ -88,9 +87,7 @@ type pending_board_event = {
     it to [Scheduled_automation_stimulus] independently of this partition
     ([scheduled_automation.due_ready_count] is a separate live-store
     observation, not the stimulus's trigger; it can already be zero once
-    dispatch begins). [Goal_reconciliation_ready] has no dedicated event-queue
-    trigger, so classifying an isolated reconciliation event [false] also
-    removes [Board_event_pending] and suppresses its intended reactive turn.
+    dispatch begins).
 
     A new event kind placed on the wrong side compiles cleanly and fails
     silently. Classify by its source contract and pin the answer in a test. *)

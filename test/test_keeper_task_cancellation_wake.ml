@@ -1,10 +1,8 @@
 (** A committed cancellation reaches the Keeper that authored the Task.
 
-    Cancellation is the one terminal Task outcome with no Board projection, and
-    [Keeper_goal_reconciliation_wake] targets the Goal owner, so a Task with no
-    Goal link reached no one. On the reference workspace 46 of 56 cancellations
-    had a canceller different from the author and 0 of 161 tasks carried a Goal
-    link, so every one of those reasons was written and never read.
+    Cancellation is the one terminal Task outcome with no Board projection. On
+    the reference workspace 46 of 56 cancellations had a canceller different
+    from the author, so every one of those reasons was written and never read.
 
     These tests drive [notify_author] against a real workspace and read the
     author's durable event queue, so a delivery that stops at the enqueue
@@ -106,7 +104,6 @@ let queued_cancellations ~base_path ~keeper_name =
     | Event_queue.Connector_attention _
     | Event_queue.Hitl_resolved _
     | Event_queue.Manual_compaction_requested
-    | Event_queue.Goal_reconciliation_ready _
     | Event_queue.Completion_authority_rejected _
     | Event_queue.Workspace_message _ -> None)
 ;;

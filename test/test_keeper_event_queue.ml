@@ -574,65 +574,6 @@ let () =
       (hitl_stimulus Hitl_approved)
       (hitl_stimulus (Hitl_rejected "operator declined"))));
 
-  let reconciliation =
-    { gr_goal_id = "goal-9"; gr_triggering_task_id = "task-4" }
-  in
-  let reconciliation_stim =
-    { post_id = goal_reconciliation_ready_post_id reconciliation
-    ; urgency = Immediate
-    ; arrived_at = 9.0
-    ; payload = Goal_reconciliation_ready reconciliation
-    }
-  in
-  assert (
-    String.equal
-      reconciliation_stim.post_id
-      "goal-reconciliation-ready:goal-9");
-  assert (
-    String.equal
-      (payload_kind_label reconciliation_stim.payload)
-      "goal_reconciliation_ready");
-  (match stimulus_of_yojson (stimulus_to_yojson reconciliation_stim) with
-   | Ok { payload = Goal_reconciliation_ready decoded; _ } ->
-     assert (String.equal decoded.gr_goal_id "goal-9");
-     assert (String.equal decoded.gr_triggering_task_id "task-4")
-   | Ok _ -> Alcotest.fail "Goal_reconciliation_ready codec changed payload"
-   | Error msg ->
-     Alcotest.fail
-       ("Goal_reconciliation_ready stimulus round-trip failed: " ^ msg));
-  let prompt_event =
-    match
-      Masc.Keeper_world_observation.pending_board_event_of_stimulus
-        ~meta:(event_queue_test_meta "goal-reconciler" "trace-goal-reconciler")
-        reconciliation_stim
-    with
-    | Ok (Some event) -> event
-    | Ok None -> Alcotest.fail "goal reconciliation wake produced no prompt event"
-    | Error _ -> Alcotest.fail "goal reconciliation wake prompt projection failed"
-  in
-  assert (
-    match prompt_event.event_kind with
-    | Masc.Keeper_world_observation.Goal_reconciliation_ready -> true
-    | _ -> false);
-  assert (
-    String_util.string_contains_substring
-      ~needle:"Re-read Goal and Task SSOT"
-      prompt_event.preview);
-  (* The Board-activity partition decides which prompt section renders this
-     event and whether it reaches [Keeper_contract_classifier]'s
-     [board_activity_count]. Classifying a reconciliation wake as scheduled
-     work compiles cleanly but drops it from the Board Activity prompt section
-     and from [board_activity_count]; when the event is isolated, it also
-     removes [Board_event_pending] and suppresses the intended reactive turn,
-     so pin both sides here. *)
-  assert (Masc.Keeper_world_observation.is_board_activity_event prompt_event);
-  assert (
-    not
-      (Masc.Keeper_world_observation.is_board_activity_event
-         { prompt_event with
-           event_kind = Masc.Keeper_world_observation.Schedule_due scheduled_wake
-         }));
-
   (* A completion-authority rejection is a system LLM result delivered to the
      producer Keeper. It is neither a Keeper identity nor a generic Board
      signal, so its typed task/verification/reason fields must survive the

@@ -22,9 +22,10 @@ GET   /api/v1/sidecar/:id/status   →  200 OK, returns status.json
 GET   /api/v1/sidecar/:id/logs     →  200 OK, last N lines (?lines=N, default 200)
 ```
 
-`:id` ∈ `{imessage, slack, telegram}` (RFC-0203 §Phase 3 removed
-`discord` — it now runs in-process under
-`Server_discord_in_process_gateway`). Anything else returns
+`:id` ∈ `{imessage, telegram}` — the connectors that run as external
+sidecar processes. Discord (`Server_discord_in_process_gateway`) and Slack
+(`Server_slack_in_process_gateway`) run in-process and are not sidecar ids.
+Anything else returns
 `400 Bad Request {"ok":false,"error":"unknown sidecar id"}`.
 
 Auth model (mirroring `Server_routes_http_routes_channel_gate`):
@@ -40,14 +41,14 @@ Auth model (mirroring `Server_routes_http_routes_channel_gate`):
 
 **start** (202):
 ```json
-{ "ok": true, "log_path": ".../discord-sidecar-20260418.log",
+{ "ok": true, "log_path": ".../telegram-sidecar-20260418.log",
   "status_path": ".../status.json" }
 ```
 
 **stop** (200):
 ```json
 { "ok": true, "signaled": true }
-{ "ok": true, "signaled": false, "note": "discord-bot not running." }
+{ "ok": true, "signaled": false, "note": "telegram-bot not running." }
 ```
 
 **status** (200):
@@ -71,8 +72,8 @@ open Server_auth
 open Server_utils
 module Http = Http_server_eio
 
-(* RFC-0203 Phase 3: discord runs in-process; not a sidecar id. *)
-let known_ids = ["imessage"; "slack"; "telegram"]
+(* Discord and Slack run in-process; not sidecar ids. *)
+let known_ids = ["imessage"; "telegram"]
 
 let parse_id_from_path req =
   (* expect path /api/v1/sidecar/<id>/<action> *)

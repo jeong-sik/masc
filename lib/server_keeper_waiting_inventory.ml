@@ -198,6 +198,13 @@ let board_signal_what (signal : Keeper_event_queue.board_stimulus) =
       "%s의 반응 %s"
       change.user_id
       (if change.reacted then "추가" else "제거")
+  | Vote_cast change ->
+    Printf.sprintf
+      "%s의 %s 투표"
+      change.voter
+      (match change.direction with
+       | Vote_up -> "찬성"
+       | Vote_down -> "반대")
 ;;
 
 (* One operator sentence per payload kind, from the payload's own typed

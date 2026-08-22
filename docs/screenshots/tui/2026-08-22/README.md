@@ -8,6 +8,7 @@ real PTY through ttyd and rendered in Chromium.
 - Captured: `2026-08-22T02:26:45Z`–`2026-08-22T02:30:18Z`
 - PR / issue: `#29443` / `#29424`
 - Code source SHA: `d60227634b87f18b63b098c7a52b5ebdd9a8373d`
+- Evidence asset commit SHA: `63a61edd4466bd2559ae55adb94e0c2a7fe68b91`
 - Worktree before capture: clean
 - Executable: `_build/default/bin/masc_tui.exe`, `39,373,840` bytes,
   SHA-256 `87b86d9e72e1361284afc7ef639205c01d9d70af7f0e2eba660d63fcd2f73647`
@@ -37,7 +38,7 @@ real PTY through ttyd and rendered in Chromium.
 |---:|---|---|---|
 | 1 | The selected Beta goal stays selected after a new goal is prepended. | `Tab` ×4 (`0x09`), `j` (`0x6a`); replace `[A,B,C]` with `[NEW,A,B,C]`; `r` (`0x72`) | [PNG](01-planning-selection-after-reorder.png) |
 | 2 | Removing the open Beta detail returns to list mode with Charlie selected. | `Tab` ×4, `j`, `Enter` (`0x0d`); replace `[A,B,C]` with `[A,C,D]`; `r` | [PNG](02-planning-list-after-detail-removal.png) |
-| 3 | One `j` after recovery selects Delta, and `Enter` opens Delta's detail. | Continue capture 2 with `j` (`0x6a`), `Enter` (`0x0d`) | [PNG](03-planning-detail-after-recovery-navigation.png) |
+| 3 | One `j` after recovery selects Delta, and `Enter` opens Delta's detail. | Independent replay: `Tab` ×4, `j`, `Enter`; replace `[A,B,C]` with `[A,C,D]`; `r`, `j` (`0x6a`), `Enter` (`0x0d`) | [PNG](03-planning-detail-after-recovery-navigation.png) |
 
 The screenshots prove the fixture-backed terminal rendering. The PTY regression
 tests remain the behavior proof. Neither claims that this PR is deployed or that

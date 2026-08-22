@@ -5,6 +5,7 @@
   "captured_at_end": "2026-08-22T02:30:18Z",
   "pull_request": 29443,
   "issue": 29424,
+  "evidence_asset_commit_sha": "63a61edd4466bd2559ae55adb94e0c2a7fe68b91",
   "worktree_clean_before_capture": true,
   "source": {
     "code_source_sha": "d60227634b87f18b63b098c7a52b5ebdd9a8373d",
@@ -100,8 +101,9 @@
       "terminal_columns": 99,
       "terminal_rows": 30,
       "visible_fixture_port": 49230,
-      "input_from_previous_capture": ["j", "Enter"],
-      "input_hex_from_previous_capture": ["6a", "0d"],
+      "input": ["Tab", "Tab", "Tab", "Tab", "j", "Enter", "r", "j", "Enter"],
+      "input_hex": ["09", "09", "09", "09", "6a", "0d", "72", "6a", "0d"],
+      "fixture_transition": "open B detail; [A,B,C] -> [A,C,D]",
       "assertion": "goal-d-29424 detail opens after one downward move"
     }
   ],

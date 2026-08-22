@@ -7,15 +7,10 @@
     - [/api/v1/dashboard/tasks/delete] — delete one task
     - [/api/v1/dashboard/goals/delete] — delete one goal
     - [/api/v1/dashboard/agents/purge] — delete an exact agent or accept a
-      durable Keeper purge operation
-
-    Board moderation routes (Phase 2):
-    - [POST /api/v1/dashboard/board/moderation/flag] — flag a post for review
-    - [GET  /api/v1/dashboard/board/moderation/queue] — list pending/resolved queue entries
-    - [POST /api/v1/dashboard/board/moderation/action] — take a moderation action *)
+      durable Keeper purge operation *)
 
 (** [add_delete_action_routes router] returns [router] with the delete
-    endpoints and three board moderation endpoints appended.
+    endpoints appended.
     Each route requires {!Masc_domain.CanAdmin} via
     [Server_auth.with_token_permission_auth]. *)
 val add_delete_action_routes :

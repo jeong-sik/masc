@@ -1129,8 +1129,7 @@
   test_prompt_asset_sync
   test_system_error_class
   test_set_util
-  test_board_core_payload
-  test_board_moderation)
+  test_board_core_payload)
  (modules
   test_keeper_turn_interrupt
   test_runtime_params
@@ -1269,8 +1268,7 @@
   test_prompt_asset_sync
   test_system_error_class
   test_set_util
-  test_board_core_payload
-  test_board_moderation)
+  test_board_core_payload)
  (libraries
   masc_test_deps
   masc_test_runtime

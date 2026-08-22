@@ -1257,6 +1257,289 @@ def keeper_detail_overscroll_interaction(
     return interact
 
 
+def keeper_selection_identity_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=cluster_end,
+        timeout=3.0,
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"j",
+        b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+    )
+    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
+
+    keepers_path = Path(base_path) / ".masc" / "keepers"
+    beta_metadata = keeper_metadata("beta")
+    beta_metadata["generation"] = 29453
+    (keepers_path / "beta.json").write_text(json.dumps(beta_metadata), encoding="utf-8")
+    (keepers_path / "aardvark.json").write_text(
+        json.dumps(keeper_metadata("aardvark")), encoding="utf-8"
+    )
+    send_and_wait(process, master_fd, output, b"r", b"29453")
+    send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1mbeta")
+
+    (keepers_path / "beta.json").write_text("{", encoding="utf-8")
+    read_available(master_fd, output)
+    error_start = len(output)
+    os.write(master_fd, b"r")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        CONSOLE_DIAGNOSTIC,
+        start=error_start,
+        timeout=3.0,
+    )
+    unreliable = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=99,
+        needle=b"Keeper: \x1b[1mbeta",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    if b"Keeper: \x1b[1malpha" in unreliable:
+        raise AssertionError(
+            f"unreliable Keeper snapshot retargeted beta detail: {unreliable!r}"
+        )
+    stale_gate = send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"ml",
+        b"Keeper Logs: beta",
+    )
+    if b"Message to: beta" in CSI_RE.sub(b"", stale_gate):
+        raise AssertionError(
+            f"unreliable Keeper snapshot opened message mode: {stale_gate!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1mbeta")
+    alpha_metadata = keeper_metadata("alpha")
+    alpha_metadata["generation"] = 29454
+    (keepers_path / "alpha.json").write_text(
+        json.dumps(alpha_metadata), encoding="utf-8"
+    )
+    (keepers_path / "aardvark.json").unlink()
+    (keepers_path / "beta.json").unlink()
+    missing = send_and_wait(process, master_fd, output, b"r", b"29454")
+    missing_plain = CSI_RE.sub(b"", missing)
+    failures = []
+    if b"MASC Keepers (1)" not in missing_plain:
+        failures.append("missing beta detail did not return to MASC Keepers (1)")
+    if b"Keeper: alpha" in missing_plain:
+        failures.append("missing beta detail silently retargeted to Keeper: alpha")
+
+    after_selection = send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"m\r",
+        b"Keeper: \x1b[1malpha",
+    )
+    after_selection_plain = CSI_RE.sub(b"", after_selection)
+    if b"Message to: alpha" in after_selection_plain:
+        failures.append("m opened Message to: alpha after beta disappeared")
+    if failures:
+        raise AssertionError("; ".join(failures))
+    os.write(master_fd, b"q")
+
+
+def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interaction:
+    draft = b"beta-periodic-draft-29453"
+    chat_path = "/api/v1/keepers/chat/stream"
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+        )
+        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
+        send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
+        send_and_wait(process, master_fd, output, draft, b"> " + draft)
+
+        read_available(master_fd, output)
+        refresh_start = len(output)
+        keeper_path = Path(base_path) / ".masc" / "keepers" / "beta.json"
+        keeper_path.unlink()
+        unavailable = b"Keeper beta is no longer registered"
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            unavailable,
+            start=refresh_start,
+            timeout=3.0,
+        )
+        unavailable_end = output.find(unavailable, refresh_start) + len(unavailable)
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=unavailable_end,
+            timeout=3.0,
+        )
+
+        refreshed = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=99,
+            needle=b"Message to: beta",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25h",
+        )
+        refreshed_plain = CSI_RE.sub(b"", refreshed)
+        for expected in (
+            b"Message to: beta",
+            unavailable,
+            b"Enter:disabled (Keeper unavailable)",
+            b"> " + draft,
+        ):
+            if expected not in refreshed_plain:
+                raise AssertionError(
+                    f"periodic refresh lost Keeper message state {expected!r}: "
+                    f"{refreshed!r}"
+                )
+        if b"Message to: alpha" in refreshed_plain:
+            raise AssertionError(
+                f"periodic refresh retargeted the draft to alpha: {refreshed!r}"
+            )
+
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\rx",
+            b"> " + draft + b"x",
+        )
+        if any(path == chat_path for path, _body in requests):
+            raise AssertionError(
+                "Enter sent a message after the target Keeper disappeared"
+            )
+
+        keepers = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            b"MASC Keepers (1)",
+        )
+        keepers_frame = frame_containing(keepers, b"MASC Keepers (1)")
+        if b"Keeper: alpha" in CSI_RE.sub(b"", keepers_frame):
+            raise AssertionError(
+                f"Esc opened alpha detail after beta disappeared: {keepers!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def keeper_message_unreliable_roster_interaction(
+    requests: HttpRequests,
+) -> Interaction:
+    draft = b"beta-unreliable-draft-29453"
+    chat_path = "/api/v1/keepers/chat/stream"
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+        )
+        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
+        send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
+        send_and_wait(process, master_fd, output, draft, b"> " + draft)
+
+        read_available(master_fd, output)
+        refresh_start = len(output)
+        alpha_path = Path(base_path) / ".masc" / "keepers" / "alpha.json"
+        alpha_path.write_text("{", encoding="utf-8")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            CONSOLE_DIAGNOSTIC,
+            start=refresh_start,
+            timeout=3.0,
+        )
+        unreliable = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=99,
+            needle=b"Message to: beta",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25h",
+        )
+        unreliable_plain = CSI_RE.sub(b"", unreliable)
+        for expected in (
+            b"Message to: beta",
+            b"Keeper roster is unavailable",
+            b"Enter:disabled (roster unavailable)",
+            b"> " + draft,
+        ):
+            if expected not in unreliable_plain:
+                raise AssertionError(
+                    f"unreliable roster did not block Keeper message {expected!r}: "
+                    f"{unreliable!r}"
+                )
+
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\rx",
+            b"> " + draft + b"x",
+        )
+        if any(path == chat_path for path, _body in requests):
+            raise AssertionError("unreliable Keeper roster allowed a message POST")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def interrupt_with_ctrl_c(
     _process: subprocess.Popen[bytes],
     master_fd: int,
@@ -2275,6 +2558,8 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
 
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
+    missing_target_requests: HttpRequests = []
+    unreliable_roster_requests: HttpRequests = []
     keeper_scroll_fixtures = overview_event_http_fixtures()
     keeper_scroll_gate = GatedHttpResponse((200, {"posts": []}))
     approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
@@ -2304,6 +2589,30 @@ def run_keyboard_regression(executable: str) -> None:
             keeper_scroll_gate,
         ),
         http_fixtures=keeper_scroll_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper selection identity",
+        interact=keeper_selection_identity_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper message unreliable roster",
+        interact=keeper_message_unreliable_roster_interaction(
+            unreliable_roster_requests
+        ),
+        refresh=0.05,
+        http_fixtures=overview_event_http_fixtures(),
+        http_requests=unreliable_roster_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper message missing target",
+        interact=keeper_message_missing_target_interaction(missing_target_requests),
+        refresh=0.05,
+        http_fixtures=overview_event_http_fixtures(),
+        http_requests=missing_target_requests,
     )
     run_terminal_scenario(
         executable,

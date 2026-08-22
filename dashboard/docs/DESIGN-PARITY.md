@@ -125,15 +125,21 @@ divergence from prototype): full-width, left-aligned … per design direction th
 dashboard fills the content area to match the other surfaces
 (board/monitoring/command/lab/ide). Do not re-add max-width / margin:auto on a
 prototype re-sync."* The design still centres it in v5, and the note predates
-this design drop, so it was put to the operator on 2026-08-22 with the
-measurement — the decision is to keep full width.
+this design drop, so it was put to the operator twice.
 
-Cost: overview measures **0.842**; restoring `max-width: 1280px; margin: 0 auto`
-takes it to **0.996**, and the fleet mean from 0.949 to 0.960 — over the bar. It is
-the only remaining lever: a sixteen-agent sweep of the eight surfaces still short
-of parity found no other actionable drift. No other
-surface moves — `.ov-scroll` is the only centred container, and `work`,
-`approvals` and `board` render full-width in the design too.
+The first time, restoring the centring would have left the fleet mean short of
+the 95% bar anyway, and the recorded decision stood. After the monitor, IDE and
+Work repairs it became the only remaining lever — this one line is the whole
+difference between 0.949 and 0.960 — so it was put again with that number
+attached. **Re-confirmed on 2026-08-22: the surface stays full width, and the
+parity bar goes unmet rather than the product decision being reversed.**
+
+Cost, measured: overview reads **0.842**; `max-width: 1280px; margin: 0 auto` on
+`.ov-scroll` takes it to **0.996** and the fleet mean from 0.949 to 0.960. No
+other surface moves — `.ov-scroll` is the only container the design centres, and
+`work`, `approvals` and `board` render full-width in the design too. A
+sixteen-agent sweep of the eight surfaces still short of parity found no other
+actionable drift, so this is the only lever that exists.
 
 ### Keepers — resolved: `.chip` named two different components
 

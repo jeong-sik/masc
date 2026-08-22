@@ -1072,6 +1072,7 @@ let run_keeper_cycle
                   in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
+                    ~category:Log.Turn
                     "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \

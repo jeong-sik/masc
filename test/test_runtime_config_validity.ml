@@ -3368,47 +3368,37 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check bool "valid save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
-let test_deprecated_capability_notice_warns_once_per_process () =
-  (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation
-     warning flooded the WARN log (~315/day, 25% of live WARN volume). The
-     notice must fire once per process per capability key, not once per parse.
-     [dedupcheck] is a unique provider id so the process-level dedup table is
-     not pre-populated by another test. The deprecated key sits under
-     [providers.<id>.capabilities] because that is where parse_capabilities (the
-     emitter) runs. *)
+let test_unknown_capability_key_rejected_at_load () =
   let content =
-    "[providers.dedupcheck]\n\
+    "[providers.capcheck]\n\
      protocol = \"openai-compatible-http\"\n\
      endpoint = \"http://127.0.0.1:1/v1\"\n\
      \n\
-     [providers.dedupcheck.capabilities]\n\
-     supports-runtime-mcp-tools = true\n\
+     [providers.capcheck.capabilities]\n\
+     supports-teleport = true\n\
      \n\
      [models.sample]\n\
      api-name = \"sample\"\n\
      max-context = 1024\n\
      \n\
-     [dedupcheck.sample]\n\
+     [capcheck.sample]\n\
      \n\
      [runtime]\n\
-     default = \"dedupcheck.sample\"\n"
+     default = \"capcheck.sample\"\n"
   in
-  let warns = ref [] in
-  Console_sink.For_testing.reset ();
-  Console_sink.For_testing.set_writer (Some (fun l -> warns := l :: !warns));
-  Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
-    (* Parse twice; the deprecated key is present both times. *)
-    ignore (Runtime_toml.parse_string content);
-    ignore (Runtime_toml.parse_string content));
-  let dep_warns =
-    List.filter
-      (fun l ->
-        String_util.contains_substring l "dedupcheck"
-        && String_util.contains_substring l "is deprecated")
-      !warns
-  in
-  check int "deprecation notice fires once per process across two parses" 1
-    (List.length dep_warns)
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "an unknown capabilities key must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending key path"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            String.equal
+              e.path
+              "providers.capcheck.capabilities.supports-teleport")
+         errors)
 
 (* PR-6 (bugs #14/#15/#36): [model.max-context] is now optional — a runtime
    can resolve its effective context window from the runtime.toml override,
@@ -4065,8 +4055,8 @@ let () =
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case
-            "deprecated capability notice warns once per process, not per parse"
-            `Quick test_deprecated_capability_notice_warns_once_per_process;
+            "unknown capabilities key is rejected at load"
+            `Quick test_unknown_capability_key_rejected_at_load;
           test_case
             "max-context: capability-only source uses the catalog cap"
             `Quick test_runtime_max_context_capability_only_uses_catalog_cap;

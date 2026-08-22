@@ -6,8 +6,6 @@ type t =
   ; repo_version : string option [@default None]
   ; commit : string option [@default None]
   ; commit_source : string option [@default None]
-  ; commit_unix_ts : float option [@default None]
-  ; commit_age_seconds : int option [@default None]
   ; binary_commit : string option [@default None]
   ; binary_commit_source : string option [@default None]
   ; binary_commit_unix_ts : float option [@default None]
@@ -196,7 +194,7 @@ let parse_commit_unix_ts_output raw =
     while every fix-PR shipped to main.  Health endpoint had no signal
     that the running binary was behind, so the operator (rightly)
     re-asked the same diagnostic prompt 7 times before noticing.
-    Surfacing [commit_unix_ts] on /health closes that loop without
+    Surfacing [binary_commit_unix_ts] on /health closes that loop without
     requiring the dashboard to fetch anything from the git remote. *)
 let probe_commit_unix_ts commit_hash_opt =
   match commit_hash_opt with
@@ -318,7 +316,6 @@ let commit_resolution =
 let resolved_repo_root = probe_repo_root ()
 let repo_root () = resolved_repo_root
 let repo_version = Option.bind resolved_repo_root probe_repo_version
-let commit_unix_ts = probe_commit_unix_ts commit_resolution.commit
 let binary_commit_unix_ts = probe_commit_unix_ts commit_resolution.binary_commit
 let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_commit
 
@@ -329,8 +326,6 @@ let current () =
   ; repo_version
   ; commit = commit_resolution.commit
   ; commit_source = commit_resolution.commit_source
-  ; commit_unix_ts
-  ; commit_age_seconds = age_seconds ~now commit_unix_ts
   ; binary_commit = commit_resolution.binary_commit
   ; binary_commit_source = commit_resolution.binary_commit_source
   ; binary_commit_unix_ts

@@ -866,6 +866,158 @@ let test_comment_on_own_post_wakes_the_author () =
        | None -> fail "posterlane registry entry missing")
 ;;
 
+(* #29457: votes travel the same hook as comments and reactions. This drives
+   the real producer ([Board_dispatch.vote] / [vote_comment]) through the real
+   hook into the durable queue, so the whole path is measured: one vote on
+   the keeper's writing is one stimulus for the author lane; a duplicate
+   same-direction vote is [Already_voted] and adds nothing; the keeper's own
+   vote on its own writing addresses nobody. *)
+let vote_queue_kinds config keeper_name =
+  match
+    Keeper_registry_event_queue.snapshot_result
+      ~base_path:config.Workspace.base_path
+      keeper_name
+  with
+  | Error detail -> fail ("event queue snapshot failed: " ^ detail)
+  | Ok queue ->
+    Keeper_event_queue.to_list queue
+    |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Board_signal { kind = Keeper_event_queue.Vote_cast vote; _ } ->
+        Some vote
+      | _ -> None)
+;;
+
+let create_post_exn ~author ~title ~content =
+  match
+    Board_dispatch.create_post
+      ~author
+      ~content
+      ~title
+      ~post_kind:Board.Human_post
+      ~visibility:Board.Internal
+      ()
+  with
+  | Error error -> fail (Board.show_board_error error)
+  | Ok post -> Board.Post_id.to_string post.id
+;;
+
+let test_vote_on_own_post_wakes_the_author_once () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta = make_board_resume_meta "voterlane" in
+       persist_and_register_board_lane config meta;
+       Board_dispatch.set_board_signal_hook (fun signal ->
+         KKS.wakeup_relevant_keeper_for_board_signal ~config signal);
+       let post_id =
+         create_post_exn
+           ~author:meta.Keeper_meta_contract.agent_name
+           ~title:"keeper finding"
+           ~content:"the loader skips empty fixtures"
+       in
+       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+        | Error error -> fail (Board.show_board_error error)
+        | Ok _ -> ());
+       check int "one vote is one stimulus for the author" 1
+         (board_queue_length config meta.name);
+       (match vote_queue_kinds config meta.name with
+        | [ vote ] ->
+          check string "stimulus names the voter" "external-voter" vote.voter;
+          check string "stimulus names the voted-on author"
+            meta.Keeper_meta_contract.agent_name vote.target_author;
+          (match vote.direction with
+           | Keeper_event_queue.Vote_up -> ()
+           | Keeper_event_queue.Vote_down -> fail "direction must be up");
+          (match vote.target with
+           | Keeper_event_queue.Vote_on_post id -> check string "post target" post_id id
+           | Keeper_event_queue.Vote_on_comment _ -> fail "target must be the post")
+        | votes -> failf "expected one vote stimulus, got %d" (List.length votes));
+       (match Keeper_registry.get ~base_path:config.base_path meta.name with
+        | Some entry ->
+          check bool "author woken by the vote" true (Atomic.get entry.fiber_wakeup)
+        | None -> fail "voterlane registry entry missing");
+       (* Same voter, same direction: Already_voted, nothing new to act on. *)
+       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+        | Error (Board.Already_voted _) -> ()
+        | Ok _ -> fail "expected Already_voted"
+        | Error error -> fail (Board.show_board_error error));
+       check int "duplicate vote adds no stimulus" 1 (board_queue_length config meta.name);
+       (* The keeper voting on its own post addresses no lane. *)
+       (match
+          Board_dispatch.vote
+            ~voter:meta.Keeper_meta_contract.agent_name
+            ~post_id
+            ~direction:Board.Up
+        with
+        | Error error -> fail (Board.show_board_error error)
+        | Ok _ -> ());
+       check int "self vote adds no stimulus" 1 (board_queue_length config meta.name))
+;;
+
+(* A comment vote addresses the comment's author, not the post's. *)
+let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let poster = make_board_resume_meta "posterlane" in
+       let commenter = make_board_resume_meta "commenterlane" in
+       persist_and_register_board_lane config poster;
+       persist_and_register_board_lane config commenter;
+       Board_dispatch.set_board_signal_hook (fun signal ->
+         KKS.wakeup_relevant_keeper_for_board_signal ~config signal);
+       let post_id =
+         create_post_exn
+           ~author:poster.Keeper_meta_contract.agent_name
+           ~title:"question"
+           ~content:"why is the fixture empty?"
+       in
+       let comment_id =
+         match
+           Board_dispatch.add_comment
+             ~post_id
+             ~author:commenter.Keeper_meta_contract.agent_name
+             ~content:"the loader skips it"
+             ()
+         with
+         | Error error -> fail (Board.show_board_error error)
+         | Ok comment -> Board.Comment_id.to_string comment.id
+       in
+       (* The comment itself woke the poster; measure only the vote from here. *)
+       let poster_before = board_queue_length config poster.name in
+       let commenter_before = board_queue_length config commenter.name in
+       (match
+          Board_dispatch.vote_comment
+            ~voter:"external-voter"
+            ~comment_id
+            ~direction:Board.Down
+        with
+        | Error error -> fail (Board.show_board_error error)
+        | Ok _ -> ());
+       check int "commenter receives the comment vote" (commenter_before + 1)
+         (board_queue_length config commenter.name);
+       check int "poster is not addressed by a vote on someone else's comment"
+         poster_before
+         (board_queue_length config poster.name);
+       match vote_queue_kinds config commenter.name with
+       | [ vote ] ->
+         (match vote.target with
+          | Keeper_event_queue.Vote_on_comment id -> check string "comment target" comment_id id
+          | Keeper_event_queue.Vote_on_post _ -> fail "target must be the comment");
+         (match vote.direction with
+          | Keeper_event_queue.Vote_down -> ()
+          | Keeper_event_queue.Vote_up -> fail "direction must be down")
+       | votes -> failf "expected one vote stimulus, got %d" (List.length votes))
+;;
+
 (* #25600 bound pin: the retry is bounded — a store that keeps failing past
    [board_signal_relevance_max_attempts] still drops the lane (loudly), it
    does not retry forever. *)
@@ -935,6 +1087,10 @@ let () =
             test_thread_participant_drop_is_bounded_under_persistent_failure
         ; test_case "comment on own post wakes the author" `Quick
             test_comment_on_own_post_wakes_the_author
+        ; test_case "vote on own post wakes the author once" `Quick
+            test_vote_on_own_post_wakes_the_author_once
+        ; test_case "vote on own comment wakes the commenter not the poster" `Quick
+            test_vote_on_own_comment_wakes_the_commenter_not_the_poster
         ] )
     ; ( "interruptible_cadence"
       , [ test_case "directed wake cuts configured sleep" `Quick

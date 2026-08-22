@@ -111,7 +111,6 @@ async function detail(page, credential, postId, voter) {
   const params = new URLSearchParams({
     format: 'flat',
     voter,
-    blind_votes: 'true',
   })
   const result = await api(page, credential, `/api/v1/board/${postId}?${params}`, { actor: observerActor })
   check(result.ok, `board detail: HTTP ${result.status} ${JSON.stringify(result.json)}`)
@@ -207,7 +206,7 @@ try {
     () => api(
       page,
       credential,
-      `/api/v1/board?limit=150&voter=${encodeURIComponent(credential.actor)}&blind_votes=true`,
+      `/api/v1/board?limit=150&voter=${encodeURIComponent(credential.actor)}`,
       { actor: observerActor },
     ),
     result => result.ok && result.json?.posts?.some(row => row.title === title),
@@ -465,7 +464,7 @@ try {
       const candidates = await api(
         page,
         credential,
-        '/api/v1/board?limit=150&blind_votes=true',
+        '/api/v1/board?limit=150',
         { actor: observerActor },
       )
       const orphan = candidates.json?.posts?.find(candidate => candidate.title === title)

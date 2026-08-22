@@ -287,6 +287,32 @@ let test_board_reaction_event_renders_reaction_context () =
   check_field "prompt includes reaction emoji" "👏" "emoji" fields
 ;;
 
+(* #29457: the vote row states who voted which way on what, so the author
+   does not need a masc_board_post_get to learn what the wake was about. *)
+let test_board_vote_event_renders_voter_and_direction () =
+  Masc_test_deps.init_unified_tool_registry ();
+  let vote_event =
+    {
+      sample_board_event with
+      event_kind =
+        WO.Board_vote_cast
+          {
+            target = Masc.Board_dispatch.Vote_on_comment "c-1";
+            target_author = "test-keeper";
+            voter = "peer-keeper";
+            direction = Masc.Board.Down;
+          };
+      post_id = "vote-parent";
+      author = "peer-keeper";
+    }
+  in
+  let fields = Masc.Keeper_unified_prompt.For_testing.board_event_fields vote_event in
+  check_field "prompt labels vote board event" "vote_cast" "event" fields;
+  check_field "prompt includes vote direction" "down" "vote" fields;
+  check_field "prompt includes vote target" "comment:c-1" "target" fields;
+  check_field "prompt includes voter" "peer-keeper" "voter" fields
+;;
+
 (* Structured world-state values are observations, not tool instructions. A
    diagnostic token must survive prompt assembly verbatim; the instruction
    token scanner is intentionally not allowed to rewrite this surface. *)
@@ -646,6 +672,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
   | WO.Board_post_created
   | WO.Board_comment_added
   | WO.Board_reaction_changed _
+  | WO.Board_vote_cast _
   | WO.Fusion_completed
   | WO.External_attention _
   | WO.Completion_authority_rejected _
@@ -1091,6 +1118,9 @@ let () =
           test_case
             "prompt: board reaction event renders reaction context"
             `Quick test_board_reaction_event_renders_reaction_context;
+          test_case
+            "prompt: board vote event renders voter and direction"
+            `Quick test_board_vote_event_renders_voter_and_direction;
           test_case
             "prompt: observation tool names remain immutable"
             `Quick test_observation_tool_names_are_preserved;

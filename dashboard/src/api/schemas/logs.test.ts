@@ -92,8 +92,7 @@ describe('decodeLogsData', () => {
       hasTurn: false,
       message: 'booted',
       details: {},
-      category: 'uncategorized',
-      hasExplicitCategory: false,
+      category: null,
     })
   })
 
@@ -111,7 +110,6 @@ describe('decodeLogsData', () => {
     expect(entry?.keeperName).toBe('reviewer')
     expect(entry?.hasTurn).toBe(true)
     expect(entry?.category).toBe('tool')
-    expect(entry?.hasExplicitCategory).toBe(true)
     expect(entry?.details).toEqual({ tool_name: 'masc_status' })
   })
 

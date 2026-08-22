@@ -69,10 +69,6 @@ type logical_ordering = {
   logical_seq : int option;
 }
 
-type status =
-  | Skipped
-  | Other of string
-
 type compaction_outcome =
   | Checkpoint_committed
   | Lifecycle_cleanup_failed_without_checkpoint
@@ -84,10 +80,6 @@ val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
-val manifest_file_suffix : string
-val status_of_string : string -> status
-val status_to_string : status -> string
-val status_is_skipped : t -> bool
 val compaction_outcome_key : string
 val compaction_outcome_to_string : compaction_outcome -> string
 val clock_refs :

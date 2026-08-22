@@ -62,10 +62,6 @@ export type DashboardSurfaceEnvelope = {
     latest_age_s?: number | null
     health?: string | null
   }
-  migration?: {
-    body_shape?: string
-    rule?: string
-  }
 }
 
 export type TelemetryCoverageGap = {
@@ -101,12 +97,6 @@ function decodeDashboardSurfaceEnvelope(raw: unknown): DashboardSurfaceEnvelope 
         health: asNullableString(raw.cache.health),
       }
     : undefined
-  const migration = isRecord(raw.migration)
-    ? {
-        body_shape: asString(raw.migration.body_shape),
-        rule: asString(raw.migration.rule),
-      }
-    : undefined
   return {
     schema: asString(raw.schema),
     schema_version: asNumber(raw.schema_version),
@@ -114,7 +104,6 @@ function decodeDashboardSurfaceEnvelope(raw: unknown): DashboardSurfaceEnvelope 
     source: asString(raw.source),
     generated_at_iso: asString(raw.generated_at_iso),
     cache,
-    migration,
   }
 }
 

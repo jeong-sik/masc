@@ -20,7 +20,6 @@ let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_turn_records = "/turn-records"
-let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
 
@@ -80,7 +79,6 @@ type keeper_post_route_kind =
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_paused_work
-  | Keeper_post_catchup_judge
   | Keeper_post_fusion
   | Keeper_post_operator_note
   | Keeper_post_board_attention_quarantine_recovery of
@@ -135,7 +133,6 @@ let classify_keeper_post_route req_path =
     else if ends_with keeper_suffix_directive then Keeper_post_directive
     else if ends_with keeper_suffix_operator_note then Keeper_post_operator_note
     else if ends_with keeper_suffix_paused_work then Keeper_post_paused_work
-    else if ends_with keeper_suffix_catchup_judge then Keeper_post_catchup_judge
     else if ends_with keeper_suffix_fusion then Keeper_post_fusion
     else Keeper_post_unknown
 

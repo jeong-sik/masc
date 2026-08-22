@@ -47,9 +47,6 @@ lib/board/board_core_json.ml,91,None,unclassified
 lib/board/board_core_json.ml,175,None,unclassified
 lib/board/board_core_json.ml,184,None,unclassified
 lib/board/board_dispatch.ml,54,None,unclassified
-lib/board/board_moderation.ml,28,None,unclassified
-lib/board/board_moderation.ml,50,None,unclassified
-lib/board/board_moderation.ml,66,None,unclassified
 lib/board/board_sub_board_json.ml,22,None,unclassified
 lib/board/board_sub_board_json.ml,116,None,unclassified
 lib/board/board_sub_board_json.ml,152,None,unclassified

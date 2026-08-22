@@ -59,6 +59,7 @@ type board_signal_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_change
+  | Board_vote_cast of board_vote_change
 
 and board_reaction_change = {
   target_type : Board.reaction_target_type;
@@ -66,6 +67,17 @@ and board_reaction_change = {
   user_id : string;
   emoji : string;
   reacted : bool;
+}
+
+and board_vote_target =
+  | Vote_on_post of string
+  | Vote_on_comment of string
+
+and board_vote_change = {
+  target : board_vote_target;
+  target_author : string;
+  voter : string;
+  direction : Board.vote_direction;
 }
 
 type board_signal = {
@@ -558,10 +570,43 @@ let current_vote_for_post ~voter ~post_id =
   match backend () with
   | Jsonl store -> Board.current_vote_for_post store ~voter ~post_id
 
+(* A vote is thread activity the voted-on author can act on, so it travels
+   the same hook as comments and reactions. The signal's [author] is the
+   voter, the actor; [target_author] names whose writing was voted on, so the
+   keeper router can wake exactly that lane without a second store read. *)
+let emit_vote_board_signal ~target ~target_author ~voter ~direction
+    (post : Board.post) =
+  emit_board_signal
+    { signal =
+        { kind = Board_vote_cast { target; target_author; voter; direction }
+        ; post_id = Board.Post_id.to_string post.id
+        ; author = voter
+        ; title = post.title
+        ; content = post.content
+        ; hearth = post.hearth
+        ; updated_at = Some post.updated_at
+        }
+    ; audience = Board.audience_for_vote
+    }
+
 let vote ~voter ~post_id ~direction =
   let result =
     match backend () with
-    | Jsonl store -> Board.vote store ~voter ~post_id ~direction
+    | Jsonl store ->
+        (match Board.vote store ~voter ~post_id ~direction with
+         | Ok _score as ok ->
+             (match Board.get_post store ~post_id with
+              | Ok post ->
+                  emit_vote_board_signal
+                    ~target:(Vote_on_post (Board.Post_id.to_string post.id))
+                    ~target_author:(Board.Agent_id.to_string post.author)
+                    ~voter ~direction post
+              | Error e ->
+                  Log.BoardLog.warn
+                    "board vote signal skipped: get_post failed for %s: %s"
+                    post_id (Board_types.show_board_error e));
+             ok
+         | Error _ as err -> err)
   in
   (match result with
    | Ok _score ->
@@ -585,7 +630,29 @@ let current_vote_for_comment ~voter ~comment_id =
 let vote_comment ~voter ~comment_id ~direction =
   let result =
     match backend () with
-    | Jsonl store -> Board.vote_comment store ~voter ~comment_id ~direction
+    | Jsonl store ->
+        (match Board.vote_comment store ~voter ~comment_id ~direction with
+         | Ok _score as ok ->
+             (match Board.get_comment store ~comment_id with
+              | Error e ->
+                  Log.BoardLog.warn
+                    "board comment vote signal skipped: get_comment failed for %s: %s"
+                    comment_id (Board_types.show_board_error e)
+              | Ok comment ->
+                  let post_id = Board.Post_id.to_string comment.post_id in
+                  (match Board.get_post store ~post_id with
+                   | Ok post ->
+                       emit_vote_board_signal
+                         ~target:
+                           (Vote_on_comment (Board.Comment_id.to_string comment.id))
+                         ~target_author:(Board.Agent_id.to_string comment.author)
+                         ~voter ~direction post
+                   | Error e ->
+                       Log.BoardLog.warn
+                         "board comment vote signal skipped: get_post failed for %s: %s"
+                         post_id (Board_types.show_board_error e)));
+             ok
+         | Error _ as err -> err)
   in
   (match result with
    | Ok _score ->
@@ -706,10 +773,6 @@ let set_pinned ~post_id ~pinned =
 let delete_post ~post_id =
   match backend () with
   | Jsonl store -> Board.delete_post store ~post_id
-
-let delete_comment ~comment_id =
-  match backend () with
-  | Jsonl store -> Board.delete_comment store ~comment_id
 
 let search ~query ~limit =
   match backend () with

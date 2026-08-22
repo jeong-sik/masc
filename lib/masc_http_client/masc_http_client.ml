@@ -147,10 +147,6 @@ end
 
 (* ── Observability ────────────────────────────────────────────────── *)
 
-(** Return the pool for the current domain, if initialized.
-    Backward-compatible accessor for telemetry consumers. *)
-let pool_singleton_opt () : Pool.t option = Domain.DLS.get pool_key
-
 (** Return all domain pools created so far.
     Used by [Pool_metrics] to aggregate counters across domains.
     Thread-safe via [Stdlib.Mutex]; only touched during pool creation

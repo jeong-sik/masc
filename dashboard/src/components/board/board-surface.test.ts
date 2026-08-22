@@ -531,25 +531,6 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText('flair:insight')).toBeInTheDocument()
   })
 
-  it('renders vote-blind post scores as hidden until voting', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-blind',
-        title: 'Blind score',
-        body: 'content',
-        author: 'ani1999',
-        votes: null,
-        vote_balance: null,
-        vote_blind: true,
-        vote_blind_reason: 'vote_before_score',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent(/투표 후 공개/)
-  })
-
   it('renders sub-board rail and filters posts by sub-board', () => {
     boardHearths.value = [
       { name: 'ops', count: 1 },

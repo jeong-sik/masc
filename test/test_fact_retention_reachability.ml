@@ -91,7 +91,7 @@ let page_contains token (page : K.page) =
 let oldest_ts (page : K.page) =
   match page.K.messages with
   | [] -> None
-  | first :: _ -> first.K.ts
+  | first :: _ -> Some first.K.ts
 
 (* Walk back from the tail until [token] appears; return pages read. *)
 let pages_to_find ~base_dir token : int option =

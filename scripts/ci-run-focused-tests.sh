@@ -312,7 +312,6 @@ normal_targets=(
   @test/runtest-test_agent_api_query_params
   @test/runtest-test_h2_mode_vocabulary
   @test/runtest-test_agent_transport_vocabulary
-  @test/runtest-test_keeper_catchup_digest
   @test/runtest-test_workspace_root_state_parity
   @test/runtest-test_dashboard_keeper_name
   @test/runtest-test_dashboard_briefing

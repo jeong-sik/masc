@@ -226,8 +226,8 @@ function CommentItem({
   const hiddenSiblingReplyCount = Math.max(0, replies.length - visibleReplies.length)
   const canLoadMoreSiblingReplies = showReplies && !forceThreadExpanded && hiddenSiblingReplyCount > 0
   const score = comment.vote_balance ?? comment.votes ?? ((comment.votes_up ?? 0) - (comment.votes_down ?? 0))
-  const scoreLabel = comment.vote_blind ? '투표 후 공개' : String(score)
-  const scoreAria = comment.vote_blind ? '댓글 점수 투표 후 공개' : `댓글 점수 ${score}`
+  const scoreLabel = String(score)
+  const scoreAria = `댓글 점수 ${score}`
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
   const authorTitle = boardActorTitle(comment.author, comment.author_identity)
@@ -283,9 +283,7 @@ function CommentItem({
               onClick=${() => handleCommentVote('up')}
             >▲</button>
             <span
-              class=${comment.vote_blind
-                ? 'min-w-14 text-center text-[10px] font-medium leading-tight text-[var(--color-fg-muted)]'
-                : 'min-w-5 text-center text-2xs font-semibold tabular-nums text-[var(--color-fg-secondary)]'}
+              class="min-w-5 text-center text-2xs font-semibold tabular-nums text-[var(--color-fg-secondary)]"
               aria-label=${scoreAria}
               title=${scoreLabel}
             >${scoreLabel}</span>
@@ -545,8 +543,8 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const authorTitle = boardActorTitle(post.author, post.author_identity)
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
-  const postVoteLabel = post.vote_blind ? '투표 후 공개' : `${post.votes ?? 0} votes`
-  const postVoteAria = post.vote_blind ? '게시글 점수 투표 후 공개' : `게시글 점수 ${post.votes ?? 0}`
+  const postVoteLabel = `${post.votes} votes`
+  const postVoteAria = `게시글 점수 ${post.votes}`
   const auditLabel = postVisibilityAuditLabel(post)
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
 

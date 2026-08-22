@@ -183,18 +183,3 @@ end
 val start_mcp_session_cleanup_loop :
   sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->
   ?interval:float -> unit -> unit
-
-(** {1 MCP Session Helpers} *)
-
-(** Extract MCP session ID from HTTP headers.
-    Prefers canonical [Mcp-Session-Id], falls back to legacy
-    [X-MCP-Session-ID]. *)
-val extract_mcp_session_id : Cohttp.Header.t -> string option
-
-(** Retrieve or create an MCP session from request headers. *)
-val get_or_create_mcp_session :
-  Cohttp.Header.t -> McpSessionStore.mcp_session
-
-(** Add [Mcp-Session-Id] to response headers. *)
-val add_mcp_session_header :
-  Cohttp.Header.t -> McpSessionStore.mcp_session -> Cohttp.Header.t

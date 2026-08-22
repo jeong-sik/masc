@@ -1,27 +1,9 @@
-type prompt_metrics = {
-  usage_count : int;
-  avg_score : float;
-  last_used : float;
-}
-[@@deriving yojson]
-
 type prompt_entry = {
   id : string;
   template : string;
   version : string;
   variables : string list;
-  metrics : prompt_metrics option; [@default None]
   created_at : float;
-  deprecated : bool;
-}
-[@@deriving yojson]
-
-type registry_stats = {
-  total_prompts : int;
-  active_prompts : int;
-  deprecated_prompts : int;
-  most_used : string option;
-  avg_usage : float;
 }
 
 type prompt_meta = {

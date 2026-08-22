@@ -59,10 +59,6 @@ module StringSet = Set_util.StringSet
 let schema_version = 1
 let manifest_file_suffix = ".jsonl"
 
-type status =
-  | Skipped
-  | Other of string
-
 type compaction_outcome =
   | Checkpoint_committed
   | Lifecycle_cleanup_failed_without_checkpoint
@@ -80,23 +76,6 @@ let compaction_outcome_of_string = function
   | "lifecycle_cleanup_failed_without_checkpoint" ->
     Some Lifecycle_cleanup_failed_without_checkpoint
   | _ -> None
-;;
-
-let skipped_status = "skipped"
-
-let status_of_string value =
-  if String.equal value skipped_status then Skipped else Other value
-;;
-
-let status_to_string = function
-  | Skipped -> skipped_status
-  | Other value -> value
-;;
-
-let status_is_skipped manifest =
-  match status_of_string manifest.status with
-  | Skipped -> true
-  | Other _ -> false
 ;;
 
 let safe_segment value =

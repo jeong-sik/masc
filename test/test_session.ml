@@ -43,8 +43,7 @@ let test_mcp_session_get_increments_request () =
   check int "initial count" 0 session.request_count;
   (* [get] returns a fresh immutable record carrying the incremented count
      (with-copy, not in-place): the store advances but the original [session]
-     binding does not. Assert on the returned record — the real consumer
-     [get_or_create_mcp_session] likewise uses get's return value. *)
+     binding does not. Assert on the returned record. *)
   let count_of = function
     | Some (s : Session.McpSessionStore.mcp_session) -> s.request_count
     | None -> -1
@@ -69,29 +68,6 @@ let test_mcp_session_list_all () =
   let _s2 = Session.McpSessionStore.create ~agent_name:"agent2" () in
   let all = Session.McpSessionStore.list_all () in
   check bool "has sessions" true (List.length all >= 2)
-
-(** Header extraction tests *)
-let test_extract_session_id_primary () =
-  let headers = Cohttp.Header.init_with "Mcp-Session-Id" "session-123" in
-  let result = Session.extract_mcp_session_id headers in
-  check (option string) "extracts primary" (Some "session-123") result
-
-let test_extract_session_id_fallback () =
-  let headers = Cohttp.Header.init_with "X-MCP-Session-ID" "session-456" in
-  let result = Session.extract_mcp_session_id headers in
-  check (option string) "extracts fallback" (Some "session-456") result
-
-let test_extract_session_id_none () =
-  let headers = Cohttp.Header.init () in
-  let result = Session.extract_mcp_session_id headers in
-  check (option string) "no header" None result
-
-let test_extract_session_id_primary_precedence () =
-  let headers = Cohttp.Header.init () in
-  let headers = Cohttp.Header.add headers "Mcp-Session-Id" "primary" in
-  let headers = Cohttp.Header.add headers "X-MCP-Session-ID" "fallback" in
-  let result = Session.extract_mcp_session_id headers in
-  check (option string) "primary takes precedence" (Some "primary") result
 
 (** JSON serialization *)
 let test_session_to_json () =
@@ -118,13 +94,6 @@ let store_tests = [
   "list all", `Quick, test_mcp_session_list_all;
 ]
 
-let header_tests = [
-  "extract primary", `Quick, test_extract_session_id_primary;
-  "extract fallback", `Quick, test_extract_session_id_fallback;
-  "extract none", `Quick, test_extract_session_id_none;
-  "primary precedence", `Quick, test_extract_session_id_primary_precedence;
-]
-
 let json_tests = [
   "session_to_json", `Quick, test_session_to_json;
 ]
@@ -132,6 +101,5 @@ let json_tests = [
 let () =
   run "Session" [
     "store", store_tests;
-    "headers", header_tests;
     "json", json_tests;
   ]

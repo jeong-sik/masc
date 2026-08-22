@@ -106,15 +106,6 @@ let request target =
 let request_with_headers target headers =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
 
-let test_keeper_post_route_classifies_catchup_judge () =
-  let path = "/api/v1/keepers/idealist/catchup-judge" in
-  check bool "catchup judge route kind" true
-    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
-     = Server_dashboard_http_keeper_api.Keeper_post_catchup_judge);
-  check string "keeper name extracted" "idealist"
-    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
-       Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
-
 let test_keeper_name_extractors_use_shared_grammar () =
   let keeper_name = "release.bot" in
   check bool "dotted keeper name is valid" true
@@ -3085,75 +3076,6 @@ let post_config ~sw ~clock ~state ~name body =
   in
   raw, Yojson.Safe.from_string body
 
-let post_catchup_judge ~state ~name body =
-  let output = Buffer.create 512 in
-  let connection =
-    Httpun.Server_connection.create (fun reqd ->
-      Keeper_config_post.handle_keeper_catchup_judge_post
-        state
-        (Httpun.Reqd.request reqd)
-        reqd
-        body)
-  in
-  let request =
-    Printf.sprintf
-      "POST /api/v1/keepers/%s/catchup-judge HTTP/1.1\r\nHost: x\r\n\r\n"
-      name
-  in
-  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
-  ignore
-    (Httpun.Server_connection.read_eof
-       connection
-       input
-       ~off:0
-       ~len:(Bigstringaf.length input));
-  let rec drain () =
-    match Httpun.Server_connection.next_write_operation connection with
-    | `Write iovecs ->
-      let bytes =
-        List.fold_left
-          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
-            Buffer.add_string output
-              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
-            total + iov.len)
-          0
-          iovecs
-      in
-      Httpun.Server_connection.report_write_result connection (`Ok bytes);
-      drain ()
-    | `Yield | `Close _ -> ()
-  in
-  drain ();
-  Buffer.contents output
-;;
-
-let test_catchup_judge_prompt_failure_is_server_error () =
-  let base_path = test_dir () in
-  let empty_prompts = Filename.concat base_path "empty-prompts" in
-  Unix.mkdir empty_prompts 0o755;
-  let previous_prompt_dir = Prompt_registry.get_markdown_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Option.iter Prompt_registry.set_markdown_dir previous_prompt_dir;
-      cleanup_dir base_path)
-    (fun () ->
-      Prompt_registry.set_markdown_dir empty_prompts;
-      let raw =
-        post_catchup_judge
-          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path)
-          ~name:"catchup-prompt-fixture"
-          {|{"since_unix":0}|}
-      in
-      check bool
-        "missing server-owned prompt is HTTP 500"
-        true
-        (String.starts_with ~prefix:"HTTP/1.1 500" raw);
-      check bool
-        "response identifies the unavailable prompt"
-        true
-        (String_util.contains_substring raw "judge.catchup prompt unavailable"))
-;;
-
 let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-success" in
@@ -3481,8 +3403,6 @@ let () =
             test_dashboard_fleet_composite_envelope_is_cached;
           test_case "state diagram runtime projection stays empty without meta" `Quick
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
-          test_case "keeper catch-up judge route is classified" `Quick
-            test_keeper_post_route_classifies_catchup_judge;
           test_case "keeper path extraction uses shared name grammar" `Quick
             test_keeper_name_extractors_use_shared_grammar;
           test_case "keeper paused-work route is exact" `Quick
@@ -3513,8 +3433,6 @@ let () =
             "operator snapshot HTTP rejects stale success after store error"
             `Quick
             test_operator_snapshot_http_rejects_stale_success_after_store_error;
-          test_case "catch-up prompt failure is a server error" `Quick
-            test_catchup_judge_prompt_failure_is_server_error;
           test_case "proof payload exposes submission index" `Quick
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick

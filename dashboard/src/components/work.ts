@@ -20,6 +20,7 @@ import { KeeperPersistenceProofPanel } from './keeper-persistence-proof-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { SectionNav } from './common/section-nav'
+import { TimeAgo } from './common/time-ago'
 import { VirtualList } from './common/virtual-list'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
@@ -435,8 +436,13 @@ function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }
 
 // ── Goal detail panel (expanded goal card body) ─────────────────────────────
 //
-// The panel answers three operator questions, in order: what this goal is,
-// why it sits in its current phase, and where to go next.
+// The card header already says what the goal is — priority, phase, title, due
+// date, lead badge, done/total progress and the metric chip — and the card's
+// `data-goal-id` carries the id. The panel holds only what the header does not:
+// the progress review note (when there is one), the linked keepers, pending
+// approvals, and one activity row with the three instants (created, last
+// changed, last active) as relative time, the goal-event history behind a
+// toggle. There is no owner row: the goals endpoint serves no owner field.
 //
 // It carries no "완료 조건" section. The metric and its target value ride the
 // card header next to the progress bar, and the task counts there were a
@@ -455,12 +461,12 @@ function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }
 // is done is a judgement the operator makes from the declaration and the
 // tasks themselves.
 //
-// There is no "기록 0건" fallback on the activity row. The goals-tree endpoint
-// serves timeline rows as {event_type, payload} while the decoder requires
-// {kind, lane, title, summary, severity} (api/dashboard-goals.ts), so every
-// row is dropped before it reaches this component and the list is empty for
-// reasons that have nothing to do with whether the goal has history — see
-// masc#29299. Printing a zero would assert something the payload does not say.
+// The history toggle appears only when the node carries at least one timeline
+// event; there is no "기록 0건" line. The goals endpoint serves those rows
+// through the goal-event normalizer (`goal_event_timeline_json` in
+// lib/dashboard/dashboard_goals_types_timeline.ml), so each row is
+// {ts, kind, lane, title, summary, severity} — the shape
+// `decodeGoalDetailTimelineEvent` (api/dashboard-goals.ts) reads.
 //
 // The goal_fsm triple (state / source / activity_observation) and its
 // `next_actions` labels are deliberately not rendered here. `state` repeats the
@@ -491,12 +497,24 @@ function GoalDetailRow({
   `
 }
 
-function GoalDetailSection({ title, children }: { title: string; children: unknown }) {
+function GoalDetailSection({ title, children }: { title?: string; children: unknown }) {
   return html`
     <section class="wk-dossier-sec">
-      <h4 class="wk-dossier-h">${title}</h4>
+      ${title ? html`<h4 class="wk-dossier-h">${title}</h4>` : null}
       ${children}
     </section>
+  `
+}
+
+// One labelled instant of the activity row: relative text, absolute time on
+// hover and on the <time> element (TimeAgo). The goals endpoint serves ISO-8601
+// for all three instants (`tree_node_to_json`), so the value goes to TimeAgo
+// as served.
+function GoalDossierInstant({ label, at, testHook }: { label: string; at: string; testHook: string }) {
+  return html`
+    <span data-goal-detail-when=${testHook}>
+      ${label} <${TimeAgo} timestamp=${at} />
+    </span>
   `
 }
 
@@ -511,10 +529,6 @@ function GoalProjectionDossier({
   if (!node) return null
 
   const keeperLinks = node.linked_keeper_names
-  const latestRun = [
-    node.latest_keeper_ref ? `키퍼 ${node.latest_keeper_ref}` : null,
-    node.latest_turn_ref != null ? `턴 ${node.latest_turn_ref}` : null,
-  ].filter((part): part is string => part !== null)
 
   return html`
     <div
@@ -524,25 +538,13 @@ function GoalProjectionDossier({
       data-goal-dossier-phase=${node.phase}
       data-goal-dossier-timeline-count=${node.timeline_events.length}
     >
-      <${GoalDetailSection} title="이 Goal 은">
-        <${GoalDetailRow} label="목표 ID" testHook="id"><span class="mono">${node.id}</span><//>
-        <${GoalDetailRow} label="담당" testHook="owner">
-          ${node.owner ?? html`<span class="wk-dossier-sub">담당자가 없어요</span>`}
-        <//>
-        ${node.due_date ? html`
-          <${GoalDetailRow} label="기한" testHook="due"><span class="mono">${node.due_date}</span><//>
-        ` : null}
-        <${GoalDetailRow} label="만든 날" testHook="created"><span class="mono">${node.created_at}</span><//>
-        <${GoalDetailRow} label="마지막 변경" testHook="updated"><span class="mono">${node.updated_at}</span><//>
-      <//>
-
       ${reviewNote ? html`
         <${GoalDetailSection} title="진행 판정 메모">
           <p class="wk-dossier-text" data-goal-detail-review-note>${reviewNote}</p>
         <//>
       ` : null}
 
-      <${GoalDetailSection} title="관련">
+      <${GoalDetailSection}>
         ${keeperLinks.length > 0 ? html`
           <${GoalDetailRow} label="키퍼" testHook="keepers">
             ${keeperLinks.map((name) => html`
@@ -557,11 +559,6 @@ function GoalProjectionDossier({
             `)}
           <//>
         ` : null}
-        ${latestRun.length > 0 ? html`
-          <${GoalDetailRow} label="최근 실행" testHook="latest-run">
-            <span class="mono">${latestRun.join(' · ')}</span>
-          <//>
-        ` : null}
         ${node.pending_approval_count > 0 ? html`
           <${GoalDetailRow} label="승인 대기" tone="warn" testHook="approvals">
             <button
@@ -574,9 +571,12 @@ function GoalProjectionDossier({
           <//>
         ` : null}
         <${GoalDetailRow} label="활동" testHook="activity">
-          <span class="mono">${node.last_activity_at || '기록 없음'}</span>
-          <span class="wk-dossier-sub">
-            ${node.stagnation_seconds == null ? '멈춘 시간 알 수 없음' : `${node.stagnation_seconds}초째 변화 없음`}
+          <span>
+            <${GoalDossierInstant} label="만든 날" at=${node.created_at} testHook="created" />
+            ${' · '}
+            <${GoalDossierInstant} label="마지막 변경" at=${node.updated_at} testHook="updated" />
+            ${' · '}
+            <${GoalDossierInstant} label="마지막 활동" at=${node.last_activity_at} testHook="last-activity" />
           </span>
           ${node.timeline_events.length > 0 ? html`
             <button

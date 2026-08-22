@@ -174,10 +174,6 @@ describe('fetchDashboardExecutionTrust', () => {
           latest_age_s: null,
           health: 'coverage_gap',
         },
-        migration: {
-          body_shape: 'root_fields_preserved',
-          rule: 'additive envelope first',
-        },
       },
       freshness_slo_s: 900,
       entry_count: 0,
@@ -223,7 +219,6 @@ describe('fetchDashboardExecutionTrust', () => {
         key: 'execution-trust:default',
         stale_reason: 'execution_receipt_append_failed',
       },
-      migration: { body_shape: 'root_fields_preserved' },
     })
     expect(result.coverage_gaps?.[0]).toMatchObject({
       producer: 'keeper_agent_run.execution_receipt',
@@ -1686,7 +1681,7 @@ describe('fetchTelemetrySummary', () => {
 })
 
 describe('fetchDashboardMemory', () => {
-  it('requests vote-blind dashboard board rows for the current actor', async () => {
+  it('requests dashboard board rows for the current actor', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ posts: [] }), {
         status: 200,
@@ -1700,7 +1695,6 @@ describe('fetchDashboardMemory', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/dashboard/board?')
     expect(url).toContain('voter=')
-    expect(url).toContain('blind_votes=true')
   })
 })
 

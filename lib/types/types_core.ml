@@ -797,6 +797,21 @@ let task_to_yojson t =
   | `Assoc status_fields -> `Assoc (with_do_not_reclaim @ status_fields)
   | _ -> `Assoc with_do_not_reclaim
 
+(* Listing row for keeper tools: identity, ordering, and claim state without
+   the body. A live backlog row averages 2.0 KB of which handoff_context,
+   description, and contract are 89% (#29463); this carries the remaining
+   fields so a 50-row listing stays a few KB. *)
+let task_compact_to_yojson t =
+  let base = [
+    ("id", `String t.id);
+    ("title", `String t.title);
+    ("priority", `Int t.priority);
+    ("created_at", `String t.created_at);
+  ] in
+  match task_status_to_yojson t.task_status with
+  | `Assoc status_fields -> `Assoc (base @ status_fields)
+  | _ -> `Assoc base
+
 let task_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in

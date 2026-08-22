@@ -52,7 +52,7 @@ Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서
 | `command` | `operations` | operator action/confirm은 가능 |
 | `connectors` | `connector-status` | 상태 리스트로 가능 |
 | `workspace` | `work`, `planning`, `repositories`, `verification` | 가능 |
-| `workspace` | `board`, `sub-boards`, `moderation` (hidden) | board surface와 중복 |
+| `workspace` | `board`, `sub-boards` (hidden) | board surface와 중복 |
 | `lab` | `tools`, `harness`, `performance`, `memory-subsystems`, `keeper-memory-health` | 부분 가능 |
 | `code` | `ide-shell` | **TUI에 부적합** |
 | `settings` | 다수 | 부분 가능 |
@@ -151,7 +151,7 @@ Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서
 | # | 기능 | 근거 |
 |---|---|---|
 | 16 | **Schedule 상세 제어** | schedule은 조회 위주로 축소 |
-| 17 | **Sub-Board / Moderation** | board surface와 중복되거나 운영 빈도 낮음 |
+| 17 | **Sub-Board** | board surface와 중복되거나 운영 빈도 낮음 |
 | 18 | **Settings 변경** | 읽기 전용 조회만; 변경은 웹 대시보드 권장 |
 | 19 | **Fusion / Code / Performance / Memory 그래프** | TUI 부적합 |
 | 20 | **Copilot Dock / Command Palette / Tweaks Panel** | TUI에서 equivalently 지원 불필요 |

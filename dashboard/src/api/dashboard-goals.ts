@@ -215,7 +215,6 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     metric,
     target_value: targetValue,
     due_date: asNullableString(raw.due_date),
-    owner: asNullableString(raw.owner),
     tasks,
     task_count: taskCount,
     task_done_count: taskDoneCount,

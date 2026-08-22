@@ -132,9 +132,9 @@ let test_canonical_payload_carries_delivery_target () =
        (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
           error));
   (* The outcome and the receipt come from the same terminal_effect_state
-     (keeper_agent_run.ml:1064-1076), so a completed external effect always
-     serializes its target. A payload claiming the outcome without one predates
-     the field and is rejected rather than projected as a null destination. *)
+     (keeper_agent_run.ml), so a completed external effect always serializes
+     its target. A payload claiming the outcome without one is rejected rather
+     than projected as a null destination. *)
   (match
      Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
        (body_with [])
@@ -160,6 +160,21 @@ let test_canonical_payload_carries_delivery_target () =
      fail
        (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
           error));
+  (* The other direction: a target on an outcome that completed no external
+     effect is rejected, so [Some] alone proves the outcome. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_for TO.Visible_reply
+          [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+            , `Assoc [ "kind", `String "dashboard" ] )
+          ])
+   with
+   | Error (Stream.Invalid_external_effect_target _) -> ()
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error)
+   | Ok _ -> fail "a delivery target on a visible reply must reject the payload");
   match
     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
       (body_with

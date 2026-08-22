@@ -6,7 +6,7 @@
 val app_token_opt : unit -> string option
 (** [SLACK_APP_TOKEN] — app-level token ([xapp-...]) for Socket Mode
     [apps.connections.open]. Absent ⇒ the gateway does not start. Unprefixed to
-    match the Slack SDK convention, the sidecar, and the dashboard guide. *)
+    match the Slack SDK convention and the dashboard guide. *)
 
 val bot_token_opt : unit -> string option
 (** [SLACK_BOT_TOKEN] — bot token ([xoxb-...]) for REST outbound and

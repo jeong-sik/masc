@@ -202,6 +202,43 @@ let test_vote_direction_mirror () =
     ()
 ;;
 
+(* The [pattern] declared for one property name across every schema that
+   declares it, mirroring [advertised_values_for_schemas] for enums. *)
+let declared_patterns_for_schemas schemas ~property =
+  let rec walk (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+          match value with
+          | `Assoc inner when String.equal key property ->
+            (match List.assoc_opt "pattern" inner with
+             | Some (`String pattern) -> [ pattern ]
+             | _ -> walk value)
+          | _ -> walk value)
+        fields
+    | `List items -> List.concat_map walk items
+    | _ -> []
+  in
+  schemas
+  |> List.concat_map (fun (t : Masc_domain.tool_schema) -> walk t.input_schema)
+  |> List.sort_uniq String.compare
+;;
+
+(* Board comment id. [Masc.Board.Comment_id] owns the shape; the canonical
+   comment_vote / comment schemas read it directly and the Keeper projection of
+   masc_board_comment hand-copies it as [comment_id_pattern]. Both property
+   names carry a comment id, so each is compared on its own. *)
+let test_comment_id_pattern_mirror () =
+  List.iter
+    (fun property ->
+      check (list string)
+        (Printf.sprintf "%s pattern matches Board.Comment_id" property)
+        [ Masc.Board.Comment_id.json_schema_pattern ]
+        (declared_patterns_for_schemas (all_schemas ()) ~property))
+    [ "comment_id"; "parent_id" ]
+;;
+
 (* A guard that passes when the thing it guards is empty is not a guard. *)
 let test_owners_are_non_empty () =
   List.iter
@@ -226,6 +263,7 @@ let () =
         ; test_case "fs write mode" `Quick test_fs_write_mode_mirror
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
+        ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode

@@ -194,15 +194,22 @@ let info_of_json json : (info, Error.t) result =
     let open Yojson.Safe.Util in
     let* () =
       match json with
-      | `Assoc fields when List.mem_assoc "env_policy" fields ->
-        Error
-          (Error.Serialization
-             (JsonParseError
-                { detail =
-                    "Mcp_session.info_of_json: legacy env_policy is not supported; MCP \
-                     subprocesses inherit the caller environment"
-                }))
-      | `Assoc _ -> Ok ()
+      | `Assoc fields ->
+        Types.exact_object_fields
+          ~scope:"Mcp_session.info_of_json"
+          ~required:
+            [ "server_name"
+            ; "command"
+            ; "args"
+            ; "env"
+            ; "http_base_url"
+            ; "http_headers"
+            ; "tool_schemas"
+            ; "transport_kind"
+            ]
+          fields
+        |> Result.map_error (fun detail ->
+          Error.Serialization (JsonParseError { detail }))
       | _ ->
         Error
           (Error.Serialization

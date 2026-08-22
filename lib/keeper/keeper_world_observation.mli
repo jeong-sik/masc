@@ -41,10 +41,6 @@ type pending_board_event_kind =
           identity visible in the current Keeper prompt. The Librarian reads
           the same producer-owned attention record through its bounded durable
           projection. *)
-      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
-          the assignment edge surfaces as actionable turn input. *)
-      (** All linked Tasks are terminal; the Keeper must re-read SSOT and
-          choose completion, blocking, or follow-up work. *)
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
       (** A system LLM completion authority rejected this Keeper's evidence. *)
   | Task_cancelled of Keeper_event_queue.task_cancellation

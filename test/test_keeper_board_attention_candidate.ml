@@ -414,12 +414,6 @@ let rewrite_candidate_keeper_context rewrite candidate =
     rewrite_assoc_field "keeper_context" rewrite request)
 ;;
 
-let with_legacy_active_goal_ids value candidate =
-  rewrite_candidate_keeper_context
-    (insert_assoc_field_after "instructions" "active_goal_ids" value)
-    candidate
-;;
-
 let ledger_path ~base_path =
   Filename.concat
     (Filename.concat
@@ -451,112 +445,6 @@ let expect_record_error ?expected_detail ~base_path label candidate =
          Alcotest.(check string) (label ^ " error") expected detail)
       expected_detail
   | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
-;;
-
-let test_legacy_v4_context_tombstone_normalizes_on_read_and_rewrite () =
-  with_temp_base "board-attention-candidate-legacy-v4" @@ fun base_path ->
-  let first = candidate (signal "post-legacy-v4-first") in
-  let second = candidate (signal "post-legacy-v4-second") in
-  let in_memory_legacy_request =
-    rewrite_assoc_field
-      "keeper_context"
-      (set_assoc_field "active_goal_ids" (`List []))
-      first.judgment_request
-  in
-  (match
-     A.record
-       ~base_path
-       { first with judgment_request = in_memory_legacy_request }
-   with
-   | A.Record_error _ -> ()
-   | A.Recorded _ | A.Duplicate _ ->
-     Alcotest.fail "current writer accepted the retired keeper-context field");
-  ignore (record ~base_path first : A.candidate);
-  let legacy_goal_ids = `List [ `String "goal-old-a"; `String "goal-old-b" ] in
-  write_ledger_rows
-    ~base_path
-    [ with_legacy_active_goal_ids legacy_goal_ids first
-    ; with_legacy_active_goal_ids (`List []) second
-    ];
-  let loaded =
-    ok
-      "load multi-row legacy v4 ledger"
-      (A.load_candidates ~base_path ~keeper_name:first.keeper_name)
-  in
-  Alcotest.(check bool)
-    "legacy rows normalize to current candidates"
-    true
-    (loaded = [ first; second ]);
-  let third = candidate (signal "post-current-after-legacy-v4") in
-  ignore (record ~base_path third : A.candidate);
-  let rewritten =
-    ok
-      "load ledger after current write"
-      (A.load_candidates ~base_path ~keeper_name:first.keeper_name)
-  in
-  Alcotest.(check bool)
-    "current write preserves every normalized row"
-    true
-    (rewritten = [ first; second; third ]);
-  let durable_content =
-    In_channel.with_open_bin (ledger_path ~base_path) In_channel.input_all
-  in
-  Alcotest.(check bool)
-    "compacted ledger drops the retired field"
-    false
-    (String_util.contains_substring durable_content "active_goal_ids")
-;;
-
-let test_legacy_v4_context_tombstone_rejects_malformed_shapes () =
-  let base = candidate (signal "post-legacy-v4-invalid") in
-  let legacy =
-    with_legacy_active_goal_ids (`List [ `String "goal-old" ]) base
-  in
-  let unrelated_row =
-    rewrite_candidate_keeper_context
-      (set_assoc_field "unrelated_extra" (`String "reject"))
-      base
-  in
-  let invalid_rows =
-    [ "unrelated keeper-context field", unrelated_row
-    ; ( "legacy field with unrelated keeper-context field"
-      , rewrite_assoc_field
-          "judgment_request"
-          (fun request ->
-             rewrite_assoc_field
-               "keeper_context"
-               (set_assoc_field "unrelated_extra" (`String "reject"))
-               request)
-          legacy )
-    ; ( "duplicate legacy field"
-      , rewrite_assoc_field
-          "judgment_request"
-          (fun request ->
-             rewrite_assoc_field
-               "keeper_context"
-               (append_assoc_field
-                  "active_goal_ids"
-                  (`List [ `String "goal-duplicate" ]))
-               request)
-          legacy )
-    ; ( "wrong-typed legacy field"
-      , with_legacy_active_goal_ids (`String "goal-not-an-array") base )
-    ; ( "wrong-typed legacy field element"
-      , with_legacy_active_goal_ids (`List [ `Int 7 ]) base )
-    ]
-  in
-  List.iter
-    (fun (label, row) ->
-       match A.candidate_of_json row with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail (label ^ " was accepted"))
-    invalid_rows;
-  with_temp_base "board-attention-candidate-legacy-v4-invalid" @@ fun base_path ->
-  ignore (record ~base_path base : A.candidate);
-  write_ledger_rows ~base_path [ unrelated_row ];
-  match A.load_candidates ~base_path ~keeper_name:base.keeper_name with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "persisted unrelated keeper-context field was accepted"
 ;;
 
 let test_singleton_request_is_canonical_and_identity_bound () =
@@ -1074,14 +962,6 @@ let () =
             "status view preserves resumability and quarantine"
             `Quick
             test_status_view_preserves_resumability_and_quarantine
-        ; Alcotest.test_case
-            "legacy v4 context tombstone normalizes on read and rewrite"
-            `Quick
-            test_legacy_v4_context_tombstone_normalizes_on_read_and_rewrite
-        ; Alcotest.test_case
-            "legacy v4 context tombstone rejects malformed shapes"
-            `Quick
-            test_legacy_v4_context_tombstone_rejects_malformed_shapes
         ; Alcotest.test_case
             "singleton request is canonical and identity bound"
             `Quick

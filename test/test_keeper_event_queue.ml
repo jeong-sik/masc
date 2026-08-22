@@ -321,6 +321,68 @@ let () =
       | _ -> Alcotest.fail "reaction board stimulus round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("reaction board stimulus round-trip failed: " ^ msg));
 
+  (* #29457: a vote is a board stimulus whose payload names the target, the
+     voted-on author, the voter, and the direction; all four must survive the
+     durable round-trip, and the post id stays the enclosing stimulus id. *)
+  let vote_payload () =
+    Board_signal
+      { kind =
+          Vote_cast
+            { target = Vote_on_comment "c1"
+            ; target_author = "poster"
+            ; voter = "peer"
+            ; direction = Vote_down
+            }
+      ; author = "peer"
+      ; title = "parent"
+      ; content = "body"
+      ; hearth = None
+      ; updated_at = Some 6.0
+      }
+  in
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "p-vote"; urgency = Normal; arrived_at = 6.0; payload = vote_payload () })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Board_signal
+          { kind =
+              Vote_cast
+                { target = Vote_on_comment target_id; target_author; voter; direction = Vote_down }
+          ; author
+          ; hearth = None
+          ; _
+          } ->
+        assert (String.equal s.post_id "p-vote");
+        assert (String.equal target_id "c1");
+        assert (String.equal target_author "poster");
+        assert (String.equal voter "peer");
+        assert (String.equal author "peer")
+      | _ -> Alcotest.fail "vote board stimulus round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("vote board stimulus round-trip failed: " ^ msg));
+  (match
+     stimulus_of_yojson
+       (`Assoc
+          [ "post_id", `String "p-vote"
+          ; "urgency", `String "normal"
+          ; "arrived_at_unix", `Float 6.0
+          ; ( "payload"
+            , `Assoc
+                [ "kind", `String "board_signal"
+                ; "board_kind", `String "vote_cast"
+                ; "author", `String "peer"
+                ; "title", `String "parent"
+                ; "content", `String "body"
+                ; "hearth", `Null
+                ; "updated_at_unix", `Null
+                ] )
+          ])
+   with
+   | Ok _ -> Alcotest.fail "vote_cast without vote payload fields must not decode"
+   | Error _ -> ());
+
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
     Fusion_completed

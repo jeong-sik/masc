@@ -46,7 +46,7 @@ let message_json (m : Store.chat_message) : Yojson.Safe.t =
     ([ ("role", `String (Store.Role.to_label m.role));
        ("content", `String m.content) ]
     @ kind_fields
-    @ opt_float_field "ts" m.ts
+    @ [ ("ts", `Float m.ts) ]
     @ opt_string_field "source" (Option.map Surface_ref.lane_label m.surface)
     @ opt_string_field "conversation_id" m.conversation_id
     @ opt_string_field "external_message_id" m.external_message_id
@@ -79,8 +79,8 @@ let roster (lane : Store.chat_message list) : participant list =
                   id;
                   name = speaker_name;
                   authority = speaker_authority;
-                  first_seen = m.ts;
-                  last_seen = m.ts;
+                  first_seen = Some m.ts;
+                  last_seen = Some m.ts;
                   message_count = 1;
                   note = None;
                 }
@@ -91,11 +91,11 @@ let roster (lane : Store.chat_message list) : participant list =
                     (match speaker_name with
                     | Some n when String.trim n <> "" -> Some n
                     | Some _ | None -> p.name);
-                  last_seen = (match m.ts with Some _ -> m.ts | None -> p.last_seen);
+                  last_seen = Some m.ts;
                   first_seen =
-                    (match (p.first_seen, m.ts) with
-                    | None, ts -> ts
-                    | some, _ -> some);
+                    (match p.first_seen with
+                    | None -> Some m.ts
+                    | Some _ as seen -> seen);
                   message_count = p.message_count + 1;
                 }
           in
@@ -127,10 +127,9 @@ let take_last n items =
 let page_oldest_ts (messages : Store.chat_message list) : float option =
   List.fold_left
     (fun acc (m : Store.chat_message) ->
-      match (acc, m.ts) with
-      | None, ts -> ts
-      | Some a, Some t when t < a -> Some t
-      | some, _ -> some)
+      match acc with
+      | None -> Some m.ts
+      | Some oldest -> Some (Float.min oldest m.ts))
     None messages
 
 (* RFC-0229 P1: notes are keeper-scoped deliberate memory. Union them

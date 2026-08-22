@@ -227,9 +227,10 @@ must not revive periodic full-store consolidation.
 
 **Current verdict:** `WIRED_FAILING_LIVE`
 
-**Observed:** all eight public compaction snapshot inventories are empty while
-turn request and recall sizes grow. No live checkpoint replacement has been
-observed.
+**Observed:** no configured Keeper has a recorded compaction (no
+`Context_compacted` runtime-manifest row and a zero `compaction_rt` count for
+every Keeper, #29454) while turn request and recall sizes grow. No live
+checkpoint replacement has been observed.
 
 **Missing:** bounded input, new-delta/backlog selection, Runtime failover,
 checkpoint install, and next-turn proof.
@@ -362,7 +363,6 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 | 2026-07-27 22:24 KST | `GET /health?full=1` | current process reported `status=ok` and `keeper_fibers=8` | High for fiber presence only; Keeper role attribution was not proven |
 | 2026-07-27 22:25 KST | `GET /api/v1/keepers/:name/turn-records?limit=1` over the historical configured roster | seven entries had fresh-runtime turn records; `kinobot-frontend` had none | High for endpoint observation, not current Keeper-fleet proof |
 | 2026-07-27 22:28 KST | `kinobot-frontend` config, composite, turn records, and system log | config said proactive true; effective activation was false; scheduler skipped with `scheduled_autonomous_disabled`; turn record count remained zero | High |
-| 2026-07-27 22:24 KST | `GET /api/v1/keepers/:name/compaction-snapshots` over the historical configured roster | every inventory was empty; no live compaction or checkpoint-install proof | High for the observed endpoints |
 | 2026-07-27 22:25 KST | latest turn records and earlier live trace comparison | the system LLM verifier had one Gemma-to-GLM recovery, but later post-checkpoint failures did not retain the successor; this is not Keeper failover evidence | High for the trace, not Keeper attribution |
 | 2026-07-27 22:25 KST | fresh turn-record prompt blocks | recall was active, but representative blocks ranged from 1,455 to 9,962 bytes and continued accumulating without a semantic replacement cycle | Medium |
 

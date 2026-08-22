@@ -1365,9 +1365,12 @@ let board_list_output_schema =
     ~required:[ "kind"; "revision" ]
 ;;
 
-(* Producer: Masc_domain.task_to_yojson (lib/types/types_core.ml). Only the
-   unconditionally emitted fields are declared; status-variant and
-   presence-conditional fields pass through [additionalProperties]. *)
+(* Producer: Masc_domain.task_compact_to_yojson by default and
+   Masc_domain.task_to_yojson under projection "full" (lib/types/types_core.ml).
+   Required are the fields both shapes emit unconditionally; [description] and
+   [files] are declared because the full shape always carries them; the
+   status-variant and presence-conditional fields pass through
+   [additionalProperties]. *)
 let tasks_list_task_item_schema =
   `Assoc
     [ "type", `String "object"
@@ -1389,33 +1392,27 @@ let tasks_list_task_item_schema =
       , `List
           (List.map
              (fun name -> `String name)
-             [ "id"
-             ; "title"
-             ; "description"
-             ; "priority"
-             ; "files"
-             ; "created_at"
-             ; "status"
-             ]) )
+             [ "id"; "title"; "priority"; "created_at"; "status" ]) )
     ; "additionalProperties", `Bool true
     ]
 ;;
 
 (* Producer: Tasks_list Ok branch (keeper_tool_task_runtime.ml) — the
-   Snapshot_protocol envelope prefixed with backlog provenance. [snapshot]
-   is absent on the [unchanged] variant. *)
+   Snapshot_protocol envelope prefixed with backlog provenance and the row
+   shape that was served. [snapshot] is absent on the [unchanged] variant. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:
       [ "backlog_authority", `Assoc [ "type", `String "string" ]
       ; "degraded", `Assoc [ "type", `String "boolean" ]
+      ; "projection", `Assoc [ "type", `String "string" ]
       ; "kind", `Assoc [ "type", `String "string" ]
       ; "revision", `Assoc [ "type", `String "string" ]
       ; ( "snapshot"
         , `Assoc
             [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
       ]
-    ~required:[ "backlog_authority"; "degraded"; "kind"; "revision" ]
+    ~required:[ "backlog_authority"; "degraded"; "projection"; "kind"; "revision" ]
 ;;
 
 (* Producer: Keeper_artifact_read.page_to_json — the single success path. *)

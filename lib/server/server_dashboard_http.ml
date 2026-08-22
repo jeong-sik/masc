@@ -25,7 +25,6 @@ let dashboard_board_json
       ?(limit = 100)
       ?(offset = 0)
       ?voter
-      ?(blind_votes = false)
       ()
   : Yojson.Safe.t
   =
@@ -39,7 +38,7 @@ let dashboard_board_json
   in
   let cache_key =
     Printf.sprintf
-      "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%s;%b"
+      "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%s"
       (Option.value ~default:"-" hearth)
       (Option.value ~default:"-" author_filter)
       (board_sort_label sort_by)
@@ -49,7 +48,6 @@ let dashboard_board_json
       offset
       config_key
       (Option.value ~default:"-" voter)
-      blind_votes
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
@@ -92,7 +90,6 @@ let dashboard_board_json
              let post_id = Board.Post_id.to_string post.id in
              let current_vote = board_current_vote_for_post ~voter ~post_id in
              board_post_dashboard_json
-               ~blind_votes
                ?current_vote
                ~author_karma:(get_karma author)
                post)
@@ -133,7 +130,6 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
   let voter = board_voter_query request in
-  let blind_votes = bool_query_param request "blind_votes" ~default:false in
   dashboard_board_json
     ?config
     ?hearth
@@ -144,7 +140,6 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     ~limit
     ~offset
     ?voter
-    ~blind_votes
     ()
 ;;
 

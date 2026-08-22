@@ -21,6 +21,11 @@ type pending_board_event_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
+  | Board_vote_cast of Board_dispatch.board_vote_change
+      (** A vote landed on a post or comment this Keeper wrote. Payload-carrying
+          like {!Completion_authority_rejected}: the voter and direction are the
+          fact the row states, and [post_id] is the post the vote belongs to
+          (the parent post for a comment vote). *)
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
       (** The consumed wake, kept typed. The exact occurrence key is
@@ -36,10 +41,6 @@ type pending_board_event_kind =
           identity visible in the current Keeper prompt. The Librarian reads
           the same producer-owned attention record through its bounded durable
           projection. *)
-      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
-          the assignment edge surfaces as actionable turn input. *)
-      (** All linked Tasks are terminal; the Keeper must re-read SSOT and
-          choose completion, blocking, or follow-up work. *)
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
       (** A system LLM completion authority rejected this Keeper's evidence. *)
   | Task_cancelled of Keeper_event_queue.task_cancellation

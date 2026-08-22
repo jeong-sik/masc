@@ -187,10 +187,8 @@ export interface BoardPost {
   meta?: BoardPostMeta | null
   attachments?: BoardAttachmentDecode[]
   tags: string[]
-  votes: number | null
-  vote_balance?: number | null
-  vote_blind?: boolean
-  vote_blind_reason?: string
+  votes: number
+  vote_balance?: number
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   comment_count: number
@@ -214,12 +212,10 @@ export interface BoardComment {
   author_identity?: BoardActorIdentity | null
   content: string
   created_at: string
-  votes?: number | null
-  vote_balance?: number | null
-  votes_up?: number | null
-  votes_down?: number | null
-  vote_blind?: boolean
-  vote_blind_reason?: string
+  votes?: number
+  vote_balance?: number
+  votes_up?: number
+  votes_down?: number
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   reactions?: BoardReactionSummary[]

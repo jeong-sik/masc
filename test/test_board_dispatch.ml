@@ -1452,7 +1452,6 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
    | Error error -> Alcotest.fail (Board.show_board_error error));
   let status, body =
     Server_routes_http_runtime.board_post_detail_json
-      ~blind_votes:false
       ~config:None
       ~voter:(Some "forgeable-query-voter")
       ~reaction_actor:(Some "credential-owner")
@@ -1583,6 +1582,102 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
          | _ -> Alcotest.fail "reaction audience must be thread participants")
      | _ -> Alcotest.fail "expected reaction_changed board signal")
   | None -> Alcotest.fail "expected reaction_changed board signal"
+
+(* #29457: a vote is a board signal addressed at the voted-on author. The
+   signal's [author] is the voter (the actor) and the payload carries whose
+   writing was voted on, so the keeper router can wake that lane directly. *)
+let vote_signals_seen () =
+  let seen = ref [] in
+  Board_dispatch.set_board_signal_hook (fun signal -> seen := signal :: !seen);
+  fun () -> List.rev !seen
+
+let test_board_signal_vote_cast_on_post () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"vote-author" ~title:"Vote parent"
+        ~content:"vote parent content" ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let signals = vote_signals_seen () in
+  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  (match signals () with
+   | [ addressed ] ->
+     let signal = addressed.Board_dispatch.signal in
+     (match signal.Board_dispatch.kind with
+      | Board_dispatch.Board_vote_cast { target; target_author; voter; direction } ->
+        (match target with
+         | Board_dispatch.Vote_on_post id ->
+           Alcotest.(check string) "target is the post" post_id id
+         | Board_dispatch.Vote_on_comment _ -> Alcotest.fail "expected a post target");
+        Alcotest.(check string) "target author" "vote-author" target_author;
+        Alcotest.(check string) "voter" "voter-one" voter;
+        Alcotest.(check string) "direction" "up"
+          (Board.vote_direction_to_string direction);
+        Alcotest.(check string) "signal author is the voter" "voter-one" signal.author;
+        Alcotest.(check string) "signal post" post_id signal.Board_dispatch.post_id;
+        Alcotest.(check string) "signal title" "Vote parent" signal.title;
+        (match addressed.audience with
+         | Board.Thread_participants -> ()
+         | _ -> Alcotest.fail "vote audience must be thread participants")
+      | _ -> Alcotest.fail "expected vote_cast board signal")
+   | signals ->
+     Alcotest.failf "expected exactly one board signal, got %d" (List.length signals));
+  (* A same-direction duplicate is Already_voted: no store change, no signal. *)
+  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+   | Error (Board.Already_voted _) -> ()
+   | Ok _ -> Alcotest.fail "expected Already_voted"
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  Alcotest.(check int) "duplicate vote emits no signal" 1 (List.length (signals ()))
+
+let test_board_signal_vote_cast_on_comment_names_comment_author () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"vote-post-author" ~title:"Comment vote parent"
+        ~content:"comment vote parent content" ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"vote-comment-author"
+        ~content:"comment vote target" ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok comment -> comment
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let signals = vote_signals_seen () in
+  (match
+     Board_dispatch.vote_comment ~voter:"voter-two" ~comment_id ~direction:Board.Down
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  match signals () with
+  | [ addressed ] ->
+    let signal = addressed.Board_dispatch.signal in
+    (match signal.Board_dispatch.kind with
+     | Board_dispatch.Board_vote_cast { target; target_author; voter; direction } ->
+       (match target with
+        | Board_dispatch.Vote_on_comment id ->
+          Alcotest.(check string) "target is the comment" comment_id id
+        | Board_dispatch.Vote_on_post _ -> Alcotest.fail "expected a comment target");
+       Alcotest.(check string) "target author is the commenter" "vote-comment-author"
+         target_author;
+       Alcotest.(check string) "voter" "voter-two" voter;
+       Alcotest.(check string) "direction" "down"
+         (Board.vote_direction_to_string direction);
+       Alcotest.(check string) "signal post is the parent" post_id
+         signal.Board_dispatch.post_id
+     | _ -> Alcotest.fail "expected vote_cast board signal")
+  | signals ->
+    Alcotest.failf "expected exactly one board signal, got %d" (List.length signals)
 
 let test_reaction_rejects_unsupported_emoji () =
   match
@@ -2261,6 +2356,10 @@ let () =
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick
         (with_eio test_board_signal_reaction_changed_resolves_comment_parent);
+      Alcotest.test_case "board signal vote_cast on post" `Quick
+        (with_eio test_board_signal_vote_cast_on_post);
+      Alcotest.test_case "board signal vote_cast on comment names comment author" `Quick
+        (with_eio test_board_signal_vote_cast_on_comment_names_comment_author);
       Alcotest.test_case "unsupported emoji rejected" `Quick
         (with_eio test_reaction_rejects_unsupported_emoji);
     ];

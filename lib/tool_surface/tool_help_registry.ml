@@ -187,7 +187,7 @@ let manual_help_entry name =
               "Use status to narrow the list when inspecting a specific lifecycle state.";
             ];
           details_markdown =
-            "Returns task_id, title, status, assignee, and priority for backlog tasks visible to the keeper.";
+            "Rows: id, title, priority, created_at, status, assignee; projection=full adds the task body.";
           doc_refs = [];
           prompt_hints = [];
           examples = [ "status='todo' include_done=false limit=20" ];

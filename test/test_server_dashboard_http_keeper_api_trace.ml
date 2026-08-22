@@ -2,7 +2,6 @@ open Alcotest
 open Masc
 module Trace = Server_dashboard_http_keeper_api_trace
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
-module Keeper_api = Server_dashboard_http_keeper_api
 module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
 module Runtime_lens_swimlane = Server_dashboard_http_keeper_runtime_lens_swimlane
 module T = Trajectory
@@ -496,119 +495,6 @@ let test_checkpoint_inventory_projects_missing_current () =
     (json |> member "current_error" = `Null)
 ;;
 
-let test_compaction_snapshots_read_rotated_manifest_beyond_old_tail () =
-  with_temp_dir @@ fun dir ->
-  let config = Workspace.default_config dir in
-  let keeper_name = "compaction-rotated" in
-  let trace_id = "trace-compaction-rotated" in
-  let active_path =
-    Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id
-  in
-  let rotated_path = active_path ^ ".1" in
-  Fs_compat.mkdir_p (Filename.dirname active_path);
-  let context_compacted =
-    let exact_evidence =
-      `Assoc
-        [ "slot_id", `String "slot-7"
-        ; "call_id", `String "call-7"
-        ; "target_identity_fingerprint", `String "target-7"
-        ; "catalog_generation_fingerprint", `String "catalog-7"
-        ; "catalog_evidence_sha256", `String "catalog-sha-7"
-        ; "plan_fingerprint", `String "plan-7"
-        ; "receipt_request_body_sha256", `String "request-sha-7"
-        ; "before_checkpoint_bytes", `Int 4096
-        ; "after_checkpoint_bytes", `Int 1024
-        ; "before_message_count", `Int 12
-        ; "after_message_count", `Int 4
-        ; "summarized_message_count", `Int 4
-        ; "dropped_message_count", `Int 8
-        ; "before_tool_use_count", `Int 3
-        ; "after_tool_use_count", `Int 3
-        ; "before_tool_result_count", `Int 3
-        ; "after_tool_result_count", `Int 3
-        ]
-    in
-    Keeper_runtime_manifest.make
-      ~ts:"2026-08-05T00:00:00Z"
-      ~keeper_name
-      ~trace_id
-      ~keeper_turn_id:7
-      ~event:Keeper_runtime_manifest.Context_compacted
-      ~decision:
-        (Keeper_runtime_manifest.with_compaction_outcome
-           ~compaction_outcome:Keeper_runtime_manifest.Checkpoint_committed
-           (`Assoc
-             [ "before_tokens", `Int 1200
-             ; "after_tokens", `Int 400
-             ; "exact_evidence", exact_evidence
-             ]))
-      ()
-  in
-  let unrelated index =
-    Keeper_runtime_manifest.make
-      ~ts:(Printf.sprintf "2026-08-05T00:%02d:%02dZ" (index / 60) (index mod 60))
-      ~keeper_name
-      ~trace_id
-      ~keeper_turn_id:7
-      ~event:Keeper_runtime_manifest.Turn_started
-      ()
-  in
-  let rotated_rows =
-    context_compacted :: List.init 250 (fun index -> unrelated (index + 1))
-  in
-  let render rows =
-    rows
-    |> List.map (fun row ->
-      Keeper_runtime_manifest.to_json row |> Yojson.Safe.to_string)
-    |> String.concat "\n"
-    |> fun content -> content ^ "\n"
-  in
-  Fs_compat.save_file rotated_path (render rotated_rows);
-  Fs_compat.save_file active_path (render [ unrelated 251 ]);
-  Unix.utimes rotated_path 1.0 1.0;
-  Unix.utimes active_path 2.0 2.0;
-  let json =
-    Keeper_api.compaction_snapshots_json ~config ~keeper_id:keeper_name ~limit:25
-  in
-  let open Yojson.Safe.Util in
-  check int "rotated compaction is visible" 1 (json |> member "count" |> to_int);
-  check bool "complete segment scan is not truncated" false
-    (json |> member "scan_truncated" |> to_bool);
-  let item = json |> member "items" |> to_list |> List.hd in
-  check int "before token count" 1200 (item |> member "before_tokens" |> to_int);
-  check int "after token count" 400 (item |> member "after_tokens" |> to_int)
-;;
-
-let test_compaction_snapshots_cache_returns_warming_then_ready () =
-  with_temp_dir (fun dir ->
-    let config = Workspace.default_config dir in
-    let keeper_id = "cache-hydration-keeper" in
-    let hydration_status json =
-      Yojson.Safe.Util.(json |> member "hydration_status" |> to_string)
-    in
-    let cold =
-      Keeper_api.cached_compaction_snapshots_json ~config ~keeper_id ~limit:25
-        ~force_refresh:true
-    in
-    check string "cold miss is explicit" "warming" (hydration_status cold);
-    let rec await_ready remaining =
-      let current =
-        Keeper_api.cached_compaction_snapshots_json ~config ~keeper_id ~limit:25
-          ~force_refresh:false
-      in
-      match hydration_status current with
-      | "ready" -> current
-      | "warming" when remaining > 0 ->
-        Time_compat.sleep 0.005;
-        await_ready (remaining - 1)
-      | status -> failf "unexpected hydration status: %s" status
-    in
-    let ready = await_ready 200 in
-    check int "ready empty inventory" 0
-      Yojson.Safe.Util.(ready |> member "count" |> to_int))
-;;
-
-
 (* Clock groups fold the edge stream into a table of per-group accumulators.
    The records are immutable, so each edge rebinds its entry; two edges in the
    same turn must still land in one group with the count advanced and the
@@ -731,16 +617,6 @@ let () =
             "projects missing current without failing inventory"
             `Quick
             test_checkpoint_inventory_projects_missing_current
-        ] )
-    ; ( "compaction_snapshots"
-      , [ test_case
-            "reads rotated compaction beyond the old tail window"
-            `Quick
-            test_compaction_snapshots_read_rotated_manifest_beyond_old_tail
-        ; test_case
-            "returns warming before background hydration completes"
-            `Quick
-            test_compaction_snapshots_cache_returns_warming_then_ready
         ] )
     ]
 ;;

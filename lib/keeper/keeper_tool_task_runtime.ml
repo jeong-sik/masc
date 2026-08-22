@@ -187,6 +187,31 @@ let sync_keeper_meta_current_task
          (Keeper_owner_registry.command_error_to_string error))
 ;;
 
+(* Row shape of a [Tasks_list] page. [Compact] is the default: identity,
+   ordering and claim state only ([Masc_domain.task_compact_to_yojson]).
+   [Full] is the whole record, for the task(s) a keeper is about to work on.
+   The argument is decoded once here; an unknown value is a validation error,
+   not a silent fallback to either shape. *)
+type task_projection =
+  | Compact
+  | Full
+
+let task_projection_of_args args : (task_projection, string) result =
+  match Safe_ops.json_string_opt "projection" args with
+  | None | Some "compact" -> Ok Compact
+  | Some "full" -> Ok Full
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "projection must be \"compact\" or \"full\", got %S"
+         other)
+;;
+
+let task_projection_to_string = function
+  | Compact -> "compact"
+  | Full -> "full"
+;;
+
 (* Cluster sub-dispatch via closed sum type — string [name] is converted
    into [task_op] exactly once at the entry boundary; downstream match
    is exhaustive, so adding a new op forces the compiler to flag every
@@ -271,12 +296,17 @@ let handle_keeper_task_tool_with_outcome
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
-    (match Snapshot_protocol.if_revision args with
+    let projection_and_revision =
+      match task_projection_of_args args, Snapshot_protocol.if_revision args with
+      | Error message, _ | _, Error message -> Error message
+      | Ok projection, Ok if_revision -> Ok (projection, if_revision)
+    in
+    (match projection_and_revision with
      | Error message ->
        Keeper_tool_execution.failure
          ~class_:Tool_result.Policy_rejection
          (validation_error_json message)
-     | Ok if_revision ->
+     | Ok (projection, if_revision) ->
        match Workspace.read_backlog_observation_with_source_r config with
      | Error message ->
        let data =
@@ -325,7 +355,12 @@ let handle_keeper_task_tool_with_outcome
           across nineteen todo listings while the caller read the page as the
           whole backlog (#29101). *)
        let tasks = matching |> List.filteri (fun index _ -> index < limit) in
-       let tasks_json = `List (List.map Masc_domain.task_to_yojson tasks) in
+       let row_to_yojson =
+         match projection with
+         | Compact -> Masc_domain.task_compact_to_yojson
+         | Full -> Masc_domain.task_to_yojson
+       in
+       let tasks_json = `List (List.map row_to_yojson tasks) in
        let revision =
          Snapshot_protocol.revision_of_json
            ~namespace:"tasks"
@@ -338,6 +373,7 @@ let handle_keeper_task_tool_with_outcome
              ; "status", Option.fold ~none:`Null ~some:(fun value -> `String value) status_filter
              ; "include_done", `Bool include_done
              ; "limit", `Int limit
+             ; "projection", `String (task_projection_to_string projection)
              ; "snapshot", tasks_json
              ])
        in
@@ -356,6 +392,7 @@ let handle_keeper_task_tool_with_outcome
                    then "primary"
                    else "recovery_non_authoritative") )
               :: ("degraded", `Bool (Option.is_some recovered_from))
+              :: ("projection", `String (task_projection_to_string projection))
               :: ("matching_count", `Int matching_count)
               :: ("returned_count", `Int (List.length tasks))
               :: ("truncated", `Bool (matching_count > limit))

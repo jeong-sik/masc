@@ -1681,7 +1681,7 @@ describe('fetchTelemetrySummary', () => {
 })
 
 describe('fetchDashboardMemory', () => {
-  it('requests vote-blind dashboard board rows for the current actor', async () => {
+  it('requests dashboard board rows for the current actor', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ posts: [] }), {
         status: 200,
@@ -1695,7 +1695,6 @@ describe('fetchDashboardMemory', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/dashboard/board?')
     expect(url).toContain('voter=')
-    expect(url).toContain('blind_votes=true')
   })
 })
 

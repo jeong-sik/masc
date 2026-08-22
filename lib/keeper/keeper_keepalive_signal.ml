@@ -357,7 +357,9 @@ let board_signal_stimulus
           raising it to Immediate would be a separate queue decision. *)
        | Board_wake.Comment_on_self_post
        | Board_wake.Thread_reply_after_self_comment
-       | Board_wake.Reaction_after_self_activity ->
+       | Board_wake.Reaction_after_self_activity
+       | Board_wake.Vote_on_self_post
+       | Board_wake.Vote_on_self_comment ->
          Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
   ; payload
@@ -531,6 +533,7 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_post_created -> "post_created"
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
+    | Board_dispatch.Board_vote_cast _ -> "vote_cast"
   in
   match Keeper_board_audience.of_board_audience addressed.audience with
   | Error error ->
@@ -769,7 +772,9 @@ let wakeup_relevant_keeper_for_board_signal
                       | Board_wake.Explicit_mention
                       | Board_wake.Comment_on_self_post
                       | Board_wake.Thread_reply_after_self_comment
-                      | Board_wake.Reaction_after_self_activity ->
+                      | Board_wake.Reaction_after_self_activity
+                      | Board_wake.Vote_on_self_post
+                      | Board_wake.Vote_on_self_comment ->
                         Keeper_registry.Reactive_signal
                     in
                     Keeper_registry.wakeup_running

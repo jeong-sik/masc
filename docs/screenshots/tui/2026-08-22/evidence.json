@@ -1,0 +1,115 @@
+{
+  "schema": "masc.tui.screenshot_evidence.v1",
+  "kind": "fixture_backed_actual_binary_tui_capture",
+  "captured_at_start": "2026-08-22T02:26:45Z",
+  "captured_at_end": "2026-08-22T02:30:18Z",
+  "pull_request": 29443,
+  "issue": 29424,
+  "worktree_clean_before_capture": true,
+  "source": {
+    "code_source_sha": "d60227634b87f18b63b098c7a52b5ebdd9a8373d",
+    "executable": "_build/default/bin/masc_tui.exe",
+    "executable_bytes": 39373840,
+    "executable_sha256": "87b86d9e72e1361284afc7ef639205c01d9d70af7f0e2eba660d63fcd2f73647",
+    "build_command": "scripts/dune-local.sh build bin/masc_tui.exe @test/runtest-test_tui_planning_selection @test/runtest-test_tui_keyboard_input @test/runtest-test_tui_http_ast",
+    "fixture_module": "test/test_tui_keyboard_input.py",
+    "fixture_functions": [
+      "planning_selection_http_fixtures",
+      "planning_snapshot"
+    ],
+    "fixture_endpoint": "/api/v1/dashboard/planning"
+  },
+  "terminal": {
+    "kind": "real_pty_via_ttyd",
+    "columns": 99,
+    "rows": 30,
+    "term": "xterm-256color",
+    "ttyd_version": "1.7.7-unknown",
+    "renderer": "dom",
+    "xterm_version": null,
+    "xterm_version_note": "ttyd does not report its bundled xterm.js version separately",
+    "font_size_px": 14,
+    "playwright_version": "1.59.0",
+    "chromium_version": "147.0.7727.15",
+    "device_scale_factor": 1,
+    "screenshot_width_px": 834,
+    "screenshot_height_px": 480
+  },
+  "runtime": {
+    "TERM": "xterm-256color",
+    "MASC_TUI_SYNC": "off",
+    "refresh_seconds": 60,
+    "screenshot_selector": ".xterm-screen"
+  },
+  "fixtures": {
+    "initial": [
+      {"id": "goal-a-29424", "title": "plan-alpha-29424"},
+      {"id": "goal-b-29424", "title": "plan-beta-29424"},
+      {"id": "goal-c-29424", "title": "plan-charlie-29424"}
+    ],
+    "reorder_replacement": [
+      {"id": "goal-new-29424", "title": "plan-new-reorder-applied-29424"},
+      {"id": "goal-a-29424", "title": "plan-alpha-29424"},
+      {"id": "goal-b-29424", "title": "plan-beta-29424"},
+      {"id": "goal-c-29424", "title": "plan-charlie-29424"}
+    ],
+    "missing_detail_replacement": [
+      {"id": "goal-a-29424", "title": "plan-alpha-29424"},
+      {"id": "goal-c-29424", "title": "plan-charlie-29424"},
+      {"id": "goal-d-29424", "title": "plan-delta-missing-applied-29424"}
+    ]
+  },
+  "screenshots": [
+    {
+      "file": "01-planning-selection-after-reorder.png",
+      "captured_at": "2026-08-22T02:26:45Z",
+      "bytes": 43404,
+      "sha256": "96b100cb5129a67c16766d1c54164727a666046f918fb8076938e28f7c59b380",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 49205,
+      "input": ["Tab", "Tab", "Tab", "Tab", "j", "r"],
+      "input_hex": ["09", "09", "09", "09", "6a", "72"],
+      "fixture_transition": "[A,B,C] -> [NEW,A,B,C]",
+      "assertion": "plan-beta-29424 remains selected after refresh"
+    },
+    {
+      "file": "02-planning-list-after-detail-removal.png",
+      "captured_at": "2026-08-22T02:30:16Z",
+      "bytes": 39807,
+      "sha256": "85cef6f954a76d79efe98cb5a212304f55538bb36be35be1388fc32417bf99b7",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 51192,
+      "input": ["Tab", "Tab", "Tab", "Tab", "j", "Enter", "r"],
+      "input_hex": ["09", "09", "09", "09", "6a", "0d", "72"],
+      "fixture_transition": "open B detail; [A,B,C] -> [A,C,D]",
+      "assertion": "list mode is restored with plan-charlie-29424 selected"
+    },
+    {
+      "file": "03-planning-detail-after-recovery-navigation.png",
+      "captured_at": "2026-08-22T02:26:47Z",
+      "bytes": 21785,
+      "sha256": "8aadee69eb18c045d57f4656d497a649bb9a4ffe27df154098101fc3d6919603",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 49230,
+      "input_from_previous_capture": ["j", "Enter"],
+      "input_hex_from_previous_capture": ["6a", "0d"],
+      "assertion": "goal-d-29424 detail opens after one downward move"
+    }
+  ],
+  "limits": [
+    "The HTTP responses are deterministic synthetic fixtures, not a production runtime.",
+    "The screenshots are rendering evidence; the PTY regression tests are the behavior proof.",
+    "The capture proves the terminal projection for this executable and viewport only.",
+    "No DOM text was replaced and no screenshot was edited, redacted, or AI-generated after capture.",
+    "Deployment and live API health are separate evidence axes."
+  ]
+}

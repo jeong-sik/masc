@@ -192,6 +192,17 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             ["A", "B", "C"],
         )
 
+    def test_goal_verifier_convergence_budget_covers_one_retry_cycle(self):
+        # The live worker re-arms retryable deferred reviews on the default
+        # 60-second maintenance pulse. A 300-second evaluator request that
+        # fails near its boundary still needs a complete second attempt.
+        self.assertEqual(
+            acceptance.goal_verifier_convergence_timeout(300.0),
+            720.0,
+        )
+        wait_source = inspect.getsource(acceptance.MissionRun.wait_for_goal_state)
+        self.assertIn("goal_verifier_convergence_timeout(self.timeout)", wait_source)
+
     def test_runtime_serving_evidence_requires_exact_completed_receipt_per_role(self):
         keepers = {"coordinator": "keeper-c", "reviewer": "keeper-r"}
         expected = {"coordinator": "runtime-c", "reviewer": "runtime-r"}

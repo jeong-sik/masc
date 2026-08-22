@@ -108,7 +108,15 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
                (fun (task : Masc_domain.task) -> task_is_done task)
                node.tasks)));
       ("task_summary", task_summary);
-      ("timeline_events", `List (events_for_goal goal.id));
+      (* The normalizer, not the raw ledger row. [build_goal_events_projection]
+         hands back whatever [goal_events.jsonl] holds — {event_type, payload} —
+         and every consumer of this field reads the normalized shape
+         {kind, lane, title, summary, severity}. The detail view has always
+         mapped through [goal_event_timeline_json] (see [build_goal_timeline]);
+         the tree emitted the raw rows, so the dashboard's strict decoder
+         dropped all of them and every goal read as having no history (#29299). *)
+      ( "timeline_events",
+        `List (List.map goal_event_timeline_json (events_for_goal goal.id)) );
       ( "children",
         `List
           (List.map

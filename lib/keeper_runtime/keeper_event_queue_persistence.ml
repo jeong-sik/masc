@@ -625,10 +625,13 @@ let load_pending_result ~base_path ~keeper_name =
   load_result ~base_path ~keeper_name
 ;;
 
-type snapshot_with_errors =
-  { pending : Keeper_event_queue.t
+type 'pending with_read_errors =
+  { pending : 'pending
   ; read_errors : snapshot_read_error list
   }
+
+type snapshot_with_errors = Keeper_event_queue.t with_read_errors
+type selections_with_errors = State.pending_selection list with_read_errors
 
 let diagnose_snapshot_read_error ~base_path ~keeper_name message =
   match resolve_owner ~base_path ~keeper_name with
@@ -658,13 +661,21 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
      | None -> [ { kind = Parse_failed; path = None; message } ])
 ;;
 
-let load_snapshot_with_errors ~base_path ~keeper_name =
+let load_with_read_errors ~projection ~base_path ~keeper_name =
   match load_state_result ~base_path ~keeper_name with
-  | Ok state -> { pending = State.pending state; read_errors = [] }
+  | Ok state -> { pending = projection state; read_errors = [] }
   | Error message ->
-    { pending = Keeper_event_queue.empty
+    { pending = projection State.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
+;;
+
+let load_snapshot_with_errors ~base_path ~keeper_name =
+  load_with_read_errors ~projection:State.pending ~base_path ~keeper_name
+;;
+
+let load_selections_with_errors ~base_path ~keeper_name =
+  load_with_read_errors ~projection:State.pending_selections ~base_path ~keeper_name
 ;;
 
 let observe_snapshot_with_errors_with ~between_samples ~base_path ~keeper_name =

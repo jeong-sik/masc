@@ -754,6 +754,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            | None -> settle_host_stop stop)
         | Ok (`Completed turn) ->
           recovery_failure := Session_store.Protocol_failed;
+          (match turn.trajectory_error with
+           | None -> ()
+           | Some detail ->
+             Log.Keeper.warn
+               ~keeper_name
+               "antigravity turn completed with %d tool error step(s); last step error: %s"
+               turn.tool_errors
+               detail);
           let turn_id =
             provider_turn_identity
               ~conversation_id:turn.conversation_id

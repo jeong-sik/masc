@@ -28,7 +28,7 @@ RFC-0020 §3 Rule 4). RFC-0377 이 `Connector_attention` 한 종류만 "같은 �
 셋째, 같은 `schedule_id` 의 `Schedule_due` occurrence 여러 건은 턴 컨텍스트에서 **하나의 행**으로 투영한다
 (파생 상태, 쓰기 시점 dedup 없음).
 
-## 1. 관측 (라이브 `~/me/.masc`, 2026-08-22)
+## 1. 관측 (라이브 `<base-path>`, 2026-08-22)
 
 ### 1.1 사이클당 1건은 유입을 못 따라간다
 

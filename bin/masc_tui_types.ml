@@ -280,6 +280,16 @@ type state = {
   refresh_interval: float;
 }
 
+(** New Keeper messages require a complete roster observation. [state.keepers]
+    may intentionally retain the previous complete roster while a detail or log
+    view survives a transient metadata read failure, so membership alone is not
+    authorization for an external effect. *)
+let keeper_available_for_new_message (state : state) keeper_name =
+  Option.is_none state.keepers_error
+  && List.exists
+       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+       state.keepers
+
 (** Create initial state *)
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];

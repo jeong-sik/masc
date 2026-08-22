@@ -283,6 +283,11 @@
  (modules masc_tui_planning_selection))
 
 (library
+ (name masc_tui_keeper_selection)
+ (wrapped false)
+ (modules masc_tui_keeper_selection))
+
+(library
  (name masc_tui_board_detail)
  (wrapped false)
  (modules masc_tui_board_detail))
@@ -316,6 +321,7 @@
   masc_tui_operator_projection
   masc_tui_board_detail
   masc_tui_board_selection
+  masc_tui_keeper_selection
   masc_tui_planning_selection
   masc_tui_render_schedule
   masc_tui_terminal_write_repair

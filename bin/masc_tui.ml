@@ -221,8 +221,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   match key with
   | "esc" ->
     save_message_draft state;
-    state.view <- Keepers Keeper_detail;
+    let target_registered =
+      match state.msg_target_keeper_name with
+      | Some keeper_name ->
+          keeper_available_for_new_message state keeper_name
+      | None -> false
+    in
+    state.view <-
+      Keepers (if target_registered then Keeper_detail else Keeper_list);
     state.detail_scroll <- 0;
+    if not target_registered then state.log_scroll <- 0;
     true
   | "\r" | "\n" ->
     let text = Buffer.contents state.msg_input in
@@ -453,12 +461,11 @@ let rec start_keeper_message state ~base_path ~mailbox text =
       | None ->
       match state.msg_target_keeper_name with
       | None -> add_event state "error" "Cannot send: no Keeper is selected"
+      | Some _ when Option.is_some state.keepers_error ->
+          add_event state "error"
+            "Cannot send while the Keeper roster is unavailable"
       | Some keeper_name
-        when not
-               (List.exists
-                  (fun (keeper : keeper) ->
-                    String.equal keeper.k_name keeper_name)
-                  state.keepers) ->
+        when not (keeper_available_for_new_message state keeper_name) ->
           add_event state "error"
             (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
                (Keeper_chat.terminal_safe_text keeper_name))
@@ -1959,7 +1966,9 @@ let main () =
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
            (match state.view with
-            | Keepers Keeper_detail when state.keeper_cursor < List.length state.keepers ->
+            | Keepers Keeper_detail
+              when Option.is_none state.keepers_error
+                   && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper state keeper.k_name;
                 state.view <- Keepers Keeper_message

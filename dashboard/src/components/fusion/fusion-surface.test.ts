@@ -1173,7 +1173,42 @@ describe('FusionSurface', () => {
     expect(ids).toEqual(['fus-created-early-started-new', 'fus-created-late-started-old'])
   })
 
-  it('does not list board evidence that carries no run start', () => {
+  // Live 2026-08-22: 13 fusion posts written before the sink copied
+  // started_at into the evidence, all 13 still in the registry. The list
+  // showed 13 "waiting for board sink" registry rows while the board rows
+  // carried the panel and judge.
+  it('takes the start from the registry record when the board evidence has no copy', () => {
+    fusionRuns.value = [
+      {
+        runId: 'fus-registry-start',
+        keeper: 'sangsu',
+        preset: 'balanced',
+        topology: null,
+        startedAt: Date.parse('2026-06-19T12:00:00Z') / 1000,
+        status: 'completed',
+      },
+    ]
+    fusionBoardPosts.value = [
+      minimalFusionPost(
+        'fus-registry-start',
+        '2026-06-19T09:00:00Z',
+        '2026-06-19T09:01:00Z',
+        null,
+      ),
+      minimalFusionPost('fus-known-start', '2026-06-19T01:00:00Z', '2026-06-19T01:01:00Z'),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const ids = Array.from(container.querySelectorAll('.fus-run-id')).map(
+      element => element.textContent,
+    )
+    expect(ids).toEqual(['fus-registry-start', 'fus-known-start'])
+    // The board row wins over its registry duplicate: one row, board detail.
+    expect(container.querySelectorAll('[data-testid="fusion-registry-row"]').length).toBe(0)
+  })
+
+  it('does not list board evidence with no start in the evidence or the registry', () => {
     fusionBoardPosts.value = [
       minimalFusionPost(
         'fus-no-start',

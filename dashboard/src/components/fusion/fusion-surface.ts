@@ -134,7 +134,10 @@ interface FusionRunView {
   usage: FusionUsage
   preset: string | null
   params: FusionRunParams
-  startedAt: number
+  // Run start (unix seconds) as the board sink copied it from the registry;
+  // null when the evidence predates that copy. The list resolves the start
+  // from the registry record in that case (buildMergedRuns).
+  startedAt: number | null
   createdAt: string
   updatedAt: string
 }
@@ -354,11 +357,11 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   const judges = normalizeFusionJudgeNodes(meta.judges)
   const usage = normalizeUsage(meta, panel)
   const params = normalizeParams(meta)
-  // A fusion run is identified on the list by its start coordinate; board
-  // evidence without a finite non-negative `started_at` is not a run row.
   const rawStartedAt = firstNumber(meta, ['started_at'])
-  if (rawStartedAt === null || !Number.isFinite(rawStartedAt) || rawStartedAt < 0) return null
-  const startedAt = rawStartedAt
+  const startedAt =
+    rawStartedAt !== null && Number.isFinite(rawStartedAt) && rawStartedAt >= 0
+      ? rawStartedAt
+      : null
   const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
   const status = statusFor(judge, panel)
   const tone = toneFor(status, judge.decision)
@@ -405,7 +408,7 @@ function registryToRunStatus(status: FusionRunStatusLabel): FusionRunStatus {
 // surface matches the prototype's 2-pane master/detail instead of stacking a
 // separate registry panel above it.
 type MergedRun =
-  | { kind: 'board'; runId: string; sortTime: number; view: FusionRunView }
+  | { kind: 'board'; runId: string; sortTime: number; startedAt: number; view: FusionRunView }
   | { kind: 'registry'; runId: string; sortTime: number; record: FusionRunRecord }
 
 // Master-list page size: rows rendered initially and added per "더 보기" click.
@@ -414,21 +417,26 @@ const FUSION_LIST_PAGE_SIZE = 30
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Ordering uses
 // one visible policy — newest first — on a SINGLE axis for every row: the run's
-// START time, which both board evidence (`started_at`) and the registry persist.
-// Sorting board rows by createdAt and registry rows by startedAt was the mixed
-// axis this list must not reintroduce (38-bug campaign #34 follow-up).
+// START time. The registry records it and the board sink copies it into the
+// evidence so a completed row outlives the registry's Latest-64 retention. A
+// board row whose evidence has no copy takes the start from its registry
+// record; without either there is no start coordinate and the row is not
+// listed. Sorting board rows by createdAt and registry rows by startedAt was
+// the mixed axis this list must not reintroduce (38-bug campaign #34).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
 ): MergedRun[] {
   const boardIds = new Set(boardRuns.map(run => run.runId))
+  const registryByRun = new Map(registryRuns.map(record => [record.runId, record]))
+  const boardRows: MergedRun[] = []
+  for (const view of boardRuns) {
+    const startedAt = view.startedAt ?? registryByRun.get(view.runId)?.startedAt ?? null
+    if (startedAt === null) continue
+    boardRows.push({ kind: 'board', runId: view.runId, sortTime: startedAt * 1000, startedAt, view })
+  }
   const merged: MergedRun[] = [
-    ...boardRuns.map((view): MergedRun => ({
-      kind: 'board',
-      runId: view.runId,
-      sortTime: view.startedAt * 1000,
-      view,
-    })),
+    ...boardRows,
     ...registryRuns
       .filter(record => !boardIds.has(record.runId))
       .map((record): MergedRun => ({
@@ -925,7 +933,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
 }
 
 // Row timestamp renders the same durable start coordinate used for sorting.
-function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
+function FusionRunRow({ run, startedAt, active }: { run: FusionRunView; startedAt: number; active: boolean }) {
   const dec = decisionSpecFor(run.judge.decision)
   return html`
     <button
@@ -937,7 +945,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       <span class="fus-row-h">
         <${FusionStatusGlyph} status=${run.status} />
         <span class="fus-run-id mono">${run.runId}</span>
-        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.startedAt} /></span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${startedAt} /></span>
       </span>
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
       <span class="fus-row-f">
@@ -1385,6 +1393,7 @@ export function FusionSurface() {
                     ? html`<${FusionRunRow}
                         key=${run.runId}
                         run=${run.view}
+                        startedAt=${run.startedAt}
                         active=${selected?.runId === run.runId}
                       />`
                     : html`<${FusionRegistryRow}

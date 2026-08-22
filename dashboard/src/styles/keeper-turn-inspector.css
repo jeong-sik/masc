@@ -3,7 +3,7 @@
    tabbed waterfall + transcript + meta cards. Uses dashboard semantic tokens. */
 
 /* ── Overlay & drawer shell ── */
-.kti-overlay {
+.ti-overlay {
   position: fixed;
   inset: 0;
   /* prototype .turn-overlay (keeper-v2/styles/v2.css:687): rgba(4,5,8,0.42) — a
@@ -17,11 +17,11 @@
   isolation: isolate;
 }
 
-.kti-overlay[aria-hidden="true"] {
+.ti-overlay[aria-hidden="true"] {
   display: none;
 }
 
-.kti-drawer {
+.ti-drawer {
   /* prototype .ti-drawer width (inspector.css:11): min(720px, 96vw). */
   width: min(720px, 96vw);
   height: 100%;
@@ -37,7 +37,7 @@
   overflow: hidden;
 }
 
-.kti-head {
+.ti-head {
   display: flex;
   align-items: center;
   /* prototype .turn-hd (keeper-v2/styles/v2.css:694): gap 10px. --sp-3 is 8px
@@ -55,7 +55,7 @@
   flex-shrink: 0;
 }
 
-.kti-head h3 {
+.ti-head h3 {
   margin: 0;
   /* prototype .turn-hd h3 (keeper-v2/styles/v2.css:695): display, uppercase,
      letter-spacing 0.14em, 13px. var(--type-title) is sentence-case 14px, so
@@ -71,7 +71,7 @@
   white-space: nowrap;
 }
 
-.kti-head .tid {
+.ti-head .tid {
   font-family: var(--font-mono);
   /* prototype .turn-hd .tid (keeper-v2/styles/v2.css:696): 11px. --fs-11 is
      bumped to 13px at desktop :root (variables.css:723); pin the literal. */
@@ -83,7 +83,7 @@
   min-width: 0;
 }
 
-.kti-head-actions {
+.ti-head-actions {
   display: flex;
   align-items: center;
   /* prototype spaces the ID-copy button and close with the close's inline
@@ -93,7 +93,7 @@
   flex-shrink: 0;
 }
 
-.kti-close {
+.ti-close {
   background: transparent;
   /* prototype .turn-close (v2.css:699): border --border-main, color --text-mid,
      26x26, --radius-sm (4px), font-size 12px. --fs-12 is bumped to 14px at
@@ -109,7 +109,7 @@
   transition: 0.14s; /* prototype .turn-close (v2.css:699) */
 }
 
-.kti-close:hover {
+.ti-close:hover {
   /* prototype .turn-close:hover (v2.css:700): border-color --volt-dim, color
      --volt (no background). --color-accent-fg/-dim map to --volt/--volt-dim. */
   border-color: var(--color-accent-fg-dim);
@@ -117,7 +117,7 @@
 }
 
 /* ── Header subline chips ── */
-.kti-sub {
+.ti-sub {
   display: flex;
   align-items: center;
   /* Keep the integrated drawer gutters on the dashboard v2 spacing token while
@@ -128,7 +128,7 @@
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.kti-chip {
+.ti-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -144,19 +144,19 @@
   white-space: nowrap;
 }
 
-.kti-chip .sub-k {
+.ti-chip .sub-k {
   /* prototype .ti-chip .sub-k (inspector.css:16): only margin:0; the label
      inherits the chip's mono/--text-mid/10.5px (no dim/uppercase/tracking). */
   margin: 0;
 }
 
-.kti-chip.ok {
+.ti-chip.ok {
   color: var(--color-status-ok);
   border-color: rgb(var(--color-status-ok-glow) / .35);
 }
 
 /* ── Summary stat strip ── */
-.kti-summary {
+.ti-summary {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 1px;
@@ -164,14 +164,14 @@
   border-bottom: 1px solid var(--color-border-default);
 }
 
-.kti-stat {
+.ti-stat {
   background: var(--color-bg-surface);
   /* prototype .ti-stat (inspector.css:21): padding 11px 14px. */
   padding: 11px 14px;
   min-width: 0;
 }
 
-.kti-stat .k {
+.ti-stat .k {
   /* prototype .ti-stat .k (inspector.css:22): 8.5px. --fs-9 is bumped to 11px
      at desktop :root (variables.css:723); pin the literal. */
   font-size: 8.5px;
@@ -180,7 +180,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-stat .v {
+.ti-stat .v {
   font-family: var(--font-mono);
   /* prototype .ti-stat .v (inspector.css:23): 16px, margin-top 5px. --fs-16 is
      bumped to 18px at desktop :root (variables.css:724); pin the literals. */
@@ -191,36 +191,36 @@
   white-space: nowrap;
 }
 
-.kti-stat .v small {
+.ti-stat .v small {
   /* prototype .ti-stat .v small (inspector.css:24): 10px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
   font-size: var(--fs-10);
   color: var(--color-fg-disabled);
 }
 
-.kti-stat .v.ok {
+.ti-stat .v.ok {
   color: var(--color-status-ok);
 }
 
-.kti-stat .v.volt {
+.ti-stat .v.volt {
   color: var(--color-accent-fg);
 }
 
 /* ── Token economics bar ── */
-.kti-tok {
+.ti-tok {
   /* Dashboard v2 uses the shared horizontal spacing token here while preserving
      the prototype's 13px vertical pad and no-border economics band. */
   padding: 13px var(--sp-4);
 }
 
-.kti-tok-top {
+.ti-tok-top {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 8px;
 }
 
-.kti-tok-top .lbl {
+.ti-tok-top .lbl {
   /* prototype .ti-tok-top .lbl (inspector.css:31): 9.5px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
   font-size: 9.5px;
@@ -229,7 +229,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-tok-top .ctxpct {
+.ti-tok-top .ctxpct {
   font-family: var(--font-mono);
   /* prototype .ti-tok-top .ctxpct (inspector.css:32): 11px. --fs-11 is bumped to
      13px at desktop :root (variables.css:723); pin the literal. */
@@ -237,7 +237,7 @@
   color: var(--color-fg-muted);
 }
 
-.kti-tok-bar {
+.ti-tok-bar {
   display: flex;
   height: 10px;
   border-radius: var(--radius-pill);
@@ -248,23 +248,23 @@
   border: 1px solid var(--color-border-subtle);
 }
 
-.kti-tok-bar > span {
+.ti-tok-bar > span {
   display: block;
   height: 100%;
   min-width: 2px;
 }
 
-.kti-tok-bar .seg-in {
+.ti-tok-bar .seg-in {
   /* prototype .ti-tok-bar .seg-in (inspector.css:36): solid --info-dim
      (#1c6b86 dark teal), not a 55%-alpha bright cyan. Use the v2 base --info-dim. */
   background: var(--info-dim);
 }
 
-.kti-tok-bar .seg-out {
+.ti-tok-bar .seg-out {
   background: var(--color-accent-fg);
 }
 
-.kti-tok-legend {
+.ti-tok-legend {
   display: flex;
   /* prototype .ti-tok-legend (keeper-v2/styles/inspector.css:37): gap 18px,
      margin-top 9px, font-size 11.5px. --sp-4 is 10px under v2 and pinches the
@@ -276,36 +276,36 @@
   color: var(--color-fg-muted);
 }
 
-.kti-tok-legend span {
+.ti-tok-legend span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.kti-tok-legend i {
+.ti-tok-legend i {
   width: 9px;
   height: 9px;
   border-radius: 2px;
   flex: none;
 }
 
-.kti-tok-legend .in i {
+.ti-tok-legend .in i {
   /* prototype .ti-tok-legend .in i (inspector.css:41): solid --info-dim. */
   background: var(--info-dim);
 }
 
-.kti-tok-legend .out i {
+.ti-tok-legend .out i {
   background: var(--color-accent-fg);
 }
 
-.kti-tok-legend b {
+.ti-tok-legend b {
   font-family: var(--font-mono);
   color: var(--color-fg-primary);
   font-weight: 600;
 }
 
 /* ── Tabs — pill rail (prototype .turn-tabs / .turn-tab, keeper-v2/styles/v2.css:701-704) ── */
-.kti-tabs {
+.ti-tabs {
   display: flex;
   /* prototype .turn-tabs (v2.css:701): gap 5px; padding 9px 14px;
      border-bottom 1px var(--border-soft). --sp-* would shrink the rail. */
@@ -318,7 +318,7 @@
   flex-shrink: 0;
 }
 
-.kti-tab {
+.ti-tab {
   /* prototype .turn-tab (v2.css:702): outlined pill, not an underline. */
   background: none;
   border: 1px solid transparent;
@@ -335,12 +335,12 @@
   transition: 0.14s;
 }
 
-.kti-tab:hover {
+.ti-tab:hover {
   /* prototype .turn-tab:hover (v2.css:703): color only */
   color: var(--color-fg-muted);
 }
 
-.kti-tab.on {
+.ti-tab.on {
   /* prototype .turn-tab.on (v2.css:704): volt text + dim border + wash fill.
      --color-accent-fg/-dim resolve to brass #e0b057 / #8a6a28 under v2,
      matching the prototype --volt/--volt-dim; --volt-wash is the brass
@@ -351,28 +351,28 @@
 }
 
 /* ── Drawer body / section shell ── */
-.kti-body {
+.ti-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
   /* prototype .turn-body (v2.css:705): padding 16px, inter-section gap 16px,
      inherited font-size 14px (.v2-app, v2.css:178). --sp-3/--sp-4 are 8px/10px
      under v2 and --fs-12 is bumped to 14px at desktop :root; the inter-section
-     16px is carried by .kti-sec margin-bottom below. Pin the literal. */
+     16px is carried by .ti-sec margin-bottom below. Pin the literal. */
   padding: 16px;
   font-size: var(--fs-12);
 }
 
-.kti-sec {
+.ti-sec {
   /* prototype .turn-body gap 16px (v2.css:705) between sibling .turn-sec. */
   margin-bottom: 16px;
 }
 
-.kti-sec:last-child {
+.ti-sec:last-child {
   margin-bottom: 0;
 }
 
-.kti-sec-h {
+.ti-sec-h {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -381,11 +381,11 @@
   margin: 0 0 9px;
 }
 
-.kti-sec-h h4 {
+.ti-sec-h h4 {
   /* prototype section header is .turn-sec h4 (v2.css:706): font-ui, uppercase,
      letter-spacing 0.1em, 10px, color --text-dim (NOT the sentence-case 14px
      bright --type-title). .ti-sec-h h4 (inspector.css:116) only adds margin:0.
-     This surface uses .kti-sec, so replicate the .turn-sec h4 rule in full. */
+     This surface uses .ti-sec, so replicate the .turn-sec h4 rule in full. */
   margin: 0;
   font-family: var(--font-ui);
   font-size: var(--fs-10);
@@ -394,7 +394,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-sec-h .n {
+.ti-sec-h .n {
   font-family: var(--font-mono);
   /* prototype .ti-sec-h .n (inspector.css:117): 10px. --fs-10 is bumped to 12px
      at desktop :root (variables.css:723); pin the literal. */
@@ -403,12 +403,12 @@
 }
 
 /* ── Waterfall timeline ── */
-.kti-wf {
+.ti-wf {
   display: flex;
   flex-direction: column;
 }
 
-.kti-wf-row {
+.ti-wf-row {
   display: grid;
   grid-template-columns: 158px 1fr 56px;
   /* prototype .ti-wf-row (inspector.css:46): gap 12px. --sp-3 is 8px under v2;
@@ -419,11 +419,11 @@
   border-top: 1px solid var(--color-border-subtle);
 }
 
-.kti-wf-row:first-child {
+.ti-wf-row:first-child {
   border-top: 0;
 }
 
-.kti-wf-lbl {
+.ti-wf-lbl {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -434,27 +434,27 @@
   color: var(--color-fg-primary);
 }
 
-.kti-wf-lbl .nm {
+.ti-wf-lbl .nm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.kti-wf-lbl .nm.mono {
+.ti-wf-lbl .nm.mono {
   font-family: var(--font-mono);
   /* prototype .ti-wf-lbl .nm.mono (inspector.css:50): 11.5px. --fs-11 is bumped
      to 13px at desktop :root (variables.css:723); pin the literal. */
   font-size: 11.5px;
 }
 
-.kti-wf-ico {
+.ti-wf-ico {
   width: 8px;
   height: 8px;
   border-radius: 2px;
   flex: none;
 }
 
-.kti-wf-track {
+.ti-wf-track {
   position: relative;
   height: 18px;
   /* prototype .ti-wf-track (inspector.css:52): background --bg-sunken (#0a0b0f),
@@ -465,7 +465,7 @@
   overflow: hidden;
 }
 
-.kti-wf-bar {
+.ti-wf-bar {
   position: absolute;
   top: 3px;
   height: 12px;
@@ -474,7 +474,7 @@
   transition: none; /* v2 source: waterfall bars are not animated */
 }
 
-.kti-wf-dur {
+.ti-wf-dur {
   font-family: var(--font-mono);
   /* prototype .ti-wf-dur (inspector.css:54): 11px. --fs-11 is bumped to 13px at
      desktop :root (variables.css:723); pin the literal. */
@@ -484,20 +484,20 @@
   font-variant-numeric: tabular-nums;
 }
 
-.kti-k-ctx { background: var(--color-fg-disabled); }
-.kti-k-reason { background: var(--color-status-info); }
-.kti-k-tool { background: var(--color-accent-fg); }
-.kti-k-gen { background: var(--color-status-ok); }
+.ti-k-ctx { background: var(--color-fg-disabled); }
+.ti-k-reason { background: var(--color-status-info); }
+.ti-k-tool { background: var(--color-accent-fg); }
+.ti-k-gen { background: var(--color-status-ok); }
 /* Unmeasured phases (durationSource === 'not_recorded'): no real duration, so
    the bar is a placeholder, not a measurement. Hatch + dim it so it never reads
    as a measured span alongside the tool bars that carry real ms. */
-.kti-wf-bar.is-unmeasured {
+.ti-wf-bar.is-unmeasured {
   opacity: 0.5;
   background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--color-bg-page) 60%, transparent) 0 5px, transparent 5px 10px);
   border: 1px dashed color-mix(in oklab, var(--color-fg-muted) 45%, transparent);
 }
 
-.kti-wf-foot {
+.ti-wf-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -511,13 +511,13 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-wf-foot b {
+.ti-wf-foot b {
   font-family: var(--font-mono);
   color: var(--color-fg-primary);
   font-weight: 600;
 }
 
-.kti-wf-legend {
+.ti-wf-legend {
   display: flex;
   /* prototype .ti-wf-legend (keeper-v2/styles/inspector.css:61): gap 14px.
      --sp-3 is 8px under v2; pin the literal so the reason/tool/gen swatches
@@ -525,7 +525,7 @@
   gap: 14px;
 }
 
-.kti-wf-legend span {
+.ti-wf-legend span {
   display: inline-flex;
   align-items: center;
   /* prototype .ti-wf-legend span (inspector.css:62): gap 5px, font-size 10.5px.
@@ -536,14 +536,14 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-wf-legend i {
+.ti-wf-legend i {
   width: 8px;
   height: 8px;
   border-radius: 2px;
 }
 
 /* ── Copy button ── */
-.kti-copy {
+.ti-copy {
   display: inline-flex;
   align-items: center;
   /* prototype .ti-copy (inspector.css:73): gap 5px, font-size 10px, padding
@@ -562,18 +562,18 @@
   white-space: nowrap;
 }
 
-.kti-copy:hover {
+.ti-copy:hover {
   color: var(--color-accent-fg);
   border-color: var(--color-accent-fg-dim);
 }
 
-.kti-copy.done {
+.ti-copy.done {
   color: var(--color-status-ok);
   border-color: rgb(var(--color-status-ok-glow) / .4);
 }
 
 /* ── Code / context card ── */
-.kti-code {
+.ti-code {
   border: 1px solid var(--color-border-subtle);
   /* prototype .ti-code (inspector.css:66): --radius-sm (4px), background
      --bg-well (deepest well, #06070a). --color-bg-page maps to --bg-deep
@@ -584,7 +584,7 @@
   margin-top: 6px;
 }
 
-.kti-code-h {
+.ti-code-h {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -596,7 +596,7 @@
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.kti-code-h .cap {
+.ti-code-h .cap {
   font-family: var(--font-mono);
   /* prototype .ti-code-h .cap (inspector.css:68): 9.5px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
@@ -606,7 +606,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-code-h .sz {
+.ti-code-h .sz {
   font-family: var(--font-mono);
   /* prototype .ti-code-h .sz (inspector.css:69): 9.5px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
@@ -614,7 +614,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-code pre {
+.ti-code pre {
   margin: 0;
   padding: 10px 12px;
   overflow-x: auto;
@@ -629,23 +629,23 @@
   word-break: break-word;
 }
 
-.kti-code pre .jk {
+.ti-code pre .jk {
   color: var(--color-accent-fg);
 }
 
-.kti-code pre .js {
+.ti-code pre .js {
   color: var(--color-status-ok);
 }
 
 /* ── Structured tool card (transcript) ── */
-.kti-tool {
+.ti-tool {
   border: 1px solid var(--color-border-default);
   /* prototype .ti-tool (inspector.css:78): --radius-sm (4px). */
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
-.kti-tool-h {
+.ti-tool-h {
   display: flex;
   align-items: center;
   /* prototype .ti-tool-h (inspector.css:79): gap 9px, padding 9px 12px,
@@ -656,7 +656,7 @@
   background: var(--color-bg-panel-alt);
 }
 
-.kti-tool-h .seq {
+.ti-tool-h .seq {
   font-family: var(--font-mono);
   /* prototype .ti-tool-h .seq (inspector.css:80): 9.5px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
@@ -664,7 +664,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-tool-h .tnm {
+.ti-tool-h .tnm {
   font-family: var(--font-mono);
   /* prototype .ti-tool-h .tnm (inspector.css:81): 12.5px. --fs-12 is bumped to
      14px at desktop :root (variables.css:723); pin the literal. */
@@ -672,7 +672,7 @@
   color: var(--color-fg-primary);
 }
 
-.kti-tool-h .pill {
+.ti-tool-h .pill {
   font-family: var(--font-ui);
   /* prototype .ti-tool-h .pill (inspector.css:82): 9px, padding 2px 7px. --fs-9
      is bumped to 11px at desktop :root (variables.css:723); pin the literals. */
@@ -683,17 +683,17 @@
   border-radius: var(--radius-pill);
 }
 
-.kti-tool-h .pill.ok {
+.ti-tool-h .pill.ok {
   color: var(--color-status-ok);
   border: 1px solid rgb(var(--color-status-ok-glow) / .4);
 }
 
-.kti-tool-h .pill.bad {
+.ti-tool-h .pill.bad {
   color: var(--color-status-err);
   border: 1px solid rgb(var(--color-status-err-glow) / .4);
 }
 
-.kti-tool-h .lat {
+.ti-tool-h .lat {
   margin-left: auto;
   font-family: var(--font-mono);
   /* prototype .ti-tool-h .lat (inspector.css:85): 11px. --fs-11 is bumped to
@@ -702,19 +702,19 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-tool-b {
+.ti-tool-b {
   padding: 10px 12px;
 }
 
 /* ── Role-tinted transcript message ── */
-.kti-msg {
+.ti-msg {
   border: 1px solid var(--color-border-subtle);
   /* prototype .ti-msg (inspector.css:89): --radius-sm (4px). */
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
-.kti-msg-h {
+.ti-msg-h {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -726,7 +726,7 @@
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.kti-msg-role {
+.ti-msg-role {
   font-family: var(--font-mono);
   /* prototype .ti-msg-role (inspector.css:91): 9.5px. --fs-10 is bumped to 12px
      at desktop :root (variables.css:723); pin the literal. */
@@ -738,12 +738,12 @@
   border-radius: var(--radius-xs);
 }
 
-.kti-msg-role.system {
+.ti-msg-role.system {
   color: var(--color-status-info);
   border: 1px solid rgb(var(--color-status-info-glow) / .35);
 }
 
-.kti-msg-role.user {
+.ti-msg-role.user {
   /* prototype .ti-msg-role.user (inspector.css:93): color --volt-strong (the
      brighter brass #f0c373), border --volt-dim. --color-accent-fg maps to the
      base --volt (#e0b057); use --volt-strong directly. */
@@ -751,12 +751,12 @@
   border: 1px solid var(--color-accent-fg-dim);
 }
 
-.kti-msg-role.assistant {
+.ti-msg-role.assistant {
   color: var(--color-fg-primary);
   border: 1px solid var(--color-border-strong);
 }
 
-.kti-msg-role.context {
+.ti-msg-role.context {
   /* prototype renders the injected-context chip with the SAME .system styling
      (turn-inspector.jsx: <span className="ti-msg-role system">context</span>) —
      info/--accent-ice text + 35% info border, not amber. Mirror .system so the
@@ -765,7 +765,7 @@
   border: 1px solid rgb(var(--color-status-info-glow) / .35);
 }
 
-.kti-msg-h .who {
+.ti-msg-h .who {
   font-family: var(--font-mono);
   /* prototype .ti-msg-h .who (inspector.css:95): 10.5px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
@@ -773,7 +773,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-msg-h .seq {
+.ti-msg-h .seq {
   margin-left: auto;
   font-family: var(--font-mono);
   /* prototype .ti-msg-h .seq (inspector.css:96): 9.5px. --fs-10 is bumped to
@@ -782,7 +782,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-msg-b {
+.ti-msg-b {
   padding: 10px 12px;
   /* prototype .ti-msg-b (inspector.css:97): font-family --font-body, 12.5px,
      line-height 1.62, color --text-primary. --font-ui has a different fallback
@@ -796,7 +796,7 @@
   word-break: break-word;
 }
 
-.kti-msg-b.mono {
+.ti-msg-b.mono {
   font-family: var(--font-mono);
   /* prototype .ti-msg-b.mono (inspector.css:98): 11.5px. --fs-11 is bumped to
      13px at desktop :root (variables.css:723); pin the literal. */
@@ -804,7 +804,7 @@
   color: var(--color-fg-muted);
 }
 
-.kti-seq-rail {
+.ti-seq-rail {
   display: flex;
   flex-direction: column;
   /* prototype .ti-seq-rail (inspector.css:100): gap 10px. --sp-3 is 8px under
@@ -813,14 +813,14 @@
 }
 
 /* ── Context section card ── */
-.kti-ctx-card {
+.ti-ctx-card {
   border: 1px solid var(--color-border-subtle);
   /* prototype .ti-ctx-card (inspector.css:108): --radius-sm (4px). */
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
-.kti-ctx-h {
+.ti-ctx-h {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -831,7 +831,7 @@
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.kti-ctx-h .t {
+.ti-ctx-h .t {
   font-family: var(--font-ui);
   /* prototype .ti-ctx-h .t (inspector.css:110): 10px. --fs-10 is bumped to 12px
      at desktop :root (variables.css:723); pin the literal. */
@@ -841,7 +841,7 @@
   color: var(--color-fg-muted);
 }
 
-.kti-ctx-h .tok {
+.ti-ctx-h .tok {
   font-family: var(--font-mono);
   /* prototype .ti-ctx-h .tok (inspector.css:111): 10px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
@@ -849,7 +849,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-ctx-card pre {
+.ti-ctx-card pre {
   margin: 0;
   /* prototype .ti-ctx-card pre (inspector.css:112): padding 11px 13px, 11.5px,
      line-height 1.62. --fs-11 is bumped to 13px at desktop :root and --lh-loose
@@ -866,7 +866,7 @@
 }
 
 /* ── Meta: parameter chips + kv ── */
-.kti-params {
+.ti-params {
   display: flex;
   flex-wrap: wrap;
   /* prototype .ti-params (inspector.css:103): gap 7px. */
@@ -874,7 +874,7 @@
   margin-bottom: 4px;
 }
 
-.kti-param {
+.ti-param {
   font-family: var(--font-mono);
   /* prototype .ti-param (inspector.css:104): 11px, padding 4px 11px. --fs-11 is
      bumped to 13px at desktop :root (variables.css:723); pin the literals. */
@@ -886,7 +886,7 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-param b {
+.ti-param b {
   color: var(--color-fg-primary);
   font-weight: 600;
   margin-left: 6px;
@@ -897,7 +897,7 @@
    .v --text-bright. NOT a bordered-cell grid; keep the prototype's flat look
    (no cell borders/backgrounds/padding, no uppercase). --fs-12 is bumped to
    14px at desktop :root (variables.css:723); pin the 12px literal. */
-.kti-kv {
+.ti-kv {
   display: grid;
   grid-template-columns: 130px 1fr;
   gap: 8px 12px;
@@ -905,27 +905,27 @@
   font-size: var(--fs-12);
 }
 
-.kti-kv .k {
+.ti-kv .k {
   color: var(--color-fg-disabled);
   word-break: break-word;
 }
 
-.kti-kv .v {
+.ti-kv .v {
   color: var(--color-fg-primary);
   word-break: break-word;
 }
 
 /* ── Row opener affordance ── */
-.kti-turn-summary {
+.ti-turn-summary {
   cursor: pointer;
   user-select: none;
 }
 
-.kti-turn-summary:hover {
+.ti-turn-summary:hover {
   background: var(--color-bg-hover);
 }
 
-.kti-turn-summary .open-hint {
+.ti-turn-summary .open-hint {
   margin-left: auto;
   font-family: var(--font-mono);
   font-size: var(--fs-9);
@@ -934,30 +934,30 @@
   transition: opacity 0.14s;
 }
 
-.kti-turn-summary:hover .open-hint {
+.ti-turn-summary:hover .open-hint {
   opacity: 1;
 }
 
 @media (max-width: 900px) {
-  .kti-drawer {
+  .ti-drawer {
     width: 100vw;
     max-width: 100vw;
     height: 100dvh;
     border-left: 0;
   }
 
-  .kti-head {
+  .ti-head {
     padding-top: max(14px, env(safe-area-inset-top, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
     padding-left: max(16px, env(safe-area-inset-left, 0px));
   }
 
-  .kti-sub {
+  .ti-sub {
     padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
     padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
   }
 
-  .kti-tok {
+  .ti-tok {
     padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
     padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
   }
@@ -965,11 +965,11 @@
 
 /* Responsive summary strip */
 @media (max-width: 540px) {
-  .kti-summary {
+  .ti-summary {
     grid-template-columns: repeat(3, 1fr);
   }
 
-  .kti-wf-row {
+  .ti-wf-row {
     grid-template-columns: 110px 1fr 48px;
     gap: 8px;
   }

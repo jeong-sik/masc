@@ -69,7 +69,7 @@ function statesOwnPadding(cls: string, files: Set<string>): boolean {
  *  `.ia-card` and `.sch-card` get no padding rule at all, and `.ti-ctx-card`
  *  puts it on the nested <pre> instead. Padding these would double-inset them. */
 const DESIGN_UNPADDED = new Set([
-  'ap-card', 'cn-card', 'ia-card', 'sch-card', 'ti-ctx-card', 'kti-ctx-card',
+  'ap-card', 'cn-card', 'ia-card', 'sch-card', 'ti-ctx-card', 'ti-ctx-card',
 ])
 
 describe('craft-v2.css density card set', () => {

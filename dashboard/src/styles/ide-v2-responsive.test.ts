@@ -36,16 +36,16 @@ function mediaDeclarations(selector: string, maxWidth: string): Record<string, s
 describe('keeper-v2 IDE responsive contract', () => {
   it('drops the tree before mobile so the editor keeps a usable width', () => {
     expect(mediaDeclarations(
-      `${DESKTOP_SHELL}[data-rails-collapsed="false"] .ide-v2-body.ide-plane-grid`,
+      `${DESKTOP_SHELL}[data-rails-collapsed="false"] .ide-body.ide-plane-grid`,
       '1180px',
     )['grid-template-columns']).toBe('minmax(0, 1fr) minmax(270px, 320px)')
-    expect(mediaDeclarations(`${DESKTOP_SHELL} .ide-v2-tree`, '1180px').display).toBe('none')
+    expect(mediaDeclarations(`${DESKTOP_SHELL} .ide-tree`, '1180px').display).toBe('none')
     expect(mediaDeclarations(`${DESKTOP_SHELL} .ide-v2-tree-toggle`, '1180px').display).toBe('none')
   })
 
   it('uses the typed viewport state instead of a second CSS breakpoint SSOT', () => {
     expect(css).not.toContain(`max-width: ${DEFAULT_MOBILE_BREAKPOINT}px`)
-    expect(declarations(`${MOBILE_SHELL} .ide-v2-body.ide-plane-grid`)['grid-template-columns'])
+    expect(declarations(`${MOBILE_SHELL} .ide-body.ide-plane-grid`)['grid-template-columns'])
       .toBe('minmax(0, 1fr)')
   })
 
@@ -57,12 +57,12 @@ describe('keeper-v2 IDE responsive contract', () => {
   it('keeps the mobile file tree reachable while hiding the unavailable polling rail', () => {
     expect(declarations(`${MOBILE_SHELL} .ide-v2-tree-toggle`).display).toBe('inline-flex')
     expect(declarations(`${MOBILE_SHELL} .ide-v2-rail-toggle`).display).toBe('none')
-    const drawer = declarations(`${MOBILE_SHELL} .ide-v2-body.ide-plane-grid .ide-plane-tree`)
+    const drawer = declarations(`${MOBILE_SHELL} .ide-body.ide-plane-grid .ide-plane-tree`)
     expect(drawer.display).toBe('flex')
     expect(drawer.position).toBe('absolute')
     expect(drawer.width).toBe('min(86vw, 340px)')
     expect(drawer['z-index']).toBe('var(--z-overlay)')
-    expect(declarations(`${MOBILE_SHELL} .ide-v2-tree .ide-explorer-row`)['min-height'])
+    expect(declarations(`${MOBILE_SHELL} .ide-tree .ide-explorer-row`)['min-height'])
       .toBe('var(--mobile-touch-target-min)')
   })
 

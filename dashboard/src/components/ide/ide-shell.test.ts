@@ -1033,7 +1033,7 @@ describe('IdeShell', () => {
 
     const rail = container.querySelector('[data-testid="ide-right-rail"]')
     expect(rail).not.toBeNull()
-    expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
+    expect(rail?.classList.contains('ide-rail')).toBe(true)
     expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelectorAll('.ide-rail-tab')).toHaveLength(3)
@@ -1083,7 +1083,7 @@ describe('IdeShell', () => {
     expect(rail).not.toBeNull()
     expect(contextStack).not.toBeNull()
     expect(primaryRail).not.toBeNull()
-    expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
+    expect(rail?.classList.contains('ide-rail')).toBe(true)
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('true')
     expect(buttonByText(container, '활동').getAttribute('title'))
       .toBe('Workspace and keeper activity linked to the active file and repository')
@@ -1326,7 +1326,7 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     const shell = container.querySelector<HTMLElement>('.ide-plane-shell')
-    const grid = container.querySelector<HTMLElement>('.ide-v2-body')
+    const grid = container.querySelector<HTMLElement>('.ide-body')
     const handle = container.querySelector<HTMLElement>('[data-testid="ide-tree-resize"]')
     expect(shell?.getAttribute('data-tree-width')).toBe('315')
     expect(grid?.getAttribute('style')).toContain('--ide-tree-width: 315px')

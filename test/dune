@@ -2607,6 +2607,11 @@
  (modules test_tui_frame_presenter)
  (libraries alcotest masc_tui_frame_presenter))
 
+(test
+ (name test_tui_board_selection)
+ (modules test_tui_board_selection)
+ (libraries alcotest masc_tui_board_selection))
+
 (rule
  (alias runtest-test_tui_keyboard_input)
  (deps

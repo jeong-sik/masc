@@ -50,6 +50,7 @@ val allocate_overview :
   terminal_rows:int ->
   has_cluster:bool ->
   attention_count:int ->
+  event_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation

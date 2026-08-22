@@ -463,6 +463,18 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"load_selected_keeper_logs"
      >= 3);
+  check int "Board list success uses shared post replacement" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
+       ~callee:"replace_board_posts");
+  check int "Board detail success uses shared post replacement" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~callee:"replace_board_posts");
+  check int "Board post replacement reconciles selection once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"replace_board_posts"
+       ~callee:"Board_selection.reconcile_cursor");
   check bool "metadata refresh reconciles the selected log identity" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml"

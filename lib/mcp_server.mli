@@ -1,13 +1,7 @@
-(** Mcp_server — MCP server runtime: JSON-RPC envelope
-    helpers, resource catalogue, runtime state, SSE
-    broadcaster.
+(** Mcp_server — MCP server runtime: resource catalogue,
+    runtime state, SSE broadcaster.
 
-    Splits into four concerns:
-    - {b JSON-RPC plumbing} — re-exported pinned aliases of
-      {!Mcp_transport_protocol.jsonrpc_request} and the
-      validator / accessor / response-builder helpers so
-      callers reach them via [Mcp_server.X] without
-      importing the transport module.
+    Splits into three concerns:
     - {b Icon + resource catalogue} — the static
       [resources] / [resource_templates] tables advertised
       to the MCP client during initialisation, plus the
@@ -23,60 +17,7 @@
     ([svg_icon_data_uri], [text_icon] / [json_icon] /
     [doc_icon], [icons_for_mime], [server_icons],
     [make_resource_template] (callers use the static
-    {!resource_templates} list, not the constructor),
-    [supported_protocol_versions],
-    [default_protocol_version], [is_supported_protocol_version],
-    [validate_protocol_version], [jsonrpc_notification]). *)
-
-(** {1 JSON-RPC envelope (re-exported from Mcp_transport_protocol)} *)
-
-type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request = {
-  jsonrpc : string;
-  id : Yojson.Safe.t option;
-  method_ : string;
-  params : Yojson.Safe.t option;
-}
-(** Type re-export so callers reach it via
-    [Mcp_server.jsonrpc_request] with field access
-    preserved.  Identity preserved with the source type. *)
-
-val jsonrpc_request_of_yojson :
-  Yojson.Safe.t -> (jsonrpc_request, string) result
-val jsonrpc_request_to_yojson : jsonrpc_request -> Yojson.Safe.t
-
-val has_field : string -> Yojson.Safe.t -> bool
-val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
-
-val is_jsonrpc_v2 : Yojson.Safe.t -> bool
-val is_jsonrpc_response : Yojson.Safe.t -> bool
-val is_notification : jsonrpc_request -> bool
-
-val get_id : jsonrpc_request -> Yojson.Safe.t
-val is_valid_request_id : Yojson.Safe.t -> bool
-
-val validate_initialize_params :
-  Yojson.Safe.t option -> (unit, string) result
-(** Validates an [initialize] params payload.  Returns
-    [Ok ()] on a well-formed envelope with a supported
-    protocol version, [Error msg] otherwise. *)
-
-val make_response :
-  id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-val make_error :
-  ?data:Yojson.Safe.t ->
-  id:Yojson.Safe.t ->
-  int ->
-  string ->
-  Yojson.Safe.t
-
-val normalize_protocol_version : string -> string
-val protocol_version_from_params : Yojson.Safe.t option -> string
-val validate_protocol_version : string -> (string, string) result
-(** Returns [Ok normalized] when the input matches one of
-    the supported protocol versions, [Error msg]
-    otherwise.  Pinned because [test/test_mcp_server_eio.ml]
-    aliases the module ([module Mcp = Masc.Mcp_server])
-    and exercises the validator directly. *)
+    {!resource_templates} list, not the constructor)). *)
 
 (** {1 MCP icons} *)
 

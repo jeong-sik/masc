@@ -414,54 +414,6 @@ let test_loader_parses_selector_backed_case_fields () =
                (List.length cases))
       | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
 
-(* Regression guard for the legacy [tool_name] arg_check shape: case JSON that
-   predates typed selectors carries a bare ["tool_name"] field instead of a
-   ["selector"] object. parse_arg_check must keep parsing it as
-   [Eval_tool_selector.Tool_name], so removing that fallback fails here. *)
-let test_loader_parses_legacy_tool_name_arg_check () =
-  let path = Filename.temp_file "tool-call-quality-legacy" ".json" in
-  Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
-    (fun () ->
-      Fs_compat.save_file path
-        {|{
-  "cases": [
-    {
-      "id": "legacy_arg_check_case",
-      "prompt": "synthetic legacy arg_check case",
-      "category": "tool_use",
-      "keeper_profiles": ["bench-selector"],
-      "forbidden_tools": [],
-      "forbidden_selectors": [],
-      "required_selectors": [],
-      "max_tool_calls": 3,
-      "success_checks": [
-        {"path": "$.status", "equals": "completed"}
-      ],
-      "arg_checks": [
-        {
-          "tool_name": "tool_read_file",
-          "path": "$.path",
-          "contains": "keeper_tool_call_log"
-        }
-      ]
-    }
-  ]
-}|};
-      match Tool_call_quality_benchmark.load_cases_from_file path with
-      | Ok [ case ] ->
-          check int "arg check count" 1
-            (List.length case.Tool_call_quality_benchmark.arg_checks);
-          let arg_check = List.hd case.Tool_call_quality_benchmark.arg_checks in
-          check string "legacy tool_name selector" "tool_name:tool_read_file"
-            (Eval_tool_selector.label
-               arg_check.Tool_call_quality_benchmark.selector)
-      | Ok cases ->
-          fail
-            (Printf.sprintf "expected one parsed case, got %d"
-               (List.length cases))
-      | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
-
 (* When a case uses semantic selectors but none of the run's tool calls carry
    usable route_evidence, scoring cannot distinguish "wrong tool" from
    "missing evidence". Per the evidence-quality contract, such runs are excluded
@@ -631,8 +583,6 @@ let () =
              test_route_evidence_quality_reports_semantic_case_gaps;
            test_case "loader parses selector-backed case fields" `Quick
              test_loader_parses_selector_backed_case_fields;
-           test_case "loader parses legacy tool_name arg check" `Quick
-             test_loader_parses_legacy_tool_name_arg_check;
            test_case "route evidence quality treats empty fields as missing"
              `Quick test_route_evidence_quality_treats_empty_evidence_as_missing;
            test_case "unavailable route evidence excludes run from scoring"

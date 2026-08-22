@@ -1,7 +1,6 @@
 type completed_call =
   { operation : string
   ; input : Yojson.Safe.t
-  ; result : Yojson.Safe.t
   ; disposition : string
   }
 
@@ -24,16 +23,11 @@ let rec record_completed t call =
 let record_tool_result t ~operation ~input result =
   record_completed
     t
-    { operation
-    ; input
-    ; result = Tool_result.data result
-    ; disposition = Tool_result.string_of_disposition result
-    }
+    { operation; input; disposition = Tool_result.string_of_disposition result }
 ;;
 
-(* The cell records each call's exact typed result because
-   [record_tool_result] is the turn's own accounting. The judge is a different
-   consumer with a different question - "may this next call proceed" - and
+(* The payload a tool returned is not recorded. The judge is the only
+   consumer, its question is "may this next call proceed", and
    config/prompts/judge.effect.md asks it to weigh the operation identity and
    the complete input, never the payload a previous tool returned. Rendering
    that payload put a tool's entire output into a prompt about a different
@@ -43,7 +37,7 @@ let record_tool_result t ~operation ~input result =
    {"error":{"code":"1261","message":"Prompt exceeds max length"}} - the same
    error #26081 cites verbatim. 45 of 52 hitl_auto_judge runs failed.
 
-   Dropping [result] from this rendering is not a truncation. Measured over the
+   Dropping [result] is not a truncation. Measured over the
    same samples, the calls render at 7,473 B instead of 901,178 B (0.83%) with
    every call retained, where a size budget over the old shape had to discard
    whole calls to fit - so the judge now sees more of the turn, not less.

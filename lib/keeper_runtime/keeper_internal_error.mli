@@ -38,20 +38,6 @@ type capacity_retry_after =
   | Explicit of float
   | No_retry_hint
 
-(** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
-    It has no retry, admission, or lifecycle authority. *)
-type provider_cooldown_cause =
-  | Cooldown_provider_capacity
-  | Cooldown_soft_rate_limited
-  | Cooldown_server_error
-  | Cooldown_hard_quota
-  | Cooldown_terminal_failure
-  | Cooldown_provider_error
-  | Cooldown_rejected
-
-val provider_cooldown_cause_to_string : provider_cooldown_cause -> string
-val provider_cooldown_cause_of_string : string -> provider_cooldown_cause option
-
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -123,9 +109,6 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
-      cooldown_cause : provider_cooldown_cause option;
-      (** Legacy diagnostic only. Current producers use [None]; decoded values
-          never grant retry, admission, or lifecycle authority. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;

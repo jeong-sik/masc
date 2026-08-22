@@ -447,10 +447,11 @@ let tool_vote : Masc_domain.tool_schema =
               ; ( "direction"
                 , `Assoc
                     [ "type", `String "string"
-                    ; "description", `String "up or down (default: up)"
+                    ; "enum", `List [ `String "up"; `String "down" ]
+                    ; "description", `String "Required vote direction: up or down"
                     ] )
               ] )
-        ; "required", `List [ `String "post_id" ]
+        ; "required", `List [ `String "post_id"; `String "direction" ]
         ]
   }
 ;;
@@ -521,10 +522,11 @@ let tool_comment_vote : Masc_domain.tool_schema =
               ; ( "direction"
                 , `Assoc
                     [ "type", `String "string"
-                    ; "description", `String "up or down (default: up)"
+                    ; "enum", `List [ `String "up"; `String "down" ]
+                    ; "description", `String "Required vote direction: up or down"
                     ] )
               ] )
-        ; "required", `List [ `String "comment_id" ]
+        ; "required", `List [ `String "comment_id"; `String "direction" ]
         ]
   }
 ;;

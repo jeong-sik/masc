@@ -411,16 +411,16 @@ let test_execution_id_roundtrip () =
     execution_id = Some "exec-1718150400000-0001";
   } in
   (match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
-   | Some (decoded, _) ->
+   | Some decoded ->
        Alcotest.(check (option string)) "round-trip"
          (Some "exec-1718150400000-0001") decoded.Trajectory.execution_id
    | None -> Alcotest.fail "entry did not decode");
-  let legacy = Trajectory.entry_to_json { entry with execution_id = None } in
-  match Trajectory.tool_call_entry_of_json legacy with
-  | Some (decoded, _) ->
-      Alcotest.(check (option string)) "legacy row decodes as None" None
+  let without_execution_id = Trajectory.entry_to_json { entry with execution_id = None } in
+  match Trajectory.tool_call_entry_of_json without_execution_id with
+  | Some decoded ->
+      Alcotest.(check (option string)) "absent execution_id decodes as None" None
         decoded.Trajectory.execution_id
-  | None -> Alcotest.fail "legacy entry did not decode"
+  | None -> Alcotest.fail "entry without execution_id did not decode"
 
 let has_assoc_key key = function
   | `Assoc fields -> List.mem_assoc key fields
@@ -476,8 +476,10 @@ let test_read_entries_since () =
     let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
+    (* [gate] is written unconditionally by [entry_to_json]; a row without it is
+       not a shape the writer produces, and the reader no longer invents one. *)
     let entry_json ts = Printf.sprintf
-      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null}|}
+      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|}
       ts
     in
     let oc = open_out path in
@@ -492,7 +494,7 @@ let test_read_entries_since () =
     let all = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
     Alcotest.(check int) "all entries" 3 (List.length all))
 
-let test_read_entries_since_result_parses_gate_summary () =
+let test_rows_without_a_gate_object_are_not_read () =
   with_tmpdir (fun dir ->
     let masc_root = dir in
     let keeper = "test-keeper" in
@@ -509,16 +511,11 @@ let test_read_entries_since_result_parses_gate_summary () =
     let oc = open_out path in
     List.iter (Printf.fprintf oc "%s\n") rows;
     close_out oc;
-    let result =
-      Trajectory.read_entries_since_result ~masc_root ~keeper_name:keeper
-        ~since:0.0
-    in
-    Alcotest.(check int) "three entries" 3 (List.length result.Trajectory.entries);
-    Alcotest.(check int) "parsed gate count" 2
-      result.Trajectory.gate_decode.parsed_gate_count;
-    Alcotest.(check int) "legacy default count" 1
-      result.Trajectory.gate_decode.legacy_default_count;
-    match List.nth result.Trajectory.entries 1 with
+    let entries = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
+    (* The third row carries no gate object. It used to arrive as [Pass], a
+       verdict it never recorded; it is now not an entry at all. *)
+    Alcotest.(check int) "only the two rows with a gate object" 2 (List.length entries);
+    match List.nth entries 1 with
     | { Trajectory.gate_decision = Trajectory.Reject reason; _ } ->
       Alcotest.(check string) "reject reason parsed" "blocked" reason
     | _ -> Alcotest.fail "expected persisted reject gate")
@@ -579,7 +576,7 @@ let test_read_recent_lines_skips_malformed_rows () =
 let test_summary_row_not_counted_as_malformed () =
   let lines =
     [
-      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":10,"error":null}|}
+      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":10,"error":null}|}
     ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
     ; "{not valid json"
     ]
@@ -961,8 +958,8 @@ let () =
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
-      Alcotest.test_case "parses persisted gate summary" `Quick
-        test_read_entries_since_result_parses_gate_summary;
+      Alcotest.test_case "rows without a gate object are not read" `Quick
+        test_rows_without_a_gate_object_are_not_read;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
       Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
         test_read_recent_lines_skips_malformed_rows;

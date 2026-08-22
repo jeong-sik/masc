@@ -2,7 +2,10 @@ import { chromium } from 'playwright'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { selectCompleteInlineRun } from './keeper-composition-browser-evidence.mjs'
+import {
+  selectCompleteInlineRun,
+  waitForKeeperComposerReady,
+} from './keeper-composition-browser-evidence.mjs'
 
 function required(name) {
   const value = process.env[name]?.trim()
@@ -79,7 +82,7 @@ try {
   route.searchParams.set('token', token)
   route.hash = `monitoring?section=agents&keeper=${encodeURIComponent(keeperName)}`
   await page.goto(route.toString())
-  await page.getByLabel('메시지 입력').waitFor()
+  await waitForKeeperComposerReady(page)
   await page.getByTestId('kw-chat-command-menu-toggle').click()
   await page.getByTestId('kw-chat-command-detail').click()
   await page.getByRole('tab', { name: '진단', exact: true }).click()

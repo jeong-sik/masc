@@ -3,6 +3,8 @@
    dashboard will read — see lib/keeper_canary/keeper_canary_evidence.ml
    for the module under test. *)
 
+open Masc
+
 let sample_fact : Keeper_canary_facts.fact =
   { category = "project_codename"; statement = "The project codename is X."; value = "X" }
 
@@ -267,6 +269,36 @@ let test_timing_fields_are_present () =
   | `Float 1.0, `Float 1.25, `Float 1.5 -> ()
   | _ -> Alcotest.fail "expected timing.{min_s,median_s,max_s} to round-trip"
 
+let serialized_harness_git_commit resolution =
+  Keeper_canary_evidence.to_yojson
+    { sample_evidence with
+      harness_git_commit = resolution.Build_identity.binary_commit
+    }
+  |> member "harness"
+  |> member "git_commit"
+
+let test_harness_commit_uses_embedded_binary_identity () =
+  let resolution =
+    Build_identity.resolve_commit_details
+      ~embedded:(Some "embedded-canary-source")
+      ~probe:(fun () -> Some "ambient-checkout-head")
+  in
+  Alcotest.(check string)
+    "serialized harness commit is the embedded binary source"
+    "embedded-canary-source"
+    (serialized_harness_git_commit resolution |> as_string)
+
+let test_harness_commit_is_null_without_build_stamp () =
+  let resolution =
+    Build_identity.resolve_commit_details
+      ~embedded:None
+      ~probe:(fun () -> Some "ambient-checkout-head")
+  in
+  Alcotest.(check bool)
+    "ambient checkout does not populate harness identity"
+    true
+    (serialized_harness_git_commit resolution = `Null)
+
 let test_pretty_string_is_parseable_json () =
   let text = Keeper_canary_evidence.to_pretty_string sample_evidence in
   match Yojson.Safe.from_string text with
@@ -340,6 +372,14 @@ let () =
             `Quick
             test_runtime_none_becomes_null_under_keeper
         ; Alcotest.test_case "timing fields are present" `Quick test_timing_fields_are_present
+        ; Alcotest.test_case
+            "harness commit uses embedded binary identity"
+            `Quick
+            test_harness_commit_uses_embedded_binary_identity
+        ; Alcotest.test_case
+            "harness commit is null without build stamp"
+            `Quick
+            test_harness_commit_is_null_without_build_stamp
         ] )
     ; ( "to_pretty_string"
       , [ Alcotest.test_case "is parseable JSON" `Quick test_pretty_string_is_parseable_json ] )

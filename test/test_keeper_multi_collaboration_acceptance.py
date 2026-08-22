@@ -192,6 +192,17 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             ["A", "B", "C"],
         )
 
+    def test_goal_verifier_convergence_budget_covers_one_retry_cycle(self):
+        # The live worker re-arms retryable deferred reviews on the default
+        # 60-second maintenance pulse. A 300-second evaluator request that
+        # fails near its boundary still needs a complete second attempt.
+        self.assertEqual(
+            acceptance.goal_verifier_convergence_timeout(300.0),
+            720.0,
+        )
+        wait_source = inspect.getsource(acceptance.MissionRun.wait_for_goal_state)
+        self.assertIn("goal_verifier_convergence_timeout(self.timeout)", wait_source)
+
     def test_runtime_serving_evidence_requires_exact_completed_receipt_per_role(self):
         keepers = {"coordinator": "keeper-c", "reviewer": "keeper-r"}
         expected = {"coordinator": "runtime-c", "reviewer": "runtime-r"}
@@ -382,6 +393,43 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertEqual(rw23_source.count("wait_for_verifier_task_verdict"), 2)
         self.assertIn('wait_for_verifier_task_verdict("in_progress")', rw23_source)
         self.assertIn('wait_for_verifier_task_verdict("done")', rw23_source)
+
+    def test_rw23_prompts_pin_canonical_artifact_path_and_original_task(self):
+        run = object.__new__(acceptance.MissionRun)
+        run.marker = "keeper-collab-contract"
+        run.verifier_task_id = "task-009"
+        run.verifier_artifact = "artifacts/keeper-collab-contract-goal-proof.txt"
+        run.verifier_success_token = "GOAL_PROOF_PASS=keeper-collab-contract"
+
+        refute = run._goal_verifier_refute_prompt(
+            "GOAL_PROOF_FAIL=keeper-collab-contract"
+        )
+        proven = run._goal_verifier_proven_prompt()
+
+        canonical_write = (
+            "path='artifacts/keeper-collab-contract-goal-proof.txt'"
+        )
+        canonical_evidence = (
+            "evidence_refs=['artifact:artifacts/"
+            "keeper-collab-contract-goal-proof.txt']"
+        )
+        self.assertIn(canonical_write, refute)
+        self.assertIn(canonical_write, proven)
+        self.assertIn(canonical_evidence, refute)
+        self.assertIn(canonical_evidence, proven)
+        self.assertIn("path에 'playground/' 접두사", refute)
+        self.assertIn("path에 'playground/' 접두사", proven)
+        self.assertNotIn("playground의 artifacts/", refute)
+        self.assertNotIn("playground의 artifacts/", proven)
+        self.assertIn("task_id='task-009'", refute)
+        self.assertIn("task_id='task-009'", proven)
+        for forbidden_tool in (
+            "keeper_task_release",
+            "masc_add_task",
+            "keeper_task_claim",
+        ):
+            self.assertIn(forbidden_tool, proven)
+        self.assertIn("대체 Task를 만들거나 claim하지 마세요", proven)
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}

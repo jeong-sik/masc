@@ -12,7 +12,7 @@ let safe_discovery_endpoints () =
   | _ -> None
 
 let select_endpoint_urls_for_pool ?runtime_pool endpoint_urls =
-  match Option.bind runtime_pool String_util.trim_to_option with
+  match Option.bind runtime_pool String_util.trim_nonempty with
   | None -> if endpoint_urls = [] then None else Some endpoint_urls
   | Some pool
     when String.equal pool Local_runtime_pool.default_pool_label
@@ -50,10 +50,10 @@ let discovery_endpoints_for_pool runtime_pool =
 
 let endpoint_model_id (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.models with
-  | model :: _ -> String_util.trim_to_option model.id
+  | model :: _ -> String_util.trim_nonempty model.id
   | [] -> (
       match endpoint.props with
-      | Some props -> String_util.trim_to_option props.model
+      | Some props -> String_util.trim_nonempty props.model
       | None -> None)
 
 let endpoint_total_slots (endpoint : Discovery_cache.endpoint_info) =

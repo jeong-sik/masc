@@ -108,6 +108,18 @@ KNOWN_ASSERTIONS = {
     "goal_verifier_dashboard_browser_observed",
 }
 
+# Goal verification is an autonomous durable drain, not one synchronous model
+# request. A retryable provider failure is re-armed by the runtime's default
+# 60-second maintenance pulse. The acceptance budget must therefore cover a
+# full first request, that re-arm interval, and a full second request. Keep one
+# additional pulse as scheduling/polling margin so a retry observed near the
+# request boundary is not turned into a false-negative campaign result.
+GOAL_VERIFIER_RETRY_INTERVAL_SEC = 60.0
+
+
+def goal_verifier_convergence_timeout(request_timeout: float) -> float:
+    return (2.0 * request_timeout) + (2.0 * GOAL_VERIFIER_RETRY_INTERVAL_SEC)
+
 
 class AcceptanceError(RuntimeError):
     pass
@@ -1142,8 +1154,10 @@ class MissionRun:
         phase: str,
         completion_state: str | None = None,
         criterion_state: str | None = None,
-        timeout: float = 300.0,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
+        if timeout is None:
+            timeout = goal_verifier_convergence_timeout(self.timeout)
         deadline = time.monotonic() + timeout
         attempt = 0
         last: dict[str, Any] | None = None
@@ -1829,14 +1843,7 @@ class MissionRun:
         self.run_turn(
             "coordinator",
             "goal-verifier-refute-artifact",
-            (
-                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"exact Task {self.verifier_task_id}를 claim하세요. "
-                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}에 "
-                f"정확히 '{failure_token}' 한 줄만 쓰세요. 다른 토큰을 추가하지 마세요. "
-                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
-                "제출하세요. 실패 내용이어도 완료를 가장하지 말고 실제 파일을 그대로 제출하세요."
-            ),
+            self._goal_verifier_refute_prompt(failure_token),
         )
         rejected_task_verdict = self.wait_for_verifier_task_verdict("in_progress")
         self.writer.write_json(
@@ -1866,14 +1873,7 @@ class MissionRun:
         self.run_turn(
             "coordinator",
             "goal-verifier-proven-artifact",
-            (
-                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}를 "
-                f"정확히 '{self.verifier_success_token}' 한 줄로 교체하세요. "
-                "쓴 뒤 파일의 exact content를 다시 읽어 확인하고, "
-                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
-                "다시 제출하세요."
-            ),
+            self._goal_verifier_proven_prompt(),
         )
         approved_task_verdict = self.wait_for_verifier_task_verdict("done")
         self.writer.write_json(
@@ -1950,6 +1950,32 @@ class MissionRun:
         self.writer.write_json(
             "observations/goal-verification-runs.json",
             {"payload": runs_payload, "evidence": self.goal_verifier_evidence},
+        )
+
+    def _goal_verifier_refute_prompt(self, failure_token: str) -> str:
+        return (
+            f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+            f"exact Task {self.verifier_task_id}를 claim하세요. "
+            f"tool_write_file을 path='{self.verifier_artifact}', "
+            f"content='{failure_token}', mode='overwrite'로 호출하세요. "
+            "path에 'playground/' 접두사나 절대 경로를 붙이지 마세요. "
+            f"keeper_task_done은 task_id='{self.verifier_task_id}', "
+            f"evidence_refs=['artifact:{self.verifier_artifact}']로 제출하세요. "
+            "실패 내용이어도 완료를 가장하지 말고 실제 파일을 그대로 제출하세요."
+        )
+
+    def _goal_verifier_proven_prompt(self) -> str:
+        return (
+            f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+            f"반려 뒤 in_progress인 exact Task {self.verifier_task_id}만 계속 처리하세요. "
+            "keeper_task_release, masc_add_task, keeper_task_claim을 호출하지 말고 "
+            "Task를 release하거나 대체 Task를 만들거나 claim하지 마세요. "
+            f"tool_write_file을 path='{self.verifier_artifact}', "
+            f"content='{self.verifier_success_token}', mode='overwrite'로 호출하세요. "
+            "path에 'playground/' 접두사나 절대 경로를 붙이지 마세요. "
+            f"tool_read_file도 path='{self.verifier_artifact}'로 호출해 exact content를 확인하세요. "
+            f"keeper_task_done은 task_id='{self.verifier_task_id}', "
+            f"evidence_refs=['artifact:{self.verifier_artifact}']로 다시 제출하세요."
         )
 
     def restart_and_recall(self, post_id: str) -> None:

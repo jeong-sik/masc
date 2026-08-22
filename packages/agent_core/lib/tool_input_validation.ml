@@ -181,7 +181,10 @@ let canonical_number = function
 
 let numeric_equal left right =
   match canonical_number left, canonical_number right with
-  | Some left, Some right -> left = right
+  | Some left, Some right ->
+    Bool.equal left.negative right.negative
+    && String.equal left.significand right.significand
+    && Int.equal left.exponent right.exponent
   | None, None | None, Some _ | Some _, None -> false
 ;;
 

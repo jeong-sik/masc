@@ -19,38 +19,68 @@ module Snapshot_cache = struct
     ; approval_queue_revision : int
     }
 
+  (* [Hashtbl.Make] rather than the polymorphic table: [last_turn_ts] is a
+     float, and the generic hash of a float is not the tool for a cache whose
+     whole job is to notice that a keeper moved. Naming each field here is
+     also what states that all five take part in the key -- with the generic
+     table the compiler could see no field being read at all. *)
+  module Key = struct
+    type t = key
+
+    let equal left right =
+      String.equal left.base_path right.base_path
+      && String.equal left.keeper_name right.keeper_name
+      && Int.equal left.generation right.generation
+      && Float.equal left.last_turn_ts right.last_turn_ts
+      && Int.equal left.approval_queue_revision right.approval_queue_revision
+    ;;
+
+    (* [Float.equal] treats -0. and 0. as equal and NaN as equal to itself;
+       [Hashtbl.hash] normalises both the same way, so equal keys hash alike. *)
+    let hash key =
+      Hashtbl.hash
+        ( key.base_path
+        , key.keeper_name
+        , key.generation
+        , key.last_turn_ts
+        , key.approval_queue_revision )
+    ;;
+  end
+
+  module Table = Hashtbl.Make (Key)
+
   type entry =
     { value : Yojson.Safe.t
     ; expires_at : float
     }
 
-  let tbl : (key, entry) Hashtbl.t = Hashtbl.create 64
+  let tbl : entry Table.t = Table.create 64
   let mu = Stdlib.Mutex.create ()
   let ttl_sec = 0.5
   let max_size = 256
 
   let clear_expired ~now =
     let expired =
-      Hashtbl.fold (fun k e acc -> if e.expires_at <= now then k :: acc else acc) tbl []
+      Table.fold (fun k e acc -> if e.expires_at <= now then k :: acc else acc) tbl []
     in
-    List.iter (Hashtbl.remove tbl) expired
+    List.iter (Table.remove tbl) expired
 
   let get ~now key =
     Stdlib.Mutex.protect mu (fun () ->
-        match Hashtbl.find_opt tbl key with
+        match Table.find_opt tbl key with
         | Some entry when entry.expires_at > now -> Some entry.value
         | _ -> None)
 
   let set ~now key value =
     Stdlib.Mutex.protect mu (fun () ->
         clear_expired ~now;
-        if Hashtbl.length tbl >= max_size
+        if Table.length tbl >= max_size
         then (
           (* Cap memory: drop expired entries, and if still full clear the
              whole table rather than keeping stale entries. *)
           clear_expired ~now;
-          if Hashtbl.length tbl >= max_size then Hashtbl.clear tbl);
-        Hashtbl.replace tbl key { value; expires_at = now +. ttl_sec })
+          if Table.length tbl >= max_size then Table.clear tbl);
+        Table.replace tbl key { value; expires_at = now +. ttl_sec })
 end
 
 module Completion_contract_result = Keeper_completion_contract_result_label
@@ -58,11 +88,7 @@ module Completion_contract_result = Keeper_completion_contract_result_label
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
-  | _ ->
-      Option.map
-        (fun code ->
-          Keeper_turn_terminal.of_code ~source:"decision_log" code)
-        (json_string_opt_member "terminal_reason_code" json)
+  | _ -> None
 
 let terminal_reason_from_receipt receipt =
   Option.map

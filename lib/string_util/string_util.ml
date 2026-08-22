@@ -286,10 +286,6 @@ let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v
 
-let trim_to_option value =
-  let v = String.trim value in
-  if v = "" then None else Some v
-
 let option_trim = function
   | None -> None
   | Some s ->

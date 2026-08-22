@@ -26,16 +26,6 @@ type tool_call_entry = {
           that have not adopted the id yet (and historical rows). *)
 }
 
-type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
-}
-
-type entries_read_result = {
-  entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
-}
-
 type trajectory_outcome =
   | Completed
   | Failed of string
@@ -98,12 +88,11 @@ val entry_to_json :
   tool_call_entry ->
   Yojson.Safe.t
 
-val tool_call_entry_of_json :
-  Yojson.Safe.t -> (tool_call_entry * bool) option
+val tool_call_entry_of_json : Yojson.Safe.t -> tool_call_entry option
 (** Decode one persisted JSONL row back into a [tool_call_entry].
-    Returns [None] for non-entry rows (summary/thinking) and malformed
-    JSON. The [bool] is true when the gate field parsed from a
-    persisted value rather than the legacy default. Exposed for
+    Returns [None] for non-entry rows (summary/thinking), malformed JSON,
+    and rows carrying no readable gate object -- that last case used to
+    decode as [Pass], a verdict the row never recorded. Exposed for
     RFC-0233 consumers that join rows on [execution_id]. *)
 val withheld_thinking_entry_to_json : withheld_thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> trajectory_line -> Yojson.Safe.t
@@ -263,8 +252,4 @@ val read_entries_since :
 (** Read entries from all trace files for a keeper with ts >= [since].
     Results sorted chronologically. *)
 
-val read_entries_since_result :
-  masc_root:string -> keeper_name:string -> since:float ->
-  entries_read_result
-(** Like {!read_entries_since}, plus whether the persisted gate object was
-    parsed or defaulted for legacy rows that had no readable gate payload. *)
+

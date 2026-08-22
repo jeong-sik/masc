@@ -7,7 +7,7 @@ import {
   pickAxisLabelIndices,
   rateColorVar,
 } from './tool-quality-panel'
-import { classifyCoverageError, errorHintFromClass, errorHintFromGap } from './common/coverage-gap-block'
+import { errorHintFromClass, errorHintFromGap } from './common/coverage-gap-block'
 import type { CoverageGapDisplay } from './common/source-health'
 
 vi.setConfig({
@@ -79,6 +79,9 @@ const payloadWithCoverageGap = {
       stale_reason: 'append_failed',
       trace_id: 'trace-quality-gap',
       error: 'disk full',
+      // The backend writes error_class (RFC-0154 PR-2). The hint used to be
+      // recovered by matching 'disk full' in the error text instead.
+      error_class: 'disk_exhaustion',
     },
   ],
 }
@@ -438,58 +441,6 @@ describe('ToolQualityPanel', () => {
   })
 })
 
-describe('classifyCoverageError', () => {
-  it('returns null for empty / missing input', () => {
-    expect(classifyCoverageError(null)).toBeNull()
-    expect(classifyCoverageError(undefined)).toBeNull()
-    expect(classifyCoverageError('')).toBeNull()
-  })
-
-  it('detects "Too many open files" → RFC-0097 fd_exhaustion hint', () => {
-    const hint = classifyCoverageError(
-      'Sys_error("Eio.Io Unix_error (Too many open files in system, \\"fstatat\\", \\"...\\")")',
-    )
-    expect(hint).not.toBeNull()
-    expect(hint?.reason).toBe('fd_exhaustion')
-    expect(hint?.href).toContain('RFC-0097')
-    expect(hint?.label).toMatch(/RFC-0097/)
-  })
-
-  it('detects raw ENFILE / EMFILE errno names', () => {
-    expect(classifyCoverageError('ENFILE: too many'))?.toMatchObject({ reason: 'fd_exhaustion' })
-    expect(classifyCoverageError('EMFILE on open'))?.toMatchObject({ reason: 'fd_exhaustion' })
-  })
-
-  it('is case-insensitive on the trigger pattern', () => {
-    expect(classifyCoverageError('TOO MANY OPEN FILES')?.reason).toBe('fd_exhaustion')
-  })
-
-  it('detects ENOSPC / disk-full → RFC-0122 disk_exhaustion hint', () => {
-    const hint = classifyCoverageError(
-      'Sys_error("Eio.Io Unix_error (No space left on device, \\"write\\", \\"...\\")")',
-    )
-    expect(hint).not.toBeNull()
-    expect(hint?.reason).toBe('disk_exhaustion')
-    expect(hint?.href).toContain('RFC-0122')
-    expect(hint?.label).toMatch(/RFC-0122/)
-  })
-
-  it('detects disk-pressure substrings shared with backend SSOT', () => {
-    // Mirrors lib/keeper_disk_pressure.ml `is_disk_exhaustion_text` vocabulary
-    expect(classifyCoverageError('disk full')?.reason).toBe('disk_exhaustion')
-    expect(classifyCoverageError('ENOSPC on append')?.reason).toBe('disk_exhaustion')
-    expect(classifyCoverageError('Disk quota exceeded')?.reason).toBe('disk_exhaustion')
-    expect(classifyCoverageError('quota exceeded')?.reason).toBe('disk_exhaustion')
-    expect(classifyCoverageError('not enough space available')?.reason).toBe('disk_exhaustion')
-  })
-
-  it('returns null for unrelated errors (network, permission, etc.)', () => {
-    expect(classifyCoverageError('connection refused')).toBeNull()
-    expect(classifyCoverageError('append denied')).toBeNull()
-    expect(classifyCoverageError('permission denied')).toBeNull()
-  })
-})
-
 describe('errorHintFromClass (RFC-0154 PR-3 typed lookup)', () => {
   it('returns null for absent / unknown / empty class', () => {
     expect(errorHintFromClass(null)).toBeNull()
@@ -511,7 +462,7 @@ describe('errorHintFromClass (RFC-0154 PR-3 typed lookup)', () => {
   })
 })
 
-describe('errorHintFromGap (RFC-0154 PR-3 cascading resolver)', () => {
+describe('errorHintFromGap (typed lookup only)', () => {
   const buildDisplay = (
     errorClass: string | null,
     error: string | null,
@@ -534,24 +485,22 @@ describe('errorHintFromGap (RFC-0154 PR-3 cascading resolver)', () => {
     },
   })
 
-  it('prefers typed errorClass lookup over substring matching', () => {
-    // Typed says disk; substring says fd — typed must win.
+  it('reads the typed class the backend wrote', () => {
     const hint = errorHintFromGap(buildDisplay('disk_exhaustion', 'too many open files'))
     expect(hint?.reason).toBe('disk_exhaustion')
   })
 
-  it('falls back to substring matching when errorClass is absent (v1 wire row)', () => {
-    const hint = errorHintFromGap(buildDisplay(null, 'too many open files'))
-    expect(hint?.reason).toBe('fd_exhaustion')
+  it('does not read the error text when the class is absent', () => {
+    // 'too many open files' used to reach fd_exhaustion through a substring
+    // classifier kept alive for v1 rows. The text is not a classification.
+    expect(errorHintFromGap(buildDisplay(null, 'too many open files'))).toBeNull()
   })
 
-  it('falls back to substring matching when errorClass is unknown', () => {
-    const hint = errorHintFromGap(buildDisplay('future_class', 'ENOSPC'))
-    expect(hint?.reason).toBe('disk_exhaustion')
+  it('does not read the error text when the class is unknown', () => {
+    expect(errorHintFromGap(buildDisplay('future_class', 'ENOSPC'))).toBeNull()
   })
 
-  it('returns null when both typed and substring paths miss', () => {
-    expect(errorHintFromGap(buildDisplay(null, 'completely unrelated'))).toBeNull()
+  it('returns null when the class carries no hint', () => {
     expect(errorHintFromGap(buildDisplay('other', 'completely unrelated'))).toBeNull()
   })
 })

@@ -69,12 +69,6 @@ val voice_health_uri : unit -> Uri.t
 val voice_mcp_host : unit -> string
 val voice_mcp_port : unit -> int
 
-(* RFC-0107 Phase D.2c bis-2 — [client_for_uri] / [client_for_uri_result]
-   removed.  Voice HTTP callers now route through [Masc_http_client]
-   {[post_sync]/[get_sync]/[get_response_sync]} which delegate to the
-   per-process piaf pool.  See voice_bridge_core.ml for the in-place
-   note explaining the migration. *)
-
 (** {1 Playback timeout} *)
 
 val playback_timeout_margin_sec : float
@@ -118,7 +112,7 @@ val is_dedup_hit : agent_id:string -> message:string -> bool
 val run_local_playback :
   sw:Eio.Switch.t ->
   agent_id:string ->
-  ?message:string ->
+  message:string ->
   audio_file:string ->
   unit ->
   [ `Dedup_hit | `Opened of float | `Played of float | `Skipped of string | `Failed of string ]
@@ -140,14 +134,7 @@ val run_local_playback :
     - [`Opened duration_seconds] — the file was handed to macOS [open(1)] after
       all blocking players failed. This is a GUI handoff fallback; playback
       completion is not observable from the runtime;
-    - [`Played duration_seconds] — playback succeeded.
-
-    When [message] is omitted the dedup re-check is skipped (legacy
-    callers that do not propagate the message string). *)
-
-val start_local_playback :
-  sw:Eio.Switch.t -> agent_id:string -> audio_file:string -> unit
-(** Fire-and-forget wrapper around {!run_local_playback}. *)
+    - [`Played duration_seconds] — playback succeeded. *)
 
 (** {1 Filesystem layout} *)
 

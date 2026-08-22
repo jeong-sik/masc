@@ -261,10 +261,10 @@ let schemas : Masc_domain.tool_schema list =
                       ; ( "enum"
                         , `List
                             (List.map (fun s -> `String s) vote_direction_enum_strings) )
-                      ; "description", `String "Vote direction (default: up)"
+                      ; "description", `String "Required vote direction: up or down"
                       ] )
                 ] )
-          ; "required", `List [ `String "post_id" ]
+          ; "required", `List [ `String "post_id"; `String "direction" ]
           ; "additionalProperties", `Bool false
           ]
     }

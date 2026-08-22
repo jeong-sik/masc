@@ -230,5 +230,5 @@ let int_member json key =
 let string_member json key =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> None
-  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`String value) -> String_util.trim_nonempty value
   | Some _ -> None

@@ -697,7 +697,7 @@ describe('PostDetail', () => {
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: '(Fusion_types.Provider_error\n   "Provider \'unknown\' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout")',
+            reason: "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout",
           },
         ],
         judge: {
@@ -723,7 +723,6 @@ describe('PostDetail', () => {
     expect(evidence).toHaveTextContent('Should we ship the fusion board renderer?')
     expect(evidence).toHaveTextContent('Panel one answer')
     expect(evidence).toHaveTextContent("Provider 'ollama_cloud.minimax-m3' timeout phase=http_operation")
-    expect(evidence).not.toHaveTextContent('Fusion_types.Provider_error')
     expect(evidence).not.toHaveTextContent("Provider 'unknown'")
     expect(evidence).toHaveTextContent('**[judge]** synthesis')
     expect(evidence).toHaveTextContent('Consensus')

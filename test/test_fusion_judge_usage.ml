@@ -295,7 +295,6 @@ let preset_with ?judge_max_output_tokens ?judge_timeout_s judges : Fusion_policy
   ; judge_timeout_s
   ; judges
   ; min_answered = 1
-  ; fallback_judge_model = None
   }
 
 let int_opt_t = testable (Fmt.option Fmt.int) (Option.equal Int.equal)

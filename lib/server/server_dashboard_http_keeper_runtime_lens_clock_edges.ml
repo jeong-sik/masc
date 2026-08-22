@@ -17,11 +17,11 @@ let clock_string (row : manifest_row) key =
 
 let clock_string_non_empty (row : manifest_row) key =
   match clock_string row key with
-  | Some value -> String_util.trim_to_option value
+  | Some value -> String_util.trim_nonempty value
   | _ -> None
 
 let first_non_empty values =
-  List.find_map String_util.trim_to_option values
+  List.find_map String_util.trim_nonempty values
 
 let first_string_opt values =
   values |> List.filter_map Fun.id |> first_non_empty
@@ -30,7 +30,7 @@ let basename_opt = function
   | None -> None
   | Some path ->
     let base = Filename.basename path in
-    String_util.trim_to_option base
+    String_util.trim_nonempty base
 
 let turn_label (row : manifest_row) =
   match row.Keeper_runtime_manifest.keeper_turn_id with
@@ -280,7 +280,7 @@ let clock_edge_jsons scan =
        let parent_id = edge_string "parent_event_id" edge in
        let causality_verified =
          match parent_id with
-         | Some id when Option.is_some (String_util.trim_to_option id) -> List.mem id edge_id_set
+         | Some id when Option.is_some (String_util.trim_nonempty id) -> List.mem id edge_id_set
          | _ -> true
        in
        match edge with

@@ -408,6 +408,47 @@ let gate_verdict
   }
 ;;
 
+(* A Keeper requests completion and the verifier answers out of band. Without
+   this the answer lands in the ledger and nowhere else: no module under
+   lib/keeper reads [Goal_verification], so a Keeper learns its own proof was
+   judged only by calling masc_goal_list and looking. The record stays the
+   authority; this is the projection that reaches the conversation.
+
+   A failed announcement does not undo the verdict — the ledger row is already
+   committed and readable — so it warns rather than failing the commit. *)
+let announce_proof_verdict
+      (ctx : context)
+      ~(goal : Goal_store.goal)
+      (verdict : Goal_verification.verdict)
+  =
+  let outcome_line =
+    match verdict.outcome with
+    | Goal_verification.Proven -> "proven"
+    | Goal_verification.Refuted { reason } -> "refuted: " ^ reason
+  in
+  let content =
+    Printf.sprintf
+      "[goal_verdict] %s — %s\noutcome: %s\nevidence: %s"
+      goal.Goal_store.id
+      goal.Goal_store.title
+      outcome_line
+      verdict.evidence
+  in
+  match
+    Workspace_broadcast.broadcast
+      ~audience:Workspace_broadcast.Fleet_conversation
+      ctx.config
+      ~from_agent:ctx.agent_name
+      ~content
+  with
+  | Ok _ -> ()
+  | Error error ->
+    Log.Misc.warn
+      "goal verdict announcement failed goal_id=%s: %s"
+      goal.Goal_store.id
+      (Workspace_broadcast.broadcast_error_to_string error)
+;;
+
 let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =
   let outcome_fields =
     match verdict.outcome with
@@ -506,6 +547,7 @@ let commit_verifier_decision
                      ~goal_id
                      ~event_type:"goal_phase"
                      ~payload:(gate_event_payload ctx ~phase verdict);
+                   announce_proof_verdict ctx ~goal:updated_goal verdict;
                    ok_result
                      ~tool_name
                      ~start_time

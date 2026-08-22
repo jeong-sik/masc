@@ -410,7 +410,21 @@ let test_proof_pending_drains_to_completed () =
     check string "the fixed lane identity is the authority" "verifier_exact"
       (Masc_domain.completion_authority_actor verdict.Goal_verification.authority);
     check string "authority kind is the system-llm slot" "system_llm_agent"
-      (Masc_domain.completion_authority_kind verdict.Goal_verification.authority)
+      (Masc_domain.completion_authority_kind verdict.Goal_verification.authority);
+    (* The Keeper that asked for completion has to be able to learn the answer
+       without going and looking for it. *)
+    let announced =
+      Workspace.get_all_messages_raw config ~since_seq:0
+      |> List.exists (fun (message : Masc_domain.message) ->
+        String_util.string_contains_substring
+          ~needle:"[goal_verdict]"
+          message.content
+        && String_util.string_contains_substring ~needle:goal_id message.content
+        && String_util.string_contains_substring
+             ~needle:"all 3 services verified"
+             message.content)
+    in
+    check bool "the verdict is announced to the workspace" true announced
   | _ -> fail "ledger must hold the proven verdict"
 ;;
 

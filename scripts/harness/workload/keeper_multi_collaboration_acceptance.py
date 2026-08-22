@@ -115,10 +115,19 @@ KNOWN_ASSERTIONS = {
 # additional pulse as scheduling/polling margin so a retry observed near the
 # request boundary is not turned into a false-negative campaign result.
 GOAL_VERIFIER_RETRY_INTERVAL_SEC = 60.0
+BROWSER_PROOF_TIMEOUT_FLOOR_SEC = 600.0
 
 
 def goal_verifier_convergence_timeout(request_timeout: float) -> float:
     return (2.0 * request_timeout) + (2.0 * GOAL_VERIFIER_RETRY_INTERVAL_SEC)
+
+
+def browser_proof_subprocess_timeout(request_timeout: float) -> float:
+    # The Node proof's declared Keeper-ready window is 240 seconds. It then
+    # verifies three independent dashboard surfaces and owns the failure-state
+    # screenshot/console capture. The parent must never terminate it before
+    # that inner contract can settle and emit its diagnostic artifacts.
+    return max(BROWSER_PROOF_TIMEOUT_FLOOR_SEC, 2.0 * request_timeout)
 
 
 class AcceptanceError(RuntimeError):
@@ -1572,7 +1581,7 @@ class MissionRun:
             check=False,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=browser_proof_subprocess_timeout(self.timeout),
         )
         if completed.returncode != 0:
             raise AcceptanceError(

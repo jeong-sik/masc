@@ -20,28 +20,22 @@ type category =
   | Lifecycle
   | Directive
   | Heartbeat
-  | Presence
-  | Task
   | Tool
-  | Memory
-  | Telemetry
   | Routine
   | Boundary
-  | Uncategorized
+  | Turn
+  | Broadcast
 
 let category_to_string : category -> string = function
   | Fsm -> "fsm"
   | Lifecycle -> "lifecycle"
   | Directive -> "directive"
   | Heartbeat -> "heartbeat"
-  | Presence -> "presence"
-  | Task -> "task"
   | Tool -> "tool"
-  | Memory -> "memory"
-  | Telemetry -> "telemetry"
   | Routine -> "routine"
   | Boundary -> "boundary"
-  | Uncategorized -> "uncategorized"
+  | Turn -> "turn"
+  | Broadcast -> "broadcast"
 
 let category_of_string_opt s : category option =
   match String.lowercase_ascii (String.trim s) with
@@ -49,14 +43,11 @@ let category_of_string_opt s : category option =
   | "lifecycle" -> Some Lifecycle
   | "directive" -> Some Directive
   | "heartbeat" -> Some Heartbeat
-  | "presence" -> Some Presence
-  | "task" -> Some Task
   | "tool" -> Some Tool
-  | "memory" -> Some Memory
-  | "telemetry" -> Some Telemetry
   | "routine" -> Some Routine
   | "boundary" -> Some Boundary
-  | "uncategorized" -> Some Uncategorized
+  | "turn" -> Some Turn
+  | "broadcast" -> Some Broadcast
   | _ -> None
 
 (** Current log level (Atomic for thread safety in OCaml 5) *)

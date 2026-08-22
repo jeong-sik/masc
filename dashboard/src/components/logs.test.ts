@@ -23,8 +23,7 @@ function entry(overrides: Partial<LogEntry>): LogEntry {
     keeperName: 'system',
     hasTurn: false,
     details: {},
-    category: 'uncategorized',
-    hasExplicitCategory: false,
+    category: null,
     ...overrides,
   }
 }
@@ -423,7 +422,6 @@ describe('LogViewer Code links', () => {
           level: 'INFO',
           module: 'keeper_tool',
           category: 'tool',
-          hasExplicitCategory: true,
           message: 'tool event',
           details: {
             tool_name: 'fs.ls',
@@ -437,8 +435,7 @@ describe('LogViewer Code links', () => {
           timestamp: '2026-05-14T00:00:01Z',
           level: 'INFO',
           module: 'keeper_turn',
-          category: 'routine',
-          hasExplicitCategory: true,
+          category: 'turn',
           hasTurn: true,
           message: 'turn event',
           details: {
@@ -454,7 +451,6 @@ describe('LogViewer Code links', () => {
           level: 'WARN',
           module: 'keeper_fsm',
           category: 'fsm',
-          hasExplicitCategory: true,
           message: 'lifecycle event',
           details: {
             from: 'idle',
@@ -538,7 +534,6 @@ describe('LogViewer kind column', () => {
           module: 'keeper_tool',
           message: 'read file',
           category: 'tool',
-          hasExplicitCategory: true,
           details: { tool_name: 'tool_read_file', file_path: 'lib/runtime.ml' },
         }),
       ]))

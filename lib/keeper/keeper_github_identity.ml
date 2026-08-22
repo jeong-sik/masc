@@ -965,7 +965,7 @@ let run_inherited ~timeout_sec ~env = function
                ignore (reap ());
                Unix.WEXITED 124
              end else begin
-               (try Unix.sleepf 0.05 with Unix.Unix_error _ -> ());
+               (try ignore (Unix.select [] [] [] 0.05) with Unix.Unix_error _ -> ());
                wait ()
              end
            | _, status -> status

@@ -78,6 +78,12 @@ let nonnegative_width width = max 0 width
 let keeper_context_bar_width ~inner_width =
   nonnegative_width (min 30 (inner_width - 40))
 
+let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
+  let line_count = max 0 line_count in
+  let content_height = max 0 content_height in
+  let maximum_scroll = max 0 (line_count - content_height) in
+  max 0 (min scroll maximum_scroll)
+
 module Input_wait = struct
   type 'a poll_result =
     | Ready of 'a

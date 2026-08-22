@@ -1317,7 +1317,7 @@ let render_keeper_message (state : state) =
       Printf.sprintf " Message to: %s  (port %d)" display_keeper_name state.port
     in
     let target_registered =
-      keeper_message_target_registered state keeper_name
+      keeper_available_for_new_message state keeper_name
     in
     let status_rows = keeper_message_status_rows state in
     if

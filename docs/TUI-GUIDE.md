@@ -65,7 +65,9 @@ MASC Keepers (5 registered)
 
 ### Keeper Detail View
 
-Press `Enter` on a keeper to see details. Includes live context status from metrics JSONL.
+Press `Enter` on a keeper to see details. Live context comes from the newest
+trace-matched TurnRecord; missing, malformed, unreadable, usage-less, and
+prior-trace observations remain distinct unavailable states.
 
 ```
 Keeper: sangsu
@@ -81,7 +83,8 @@ Keeper: sangsu
 
   Live Context
   Context:               55.2%  ########-----------  70629 / 128000 tokens
-  Messages:              430
+  Observed:              2026-08-21T12:00:00
+  Turn Ref:              trace-current#30317
 
   Runtime Stats
   Total Turns:           30317
@@ -98,29 +101,34 @@ Keeper: sangsu
 
 ### Keeper Log View
 
-Press `l` from detail view. Shows recent heartbeat/metrics entries from `<name>/metrics/YYYY-MM/DD.jsonl`.
+Press `l` from detail view. Shows the newest 200 physical rows from the
+Keeper's canonical dated metrics store, spanning month boundaries and rotated
+day segments. Reads are tail-bounded by row count rather than file size.
+Malformed JSON, current-schema decode failures, and storage/layout failures are
+shown explicitly; rejected rows consume the 200-row window and are never
+silently backfilled with older data. A current-schema row whose `name` does not
+match the selected Keeper is rejected instead of being attributed to that
+Keeper by its file location.
 
 ```
 Keeper Logs: sangsu  (85 entries)
 
-  Time     Chan  Ctx        Tokens      In/Out   Lat    Cost    Work
-  14:31:08  hb   55.2%  70629/128000  0/0        --      --    status_tick
-  14:31:32  hb   55.2%  70629/128000  0/0        --      --    status_tick
-  14:33:03  hb   55.2%  70629/128000  0/0        --      --    status_tick
+  Time     Kind Channel   Msgs          In/Out       Lat      Cost  Work
+  14:31:08 turn turn         7            10/12       0ms    $0.000  tool_use
+  14:31:32 hb   hb          --            --/--        --        --
 
 [j/k] Scroll  [Esc] Back  [q] Quit
 ```
 
 Fields displayed per entry:
 - **Time**: HH:MM:SS from the timestamp
-- **Chan**: channel (hb=heartbeat, turn, comp=compaction, hand=handoff, init=initiative)
-- **Ctx**: context_ratio percentage with color coding (green < 50%, yellow 50-80%, red > 80%)
-- **Tokens**: context_tokens / context_max
+- **Kind**: current `keeper.metrics.v1` Turn or Heartbeat row
+- **Channel**: canonical short label (`turn`, `sched`, or `hb`)
+- **Msgs**: observed message count, or `--` when the Heartbeat did not observe it
 - **In/Out**: input_tokens / output_tokens from usage
-- **Lat**: latency_ms (if > 0)
-- **Cost**: cost_usd (if > 0)
+- **Lat**: observed latency_ms, including zero; `--` when unavailable
+- **Cost**: observed cost_usd, including zero; `--` when unavailable
 - **Work**: work_kind label
-- Guardrail stops are highlighted with a red STOP marker
 
 ### Keeper Message View
 
@@ -159,6 +167,10 @@ Only a request-correlated terminal Keeper result is shown as a reply. Interrupte
 | `r` | All (except message) | Force refresh |
 | `q` | All (except message) | Quit |
 
+The TUI renders only after input, an applied refresh/result, or a terminal
+resize. Background changes are coalesced into a 16 ms frame window, while an
+idle TUI neither redraws nor reruns the terminal-size probe.
+
 ## View Navigation
 
 ```
@@ -179,8 +191,8 @@ Dashboard <--Tab--> Keeper List
 |---------|--------|-----------------|
 | Active task list | `.masc/tasks/backlog.json` | No |
 | Keeper list/detail | current-schema `.masc/keepers/*.json` | No |
-| Live context status | `<name>/metrics/YYYY-MM/DD.jsonl` (latest entry) | No |
-| Keeper logs | `<name>/metrics/YYYY-MM/DD.jsonl` (last 200 entries) | No |
+| Live context status | `<name>/turn-records/YYYY-MM/DD.jsonl` (strict newest trace-matched row) | No |
+| Keeper logs | canonical `<name>/metrics/` dated store (newest 200 physical rows) | No |
 | Goal planning | `GET /api/v1/dashboard/planning` | Yes |
 | Actor-scoped approvals | `GET /api/v1/operator?view=summary&include_messages=0&include_keepers=0` | Yes |
 | Send messages | request-correlated `POST /api/v1/keepers/chat/stream` SSE | Yes |

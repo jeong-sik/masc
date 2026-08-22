@@ -2596,6 +2596,34 @@
  (libraries alcotest masc_tui_message_layout))
 
 (test
+ (name test_tui_observation_layout)
+ (modules test_tui_observation_layout)
+ (libraries alcotest masc_tui_observation_layout masc))
+
+(test
+ (name test_tui_context_state)
+ (modules test_tui_context_state)
+ (libraries alcotest masc_tui_context_state masc))
+
+(test
+ (name test_tui_metrics_tail)
+ (modules test_tui_metrics_tail)
+ (libraries
+  alcotest
+  masc_tui_keeper_chat_projection
+  masc_tui_metrics_tail
+  masc
+  dated_jsonl
+  fs_compat
+  unix
+  yojson))
+
+(test
+ (name test_tui_render_schedule)
+ (modules test_tui_render_schedule)
+ (libraries alcotest masc_tui_render_schedule))
+
+(test
  (name test_fs_compat_capability_exact_read)
  (modules test_fs_compat_capability_exact_read)
  (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)

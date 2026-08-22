@@ -58,7 +58,17 @@ MASC TUI를 Dashboard V2 surface 기준으로 확장하여, 웹 대시보드 없
 +------------------+
 ```
 
-### 2.1 확장된 view enum (제안)
+### 2.1 Render scheduling
+
+The main loop requests a frame only for typed input, an applied background
+result/refresh, or a terminal resize. A monotonic 16 ms frame window coalesces
+background bursts; input can preempt an already pending background frame, and a
+resize forces one frame. With no state change the renderer performs no work and
+writes no terminal output. Terminal dimensions are probed once, cached, and
+invalidated by `SIGWINCH`; the signal handler only sets an atomic flag and the
+main fiber performs the later process-backed probe.
+
+### 2.2 확장된 view enum (제안)
 
 ```ocaml
 type surface =
@@ -71,7 +81,7 @@ type surface =
 
 기존 `view_mode` (Dashboard | Keeper_list | Keeper_detail | Keeper_logs | Keeper_message)은 keepers surface 내부 상태로 재편된다.
 
-### 2.2 데이터 로더 전략
+### 2.3 데이터 로더 전략
 
 | 소스 | 우선순위 | 사용 시나리오 |
 |---|---|---|
@@ -93,7 +103,8 @@ scope가 결합된 서버 계약이므로 파일시스템이나 briefing을 대�
 | agents | `.masc/agents/*.json` |
 | tasks | `.masc/tasks/backlog.json` |
 | keepers | `.masc/keepers/*.json` |
-| keeper metrics | `.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl` |
+| keeper metrics | `.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl` (`keeper.metrics.v1` Turn/Heartbeat) |
+| keeper context | `.masc/keepers/<name>/turn-records/YYYY-MM/DD.jsonl` (strict newest trace-matched TurnRecord) |
 | board posts | `.masc/board_posts.jsonl` |
 | board comments | `.masc/board_comments.jsonl` |
 | board votes | `.masc/board_votes.jsonl` |
@@ -159,7 +170,7 @@ scope가 결합된 서버 계약이므로 파일시스템이나 briefing을 대�
 
 - List: name, generation, runtime lane, composite phase, goal
 - Detail: identity, live context, runtime lane, runtime stats, behavior, timestamps
-- Logs: metrics JSONL tail
+- Logs: strict newest-200 physical-row tail across dated months/rotations; malformed, invalid current-schema, cross-Keeper identity mismatches, and storage failures remain explicit. Valid Turn/Heartbeat rows stay chronological, and context occupancy is not a metrics-ledger field.
 - Message: request-correlated asynchronous chat stream. The TUI creates one durable UUIDv7 request ID per send, accepts only the current Keeper SSE contract, and applies a completion only when both request and Keeper identities match. Partial text, interrupted streams, and terminal outcomes without a visible reply are explicit status/error values rather than successful replies.
 
 강화: 24h bucket 요약, tool call 카운트, composite phase (`Stable <- paused`)

@@ -6,20 +6,42 @@ open Masc_tui_loader
 module Approval = Masc_tui_operator_projection
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
+module Metrics_tail = Masc_tui_metrics_tail
+module Render_schedule = Masc_tui_render_schedule
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
+(** One 60 Hz frame window: bursts are coalesced without delaying an idle
+    terminal's first changed frame. *)
+let frame_interval_ns = 16_000_000L
+let maximum_input_wait_seconds = 0.016
+let nanoseconds_per_second = 1_000_000_000.0
+
+let keeper_log_content_height (state : state) =
+  let rows, _columns = get_terminal_size () in
+  Metrics_tail.content_height ~terminal_rows:rows ~error:state.log_error
+
 (** Read a single byte from stdin, returning Some char or None. *)
 let read_byte_unix ?(timeout = 0.1) () : char option =
-  let ready, _, _ = Unix.select [Unix.stdin] [] [] timeout in
-  if ready <> [] then begin
-    let buf = Bytes.create 1 in
-    let n = Unix.read Unix.stdin buf 0 1 in
-    if n > 0 then Some (Bytes.get buf 0)
-    else None
-  end else
-    None
+  let timeout_ns =
+    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
+  in
+  let poll remaining =
+    match Unix.select [Unix.stdin] [] [] remaining with
+    | ready, _, _ when ready <> [] ->
+        let buf = Bytes.create 1 in
+        (match Unix.read Unix.stdin buf 0 1 with
+         | n when n > 0 -> Render_schedule.Input_wait.Ready (Bytes.get buf 0)
+         | _ -> Render_schedule.Input_wait.Timed_out
+         | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+             Render_schedule.Input_wait.Interrupted)
+    | _ -> Render_schedule.Input_wait.Timed_out
+    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+        Render_schedule.Input_wait.Interrupted
+  in
+  Render_schedule.Input_wait.await ~now_ns:Mtime_clock.elapsed_ns ~timeout_ns
+    ~poll
 
 (** Read a single byte from stdin, returning Some char or None. *)
 let read_byte () : char option =
@@ -62,9 +84,9 @@ let read_utf8_scalar reader first expected_length =
   fill 1
 
 (** Try to read an escape sequence. Returns a key description. *)
-let read_key reader () : string option =
+let read_key ?(timeout = 0.1) reader () : string option =
   Eio_guard.run_in_systhread (fun () ->
-      match take_input_byte reader ~timeout:0.1 with
+      match take_input_byte reader ~timeout with
       | None -> None
       | Some '\027' -> (
           (* Escape sequence: try to read [ and then the code. *)
@@ -890,15 +912,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
 
 let drain_async_messages state ~base_path ~http_refresh_inflight
     ~board_post_refresh_inflight mailbox =
-  let rec loop () =
+  let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
-    | None -> ()
+    | None -> changed
     | Some msg ->
         apply_async_message state ~base_path ~http_refresh_inflight
           ~board_post_refresh_inflight msg;
-        loop ()
+        loop true
   in
-  loop ()
+  loop false
 
 (** Main loop *)
 let main () =
@@ -920,6 +942,13 @@ let main () =
   in
   at_exit cleanup;
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> exit 0));
+
+  let resize_requested = Atomic.make false in
+  Sys.set_signal Sys.sigwinch
+    (Sys.Signal_handle (fun _ -> Atomic.set resize_requested true));
+  let render_schedule =
+    Render_schedule.create ~min_interval_ns:frame_interval_ns ()
+  in
 
   (* Initial load *)
   load_from_masc_dir state base_path;
@@ -946,14 +975,30 @@ let main () =
   add_event state "system" "TUI started";
 
   (* Main loop *)
-  let last_check = ref (Unix.gettimeofday ()) in
+  let refresh_interval_ns =
+    Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
+  in
+  let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let input_reader = create_input_reader () in
   try
     while true do
-      drain_async_messages state ~base_path ~http_refresh_inflight
-        ~board_post_refresh_inflight async_messages;
+      if Atomic.exchange resize_requested false then begin
+        invalidate_terminal_size ();
+        Render_schedule.request render_schedule Render_schedule.Force
+      end;
+      if
+        drain_async_messages state ~base_path ~http_refresh_inflight
+          ~board_post_refresh_inflight async_messages
+      then Render_schedule.request render_schedule Render_schedule.Background;
       (* Check for input *)
-      let key = read_key input_reader () in
+      let input_timeout =
+        Render_schedule.input_timeout_seconds render_schedule
+          ~now_ns:(Mtime_clock.elapsed_ns ())
+          ~maximum:maximum_input_wait_seconds
+      in
+      let key = read_key ~timeout:input_timeout input_reader () in
+      if Option.is_some key then
+        Render_schedule.request render_schedule Render_schedule.Input;
       (match state.view, key with
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None
@@ -1001,10 +1046,8 @@ let main () =
            (* Also reload logs / board / planning detail if viewing them *)
            (match state.view with
             | Keepers Keeper_logs ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.log_entries <- load_keeper_logs base_path k.k_name 200
-                 | None -> ())
+                load_selected_keeper_logs state base_path 200
+                  (List.nth_opt state.keepers state.keeper_cursor)
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
@@ -1067,13 +1110,17 @@ let main () =
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k.k_name
+                   | Some k -> load_live_context state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
                 state.detail_scroll <- state.detail_scroll + 1
             | Keepers Keeper_logs ->
-                state.log_scroll <- state.log_scroll + 1
+                state.log_scroll <-
+                  Metrics_tail.scroll_down
+                    ~entry_count:(List.length state.log_entries)
+                    ~content_height:(keeper_log_content_height state)
+                    state.log_scroll
             | Approvals ->
                 let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -1106,15 +1153,18 @@ let main () =
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k.k_name
+                   | Some k -> load_live_context state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
                 if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
             | Keepers Keeper_logs ->
-                if state.log_scroll > 0 then
-                  state.log_scroll <- state.log_scroll - 1
+                state.log_scroll <-
+                  Metrics_tail.scroll_up
+                    ~entry_count:(List.length state.log_entries)
+                    ~content_height:(keeper_log_content_height state)
+                    state.log_scroll
             | Approvals ->
                 if state.approval_cursor > 0 then begin
                   state.pending_approval_action <- None;
@@ -1145,7 +1195,7 @@ let main () =
                  | Some k ->
                      state.view <- Keepers Keeper_detail;
                      state.detail_scroll <- 0;
-                     load_live_context state base_path k.k_name
+                     load_live_context state base_path k
                  | None -> ())
             | Board ->
                 (match state.board_mode with
@@ -1182,10 +1232,16 @@ let main () =
            (* L opens log view from detail *)
            (match state.view with
             | Keepers Keeper_detail ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.log_entries <- load_keeper_logs base_path k.k_name 200;
-                     state.log_scroll <- max 0 (List.length state.log_entries - 1);
+                let keeper =
+                  List.nth_opt state.keepers state.keeper_cursor
+                in
+                load_selected_keeper_logs state base_path 200 keeper;
+                (match keeper with
+                 | Some _ ->
+                     state.log_scroll <-
+                       Metrics_tail.maximum_scroll
+                         ~entry_count:(List.length state.log_entries)
+                         ~content_height:(keeper_log_content_height state);
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
@@ -1202,12 +1258,16 @@ let main () =
       | _ -> ());
 
       Eio.Fiber.yield ();
-      drain_async_messages state ~base_path ~http_refresh_inflight
-        ~board_post_refresh_inflight async_messages;
+      if
+        drain_async_messages state ~base_path ~http_refresh_inflight
+          ~board_post_refresh_inflight async_messages
+      then Render_schedule.request render_schedule Render_schedule.Background;
 
       (* Periodic refresh *)
-      let now = Unix.gettimeofday () in
-      if now -. !last_check >= refresh then begin
+      let now_ns = Mtime_clock.elapsed_ns () in
+      if
+        Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
+      then begin
         state.pending_approval_action <- None;
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
@@ -1218,10 +1278,8 @@ let main () =
         (* Also refresh logs / board / planning detail if viewing them *)
         (match state.view with
          | Keepers Keeper_logs ->
-             (match List.nth_opt state.keepers state.keeper_cursor with
-              | Some k ->
-                  state.log_entries <- load_keeper_logs base_path k.k_name 200
-              | None -> ())
+             load_selected_keeper_logs state base_path 200
+               (List.nth_opt state.keepers state.keeper_cursor)
          | Board ->
              (match state.board_mode with
               | Board_read post_id ->
@@ -1241,11 +1299,16 @@ let main () =
               | Planning_list -> ())
          | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
          | Approvals -> ());
-        last_check := now
+        last_check_ns := now_ns;
+        Render_schedule.request render_schedule Render_schedule.Background
       end;
 
-      (* Render *)
-      render state
+      (match
+         Render_schedule.take render_schedule
+           ~now_ns:(Mtime_clock.elapsed_ns ())
+       with
+       | Render_schedule.Render -> render state
+       | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   with Break -> ()
 

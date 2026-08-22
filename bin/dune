@@ -242,6 +242,29 @@
   yojson
   unix))
 
+(library
+ (name masc_tui_metrics_tail)
+ (wrapped false)
+ (modules masc_tui_metrics_tail)
+ (libraries masc dated_jsonl))
+
+(library
+ (name masc_tui_context_state)
+ (wrapped false)
+ (modules masc_tui_context_state)
+ (libraries masc masc.masc_workspace yojson))
+
+(library
+ (name masc_tui_observation_layout)
+ (wrapped false)
+ (modules masc_tui_observation_layout)
+ (libraries masc))
+
+(library
+ (name masc_tui_render_schedule)
+ (wrapped false)
+ (modules masc_tui_render_schedule))
+
 (executable
  (name masc_tui)
  (modules
@@ -255,10 +278,14 @@
  (package masc)
  (libraries
   masc
+  masc_tui_context_state
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_recovery
   masc_tui_message_layout
+  masc_tui_metrics_tail
+  masc_tui_observation_layout
   masc_tui_operator_projection
+  masc_tui_render_schedule
   masc.dashboard
   masc.server
   masc.config
@@ -282,6 +309,7 @@
   str
   eio_main
   eio
+  mtime.clock.os
   httpun
   cohttp
   cohttp-eio

@@ -333,10 +333,80 @@ let test_tui_current_projection_wiring () =
        ~callee:"Tui_decode.keeper_of_meta"
      >= 1);
   check bool "keeper metrics use the cluster-aware canonical path" true
-    (Ast_grep.count_calls
+    (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml"
-       ~callee:"Keeper_types_support.keeper_metrics_dir"
+       ~binding_name:"load_selected_keeper_logs"
+       ~callee:"Keeper_types_support.keeper_metrics_store"
+     = 1);
+  check bool "keeper metrics use the strict bounded physical tail" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_metrics_tail.ml" ~binding_name:"load"
+       ~callee:"Dated_jsonl.read_recent_result"
+     = 1);
+  check int "selected Keeper identity reaches the metrics decoder" 1
+    (Ast_grep.count_calls_with_label
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Metrics_tail.load" ~label:"expected_keeper");
+  check bool "all log interactions use the selected Keeper loader" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"load_selected_keeper_logs"
+     >= 3);
+  check bool "metadata refresh reconciles the selected log identity" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"load_from_masc_dir"
+       ~callee:"Metrics_tail.reconcile_selection"
+     = 1);
+  check bool "metrics diagnostics are terminal-safe before rendering" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Keeper_chat.terminal_safe_text"
      >= 1);
+  check bool "log input uses viewport-bounded scrolling" true
+    (Ast_grep.count_calls_across_files
+       ~module_paths:[ "bin/masc_tui.ml" ]
+       ~callee:"Metrics_tail.scroll_up"
+     = 1
+     && Ast_grep.count_calls_across_files
+          ~module_paths:[ "bin/masc_tui.ml" ]
+          ~callee:"Metrics_tail.scroll_down"
+        = 1);
+  List.iter
+    (fun retired ->
+      check int ("retired raw metrics helper absent: " ^ retired) 0
+        (Ast_grep.count_value_bindings
+           ~module_path:"bin/masc_tui_loader.ml" ~name:retired))
+    [ "read_last_lines"; "parse_log_entry"; "find_metrics_files"; "load_keeper_logs" ];
+  check bool "Keeper log rows use the current typed discriminator" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/tui_decode.ml" ~binding_name:"decode_log_entry"
+       ~callee:"Keeper_metrics_record.kind_of_json"
+     = 1);
+  check bool "live context uses the trace-scoped TurnRecord projection" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_context_state.ml" ~binding_name:"load"
+       ~callee:"Projection.context_fields"
+     = 1);
+  check bool "loader applies the behavior-tested selection transition" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"load_selected_live_context"
+       ~callee:"Context_state.for_selection"
+     = 1);
+  check bool "log diagnostics remain operator-visible" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Metrics_tail.error_to_string"
+     = 1);
+  check bool "log empty copy distinguishes typed outcomes" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Metrics_tail.empty_message"
+     = 1);
   check int "retired planning running alias absent" 0
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
@@ -433,6 +503,34 @@ let test_planning_cursor_uses_visible_goal_order () =
      >= 2)
 ;;
 
+let test_render_loop_uses_monotonic_dirty_schedule () =
+  let main_path = "bin/masc_tui.ml" in
+  check bool "main loop reads a monotonic clock" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
+     >= 3);
+  check int "main loop has no wall-clock refresh deadline" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Unix.gettimeofday");
+  check bool "context bar width is total" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_ansi.ml"
+       ~binding_name:"ctx_bar"
+       ~callee:"Masc_tui_render_schedule.nonnegative_width"
+     = 1);
+  check bool "keeper detail clamps its derived bar width" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_detail"
+       ~callee:"Masc_tui_render_schedule.keeper_context_bar_width"
+     = 1);
+  check bool "interrupted input uses the deadline-aware retry contract" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"read_byte_unix"
+       ~callee:"Render_schedule.Input_wait.await"
+     = 1)
+;;
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -467,6 +565,10 @@ let () =
           "planning cursor uses visible goal order"
           `Quick
           test_planning_cursor_uses_visible_goal_order;
+        test_case
+          "render loop uses monotonic dirty scheduling"
+          `Quick
+          test_render_loop_uses_monotonic_dirty_schedule;
       ]
     )
   ]

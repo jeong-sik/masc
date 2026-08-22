@@ -3,6 +3,8 @@
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Context_state = Masc_tui_context_state
+module Metrics_tail = Masc_tui_metrics_tail
 
 open Masc_tui_types
 open Tui_decode
@@ -70,107 +72,41 @@ let load_active_tasks (base_path : string) : task list * string option =
       ( Tui_decode.active_tasks_of_domain observation.observed_backlog.tasks
       , recovery_error )
 
-(** Read the last N lines from a file (tail) *)
-let read_last_lines path n =
-  try
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        (* Read all lines then take last N -- simple for JSONL files < 1MB *)
-        let lines = ref [] in
-        (try while true do
-           lines := input_line ic :: !lines
-         done with End_of_file -> ());
-        let all = List.rev !lines in
-        let len = List.length all in
-        if len <= n then all
-        else
-          List.filteri (fun i _ -> i >= len - n) all)
-  with Sys_error _ -> []
+(** Apply one strict bounded metrics snapshot to the mutable screen state. *)
+let apply_keeper_log_snapshot (state : state)
+    (snapshot : Metrics_tail.snapshot) =
+  state.log_entries <- snapshot.entries;
+  state.log_error <- snapshot.error;
+  state.log_scroll <-
+    min state.log_scroll (max 0 (List.length snapshot.entries - 1))
 
-(** Parse a single metrics JSONL line into a log_entry *)
-let parse_log_entry (line : string) : log_entry option =
-  match Tui_decode.parse_log_entry line with
-  | Ok entry -> Some entry
-  | Error err ->
-      Printf.eprintf "[masc-tui] log decode failed: %s\n%!" err;
-      None
-
-(** Find the most recent metrics file for a keeper *)
-let find_metrics_files (base_path : string) (keeper_name : string) : string list =
+(** Load the newest physical metrics rows across months and rotations. *)
+let load_selected_keeper_logs (state : state) (base_path : string)
+    (max_entries : int) (keeper : keeper option) =
   let config = Workspace_core.default_config base_path in
-  let metrics_dir = Keeper_types_support.keeper_metrics_dir config keeper_name in
-  if not (Sys.file_exists metrics_dir && Sys.is_directory metrics_dir) then []
-  else begin
-    (* List year-month directories, pick the most recent *)
-    let months = Sys.readdir metrics_dir
-      |> Array.to_list
-      |> List.filter (fun d ->
-           let full = Filename.concat metrics_dir d in
-           Sys.is_directory full)
-      |> List.sort (fun a b -> String.compare b a)  (* Reverse sort: most recent first *)
-    in
-    match months with
-    | [] -> []
-    | month :: _ ->
-      let month_dir = Filename.concat metrics_dir month in
-      Sys.readdir month_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-      |> List.sort (fun a b -> String.compare b a)  (* Most recent first *)
-      |> List.map (fun f -> Filename.concat month_dir f)
-  end
+  Metrics_tail.for_selection
+    ~load:(fun keeper ->
+      Keeper_types_support.keeper_metrics_store config keeper.k_name
+      |> fun store ->
+      Metrics_tail.load ~store ~expected_keeper:keeper.k_name
+        ~limit:max_entries)
+    keeper
+  |> apply_keeper_log_snapshot state
 
-(** Load log entries for the currently selected keeper *)
-let load_keeper_logs (base_path : string) (keeper_name : string) (max_entries : int) : log_entry list =
-  let files = find_metrics_files base_path keeper_name in
-  let entries = ref [] in
-  let remaining = ref max_entries in
-  List.iter (fun path ->
-    if !remaining > 0 then begin
-      let lines = read_last_lines path !remaining in
-      let parsed = List.filter_map parse_log_entry lines in
-      entries := parsed @ !entries;
-      remaining := !remaining - List.length parsed
-    end
-  ) files;
-  (* Return in chronological order, limited to max_entries *)
-  let all = List.rev !entries in
-  let len = List.length all in
-  if len <= max_entries then all
-  else List.filteri (fun i _ -> i >= len - max_entries) all
+(** Apply one exclusive context projection to the mutable screen state. *)
+let apply_live_context_state (state : state) (context_state : Context_state.t) =
+  state.live_context <- context_state.observation;
+  state.live_context_error <- context_state.error
 
-(** Load live context status from the latest metrics entry *)
-let load_live_context (state : state) (base_path : string) (keeper_name : string) =
-  let files = find_metrics_files base_path keeper_name in
-  match files with
-  | [] ->
-    state.live_context_ratio <- 0.0;
-    state.live_context_tokens <- 0;
-    state.live_context_max <- 0;
-    state.live_message_count <- 0
-  | latest_file :: _ ->
-    (* Read just the last line *)
-    let lines = read_last_lines latest_file 1 in
-    (match lines with
-     | [] ->
-       state.live_context_ratio <- 0.0;
-       state.live_context_tokens <- 0;
-       state.live_context_max <- 0;
-       state.live_message_count <- 0
-     | line :: _ ->
-       match parse_log_entry line with
-       | None ->
-         state.live_context_ratio <- 0.0;
-         state.live_context_tokens <- 0;
-         state.live_context_max <- 0;
-         state.live_message_count <- 0
-       | Some e ->
-         state.live_context_ratio <- e.le_context_ratio;
-         state.live_context_tokens <- e.le_context_tokens;
-         state.live_context_max <- e.le_context_max;
-         state.live_message_count <- e.le_message_count)
+(** Load trace-scoped context occupancy from its current TurnRecord SSOT. *)
+let load_selected_live_context (state : state) (base_path : string)
+    (keeper : keeper option) =
+  let config = Workspace_core.default_config base_path in
+  Context_state.for_selection ~load:(Context_state.load ~config) keeper
+  |> apply_live_context_state state
+
+let load_live_context state base_path keeper =
+  load_selected_live_context state base_path (Some keeper)
 
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
@@ -231,11 +167,21 @@ let load_from_masc_dir (state : state) (base_path : string) =
           | None -> min state.keeper_cursor (max 0 (List.length state.keepers - 1)))
      | None -> min state.keeper_cursor (max 0 (List.length state.keepers - 1)));
 
-  (* Load live context for selected keeper *)
-  if state.keeper_cursor < List.length state.keepers then begin
-    let k = List.nth state.keepers state.keeper_cursor in
-    load_live_context state base_path k.k_name
-  end;
+  let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
+
+  (* Load live context for the selected keeper. Metadata-only refresh paths do
+     not read metrics, but an empty roster must clear any cached log state. *)
+  load_selected_live_context state base_path selected_keeper;
+  let current_logs : Metrics_tail.snapshot =
+    { entries = state.log_entries; error = state.log_error }
+  in
+  let selected_keeper_name_after_refresh =
+    Option.map (fun keeper -> keeper.k_name) selected_keeper
+  in
+  Metrics_tail.reconcile_selection ~current:current_logs
+    ~previous_keeper:selected_keeper_name
+    ~selected_keeper:selected_keeper_name_after_refresh
+  |> apply_keeper_log_snapshot state;
 
   state.last_refresh <- Unix.gettimeofday ()
 

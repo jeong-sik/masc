@@ -313,7 +313,7 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
-  it('accepts external-effect completion with and without a delivery target', () => {
+  it('accepts external-effect completion only with a typed delivery target', () => {
     const event = (value: unknown) => ({
       type: 'keeper_chat_operation_event',
       name: 'sangsu',
@@ -326,7 +326,8 @@ describe('SSEMessageSchema', () => {
         timestamp: 1_712_000_000,
       },
     })
-    expect(SSEMessageSchema.safeParse(event(null)).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(event(null)).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(event({})).success).toBe(false)
     expect(
       SSEMessageSchema.safeParse(event({ target: { kind: 'dashboard' } })).success,
     ).toBe(true)

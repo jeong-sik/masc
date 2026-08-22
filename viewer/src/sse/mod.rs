@@ -3,7 +3,6 @@ pub mod client;
 pub mod masc_bridge;
 pub mod masc_client;
 pub mod reconnect;
-pub mod social_board;
 
 use bevy::prelude::*;
 
@@ -50,21 +49,6 @@ impl Plugin for SsePlugin {
                 .add_systems(Update, masc_bridge::poll_masc_events.run_if(in_state(mode)))
                 .add_systems(OnExit(mode), masc_client::teardown_masc_sse);
         }
-
-        // ── Social Board HTTP poller (supplements SSE with Board posts) ──
-        app.add_systems(
-            OnEnter(ViewerMode::Social),
-            social_board::fetch_board_on_enter,
-        )
-        .add_systems(
-            Update,
-            (
-                social_board::render_board_posts,
-                social_board::board_refresh_tick,
-            )
-                .run_if(in_state(ViewerMode::Social)),
-        )
-        .add_systems(OnExit(ViewerMode::Social), social_board::cleanup_board);
 
         // ── Sync async connection status into ECS (runs every frame) ──
         app.add_systems(Update, reconnect::sync_connection_status);

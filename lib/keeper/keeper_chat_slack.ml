@@ -436,7 +436,17 @@ let send_message_with_blocks ?clock
         try
           let json = Yojson.Safe.from_string response_body in
           match Json_util.get_bool json "ok" with
-          | Some true -> Ok ()
+          | Some true -> (
+              (* Slack chat.postMessage returns the posted message's [ts] on
+                 success. Returning it lets the caller surface an independent
+                 message id (and, for threaded replies, the thread coordinate)
+                 so delivery can be verified without self-reported lane rows. *)
+              match Json_util.get_string json "ts" with
+              | Some ts -> Ok ts
+              | None ->
+                  Log.Keeper.warn
+                    "keeper_chat_slack: ok=true but missing ts in response";
+                  Error (Other "ok=true but missing ts"))
           | Some false -> (
               match Json_util.get_string json "error" with
               | Some err ->
@@ -774,9 +784,12 @@ let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
       delete_message ~clock ~token ~channel ~message_id ())
     ~sleep:(Eio.Time.sleep clock)
     ~send_plain:(fun ~content ->
-      send_message ~clock ?thread_ts ~token ~channel ~content ())
+      send_message ~clock ?thread_ts ~token ~channel ~content ()
+      |> Result.map (fun _ -> ()))
     ~send_blocks:(fun ~content ~blocks ->
-      send_message_with_blocks ~clock ?thread_ts ~token ~channel ~content ~blocks ())
+      send_message_with_blocks ~clock ?thread_ts ~token ~channel ~content
+        ~blocks ()
+      |> Result.map (fun _ -> ()))
     ~events ?set_activity_status ?base_url ?on_send_result ()
 
 module For_testing = struct

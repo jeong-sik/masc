@@ -29,22 +29,22 @@ val send_message :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
   ?thread_ts:string ->
-  token:string -> channel:string -> content:string -> unit -> (unit, error) result
+  token:string -> channel:string -> content:string -> unit -> (string, error) result
 (** [send_message ~token ~channel ~content] posts to
     [chat.postMessage]. Logs errors via [Log.Keeper.warn] and returns the
-    outcome. *)
+    posted message's Slack [ts] on success. *)
 
 val send_message_with_blocks :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
   ?thread_ts:string ->
   ?mention_user_ids:string list ->
-  token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> unit -> (unit, error) result
+  token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> unit -> (string, error) result
 (** [send_message_with_blocks ~token ~channel ~content ~blocks] posts to
     [chat.postMessage] with the given Block Kit [blocks]. Stable Slack ids in
     [mention_user_ids] are emitted both in the accessible fallback and the
     visible blocks assembled by the caller. Logs errors via [Log.Keeper.warn]
-    and returns the outcome. *)
+    and returns the posted message's Slack [ts] on success. *)
 
 val content_blocks_of_text : string -> Yojson.Safe.t list
 (** [content_blocks_of_text text] puts the complete LLM-authored standard

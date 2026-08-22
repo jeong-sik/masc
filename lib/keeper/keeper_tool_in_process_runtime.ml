@@ -1239,7 +1239,7 @@ let replay_connector_post_with_outcome
             Keeper_surface_post.slack_label
             ~effect_disposition:(Keeper_chat_slack.effect_disposition send_error)
             (Format.asprintf "%a" Keeper_chat_slack.pp_error send_error)
-        | Ok () ->
+        | Ok message_id ->
           (match
              Keeper_chat_store.append_assistant_message_result
                ~base_dir:config.Workspace.base_path
@@ -1259,7 +1259,7 @@ let replay_connector_post_with_outcome
                ~source:Keeper_surface_post.slack_label
                ~content
                ();
-             succeed Keeper_surface_post.slack_label ())))
+             succeed Keeper_surface_post.slack_label ~message_id ())))
 ;;
 
 let handle_surface_post_with_outcome

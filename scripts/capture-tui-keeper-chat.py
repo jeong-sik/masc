@@ -1078,18 +1078,23 @@ def success_scenario(
                 started = time.monotonic()
                 state.post_release.set()
                 wait_text(page, "reply-v3")
-                latency = (time.monotonic() - started) * 1000
+                reply_visible_at = time.monotonic()
+                latency = (reply_visible_at - started) * 1000
                 measurements["reply_visible_after_release_ms"] = round(latency, 3)
                 require(latency <= 2500, f"reply latency {latency:.3f}ms")
                 wait_text(page, "(sending ", present=False)
-                lock_started = time.monotonic()
+                settled_ui_at = time.monotonic()
                 wait_until(
                     lambda: file_lock_available(dispatch_lock),
                     "done ACK did not release the dispatch lock",
                     timeout=5,
                 )
+                lock_probe_succeeded_at = time.monotonic()
                 measurements["reply_visible_to_lock_probe_success_ms"] = round(
-                    (time.monotonic() - lock_started) * 1000, 3
+                    (lock_probe_succeeded_at - reply_visible_at) * 1000, 3
+                )
+                measurements["settled_ui_to_lock_probe_success_ms"] = round(
+                    (lock_probe_succeeded_at - settled_ui_at) * 1000, 3
                 )
                 wait_text(page, "> draft-during-send")
                 visible = screen_text(page)

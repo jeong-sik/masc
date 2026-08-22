@@ -1,0 +1,1588 @@
+#!/usr/bin/env python3
+"""Reproducible exact-head ttyd/Chromium proof for Keeper chat recovery."""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from hashlib import sha256
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import version as package_version
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import threading
+import time
+from typing import Any, Callable, Iterator, Literal
+from urllib.parse import unquote, urlsplit
+
+from playwright.sync_api import (
+    Browser,
+    Frame,
+    Page,
+    TimeoutError as PlaywrightTimeoutError,
+    sync_playwright,
+)
+
+
+# fmt: off
+WORKTREE = Path(
+    os.environ.get("MASC_CAPTURE_WORKTREE", Path(__file__).resolve().parents[1])
+).resolve()
+BUILD_WRAPPER = WORKTREE / "scripts/dune-local.sh"
+TTYD = Path("/opt/homebrew/bin/ttyd")
+KEEPER = "alpha"
+SUCCESS_MESSAGE = "Aé한🙂👍🏽🇰🇷❤️-v3"
+LONG_TAIL = ("❤️" * 10) + "-TAIL"
+LONG_DRAFT = "prefix-" + ("x" * 100) + LONG_TAIL
+CHAT_POST = "/api/v1/keepers/chat/stream"
+OPERATOR_GET = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
+OPERATION_RE = re.compile(r"^/api/v1/keepers/([^/]+)/chat/operations/([^/?]+)$")
+UUID7_RE = re.compile(
+    r"^tui-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+SAFE_ENV_KEYS = ("LANG", "LC_ALL", "PATH", "TMPDIR", "TZ")
+BUILD_ENV_KEYS = SAFE_ENV_KEYS + (
+    "CAML_LD_LIBRARY_PATH", "HOME", "OCAML_TOPLEVEL_PATH", "OPAMROOT", "OPAMSWITCH",
+    "OPAM_SWITCH_PREFIX",
+)
+# fmt: on
+
+
+def utc_now() -> str:
+    now = datetime.now(timezone.utc)
+    return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def digest_bytes(value: bytes) -> str:
+    return sha256(value).hexdigest()
+
+
+def digest_file(path: Path) -> str:
+    return digest_bytes(path.read_bytes())
+
+
+def run_text(*command: str, cwd: Path = WORKTREE) -> str:
+    return subprocess.check_output(command, cwd=cwd, text=True).strip()
+
+
+def safe_env(keys: tuple[str, ...]) -> dict[str, str]:
+    return {key: os.environ[key] for key in keys if key in os.environ}
+
+
+def require(condition: bool, detail: str) -> None:
+    if not condition:
+        raise AssertionError(detail)
+
+
+def current_keeper_meta() -> dict[str, object]:
+    # fmt: off
+    meta: dict[str, object] = {
+        "schema": "masc.keeper_meta.v1", "name": KEEPER,
+        "agent_name": f"keeper-{KEEPER}-agent",
+        "instructions": "Runtime evidence fixture for Keeper chat recovery.",
+        "autonomous_instructions": None, "trace_id": "trace-capture-v3",
+        "multimodal_policy": "inherit", "trace_history": [], "generation": 1,
+        "created_at": "2026-08-22T00:00:00Z", "updated_at": "2026-08-22T00:00:00Z",
+        "last_proactive_outcome": "never_started", "last_proactive_reason": "",
+        "last_proactive_preview": "", "last_compaction_decision": "",
+        "last_autonomous_action_at": "", "message_scope_ack_id": None,
+        "last_blocker": None, "last_runtime_attempt": None, "paused": False,
+        "latched_reason": None, "current_task_id": None, "keeper_id": None,
+        "agent_core_env": {},
+    }
+    for key in (
+        "total_turns", "total_input_tokens", "total_output_tokens", "total_tokens",
+        "last_input_tokens", "last_output_tokens", "last_total_tokens",
+        "last_latency_ms", "compaction_count", "last_compaction_before_tokens",
+        "last_compaction_after_tokens", "proactive_count_total",
+        "proactive_visible_count_total", "consecutive_noop_count",
+        "autonomous_action_count", "autonomous_turn_count",
+        "autonomous_text_turn_count", "autonomous_tool_turn_count",
+        "board_reactive_turn_count", "mention_reactive_turn_count", "noop_turn_count",
+    ):
+        meta[key] = 0
+    for key in (
+        "last_handoff_ts", "total_cost_usd", "last_turn_ts", "last_compaction_ts",
+        "last_proactive_ts", "last_visible_proactive_ts", "last_compaction_check_ts",
+    ):
+        meta[key] = 0.0
+    # fmt: on
+    return meta
+
+
+def prepare_base(base: Path) -> None:
+    keepers = base / ".masc/keepers"
+    keepers.mkdir(parents=True)
+    (keepers / f"{KEEPER}.json").write_text(
+        json.dumps(current_keeper_meta(), indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def write_recovery(
+    base: Path,
+    *,
+    phase: Literal["prepared", "dispatching", "replayable", "accepted", "rejected"],
+    request: dict[str, str],
+) -> Path:
+    recovery = base / ".masc/tui-keeper-chat-recovery.json"
+    payload = {
+        "schema": "masc.tui_keeper_chat_recovery.v3",
+        "phase": phase,
+        "request_id": request["request_id"],
+        "keeper_name": request["name"],
+        "message": request["message"],
+    }
+    recovery.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    recovery.chmod(0o600)
+    return recovery
+
+
+def event(request: dict[str, str], kind: str, **fields: object) -> object:
+    # fmt: off
+    return {"type": kind, "threadId": f"keeper:{request['name']}", "timestamp": 1.0, **fields}
+    # fmt: on
+
+
+def acceptance(request: dict[str, str]) -> object:
+    # fmt: off
+    return {
+        "type": "CUSTOM", "threadId": "default", "timestamp": 1.0,
+        "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+        "value": {"operation_id": request["request_id"], "state": "Queued", "queued_count": 0},
+    }
+    # fmt: on
+
+
+def sse(values: list[object]) -> bytes:
+    return "".join(
+        "data: " + json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n\n"
+        for value in values
+    ).encode()
+
+
+def stream_payload(request: dict[str, str], complete: bool) -> bytes:
+    request_id = request["request_id"]
+    run_id = f"keeper-operation-run-{request_id}"
+    message_id = f"keeper-operation-message-{request_id}"
+    # fmt: off
+    values = [
+        acceptance(request),
+        event(request, "RUN_STARTED", runId=run_id),
+        event(request, "TEXT_MESSAGE_START", runId=run_id, messageId=message_id, role="assistant"),
+        event(request, "TEXT_MESSAGE_CONTENT", runId=run_id, messageId=message_id,
+              delta="reply-v3" if complete else "partial-must-not-be-promoted"),
+    ]
+    if complete:
+        values.extend([
+            event(request, "CUSTOM", runId=run_id, name="KEEPER_REPLY_DETAILS",
+                  value={"reply": "reply-v3", "turn_outcome": "visible_reply", "turn_ref": "trace-chat#v3"}),
+            event(request, "TEXT_MESSAGE_END", runId=run_id, messageId=message_id),
+            event(request, "RUN_FINISHED", runId=run_id),
+        ])
+    # fmt: on
+    return sse(values)
+
+
+def execution_digest(message: str) -> str:
+    # fmt: off
+    value = {
+        "schema": "masc.keeper_chat_operation.input.v1", "message": message,
+        "user_blocks": [], "turn_instructions": None, "surface_context": None, "attachments": [],
+    }
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    # fmt: on
+    return digest_bytes(canonical.encode())
+
+
+def operation_payload(request: dict[str, str], succeeded: bool) -> object:
+    # fmt: off
+    value: dict[str, object] = {
+        "schema": "masc.keeper_chat_operation.v1", "operation_id": request["request_id"],
+        "sequence": "7", "created_at": 1.0,
+        "execution_digest": execution_digest(request["message"]),
+        "source": {}, "input": None, "state": "Succeeded" if succeeded else "Running",
+    }
+    # fmt: on
+    if succeeded:
+        value.update({"completed_at": 3.0, "outcome_ref": "turn:v3"})
+    else:
+        value["started_at"] = 2.0
+    return value
+
+
+# fmt: off
+OVERVIEW = {
+    "summary": {"workspace_health": "ok", "cluster": "cluster-v3", "project": "keeper-chat-v3", "active_agents": 1, "incident_count": 0},
+    "command_focus": None, "incidents": [], "attention_queue": [], "attention_items": [],
+    "agent_briefs": [], "generated_at": "2026-08-22T00:00:00Z",
+}
+PLANNING = {
+    "goals": [], "rollup": {"active_count": 0, "paused_count": 0, "verifying_count": 0, "done_count": 0, "dropped_count": 0},
+    "task_backlog": {"todo": 0, "claimed": 0, "in_progress": 0, "done": 0, "cancelled": 0},
+    "generated_at": "2026-08-22T00:00:00Z",
+}
+OPERATOR = {"pending_confirm_envelope": {"items": [], "summary": {
+    "actor_filter": "masc-tui", "filter_active": True, "visible_count": 0, "total_count": 0,
+    "hidden_count": 0, "hidden_actors": [], "confirm_required_actions": [],
+}}}
+# fmt: on
+
+
+@dataclass
+class Fixture:
+    mode: Literal["success", "recovery", "rejection"]
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    request: dict[str, str] | None = None
+    records: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    operation_sequence: int = 0
+    get2_received_monotonic: float | None = None
+    post_seen: threading.Event = field(default_factory=threading.Event)
+    post_release: threading.Event = field(default_factory=threading.Event)
+    get1_seen: threading.Event = field(default_factory=threading.Event)
+    get1_release: threading.Event = field(default_factory=threading.Event)
+    get1_done: threading.Event = field(default_factory=threading.Event)
+    get2_seen: threading.Event = field(default_factory=threading.Event)
+    get2_release: threading.Event = field(default_factory=threading.Event)
+
+    def record(self, method: str, path: str) -> dict[str, Any]:
+        with self.lock:
+            operation_ordinal = None
+            if method == "GET" and OPERATION_RE.fullmatch(urlsplit(path).path):
+                self.operation_sequence += 1
+                operation_ordinal = self.operation_sequence
+                if operation_ordinal == 2:
+                    self.get2_received_monotonic = time.monotonic()
+            record = {
+                "method": method,
+                "path": path,
+                "received_monotonic": time.monotonic(),
+                "operation_ordinal": operation_ordinal,
+                "request_body_bytes": 0,
+                "request_body_sha256": digest_bytes(b""),
+                "request_body_utf8": "",
+                "response_body_bytes": None,
+                "response_body_sha256": None,
+                "response_body_utf8": None,
+                "response_content_type": None,
+                "response_status": None,
+                "response_handler_completed": False,
+                "response_write_completed": False,
+                "client_disconnected": False,
+            }
+            self.records.append(record)
+            return record
+
+    def parse_request(self, body: bytes) -> dict[str, str] | None:
+        try:
+            value = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            self.errors.append(f"invalid chat JSON: {type(error).__name__}")
+            return None
+        if not isinstance(value, dict) or set(value) != {
+            "request_id",
+            "name",
+            "message",
+        }:
+            self.errors.append("chat request shape mismatch")
+            return None
+        if not all(isinstance(value[key], str) for key in value):
+            self.errors.append("chat request fields are not strings")
+            return None
+        request = {key: value[key] for key in ("request_id", "name", "message")}
+        with self.lock:
+            if self.request is None:
+                self.request = request
+            elif self.request != request:
+                self.errors.append("a second POST changed request identity")
+        return request
+
+    def summary(self) -> dict[str, Any]:
+        with self.lock:
+            records = [dict(record) for record in self.records]
+            errors = list(self.errors)
+            request = None
+            if self.request is not None:
+                message = self.request["message"].encode()
+                request = {
+                    "request_id": self.request["request_id"],
+                    "name": self.request["name"],
+                    "message_bytes": len(message),
+                    "message_sha256": digest_bytes(message),
+                }
+            # fmt: off
+            posts = sum(r["method"] == "POST" and r["path"] == CHAT_POST for r in records)
+            gets = sum(r["operation_ordinal"] is not None for r in records)
+            other_posts = sum(r["method"] == "POST" and r["path"] != CHAT_POST for r in records)
+            unexpected_chat = sum("/chat/" in urlsplit(r["path"]).path
+                                  and not (r["method"] == "POST" and r["path"] == CHAT_POST)
+                                  and r["operation_ordinal"] is None for r in records)
+        return {
+            "chat_stream_post_count": posts,
+            "chat_operation_get_count": gets,
+            "other_post_count": other_posts,
+            "unexpected_chat_route_count": unexpected_chat,
+            "request": request,
+            "errors": errors,
+            "records": records,
+        }
+        # fmt: on
+
+
+class FixtureServer(ThreadingHTTPServer):
+    daemon_threads = False
+
+
+@contextmanager
+def fixture_server(state: Fixture) -> Iterator[int]:
+    class Handler(BaseHTTPRequestHandler):
+        def reply(
+            self,
+            record: dict[str, Any],
+            status: int,
+            payload: bytes,
+            content_type: str = "application/json",
+        ) -> None:
+            decoded_payload = payload.decode("utf-8")
+            write_completed = False
+            client_disconnected = False
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+                self.wfile.flush()
+                write_completed = True
+            except (BrokenPipeError, ConnectionResetError):
+                client_disconnected = True
+            finally:
+                with state.lock:
+                    record.update(
+                        {
+                            "response_body_bytes": len(payload),
+                            "response_body_sha256": digest_bytes(payload),
+                            "response_body_utf8": decoded_payload,
+                            "response_content_type": content_type,
+                            "response_status": status,
+                            "response_handler_completed": True,
+                            "response_write_completed": write_completed,
+                            "client_disconnected": client_disconnected,
+                        }
+                    )
+
+        def reply_json(
+            self, record: dict[str, Any], status: int, value: object
+        ) -> None:
+            self.reply(record, status, json.dumps(value).encode())
+
+        def do_GET(self) -> None:  # noqa: N802
+            record = state.record("GET", self.path)
+            static = {
+                "/api/v1/dashboard/briefing": OVERVIEW,
+                OPERATOR_GET: OPERATOR,
+                "/api/v1/board": {"posts": []},
+                "/api/v1/dashboard/planning": PLANNING,
+            }.get(self.path)
+            if static is not None:
+                self.reply_json(record, 200, static)
+                return
+            match = OPERATION_RE.fullmatch(urlsplit(self.path).path)
+            request = state.request
+            if match is None or request is None or state.mode == "success":
+                state.errors.append("unexpected GET endpoint")
+                self.reply_json(record, 503, {"error": "unexpected GET"})
+                return
+            keeper, request_id = map(unquote, match.groups())
+            if keeper != request["name"] or request_id != request["request_id"]:
+                state.errors.append("operation GET identity mismatch")
+                self.reply_json(record, 409, {"error": "identity mismatch"})
+                return
+            if state.mode == "rejection":
+                self.reply_json(record, 404, {"error": "operation not found"})
+                return
+            ordinal = record["operation_ordinal"]
+            if ordinal == 1:
+                state.get1_seen.set()
+                if not state.get1_release.wait(30):
+                    state.errors.append("GET1 gate timeout")
+                    self.reply_json(record, 504, {"error": "gate timeout"})
+                    state.get1_done.set()
+                    return
+                self.reply_json(record, 200, operation_payload(request, False))
+                state.get1_done.set()
+            elif ordinal == 2:
+                state.get2_seen.set()
+                if not state.get2_release.wait(30):
+                    state.errors.append("GET2 gate timeout")
+                    self.reply_json(record, 504, {"error": "gate timeout"})
+                    return
+                self.reply_json(record, 200, operation_payload(request, True))
+            else:
+                state.errors.append(f"unexpected operation GET ordinal {ordinal}")
+                self.reply_json(record, 500, {"error": "extra operation GET"})
+
+        def do_POST(self) -> None:  # noqa: N802
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            record = state.record("POST", self.path)
+            with state.lock:
+                record.update(
+                    {
+                        "request_body_bytes": len(body),
+                        "request_body_sha256": digest_bytes(body),
+                        "request_body_utf8": body.decode("utf-8"),
+                    }
+                )
+            if self.path != CHAT_POST:
+                state.errors.append("unexpected POST endpoint")
+                self.reply_json(record, 500, {"error": "unexpected POST"})
+                return
+            request = state.parse_request(body)
+            state.post_seen.set()
+            if request is None:
+                self.reply_json(record, 400, {"error": "bad request"})
+                return
+            if state.mode in ("success", "rejection"):
+                if not state.post_release.wait(30):
+                    state.errors.append("POST gate timeout")
+                    self.reply_json(record, 504, {"error": "gate timeout"})
+                    return
+                if state.mode == "rejection":
+                    self.reply_json(
+                        record,
+                        403,
+                        {"error": "synthetic definitive pre-acceptance rejection"},
+                    )
+                    return
+                payload = stream_payload(request, True)
+            else:
+                # Clean EOF after acceptance, but before any terminal SSE event.
+                payload = stream_payload(request, False)
+            self.reply(record, 200, payload, "text/event-stream")
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    server = FixtureServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        for gate in (state.post_release, state.get1_release, state.get2_release):
+            gate.set()
+        server.shutdown()
+        thread.join(timeout=3)
+        server_stopped = not thread.is_alive()
+        server.server_close()  # waits for non-daemon request threads
+        require(server_stopped, "fixture server thread did not stop")
+
+
+def wait_port(port: int, process: subprocess.Popen[bytes]) -> None:
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            log = b"" if process.stdout is None else process.stdout.read()
+            raise RuntimeError(f"ttyd exited early; log_sha256={digest_bytes(log)}")
+        with socket.socket() as sock:
+            if sock.connect_ex(("127.0.0.1", port)) == 0:
+                return
+        time.sleep(0.05)
+    raise TimeoutError("ttyd did not listen")
+
+
+def stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    try:
+        process.communicate(timeout=4)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate(timeout=4)
+
+
+@contextmanager
+def held_file_lock(path: Path) -> Iterator[Callable[[], None]]:
+    helper = """
+import fcntl
+import os
+import sys
+path = sys.argv[1]
+fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o600)
+try:
+    fcntl.lockf(fd, fcntl.LOCK_EX)
+    sys.stdout.buffer.write(b'R')
+    sys.stdout.buffer.flush()
+    sys.stdin.buffer.read(1)
+finally:
+    os.close(fd)
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", helper, str(path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    helper_closed = False
+
+    def release() -> None:
+        nonlocal helper_closed
+        if helper_closed:
+            return
+        try:
+            stdout, stderr = process.communicate(input=b"X", timeout=5)
+        except subprocess.TimeoutExpired as error:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
+            helper_closed = True
+            raise AssertionError(
+                f"lock helper timed out: stdout={stdout!r}, stderr={stderr!r}"
+            ) from error
+        helper_closed = True
+        require(process.returncode == 0, f"lock helper failed: {stderr!r}")
+        require(stdout == b"", f"lock helper emitted trailing output: {stdout!r}")
+
+    try:
+        helper_stdout = process.stdout
+        assert helper_stdout is not None
+        ready = helper_stdout.read(1)
+        require(ready == b"R", f"lock helper did not become ready: {ready!r}")
+        yield release
+    finally:
+        if not helper_closed:
+            release()
+
+
+@contextmanager
+def ttyd_session(
+    browser: Browser,
+    base: Path,
+    api_port: int,
+    executable: Path,
+) -> Iterator[tuple[Page, float]]:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        web_port = int(sock.getsockname()[1])
+    environment = safe_env(SAFE_ENV_KEYS)
+    environment.update(
+        {
+            "MASC_BASE_PATH": str(base),
+            "MASC_HOST": "127.0.0.1",
+            "MASC_TUI_SYNC": "off",
+            "TERM": "xterm-256color",
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
+        }
+    )
+    # fmt: off
+    command = [
+        str(TTYD), "-p", str(web_port), "-i", "127.0.0.1", "-W",
+        "-t", "rendererType=dom", "-t", "fontSize=14", "-t", "fontFamily=Menlo",
+        "-T", "xterm-256color", str(executable), "--base-path", str(base),
+        "--workspace", "keeper-chat-v3", "--port", str(api_port), "--refresh", "60",
+    ]
+    # fmt: on
+    started = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        cwd=WORKTREE,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    context = None
+    try:
+        wait_port(web_port, process)
+        context = browser.new_context(
+            viewport={"width": 860, "height": 496}, device_scale_factor=1
+        )
+        page = context.new_page()
+        page.goto(f"http://127.0.0.1:{web_port}", wait_until="domcontentloaded")
+        page.wait_for_selector(".xterm-helper-textarea", timeout=10_000)
+        page.wait_for_function(
+            "window.term && window.term.cols === 99 && window.term.rows === 30",
+            timeout=10_000,
+        )
+        wait_text(page, "MASC Overview")
+        # ttyd briefly paints a centered terminal-size overlay after connect.
+        page.wait_for_timeout(3_000)
+        yield page, started
+    finally:
+        try:
+            if context is not None:
+                context.close()
+        finally:
+            stop_process(process)
+
+
+def screen_text(page: Page) -> str:
+    return page.locator(".xterm-screen").inner_text()
+
+
+def wait_text(
+    page: Page, needle: str, timeout: int = 10_000, *, present: bool = True
+) -> None:
+    try:
+        page.wait_for_function(
+            """expected => {
+              const screen = document.querySelector('.xterm-screen');
+              return screen && screen.innerText.includes(expected.text) === expected.present;
+            }""",
+            arg={"text": needle, "present": present},
+            timeout=timeout,
+        )
+    except PlaywrightTimeoutError as error:
+        visible = screen_text(page)
+        raise TimeoutError(
+            f"screen text {needle!r} present={present}; visible={visible!r}"
+        ) from error
+
+
+def press(page: Page, key: str, expected: str | None = None) -> None:
+    page.locator(".xterm-helper-textarea").focus()
+    page.keyboard.press(key)
+    if expected:
+        wait_text(page, expected)
+
+
+def type_text(page: Page, value: str) -> None:
+    page.locator(".xterm-helper-textarea").focus()
+    page.keyboard.type(value)
+
+
+def open_message(page: Page) -> None:
+    press(page, "Tab", "MASC Keepers")
+    press(page, "Enter")
+    wait_text(page, "Identity")
+    wait_text(page, "m:message")
+    press(page, "m", f"Message to: {KEEPER}")
+
+
+def cursor_position(page: Page) -> dict[str, int]:
+    return page.evaluate(
+        "({x: window.term.buffer.active.cursorX, y: window.term.buffer.active.cursorY})"
+    )
+
+
+def cursor_visible(page: Page) -> bool:
+    return page.evaluate(
+        """() => {
+          const cursor = document.querySelector('.xterm-cursor');
+          if (!cursor) return false;
+          const style = window.getComputedStyle(cursor);
+          return style.display !== 'none'
+            && style.visibility !== 'hidden'
+            && Number.parseFloat(style.opacity || '1') > 0;
+        }"""
+    )
+
+
+def buffer_line(page: Page, row: int) -> str:
+    return page.evaluate(
+        """row => {
+          const buffer = window.term.buffer.active;
+          const line = buffer.getLine(buffer.baseY + row);
+          return line ? line.translateToString(false) : '';
+        }""",
+        row,
+    )
+
+
+def buffer_cell_chars(page: Page, row: int, column: int) -> str:
+    return page.evaluate(
+        """position => {
+          const buffer = window.term.buffer.active;
+          const line = buffer.getLine(buffer.baseY + position.row);
+          const cell = line && line.getCell(position.column);
+          return cell ? cell.getChars() : '';
+        }""",
+        {"row": row, "column": column},
+    )
+
+
+def wait_cursor(page: Page, expected_x: int, expected_y: int) -> dict[str, int]:
+    try:
+        page.wait_for_function(
+            """expected => {
+              if (!window.term
+                  || window.term.buffer.active.cursorX !== expected.x
+                  || window.term.buffer.active.cursorY !== expected.y) return false;
+              const cursor = document.querySelector('.xterm-cursor');
+              if (!cursor) return false;
+              const style = window.getComputedStyle(cursor);
+              return style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && Number.parseFloat(style.opacity || '1') > 0;
+            }""",
+            arg={"x": expected_x, "y": expected_y},
+            timeout=10_000,
+        )
+    except PlaywrightTimeoutError as error:
+        actual = cursor_position(page)
+        raise TimeoutError(
+            f"cursor expected x={expected_x} y={expected_y}; actual={actual}; "
+            f"visible={cursor_visible(page)}; screen={screen_text(page)!r}"
+        ) from error
+    actual = cursor_position(page)
+    require(actual == {"x": expected_x, "y": expected_y}, f"cursor: {actual}")
+    require(cursor_visible(page), "cursor coordinates are correct but cursor is hidden")
+    return actual
+
+
+def wait_cursor_hidden(page: Page) -> None:
+    page.wait_for_function(
+        """() => {
+          const cursor = document.querySelector('.xterm-cursor');
+          if (!cursor) return true;
+          const style = window.getComputedStyle(cursor);
+          return style.display === 'none'
+            || style.visibility === 'hidden'
+            || Number.parseFloat(style.opacity || '1') === 0;
+        }""",
+        timeout=10_000,
+    )
+    require(not cursor_visible(page), "compact resize gate left cursor visible")
+
+
+def resize_terminal(page: Page, cols: int, rows: int) -> None:
+    page.evaluate(
+        "size => window.term.resize(size.cols, size.rows)",
+        {"cols": cols, "rows": rows},
+    )
+    page.wait_for_function(
+        "size => window.term.cols === size.cols && window.term.rows === size.rows",
+        arg={"cols": cols, "rows": rows},
+        timeout=10_000,
+    )
+
+
+def await_event(value: threading.Event, label: str) -> None:
+    if not value.wait(10):
+        raise TimeoutError(label)
+
+
+def wait_until(
+    predicate: Callable[[], bool], label: str, timeout: float = 10.0
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.05)
+    raise TimeoutError(label)
+
+
+def capture(
+    page: Page,
+    output: Path,
+    filename: str,
+    *markers: str,
+    expected_cursor: tuple[int, int] | None = None,
+    expected_dimensions: tuple[int, int] = (99, 30),
+    input_row_markers: tuple[str, ...] = (),
+    input_row_absent: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    path = output / filename
+    require(not path.exists(), f"capture path already exists: {path}")
+    dimensions = page.evaluate("({cols: window.term.cols, rows: window.term.rows})")
+    require(
+        dimensions == {"cols": expected_dimensions[0], "rows": expected_dimensions[1]},
+        f"wrong dimensions: {dimensions}",
+    )
+    visible = screen_text(page)
+    for marker in markers:
+        require(marker in visible, f"{filename} does not show {marker!r}")
+    screen = page.locator(".xterm-screen")
+    cursor = cursor_position(page)
+    input_row = buffer_line(page, cursor["y"])
+    if expected_cursor is not None:
+        require(
+            cursor == {"x": expected_cursor[0], "y": expected_cursor[1]},
+            f"{filename} cursor {cursor}, expected {expected_cursor}",
+        )
+        require(cursor_visible(page), f"{filename} cursor is hidden")
+    for marker in input_row_markers:
+        require(
+            marker in input_row,
+            f"{filename} input row omits {marker!r}: {input_row!r}",
+        )
+    for marker in input_row_absent:
+        require(
+            marker not in input_row,
+            f"{filename} input row retains {marker!r}: {input_row!r}",
+        )
+    if input_row_markers:
+        require(
+            buffer_cell_chars(page, cursor["y"], dimensions["cols"] - 1) == "│",
+            f"{filename} input row lost right-border cell: {input_row!r}",
+        )
+    box = screen.bounding_box()
+    require(box is not None, f"{filename} has no screen bounds")
+    screen.screenshot(path=str(path))
+    payload = path.read_bytes()
+    assert box is not None
+    # fmt: off
+    return {
+        "file": filename, "captured_at": utc_now(), "bytes": len(payload),
+        "sha256": digest_bytes(payload), "visible_text_sha256": digest_bytes(visible.encode()),
+        "visible_text": visible,
+        "terminal_columns": dimensions["cols"], "terminal_rows": dimensions["rows"],
+        "width_px": int(box["width"]), "height_px": int(box["height"]),
+        "cursor_zero_based": cursor, "cursor_visible": cursor_visible(page),
+        "xterm_unicode_active_version": page.evaluate("window.term.unicode.activeVersion"),
+        "input_row_text_sha256": digest_bytes(input_row.encode()),
+        "input_row_text": input_row, "markers": markers,
+    }
+    # fmt: on
+
+
+def request_identity(state: Fixture, expected_message: str) -> dict[str, str]:
+    request = state.request
+    if request is None:
+        raise AssertionError(f"{expected_message} request was not recorded")
+    require(request["name"] == KEEPER, "Keeper identity mismatch")
+    require(request["message"] == expected_message, "message identity mismatch")
+    require(UUID7_RE.fullmatch(request["request_id"]) is not None, "invalid UUIDv7")
+    return request
+
+
+def final_http(
+    state: Fixture,
+    posts: int,
+    gets: int,
+) -> dict[str, Any]:
+    summary = state.summary()
+    counts = {
+        key: summary[key]
+        for key in (
+            "chat_stream_post_count",
+            "chat_operation_get_count",
+            "other_post_count",
+            "unexpected_chat_route_count",
+        )
+    }
+    expected = {
+        "chat_stream_post_count": posts,
+        "chat_operation_get_count": gets,
+        "other_post_count": 0,
+        "unexpected_chat_route_count": 0,
+    }
+    require(counts == expected, f"final HTTP counts: {counts}, expected {expected}")
+    require(summary["errors"] == [], f"fixture errors: {summary['errors']}")
+    settled = all(
+        record["response_status"] == 200 and record["response_handler_completed"]
+        for record in summary["records"]
+    )
+    require(settled, "not all fixture responses settled")
+    return summary
+
+
+def success_scenario(
+    browser: Browser,
+    output: Path,
+    prefix: str,
+    executable: Path,
+) -> dict[str, Any]:
+    state = Fixture("success")
+    shots: list[dict[str, Any]] = []
+    measurements: dict[str, Any] = {}
+    with fixture_server(state) as api_port:
+        with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-success-") as raw:
+            base = Path(raw)
+            prepare_base(base)
+            with ttyd_session(browser, base, api_port, executable) as (page, _started):
+                open_message(page)
+                resize_terminal(page, 99, 7)
+                wait_text(page, "Keeper chat needs")
+                wait_cursor_hidden(page)
+                type_text(page, "blocked-tiny")
+                page.wait_for_timeout(2_000)
+                wait_cursor_hidden(page)
+                require(
+                    "blocked-tiny" not in screen_text(page),
+                    "compact resize gate accepted hidden input",
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "01-chat-tiny-resize-gate.png",
+                                     "Keeper chat needs", "resize", "Esc:back",
+                                     expected_dimensions=(99, 7)))
+                # fmt: on
+                resize_terminal(page, 99, 30)
+                wait_text(page, f"Message to: {KEEPER}")
+                wait_text(page, "blocked-tiny", present=False)
+                measurements["resize_restore_cursor_zero_based"] = wait_cursor(
+                    page, 6, 24
+                )
+                type_text(page, "👍🏽")
+                wait_text(page, "👍🏽")
+                measurements["compound_before_backspace_cursor_zero_based"] = (
+                    wait_cursor(page, 10, 24)
+                )
+                press(page, "Backspace")
+                wait_text(page, "👍")
+                wait_text(page, "👍🏽", present=False)
+                measurements["compound_after_backspace_cursor_zero_based"] = (
+                    wait_cursor(page, 8, 24)
+                )
+                press(page, "Control+U")
+                wait_text(page, "👍", present=False)
+                type_text(page, LONG_DRAFT)
+                wait_text(page, "❤️❤️❤️-TAIL")
+                wait_text(page, "prefix-", present=False)
+                measurements["long_tail_cursor_zero_based"] = wait_cursor(page, 97, 24)
+                # fmt: off
+                shots.append(capture(page, output, prefix + "02-chat-long-tail.png",
+                                     "> ~", "❤️❤️❤️-TAIL", expected_cursor=(97, 24),
+                                     input_row_markers=("> ~", "❤️❤️❤️-TAIL"),
+                                     input_row_absent=("prefix-",)))
+                # fmt: on
+                press(page, "Backspace")
+                wait_text(page, "❤️❤️❤️-TAI")
+                wait_text(page, "❤️❤️❤️-TAIL", present=False)
+                measurements["backspace_cursor_zero_based"] = wait_cursor(page, 97, 24)
+                # fmt: off
+                shots.append(capture(page, output, prefix + "03-chat-long-tail-backspace.png",
+                                     "> ~", "❤️❤️❤️-TAI", expected_cursor=(97, 24),
+                                     input_row_markers=("> ~", "❤️❤️❤️-TAI"),
+                                     input_row_absent=("prefix-", "❤️❤️❤️-TAIL")))
+                # fmt: on
+                press(page, "Control+U")
+                wait_text(page, "❤️❤️❤️-TAI", present=False)
+                type_text(page, SUCCESS_MESSAGE)
+                wait_text(page, SUCCESS_MESSAGE)
+                measurements["unicode_draft_cursor_zero_based"] = wait_cursor(
+                    page, 25, 24
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "04-chat-unicode-draft.png",
+                                     SUCCESS_MESSAGE, "Enter:send", expected_cursor=(25, 24),
+                                     input_row_markers=(f"> {SUCCESS_MESSAGE}",)))
+                # fmt: on
+                press(page, "Enter")
+                await_event(state.post_seen, "success POST")
+                request = request_identity(state, SUCCESS_MESSAGE)
+                request_label = (
+                    request["request_id"][:4] + ".." + request["request_id"][-8:]
+                )
+                wait_text(page, f"(sending {request_label}")
+                started = time.monotonic()
+                type_text(page, "draft-during-send")
+                wait_text(page, "> draft-during-send")
+                latency = (time.monotonic() - started) * 1000
+                measurements["draft_visible_latency_ms"] = round(latency, 3)
+                measurements[
+                    "draft_visible_before_post_release"
+                ] = not state.post_release.is_set()
+                require(
+                    latency <= 500 and not state.post_release.is_set(),
+                    f"draft latency/release violated: {latency:.3f}ms",
+                )
+                press(page, "Enter")
+                page.wait_for_timeout(350)
+                require(
+                    state.summary()["chat_stream_post_count"] == 1,
+                    "inflight Enter sent a second POST",
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "05-chat-inflight-responsive.png",
+                                  SUCCESS_MESSAGE, f"(sending {request_label}",
+                                  "> draft-during-send", "Enter:wait for current request"))
+                # fmt: on
+                started = time.monotonic()
+                state.post_release.set()
+                wait_text(page, "reply-v3")
+                latency = (time.monotonic() - started) * 1000
+                measurements["reply_visible_after_release_ms"] = round(latency, 3)
+                require(latency <= 2500, f"reply latency {latency:.3f}ms")
+                wait_text(page, "(sending ", present=False)
+                wait_text(page, "> draft-during-send")
+                visible = screen_text(page)
+                lines = visible.splitlines()
+                user_row = any(
+                    " you " in line and request_label in line for line in lines
+                )
+                keeper_row = any(
+                    f" {KEEPER} " in line and request_label in line for line in lines
+                )
+                require(user_row and keeper_row, "request ID is not on both rows")
+                require("Enter:send" in visible, "settled footer does not allow send")
+                # fmt: off
+                shots.append(capture(page, output, prefix + "06-chat-success-correlated.png",
+                                  SUCCESS_MESSAGE, "reply-v3", request_label,
+                                  "> draft-during-send", "Enter:send",
+                                  expected_cursor=(23, 24),
+                                  input_row_markers=("> draft-during-send",)))
+                # fmt: on
+    # fmt: off
+    return {"name": "responsive_success", "measurements": measurements,
+            "screenshots": shots, "http": final_http(state, 1, 0)}
+    # fmt: on
+
+
+def recovery_scenario(
+    browser: Browser,
+    output: Path,
+    prefix: str,
+    executable: Path,
+) -> dict[str, Any]:
+    state = Fixture("recovery")
+    shots: list[dict[str, Any]] = []
+    measurements: dict[str, float | int] = {}
+    with fixture_server(state) as api_port:
+        with tempfile.TemporaryDirectory(
+            prefix="masc-tui-keeper-chat-recovery-"
+        ) as raw:
+            base = Path(raw)
+            prepare_base(base)
+            recovery = base / ".masc/tui-keeper-chat-recovery.json"
+            with ttyd_session(browser, base, api_port, executable) as (page, _started):
+                open_message(page)
+                type_text(page, "recover-v3")
+                press(page, "Enter")
+                await_event(state.post_seen, "recovery POST")
+                request = request_identity(state, "recover-v3")
+                request_label = (
+                    request["request_id"][:4] + ".." + request["request_id"][-8:]
+                )
+                wait_text(page, "outcome unverified:")
+                visible = screen_text(page)
+                require(
+                    "partial-must-not-be-promoted" not in visible,
+                    "partial reply was promoted",
+                )
+                require(recovery.exists(), "recovery file is missing")
+                recovery_bytes = recovery.read_bytes()
+                recovery_json = json.loads(recovery_bytes)
+                expected_recovery = {
+                    "schema": "masc.tui_keeper_chat_recovery.v3",
+                    "phase": "accepted",
+                    "request_id": request["request_id"],
+                    "keeper_name": KEEPER,
+                    "message": "recover-v3",
+                }
+                require(
+                    recovery_json == expected_recovery, "recovery identity mismatch"
+                )
+                require(
+                    stat.S_IMODE(recovery.stat().st_mode) == 0o600,
+                    "recovery mode is not 0600",
+                )
+                recovery_hash = digest_bytes(recovery_bytes)
+                type_text(page, "blocked-resend")
+                press(page, "Enter")
+                page.wait_for_timeout(350)
+                require(
+                    state.summary()["chat_stream_post_count"] == 1,
+                    "unverified Enter sent a second POST",
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "07-chat-outcome-unverified.png",
+                                  "outcome unverified:", request_label, "> blocked-resend",
+                                  "Ctrl-R:resume exact request  Enter:blocked"))
+                # fmt: on
+                navigations: list[Frame] = []
+                page.on("framenavigated", lambda frame: navigations.append(frame))
+                require(
+                    not state.get1_seen.is_set(),
+                    "manual reconciliation GET arrived before Ctrl-R",
+                )
+                started = time.monotonic()
+                press(page, "Control+R")
+                await_event(state.get1_seen, "manual operation GET")
+                get_latency = (time.monotonic() - started) * 1000
+                wait_text(page, f"(reconciling exact operation {request_label}")
+                ui_latency = (time.monotonic() - started) * 1000
+                measurements.update(
+                    {
+                        "ctrl_r_to_get_ms": round(get_latency, 3),
+                        "ctrl_r_to_reconciling_ui_ms": round(ui_latency, 3),
+                        "ctrl_r_navigation_count": len(navigations),
+                    }
+                )
+                require(get_latency <= 500, f"Ctrl-R GET latency {get_latency:.3f}ms")
+                require(ui_latency <= 500, f"Ctrl-R UI latency {ui_latency:.3f}ms")
+                require(navigations == [], "Ctrl-R navigated the browser page")
+                press(page, "Control+R")
+                press(page, "Enter")
+                page.wait_for_timeout(350)
+                interim = state.summary()
+                require(
+                    interim["chat_stream_post_count"] == 1
+                    and interim["chat_operation_get_count"] == 1,
+                    "held reconciliation did not remain POST1/GET1",
+                )
+            require(
+                recovery.exists() and digest_file(recovery) == recovery_hash,
+                "recovery changed across process exit",
+            )
+            state.get1_release.set()
+            await_event(state.get1_done, "GET1 cleanup")
+            with ttyd_session(browser, base, api_port, executable) as (
+                page,
+                session_started,
+            ):
+                await_event(state.get2_seen, "startup operation GET")
+                assert state.get2_received_monotonic is not None
+                startup_latency = (
+                    state.get2_received_monotonic - session_started
+                ) * 1000
+                measurements["restart_to_auto_get_ms"] = round(startup_latency, 3)
+                require(
+                    startup_latency <= 5000,
+                    f"startup GET latency {startup_latency:.3f}ms",
+                )
+                open_message(page)
+                wait_text(
+                    page,
+                    "Recovered an accepted request; reconciling the exact durable operation",
+                )
+                wait_text(page, f"(reconciling exact operation {request_label}")
+                # fmt: off
+                shots.append(capture(page, output, prefix + "08-chat-restarted-reconciling.png",
+                                  "Recovered an accepted request; reconciling the exact durable operation",
+                                  f"(reconciling exact operation {request_label}",
+                                  "reconciling exact operation  Enter:blocked"))
+                # fmt: on
+                started = time.monotonic()
+                state.get2_release.set()
+                wait_text(page, "Operation settled successfully (turn:v3)")
+                latency = (time.monotonic() - started) * 1000
+                measurements["recovery_visible_after_release_ms"] = round(latency, 3)
+                require(latency <= 2500, f"recovery latency {latency:.3f}ms")
+                wait_text(page, "outcome unverified:", present=False)
+                wait_text(page, "(reconciling exact operation", present=False)
+                deadline = time.monotonic() + 5
+                while recovery.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                require(not recovery.exists(), "terminal recovery retained fence")
+                require("Enter:send" in screen_text(page), "settled footer blocks send")
+                # fmt: off
+                shots.append(capture(page, output, prefix + "09-chat-reconciled.png",
+                                  "Operation settled successfully (turn:v3)",
+                                  "canonical reply is unavailable", "transport", "Enter:send"))
+                # fmt: on
+    summary = final_http(state, 1, 2)
+    expected_path = f"/api/v1/keepers/{KEEPER}/chat/operations/{request['request_id']}"
+    paths = [
+        r["path"] for r in summary["records"] if r["operation_ordinal"] is not None
+    ]
+    require(paths == [expected_path, expected_path], f"operation paths: {paths}")
+    # fmt: off
+    return {
+        "name": "accepted_eof_exact_recovery_across_restart",
+        "uncertainty_fixture": "accepted strict SSE ending before terminal event",
+        "measurements": measurements, "recovery_sha256_before_restart": recovery_hash,
+        "screenshots": shots, "http": summary,
+    }
+    # fmt: on
+
+
+def replayable_scenario(
+    browser: Browser,
+    output: Path,
+    prefix: str,
+    executable: Path,
+) -> dict[str, Any]:
+    state = Fixture("success")
+    shots: list[dict[str, Any]] = []
+    request = {
+        "request_id": "tui-0198f0de-1234-7abc-8def-0123456789ab",
+        "name": KEEPER,
+        "message": "replayable-v3",
+    }
+    with fixture_server(state) as api_port:
+        with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-replay-") as raw:
+            base = Path(raw)
+            prepare_base(base)
+            recovery = write_recovery(base, phase="replayable", request=request)
+            with ttyd_session(browser, base, api_port, executable) as (page, started):
+                await_event(state.post_seen, "authorized replay POST")
+                observed = request_identity(state, request["message"])
+                require(observed == request, "authorized replay changed exact identity")
+                post_record = next(
+                    record
+                    for record in state.summary()["records"]
+                    if record["method"] == "POST"
+                )
+                post_latency = (post_record["received_monotonic"] - started) * 1000
+                open_message(page)
+                request_label = (
+                    request["request_id"][:4] + ".." + request["request_id"][-8:]
+                )
+                wait_text(page, "Recovered a replayable request")
+                wait_text(page, f"(replaying exact request {request_label}")
+                wait_text(page, "prior outcome unverified:")
+                phase = json.loads(recovery.read_text(encoding="utf-8"))["phase"]
+                require(phase == "dispatching", f"replay claim phase: {phase}")
+                # fmt: off
+                shots.append(capture(page, output, prefix + "10-chat-replayable-exact-replay.png",
+                                     "Recovered a replayable request",
+                                     f"(replaying exact request {request_label}",
+                                     "prior outcome unverified:",
+                                     "replaying exact request  Enter:blocked"))
+                # fmt: on
+                state.post_release.set()
+                wait_text(page, "reply-v3")
+                wait_until(lambda: not recovery.exists(), "replay fence cleanup")
+    # fmt: off
+    return {
+        "name": "durable_replayable_exact_id_replay",
+        "measurements": {"startup_to_replay_post_ms": round(post_latency, 3)},
+        "screenshots": shots, "http": final_http(state, 1, 0),
+    }
+    # fmt: on
+
+
+def cross_process_fail_closed_scenario(
+    browser: Browser,
+    output: Path,
+    prefix: str,
+    executable: Path,
+) -> dict[str, Any]:
+    state = Fixture("rejection")
+    shots: list[dict[str, Any]] = []
+    measurements: dict[str, float | int] = {}
+    request = {
+        "request_id": "tui-0198f0df-5678-7abc-9def-0123456789ab",
+        "name": KEEPER,
+        "message": "race-v3",
+    }
+    with fixture_server(state) as api_port:
+        with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-race-") as raw:
+            base = Path(raw)
+            prepare_base(base)
+            recovery = write_recovery(base, phase="prepared", request=request)
+            dispatch_lock = Path(str(recovery) + ".dispatch.lock")
+            with held_file_lock(dispatch_lock) as release_lock:
+                with ttyd_session(browser, base, api_port, executable) as (
+                    observer,
+                    observer_started,
+                ):
+                    open_message(observer)
+                    wait_text(
+                        observer,
+                        "Recovered a prepared request; claiming its first serialized dispatch",
+                    )
+                    wait_text(observer, "prepared recovery blocked")
+                    wait_text(observer, "Ctrl-R:retry prepared fence  Enter:blocked")
+                    summary_during = state.summary()
+                    posts_during = summary_during["chat_stream_post_count"]
+                    require(posts_during == 0, "locked observer issued a POST")
+                    measurements.update(
+                        {
+                            "prepared_observer_start_to_blocked_ui_ms": round(
+                                (time.monotonic() - observer_started) * 1000,
+                                3,
+                            ),
+                            "post_count_while_external_lock_active": posts_during,
+                        }
+                    )
+                    # fmt: off
+                    shots.append(capture(observer, output, prefix + "11-chat-stale-prepared-blocked.png",
+                                         "Recovered a prepared request; claiming its first serialized dispatch",
+                                         "prepared recovery blocked",
+                                         "Ctrl-R:retry prepared fence  Enter:blocked"))
+                    # fmt: on
+                    release_lock()
+                    with ttyd_session(browser, base, api_port, executable) as (
+                        owner,
+                        _,
+                    ):
+                        await_event(state.post_seen, "owner first serialized POST")
+                        observed = request_identity(state, request["message"])
+                        require(
+                            observed == request,
+                            "owner dispatcher changed exact identity",
+                        )
+                        phase = json.loads(recovery.read_text(encoding="utf-8"))[
+                            "phase"
+                        ]
+                        require(
+                            phase == "dispatching", f"owner dispatch phase: {phase}"
+                        )
+                        require(
+                            state.summary()["chat_stream_post_count"] == 1,
+                            "owner did not remain the only POST",
+                        )
+                        released = time.monotonic()
+                        state.post_release.set()
+                        wait_until(
+                            lambda: any(
+                                record["method"] == "POST"
+                                and record["response_status"] == 403
+                                and record["response_handler_completed"]
+                                for record in state.summary()["records"]
+                            ),
+                            "definitive rejection response",
+                        )
+                        wait_until(
+                            lambda: not recovery.exists(), "rejected fence cleanup"
+                        )
+                        owner.wait_for_timeout(500)
+                        measurements["rejection_release_to_fence_removed_ms"] = round(
+                            (time.monotonic() - released) * 1000, 3
+                        )
+                    resumed = time.monotonic()
+                    press(observer, "Control+R")
+                    wait_text(observer, "Enter:send")
+                    wait_text(observer, "prepared recovery blocked", present=False)
+                    observer.wait_for_timeout(350)
+                    require(
+                        state.summary()["chat_stream_post_count"] == 1,
+                        "stale Ctrl-R recreated and dispatched the removed fence",
+                    )
+                    measurements["stale_ctrl_r_to_send_enabled_ms"] = round(
+                        (time.monotonic() - resumed) * 1000, 3
+                    )
+                    # fmt: off
+                    shots.append(capture(observer, output, prefix + "12-chat-stale-fence-not-recreated.png",
+                                         "Recovered a prepared request",
+                                         "Enter:send"))
+                    # fmt: on
+    summary = state.summary()
+    require(summary["chat_stream_post_count"] == 1, "race final POST count")
+    require(summary["chat_operation_get_count"] == 0, "race final GET count")
+    require(summary["other_post_count"] == 0, "race emitted other POST")
+    require(summary["unexpected_chat_route_count"] == 0, "race used wrong route")
+    require(summary["errors"] == [], f"race fixture errors: {summary['errors']}")
+    require(
+        all(record["response_handler_completed"] for record in summary["records"]),
+        "race left an HTTP response unsettled",
+    )
+    # fmt: off
+    return {
+        "name": "two_tui_stale_prepared_not_recreated",
+        "measurements": measurements, "screenshots": shots, "http": summary,
+    }
+    # fmt: on
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--target-pr", required=True, type=int)
+    args = parser.parse_args()
+    script_path = Path(__file__).resolve()
+    script_hash = digest_file(script_path)
+    output = Path(tempfile.mkdtemp(prefix="masc-tui-keeper-chat-capture-"))
+    source_temp = tempfile.TemporaryDirectory(prefix=".source-", dir=output)
+    source_dir = Path(source_temp.name)
+    build_temp = tempfile.TemporaryDirectory(prefix=".dune-build-", dir=output)
+    build_dir = Path(build_temp.name)
+    executable = build_dir / "default/bin/masc_tui.exe"
+    # fmt: off
+    evidence: dict[str, Any] = {
+        "schema": "masc.tui_keeper_chat_capture.v2", "target_pr": args.target_pr,
+        "output_dir": str(output), "started_at": utc_now(), "scenarios": [],
+    }
+    # fmt: on
+    code = 0
+    try:
+        require(
+            re.fullmatch(r"[0-9a-f]{40}", args.expected_head) is not None,
+            "--expected-head must be a full lowercase SHA",
+        )
+        require(args.target_pr > 0, "--target-pr must be positive")
+        head = run_text("git", "rev-parse", "HEAD")
+        dirty = run_text("git", "status", "--porcelain=v1").splitlines()
+        require(head == args.expected_head, f"HEAD mismatch: {head}")
+        require(dirty == [], f"dirty checkout: {dirty}")
+        require(BUILD_WRAPPER.is_file(), f"missing build wrapper: {BUILD_WRAPPER}")
+        require(TTYD.is_file(), f"missing ttyd: {TTYD}")
+
+        archive_path = output / ".source.tar"
+        with archive_path.open("xb") as archive_handle:
+            archive_result = subprocess.run(
+                ["git", "archive", "--format=tar", head],
+                cwd=WORKTREE,
+                stdout=archive_handle,
+            )
+        require(archive_result.returncode == 0, "git archive failed")
+        archive_hash = digest_file(archive_path)
+        with tarfile.open(archive_path, mode="r") as archive:
+            archive.extractall(path=source_dir, filter="data")
+        archive_path.unlink()
+        snapshot_wrapper = source_dir / "scripts/dune-local.sh"
+        require(snapshot_wrapper.is_file(), "source snapshot is incomplete")
+
+        require(not any(build_dir.iterdir()), "fresh build directory is not empty")
+        build_environment = safe_env(BUILD_ENV_KEYS)
+        build_args = ["build", "--build-dir", str(build_dir), "bin/masc_tui.exe"]
+        build_started = utc_now()
+        build_started_monotonic = time.monotonic()
+        build = subprocess.run(
+            [str(snapshot_wrapper), *build_args],
+            cwd=source_dir,
+            capture_output=True,
+            env=build_environment,
+        )
+        # fmt: off
+        evidence["build"] = {
+            "command": ["scripts/dune-local.sh", *build_args],
+            "started_at": build_started, "finished_at": utc_now(),
+            "duration_ms": round((time.monotonic() - build_started_monotonic) * 1000, 3),
+            "returncode": build.returncode, "stdout_sha256": digest_bytes(build.stdout),
+            "stderr_sha256": digest_bytes(build.stderr),
+            "stdout_utf8": build.stdout.decode("utf-8"),
+            "stderr_utf8": build.stderr.decode("utf-8"),
+            "inherited_environment_keys": sorted(build_environment),
+            "fresh_build_dir": str(build_dir),
+            "source_snapshot": {
+                "kind": "git_archive", "commit": head, "tar_sha256": archive_hash,
+            },
+        }
+        # fmt: on
+        require(build.returncode == 0, f"focused build failed: {build.returncode}")
+        require(
+            executable.is_file() and not executable.is_symlink(),
+            f"missing/non-regular rebuilt executable: {executable}",
+        )
+        require(
+            run_text("git", "rev-parse", "HEAD") == head, "HEAD changed during build"
+        )
+        require(
+            run_text("git", "status", "--porcelain=v1") == "", "build dirtied checkout"
+        )
+        require(
+            digest_file(script_path) == script_hash,
+            "capture script changed during build",
+        )
+        executable_hash = digest_file(executable)
+        executable_bytes = executable.stat().st_size
+        prefix = ""
+        # fmt: off
+        evidence["source"] = {
+            "head": head,
+            "branch": run_text("git", "branch", "--show-current"),
+            "disposition": "exact-head-candidate",
+            "executable_sha256": executable_hash,
+            "executable_bytes": executable_bytes,
+            "script_sha256": script_hash,
+            "ttyd_version": run_text(str(TTYD), "--version"),
+            "playwright_version": package_version("playwright"),
+            "child_environment_keys": sorted(set(safe_env(SAFE_ENV_KEYS)) | {
+                "MASC_BASE_PATH", "MASC_HOST", "MASC_TUI_SYNC",
+                "NO_PROXY", "TERM", "no_proxy",
+            }),
+        }
+        # fmt: on
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                evidence["source"]["chromium_version"] = browser.version
+                evidence["scenarios"].append(
+                    success_scenario(browser, output, prefix, executable)
+                )
+                evidence["scenarios"].append(
+                    recovery_scenario(browser, output, prefix, executable)
+                )
+                evidence["scenarios"].append(
+                    replayable_scenario(browser, output, prefix, executable)
+                )
+                evidence["scenarios"].append(
+                    cross_process_fail_closed_scenario(
+                        browser, output, prefix, executable
+                    )
+                )
+            finally:
+                browser.close()
+
+        # fmt: off
+        names = [scenario["name"] for scenario in evidence["scenarios"]]
+        require(names == ["responsive_success", "accepted_eof_exact_recovery_across_restart",
+                          "durable_replayable_exact_id_replay",
+                          "two_tui_stale_prepared_not_recreated"],
+                f"incomplete scenarios: {names}")
+        screenshots = [shot for scenario in evidence["scenarios"] for shot in scenario["screenshots"]]
+        # fmt: on
+        require(len(screenshots) == 12, f"screenshot count: {len(screenshots)}")
+        screenshot_paths = sorted(output.glob("*.png"))
+        require(
+            [path.name for path in screenshot_paths]
+            == sorted(shot["file"] for shot in screenshots),
+            "on-disk screenshot set differs from scenario records",
+        )
+        screenshot_records = {shot["file"]: shot for shot in screenshots}
+        for path in screenshot_paths:
+            record = screenshot_records[path.name]
+            require(path.stat().st_size == record["bytes"], f"size drift: {path.name}")
+            require(digest_file(path) == record["sha256"], f"hash drift: {path.name}")
+        require(
+            run_text("git", "rev-parse", "HEAD") == head, "HEAD changed during capture"
+        )
+        require(
+            run_text("git", "status", "--porcelain=v1") == "",
+            "capture dirtied checkout",
+        )
+        require(
+            digest_file(executable) == executable_hash,
+            "executable changed during capture",
+        )
+        require(
+            digest_file(script_path) == script_hash,
+            "capture script changed during execution",
+        )
+        # fmt: off
+        evidence["verified"] = {
+            "exact_head": True, "clean_before_and_after": True, "focused_build": True,
+            "all_four_scenarios": True, "twelve_screenshots": True,
+            "raw_dom_and_http_bodies": True,
+            "binary_unchanged_during_capture": True, "script_unchanged": True,
+            "immutable_git_archive_source": True, "screenshots_rehashed": True,
+        }
+        # fmt: on
+        evidence["status"] = "passed"
+    except Exception as error:  # noqa: BLE001 - always persist structured failure
+        code = 1
+        evidence["status"] = "failed"
+        evidence["failure"] = {
+            "type": type(error).__name__,
+            "detail": str(error),
+        }
+        evidence["partial_screenshots"] = [
+            {
+                "file": path.name,
+                "bytes": path.stat().st_size,
+                "sha256": digest_file(path),
+            }
+            for path in sorted(output.glob("*.png"))
+        ]
+    finally:
+        build_temp.cleanup()
+        source_temp.cleanup()
+    evidence["finished_at"] = utc_now()
+    evidence_path = output / "evidence.json"
+    with evidence_path.open("x", encoding="utf-8") as handle:
+        json.dump(evidence, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    print(json.dumps(evidence, ensure_ascii=False, indent=2))
+    print(f"evidence_path={evidence_path}", file=sys.stderr)
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

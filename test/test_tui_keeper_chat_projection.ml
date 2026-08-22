@@ -434,6 +434,16 @@ let test_operation_reconciliation_projection () =
   | Ok _ -> fail "cancelled operation projected to the wrong state"
   | Error error -> fail (Chat.stream_error_to_string error)
 
+let test_operation_reconciliation_uses_server_canonical_message () =
+  let request_with_whitespace = { request with message = "  hello \n" } in
+  match
+    Chat.decode_operation_reconciliation ~request:request_with_whitespace
+      (operation_json "Running" [ "started_at", `Float 2.0 ])
+  with
+  | Ok (Chat.Operation_pending Chat.Running) -> ()
+  | Ok _ -> fail "canonical operation projected to the wrong state"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
 let test_stale_completion_identity () =
   let current : Chat.request =
     { request_id = "tui-current"; keeper_name = "keeper.one"; message = "one" }
@@ -525,6 +535,8 @@ let () =
         ; test_case "typed error certainty" `Quick test_error_certainty
         ; test_case "operation reconciliation projection" `Quick
             test_operation_reconciliation_projection
+        ; test_case "operation reconciliation uses server-canonical message" `Quick
+            test_operation_reconciliation_uses_server_canonical_message
         ; test_case "operation reconciliation binds original input" `Quick
             test_operation_reconciliation_binds_original_input
         ; test_case "stale completion identity" `Quick

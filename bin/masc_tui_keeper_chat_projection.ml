@@ -117,7 +117,7 @@ let same_request_identity left right =
 
 let request_operation_input request =
   Masc.Keeper_chat_operation_payload.input_to_json
-    ~message:request.message
+    ~message:(String.trim request.message)
     ~user_blocks:[]
     ~turn_instructions:None
     ~surface_context:None

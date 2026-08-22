@@ -119,13 +119,19 @@ naming the expected shape, and no labels.
 
 ### PR status labels
 
-Pull requests carry no taxonomy. `kind`/`area`/`impact` describe a problem and a PR is an answer, so the
-`Issue Taxonomy` workflow skips them outright. What a PR does carry is `pr/*`, projected from GitHub's own
-view of it by the `PR Status Labels` workflow out of `.github/pull-request-labels.json`.
+The `Issue Taxonomy` workflow skips pull requests outright: `kind`/`area`/`impact` describe a problem and a
+PR is an answer. Practice disagrees - on 2026-08-22, 15 of 29 open PRs and 13 of the last 30 merged ones
+carried taxonomy labels, applied by hand at `gh pr create --label` time. Nothing declares those and nothing
+reconciles them, so they are the one place in this model where a label asserts a classification with no
+source behind it. Either the hand-labelling stops or PRs get a declaration of their own; today it is
+neither.
+
+What a PR does carry by machine is `pr/*`, projected from GitHub's own view of it by the `PR Status Labels`
+workflow out of `.github/pull-request-labels.json`.
 
 | Label | Set when |
 |-------|----------|
-| `pr/conflict` | `mergeable` is `CONFLICTING`. No `pull_request` workflow runs in that state, so the PR shows zero checks and reads as a slow queue |
+| `pr/conflict` | `mergeable` is `CONFLICTING`. GitHub cannot build a merge commit in that state, so no new `pull_request` workflow starts and the checks stop updating - a PR that conflicted from the start shows none at all (#29332) |
 | `pr/review-changes` | the review decision is `CHANGES_REQUESTED` |
 | `pr/review-approved` | the review decision is `APPROVED` |
 | `pr/unresolved` | at least one review thread is still open |

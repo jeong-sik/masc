@@ -4,9 +4,10 @@ name: PR Status Labels
 # nothing gates on them and nobody sets them by hand.
 #
 # Two of the four states cannot be reached any other way:
-#   - `mergeable` has no search qualifier, and a CONFLICTING PR starts no `pull_request`
-#     workflow at all, so it carries zero check runs and reads as a slow queue rather than
-#     a blocked branch.
+#   - `mergeable` has no search qualifier. GitHub also cannot build a merge commit while a
+#     PR conflicts, so no new `pull_request` workflow starts: the checks freeze at whatever
+#     the last clean push produced, and a PR that conflicted from the start shows none at
+#     all. Either way the PR reads as a slow queue rather than a blocked branch.
 #   - Unresolved review threads have no search qualifier either, and answering them is a
 #     merge precondition here.
 # The two review-decision labels do duplicate the `review:` search qualifiers. They earn

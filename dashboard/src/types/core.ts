@@ -675,8 +675,8 @@ export type KeeperTurnOutcome =
 
 // Where an `external_effect_completed` turn actually delivered its reply
 // (`external_effect_target` on the reply payload / the
-// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Absent on legacy payloads
-// that predate the field — the card then falls back to generic copy.
+// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Present exactly on those
+// turns; other outcomes carry no target and the card keeps generic copy.
 export type KeeperExternalEffectTarget =
   | { kind: 'dashboard' }
   | { kind: 'discord'; channelId: string }

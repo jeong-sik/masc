@@ -12,14 +12,11 @@ const LogCategorySchema = Schema.Literal(
   'lifecycle',
   'directive',
   'heartbeat',
-  'presence',
-  'task',
   'tool',
-  'memory',
-  'telemetry',
   'routine',
   'boundary',
-  'uncategorized',
+  'turn',
+  'broadcast',
 )
 
 const LogDetailsSchema = Schema.Record({
@@ -169,8 +166,8 @@ export interface LogEntry {
   readonly hasTurn: boolean
   readonly message: string
   readonly details: Readonly<Record<string, unknown>>
-  readonly category: LogCategory
-  readonly hasExplicitCategory: boolean
+  /** The producer's typed category; null when the OCaml emit carried none. */
+  readonly category: LogCategory | null
 }
 
 export interface LogsData {
@@ -225,8 +222,7 @@ function toLogEntry(wire: LogEntryWire): LogEntry {
     hasTurn: Option.isSome(wire.turn_id),
     message: wire.message,
     details: Option.getOrElse(wire.details, () => EMPTY_LOG_DETAILS),
-    category: Option.getOrElse(wire.category, () => 'uncategorized' as const),
-    hasExplicitCategory: Option.isSome(wire.category),
+    category: Option.getOrNull(wire.category),
   }
 }
 

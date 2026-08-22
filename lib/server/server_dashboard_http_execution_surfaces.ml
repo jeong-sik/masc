@@ -1013,7 +1013,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
           (fun ~config ~sw ->
              Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
              |> patch_surface_json_for_running_keepers config
-             |> with_projection_diagnostics
+             |> Server_dashboard_http_core_cache.with_projection_diagnostics
                   ~surface:"execution"
                   ~started_at
                   ~extra:
@@ -1121,7 +1121,7 @@ let compute_execution_trust_json ~state ~sw ~clock =
     ~config:(Mcp_server.workspace_config state)
     (fun ~config ~sw:_ ->
        Dashboard_http_keeper.execution_trust_dashboard_json config
-       |> with_projection_diagnostics
+       |> Server_dashboard_http_core_cache.with_projection_diagnostics
             ~surface:"execution_trust"
             ~started_at
             ~extra:[])
@@ -1200,7 +1200,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
            ~proc_mgr:state.Mcp_server.proc_mgr
            ()
          |> patch_surface_json_for_running_keepers config
-         |> with_projection_diagnostics
+         |> Server_dashboard_http_core_cache.with_projection_diagnostics
               ~surface:"execution"
               ~started_at
               ~extra:

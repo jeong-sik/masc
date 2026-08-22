@@ -23,7 +23,7 @@
     [runtime_counter] type, [StringMap],
     [runtime_max_keys], [create_runtime_counter],
     [runtime_eviction] type, [find_runtime_eviction_candidate],
-    [display_provider_name_of_config], [runtime_observation_of_candidates],
+    [runtime_observation_of_candidates],
     [runtime_attempt_to_json],
     [update_first_attempt_if], [record_attempt_start],
     [ensure_terminal_attempt],
@@ -80,13 +80,6 @@ val provider_name_of_config :
 (** Canonical provider slug from a config. Free-form string used as
     the runtime counter key; the function does not enumerate
     specific providers. *)
-
-val model_label_of_config :
-  Llm_provider.Provider_config.t -> string
-(** Canonical [provider:model] label (e.g.
-    ["anthropic:claude-opus"]).  Compatibility helper for legacy
-    tests and callers; current public attempt/fallback projections use
-    runtime-lane labels instead. *)
 
 (** {1 Runtime metrics capture} *)
 

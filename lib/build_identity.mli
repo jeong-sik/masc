@@ -22,12 +22,6 @@ type t = {
     (** [Some "embedded"] when [commit] came from the build-time stamp,
         [Some "runtime_repo_head"] when it came from probing the current
         checkout, [None] when unknown. *)
-  commit_unix_ts : float option;
-    (** Unix timestamp of [commit].  Kept for compatibility; prefer the
-        source-specific timestamp fields below. *)
-  commit_age_seconds : int option;
-    (** Age of [commit_unix_ts].  Kept for compatibility; prefer
-        [binary_commit_age_seconds] for binary freshness. *)
   binary_commit : string option;
     (** Commit stamped into the binary at build time, when available.  This
         is the only commit field that operators should use as binary-build

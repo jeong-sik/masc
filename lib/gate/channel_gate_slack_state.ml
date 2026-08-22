@@ -21,7 +21,6 @@ let connector_id = "slack"
 let display_name = "Slack"
 let channel = "slack"
 
-let default_status_path = ".gate/runtime/slack/status.json"
 let default_binding_store_path = ".gate/runtime/slack/bindings.json"
 let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
 
@@ -31,9 +30,6 @@ let slack_path ~env_var ~default () =
   match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
   | Some path -> Env_config_core.resolve_against_base_path path
   | None -> Env_config_core.resolve_against_base_path default
-
-let status_path () =
-  slack_path ~env_var:"MASC_SLACK_STATUS_PATH" ~default:default_status_path ()
 
 let binding_store_path () =
   slack_path ~env_var:"MASC_SLACK_BINDING_STORE_PATH"
@@ -53,9 +49,6 @@ let binding_store =
 let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
-
-let stale_after_sec () =
-  Env_config_core.get_int ~default:30 "MASC_SLACK_STATUS_STALE_SEC"
 
 (* The one definition of "the transport is live", used both by [status_json]
    and by the [Channel_gate_connector.S] registry export [connected]. Keeping
@@ -146,7 +139,6 @@ let status_json ?(audit_limit = 10) () =
     app_present && bot_present && startup_ok && binding_store_read_ok
   in
   let connected = transport_connected () in
-  let stale = false in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -176,16 +168,15 @@ let status_json ?(audit_limit = 10) () =
     ; ("trigger_policy", trigger_policy_json ())
     ; ("available", `Bool available)
     ; ("connected", `Bool connected)
-    ; ("stale", `Bool stale)
-    ; ("stale_after_sec", `Int (stale_after_sec ()))
     ; ("status",
        `String
+         (* The gateway state machine is the liveness source; it has no
+            heartbeat file that could age out, so it is never stale. *)
          (Channel_gate_connector.connector_state_label ~available ~connected
-            ~stale))
+            ~stale:false))
     ; ("error", `String error)
     ; ("status_source", `String "in_process_gateway")
     ; ("gateway_state", `String (gateway_state_label gateway_state))
-    ; ("status_path", `String (status_path ()))
     ; ("binding_store_path", `String (binding_store_path ()))
     ; ("audit_path", `String (binding_audit_path ()))
     ; ("binding_source", `String "persisted")
@@ -217,13 +208,10 @@ let connector_json ?(audit_limit = 10) () =
     ; "trigger_policy"
     ; "available"
     ; "connected"
-    ; "stale"
-    ; "stale_after_sec"
     ; "status"
     ; "error"
     ; "status_source"
     ; "gateway_state"
-    ; "status_path"
     ; "binding_store_path"
     ; "audit_path"
     ; "binding_source"

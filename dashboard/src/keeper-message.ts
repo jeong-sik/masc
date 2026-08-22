@@ -41,8 +41,9 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
 }
 
 // Closed decode of the reply payload's `external_effect_target` /
-// KEEPER_EXTERNAL_EFFECT_COMPLETED value. Missing field (legacy payload) or
-// any malformed shape decodes to null; the card then keeps its generic copy
+// KEEPER_EXTERNAL_EFFECT_COMPLETED target. The reply payload carries the
+// field only when the turn completed an external effect; a missing field or
+// any malformed shape decodes to null and the card keeps its generic copy
 // instead of guessing a destination.
 export function normalizeKeeperExternalEffectTarget(
   value: unknown,

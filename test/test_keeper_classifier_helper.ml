@@ -44,42 +44,6 @@ let test_negative_counts_are_inactive () =
     C.No_actionable_signal
     (C.classify_actionable_signal (obs ~tasks:(-1) ~board:(-3) ()))
 
-let test_is_actionable_boolean_consistency () =
-  let cases =
-    [
-      (C.No_actionable_signal, false);
-      (C.Has_unclaimed_tasks, true);
-      (C.Has_completion_authority_rejection, true);
-      (C.Has_board_activity, true);
-    ]
-  in
-  List.iter
-    (fun (sig_, expected) ->
-      Alcotest.(check bool) (C.actionable_signal_label sig_) expected
-        (C.is_actionable sig_))
-    cases
-
-let test_is_actionable_matches_classify () =
-  (* Boolean equivalence: classify(...) <> No_actionable_signal
-     iff is_actionable (classify ...) = true. *)
-  let observations =
-    [
-      obs ();
-      obs ~tasks:5 ();
-      obs ~board:3 ();
-      obs ~tasks:2 ~board:1 ();
-    ]
-  in
-  List.iter
-    (fun o ->
-      let sig_ = C.classify_actionable_signal o in
-      let expected = sig_ <> C.No_actionable_signal in
-      Alcotest.(check bool)
-        (Printf.sprintf "is_actionable(%s) = (signal <> No_actionable_signal)"
-           (C.actionable_signal_label sig_))
-        expected (C.is_actionable sig_))
-    observations
-
 let () =
   Alcotest.run "keeper_classifier_helper"
     [
@@ -95,12 +59,5 @@ let () =
             test_zero_counts_are_inactive;
           Alcotest.test_case "negative counts are inactive" `Quick
             test_negative_counts_are_inactive;
-        ] );
-      ( "is_actionable",
-        [
-          Alcotest.test_case "boolean per variant" `Quick
-            test_is_actionable_boolean_consistency;
-          Alcotest.test_case "matches classify result" `Quick
-            test_is_actionable_matches_classify;
         ] );
     ]

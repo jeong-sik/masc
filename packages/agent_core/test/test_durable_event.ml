@@ -255,9 +255,9 @@ let llm_response_json token_fields =
      @ token_fields)
 ;;
 
-let test_llm_request_rejects_legacy_input_tokens () =
+let test_llm_request_rejects_unknown_field () =
   check_event_json_error
-    "llm_request does not accept legacy field \"input_tokens\""
+    "llm_request fields mismatch (missing=[], unknown=[input_tokens], duplicates=[])"
     (`Assoc
         [ "type", `String "llm_request"
         ; "turn", `Int 1
@@ -466,9 +466,9 @@ let () =
       , [ test_case "journal roundtrip" `Quick test_json_roundtrip
         ; test_case "all event types" `Quick test_event_json_roundtrip_all_types
         ; test_case
-            "llm request rejects legacy input tokens"
+            "llm request rejects unknown field"
             `Quick
-            test_llm_request_rejects_legacy_input_tokens
+            test_llm_request_rejects_unknown_field
         ; test_case
             "llm response requires input tokens"
             `Quick

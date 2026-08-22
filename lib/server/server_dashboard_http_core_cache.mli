@@ -34,21 +34,9 @@ val dashboard_query_cache_key :
   Workspace.config -> string -> (string * string option) list -> string
 val dashboard_briefing_timeout_s : float
 
-val attach_projection_diagnostics :
-  Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-
-val projection_diagnostics_json :
-  surface:string ->
-  started_at:float ->
-  extra:(string * Yojson.Safe.t) list ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-
 val with_projection_diagnostics :
   surface:string ->
   started_at:float ->
   extra:(string * Yojson.Safe.t) list ->
   Yojson.Safe.t ->
   Yojson.Safe.t
-
-val initialized_json_opt : Yojson.Safe.t -> Yojson.Safe.t option

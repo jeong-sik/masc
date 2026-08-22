@@ -66,12 +66,10 @@ let with_temp_dir f =
     (fun () -> f base)
 
 let with_discord_paths dir f =
-  let status_path = Filename.concat dir "status.json" in
   let binding_path = Filename.concat dir "bindings.json" in
   let audit_path = Filename.concat dir "audit.jsonl" in
-  with_env "MASC_DISCORD_STATUS_PATH" (Some status_path) (fun () ->
-    with_env "MASC_DISCORD_BINDING_STORE_PATH" (Some binding_path) (fun () ->
-      with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) f))
+  with_env "MASC_DISCORD_BINDING_STORE_PATH" (Some binding_path) (fun () ->
+    with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) f)
 
 let test_bot_token_accessor_unset_and_whitespace () =
   (* The supported OCaml 5.4 test runtime has no [Unix.unsetenv]; the
@@ -107,8 +105,6 @@ let test_status_json_reports_in_process_gateway_status () =
       (json |> U.member "available" |> U.to_bool);
     check bool "connected false" false
       (json |> U.member "connected" |> U.to_bool);
-    check bool "stale false" false
-      (json |> U.member "stale" |> U.to_bool);
     check string "status source" "in_process_gateway"
       (json |> U.member "status_source" |> U.to_string);
     check string "gateway state" "disconnected"
@@ -117,31 +113,6 @@ let test_status_json_reports_in_process_gateway_status () =
       (json |> U.member "error" |> U.to_string);
     check int "no configured bindings" 0
       (json |> U.member "configured_bindings" |> U.to_list |> List.length)))
-
-let test_status_json_ignores_legacy_sidecar_status_file () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-  with_env "DISCORD_BOT_TOKEN" None (fun () ->
-    let status_path = Filename.concat dir "status.json" in
-    Yojson.Safe.to_file status_path
-      (`Assoc
-        [
-          ("updated_at", `String "2026-05-10T16:49:47Z");
-          ("connected", `Bool true);
-          ("bot_user_name", `String "legacy-sidecar");
-          ("runtime_bindings_count", `Int 99);
-        ]);
-    let json = Discord_state.status_json () in
-    check string "source" "in_process_gateway"
-      (json |> U.member "status_source" |> U.to_string);
-    check bool "legacy stale file ignored" false
-      (json |> U.member "stale" |> U.to_bool);
-    check bool "legacy connected file ignored" false
-      (json |> U.member "connected" |> U.to_bool);
-    check string "legacy bot name ignored" ""
-      (json |> U.member "bot_user_name" |> U.to_string);
-    check int "runtime bindings from persisted bindings" 0
-      (json |> U.member "runtime_bindings_count" |> U.to_int)))
 
 let test_status_json_surfaces_binding_store_failure () =
   with_temp_dir @@ fun dir ->
@@ -221,23 +192,6 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
     ignore
       (Discord_state.bind ~channel_id:"1234567890" ~keeper_name:"luna"
          ~actor_name:"dashboard");
-    let status_path = Filename.concat dir "status.json" in
-    Yojson.Safe.to_file status_path
-      (`Assoc
-        [
-          ("updated_at", `String "2026-04-09T00:00:00Z");
-          ("connected", `Bool true);
-          ("bot_user_name", `String "keeper-gateway");
-          ("bot_user_id", `String "bot-1");
-          ("guild_count", `Int 2);
-          ("gate_base_url", `String "http://127.0.0.1:8935");
-          ("gate_healthy", `Bool true);
-          ("gate_health_checked_at", `String "2026-04-09T00:00:00Z");
-          ("last_ready_at", `String "2026-04-09T00:00:00Z");
-          ("binding_source", `String "persisted");
-          ("runtime_bindings_count", `Int 1);
-          ("pid", `Int 4242);
-        ]);
     Channel_gate_connector.register (module Discord_state);
     let json = Channel_gate_connector.connectors_json () in
     let connectors = json |> U.member "connectors" |> U.to_list in
@@ -438,8 +392,6 @@ let () =
             test_bot_token_accessor_trims_and_feeds_status_consumer;
           test_case "in-process gateway status" `Quick
             test_status_json_reports_in_process_gateway_status;
-          test_case "ignores legacy sidecar status file" `Quick
-            test_status_json_ignores_legacy_sidecar_status_file;
           test_case "surfaces binding store failure" `Quick
             test_status_json_surfaces_binding_store_failure;
           test_case "record_ready surfaces bot identity" `Quick

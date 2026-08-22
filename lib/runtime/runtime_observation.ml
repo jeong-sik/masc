@@ -110,12 +110,6 @@ let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   | Some binding -> binding.Agent_core.Provider_runtime_binding.id
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 
-let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  provider_name_of_config cfg
-
-let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  Printf.sprintf "%s:%s" (display_provider_name_of_config cfg) cfg.model_id
-
 (* ================================================================ *)
 (* Observation building                                              *)
 (* ================================================================ *)

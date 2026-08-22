@@ -1656,19 +1656,19 @@ let test_streaming_exec_validates_cached_container_before_retry () =
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~timeout_sec:5.0
        runtime
        ~cwd:host_root
        ~command_argv:[ "cat"; "/tmp/first" ]
    with
    | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "initial exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected initial exec exit 0");
   let stderr_chunks = ref [] in
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
        ~timeout_sec:5.0
        runtime
@@ -1676,7 +1676,7 @@ let test_streaming_exec_validates_cached_container_before_retry () =
        ~command_argv:[ "cat"; "/tmp/second" ]
    with
    | Error msg -> Alcotest.failf "expected retried exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "retried exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected retried exec exit 0");
   let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
@@ -1834,19 +1834,19 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~timeout_sec:5.0
        runtime
        ~cwd:host_root
        ~command_argv:[ "cat"; "/tmp/first" ]
    with
    | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "initial exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected initial exec exit 0");
   let stderr_chunks = ref [] in
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
        ~timeout_sec:5.0
        runtime
@@ -1854,7 +1854,7 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
        ~command_argv:[ "cat"; "/tmp/second" ]
    with
    | Error msg -> Alcotest.failf "expected restarted exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "restarted exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected restarted exec exit 0");
   let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in

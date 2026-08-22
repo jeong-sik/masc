@@ -18,6 +18,9 @@ let magic = "ZSTD"
 (** ZSTDD header magic (dictionary compression) *)
 let magic_dict = "ZSTDD"
 
+(** Header frame length: 5-byte magic + 4-byte big-endian original size *)
+let header_len = 9
+
 (** Compress with zstd + optional dictionary *)
 let compress ?(level = default_level) (data : string) : (string * bool * bool) =
   match Compression_codec.compress ~level data with
@@ -28,7 +31,7 @@ let compress ?(level = default_level) (data : string) : (string * bool * bool) =
 (** Encode with size header: MAGIC (5) + orig_size (4 BE) + compressed
     MAGIC = "ZSTD\x00" for standard, "ZSTDD" for dictionary *)
 let encode_with_header ~(used_dict : bool) (orig_size : int) (compressed : string) : string =
-  let header = Bytes.create 9 in
+  let header = Bytes.create header_len in
   if used_dict then
     Bytes.blit_string magic_dict 0 header 0 5  (* "ZSTDD" = 5 chars *)
   else begin
@@ -41,55 +44,34 @@ let encode_with_header ~(used_dict : bool) (orig_size : int) (compressed : strin
   Bytes.set header 8 (Char.chr (orig_size land 0xFF));
   Bytes.to_string header ^ compressed
 
-(** Decode header, returns (orig_size, compressed_data, used_dict) if valid
-    Supports:
-    - Legacy 8-byte: ZSTD + 4-byte size (backwards compat)
-    - New 9-byte: ZSTD\x00 + 4-byte size (standard compression)
-    - New 9-byte: ZSTDD + 4-byte size (dictionary compression)
-
-    IMPORTANT: Check ZSTDD first because "ZSTDD" starts with "ZSTD" *)
+(** Decode header, returns (orig_size, compressed_data, used_dict) if valid.
+    Accepts exactly the two 9-byte frames [encode_with_header] writes:
+    - ZSTD\x00 + 4-byte size (standard compression)
+    - ZSTDD + 4-byte size (dictionary compression)
+    Anything else, including "ZSTD" followed by a byte other than NUL or
+    'D', is not a header. *)
 let decode_header (data : string) : (int * string * bool) option =
-  if String.length data < 8 then None
-  (* Check dictionary header FIRST (ZSTDD) *)
-  else if String.starts_with data ~prefix:magic_dict then begin
-    (* Dictionary header: ZSTDD *)
-    let orig_size =
-      (Char.code data.[5] lsl 24) lor
-      (Char.code data.[6] lsl 16) lor
-      (Char.code data.[7] lsl 8) lor
-      Char.code data.[8]
-    in
-    let compressed = String.sub data 9 (String.length data - 9) in
-    Some (orig_size, compressed, true)
-  end
-  (* Then check standard headers *)
+  if String.length data < header_len then None
   else
-    let header4 = String.sub data 0 4 in
-    if header4 = magic then begin
-      (* Could be legacy 8-byte or new 9-byte with ZSTD\x00 *)
-      if String.length data >= 9 && data.[4] = '\x00' then begin
-        (* New 9-byte header: ZSTD\x00 *)
-        let orig_size =
-          (Char.code data.[5] lsl 24) lor
-          (Char.code data.[6] lsl 16) lor
-          (Char.code data.[7] lsl 8) lor
-          Char.code data.[8]
-        in
-        let compressed = String.sub data 9 (String.length data - 9) in
-        Some (orig_size, compressed, false)
-      end else begin
-        (* Legacy 8-byte header *)
-        let orig_size =
-          (Char.code data.[4] lsl 24) lor
-          (Char.code data.[5] lsl 16) lor
-          (Char.code data.[6] lsl 8) lor
-          Char.code data.[7]
-        in
-        let compressed = String.sub data 8 (String.length data - 8) in
-        Some (orig_size, compressed, false)
-      end
-    end else
-      None
+    let used_dict =
+      if String.starts_with data ~prefix:magic_dict then Some true
+      else if String.starts_with data ~prefix:magic && data.[4] = '\x00' then
+        Some false
+      else None
+    in
+    match used_dict with
+    | None -> None
+    | Some used_dict ->
+      let orig_size =
+        (Char.code data.[5] lsl 24) lor
+        (Char.code data.[6] lsl 16) lor
+        (Char.code data.[7] lsl 8) lor
+        Char.code data.[8]
+      in
+      let compressed =
+        String.sub data header_len (String.length data - header_len)
+      in
+      Some (orig_size, compressed, used_dict)
 
 (** Decompress with known original size *)
 let decompress ~(orig_size : int) (compressed : string) : string option =

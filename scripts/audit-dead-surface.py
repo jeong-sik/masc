@@ -568,9 +568,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # workspace_utils_paths_backend tasks_dirname / backlog_filename) were
 # dropped from their .mli in the same PR, implementations kept where still
 # used internally.
-# 532 -> 531: measured on the #29454 compaction-snapshot purge merged with
-# main after #29509 (2026-08-22).
-DEAD_EXPORT_BASELINE = 531
+# 532 -> 529: the #29396 A22 purge deleted three exports this audit already
+# listed (keeper_memory_recall.recent_lines_or_record,
+# runtime_observation.model_label_of_config, session.add_mcp_session_header)
+# and orphaned nothing. 529 -> 528: measured on the merge with main after
+# #29515 (2026-08-22).
+DEAD_EXPORT_BASELINE = 528
 
 
 def run_ratchet(count: int) -> int:

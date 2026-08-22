@@ -17,6 +17,9 @@
     "goal_convergence_budget_merge_sha": "1c6d91deefd79330e29a1e14e3f04a941addd052",
     "browser_parent_budget_pr": 29465,
     "browser_parent_budget_merge_sha": "3301257200755bc7cea0fa85192e0102aab87f57",
+    "event_driven_rescan_pr": 29468,
+    "event_driven_rescan_merge_sha": "1acf147970764cef6fab68dccb94788af561b4d3",
+    "event_driven_rescan_contract": "deferred rows remain durable and stop; a Keeper completion request or another committed review must wake a new scan; no retryable field and no clock retry",
     "hosted_ci_lane": {
       "status": "removed",
       "pr": 29458,
@@ -48,6 +51,11 @@
       {
         "pr": 29465,
         "run_id": 32548088743,
+        "status": "passed"
+      },
+      {
+        "pr": 29468,
+        "run_id": 32547762667,
         "status": "passed"
       }
     ]
@@ -189,9 +197,9 @@
     "goal_proof_proven_observed": true,
     "same_run_goal_refute_reenter_prove_observed": true,
     "same_run_browser_observed": false,
-    "retryable_deferral_observed": true,
-    "retry_deferral_to_commit_observed": false,
-    "note": "Attempt 8 proves the independent Goal chain through Completed with distinct criterion/refuted/proven run IDs. Attempt 7 proves a typed retryable deferral, but no single protected-main bundle proves that deferral later committed. Attempt 8 still lacks the causally joined real-backend browser screenshot, so CELL-01 remains incomplete."
+    "historical_retryable_deferral_observed": true,
+    "current_event_driven_deferral_wake_to_commit_observed": false,
+    "note": "Attempt 8 proves the independent Goal chain through Completed with distinct criterion/refuted/proven run IDs. Attempt 7 proves a typed retryable deferral under the c07 contract. PR 29468 later removed the retryable field and clock retry: current source requires a real completion-request or committed-review wake, whose deferred-to-wake-to-commit chain is not yet observed. Attempt 8 still lacks the causally joined real-backend browser screenshot, so CELL-01 remains incomplete."
   },
   "five_provider_ten_turn": {
     "best_single_run": "five-provider-canary-64e02b2-r6",

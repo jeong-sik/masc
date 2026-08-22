@@ -121,36 +121,57 @@ check_rule() {
   fi
 }
 
+# The module part of every pattern below was 'Log\.[A-Z][a-z]+\.', which
+# matches only single-word capitalised logger names. Fourteen loggers are
+# spelled with an underscore or a second capital (Log.Runtime_agent,
+# Log.Tool_validation, Log.BoardLog, Log.KeeperExec, ...), so 131 call sites
+# were invisible to all six rules — the counters read 0 for code the rules
+# never looked at. Widened to accept the real module grammar; the counts are
+# unchanged today, so nothing was hiding there yet.
+
 # L1 — silent fallback should be Error, not Info/Warn.
 check_rule "L1a" "silent + warn" \
-  'Log\.[A-Z][a-z]+\.warn[^"]*"[^"]*silent[^"]*' \
+  'Log\.[A-Za-z][A-Za-z_0-9]*\.warn[^"]*"[^"]*silent[^"]*' \
   "$BASELINE_L1_SILENT" \
   "§ 3.1"
 
 check_rule "L1b" "logging-only mode + warn" \
-  'Log\.[A-Z][a-z]+\.warn[^"]*(?s:.{0,500})logging-only mode' \
+  'Log\.[A-Za-z][A-Za-z_0-9]*\.warn[^"]*(?s:.{0,500})logging-only mode' \
   "$BASELINE_L1_LOGGING_ONLY" \
   "§ 3.1"
 
 # L2 — operator_broadcast emission is Warn/Error, not Info.
 check_rule "L2" "operator_broadcast + info" \
-  'Log\.[A-Z][a-z]+\.info[^"]*(?s:.{0,500})operator_broadcast' \
+  'Log\.[A-Za-z][A-Za-z_0-9]*\.info[^"]*(?s:.{0,500})operator_broadcast' \
   "$BASELINE_L2_OPERATOR_BROADCAST" \
   "§ 3.2"
 
 # L4 — periodic ticks (watchdog/keepalive/heartbeat) are Debug, not Info.
+# KNOWN DEAD (measured 2026-08-22): none of the three phrases below occurs
+# anywhere in lib/ or bin/, so this rule has never matched and its 0 is not
+# evidence of compliance. It did not see the supervisor keepalive line that
+# wrote 4,795 of 20,458 log rows in the two hours to 2026-08-22T02:03Z. The
+# vocabulary cannot simply be widened: broadening it to (keepalive|heartbeat|
+# watchdog) matches three one-shot "started keepalive" lines and no periodic
+# tick at all, while the one real offender found in that window
+# (lib/gate/discord_gateway_state.ml, "presence update: %s", 248 rows in two
+# hours) is built as a `Log { level = `Info; ... }` data value rather than a
+# Log.X.info call and is out of reach of this rule family entirely. Repairing
+# it needs a detection model that covers log-as-data, not a longer phrase
+# list, so the rule is left as-is rather than given a false-positive
+# vocabulary.
 # L3 (model behavior promoted to Error) and L5 (validation success as Info) are
 # intentionally omitted from this initial gate — current count is 0 in main, so
 # there's no baseline to drift from. Add them as separate check_rule calls if a
 # regression appears.
 check_rule "L4" "watchdog/keepalive/heartbeat + info" \
-  'Log\.[A-Z][a-z]+\.info[^"]*(?s:.{0,500})(watchdog tick|keepalive emitted|heartbeat sent)' \
+  'Log\.[A-Za-z][A-Za-z_0-9]*\.info[^"]*(?s:.{0,500})(watchdog tick|keepalive emitted|heartbeat sent)' \
   "$BASELINE_L4_WATCHDOG_TICK" \
   "§ 3.4"
 
 # L5 — validation success log is Debug, not Info.
 check_rule "L5" "validation success (coerced) + info" \
-  'Log\.[A-Z][a-z]+\.info[^"]*(?s:.{0,500})tool_input_validation coerced' \
+  'Log\.[A-Za-z][A-Za-z_0-9]*\.info[^"]*(?s:.{0,500})tool_input_validation coerced' \
   "$BASELINE_L5_VALIDATION_SUCCESS" \
   "§ 3.5"
 
@@ -160,7 +181,7 @@ check_rule "L5" "validation success (coerced) + info" \
 # level-selecting [(match outcome with ... -> Log.X.info) "...outcome=%s..."]
 # expression (which closes with [)] before the string) is NOT flagged.
 check_rule "L6" "outcome-carrying line + static info" \
-  'Log\.[A-Z][a-z]+\.info\s*"(?s:.{0,500})outcome=%s' \
+  'Log\.[A-Za-z][A-Za-z_0-9]*\.info\s*"(?s:.{0,500})outcome=%s' \
   "$BASELINE_L6_OUTCOME_CARRYING" \
   "§ 3.6"
 

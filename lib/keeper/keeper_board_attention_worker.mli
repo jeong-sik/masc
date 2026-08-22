@@ -28,18 +28,30 @@ type retry_reason =
   | Exact_claim_contended
   | Selected_generation_changed
 
+type drain_progress =
+  { judgments : int
+  ; steps : int
+  }
+(** What one drain did before it stopped: [judgments] counts candidates that
+    produced a judgment, [steps] every loop iteration including visits that
+    found the candidate already consumed or its partition blocked. A wake that
+    finds an empty partition carries zeroes, which is what separates it from a
+    drain that did work — the verdict alone cannot. *)
+
 type drain_outcome =
-  | Drained
+  | Drained of drain_progress
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
+      ; progress : drain_progress
       }
 (** [Drained] clears the contention re-arms; [Retry_later] keeps the durable
     partition undrained and re-arms the contention timer, so the same worker
     re-inspects it (see [apply_drain_rearm]). A generation that moved under the
     worker arrives here as [Retry_later { reason = Selected_generation_changed }]
     and is retried, not abandoned. The ledger stays the work authority in both
-    cases. *)
+    cases. Both carry the progress made before the verdict: contention after
+    ten judgments is not the same event as contention on the first visit. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -112,6 +124,9 @@ module For_testing : sig
   (** The drain verdict as one token, as logged. Retry_later keeps its reason
       so a worker stuck on a moved generation is distinguishable from one
       losing a claim race. *)
+
+  val drain_outcome_progress : drain_outcome -> drain_progress
+  (** The work counts the outcome carries, as logged. *)
 
   val drain_outcome_log_level : drain_outcome -> Log.level
   (** The level the drain line is emitted at, derived from the outcome.

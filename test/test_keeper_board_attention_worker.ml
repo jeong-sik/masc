@@ -555,7 +555,7 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok (W.Drained | W.Retry_later _) ->
+   | Ok (W.Drained _ | W.Retry_later _) ->
      Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
@@ -887,6 +887,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
    | W.Retry_later
        { contention = observed
        ; reason = W.Selected_generation_changed
+       ; progress = _
        } ->
      Alcotest.(check string)
        "rescan retains old partition"
@@ -896,7 +897,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
        "rescan retains old generation"
        true
        (P.Generation.equal contention.generation observed.generation)
-   | W.Drained
+   | W.Drained _
    | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
      Alcotest.fail "changed selection did not reach typed delayed rescan");
   Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
@@ -2259,6 +2260,70 @@ let test_cross_domain_wake_is_coalesced_and_rearmed () =
    two of them back into one string would restore the state the measurement on
    2026-08-05 found: pending 425 -> 1031 with zero contention lines and zero
    worker failures, and no way to tell which of the three was happening. *)
+let no_progress : W.drain_progress = { judgments = 0; steps = 0 }
+
+(* A wake that finds an empty partition and a drain that judged twenty
+   candidates both end as [Drained], so the verdict token alone cannot tell an
+   operator whether the worker did any work. Live evidence: the two hours to
+   2026-08-22T02:03Z held 120 pairs of textually identical
+   [board_attention_worker_drain ... outcome=drained] lines — each pair one
+   real drain followed by a re-wake that found nothing left — against 64
+   single lines. The counts are what separate them. *)
+let test_drain_outcome_carries_the_work_it_did () =
+  let drive steps =
+    let remaining = ref steps in
+    W.For_testing.drain_available_with_process
+      ~yield:(fun () -> ())
+      ~process:(fun () ->
+        match !remaining with
+        | [] -> Ok W.Idle
+        | step :: rest ->
+          remaining := rest;
+          Ok step)
+  in
+  let judged id =
+    W.Judgment_completed
+      { candidate_id = id; owner_wake = Masc.Keeper_registry.Exact_wake_signaled }
+  in
+  let progress_of = function
+    | Ok outcome -> W.For_testing.drain_outcome_progress outcome
+    | Error detail -> Alcotest.failf "drain failed: %s" detail
+  in
+  let empty = progress_of (drive []) in
+  Alcotest.(check (pair int int))
+    "a wake that finds nothing reports no work"
+    (0, 0)
+    (empty.judgments, empty.steps);
+  let worked = progress_of (drive [ judged "c1"; judged "c2" ]) in
+  Alcotest.(check (pair int int))
+    "two judgments are two judgments and two steps"
+    (2, 2)
+    (worked.judgments, worked.steps);
+  (* A visit that finds the candidate already consumed advanced the loop but
+     produced no judgment; collapsing it into [judgments] would put a no-op
+     drain back on the same line as a productive one. *)
+  let visited =
+    progress_of (drive [ W.Candidate_already_consumed { candidate_id = "c3" } ])
+  in
+  Alcotest.(check (pair int int))
+    "an already-consumed visit is a step without a judgment"
+    (0, 1)
+    (visited.judgments, visited.steps);
+  let contended =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let after_contention =
+    progress_of (drive [ judged "c4"; W.Contended contended ])
+  in
+  Alcotest.(check (pair int int))
+    "contention after a judgment keeps the judgment"
+    (1, 1)
+    (after_contention.judgments, after_contention.steps)
+;;
+
 let test_drain_outcome_labels_stay_distinct () =
   let contention =
     { W.keeper_name = "k"
@@ -2269,9 +2334,17 @@ let test_drain_outcome_labels_stay_distinct () =
   let labels =
     List.map
       W.For_testing.drain_outcome_label
-      [ W.Drained
-      ; W.Retry_later { contention; reason = W.Exact_claim_contended }
-      ; W.Retry_later { contention; reason = W.Selected_generation_changed }
+      [ W.Drained no_progress
+      ; W.Retry_later
+          { contention
+          ; reason = W.Exact_claim_contended
+          ; progress = no_progress
+          }
+      ; W.Retry_later
+          { contention
+          ; reason = W.Selected_generation_changed
+          ; progress = no_progress
+          }
       ]
   in
   Alcotest.(check (list string))
@@ -2305,16 +2378,25 @@ let test_undrained_outcomes_are_not_routine () =
   Alcotest.(check string)
     "a completed drain is routine"
     "info"
-    (level_name W.Drained);
+    (level_name (W.Drained no_progress));
   Alcotest.(check string)
     "a contended claim is not routine"
     "warn"
-    (level_name (W.Retry_later { contention; reason = W.Exact_claim_contended }));
+    (level_name
+       (W.Retry_later
+          { contention
+          ; reason = W.Exact_claim_contended
+          ; progress = no_progress
+          }));
   Alcotest.(check string)
     "a moved generation is not routine"
     "warn"
     (level_name
-       (W.Retry_later { contention; reason = W.Selected_generation_changed }))
+       (W.Retry_later
+          { contention
+          ; reason = W.Selected_generation_changed
+          ; progress = no_progress
+          }))
 ;;
 
 (* task-336 sibling defect (masc, 2026-08-16): before this fix,
@@ -2587,6 +2669,10 @@ let () =
             "drain outcome labels stay distinct"
             `Quick
             test_drain_outcome_labels_stay_distinct
+        ; Alcotest.test_case
+            "drain outcome carries the work it did"
+            `Quick
+            test_drain_outcome_carries_the_work_it_did
         ; Alcotest.test_case
             "settle_one_completed terminalizes a partition whose candidate was retired"
             `Quick

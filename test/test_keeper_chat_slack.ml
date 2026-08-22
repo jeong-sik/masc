@@ -376,7 +376,11 @@ let test_completed_external_effect_settles_without_duplicate_send () =
   let sends = ref 0 in
   let outcomes =
     run_adapter
-      [ Masc.Keeper_chat_events.External_effect_completed { target = None }
+      [ Masc.Keeper_chat_events.External_effect_completed
+          { target =
+              Masc.Keeper_surface_post.Delivered_to_slack
+                { channel_id = "C-effect"; thread_ts = None }
+          }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect" }
       ]
       ~send_plain:(fun ~content:_ ->
@@ -402,7 +406,11 @@ let test_completed_external_effect_deletes_streamed_draft () =
         deleted := message_id :: !deleted;
         Ok ())
       [ Masc.Keeper_chat_events.Text_delta "partial "
-      ; Masc.Keeper_chat_events.External_effect_completed { target = None }
+      ; Masc.Keeper_chat_events.External_effect_completed
+          { target =
+              Masc.Keeper_surface_post.Delivered_to_slack
+                { channel_id = "C-effect"; thread_ts = None }
+          }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect-draft" }
       ]
       ~send_plain:(fun ~content:_ -> fail "external effect needs no side message")

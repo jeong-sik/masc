@@ -881,13 +881,15 @@ let canonical_reply_payload_of_body ~redact_text body =
     | None -> Error Invalid_turn_ref
   in
   let* external_effect_target =
-    (* Absent means the turn recorded no surface-post receipt, which is the
-       live shape for every outcome except External_effect_completed. That
-       outcome and the receipt are decided from the same
-       [terminal_effect_state] (keeper_agent_run.ml:1064-1076), so a completed
-       external effect always serializes its target. A payload claiming the
-       outcome without one predates the field, and is rejected rather than
-       projected downstream as a null destination. *)
+    (* The outcome and the surface-post receipt are decided from the same
+       [terminal_effect_state] (keeper_agent_run.ml), so the producer writes
+       the target exactly when the outcome is External_effect_completed. The
+       decoder holds both directions: [Some] iff that outcome, so a [Some]
+       here is the proof the External_effect_completed event needs. *)
+    let completed_external_effect =
+      Keeper_turn_outcome.equal turn_outcome
+        Keeper_turn_outcome.External_effect_completed
+    in
     match
       List.filter_map
         (fun (key, value) ->
@@ -897,17 +899,23 @@ let canonical_reply_payload_of_body ~redact_text body =
         fields
     with
     | [] ->
-      if
-        Keeper_turn_outcome.equal turn_outcome
-          Keeper_turn_outcome.External_effect_completed
+      if completed_external_effect
       then
         Error
           (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
       else Ok None
     | [ value ] ->
-      (match Keeper_surface_post.delivery_target_of_yojson value with
-       | Ok target -> Ok (Some target)
-       | Error detail -> Error (Invalid_external_effect_target detail))
+      if not completed_external_effect
+      then
+        Error
+          (Invalid_external_effect_target
+             (Printf.sprintf
+                "present on turn_outcome %s"
+                (Keeper_turn_outcome.to_label turn_outcome)))
+      else (
+        match Keeper_surface_post.delivery_target_of_yojson value with
+        | Ok target -> Ok (Some target)
+        | Error detail -> Error (Invalid_external_effect_target detail))
     | _ ->
       Error
         (Duplicate_payload_field Keeper_surface_post.delivery_target_wire_key)
@@ -1959,13 +1967,11 @@ let process_single_turn ~user_row_origin ~submission
                ; turn_outcome
                ; turn_ref = canonical_reply.turn_ref
                });
-          if
-            Keeper_turn_outcome.equal turn_outcome
-              Keeper_turn_outcome.External_effect_completed
-          then
-            Keeper_chat_events.publish events
-              (External_effect_completed
-                 { target = canonical_reply.external_effect_target });
+          (match canonical_reply.external_effect_target with
+           | Some target ->
+             Keeper_chat_events.publish events
+               (External_effect_completed { target })
+           | None -> ());
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.External_effect_pending

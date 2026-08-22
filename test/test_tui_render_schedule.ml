@@ -174,7 +174,7 @@ let overview_frame_rows ~has_cluster
 let test_overview_rows_share_one_viewport_budget () =
   let max_data =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "14-row attention allocation" 2 max_data.attention_rows;
   check int "14-row task allocation" 1 max_data.task_rows;
@@ -183,7 +183,7 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true max_data);
   let task_error =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~task_count:5 ~has_task_error:true
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:true
   in
   check int "task error keeps its reserved row" 1
     task_error.task_error_rows;
@@ -192,35 +192,58 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true task_error);
   let full =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "full viewport restores attention cap" 6 full.attention_rows;
   check int "full viewport restores task cap" 5 full.task_rows;
+  let events_only =
+    Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
+      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+  in
+  check int "events size the shared panel" 6 events_only.attention_rows;
+  check int "events preserve full task rows" 5 events_only.task_rows;
+  let mixed_panel =
+    Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
+      ~attention_count:2 ~event_count:4 ~task_count:5 ~has_task_error:false
+  in
+  check int "the longer panel column determines shared rows" 4
+    mixed_panel.attention_rows;
+  check int "mixed panel counts preserve full task rows" 5 mixed_panel.task_rows;
+  let compact_events_only =
+    Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
+      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+  in
+  check int "compact events use remaining panel rows" 2
+    compact_events_only.attention_rows;
+  check int "compact events preserve one task row" 1
+    compact_events_only.task_rows;
   for terminal_rows = 14 to 40 do
     List.iter
       (fun has_cluster ->
         for attention_count = 0 to 8 do
-          for task_count = 0 to 7 do
-            List.iter
-              (fun has_task_error ->
-                let allocation =
-                  Schedule.allocate_overview ~terminal_rows ~has_cluster
-                    ~attention_count ~task_count ~has_task_error
-                in
-                let total = overview_frame_rows ~has_cluster allocation in
-                if total > terminal_rows then
-                  failf
-                    "overview exceeds viewport: rows=%d cluster=%b attention=%d tasks=%d error=%b total=%d"
-                    terminal_rows has_cluster attention_count task_count
-                    has_task_error total;
-                if
-                  allocation.attention_rows < 0
-                  || allocation.task_error_rows < 0
-                  || allocation.task_rows < 0
-                then
-                  failf "overview allocation became negative at rows=%d"
-                    terminal_rows)
-              [ false; true ]
+          for event_count = 0 to 8 do
+            for task_count = 0 to 7 do
+              List.iter
+                (fun has_task_error ->
+                  let allocation =
+                    Schedule.allocate_overview ~terminal_rows ~has_cluster
+                      ~attention_count ~event_count ~task_count ~has_task_error
+                  in
+                  let total = overview_frame_rows ~has_cluster allocation in
+                  if total > terminal_rows then
+                    failf
+                      "overview exceeds viewport: rows=%d cluster=%b attention=%d events=%d tasks=%d error=%b total=%d"
+                      terminal_rows has_cluster attention_count event_count
+                      task_count has_task_error total;
+                  if
+                    allocation.attention_rows < 0
+                    || allocation.task_error_rows < 0
+                    || allocation.task_rows < 0
+                  then
+                    failf "overview allocation became negative at rows=%d"
+                      terminal_rows)
+                [ false; true ]
+            done
           done
         done)
       [ false; true ]
@@ -334,6 +357,25 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
 
+let test_keeper_detail_scroll_normalizes_across_bounds () =
+  let normalize = Schedule.normalize_keeper_detail_scroll in
+  let bottom = normalize ~line_count:29 ~content_height:14 max_int in
+  check int "overscroll reaches the exact bottom" 15 bottom;
+  let resized = normalize ~line_count:29 ~content_height:15 bottom in
+  check int "larger viewport clamps the persisted bottom" 14 resized;
+  check int "one upward action reveals the previous row" 13
+    (max 0 (resized - 1));
+  let measured = normalize ~line_count:31 ~content_height:15 max_int in
+  check int "measured context adds two scroll positions" 16 measured;
+  check int "content shrink clamps to its new bottom" 14
+    (normalize ~line_count:29 ~content_height:15 measured);
+  check int "content growth preserves the current offset" 14
+    (normalize ~line_count:31 ~content_height:15 resized);
+  check int "negative raw state normalizes to zero" 0
+    (normalize ~line_count:29 ~content_height:15 (-1));
+  check int "fully visible content cannot scroll" 0
+    (normalize ~line_count:10 ~content_height:15 max_int)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -365,5 +407,7 @@ let () =
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
             test_board_read_scroll_reaches_hidden_comments
+        ; test_case "keeper detail scroll follows current bounds" `Quick
+            test_keeper_detail_scroll_normalizes_across_bounds
         ] )
     ]

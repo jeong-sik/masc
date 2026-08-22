@@ -22,7 +22,9 @@ import time
 from typing import Any
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
-HttpFixtures = dict[str, tuple[int, object]]
+HttpResponse = tuple[int, object]
+HttpFixture = HttpResponse | Callable[[], HttpResponse]
+HttpFixtures = dict[str, HttpFixture]
 HttpRequests = list[tuple[str, bytes]]
 WorkspaceSetup = Callable[[str], None]
 WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
@@ -35,6 +37,19 @@ CURSOR_RE = re.compile(rb"\x1b\[(\d+);(\d+)H\x1b\[\?25h")
 POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 BOARD_CELL_BODY = ("한" * 20) + " " + ("한" * 20)
+
+
+class GatedHttpResponse:
+    def __init__(self, response: HttpResponse) -> None:
+        self.response = response
+        self.requested = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self) -> HttpResponse:
+        self.requested.set()
+        if not self.release.wait(timeout=5.0):
+            return 504, {"error": "fixture response gate timed out"}
+        return self.response
 
 
 @contextmanager
@@ -55,10 +70,11 @@ def test_http_endpoint(
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self) -> None:
-            status, payload = fixtures.get(
+            fixture = fixtures.get(
                 self.path,
                 (503, {"error": "fixture endpoint unavailable"}),
             )
+            status, payload = fixture() if callable(fixture) else fixture
             body = json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -164,6 +180,41 @@ def send_and_wait(
     )
     frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
     return bytes(output[start:frame_end])
+
+
+def release_and_wait_for_frame(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    response: GatedHttpResponse,
+    needle: bytes,
+) -> bytes:
+    read_available(master_fd, output)
+    start = len(output)
+    response.release.set()
+    wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
+    needle_end = output.find(needle, start) + len(needle)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=needle_end,
+        timeout=3.0,
+    )
+    frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
+    return bytes(output[start:frame_end])
+
+
+def frame_containing(segment: bytes, needle: bytes) -> bytes:
+    needle_offset = segment.find(needle)
+    frame_start = segment.rfind(FRAME_START, 0, needle_offset + 1)
+    frame_end = segment.find(FRAME_END, needle_offset)
+    if needle_offset < 0 or frame_start < 0 or frame_end < 0:
+        raise AssertionError(
+            f"could not isolate frame containing {needle!r}: {segment!r}"
+        )
+    return segment[frame_start : frame_end + len(FRAME_END)]
 
 
 def fixture_cell_width(text: str) -> int:
@@ -495,6 +546,188 @@ def row_budget_http_fixtures() -> HttpFixtures:
     }
 
 
+def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
+    return {
+        "summary": {
+            "workspace_health": "ok",
+            "cluster": cluster,
+            "project": "project-a",
+            "active_agents": 2,
+            "incident_count": 0,
+        },
+        "generated_at": "2026-08-22T00:00:00Z",
+        "incidents": [],
+        "attention_queue": [],
+        "attention_items": [],
+        "agent_briefs": [],
+    }
+
+
+def overview_event_http_fixtures() -> HttpFixtures:
+    return {
+        "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
+        "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
+            200,
+            {
+                "pending_confirm_envelope": {
+                    "items": [],
+                    "summary": {
+                        "actor_filter": "masc-tui",
+                        "filter_active": True,
+                        "visible_count": 0,
+                        "total_count": 0,
+                        "hidden_count": 0,
+                        "hidden_actors": [],
+                        "confirm_required_actions": [],
+                    },
+                }
+            },
+        ),
+        "/api/v1/board": (200, {"posts": []}),
+        "/api/v1/dashboard/planning": (
+            200,
+            {
+                "goals": [],
+                "rollup": {
+                    "active_count": 0,
+                    "paused_count": 0,
+                    "verifying_count": 0,
+                    "done_count": 0,
+                    "dropped_count": 0,
+                },
+                "task_backlog": {
+                    "todo": 0,
+                    "claimed": 0,
+                    "in_progress": 0,
+                    "done": 0,
+                    "cancelled": 0,
+                },
+                "generated_at": "2026-08-22T00:00:00Z",
+            },
+        ),
+    }
+
+
+def board_selection_post(suffix: str, title: str, body: str) -> dict[str, object]:
+    return {
+        "id": f"post-{suffix}",
+        "author": "board-author",
+        "title": title,
+        "body": body,
+        "votes": 1,
+        "comment_count": 0,
+        "created_at_iso": "2026-08-22T00:00:00Z",
+    }
+
+
+def board_selection_http_fixtures() -> HttpFixtures:
+    posts = [
+        board_selection_post("a", "Alpha", "list-body-a"),
+        board_selection_post("b", "Bravo", "list-body-b"),
+        board_selection_post("c", "Charlie", "list-body-c"),
+    ]
+    detail_post = board_selection_post("b", "Bravo", "detail-body-bravo")
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board/post-b?format=flat"] = (
+        200,
+        {"post": detail_post, "comments": []},
+    )
+    return fixtures
+
+
+def board_detail_comment(comment_id: str, content: str) -> dict[str, object]:
+    return {
+        "id": comment_id,
+        "author": "detail-author",
+        "content": content,
+        "created_at_iso": "2026-08-22T00:00:00Z",
+    }
+
+
+def board_detail_authority_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    posts = [
+        board_selection_post("a", "Alpha", "list-body-a"),
+        board_selection_post("b", "Bravo", "list-body-b"),
+    ]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board/post-a?format=flat"] = (
+        200,
+        {
+            "post": board_selection_post(
+                "a", "Alpha authoritative", "a-authoritative-detail"
+            ),
+            "comments": [board_detail_comment("comment-a", "a-only-comment")],
+        },
+    )
+    late_list = GatedHttpResponse(
+        (
+            200,
+            {
+                "posts": [
+                    board_selection_post("a", "Alpha light", "a-late-light-body"),
+                    board_selection_post("b", "Bravo", "list-body-b"),
+                    board_selection_post("c", "Charlie", "list-body-c"),
+                ]
+            },
+        )
+    )
+    return fixtures, late_list
+
+
+def board_detail_isolation_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    posts = [
+        board_selection_post("a", "Alpha", "list-body-a"),
+        board_selection_post("b", "Bravo", "list-body-b"),
+    ]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board/post-a?format=flat"] = (
+        200,
+        {
+            "post": board_selection_post("a", "Alpha", "a-detail-body"),
+            "comments": [board_detail_comment("comment-a", "a-only-comment")],
+        },
+    )
+    b_failure = GatedHttpResponse((503, {"error": "b-detail-failed"}))
+    fixtures["/api/v1/board/post-b?format=flat"] = b_failure
+    return fixtures, b_failure
+
+
+def board_missing_target_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    posts = [
+        board_selection_post("a", "Alpha", "list-body-a"),
+        board_selection_post("b", "Bravo", "list-body-b"),
+    ]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board/post-a?format=flat"] = (
+        200,
+        {
+            "post": board_selection_post("a", "Alpha", "a-recovered-detail"),
+            "comments": [],
+        },
+    )
+    fixtures["/api/v1/board/post-b?format=flat"] = (
+        200,
+        {
+            "post": board_selection_post("b", "Bravo", "b-initial-detail"),
+            "comments": [board_detail_comment("comment-b", "b-initial-comment")],
+        },
+    )
+    late_b = GatedHttpResponse(
+        (
+            200,
+            {
+                "post": board_selection_post("b", "Bravo", "b-late-detail"),
+                "comments": [board_detail_comment("comment-b-late", "b-late-comment")],
+            },
+        )
+    )
+    return fixtures, late_b
+
+
 def wait_for_stop(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -771,6 +1004,120 @@ def navigate_with_arrows_and_quit(
     os.write(master_fd, b"q")
 
 
+def keeper_detail_overscroll_interaction(
+    fixtures: HttpFixtures,
+    refresh_gate: GatedHttpResponse,
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        completed = False
+        try:
+            wait_for_output(
+                process, master_fd, output, b"cluster-a", start=0, timeout=10.0
+            )
+            cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                FRAME_END,
+                start=cluster_end,
+                timeout=3.0,
+            )
+            send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\r",
+                b"Keeper: \x1b[1malpha",
+            )
+            detail = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=14,
+                columns=100,
+                needle=b"Keeper: \x1b[1malpha",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            indicators = re.findall(rb"\[(\d+)/(\d+)\]", detail)
+            if not indicators:
+                raise AssertionError(
+                    f"Keeper detail did not expose a scroll indicator: {detail!r}"
+                )
+            position_count = int(indicators[-1][1])
+            if position_count < 3:
+                raise AssertionError(
+                    f"Keeper detail fixture has too few scroll positions: {detail!r}"
+                )
+
+            bottom = f"[{position_count}/{position_count}]".encode()
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j" * (position_count - 1),
+                bottom,
+            )
+
+            fixtures["/api/v1/board"] = refresh_gate
+            read_available(master_fd, output)
+            os.write(master_fd, b"jr")
+            if not refresh_gate.requested.wait(timeout=3.0):
+                raise AssertionError(
+                    "Keeper detail overscroll refresh did not reach its fixture"
+                )
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=14,
+                columns=99,
+                needle=bottom,
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            refresh_gate.release.set()
+
+            previous = f"[{position_count - 1}/{position_count}]".encode()
+            send_and_wait(process, master_fd, output, b"k", previous)
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j",
+                b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+            )
+            beta = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\r",
+                b"Keeper: \x1b[1mbeta",
+            )
+            top = f"[1/{position_count}]".encode()
+            if top not in beta:
+                raise AssertionError(
+                    f"new Keeper detail did not reset to the top: {beta!r}"
+                )
+            os.write(master_fd, b"q")
+            completed = True
+        finally:
+            refresh_gate.release.set()
+            if not completed and process.poll() is None:
+                kill_process_group(process)
+
+    return interact
+
+
 def interrupt_with_ctrl_c(
     _process: subprocess.Popen[bytes],
     master_fd: int,
@@ -940,6 +1287,346 @@ def assert_row_budgeted_surfaces(
     os.write(master_fd, b"q")
 
 
+def assert_overview_event_rows(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    wait_for_output(process, master_fd, output, b"TUI started", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"task-5", start=0, timeout=3.0)
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=3.0)
+    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=cluster_end,
+        timeout=3.0,
+    )
+
+    send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\t\t\t\t", b"MASC Overview")
+
+    overview = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=22,
+        columns=100,
+        needle=b"MASC Overview",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
+        if expected not in overview:
+            raise AssertionError(f"22-row Overview omitted {expected!r}: {overview!r}")
+    if overview.count(b"Manual refresh") != 5:
+        raise AssertionError(
+            f"22-row Overview did not show all five refresh events: {overview!r}"
+        )
+
+    overview = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"MASC Overview",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for expected in (b"Manual refresh", b"task-1", b"q:quit"):
+        if expected not in overview:
+            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
+    if overview.count(b"Manual refresh") != 2:
+        raise AssertionError(
+            f"14-row Overview did not cap the shared panel at two events: {overview!r}"
+        )
+    if b"TUI started" in overview or b"task-2" in overview:
+        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
+    if "└".encode() not in overview:
+        raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
+
+    os.write(master_fd, b"q")
+
+
+def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=cluster_end,
+            timeout=3.0,
+        )
+
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Board (3)")
+        selected_b = b"\x1b[7m>\x1b[0m   post-b"
+        selected_a = b"\x1b[7m>\x1b[0m   post-a"
+        selected_new = b"\x1b[7m>\x1b[0m   post-new"
+        send_and_wait(process, master_fd, output, b"j", selected_b)
+        send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
+
+        board = send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (3)")
+        if selected_b not in board or selected_a in board:
+            raise AssertionError(
+                f"Board detail return changed the selected post: {board!r}"
+            )
+
+        fixtures["/api/v1/board"] = (
+            200,
+            {
+                "posts": [
+                    board_selection_post("new", "New", "list-body-new"),
+                    board_selection_post("a", "Alpha", "list-body-a"),
+                    board_selection_post("b", "Bravo", "list-body-b"),
+                    board_selection_post("c", "Charlie", "list-body-c"),
+                ]
+            },
+        )
+        board = send_and_wait(process, master_fd, output, b"r", b"post-new")
+        if selected_b not in board or selected_new in board:
+            raise AssertionError(
+                f"Board list refresh changed the selected post: {board!r}"
+            )
+
+        send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def open_loaded_board(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    *,
+    post_count: int,
+) -> None:
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=cluster_end,
+        timeout=3.0,
+    )
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\t",
+        f"MASC Board ({post_count})".encode(),
+    )
+
+
+def board_detail_isolation_interaction(b_failure: GatedHttpResponse) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        completed = False
+        try:
+            open_loaded_board(process, master_fd, output, post_count=2)
+            send_and_wait(process, master_fd, output, b"\r", b"a-only-comment")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (2)")
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j",
+                b"\x1b[7m>\x1b[0m   post-b",
+            )
+
+            loading = send_and_wait(process, master_fd, output, b"\r", b"list-body-b")
+            if b"Loading Board detail" not in loading or b"a-only-comment" in loading:
+                raise AssertionError(
+                    f"Board B loading leaked the prior detail: {loading!r}"
+                )
+            if not b_failure.requested.wait(timeout=3.0):
+                raise AssertionError("Board B detail request did not reach its fixture")
+
+            release_and_wait_for_frame(
+                process,
+                master_fd,
+                output,
+                b_failure,
+                b"b-detail-failed",
+            )
+            failed = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=29,
+                columns=100,
+                needle=b"b-detail-failed",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            if b"a-only-comment" in failed:
+                raise AssertionError(
+                    f"Board B failure leaked the prior detail: {failed!r}"
+                )
+            os.write(master_fd, b"q")
+            completed = True
+        finally:
+            b_failure.release.set()
+            if not completed and process.poll() is None:
+                kill_process_group(process)
+
+    return interact
+
+
+def board_detail_authority_interaction(
+    fixtures: HttpFixtures,
+    late_list: GatedHttpResponse,
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        completed = False
+        try:
+            open_loaded_board(process, master_fd, output, post_count=2)
+            fixtures["/api/v1/board"] = late_list
+            fixtures["/api/v1/dashboard/briefing"] = (
+                200,
+                overview_event_briefing("late-list-applied"),
+            )
+
+            read_available(master_fd, output)
+            os.write(master_fd, b"r")
+            if not late_list.requested.wait(timeout=3.0):
+                raise AssertionError(
+                    "late Board list request did not reach its fixture"
+                )
+            detail = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\r",
+                b"a-authoritative-detail",
+            )
+            if b"a-only-comment" not in detail:
+                raise AssertionError(f"Board A detail did not become ready: {detail!r}")
+
+            late_list.release.set()
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Planning")
+            send_and_wait(process, master_fd, output, b"\t", b"late-list-applied")
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
+            board = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\t",
+                b"a-authoritative-detail",
+            )
+            if b"a-late-light-body" in board:
+                raise AssertionError(
+                    f"late Board list replaced the ready detail post: {board!r}"
+                )
+
+            board_list = send_and_wait(
+                process, master_fd, output, b"\x1b", b"MASC Board (3)"
+            )
+            if b"post-c" not in board_list:
+                raise AssertionError(
+                    f"late Board list application was not observed: {board_list!r}"
+                )
+            os.write(master_fd, b"q")
+            completed = True
+        finally:
+            late_list.release.set()
+            if not completed and process.poll() is None:
+                kill_process_group(process)
+
+    return interact
+
+
+def board_missing_target_interaction(
+    fixtures: HttpFixtures,
+    late_b: GatedHttpResponse,
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        completed = False
+        try:
+            open_loaded_board(process, master_fd, output, post_count=2)
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j",
+                b"\x1b[7m>\x1b[0m   post-b",
+            )
+            send_and_wait(process, master_fd, output, b"\r", b"b-initial-comment")
+
+            fixtures["/api/v1/board"] = (
+                200,
+                {"posts": [board_selection_post("a", "Alpha", "list-body-a")]},
+            )
+            fixtures["/api/v1/board/post-b?format=flat"] = late_b
+            board_update = send_and_wait(
+                process, master_fd, output, b"r", b"MASC Board (1)"
+            )
+            board = frame_containing(board_update, b"MASC Board (1)")
+            if not late_b.requested.wait(timeout=3.0):
+                raise AssertionError("late Board B request did not reach its fixture")
+            for expected in (
+                b"\x1b[7m>\x1b[0m   post-a",
+                b"Enter:read",
+            ):
+                if expected not in board:
+                    raise AssertionError(
+                        f"missing Board target did not restore list mode: {board!r}"
+                    )
+            for stale in (b"b-initial-comment", b"Esc:back"):
+                if stale in board:
+                    raise AssertionError(
+                        f"missing Board target retained detail state: {board!r}"
+                    )
+
+            send_and_wait(process, master_fd, output, b"\r", b"a-recovered-detail")
+            os.write(master_fd, b"q")
+            completed = True
+        finally:
+            late_b.release.set()
+            if not completed and process.poll() is None:
+                kill_process_group(process)
+
+    return interact
+
+
 def wait_for_http_request(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1098,6 +1785,12 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
 
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
+    keeper_scroll_fixtures = overview_event_http_fixtures()
+    keeper_scroll_gate = GatedHttpResponse((200, {"posts": []}))
+    board_selection_fixtures = board_selection_http_fixtures()
+    board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
+    board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
+    missing_target_fixtures, late_b = board_missing_target_http_fixtures()
     run_terminal_scenario(
         executable,
         description="UTF-8 message input",
@@ -1109,6 +1802,49 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=utf8_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper detail overscroll normalization",
+        interact=keeper_detail_overscroll_interaction(
+            keeper_scroll_fixtures,
+            keeper_scroll_gate,
+        ),
+        http_fixtures=keeper_scroll_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="event-budgeted Overview",
+        interact=assert_overview_event_rows,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_row_budget_workspace,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Board selection identity",
+        interact=board_selection_identity_interaction(board_selection_fixtures),
+        http_fixtures=board_selection_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Board detail post authority",
+        interact=board_detail_authority_interaction(
+            board_authority_fixtures,
+            late_list,
+        ),
+        http_fixtures=board_authority_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Board detail isolation",
+        interact=board_detail_isolation_interaction(b_failure),
+        http_fixtures=board_detail_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Board missing target recovery",
+        interact=board_missing_target_interaction(missing_target_fixtures, late_b),
+        http_fixtures=missing_target_fixtures,
     )
     run_terminal_scenario(
         executable,

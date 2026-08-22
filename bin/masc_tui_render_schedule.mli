@@ -16,6 +16,22 @@ val take : t -> now_ns:int64 -> decision
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
 val nonnegative_width : int -> int
 val keeper_context_bar_width : inner_width:int -> int
+val normalize_keeper_detail_scroll :
+  line_count:int -> content_height:int -> int -> int
+
+type overview_event_window = {
+  oew_offset : int;
+  oew_first_position : int;
+  oew_last_position : int;
+}
+
+val project_overview_event_window :
+  event_count:int -> visible_rows:int -> int -> overview_event_window
+val scroll_overview_events_older :
+  event_count:int -> visible_rows:int -> int -> int
+val scroll_overview_events_newer :
+  event_count:int -> visible_rows:int -> int -> int
+val overview_event_offset_after_prepend : retained_count:int -> int -> int
 
 module Input_wait : sig
   type 'a poll_result =
@@ -50,6 +66,7 @@ val allocate_overview :
   terminal_rows:int ->
   has_cluster:bool ->
   attention_count:int ->
+  event_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation

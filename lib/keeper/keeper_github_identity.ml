@@ -962,6 +962,7 @@ let run_inherited ~timeout_sec ~env = function
                  try snd (Unix.waitpid [] process) with
                  | Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
                in
+               (* fire-and-forget: reap the SIGKILLed child to avoid a zombie *)
                ignore (reap ());
                Unix.WEXITED 124
              end else begin

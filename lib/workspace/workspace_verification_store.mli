@@ -63,6 +63,13 @@ val evidence_access_failure_to_string :
 val evidence_read_failure_of_owned_read_failure :
   Fs_compat.owned_regular_file_read_failure -> evidence_read_failure
 
+val verification_evidence_max_bytes : int
+(** Byte cap on the snapshot taken of a producer-owned evidence artifact. The
+    artifact itself is not truncated; only the copy carried to the completion
+    authority is. Exposed so a test states the truncation property against this
+    value instead of copying the number, which made the constant unchangeable
+    without editing an assertion that never described the constant. *)
+
 val project_root_of_base_path : string -> string
 (** The project root a BasePath names, whether the caller passed the project
     root itself or its [.masc] directory. Exposed so a producer's ownership

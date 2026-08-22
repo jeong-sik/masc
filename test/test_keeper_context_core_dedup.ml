@@ -329,7 +329,7 @@ let test_persist_message_writes_single_ts_unix_key () =
       let session = C.create_session ~session_id:"history-ts" ~base_dir in
       C.persist_message session (text_message "hello");
       let path =
-        Filename.concat session.Masc.Keeper_types.session_dir "history.jsonl"
+        Filename.concat session.session_dir "history.jsonl"
       in
       let line =
         In_channel.with_open_bin path In_channel.input_all |> String.trim

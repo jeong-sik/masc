@@ -36,7 +36,6 @@ type pending_board_event_kind =
           identity visible in the current Keeper prompt. The Librarian reads
           the same producer-owned attention record through its bounded durable
           projection. *)
-  | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)
   | Goal_reconciliation_ready

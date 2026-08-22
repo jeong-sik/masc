@@ -28,7 +28,6 @@ type wake_producer =
   | Schedule_store
   | Schedule_runner
   | Operator_pending_confirm_store
-  | Keeper_goal_assignment
   | Keeper_goal_reconciliation
   | Completion_authority
   | Keeper_task_cancellation
@@ -97,7 +96,6 @@ let wake_producer_to_string = function
   | Schedule_store -> "schedule_store"
   | Schedule_runner -> "schedule_runner"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
-  | Keeper_goal_assignment -> "keeper_goal_assignment"
   | Keeper_goal_reconciliation -> "keeper_goal_reconciliation"
   | Keeper_task_cancellation -> "keeper_task_cancellation"
   | Completion_authority -> "completion_authority"
@@ -116,7 +114,6 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Manual_compaction_requested -> Keeper_compaction_request
-  | Goal_assigned _ -> Keeper_goal_assignment
   | Goal_reconciliation_ready _ -> Keeper_goal_reconciliation
   | Completion_authority_rejected _ -> Completion_authority
   | Task_cancelled _ -> Keeper_task_cancellation

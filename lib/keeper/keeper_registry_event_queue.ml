@@ -354,7 +354,6 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _

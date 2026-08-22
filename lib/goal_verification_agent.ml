@@ -480,7 +480,7 @@ let process_pending_work_inner
                   ~reason:
                     "verdict without a stated reason is not a judgment; the \
                      pending row stays durable")))
-     | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused ->
+     | Goal_phase.Executing ->
        (* The crash window of persist-before-model-call: the durable request
           exists but the phase write never landed. Reviewing now would produce
           a verdict the FSM must refuse ([Executing, Record_proof_*] is

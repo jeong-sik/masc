@@ -258,17 +258,10 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           (List.mapi
              (fun index phase ->
                 planning_goal_json (Printf.sprintf "goal-%d" index) phase index)
-             [ "executing"
-             ; "blocked"
-             ; "paused"
-             ; "verifying"
-             ; "completed"
-             ; "dropped"
-             ]) )
+             [ "executing"; "verifying"; "completed"; "dropped" ]) )
     ; ( "rollup"
       , `Assoc
           [ "active_count", `Int 1
-          ; "paused_count", `Int 2
           ; "verifying_count", `Int 3
           ; "done_count", `Int 4
           ; "dropped_count", `Int 5
@@ -289,13 +282,12 @@ let test_decode_planning_snapshot_current_contract () =
   | Error err -> Alcotest.fail err
   | Ok snapshot ->
       Alcotest.(check (list string)) "all canonical phases"
-        [ "executing"; "blocked"; "paused"; "verifying"; "completed"; "dropped" ]
+        [ "executing"; "verifying"; "completed"; "dropped" ]
         (List.map
            (fun (goal : Tui_decode.planning_goal) ->
               Goal_phase.to_string goal.pg_phase)
            snapshot.pl_goals);
       Alcotest.(check int) "active" 1 snapshot.pl_rollup.pr_active;
-      Alcotest.(check int) "paused and blocked" 2 snapshot.pl_rollup.pr_paused;
       Alcotest.(check int) "verifying" 3 snapshot.pl_rollup.pr_verifying;
       Alcotest.(check int) "done" 4 snapshot.pl_rollup.pr_done;
       Alcotest.(check int) "dropped" 5 snapshot.pl_rollup.pr_dropped;

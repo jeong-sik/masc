@@ -142,12 +142,12 @@ let test_goal_list_filters_by_phase () =
     | Error msg -> fail msg
   in
   create ~title:"Executing goal" ~phase:"executing";
-  create ~title:"Blocked goal" ~phase:"blocked";
+  create ~title:"Dropped goal" ~phase:"dropped";
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
       ~name:"masc_goal_list"
-      ~args:(`Assoc [ "phase", `String "blocked" ])
+      ~args:(`Assoc [ "phase", `String "dropped" ])
   in
   let listed_json =
     match listed with
@@ -158,7 +158,7 @@ let test_goal_list_filters_by_phase () =
   check int "one listed goal by phase" 1 (List.length goals);
   match goals with
   | [ goal_json ] ->
-    check string "phase filter honored" "blocked" (get_string_field goal_json "phase")
+    check string "phase filter honored" "dropped" (get_string_field goal_json "phase")
   | _ -> fail "expected one filtered goal"
 ;;
 
@@ -401,30 +401,6 @@ let test_goal_completion_ignores_metric_text () =
   check string "proof completes the goal" "completed"
     (transition_phase (prove_complete config goal.id))
 ;;
-let test_goal_block_and_unblock_have_no_operator_hierarchy () =
-  with_workspace
-  @@ fun config ->
-  let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Explicitly blocked Goal"
-            ~metric:"m" ~target_value:"1" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  let transition action =
-    Tool_workspace.dispatch
-      (workspace_ctx ~agent_name:"agent-alpha" config)
-      ~name:"masc_goal_transition"
-      ~args:
-        (`Assoc
-           [ "goal_id", `String goal.id
-           ; "action", `String action
-           ])
-  in
-  check string "ordinary caller blocks" "blocked"
-    (transition_phase (transition "block"));
-  check string "ordinary caller unblocks" "executing"
-    (transition_phase (transition "unblock"))
-;;
 let () =
   run
     "goal_tools"
@@ -460,10 +436,6 @@ let () =
             "completion ignores metric text"
             `Quick
             test_goal_completion_ignores_metric_text
-        ; test_case
-            "block and unblock have no operator hierarchy"
-            `Quick
-            test_goal_block_and_unblock_have_no_operator_hierarchy
         ] )
     ]
 ;;

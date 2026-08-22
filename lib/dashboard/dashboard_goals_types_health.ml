@@ -31,8 +31,6 @@ let keeper_name_of_assignee metas assignee =
 
 let goal_fsm_state_kind = function
   | Goal_phase.Executing -> "executing"
-  | Goal_phase.Blocked -> "blocked"
-  | Goal_phase.Paused -> "paused"
   | Goal_phase.Verifying -> "verifying"
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
@@ -40,10 +38,6 @@ let goal_fsm_state_kind = function
 let goal_fsm_next_actions ~goal_phase =
   [
     Goal_phase.Request_complete;
-    Goal_phase.Pause;
-    Goal_phase.Resume;
-    Goal_phase.Block;
-    Goal_phase.Unblock;
     Goal_phase.Drop;
     Goal_phase.Reopen;
     (* RFC-0387 stage 2: the verifier's proof commits are the only moves out

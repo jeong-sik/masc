@@ -136,8 +136,8 @@ let format_goal_summaries (summaries : goal_summary list) : string =
          | Some Goal_phase.Verifying ->
            base ^ " [증명 대기 중 — verifier가 proof를 검토 중]"
          | Some
-             ( Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused
-             | Goal_phase.Completed | Goal_phase.Dropped )
+             ( Goal_phase.Executing | Goal_phase.Completed
+             | Goal_phase.Dropped )
          | None -> base)
        summaries)
 

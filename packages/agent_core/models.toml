@@ -1528,6 +1528,19 @@ supports_reasoning_budget = true
 accepted_reasoning_efforts = []
 
 [[models]]
+# gemini-3.7-flash-{high,medium,low}, served through the Antigravity Google
+# subscription (agy 1.1.17 `agy models` lists the three). Official page
+# ai.google.dev/gemini-api/docs/models/gemini-3.7-flash, read 2026-08-22:
+# 1,048,576 in / 65,536 out, thinking low|medium|high — "minimal is not
+# supported and returns an error", so it is not admitted here.
+id_prefix = "gemini-3.7-flash"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["low", "medium", "high"]
+
+[[models]]
 # gemini-3.6-flash-{high,medium,low}, served through the Antigravity Google
 # subscription. Without this row they prefix-match the generic "gemini-3" row,
 # which declares no accepted_reasoning_efforts at all — so no effort level is

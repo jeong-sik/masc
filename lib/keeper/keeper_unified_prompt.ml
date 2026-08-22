@@ -267,6 +267,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_post_created -> "post_created"
   | Keeper_world_observation.Board_comment_added -> "comment_added"
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
+  | Keeper_world_observation.Board_vote_cast _ -> "vote_cast"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Schedule_due _ -> "schedule_due"
   | Keeper_world_observation.External_attention _ -> "external_attention"
@@ -376,9 +377,23 @@ let board_reaction_fields
   ]
 ;;
 
+(* Who voted which way on what. [author] on the row is already the voter
+   (the signal's actor); [voter] is repeated here so the vote row reads on its
+   own, the way the reaction row carries [user]. *)
+let board_vote_fields (vote : Board_dispatch.board_vote_change) =
+  [ "vote", Board.vote_direction_to_string vote.direction
+  ; ( "target"
+    , match vote.target with
+      | Board_dispatch.Vote_on_post post_id -> "post:" ^ post_id
+      | Board_dispatch.Vote_on_comment comment_id -> "comment:" ^ comment_id )
+  ; "voter", vote.voter
+  ]
+;;
+
 let board_event_note_fields = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_fields reaction
+  | Keeper_world_observation.Board_vote_cast vote -> board_vote_fields vote
   | Keeper_world_observation.External_attention observation ->
     [ "external_origin"
     , Keeper_counterpart_observation.origin_to_string observation.origin
@@ -567,6 +582,7 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
@@ -598,6 +614,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
@@ -648,6 +665,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
@@ -753,10 +771,8 @@ let format_own_board_post_text (post : Board.post) : string =
     ; "updated_at", Masc_domain.iso8601_of_unix_seconds post.updated_at
       (* What the Board did with it. The record carries these; the row dropped
          them, so a Keeper reading its own posts could not tell an answered one
-         from an ignored one. The prompt tells a Keeper that a vote or comment
-         is how agreement reaches whoever posted, and votes reach no wake path
-         at all — [Board_dispatch.vote] emits only the dashboard SSE event, not
-         a board signal — so this row is where the response becomes visible.
+         from an ignored one. A new vote also arrives as a [vote_cast] Board
+         Activity row the moment it lands; this row is the running total.
          Counts, not advice: the rows stay data. *)
     ; "replies", string_of_int post.reply_count
     ; "votes", Printf.sprintf "+%d/-%d" post.votes_up post.votes_down

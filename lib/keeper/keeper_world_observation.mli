@@ -21,6 +21,11 @@ type pending_board_event_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
+  | Board_vote_cast of Board_dispatch.board_vote_change
+      (** A vote landed on a post or comment this Keeper wrote. Payload-carrying
+          like {!Completion_authority_rejected}: the voter and direction are the
+          fact the row states, and [post_id] is the post the vote belongs to
+          (the parent post for a comment vote). *)
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
       (** The consumed wake, kept typed. The exact occurrence key is

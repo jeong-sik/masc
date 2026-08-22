@@ -250,6 +250,48 @@ let load_one ~base_path =
   | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
 ;;
 
+(* #29457: a vote signal round-trips through the candidate codec with its
+   payload under a [vote] key that only vote rows carry, so the rows written
+   before votes were a signal (exactly eight [signal] keys) still decode. *)
+let test_vote_signal_codec_round_trips_without_widening_other_rows () =
+  let vote_signal : Masc.Board_dispatch.board_signal =
+    { (signal "post-vote") with
+      kind =
+        Masc.Board_dispatch.Board_vote_cast
+          { target = Masc.Board_dispatch.Vote_on_comment "c-1"
+          ; target_author = "sangsu-agent"
+          ; voter = "external-author"
+          ; direction = Masc.Board.Up
+          }
+    }
+  in
+  let original = candidate vote_signal in
+  let encoded = A.candidate_to_json original in
+  Alcotest.(check bool)
+    "vote candidate roundtrip"
+    true
+    (ok "decode vote candidate" (A.candidate_of_json encoded) = original);
+  let signal_keys (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> Alcotest.fail "signal codec did not produce an object"
+  in
+  Alcotest.(check (list string))
+    "vote row carries the vote key"
+    [ "author"; "content"; "hearth"; "kind"; "post_id"; "reaction"; "title"; "updated_at"; "vote" ]
+    (signal_keys (A.signal_to_yojson vote_signal));
+  Alcotest.(check (list string))
+    "post row keeps the eight pre-vote keys"
+    [ "author"; "content"; "hearth"; "kind"; "post_id"; "reaction"; "title"; "updated_at" ]
+    (signal_keys (A.signal_to_yojson (signal "post-plain")));
+  Alcotest.(check bool)
+    "a vote and a post on the same post_id are distinct candidates"
+    false
+    (String.equal
+       (A.candidate_id_of_signal ~keeper_name:"sangsu" vote_signal)
+       (A.candidate_id_of_signal ~keeper_name:"sangsu" (signal "post-vote")))
+;;
+
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
@@ -1022,6 +1064,10 @@ let () =
             "codec and context identity are strict"
             `Quick
             test_codec_and_context_identity_are_strict
+        ; Alcotest.test_case
+            "vote signal codec round trips without widening other rows"
+            `Quick
+            test_vote_signal_codec_round_trips_without_widening_other_rows
         ; Alcotest.test_case
             "status view preserves resumability and quarantine"
             `Quick

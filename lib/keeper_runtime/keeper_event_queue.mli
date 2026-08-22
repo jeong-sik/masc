@@ -32,6 +32,10 @@ type board_stimulus_kind =
   | Post_created
   | Comment_added
   | Reaction_changed of board_reaction_change
+  | Vote_cast of board_vote_change
+      (** A vote landed on the post or on one of its comments. The queue is a
+          leaf, so the target and direction are mirrored here and converted
+          at the keeper boundary like [board_reaction_change]. *)
 
 and board_reaction_target_type =
   | Reaction_post
@@ -43,6 +47,21 @@ and board_reaction_change = {
   user_id : string;
   emoji : string;
   reacted : bool;
+}
+
+and board_vote_target =
+  | Vote_on_post of string
+  | Vote_on_comment of string
+
+and board_vote_direction =
+  | Vote_up
+  | Vote_down
+
+and board_vote_change = {
+  target : board_vote_target;
+  target_author : string;
+  voter : string;
+  direction : board_vote_direction;
 }
 
 type board_stimulus = {

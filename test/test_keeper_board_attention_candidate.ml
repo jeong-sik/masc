@@ -102,7 +102,9 @@ let comment_of_signal
       (signal : Masc.Board_dispatch.board_signal)
   : Masc.Board.comment
   =
-  { id = comment_id_exn ("comment-" ^ signal.post_id)
+  (* A comment id must have the shape [Comment_id.generate] mints; derive one
+     from the post id so the fixture stays deterministic per post. *)
+  { id = comment_id_exn (Printf.sprintf "c-%032x" (Hashtbl.hash signal.post_id))
   ; post_id = post_id_exn signal.post_id
   ; parent_id = None
   ; author = agent_id_exn "comment-author"

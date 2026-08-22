@@ -34,7 +34,8 @@ type board_error =
 (** {1 Safe ID Module - Parse Don't Validate} *)
 
 (* Shared regex for alphanumeric ID validation (Post_id, Board_id, Sub_board_id).
-   Single [Re.compile] DFA build instead of 3 identical copies. *)
+   Single [Re.compile] DFA build instead of 3 identical copies. [Comment_id]
+   is stricter: it accepts only the shape its own [generate] mints. *)
 let alphanumeric_id_re = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
 
 module Post_id : sig
@@ -64,20 +65,38 @@ module Comment_id : sig
   val of_string : string -> (t, board_error) result
   val to_string : t -> string
   val generate : unit -> t
+  val accepted_format : string
+  val json_schema_pattern : string
 end = struct
   type t = string
 
-  let valid_pattern = alphanumeric_id_re
+  (* [generate] is the only minter, so the parser accepts exactly what it
+     mints: the ["c-"] prefix followed by [2 * random_bytes] lowercase hex
+     characters. A keeper that invents a comment id (["c-placeholder"],
+     ["BUILDER_A_DONE"]: 109 of the 134 masc_board_comment_vote calls in
+     August 2026, #29457) is refused here with the accepted shape instead of
+     reaching the store as a lookup that can only miss. *)
+  let prefix = "c-"
+  let random_bytes = 16
+  let hex_length = 2 * random_bytes
+  let accepted_format = Printf.sprintf "%s<%d lowercase hex>" prefix hex_length
+  let json_schema_pattern = Printf.sprintf "^%s[0-9a-f]{%d}$" prefix hex_length
+  let valid_pattern = Re.Pcre.re json_schema_pattern |> Re.compile
 
   let of_string s =
     let s = String.trim s in
-    let len = String.length s in
-    if len >= 1 && len <= 64 && Re.execp valid_pattern s then Ok s
-    else Error (Invalid_id (Printf.sprintf "Invalid comment_id: %s" s))
+    if Re.execp valid_pattern s then Ok s
+    else
+      Error
+        (Invalid_id
+           (Printf.sprintf
+              "Invalid comment_id %S; expected %s, the id masc_board_post_get \
+               and masc_board_comment return"
+              s accepted_format))
 
   let to_string t = t
 
-  let generate () = Random_id.prefixed ~prefix:"c-" ~bytes:16
+  let generate () = Random_id.prefixed ~prefix ~bytes:random_bytes
 end
 
 module Agent_id : sig

@@ -15,6 +15,8 @@
           mirrors [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings] (#8490)
       - [vote_direction_enum_strings]
           mirrors [Board_votes.valid_vote_direction_strings] (#8506)
+      - [comment_id_pattern]
+          mirrors [Board_types.Comment_id.json_schema_pattern] (#29457)
 
     Adding a new enum value MUST be done in the canonical owner first;
     the sync test then forces the edit here — it compares each owner's list
@@ -30,3 +32,7 @@ let memory_search_source_enum_strings = [ "memory"; "history"; "all" ]
 let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]
 let sort_order_enum_strings = [ "hot"; "trending"; "recent"; "updated"; "discussed" ]
 let vote_direction_enum_strings = [ "up"; "down" ]
+
+(* JSON Schema [pattern] for a Board comment id: the shape
+   [Board_types.Comment_id.generate] mints and [of_string] accepts. *)
+let comment_id_pattern = "^c-[0-9a-f]{32}$"

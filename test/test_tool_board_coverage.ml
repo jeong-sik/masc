@@ -1664,11 +1664,13 @@ let test_comment_vote_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* Well-formed id that no comment carries: the store lookup misses. *)
+  let missing_comment_id = "c-" ^ String.make 32 '0' in
   let result =
     dispatch_result "masc_board_comment_vote"
       (make_args
          [
-           ("comment_id", `String "missing-comment");
+           ("comment_id", `String missing_comment_id);
            ("voter", `String "v");
            ("direction", `String "up");
          ])
@@ -1679,7 +1681,38 @@ let test_comment_vote_not_found () =
     "missing comment vote is workflow rejection"
     (Some "workflow_rejection")
     result;
-  Alcotest.(check bool) "error msg" true (String.length body > 0)
+  Alcotest.(check bool) "error names the miss" true
+    (String_util.contains_substring body "Comment not found")
+
+(* #29457: 109 of 134 masc_board_comment_vote calls in August 2026 carried an
+   invented id ("c-placeholder", "c-b1", "BUILDER_A_DONE"). The typed id parser
+   refuses them before any store lookup, and the message names the accepted
+   shape so the caller can correct itself. *)
+let test_comment_vote_rejects_invented_id () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  List.iter
+    (fun invented ->
+      let result =
+        dispatch_result "masc_board_comment_vote"
+          (make_args
+             [
+               ("comment_id", `String invented);
+               ("voter", `String "v");
+               ("direction", `String "up");
+             ])
+      in
+      let body = Tool_result.message result in
+      Alcotest.(check bool) (invented ^ " is refused") false
+        (Tool_result.is_success result);
+      check_failure_class
+        (invented ^ " is a workflow rejection")
+        (Some "workflow_rejection")
+        result;
+      Alcotest.(check bool) (invented ^ " error names the accepted shape") true
+        (String_util.contains_substring body Board.Comment_id.accepted_format))
+    [ "c-placeholder"; "c-b1"; "BUILDER_A_DONE"; "C-" ^ String.make 32 '0' ]
 
 (** {2 Group 6: Search / Stats / Profile / Hearths} *)
 
@@ -1978,6 +2011,8 @@ let () =
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;
+          Alcotest.test_case "comment vote rejects invented id" `Quick
+            test_comment_vote_rejects_invented_id;
         ] );
       ( "search_stats",
         [

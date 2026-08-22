@@ -84,16 +84,6 @@ val effective_instructions :
 (** Alias of [effective_autonomous_instructions]; kept for callers that
     predate the channel-aware rename. *)
 
-val executing_goals_without_tasks :
-  config:Workspace.config -> (string * string) list
-(** The executing Goals no Task serves, as [(id, title)].
-
-    The same list for every keeper: a Goal is shared intent that names nobody,
-    so an executing Goal with no Task is one fact addressed to whoever reads it.
-    [Verifying] is deliberately excluded -- a goal awaiting its proof verdict is
-    not "work with no Task yet", and nudging new tasks onto it would race the
-    RFC-0387 gate. *)
-
 (** What the prompt knows about one active goal: id, title, and the stored
     phase. [summary_phase] is [None] only for an id the store cannot resolve
     (a dangling assignment, kept visible). RFC-0387 stage 2 carries the phase

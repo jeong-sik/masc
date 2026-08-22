@@ -184,10 +184,13 @@ let connector_attention_stimulus
 (* A Board_signal distractor that is never expected to be read: it exists
    only to prove the batch filter skips a non-[Connector_attention] entry
    sitting between two conversation matches instead of taking a naive
-   contiguous prefix. *)
+   contiguous prefix. It shares the connector entries' [Low] urgency so the
+   pending list keeps it between them: a [Normal] entry would sort ahead of
+   both and be admitted first, which is urgency order working as designed,
+   not the case this fixture isolates. *)
 let board_distractor_stimulus ~post_id ~arrived_at : Q.stimulus =
   { Q.post_id
-  ; urgency = Q.Normal
+  ; urgency = Q.Low
   ; arrived_at
   ; payload =
       Q.Board_signal

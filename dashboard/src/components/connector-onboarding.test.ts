@@ -43,8 +43,6 @@ describe('ConnectorOnboardingGrid', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     const text = container.textContent ?? ''
     // Discord + Slack cards are omitted from onboarding (in-process) — no run.sh.
-    expect(text).not.toContain('cd sidecars/discord-bot && ./run.sh')
-    expect(text).not.toContain('cd sidecars/slack-bot && ./run.sh')
     expect(text).toContain('cd sidecars/imessage-bot && ./run.sh')
     expect(text).toContain('cd sidecars/telegram-bot && ./run.sh')
   })

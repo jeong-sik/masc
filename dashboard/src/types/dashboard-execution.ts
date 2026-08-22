@@ -728,7 +728,6 @@ export interface GoalTreeMetricProjection {
   metric: string | null
   target_value: string | null
   due_date: string | null
-  owner: string | null
 }
 
 export interface GoalTreeTaskProjection {

@@ -35,12 +35,6 @@ val keepers_runtime_dir : config -> string
 
 (** Cluster-root state.json path. Used by bootstrap/init to gate
     one-time root setup. *)
-(** Segment names for the task store, so a reader holding only a masc_dir
-    string composes the same path {!tasks_dir} and {!backlog_path} do. *)
-val tasks_dirname : string
-
-val backlog_filename : string
-
 val root_state_path : config -> string
 
 (** Project-scoped key prefix for backend keys (e.g.

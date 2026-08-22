@@ -437,6 +437,25 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.message).toContain('warming up')
   })
 
+  // The server answers /api/v1/dashboard/* warm-up reads with
+  // {"status":"initializing"} (server_auth.ml not_initialized_response), not
+  // {"error":"not initialized"}. Until 2026-08-22 that envelope flowed into
+  // the execution store as an empty fleet.
+  it('maps the dashboard status:initializing envelope to the execution initializing payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"status":"initializing","message":"Server is warming up"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{ status?: { project?: string }; keepers?: unknown[] }>('/api/v1/dashboard/execution')
+
+    expect(data.status?.project).toBe('initializing')
+    expect(data.keepers).toEqual([])
+  })
+
   it('maps dashboard shell not-initialized errors to an empty bootstrap shell payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {

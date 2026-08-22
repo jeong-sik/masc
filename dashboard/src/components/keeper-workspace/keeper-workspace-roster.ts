@@ -13,7 +13,7 @@ import {
 } from 'lucide-preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
-import { keepers } from '../../store'
+import { keepers, executionError, executionLoaded } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
@@ -502,6 +502,16 @@ function KeeperRosterMenu({
   `
 }
 
+// An empty list has three different causes and the text must say which:
+// the fleet has not loaded yet, the load failed, or the filter excluded
+// every keeper. Loaded-and-empty is the only case that is "no keepers".
+export function rosterEmptyText(fleetSize: number): string {
+  if (executionError.value !== null) return `키퍼 목록을 불러오지 못했습니다: ${executionError.value}`
+  if (!executionLoaded.value) return '키퍼 목록을 불러오는 중…'
+  if (fleetSize === 0) return '등록된 키퍼가 없습니다'
+  return '일치하는 키퍼가 없습니다'
+}
+
 export function KeeperWorkspaceRoster({
   activeName,
   onSelect,
@@ -746,7 +756,7 @@ export function KeeperWorkspaceRoster({
               : null}
           </div>
           ${visible.length === 0
-            ? html`<div class="kw-roster-list roster-list"><div class="kw-roster-empty v2-monitoring-row">일치하는 키퍼가 없습니다</div></div>`
+            ? html`<div class="kw-roster-list roster-list"><div class="kw-roster-empty v2-monitoring-row">${rosterEmptyText(all.length)}</div></div>`
         : useVirtual
           ? html`<${VirtualList}
               items=${items}

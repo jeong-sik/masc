@@ -43,6 +43,7 @@ import {
 import { groupByKey } from './components/common/collection'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
+import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { refreshDevTokenAfterAuthError } from './api/dev-token'
@@ -1216,6 +1217,31 @@ export function hydrateExecutionSnapshot(
 
 let nextExecutionForce = false
 
+// A warm-up envelope carries no fleet. Hydrating it would reconcile the
+// keeper list against [] and report the fleet as loaded-and-empty (the
+// "일치하는 키퍼가 없습니다" screen 37s after a restart, 2026-08-22).
+export function isInitializingExecutionPayload(data: DashboardExecutionResponse): boolean {
+  return data.status?.project === 'initializing'
+}
+
+let executionWarmRetryAttempt = 0
+let executionWarmRetryTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleExecutionWarmRetry(): void {
+  executionWarmRetryAttempt += 1
+  if (executionWarmRetryAttempt > WARM_MAX_RETRIES) {
+    executionWarmRetryAttempt = 0
+    executionError.value = 'Server warm-up timed out. Try refreshing.'
+    return
+  }
+  const delayMs = warmRetryDelayFor(executionWarmRetryAttempt)
+  if (executionWarmRetryTimer) clearTimeout(executionWarmRetryTimer)
+  executionWarmRetryTimer = setTimeout(() => {
+    executionWarmRetryTimer = null
+    executionScheduler.requestNow()
+  }, delayMs)
+}
+
 async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
@@ -1225,6 +1251,11 @@ async function doFetchExecution(): Promise<void> {
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
+    if (isInitializingExecutionPayload(data)) {
+      scheduleExecutionWarmRetry()
+      return
+    }
+    executionWarmRetryAttempt = 0
     hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)

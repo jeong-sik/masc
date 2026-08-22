@@ -1144,9 +1144,9 @@ let test_write_desired_record_fails_closed_on_corrupt_previous () =
 
 let test_status_json_surfaces_invalid_desired_state () =
   with_temp_dir "sidecar-desired-corrupt-status" (fun base_path ->
-    let path = Routes.sidecar_desired_path ~base_path "discord" in
+    let path = Routes.sidecar_desired_path ~base_path "telegram" in
     write_file path corrupt_desired_record_json;
-    let json = Routes.read_status_json ~base_path "discord" in
+    let json = Routes.read_status_json ~base_path "telegram" in
     let open Yojson.Safe.Util in
     let lifecycle = json |> member "sidecar_lifecycle" in
     (match lifecycle |> member "desired_state" with

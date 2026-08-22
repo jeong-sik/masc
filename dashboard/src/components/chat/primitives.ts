@@ -4412,7 +4412,7 @@ export function ChatTranscript({
       snap()
       requestAnimationFrame(snap)
       // Bottom-pinned with new content arriving means the operator is watching
-      // it live — advance the cursor so the divider/card do not resurrect it.
+      // it live — advance the cursor so the divider does not resurrect it.
       onSeenBottomRef.current?.()
     } else {
       setUnread(true)

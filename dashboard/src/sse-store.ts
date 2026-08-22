@@ -128,18 +128,6 @@ export function registerKeeperWaitingInventoryRefresh(
   return () => _refreshKeeperWaitingInventoryFns.delete(fn)
 }
 
-type KeeperCompactionRefreshReason = 'source_changed' | 'ready' | 'failed'
-const _refreshKeeperCompactionFns = new Set<(
-  keeperName: string,
-  reason: KeeperCompactionRefreshReason,
-) => void>()
-export function registerKeeperCompactionRefresh(
-  fn: (keeperName: string, reason: KeeperCompactionRefreshReason) => void,
-): () => void {
-  _refreshKeeperCompactionFns.add(fn)
-  return () => _refreshKeeperCompactionFns.delete(fn)
-}
-
 const _refreshActivityFns = new Set<() => void>()
 export function registerActivityRefresh(fn: () => void): () => void {
   _refreshActivityFns.add(fn)
@@ -637,14 +625,6 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
 }
 
 export function routeServerPushEvent(event: SSEEvent): void {
-  if (event.type === 'agent_core:context_compacted') {
-    const keeperName = event.agent_name?.trim() ?? ''
-    if (keeperName) {
-      for (const refresh of _refreshKeeperCompactionFns) {
-        refresh(keeperName, 'source_changed')
-      }
-    }
-  }
   if (hydrateServerPushEvent(event)) {
     return
   }
@@ -915,16 +895,6 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     const keeperName = event.keeper_name?.trim() ?? ''
     if (keeperName) {
       for (const refresh of _refreshKeeperWaitingInventoryFns) refresh(keeperName)
-    }
-    return true
-  }
-
-  if (event.type === 'keeper_compaction_snapshots_changed') {
-    const keeperName = event.keeper_name?.trim() ?? ''
-    if (keeperName && (event.status === 'ready' || event.status === 'failed')) {
-      for (const refresh of _refreshKeeperCompactionFns) {
-        refresh(keeperName, event.status)
-      }
     }
     return true
   }

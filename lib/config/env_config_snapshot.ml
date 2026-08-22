@@ -218,8 +218,6 @@ let channel_gate_entries =
       "Dedup TTL (seconds, floored at 1)";
     entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (floored at 1)";
-    entry ~default:"30" "MASC_DISCORD_STATUS_STALE_SEC"
-      "Discord status stale threshold (seconds)";
     entry ~default:"30" "MASC_IMESSAGE_STATUS_STALE_SEC"
       "iMessage status stale threshold (seconds)";
   ]

@@ -368,6 +368,7 @@ let emit_usage_metrics_and_log
     else 0
   in
   Log.Keeper.info
+    ~category:Log.Turn
     "%s: keeper cycle %s runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
     updated_meta.name
     (terminal_outcome_to_log_label terminal_outcome)

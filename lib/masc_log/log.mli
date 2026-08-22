@@ -19,14 +19,11 @@ type category =
   | Lifecycle
   | Directive
   | Heartbeat
-  | Presence
-  | Task
   | Tool
-  | Memory
-  | Telemetry
   | Routine
   | Boundary
-  | Uncategorized
+  | Turn
+  | Broadcast
 
 val category_to_string : category -> string
 (** Canonical lowercase wire label for a {!category}. *)

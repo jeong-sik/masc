@@ -56,16 +56,10 @@ val get_int_nonneg : default:int -> string -> int
     [int] does not exist, so the only extra rejection vs {!get_int}
     is [v < 0]. *)
 
-val default_jsonl_retention_days : int
-(** The value {!jsonl_retention_days} falls back to.  Exposed because a
-    caller that treats a non-positive override as "pruning disabled" needs
-    a positive bound of its own, and re-reading the getter would hand back
-    the same non-positive value. *)
-
 val jsonl_retention_days : unit -> int
 (** [MASC_JSONL_RETENTION_DAYS], default 30.  Day-file retention for the
-    JSONL stores under [.masc], shared by the startup prune, the periodic
-    maintenance prune, and the catch-up digest look-back clamp. *)
+    JSONL stores under [.masc], shared by the startup prune and the periodic
+    maintenance prune. *)
 
 val get_float_nonneg : default:float -> string -> float
 (** Like {!get_float} but floors all non-finite (NaN, +∞, -∞) and

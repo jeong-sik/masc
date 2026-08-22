@@ -24,7 +24,6 @@ val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
-val keeper_suffix_catchup_judge : string
 val keeper_suffix_fusion : string
 val keeper_suffix_operator_note : string
 val keeper_suffix_turn_records : string
@@ -72,7 +71,6 @@ type keeper_post_route_kind =
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_paused_work
-  | Keeper_post_catchup_judge
   | Keeper_post_fusion
   | Keeper_post_operator_note
   | Keeper_post_board_attention_quarantine_recovery of

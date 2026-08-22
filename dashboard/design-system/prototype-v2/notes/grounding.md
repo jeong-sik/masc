@@ -22,7 +22,7 @@
 
 ## Board (components/board/*)
 Comms board, NOT task kanban: board-surface (feed), sub-board-surface, post-detail (threads),
-reaction-bar, board-karma-panel, board-curation-panel, board-moderation-surface (+moderation-badge),
+reaction-bar, board-karma-panel, board-curation-panel,
 mention-inbox, composer-v2, message-workspace-timeline.
 
 ## IDE (components/ide/*, api/ide.ts)

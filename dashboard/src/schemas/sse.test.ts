@@ -313,7 +313,7 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
-  it('accepts external-effect completion with and without a delivery target', () => {
+  it('accepts external-effect completion only with a typed delivery target', () => {
     const event = (value: unknown) => ({
       type: 'keeper_chat_operation_event',
       name: 'sangsu',
@@ -326,7 +326,8 @@ describe('SSEMessageSchema', () => {
         timestamp: 1_712_000_000,
       },
     })
-    expect(SSEMessageSchema.safeParse(event(null)).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(event(null)).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(event({})).success).toBe(false)
     expect(
       SSEMessageSchema.safeParse(event({ target: { kind: 'dashboard' } })).success,
     ).toBe(true)
@@ -435,23 +436,6 @@ describe('SSEMessageSchema', () => {
     { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1', queue_kind: 'unknown' },
   ])('rejects an incomplete Keeper waiting-inventory invalidation: %o', value => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
-  })
-
-  it('accepts a typed compaction snapshot cache completion', () => {
-    expect(SSEMessageSchema.safeParse({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'keeper-1',
-      status: 'ready',
-      ts_unix: 1_712_000_000,
-    }).success).toBe(true)
-  })
-
-  it('rejects compaction snapshot cache completion without a closed status', () => {
-    expect(SSEMessageSchema.safeParse({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'keeper-1',
-      status: 'warming',
-    }).success).toBe(false)
   })
 
   it('accepts a gate_mode_changed event with a null previous_mode', () => {

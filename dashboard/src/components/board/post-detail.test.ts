@@ -290,25 +290,6 @@ describe('CommentThread', () => {
     expect(screen.getByText('4')).toBeInTheDocument()
   })
 
-  it('renders comment moderation projection badges', () => {
-    const comments = [
-      {
-        id: 'c1',
-        post_id: 'post-1',
-        parent_id: null,
-        author: 'agent',
-        content: 'review me',
-        created_at: '2026-04-02T00:00:00Z',
-        report_count: 1,
-        moderation_status: 'hidden',
-      },
-    ] as any
-
-    render(h(CommentThread, { comments, postId: 'post-1' }))
-
-    expect(screen.getByLabelText('댓글 moderation 숨김 1건')).toHaveTextContent('숨김 1')
-  })
-
   it('renders vote-blind comment scores as hidden until voting', () => {
     const comments = [
       {
@@ -535,8 +516,6 @@ describe('PostDetail', () => {
       comment_count: 0,
       post_kind: 'direct',
       classification_reason: 'Direct board post without automation provenance.',
-      report_count: 1,
-      moderation_status: 'approved',
       comments: [],
     } as any
 
@@ -545,7 +524,6 @@ describe('PostDetail', () => {
     expect(screen.getByText(/분류 근거:/)).toBeInTheDocument()
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
-    expect(screen.getByLabelText('게시글 moderation 승인됨 1건')).toHaveTextContent('승인됨 1')
   })
 
   it('marks the current post vote as pressed', async () => {
@@ -811,7 +789,6 @@ describe('PostDetail', () => {
       votes: 0,
       comment_count: 0,
       post_kind: 'direct',
-      moderation_status: 'none',
       origin: { turn_ref: 'trace-x#5', source: 'dashboard', fusion_run_id: null },
       comments: [],
     } as any
@@ -842,7 +819,6 @@ describe('PostDetail', () => {
       votes: 0,
       comment_count: 0,
       post_kind: 'direct',
-      moderation_status: 'none',
       // A fusion-origin post carries fusion_run_id but no turn_ref → no affordance.
       origin: { turn_ref: null, source: 'fusion', fusion_run_id: 'fus-1' },
       comments: [],

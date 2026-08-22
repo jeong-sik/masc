@@ -1,9 +1,9 @@
 ---
 title: In-process Slack connector (Socket Mode)
 rfc: "0317"
-status: In progress (PR-1/PR-2 landed; PR-3 implemented; PR-4 sidecar removal pending)
+status: Implemented
 created: 2026-07-07
-updated: 2026-07-08
+updated: 2026-08-22
 author: vincent
 related: ["0203", "0287"]
 ---
@@ -22,7 +22,7 @@ One tool out, push in. The mirror of [[RFC-0203]] for Slack.
 > (`SLACK_APP_TOKEN`, `MASC_SLACK_TRIGGER_POLICY`) + `slack_observability`,
 > and supplies a Slack-owned immutable delivery projection to the generic
 > Keeper acceptance boundary.
-> PR-4 (pending) deletes the sidecar. Ambient recording + idle-keeper wake on
+> PR-4 (landed) deleted the sidecar. Ambient recording + idle-keeper wake on
 > non-triggering messages and reaction-as-trigger are follow-up scope, not PR-3.
 
 ## Why
@@ -162,8 +162,8 @@ failure (DNS/TLS/handshake) is fed as `Wss_closed` — there is no separate
   (message/app_mention/reaction_added/unknown→Ignored_event).
 - **Integration (PR-3)**: with both tokens set, server boot → Socket Mode
   connect → Slack mention → keeper turn → `chat.postMessage` reply.
-- **Regression (PR-4)**: `/api/v1/sidecar/status?name=slack` 404; Discord
-  gateway unaffected (separate module tree).
+- **Regression (PR-4)**: `/api/v1/sidecar/status?name=slack` 400 (unknown
+  sidecar id); Discord gateway unaffected (separate module tree).
 - **Security**: token redaction snapshot test; no token in logs/argv.
 
 ## PR split
@@ -184,9 +184,8 @@ failure (DNS/TLS/handshake) is fed as `Wss_closed` — there is no separate
    before returning the threaded queue acknowledgement. Final replies are owned
    by the serial Keeper chat consumer and Slack outbound adapter.
    Ambient recording, idle-keeper wake, and reaction-as-trigger are deferred.
-4. **PR-4 (pending)**: delete `sidecars/slack-bot/` + remove Slack branch from
-   `server_routes_http_routes_sidecar` + drop `channel_gate_sidecar_state`
-   Slack instance.
+4. **PR-4 (landed)**: delete `sidecars/slack-bot/` + remove Slack from the
+   `server_routes_http_routes_sidecar` whitelist and status-file config.
 
 ## Out of scope
 

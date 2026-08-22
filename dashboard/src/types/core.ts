@@ -150,7 +150,6 @@ export type BoardAttachmentDecode =
   | { ok: false; raw: unknown }
 
 export type BoardVoteDirection = 'up' | 'down'
-export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
@@ -202,8 +201,6 @@ export interface BoardPost {
   visibility?: string
   expires_at?: string | null
   hearth_count?: number
-  report_count?: number
-  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null
@@ -225,8 +222,6 @@ export interface BoardComment {
   vote_blind_reason?: string
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
-  report_count?: number
-  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
 }
@@ -680,8 +675,8 @@ export type KeeperTurnOutcome =
 
 // Where an `external_effect_completed` turn actually delivered its reply
 // (`external_effect_target` on the reply payload / the
-// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Absent on legacy payloads
-// that predate the field — the card then falls back to generic copy.
+// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Present exactly on those
+// turns; other outcomes carry no target and the card keeps generic copy.
 export type KeeperExternalEffectTarget =
   | { kind: 'dashboard' }
   | { kind: 'discord'; channelId: string }

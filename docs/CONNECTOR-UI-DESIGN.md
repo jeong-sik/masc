@@ -107,11 +107,12 @@ one row each in the accent + emoji tables — no per-surface re-styling.
   call. It is derived from `connector.available` — if the sidecar booted
   successfully, the token validated. The bridge would have crashed at
   startup otherwise.
-- **Connector list** = exactly 4 ids in `KNOWN_CONNECTOR_IDS` (matches
-  backend whitelist in `lib/server/server_routes_http_routes_sidecar.ml`
-  via the `known_ids size = 4` invariant test). Never compute the list
-  from "what the gate is currently advertising" — that's empty during
-  cold start.
+- **Connector list** = exactly 4 ids in `KNOWN_CONNECTOR_IDS`. The backend
+  sidecar whitelist (`known_ids` in
+  `lib/server/server_routes_http_sidecar_paths.ml`) is the external subset —
+  `KNOWN_CONNECTOR_IDS` minus `IN_PROCESS_CONNECTOR_IDS` — pinned by the
+  `known_ids size = 2` invariant test. Never compute the list from "what the
+  gate is currently advertising" — that's empty during cold start.
 
 ## 7. Best-effort vs strict fetches
 
@@ -202,15 +203,17 @@ mental model than discovering the do.
 
 ## Adding a 5th connector — checklist
 
-1. Add id to `KNOWN_CONNECTOR_IDS` (dashboard) + `known_ids` (backend
-   `server_routes_http_routes_sidecar.ml`).
+1. Add id to `KNOWN_CONNECTOR_IDS` (dashboard). For an external sidecar also
+   add it to `known_ids` (backend `server_routes_http_sidecar_paths.ml`); for
+   an in-process gateway add it to `IN_PROCESS_CONNECTOR_IDS` instead.
 2. Add row to `CONNECTOR_DISPLAY_NAMES`, `CONNECTOR_ACCENT_RGB`,
    `SIDECAR_DIRS`, `channelIcon` switch.
 3. Add `sidecars/<id>-bot/` with: `src/config.py` (BotConfig),
    `src/schema_dump.py` (one-line `python -m`), `run.sh`
    ([start|stop|tail|status]).
 4. Add `CONNECTOR_SETUP_GUIDES['<id>']` (token-acquisition steps).
-5. Update `test_known_ids_size_matches_dashboard` invariant to expect 5.
+5. For an external sidecar, update the `test_known_ids_size_matches_dashboard`
+   invariant to expect 3.
 
 If any of these are skipped the dashboard will draw a card the
 backend refuses to spawn — the invariant test catches it before merge.

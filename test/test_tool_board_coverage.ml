@@ -37,7 +37,6 @@ let cleanup () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_curation.reset_for_test ();
-  Board_moderation.reset_for_test ();
   Fs_compat.reset_fd_cache_for_testing ();
   Fs_compat.reset_mkdir_memo_for_testing ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
@@ -102,44 +101,6 @@ let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_m
   with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_keeper_meta failed: %s" e)
-
-let source_text rel = Masc_test_deps.read_file (Masc_test_deps.source_path rel)
-
-let slice_between text ~start_marker ~end_marker =
-  try
-    let start = Str.search_forward (Str.regexp_string start_marker) text 0 in
-    let stop = Str.search_forward (Str.regexp_string end_marker) text start in
-    String.sub text start (stop - start)
-  with Not_found ->
-    Alcotest.failf "missing source marker between %S and %S" start_marker end_marker
-
-let slice_from text ~start_marker =
-  try
-    let start = Str.search_forward (Str.regexp_string start_marker) text 0 in
-    String.sub text start (String.length text - start)
-  with Not_found -> Alcotest.failf "missing source marker %S" start_marker
-
-let test_moderation_http_identity_bound_to_auth_source () =
-  let src = source_text "lib/server/server_dashboard_http_delete_actions.ml" in
-  let flag_route =
-    slice_between src
-      ~start_marker:{|Http.Router.post "/api/v1/dashboard/board/moderation/flag"|}
-      ~end_marker:{|Http.Router.get "/api/v1/dashboard/board/moderation/queue"|}
-  in
-  let action_route =
-    slice_from src
-      ~start_marker:{|Http.Router.post "/api/v1/dashboard/board/moderation/action"|}
-  in
-  Alcotest.(check bool) "flag route binds authenticated agent" true
-    (String_util.contains_substring flag_route "(fun _state agent_name req reqd ->");
-  Alcotest.(check bool) "flag reporter uses authenticated agent" true
-    (String_util.contains_substring flag_route "let reporter = agent_name");
-  Alcotest.(check bool) "flag route ignores body reporter" false
-    (String_util.contains_substring flag_route {|json_string_opt "reporter"|});
-  Alcotest.(check bool) "action actor uses authenticated agent" true
-    (String_util.contains_substring action_route "let actor = agent_name");
-  Alcotest.(check bool) "action route ignores body actor" false
-    (String_util.contains_substring action_route {|json_string_opt "actor"|})
 
 (** {2 Group 1: Helper / Formatting Functions} *)
 
@@ -266,11 +227,6 @@ let json_member_list json key =
   | `List values -> values
   | _ -> Alcotest.failf "expected list field %s" key
 
-let json_has_member json key =
-  match Yojson.Safe.Util.member key json with
-  | `Null -> false
-  | _ -> true
-
 let test_board_actor_identity_canonicalizes_keeper_alias () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -364,68 +320,6 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     (json_member_string comment_summary "emoji");
   Alcotest.(check bool) "comment reaction selected" true
     (json_member_bool comment_summary "has_reacted")
-
-let test_board_dashboard_json_embeds_moderation_projection () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let post =
-    match
-      Board_dispatch.create_post ~author:"moderated-author"
-        ~content:"moderation projection post" ~post_kind:Board.Human_post ()
-    with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let post_id = Board.Post_id.to_string post.id in
-  let comment =
-    match
-      Board_dispatch.add_comment ~post_id ~author:"moderated-commenter"
-        ~content:"moderation projection comment" ()
-    with
-    | Ok comment -> comment
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let comment_id = Board.Comment_id.to_string comment.id in
-  (match
-     Board_moderation.flag ~target_kind:Board_moderation.Target_post
-       ~target_id:post_id ~reporter:"reporter-a" ~reason:Board_moderation.Spam
-   with
-   | Ok _ -> ()
-   | Error e -> Alcotest.fail e);
-  (match
-     Board_moderation.flag ~target_kind:Board_moderation.Target_comment
-       ~target_id:comment_id ~reporter:"reporter-b"
-       ~reason:Board_moderation.Harassment
-   with
-   | Ok _ -> ()
-   | Error e -> Alcotest.fail e);
-  let public_post_json =
-    Server_utils.board_post_dashboard_json ~author_karma:0 post
-  in
-  let public_comment_json = Server_utils.board_comment_dashboard_json comment in
-  Alcotest.(check bool) "public post omits report count" false
-    (json_has_member public_post_json "report_count");
-  Alcotest.(check bool) "public post omits moderation status" false
-    (json_has_member public_post_json "moderation_status");
-  Alcotest.(check bool) "public comment omits report count" false
-    (json_has_member public_comment_json "report_count");
-  Alcotest.(check bool) "public comment omits moderation status" false
-    (json_has_member public_comment_json "moderation_status");
-  let post_json =
-    Server_utils.board_post_dashboard_json ~include_moderation:true ~author_karma:0 post
-  in
-  let comment_json =
-    Server_utils.board_comment_dashboard_json ~include_moderation:true comment
-  in
-  Alcotest.(check int) "post report count" 1
-    (json_member_int post_json "report_count");
-  Alcotest.(check string) "post moderation status" "flagged"
-    (json_member_string post_json "moderation_status");
-  Alcotest.(check int) "comment report count" 1
-    (json_member_int comment_json "report_count");
-  Alcotest.(check string) "comment moderation status" "flagged"
-    (json_member_string comment_json "moderation_status")
 
 let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
   with_eio @@ fun env ->
@@ -1991,16 +1885,12 @@ let () =
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
-          Alcotest.test_case "board dashboard json embeds moderation projection"
-            `Quick test_board_dashboard_json_embeds_moderation_projection;
           Alcotest.test_case "board dashboard json hides blind vote scores"
             `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"
             `Quick test_inline_board_post_author_accepts_matching_alias;
-          Alcotest.test_case "moderation http identity binds to auth source"
-            `Quick test_moderation_http_identity_bound_to_auth_source;
         ] );
       ( "json_helpers",
         [

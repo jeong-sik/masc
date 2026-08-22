@@ -2613,6 +2613,11 @@
  (libraries alcotest masc_tui_board_selection))
 
 (test
+ (name test_tui_planning_selection)
+ (modules test_tui_planning_selection)
+ (libraries alcotest masc_tui_planning_selection))
+
+(test
  (name test_tui_board_detail)
  (modules test_tui_board_detail)
  (libraries alcotest masc_tui_board_detail))

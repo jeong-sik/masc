@@ -645,6 +645,27 @@ let test_planning_cursor_uses_visible_goal_order () =
      >= 2)
 ;;
 
+let test_planning_refresh_reconciles_navigation_identity () =
+  let main_path = "bin/masc_tui.ml" in
+  check int "planning apply owns one identity reconciliation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_planning_load"
+       ~callee:"Planning_selection.reconcile");
+  check int "planning reconciliation has one application owner" 1
+    (Ast_grep.count_calls ~module_path:main_path
+       ~callee:"Planning_selection.reconcile");
+  check int "planning apply is independent of the visible surface" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_planning_load" ~callees:[]
+       ~fields:[ "view" ]);
+  check int "HTTP surface application owns one planning apply" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_http_surfaces" ~callee:"apply_planning_load");
+  check int "refresh loop no longer checks the stale planning snapshot" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"List.find_opt")
+;;
+
 let test_overview_events_use_scroll_projection () =
   check int "overview renders one bounded event window" 1
     (Ast_grep.count_calls_in_value_binding
@@ -1239,6 +1260,10 @@ let () =
           "planning cursor uses visible goal order"
           `Quick
           test_planning_cursor_uses_visible_goal_order;
+        test_case
+          "planning refresh reconciles navigation identity"
+          `Quick
+          test_planning_refresh_reconciles_navigation_identity;
         test_case
           "overview events use bounded scroll projection"
           `Quick

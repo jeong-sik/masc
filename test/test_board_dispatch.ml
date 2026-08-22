@@ -1452,7 +1452,6 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
    | Error error -> Alcotest.fail (Board.show_board_error error));
   let status, body =
     Server_routes_http_runtime.board_post_detail_json
-      ~blind_votes:false
       ~config:None
       ~voter:(Some "forgeable-query-voter")
       ~reaction_actor:(Some "credential-owner")

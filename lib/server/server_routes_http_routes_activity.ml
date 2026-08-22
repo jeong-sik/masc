@@ -736,20 +736,18 @@ let add_routes ~sw ~clock router =
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
          let voter = board_voter_query req in
-         let blind_votes = bool_query_param req "blind_votes" ~default:false in
          let cache_key =
            let cache_part = function
              | Some value -> value
              | None -> ""
            in
-           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s:%b"
+           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s"
              config.base_path
              (cache_part hearth)
              (board_sort_label sort_by)
              exclude_system exclude_automation
              (cache_part author_query)
              limit offset (cache_part voter) (cache_part reaction_actor)
-             blind_votes
          in
          let json =
            Dashboard_cache.get_or_compute cache_key
@@ -784,7 +782,7 @@ let add_routes ~sw ~clock router =
                          let post_id = Board.Post_id.to_string p.id in
                          let current_vote = board_current_vote_for_post ~voter ~post_id in
                          let reactions = reactions_for (Board.Reaction_post, post_id) in
-                         board_post_dashboard_json ~blind_votes
+                         board_post_dashboard_json
                            ~reactions
                            ?current_vote
                            ~author_karma:(get_karma author) p)
@@ -1062,12 +1060,8 @@ let add_routes ~sw ~clock router =
                        (Server_board_post_response_format.error_json error)
                    | Ok response_format ->
                      let voter = board_voter_query req in
-                     let blind_votes =
-                       bool_query_param req "blind_votes" ~default:false
-                     in
                      let status, body =
                        board_post_detail_json
-                         ~blind_votes
                          ~voter
                          ~reaction_actor
                          ~config:(Some config)

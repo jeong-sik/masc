@@ -121,7 +121,7 @@ export function KeeperBackgroundPanel({
     <section class="sch-bg" data-testid="keeper-background-inventory">
       <div class="sch-bg-h">
         <h3>Keeper 자율 백그라운드</h3>
-        <div class="sch-bg-sub">
+        <div class="sch-bg-sub is-stats">
           <span class="font-mono">keepers ${background.keeper_count.toLocaleString()}</span>
           <span class="font-mono">recurring keepers ${background.recurring_keeper_count.toLocaleString()}</span>
           <span class="font-mono">recurring tasks ${background.recurring_count.toLocaleString()}</span>

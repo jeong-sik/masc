@@ -46,6 +46,7 @@ Diagnostics, in the order they are usually needed:
 | `design-parity-box.mjs <surface> <sel…>` | where an element actually landed (x/y/size) — what a cumulative offset needs |
 | `design-parity-rules.mjs <url> <sel> <prop>` | which stylesheet rule wins that property (CDP `getMatchedStylesForNode`) |
 | `design-parity-cssdiff.mjs <name…>` | vendored vs prototype stylesheet, with the repo's font-size tokenization normalized away |
+| `design-parity-viewport.mjs <surface> [limit]` | elements that differ AND fall inside the captured 1600×1000 — a block at y=1934 can be repaired without the number moving at all |
 | `design-parity-gaps.mjs [name…]` | selectors the design defines that the vendored kit does not |
 | `design-parity-leaks.mjs` | selectors owned by both a legacy sheet and the kit, and the geometry the kit does not restate |
 
@@ -57,35 +58,139 @@ so it is not used for the metric.
 The harness writes `prototypes/keeper-v2/_parity/` and `_parity-vendored.html`;
 both are gitignored and regenerated.
 
+## Reproducibility
+
+The prototype is a live mock, not a static page, and three things in it moved a
+measurement between runs of the identical page:
+
+- `.thread` is bottom-anchored and its scroll-to-bottom races the layout. It
+  settles either at the bottom (`scrollTop` 1907 of 1907) or at an earlier
+  anchor (185), and nothing afterwards moves it. Those two states differ by the
+  height of the visible column, which is a 4pp swing on keepers — and a 15pp
+  swing when the two sides land on opposite states. The capture pins the thread
+  where the app means it to sit.
+- `alarm.jsx` fires an ambient notification five seconds after load and every
+  sixteen after that. It is switched off through the prototype's own
+  `window.MASC_NOTIFY` channel before any page script runs.
+- `shell.jsx` re-rolls a random tok/s figure every 1.1s, so the page never
+  reaches a state it can be compared in. Repeating timers of a second or more
+  are cut; the one-shot ones stay, because the FSM phase advance
+  (`act.ms || 1500`) is part of the state the design settles into.
+
+On top of that a frame is only accepted once two consecutive captures are
+byte-identical. With all four in place, four runs of the same page produce the
+same bytes and two independent full-fleet runs produce the same mean to four
+decimals. Without them, treat any difference under ~4pp as noise.
+
 ## Where it stands (2026-08-22, `Keeper Agent v5.html`, 1600×1000)
+
+Two independent full-fleet runs, identical to four decimals.
 
 | Surface | SSIM | | Surface | SSIM |
 |---|---|---|---|---|
-| logs | 0.996 | | registry | 0.955 |
-| connectors | 0.986 | | schedule | 0.944 |
-| lab | 0.986 | | ide | 0.935 |
-| fusion | 0.978 | | monitor | 0.928 |
-| command | 0.969 | | keepers | 0.909 |
-| approvals | 0.966 | | work | 0.891 |
-| | | | board | 0.853 |
-| | | | overview | 0.842 |
-| | | | **mean** | **0.939** |
+| logs | 0.996 | | approvals | 0.966 |
+| monitor | 0.995 | | registry | 0.955 |
+| ide | 0.995 | | schedule | 0.945 |
+| lab | 0.987 | | keepers | 0.909 |
+| connectors | 0.986 | | work | 0.897 |
+| command | 0.979 | | board | 0.853 |
+| fusion | 0.978 | | overview | 0.842 |
+| | | | **mean** | **0.949** |
 
-Nine of the fourteen sit at 0.93 or above and seven at 0.95 or above. The four
-that do not — overview, board, work, monitor — are each held there by one named
-cause, ledgered underneath, and none of the four is skin drift. **Across the ten
-surfaces where the two sides agree on structure the mean is 0.962**; that is the
-figure to read as "does the skin match". The 0.939 fleet mean includes the four
-and is the figure to read as "how close is the whole dashboard to the mock".
+Ten of the fourteen sit at 0.95 or above. The four that do not — overview,
+board, work, keepers — are each held there by one named cause, ledgered
+underneath, and none of the four is skin drift. **Across the ten surfaces where
+the two sides agree on structure the mean is 0.979**; that is the figure to read
+as "does the skin match". The 0.949 fleet mean includes the four and is the
+figure to read as "how close is the whole dashboard to the mock".
 
 Style conformance — `getComputedStyle` compared property by property across every
-classed element on ten surfaces — is **96.89%** (41,182 of 42,504 declarations),
+classed element on ten surfaces — is **96.93%** (41,201 of 42,504 declarations),
 from 85.85% before this pass. The largest remaining group is `font-family` (263),
 which is the UA fallback the dashboard deliberately does not reproduce (see
 below); without it the figure is 97.6%.
 
 `settings` is not measurable: the prototype's `SURFACES` registry has no entry for
 it, so `?surface=settings` is rejected and the page renders keepers.
+
+## Measured at a second viewport
+
+Everything above is 1600×1000. `keeper-v2/fleet.css` calls 1440px "the canonical
+operator viewport", so the fleet was measured there too:
+
+| | 1600×1000 | 1440×900 |
+|---|---|---|
+| mean | **0.948** | **0.942** |
+| monitor | 0.995 | 0.928 |
+| overview | 0.842 | 0.868 |
+| schedule | 0.945 | 0.931 |
+| keepers | 0.909 | 0.896 |
+
+The narrower viewport scores lower, and monitor carries most of the drop. Below
+1500px the kit's `--fl-cols` switches to a responsive tier that is tuned the way
+the base value used to be — five tracks with a 160px action cell, and
+`.fl-rhead span:nth-child(5)` hidden — all shaped by the live row's sixth cell,
+which the mock's row does not have. It is the same defect the base track set had,
+still sitting in the tiers.
+
+It is not fixed here. The tier never fires at the measured viewport, so it moves
+no number the bar reads, and splitting it touches the live surface's responsive
+behaviour at three breakpoints — worth its own change with its own verification,
+not a tail-end edit. The split follows the pattern already applied to the base
+value: the design's tiers stay in `keeper-v2/fleet.css`
+(`max-width: 1320px` → four tracks, `max-width: 720px` → three), and the live
+tiers move to `v2-monitoring.css` under `.v2-monitoring-surface`, keeping the
+1500px breakpoint and the column-shedding rule.
+
+`design-parity-shot.mjs` takes `PARITY_W` / `PARITY_H` for this.
+
+## Sub-views
+
+The prototype deep-links `?surface=` and `?keeper=` and nothing else, so every
+section tab and drawer — Lane Queue, the prompt book, all twelve Settings panes —
+is reachable only by clicking. Measuring the deep-linkable surfaces alone leaves
+most of the design unverified: Monitor has seven sections and Settings twelve,
+and `?surface=settings` is rejected outright because Settings is not in the
+prototype's `SURFACES` registry.
+
+`design-parity-views.mjs` is the recipe list — a view is a surface plus the
+clicks that open it — and the shot harness follows it. Twenty-two views,
+2026-08-22:
+
+| View | SSIM | | View | SSIM |
+|---|---|---|---|---|
+| ide-cursor | 0.996 | | monitor-tools | 0.969 |
+| monitor-observatory | 0.995 | | settings ×12 | 0.967–0.972 |
+| monitor-journey | 0.993 | | **monitor-lanes** | **0.959** |
+| ide-annotations | 0.992 | | monitor-internal | 0.870 |
+| monitor-runtime | 0.984 | | schedule-list | 0.868 |
+| | | | approvals-history | 0.796 |
+| | | | **mean** | **0.957** |
+
+The sub-views score *higher* than the top-level surfaces (0.957 against 0.949).
+Lane Queue at 0.959 and the prompt book at 0.971 say the `lanes.css` and
+`prompt-book.css` vendoring landed — which had never been verified, only
+assumed.
+
+Three are short, and all three for the same reason: the dashboard built the
+component differently, so there is no class for the vendored skin to attach to.
+None is skin drift and none is fixable in CSS.
+
+| View | What the design draws | What the dashboard renders |
+|---|---|---|
+| `approvals-history` 0.796 | `.ap-hist-row` — a dense table, four-column grid, tone stripe down the left edge, inline stat line, pill filters | `.ap-history-*` — a different component under different names, with the stats as a four-card grid. Carries fields the design has no slot for (judging model, ALWAYS rules, source). |
+| `schedule-list` 0.868 | `.sch-act` approve/deny/ghost buttons | No consumer at all. This is one of the "36 v3-only selectors with zero DOM consumers" the earlier sync recorded and skipped; it is still true. |
+| `monitor-internal` 0.870 | `.ia-badge`, `.ia-count`, `.ai-table`, `.ai-strip` — a named component vocabulary | Tailwind utilities assembled inline (`flex`, `grid`, `px-2`, `max-h-80`). Swapping the skin cannot reach this surface, because there is nothing named to style. |
+
+The last one is the most instructive. A vendored stylesheet only lands where the
+DOM speaks the same vocabulary; a surface assembled from utilities is opaque to
+it no matter how faithful the CSS is. That is a component-level decision, not a
+sync one.
+
+## Unnecessary UI
+
+`docs/DESIGN-EXTRA-UI.md` runs the reverse check — what the dashboard renders
+that the design does not — and carries its own findings.
 
 ## Divergence ledger
 
@@ -99,13 +204,21 @@ divergence from prototype): full-width, left-aligned … per design direction th
 dashboard fills the content area to match the other surfaces
 (board/monitoring/command/lab/ide). Do not re-add max-width / margin:auto on a
 prototype re-sync."* The design still centres it in v5, and the note predates
-this design drop, so it was put to the operator on 2026-08-22 with the
-measurement — the decision is to keep full width.
+this design drop, so it was put to the operator twice.
 
-Cost: overview measures **0.842**; restoring `max-width: 1280px; margin: 0 auto`
-takes it to **0.996**, and the fleet mean from 0.939 to 0.950. No other
-surface moves — `.ov-scroll` is the only centred container, and `work`,
-`approvals` and `board` render full-width in the design too.
+The first time, restoring the centring would have left the fleet mean short of
+the 95% bar anyway, and the recorded decision stood. After the monitor, IDE and
+Work repairs it became the only remaining lever — this one line is the whole
+difference between 0.949 and 0.960 — so it was put again with that number
+attached. **Re-confirmed on 2026-08-22: the surface stays full width, and the
+parity bar goes unmet rather than the product decision being reversed.**
+
+Cost, measured: overview reads **0.842**; `max-width: 1280px; margin: 0 auto` on
+`.ov-scroll` takes it to **0.996** and the fleet mean from 0.949 to 0.960. No
+other surface moves — `.ov-scroll` is the only container the design centres, and
+`work`, `approvals` and `board` render full-width in the design too. A
+sixteen-agent sweep of the eight surfaces still short of parity found no other
+actionable drift, so this is the only lever that exists.
 
 ### Keepers — resolved: `.chip` named two different components
 
@@ -124,31 +237,55 @@ a `SuggestionChip` rendering the design's `.chip`; nothing imported it, and it
 is gone. The live suggestion chip is `components/common/suggestion-chip.ts`,
 whose metrics are now the design's.
 
-keepers went **0.848 → 0.909** on that. What is left is the roster and thread
-chrome, where the residual is the button font fallback described below.
+keepers went **0.848 → 0.909** on that. What is left is the button font metric
+described under "the prototype ships no CSS reset": `.cf-view`, `.tasktag` and
+the top-bar attention chips each stand 2–3px taller than the mock because
+`line-height: normal` resolves against Noto Sans KR's metrics rather than
+Arial's. Substituting a numeric leading was measured and rejected — it inherits
+into the grid cells and cost the fleet 8.7pp.
 
 ### Board — `.bd-stateblock` is a design component the dashboard has not built
 
 The design's board renders a state-transition post (`Running → Overflowed`,
-context 100%, `restart` pending) as a `.bd-stateblock`. The class appears nowhere
-in `dashboard/src`. Vendoring the four rules would move the number without
-changing anything the app renders, which is the fake this repo's *mark-don't-fake*
-rule exists to prevent. Not vendored.
+context 100%, `restart` pending) as a `.bd-stateblock`, reading three fields off
+`post.stateBlock`. `BoardPost` in `types/core.ts` has no counterpart — no
+from/to state, no context figure, no pending action — so the backend does not
+emit the data the block displays. Vendoring the four CSS rules would move the
+number without changing anything the app renders, and building the block without
+the fields would mean inventing them; both are the fake this repo's
+*mark-don't-fake* rule exists to prevent. Not vendored.
 
 Cost: the second mock post is 56px shorter, and every post below it shifts.
 board measures **0.853**.
 
-### Monitor — the roster grid has six tracks, the design has five
+### Monitor — resolved: the roster grid had six tracks, the design has five
 
-`--fl-cols` in `keeper-v2/fleet.css` carries the local contract: *"Last track =
-action cell (멈춤/깨움/종료): the 3 text buttons render ~156px, so the track must be
-wide enough or the button group overflows left into the context value."* The
-live row has an action cell the mock row does not, so the vendored grid has six
-tracks against the design's five. The v5 width refinement (state 140→152,
-context minmax 108→96) is merged into it.
+The live row carries a `.fl-runtime` cell between context and recent-tool that
+the mock's row has no counterpart for, and its action group is three text buttons
+(멈춤/깨움/종료) rendering ~156px, so the last track needs 160px. That six-track
+value used to live in the shared `--fl-cols`, which laid the design's five cells
+into six tracks and pushed every column wide.
 
-Cost: on the parity page the prototype's five cells are laid into a six-track
-grid, so every column lands wide of the design. monitor measures **0.928**.
+`keeper-v2/fleet.css` carries the design's five tracks now, and
+`v2-monitoring.css` restates six for `.v2-monitoring-surface` alone, bounded to
+the widths above the shed-a-column tier so that tier keeps its own set. The live
+roster still renders six cells in six tracks with a 160px action cell and no
+overflow.
+
+monitor went **0.928 → 0.995**.
+
+### IDE — resolved: the rail tabs had two names
+
+The live rail tabs rendered `.ide-v2-rail-tab*`; the design draws the same
+component as `.ide-rail-tab*`, and the design's rules were never vendored, so the
+tabs fell back to the generic button chrome. The component uses the design's
+names now, `keeper-v2/surfaces.css` owns its type, spacing and selected state,
+and `ide-v2.css` keeps only what the mock never had to solve: three tabs sharing
+a 320px rail without wrapping, and a label that truncates instead of pushing its
+neighbours out. `flex: 0 1 auto` rather than `1 1 0`, so a tab sizes to its label
+the way the design draws it and still shrinks under pressure.
+
+ide went **0.935 → 0.995**.
 
 ### Work — the dashboard moved past the design here
 
@@ -186,6 +323,17 @@ Two halves, decided separately:
   not: rows and segments the design leaves square because they sit inside a
   container that already owns the corner. Those are named in `craft-v2.css`
   rather than dropping the default the other 1,309 depend on.
+- **The body face is the same one — on this machine.** Width triangulation on a
+  Korean string (40px, stack vs `Noto Sans KR` alone vs a last-resort control)
+  returns 622.41px on both pages, against 585.17px for the fallback. So the
+  chrome outside buttons matches. But the prototype loads Noto Sans KR as a
+  webfont (`styles/fonts/`) and the dashboard does not — `fonts.css` keeps the
+  9.9MB TTF off the hot path deliberately — so the dashboard is resolving it
+  from the system. On a machine without it installed the dashboard falls back to
+  585.17px metrics while the prototype still renders at 622.41px, and every
+  measurement in this document shifts. Re-measure on a clean machine before
+  treating these numbers as machine-independent.
+
 - **The font fallback is not.** Matching the design's `Arial` on buttons would
   put Korean UI text through a Latin fallback, and the design system's own
   specification names Noto Sans KR for chrome. The dashboard's normalisation

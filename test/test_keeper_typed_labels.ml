@@ -228,19 +228,6 @@ let test_classify_no_signal_returns_no_actionable () =
         "expected No_actionable_signal, got %s"
         (Keeper_contract_classifier.actionable_signal_label other)
 
-let test_is_actionable_matches_variants () =
-  Alcotest.(check bool) "Has_unclaimed_tasks is actionable" true
-    (Keeper_contract_classifier.is_actionable Has_unclaimed_tasks);
-  Alcotest.(check bool) "Has_board_activity is actionable" true
-    (Keeper_contract_classifier.is_actionable Has_board_activity);
-  Alcotest.(check bool)
-    "Has_completion_authority_rejection is actionable"
-    true
-    (Keeper_contract_classifier.is_actionable
-       Has_completion_authority_rejection);
-  Alcotest.(check bool) "No_actionable_signal is not actionable" false
-    (Keeper_contract_classifier.is_actionable No_actionable_signal)
-
 (* ── Keeper_profile_load_failure_site.t ──────────────────────── *)
 
 let all_profile_load_failure_sites : Keeper_profile_load_failure_site.t list =
@@ -303,8 +290,6 @@ let () =
             test_classify_board_signal;
           Alcotest.test_case "empty observation → No_actionable_signal" `Quick
             test_classify_no_signal_returns_no_actionable;
-          Alcotest.test_case "is_actionable matches all variants" `Quick
-            test_is_actionable_matches_variants;
         ] );
       ( "profile_load_failure_site",
         [

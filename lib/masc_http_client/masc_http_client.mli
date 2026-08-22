@@ -101,13 +101,6 @@ val get_sync :
     with header maps or non-default config. *)
 module Pool : module type of Pool
 
-val pool_singleton_opt : unit -> Pool.t option
-(** [pool_singleton_opt ()] returns some domain's [Pool.t] if any
-    has been lazy-initialized by a prior HTTP call, [None] otherwise.
-    Backward-compatible read-only accessor for telemetry consumers.
-    For comprehensive metrics across all domains, use
-    {!all_domain_pools} instead. *)
-
 val all_domain_pools : unit -> (int * Pool.t) list
 (** [all_domain_pools ()] returns all domain-local pools as
     [(domain_id, pool)] pairs.  Used by [Pool_metrics] to aggregate

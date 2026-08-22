@@ -116,8 +116,8 @@
   color: var(--status-warn);
 }
 .kcf-control-ledger-row.unsupported .kcf-control-kind {
-  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
-  color: var(--status-fail);
+  border-color: color-mix(in oklab, var(--status-bad) 45%, transparent);
+  color: var(--status-bad);
 }
 .kcf-control-ledger-row.missing-config-field .kcf-control-contracts {
   color: var(--status-warn);

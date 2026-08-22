@@ -28,7 +28,7 @@
   flex-wrap: wrap;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
-  background: var(--surface-raised);
+  background: var(--bg-panel);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
 }
@@ -66,10 +66,10 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--status-err);
+  border: 1px solid var(--status-bad);
   border-radius: var(--radius-md);
-  color: var(--status-err);
-  background: color-mix(in srgb, var(--status-err) 8%, transparent);
+  color: var(--status-bad);
+  background: color-mix(in srgb, var(--status-bad) 8%, transparent);
 }
 
 .kmh-read-errors ul {
@@ -121,7 +121,7 @@
 }
 
 .kmh-table tr:hover td {
-  background: var(--surface-hovered);
+  background: var(--bg-card-hover);
 }
 
 /* Rows with health signals that warrant operator attention. */
@@ -170,7 +170,7 @@
 /* Neutral state: a configured keeper with no snapshot and no failures yet
    (librarian has not run) — informational, not an alert. */
 .kmh-badge--muted {
-  background: var(--surface-hovered);
+  background: var(--bg-card-hover);
   color: var(--text-tertiary);
 }
 

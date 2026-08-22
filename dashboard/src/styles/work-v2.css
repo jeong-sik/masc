@@ -1359,7 +1359,7 @@
 
 .wk-viewseg button {
   padding: 0.375rem 0.75rem;
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   color: var(--color-fg-muted);
   background: transparent;
   border: none;
@@ -1397,7 +1397,7 @@
 }
 
 .wk-goal-create-eyebrow {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   font-weight: 600;
   letter-spacing: var(--track-section);
   text-transform: lowercase;
@@ -1433,7 +1433,7 @@
 }
 
 .wk-goal-create-label {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   font-weight: 500;
   color: var(--color-fg-muted);
 }
@@ -1444,12 +1444,12 @@
 }
 
 .wk-goal-create-hint {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   color: var(--color-fg-muted);
 }
 
 .wk-goal-create-err {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   color: var(--color-status-err);
 }
 
@@ -1481,7 +1481,7 @@
   border: 1px solid var(--color-border-default);
   background: var(--color-bg-elevated);
   color: var(--color-fg-muted);
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   cursor: pointer;
   transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
 }
@@ -1695,12 +1695,12 @@
 }
 
 .wk-kcard-id {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   color: var(--color-fg-muted);
 }
 
 .wk-kcard-prio {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   font-weight: 700;
   padding: 0.125rem 0.375rem;
   border-radius: var(--r-0);
@@ -1729,12 +1729,12 @@
 }
 
 .wk-kcard-block {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   color: var(--color-status-err);
 }
 
 .wk-kcard-desc {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   color: var(--color-fg-secondary);
   line-height: 1.4;
   display: -webkit-box;
@@ -1762,7 +1762,7 @@
 }
 
 .wk-kcard-kp.none {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   color: var(--color-fg-disabled);
   cursor: default;
 }
@@ -1789,7 +1789,7 @@
 }
 
 .wk-head .ov-eyebrow {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   font-weight: 600;
   letter-spacing: var(--track-section);
   text-transform: uppercase;

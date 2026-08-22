@@ -276,7 +276,7 @@
 }
 
 .set-control-ledger-h:hover {
-  color: var(--text-high);
+  color: var(--text-bright);
 }
 
 .set-control-ledger-grid {
@@ -323,8 +323,8 @@
 }
 
 .set-control-ledger-row.unsupported .set-control-kind {
-  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
-  color: var(--status-fail);
+  border-color: color-mix(in oklab, var(--status-bad) 45%, transparent);
+  color: var(--status-bad);
 }
 
 .set-control-label {
@@ -587,8 +587,8 @@
 }
 
 .set-route-icon.danger:hover {
-  border-color: color-mix(in oklab, var(--status-fail) 55%, transparent);
-  color: var(--status-fail);
+  border-color: color-mix(in oklab, var(--status-bad) 55%, transparent);
+  color: var(--status-bad);
 }
 
 .set-route-icon:disabled,
@@ -760,8 +760,8 @@
 }
 
 .set-path-truth-state.missing {
-  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
-  color: var(--status-fail);
+  border-color: color-mix(in oklab, var(--status-bad) 45%, transparent);
+  color: var(--status-bad);
 }
 
 .set-mcp-check-result {
@@ -777,7 +777,7 @@
 }
 
 .set-mcp-check-result.error {
-  color: var(--status-fail);
+  color: var(--status-bad);
 }
 
 .set-rt {
@@ -1545,7 +1545,7 @@
 }
 
 .set-fusion-runtime-chip button:hover {
-  color: var(--status-fail);
+  color: var(--status-bad);
 }
 
 .set-fusion-runtime-add {

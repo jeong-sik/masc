@@ -591,6 +591,25 @@ type KeeperGroup = {
 
 const EMPTY_CONFIGURED_BINDINGS: DiscordConfiguredBinding[] = []
 
+/** "Next:" line of the connector warning panel. An API failure points at
+    the dashboard/server pair; an in-process gateway has no status file, so
+    its remediation is the gateway state plus the env var that starts it;
+    an external sidecar is inspected through its status file. */
+function connectorWarningNextHint(
+  connectorError: string | null,
+  connector: GateConnectorInfo | null,
+  connectorId: string,
+  connectorName: string,
+) {
+  if (connectorError) {
+    return html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
+  }
+  if (isInProcessConnector(connectorId)) {
+    return html`check the server log for the ${connectorName} gateway (<${Tk}>gw ${connector?.gateway_state || 'unknown'}<//>) and the <${Tk}>${IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]}<//> env var.`
+  }
+  return html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`
+}
+
 function ConnectorLivePanel({
   connector,
   gate,
@@ -888,11 +907,7 @@ function ConnectorLivePanel({
               </div>
               <div class="mt-1">
                 <${BoldLabel}>Next: </${BoldLabel}>
-                ${connectorError
-                  ? html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
-                  : isInProcessConnector(connectorId)
-                    ? html`check the server log for the ${connectorName} gateway (<${Tk}>gw ${connector?.gateway_state || 'unknown'}<//>) and the <${Tk}>${IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]}<//> env var.`
-                    : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
+                ${connectorWarningNextHint(connectorError, connector, connectorId, connectorName)}
               </div>
             </${SurfaceCard}>
           `

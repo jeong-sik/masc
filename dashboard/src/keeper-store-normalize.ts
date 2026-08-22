@@ -727,7 +727,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         blocked_task_count: asNumber(row.blocked_task_count) ?? null,
         goal_progress: isRecord(row.goal_progress)
           ? {
-              active_goal_count: asNumber(row.goal_progress.active_goal_count) ?? undefined,
               linked_task_count: asNumber(row.goal_progress.linked_task_count) ?? undefined,
               done_task_count: asNumber(row.goal_progress.done_task_count) ?? undefined,
               open_task_count: asNumber(row.goal_progress.open_task_count) ?? undefined,

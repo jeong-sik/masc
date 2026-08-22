@@ -1155,7 +1155,6 @@ export interface Keeper {
   sandbox_last_error?: string | null
   blocked_task_count?: number | null
   goal_progress?: {
-    active_goal_count?: number
     linked_task_count?: number
     done_task_count?: number
     open_task_count?: number
@@ -1345,11 +1344,6 @@ interface KeeperConfigProactive {
 export interface RuntimeRef {
   group: string
   item: string | null
-}
-
-export interface KeeperConfigActiveGoal {
-  id: string
-  title: string
 }
 
 export interface KeeperConfigRuntimeTrust {

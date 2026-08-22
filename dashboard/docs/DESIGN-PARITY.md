@@ -170,8 +170,22 @@ clicks that open it — and the shot harness follows it. Twenty-two views,
 The sub-views score *higher* than the top-level surfaces (0.957 against 0.949).
 Lane Queue at 0.959 and the prompt book at 0.971 say the `lanes.css` and
 `prompt-book.css` vendoring landed — which had never been verified, only
-assumed. Three are newly short and unexamined: `approvals-history` (0.796),
-`schedule-list` (0.868), `monitor-internal` (0.870).
+assumed.
+
+Three are short, and all three for the same reason: the dashboard built the
+component differently, so there is no class for the vendored skin to attach to.
+None is skin drift and none is fixable in CSS.
+
+| View | What the design draws | What the dashboard renders |
+|---|---|---|
+| `approvals-history` 0.796 | `.ap-hist-row` — a dense table, four-column grid, tone stripe down the left edge, inline stat line, pill filters | `.ap-history-*` — a different component under different names, with the stats as a four-card grid. Carries fields the design has no slot for (judging model, ALWAYS rules, source). |
+| `schedule-list` 0.868 | `.sch-act` approve/deny/ghost buttons | No consumer at all. This is one of the "36 v3-only selectors with zero DOM consumers" the earlier sync recorded and skipped; it is still true. |
+| `monitor-internal` 0.870 | `.ia-badge`, `.ia-count`, `.ai-table`, `.ai-strip` — a named component vocabulary | Tailwind utilities assembled inline (`flex`, `grid`, `px-2`, `max-h-80`). Swapping the skin cannot reach this surface, because there is nothing named to style. |
+
+The last one is the most instructive. A vendored stylesheet only lands where the
+DOM speaks the same vocabulary; a surface assembled from utilities is opaque to
+it no matter how faithful the CSS is. That is a component-level decision, not a
+sync one.
 
 ## Unnecessary UI
 

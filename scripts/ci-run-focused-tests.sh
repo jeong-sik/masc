@@ -399,6 +399,7 @@ operator_targets=(
 )
 
 sse_targets=(
+  @test/runtest-test_tui_board_detail
   @test/runtest-test_tui_board_selection
   @test/runtest-test_tui_context_state
   @test/runtest-test_tui_decode

@@ -1171,20 +1171,11 @@ let render_keeper_message (state : state) =
     flush stdout
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
-    (* Header *)
     let header =
       Printf.sprintf " Message to: %s  (port %d)" display_keeper_name state.port
     in
-
-    box_top buf cols;
-    box_line_styled buf cols ~style:Ansi.bold header;
-    box_divider buf cols;
-
-    (* Message history *)
     let target_registered =
-      List.exists
-        (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-        state.keepers
+      keeper_message_target_registered state keeper_name
     in
     let reconciling =
       match state.msg_inflight, state.msg_unverified with
@@ -1192,12 +1183,26 @@ let render_keeper_message (state : state) =
           Keeper_chat.same_request_identity inflight unverified
       | Some _, None | None, Some _ | None, None -> false
     in
-    let status_rows =
-      (if Option.is_some state.msg_inflight then 1 else 0)
-      + (if Option.is_some state.msg_unverified then 1 else 0)
-      + (if Option.is_some state.msg_recovery_error then 1 else 0)
-      + (if target_registered then 0 else 1)
-    in
+    let status_rows = keeper_message_status_rows state in
+    if
+      not
+        (Message_layout.message_viewport_supported ~terminal_rows:rows
+           ~terminal_cols:cols ~status_rows)
+    then begin
+      let notice =
+        " Keeper chat needs a larger terminal; resize to continue (Esc:back)"
+      in
+      Buffer.add_string buf
+        (Message_layout.fit_width notice (max 1 (cols - 1)));
+      print_string (Buffer.contents buf);
+      flush stdout
+    end else begin
+    (* Header *)
+    box_top buf cols;
+    box_line_styled buf cols ~style:Ansi.bold header;
+    box_divider buf cols;
+
+    (* Message history *)
     let history_height = max 0 (rows - 10 - status_rows) in
     let messages =
       List.filter
@@ -1319,9 +1324,13 @@ let render_keeper_message (state : state) =
       | None, None, false -> "Enter:disabled (Keeper unavailable)"
       | None, None, true -> "Enter:send"
     in
+    let footer =
+      Printf.sprintf "%s  %s  Esc:back  Ctrl-U:clear line%s" Ansi.dim
+        enter_hint Ansi.reset
+    in
     Buffer.add_string buf
-      (Printf.sprintf "%s  %s  Esc:back  Ctrl-U:clear line%s\n" Ansi.dim
-         enter_hint Ansi.reset);
+      (Message_layout.fit_width footer (max 1 (cols - 1)));
+    Buffer.add_char buf '\n';
 
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:cols
@@ -1332,6 +1341,7 @@ let render_keeper_message (state : state) =
 
     print_string (Buffer.contents buf);
     flush stdout
+    end
 
 (** Dispatch render based on current surface *)
 let render (state : state) =

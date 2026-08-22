@@ -50,6 +50,12 @@ val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
     immediately before the right border. *)
 
+val message_viewport_supported :
+  terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool
+(** Whether the full chat frame plus its final newline fits without terminal
+    scrolling. Unsupported viewports render a compact resize gate and suppress
+    message editing. *)
+
 val visible_rows : inner_width:int -> height:int -> entry list -> row list
 (** Render chat entries into cell-bounded, UTF-8-safe physical rows and retain
     the newest rows. The newest entry always keeps its metadata row. *)

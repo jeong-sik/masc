@@ -75,46 +75,132 @@ let scalar_cell_width scalar =
   else if Uucp.Emoji.is_emoji_presentation scalar then 2
   else max 0 (Uucp.Break.tty_width_hint scalar)
 
-let next_piece text offset =
-  match ansi_csi_end text offset with
-  | Some next -> `Ansi next
-  | None ->
-      let decoded = String.get_utf_8_uchar text offset in
-      let scalar_length = max 1 (Uchar.utf_decode_length decoded) in
-      let width =
-        if Uchar.utf_decode_is_valid decoded then
-          scalar_cell_width (Uchar.utf_decode_uchar decoded)
-        else 1
+let grapheme_cell_width grapheme =
+  let rec loop offset max_width has_vs16 has_keycap has_zwj
+      has_extended_pictographic has_emoji regional_count =
+    if offset >= String.length grapheme then
+      let emoji_cluster =
+        has_vs16 || has_keycap || has_emoji || regional_count >= 2
+        || (has_zwj && has_extended_pictographic)
       in
-      `Scalar (min (String.length text) (offset + scalar_length), width)
+      if emoji_cluster then max 2 max_width else max_width
+    else
+      let decoded = String.get_utf_8_uchar grapheme offset in
+      let valid = Uchar.utf_decode_is_valid decoded in
+      let scalar_length = max 1 (Uchar.utf_decode_length decoded) in
+      if not valid then
+        loop (offset + scalar_length) (max 1 max_width) has_vs16 has_keycap
+          has_zwj has_extended_pictographic has_emoji regional_count
+      else
+        let scalar = Uchar.utf_decode_uchar decoded in
+        let code = Uchar.to_int scalar in
+        loop (offset + scalar_length)
+          (max max_width (scalar_cell_width scalar))
+          (has_vs16 || code = 0xFE0F)
+          (has_keycap || code = 0x20E3)
+          (has_zwj || code = 0x200D)
+          (has_extended_pictographic
+          || Uucp.Emoji.is_extended_pictographic scalar)
+          (has_emoji || Uucp.Emoji.is_emoji_presentation scalar
+          || Uucp.Emoji.is_emoji_modifier scalar)
+          (regional_count
+          + if Uucp.Func.is_regional_indicator scalar then 1 else 0)
+  in
+  loop 0 0 false false false false false 0
+
+type display_piece = {
+  start_offset : int;
+  end_offset : int;
+  cell_width : int;
+  ansi : bool;
+}
+
+let scalar_pieces text start_offset end_offset reversed =
+  let rec loop offset reversed =
+    if offset >= end_offset then reversed
+    else
+      let decoded = String.get_utf_8_uchar text offset in
+      let valid = Uchar.utf_decode_is_valid decoded in
+      let scalar_length = max 1 (Uchar.utf_decode_length decoded) in
+      let next = min end_offset (offset + scalar_length) in
+      let width =
+        if valid then scalar_cell_width (Uchar.utf_decode_uchar decoded) else 1
+      in
+      loop next
+        ({ start_offset = offset;
+           end_offset = next;
+           cell_width = width;
+           ansi = false;
+         }
+        :: reversed)
+  in
+  loop start_offset reversed
+
+let grapheme_pieces text start_offset end_offset reversed =
+  if start_offset >= end_offset then reversed
+  else
+    let run = String.sub text start_offset (end_offset - start_offset) in
+    if not (String.is_valid_utf_8 run) then
+      scalar_pieces text start_offset end_offset reversed
+    else
+      Uuseg_string.fold_utf_8 `Grapheme_cluster
+        (fun (offset, reversed) grapheme ->
+          let next = offset + String.length grapheme in
+          ( next
+          , { start_offset = offset;
+              end_offset = next;
+              cell_width = grapheme_cell_width grapheme;
+              ansi = false;
+            }
+            :: reversed ))
+        (start_offset, reversed) run
+      |> snd
+
+let display_pieces text =
+  let length = String.length text in
+  let rec find_ansi offset =
+    if offset >= length then None
+    else
+      match ansi_csi_end text offset with
+      | Some next -> Some (offset, next)
+      | None -> find_ansi (offset + 1)
+  in
+  let rec loop offset reversed =
+    match find_ansi offset with
+    | None -> List.rev (grapheme_pieces text offset length reversed)
+    | Some (ansi_start, ansi_end) ->
+        let reversed =
+          grapheme_pieces text offset ansi_start reversed
+        in
+        loop ansi_end
+          ({ start_offset = ansi_start;
+             end_offset = ansi_end;
+             cell_width = 0;
+             ansi = true;
+           }
+          :: reversed)
+  in
+  loop 0 []
 
 let display_width text =
-  let rec loop offset width =
-    if offset >= String.length text then width
-    else
-      match next_piece text offset with
-      | `Ansi next -> loop next width
-      | `Scalar (next, scalar_width) -> loop next (width + scalar_width)
-  in
-  loop 0 0
+  display_pieces text
+  |> List.fold_left (fun width piece -> width + piece.cell_width) 0
 
 let cell_prefix text max_cells =
   let buffer = Buffer.create (String.length text) in
-  let rec loop offset used_cells saw_ansi =
-    if offset >= String.length text then
-      Buffer.contents buffer, used_cells, saw_ansi
-    else
-      match next_piece text offset with
-      | `Ansi next ->
-          Buffer.add_substring buffer text offset (next - offset);
-          loop next used_cells true
-      | `Scalar (next, scalar_width)
-        when used_cells + scalar_width <= max_cells ->
-          Buffer.add_substring buffer text offset (next - offset);
-          loop next (used_cells + scalar_width) saw_ansi
-      | `Scalar _ -> Buffer.contents buffer, used_cells, saw_ansi
+  let rec loop used_cells saw_ansi = function
+    | [] -> Buffer.contents buffer, used_cells, saw_ansi
+    | piece :: rest when piece.ansi ->
+        Buffer.add_substring buffer text piece.start_offset
+          (piece.end_offset - piece.start_offset);
+        loop used_cells true rest
+    | piece :: rest when used_cells + piece.cell_width <= max_cells ->
+        Buffer.add_substring buffer text piece.start_offset
+          (piece.end_offset - piece.start_offset);
+        loop (used_cells + piece.cell_width) saw_ansi rest
+    | _ -> Buffer.contents buffer, used_cells, saw_ansi
   in
-  loop 0 0 false
+  loop 0 false (display_pieces text)
 
 let fit_width text width =
   if width <= 0 then ""
@@ -127,30 +213,25 @@ let fit_width text width =
     else text ^ String.make (width - cells) ' '
 
 let cell_suffix text max_cells =
-  let rec pieces offset reversed =
-    if offset >= String.length text then reversed
-    else
-      match next_piece text offset with
-      | `Ansi next -> pieces next ((offset, next, 0) :: reversed)
-      | `Scalar (next, width) ->
-          pieces next ((offset, next, width) :: reversed)
-  in
   let rec start_offset used current_start = function
     | [] -> current_start
-    | (start, _next, width) :: rest when used + width <= max_cells ->
-        start_offset (used + width) start rest
+    | piece :: rest when used + piece.cell_width <= max_cells ->
+        start_offset (used + piece.cell_width) piece.start_offset rest
     | _ -> current_start
   in
-  let start = start_offset 0 (String.length text) (pieces 0 []) in
-  let rec drop_detached_zero_width offset =
-    if offset >= String.length text then offset
-    else
-      match next_piece text offset with
-      | `Ansi next -> drop_detached_zero_width next
-      | `Scalar (next, 0) -> drop_detached_zero_width next
-      | `Scalar _ -> offset
+  let pieces = display_pieces text in
+  let start =
+    start_offset 0 (String.length text) (List.rev pieces)
   in
-  let start = drop_detached_zero_width start in
+  let rec drop_detached_zero_width = function
+    | [] -> String.length text
+    | piece :: rest when piece.end_offset <= start ->
+        drop_detached_zero_width rest
+    | piece :: rest when piece.ansi || piece.cell_width = 0 ->
+        drop_detached_zero_width rest
+    | piece :: _ -> piece.start_offset
+  in
+  let start = drop_detached_zero_width pieces in
   String.sub text start (String.length text - start)
 
 let input_viewport ~max_cells input =
@@ -168,6 +249,9 @@ let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in
   min last_column (7 + display_width input)
 
+let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
+  terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows
+
 let take_last count values =
   let drop = max 0 (List.length values - max 0 count) in
   values |> List.filteri (fun index _ -> index >= drop)
@@ -175,26 +259,21 @@ let take_last count values =
 let split_cells ~max_cells text =
   if String.equal text "" then [ "" ]
   else
-    let length = String.length text in
-    let rec take offset used_cells =
-      if offset >= length then offset
-      else
-        match next_piece text offset with
-        | `Ansi next -> take next used_cells
-        | `Scalar (next, scalar_width) ->
-            if used_cells > 0 && used_cells + scalar_width > max_cells then
-              offset
-            else if used_cells = 0 && scalar_width > max_cells then next
-            else take next (used_cells + scalar_width)
+    let rec loop chunk_start chunk_end used_cells rows = function
+      | [] ->
+          let chunk = String.sub text chunk_start (chunk_end - chunk_start) in
+          List.rev (chunk :: rows)
+      | piece :: rest
+        when piece.ansi || used_cells = 0
+             || used_cells + piece.cell_width <= max_cells ->
+          loop chunk_start piece.end_offset
+            (used_cells + piece.cell_width) rows rest
+      | piece :: rest ->
+          let chunk = String.sub text chunk_start (chunk_end - chunk_start) in
+          loop piece.start_offset piece.end_offset piece.cell_width
+            (chunk :: rows) rest
     in
-    let rec loop offset rows =
-      if offset >= length then List.rev rows
-      else
-        let next = take offset 0 in
-        let chunk = String.sub text offset (next - offset) in
-        loop next (chunk :: rows)
-    in
-    loop 0 []
+    loop 0 0 0 [] (display_pieces text)
 
 let rows_of_entry ~inner_width entry =
   let metadata, _, _ =

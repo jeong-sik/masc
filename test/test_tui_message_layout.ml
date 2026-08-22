@@ -63,6 +63,13 @@ let test_terminal_cell_width_and_fit () =
     ; "🙂", 2
     ; "Aé한🙂", 6
     ; "\x1B[31m한\x1B[0m", 2
+    ; "👍🏽", 2
+    ; "🇰🇷", 2
+    ; "❤️", 2
+    ; "👩‍👩‍👧‍👦", 2
+    ; "1️⃣", 2
+    ; "한", 2
+    ; "\x1B[31m❤️\x1B[0m", 2
     ];
   check string "exact-width text is unchanged" "12345"
     (Layout.fit_width "12345" 5);
@@ -75,7 +82,19 @@ let test_terminal_cell_width_and_fit () =
     (Layout.fit_width "가나" 3);
   check string "truncated ANSI style is reset before the marker"
     "\x1B[31m한\x1B[0m~"
-    (Layout.fit_width "\x1B[31m한글\x1B[0m" 3)
+    (Layout.fit_width "\x1B[31m한글\x1B[0m" 3);
+  check string "emoji grapheme is never split by fit" " ~"
+    (Layout.fit_width "👍🏽A" 2);
+  let longest_footer =
+    "\x1B[2m  reconciling exact operation  Enter:blocked  Esc:back  Ctrl-U:clear line\x1B[0m"
+  in
+  List.iter
+    (fun terminal_cols ->
+      let fitted = Layout.fit_width longest_footer (terminal_cols - 1) in
+      check int
+        (Printf.sprintf "%d-column footer avoids autowrap" terminal_cols)
+        (terminal_cols - 1) (Layout.display_width fitted))
+    [ 11; 20; 40 ]
 
 let test_utf8_scalar_input_contract () =
   List.iter
@@ -137,6 +156,17 @@ let test_input_viewport_keeps_latest_complete_scalars () =
     (viewport 1 "한");
   check string "detached combining mark is not rendered" "~"
     (viewport 2 "A한\xCC\x81");
+  List.iter
+    (fun grapheme ->
+      check string ("overflow keeps complete grapheme " ^ grapheme)
+        ("~" ^ grapheme) (viewport 3 ("AB" ^ grapheme)))
+    [ "👍🏽"; "🇰🇷"; "❤️"; "👩‍👩‍👧‍👦"; "1️⃣"; "한" ];
+  let repeated_hearts = String.concat "" (List.init 10 (fun _ -> "❤️")) in
+  let heart_viewport = viewport 7 repeated_hearts in
+  check int "repeated emoji viewport fills its cell budget" 7
+    (Layout.display_width heart_viewport);
+  check string "repeated emoji viewport keeps whole clusters" "~❤️❤️❤️"
+    heart_viewport;
   let before = "abcdefghi" in
   let after = Layout.drop_last_utf8_scalar before in
   check string "overflow before backspace" "~cdefghi" (viewport 8 before);
@@ -154,6 +184,10 @@ let test_input_cursor_uses_visible_terminal_cells () =
   check int "empty input starts after the prompt" 7 (column 80 "");
   check int "mixed UTF-8 input advances by cells" 13
     (column 80 "Aé한🙂");
+  check int "emoji modifier cluster advances by two cells" 10
+    (column 80 "A👍🏽");
+  check int "flag cluster advances by two cells" 9 (column 80 "🇰🇷");
+  check int "VS16 cluster advances by two cells" 9 (column 80 "❤️");
   check int "exact boundary reaches the pre-border spacer" 79
     (column 80 (String.make 72 'a'));
   check int "visible overflow remains in the pre-border spacer" 79
@@ -163,8 +197,23 @@ let test_input_cursor_uses_visible_terminal_cells () =
     Layout.input_cursor_row ~terminal_rows ~history_height ~status_rows
   in
   check int "normal input row" 25 (row 30 15 5);
-  check int "tiny viewport clamps the row" 4 (row 4 0 0);
-  check int "excess status rows clamp to the terminal" 30 (row 30 20 20)
+  check int "excess status rows clamp to the terminal" 30 (row 30 20 20);
+  let supported rows cols status_rows =
+    Layout.message_viewport_supported ~terminal_rows:rows ~terminal_cols:cols
+      ~status_rows
+  in
+  check bool "seven rows would scroll the final newline" false
+    (supported 7 80 0);
+  check bool "eight rows fit the zero-status frame" true
+    (supported 8 80 0);
+  check bool "status rows raise the minimum height" false
+    (supported 10 80 3);
+  check bool "status frame fits above its final newline" true
+    (supported 11 80 3);
+  check bool "narrow viewport uses the compact gate" false
+    (supported 30 8 0);
+  check bool "minimum width shows an omission marker and wide grapheme" true
+    (supported 30 11 0)
 
 let test_history_wraps_by_cells_without_losing_bytes () =
   let body = "A한🙂B" in
@@ -185,6 +234,26 @@ let test_history_wraps_by_cells_without_losing_bytes () =
     |> String.concat ""
   in
   check string "cell wrapping preserves body bytes" body reconstructed
+
+let test_history_never_splits_grapheme_clusters () =
+  let body = "A👍🏽🇰🇷❤️B" in
+  let rows =
+    Layout.visible_rows ~inner_width:6 ~height:10
+      [ entry Layout.Keeper "k" "r" body ]
+  in
+  let body_rows =
+    rows
+    |> List.filteri (fun index _ -> index > 0)
+    |> List.map (fun (row : Layout.row) -> row.text)
+  in
+  check (list string) "grapheme clusters stay on one physical row"
+    [ "  A👍🏽"; "  🇰🇷❤️"; "  B" ] body_rows;
+  let reconstructed =
+    body_rows
+    |> List.map (fun text -> String.sub text 2 (String.length text - 2))
+    |> String.concat ""
+  in
+  check string "grapheme wrapping preserves exact bytes" body reconstructed
 
 let test_trailing_newlines_do_not_hide_reply () =
   let entries =
@@ -230,6 +299,8 @@ let () =
             test_input_cursor_uses_visible_terminal_cells
         ; test_case "history wraps by cells without byte loss" `Quick
             test_history_wraps_by_cells_without_losing_bytes
+        ; test_case "history never splits grapheme clusters" `Quick
+            test_history_never_splits_grapheme_clusters
         ; test_case "trailing newlines keep reply visible" `Quick
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick

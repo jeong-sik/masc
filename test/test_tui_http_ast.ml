@@ -108,8 +108,18 @@ let test_keeper_chat_uses_current_async_contract () =
     [ "Message_layout.input_viewport"
     ; "Message_layout.input_cursor_row"
     ; "Message_layout.input_cursor_column"
+    ; "Message_layout.message_viewport_supported"
     ; "Ansi.move_to"
-    ]
+    ];
+  check bool "message input uses the same viewport gate as rendering" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"keeper_message_input_supported"
+       ~callee:"Masc_tui_message_layout.message_viewport_supported"
+     >= 1);
+  check bool "main loop suppresses unsupported message input" true
+    (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name:"main"
+       ~callee:"keeper_message_input_supported"
+     >= 1)
 ;;
 
 let test_operator_approvals_use_current_contract () =

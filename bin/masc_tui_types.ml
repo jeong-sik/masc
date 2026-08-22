@@ -319,6 +319,23 @@ let create_state ~workspace ~port ~refresh_interval = {
   refresh_interval;
 }
 
+let keeper_message_target_registered (state : state) keeper_name =
+  List.exists
+    (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+    state.keepers
+
+let keeper_message_status_rows (state : state) =
+  let unavailable_target =
+    match state.msg_target_keeper_name with
+    | Some keeper_name when keeper_message_target_registered state keeper_name ->
+        0
+    | Some _ | None -> 1
+  in
+  (if Option.is_some state.msg_inflight then 1 else 0)
+  + (if Option.is_some state.msg_unverified then 1 else 0)
+  + (if Option.is_some state.msg_recovery_error then 1 else 0)
+  + unavailable_target
+
 let approval_items (state : state) =
   match state.approval_snapshot with
   | Some snapshot -> snapshot.aps_items

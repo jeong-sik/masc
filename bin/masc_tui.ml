@@ -185,6 +185,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     end else
       true  (* Consume but ignore other control chars *)
 
+let keeper_message_input_supported state =
+  let rows, cols = get_terminal_size () in
+  Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
+    ~terminal_cols:cols ~status_rows:(keeper_message_status_rows state)
+
 let approval_decision_key = function
   | Confirm -> "y"
   | Deny -> "n"
@@ -955,16 +960,17 @@ let main () =
        | _ -> ());
       (match key with
        | Some k when state.view = Keepers Keeper_message ->
-           let _handled =
-             handle_message_key state
-               ~submit_message:
-                 (start_keeper_message state ~base_path
-                    ~mailbox:async_messages)
-               ~retry_message:(fun () ->
-                 retry_keeper_message state ~mailbox:async_messages)
-               k
-           in
-           ()
+           if keeper_message_input_supported state || String.equal k "esc" then
+             let _handled =
+               handle_message_key state
+                 ~submit_message:
+                   (start_keeper_message state ~base_path
+                      ~mailbox:async_messages)
+                 ~retry_message:(fun () ->
+                   retry_keeper_message state ~mailbox:async_messages)
+                 k
+             in
+             ()
        | Some "q" | Some "Q" -> raise Break
        | Some "y" | Some "Y" ->
            (match state.view with

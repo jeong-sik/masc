@@ -69,6 +69,7 @@ depends: [
   "mtime" {>= "2.0"}
   "markup" {>= "1.0.3"}
   "uucp" {>= "17.0.0"}
+  "uuseg" {>= "17.0.0"}
   "uuidm" {>= "0.9.10"}
   "atdgen" {build & >= "4.2.0"}
   "atdgen-runtime" {>= "4.2.0"}

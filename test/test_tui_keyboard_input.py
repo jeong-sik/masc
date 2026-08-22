@@ -556,6 +556,34 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
+def board_selection_post(suffix: str, title: str, body: str) -> dict[str, object]:
+    return {
+        "id": f"post-{suffix}",
+        "author": "board-author",
+        "title": title,
+        "body": body,
+        "votes": 1,
+        "comment_count": 0,
+        "created_at_iso": "2026-08-22T00:00:00Z",
+    }
+
+
+def board_selection_http_fixtures() -> HttpFixtures:
+    posts = [
+        board_selection_post("a", "Alpha", "list-body-a"),
+        board_selection_post("b", "Bravo", "list-body-b"),
+        board_selection_post("c", "Charlie", "list-body-c"),
+    ]
+    detail_post = board_selection_post("b", "Bravo", "detail-body-bravo")
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board/post-b?format=flat"] = (
+        200,
+        {"post": detail_post, "comments": []},
+    )
+    return fixtures
+
+
 def wait_for_stop(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1067,6 +1095,63 @@ def assert_overview_event_rows(
     os.write(master_fd, b"q")
 
 
+def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=cluster_end,
+            timeout=3.0,
+        )
+
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Board (3)")
+        selected_b = b"\x1b[7m>\x1b[0m   post-b"
+        selected_a = b"\x1b[7m>\x1b[0m   post-a"
+        selected_new = b"\x1b[7m>\x1b[0m   post-new"
+        send_and_wait(process, master_fd, output, b"j", selected_b)
+        send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
+
+        board = send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (3)")
+        if selected_b not in board or selected_a in board:
+            raise AssertionError(
+                f"Board detail return changed the selected post: {board!r}"
+            )
+
+        fixtures["/api/v1/board"] = (
+            200,
+            {
+                "posts": [
+                    board_selection_post("new", "New", "list-body-new"),
+                    board_selection_post("a", "Alpha", "list-body-a"),
+                    board_selection_post("b", "Bravo", "list-body-b"),
+                    board_selection_post("c", "Charlie", "list-body-c"),
+                ]
+            },
+        )
+        board = send_and_wait(process, master_fd, output, b"r", b"post-new")
+        if selected_b not in board or selected_new in board:
+            raise AssertionError(
+                f"Board list refresh changed the selected post: {board!r}"
+            )
+
+        send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def wait_for_http_request(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1225,6 +1310,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
 
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
+    board_selection_fixtures = board_selection_http_fixtures()
     run_terminal_scenario(
         executable,
         description="UTF-8 message input",
@@ -1243,6 +1329,12 @@ def run_keyboard_regression(executable: str) -> None:
         interact=assert_overview_event_rows,
         http_fixtures=overview_event_http_fixtures(),
         prepare_workspace=seed_row_budget_workspace,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Board selection identity",
+        interact=board_selection_identity_interaction(board_selection_fixtures),
+        http_fixtures=board_selection_fixtures,
     )
     run_terminal_scenario(
         executable,

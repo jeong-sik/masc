@@ -4,6 +4,7 @@ open Masc_tui_render
 open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
+module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
@@ -1026,12 +1027,25 @@ let apply_approval_observation state observation =
   if Approval.Flow.is_current state.approval_flow observation.ao_generation then
     apply_approvals_load state observation.ao_result
 
+let replace_board_posts state posts =
+  let source =
+    match state.board_mode with
+    | Board_list -> Board_selection.List_cursor
+    | Board_read post_id -> Board_selection.Detail_post post_id
+  in
+  let post_ids posts = List.map (fun post -> post.bp_id) posts in
+  let cursor =
+    Board_selection.reconcile_cursor
+      ~current_ids:(post_ids state.board_posts)
+      ~cursor:state.board_cursor ~source ~next_ids:(post_ids posts)
+  in
+  state.board_posts <- posts;
+  state.board_cursor <- cursor
+
 let apply_board_list_load state = function
   | Ok posts ->
-      state.board_posts <- posts;
+      replace_board_posts state posts;
       state.board_error <- None;
-      if state.board_cursor >= List.length posts then
-        state.board_cursor <- max 0 (List.length posts - 1)
   | Error err ->
       state.board_posts <- [];
       state.board_comments <- [];
@@ -1150,8 +1164,8 @@ let apply_board_post_load state ~post_id = function
   | Ok (post, comments) when board_detail_still_current state post_id ->
       state.board_error <- None;
       state.board_comments <- comments;
-      state.board_posts <-
-        post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
+      replace_board_posts state
+        (post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts)
   | Ok _ -> ()
   | Error err ->
       if board_detail_still_current state post_id then

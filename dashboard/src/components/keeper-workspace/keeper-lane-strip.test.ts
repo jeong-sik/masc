@@ -1,10 +1,73 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory, DashboardKeeperWaitingRow } from '../../api'
 import type { Keeper } from '../../types'
 import { KeeperLaneStrip } from './keeper-lane-strip'
+import type { LaneEventQueueActions } from './keeper-lane-event-actions'
+
+const SOURCE_REF = 'f'.repeat(64)
+
+/** One `event_queue_pending` row as `server_keeper_waiting_inventory.ml`
+ *  emits it after #29522: the exact-entry address travels in `detail`. */
+function eventRow(detail: Record<string, unknown> = {}): DashboardKeeperWaitingRow {
+  return {
+    keeper_name: 'sangsu',
+    source: 'event_queue_pending',
+    waiting_on: 'workspace_message',
+    wake_producer: 'keeper_workspace_message',
+    since_iso: '2026-07-07T08:57:00Z',
+    next_action: 'keeper_drain_event_queue',
+    detail: {
+      queue_index: 0,
+      post_id: 'workspace-message:wmsg-1',
+      source_ref: SOURCE_REF,
+      source_incarnation: '17',
+      urgency: 'normal',
+      arrived_at_unix: 1783767420,
+      payload_kind: 'workspace_message',
+      message_request_id: 'wmsg-1',
+      message_from: 'nick0cave',
+      ...detail,
+    },
+  }
+}
+
+function eventInventory(row: DashboardKeeperWaitingRow = eventRow()): DashboardKeeperWaitingInventory {
+  return {
+    keeper_count: 1,
+    waiting_keeper_count: 1,
+    row_count: 2,
+    keepers: [{
+      keeper_name: 'sangsu',
+      state: 'waiting',
+      waiting_count: 2,
+      waiting_on: [
+        row,
+        {
+          keeper_name: 'sangsu',
+          source: 'chat_operation_queued',
+          waiting_on: 'owner_fifo',
+          wake_producer: 'keeper_owner_actor',
+          since_iso: '2026-07-07T08:59:00Z',
+          next_action: 'keeper_owner_start_fifo_head',
+        },
+      ],
+    }],
+  }
+}
+
+function fakeActions(overrides: Partial<LaneEventQueueActions> = {}): LaneEventQueueActions {
+  return {
+    pendingKey: null,
+    recoveries: [],
+    error: null,
+    operate: vi.fn(async () => undefined),
+    ...overrides,
+  }
+}
 
 function keeperFixture(overrides: Partial<Keeper> = {}): Keeper {
   return {
@@ -372,5 +435,122 @@ describe('KeeperLaneStrip', () => {
     `)
     expect(el.textContent ?? '').toContain('레인 상태 로딩')
     expect(el.querySelector('[data-missing="keeper-lane"]')).toBeNull()
+  })
+
+  it('renders every row read-only without operator actions', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${eventInventory()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    expect(el.querySelectorAll('[data-testid="keeper-lane-waiting-row"]').length).toBe(2)
+    expect(el.querySelector('[data-testid="keeper-lane-event-actions"]')).toBeNull()
+    expect(el.querySelector('[data-testid="keeper-lane-event-recoveries"]')).toBeNull()
+  })
+
+  it('addresses the operator mutation with the row\'s own source ref and incarnation', () => {
+    const actions = fakeActions()
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${eventInventory()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+        eventActions=${actions}
+      />
+    `)
+    // Only the event-queue row gets actions; the chat row is another store.
+    const actionGroups = el.querySelectorAll('[data-testid="keeper-lane-event-actions"]')
+    expect(actionGroups.length).toBe(1)
+    const labels = Array.from(actionGroups[0]!.querySelectorAll('button')).map(button => button.textContent)
+    expect(labels).toEqual(['immediate', 'normal', 'low', '이관', '취소'])
+
+    fireEvent.click(Array.from(actionGroups[0]!.querySelectorAll('button')).find(b => b.textContent === 'low')!)
+    expect(actions.operate).toHaveBeenCalledWith(`event:${SOURCE_REF}`, {
+      action: 'reprioritize',
+      sourceRef: SOURCE_REF,
+      sourceIncarnation: '17',
+      urgency: 'low',
+    })
+
+    vi.stubGlobal('prompt', vi.fn(() => 'rondo'))
+    fireEvent.click(Array.from(actionGroups[0]!.querySelectorAll('button')).find(b => b.textContent === '이관')!)
+    expect(actions.operate).toHaveBeenCalledWith(`event:${SOURCE_REF}`, {
+      action: 'transfer',
+      sourceRef: SOURCE_REF,
+      sourceIncarnation: '17',
+      targetKeeper: 'rondo',
+    })
+
+    vi.stubGlobal('prompt', vi.fn(() => null))
+    fireEvent.click(Array.from(actionGroups[0]!.querySelectorAll('button')).find(b => b.textContent === '취소')!)
+    expect(actions.operate).toHaveBeenCalledTimes(2)
+    vi.unstubAllGlobals()
+  })
+
+  it('disables the row whose mutation is in flight', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${eventInventory()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+        eventActions=${fakeActions({ pendingKey: `event:${SOURCE_REF}` })}
+      />
+    `)
+    const buttons = Array.from(el.querySelectorAll('[data-testid="keeper-lane-event-actions"] button'))
+    expect(buttons.length).toBe(5)
+    expect(buttons.every(button => (button as HTMLButtonElement).disabled)).toBe(true)
+  })
+
+  it('renders an explicit gap instead of buttons when the row carries no address', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${eventInventory(eventRow({ source_ref: undefined, source_incarnation: undefined }))}
+        ready=${true}
+        loading=${false}
+        error=${null}
+        eventActions=${fakeActions()}
+      />
+    `)
+    expect(el.querySelector('[data-testid="keeper-lane-event-actions"]')).toBeNull()
+    expect(el.querySelector('[data-testid="keeper-lane-event-address-missing"]')?.textContent).toContain('항목 주소 미수신')
+  })
+
+  it('offers a replay for an operation whose commit state is unconfirmed', () => {
+    const operation = {
+      action: 'cancel' as const,
+      sourceRef: SOURCE_REF,
+      sourceIncarnation: '17',
+      reason: 'duplicate wake',
+      operationId: 'op-1',
+    }
+    const actions = fakeActions({
+      error: 'Event queue mutation committed, but projection follow-up failed (t-1): disk',
+      recoveries: [{ operation, commitState: 'committed', message: 'projection follow-up failed' }],
+    })
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${eventInventory()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+        eventActions=${actions}
+      />
+    `)
+    expect(el.querySelector('[data-testid="keeper-lane-event-error"]')?.textContent).toContain('projection follow-up failed')
+    const recoveries = el.querySelector('[data-testid="keeper-lane-event-recoveries"]')!
+    expect(recoveries.textContent).toContain('source commit 완료 · 후속 확인 필요')
+    expect(recoveries.textContent).toContain('op-1')
+    fireEvent.click(recoveries.querySelector('button')!)
+    expect(actions.operate).toHaveBeenCalledWith('event-recovery:op-1', operation)
   })
 })

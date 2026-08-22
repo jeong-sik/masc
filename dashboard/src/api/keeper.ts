@@ -1,6 +1,6 @@
 // MASC Dashboard — Keeper operation messaging and SSE streaming
 
-import { asNumber, asString, isRecord } from '../components/common/normalize'
+import { asString, isRecord } from '../components/common/normalize'
 import type { KeeperUserInputBlock } from '../types'
 import {
   apiRequestErrorFromResponse,
@@ -621,42 +621,6 @@ export async function moveQueuedKeeperChatOperationToEnd(
 
 // --- Chat history ---
 
-export interface KeeperEventQueuePendingItem {
-  queueIndex: number
-  postId: string
-  sourceRef: string
-  sourceIncarnation: string
-  urgency: 'immediate' | 'normal' | 'low'
-  arrivedAt: number
-  payloadKind: string
-  /** Why a completion_authority_rejected stimulus exists. Only that kind
-      carries it, and it is absent on a backend that predates the field —
-      the projection deliberately does not emit raw payload content for the
-      other kinds. */
-  rejectionReason?: string
-  rejectionTaskId?: string
-  /** Cancellation of a Task this Keeper authored. `cancelledReason` is absent
-      when the canceller gave none, which is a different fact from an empty
-      one. Absent on a backend that predates the fields. */
-  cancelledTaskId?: string
-  cancelledBy?: string
-  cancelledReason?: string
-  /** A workspace message that named this Keeper. `messageRequestId` is also
-      the transcript row's external message id, so an operator reading the
-      queue can find the line it refers to. Absent on a backend that predates
-      the fields. */
-  messageRequestId?: string
-  messageFrom?: string
-}
-
-export interface KeeperEventQueuePendingSnapshot {
-  keeperName: string
-  revision: string
-  totalPending: number
-  nextAfter: string | null
-  pending: KeeperEventQueuePendingItem[]
-}
-
 function parseEventQueueRevision(value: unknown): string | undefined {
   if (typeof value === 'string' && /^\d+$/.test(value)) return value
   if (
@@ -667,161 +631,23 @@ function parseEventQueueRevision(value: unknown): string | undefined {
   return undefined
 }
 
-export function parseKeeperEventQueuePendingSnapshot(
-  value: unknown,
-): KeeperEventQueuePendingSnapshot {
-  if (
-    !isRecord(value)
-    || value.schema !== 'keeper_event_queue.pending.v2'
-    || value.ok !== true
-  ) {
-    throw new Error('Keeper event pending response has an unsupported schema')
-  }
-  const keeperName = asString(value.keeper_name, '').trim()
-  const revision = parseEventQueueRevision(value.revision)
-  const totalPending = asNumber(value.total_pending)
-  const nextAfter = value.next_after === null
-    ? null
-    : parseEventQueueRevision(value.next_after)
-  if (
-    !keeperName
-    || revision === undefined
-    || typeof totalPending !== 'number'
-    || !Number.isSafeInteger(totalPending)
-    || totalPending < 0
-    || nextAfter === undefined
-    || !Array.isArray(value.pending)
-  ) {
-    throw new Error('Keeper event pending response is missing identity or entries')
-  }
-  const pending = value.pending.map((raw): KeeperEventQueuePendingItem => {
-    if (!isRecord(raw)) {
-      throw new Error('Keeper event pending entry must be an object')
-    }
-    const queueIndex = asNumber(raw.queue_index)
-    const postId = asString(raw.post_id, '').trim()
-    const sourceRef = asString(raw.source_ref, '').trim()
-    const sourceIncarnation = parseEventQueueRevision(raw.source_incarnation)
-    const urgency = asString(raw.urgency, '').trim()
-    const arrivedAt = asNumber(raw.arrived_at_unix)
-    const payloadKind = asString(raw.payload_kind, '').trim()
-    if (
-      typeof queueIndex !== 'number'
-      || !Number.isSafeInteger(queueIndex)
-      || queueIndex < 0
-      || !postId
-      || !/^[0-9a-f]{64}$/.test(sourceRef)
-      || sourceIncarnation === undefined
-      || !['immediate', 'normal', 'low'].includes(urgency)
-      || typeof arrivedAt !== 'number'
-      || !Number.isFinite(arrivedAt)
-      || arrivedAt < 0
-      || !payloadKind
-    ) {
-      throw new Error('Keeper event pending entry has invalid source identity')
-    }
-    return {
-      queueIndex,
-      postId,
-      sourceRef,
-      sourceIncarnation,
-      urgency: urgency as KeeperEventQueuePendingItem['urgency'],
-      arrivedAt,
-      payloadKind,
-      ...(typeof raw.rejection_reason === 'string' && raw.rejection_reason.trim()
-        ? { rejectionReason: raw.rejection_reason.trim() }
-        : {}),
-      ...(typeof raw.rejection_task_id === 'string' && raw.rejection_task_id.trim()
-        ? { rejectionTaskId: raw.rejection_task_id.trim() }
-        : {}),
-      ...(typeof raw.cancelled_task_id === 'string' && raw.cancelled_task_id.trim()
-        ? { cancelledTaskId: raw.cancelled_task_id.trim() }
-        : {}),
-      ...(typeof raw.cancelled_by === 'string' && raw.cancelled_by.trim()
-        ? { cancelledBy: raw.cancelled_by.trim() }
-        : {}),
-      ...(typeof raw.cancelled_reason === 'string' && raw.cancelled_reason.trim()
-        ? { cancelledReason: raw.cancelled_reason.trim() }
-        : {}),
-      ...(typeof raw.message_request_id === 'string' && raw.message_request_id.trim()
-        ? { messageRequestId: raw.message_request_id.trim() }
-        : {}),
-      ...(typeof raw.message_from === 'string' && raw.message_from.trim()
-        ? { messageFrom: raw.message_from.trim() }
-        : {}),
-    }
-  })
-  if (pending.length > totalPending) {
-    throw new Error('Keeper event pending page exceeds its total count')
-  }
-  return {
-    keeperName,
-    revision,
-    totalPending,
-    nextAfter,
-    pending,
-  }
+/** The exact-entry address a waiting-inventory `event_queue_pending` row
+    carries in its `detail` (`server_keeper_waiting_inventory.ml`), in the
+    wire form the operator route resolves: a 64-char lowercase hex source
+    snapshot digest plus the entry's admitted revision as a decimal string. */
+export interface KeeperEventQueueSourceAddress {
+  readonly sourceRef: string
+  readonly sourceIncarnation: string
 }
 
-async function fetchKeeperEventQueuePendingPage(
-  keeperName: string,
-  after: string | null,
-): Promise<KeeperEventQueuePendingSnapshot> {
-  const baseUrl = `/api/v1/keepers/${encodeURIComponent(keeperName)}/events/pending`
-  const url = `${baseUrl}?limit=100${after === null ? '' : `&after=${encodeURIComponent(after)}`}`
-  const { response, data } = await fetchJsonWithTimeout(
-    url,
-    { headers: jsonHeaders() },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!response.ok) {
-    throw await apiRequestErrorFromResponse('GET', url, response)
-  }
-  const snapshot = parseKeeperEventQueuePendingSnapshot(data)
-  if (snapshot.keeperName !== keeperName) {
-    throw new Error('fetchKeeperEventQueuePending: response identity mismatch')
-  }
-  return snapshot
-}
-
-export async function fetchKeeperEventQueuePending(
-  keeperName: string,
-): Promise<KeeperEventQueuePendingSnapshot> {
-  const pending: KeeperEventQueuePendingItem[] = []
-  const seenCursors = new Set<string>()
-  let expectedRevision: string | null = null
-  let totalPending = 0
-  let after: string | null = null
-  do {
-    const page = await fetchKeeperEventQueuePendingPage(keeperName, after)
-    if (expectedRevision === null) {
-      expectedRevision = page.revision
-      totalPending = page.totalPending
-    } else if (
-      page.revision !== expectedRevision
-      || page.totalPending !== totalPending
-    ) {
-      throw new Error('fetchKeeperEventQueuePending: queue changed during pagination')
-    }
-    pending.push(...page.pending)
-    after = page.nextAfter
-    if (after !== null) {
-      if (seenCursors.has(after)) {
-        throw new Error('fetchKeeperEventQueuePending: repeated page cursor')
-      }
-      seenCursors.add(after)
-    }
-  } while (after !== null)
-  if (expectedRevision === null || pending.length !== totalPending) {
-    throw new Error('fetchKeeperEventQueuePending: incomplete queue snapshot')
-  }
-  return {
-    keeperName,
-    revision: expectedRevision,
-    totalPending,
-    nextAfter: null,
-    pending,
-  }
+export function parseKeeperEventQueueSourceAddress(
+  detail: unknown,
+): KeeperEventQueueSourceAddress | null {
+  if (!isRecord(detail)) return null
+  const sourceRef = asString(detail.source_ref, '').trim()
+  const sourceIncarnation = parseEventQueueRevision(detail.source_incarnation)
+  if (!/^[0-9a-f]{64}$/.test(sourceRef) || sourceIncarnation === undefined) return null
+  return { sourceRef, sourceIncarnation }
 }
 
 export type KeeperEventQueueOperatorAction =

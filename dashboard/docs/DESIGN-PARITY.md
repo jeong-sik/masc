@@ -203,6 +203,47 @@ DOM speaks the same vocabulary; a surface assembled from utilities is opaque to
 it no matter how faithful the CSS is. That is a component-level decision, not a
 sync one.
 
+## Route coverage — what has and has not been looked at
+
+The measured set is 46 views: 14 deep-linkable surfaces, 22 sub-views behind tabs
+and drawers, and 10 more added after checking the prototype's own section lists
+against the recipe file. Overall mean **0.965**; seven sit below 0.95.
+
+| Below 0.95 | | Cause |
+|---|---|---|
+| overview | 0.842 | surface width, decided |
+| work-kanban | 0.855 | `.wk-kcol-body` capped at 42rem with an inner scroll; the design lets the column grow and the page scroll |
+| monitor-internal | 0.870 | assembled from Tailwind utilities, nothing named to style |
+| approvals-history | 0.891 | component rewritten, remaining gap is `.ap-hist-kind`/`-reason`/`-lat` with no live field |
+| keepers | 0.913 | the prototype's missing CSS reset (buttons keep UA Arial) |
+| lab-performance | 0.935 | not yet diagnosed |
+| schedule | 0.945 | not yet diagnosed |
+
+### Live routes the design has no counterpart for
+
+`WorkSection` is `work | board | sub-boards | moderation | planning |
+repositories | verification`; the design's Work surface has three views (트리,
+칸반, 검증) and no sections. So **five live routes are unmeasurable by this
+harness** — workspace/board, sub-boards, moderation, planning, repositories —
+along with monitoring/transport-health and monitoring/feature-health, both hidden
+diagnostics. Nothing is drifting there; the design simply does not draw them.
+`design-parity-components.mjs` is the only signal these surfaces have.
+
+### Design views the dashboard has no route for
+
+The prototype's monitor carries a 실행 슬롯 · 대기 section. There is no `lanes`
+route in `config/navigation.ts` and no `dl-` class in `src` — `lanes.css` is
+vendored for a surface that does not exist here. Lab's 감사 무결성 is the same
+shape. These are the component gap, not the skin gap, and
+`DESIGN-COMPONENT-PARITY.md` carries them.
+
+### Not vendored at all
+
+`instrument.css` (388 lines) is a second tone layer, sibling to the vendored
+`tempered.css`. The v5 export links only `tempered.css` and sets
+`data-tone="tempered"` on `<html>`, so the tone ships in the design package
+without being the one v5 specifies. Left alone deliberately.
+
 ## Unnecessary UI
 
 `docs/DESIGN-EXTRA-UI.md` runs the reverse check — what the dashboard renders

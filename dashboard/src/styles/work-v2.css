@@ -1780,6 +1780,7 @@
 }
 
 @media (max-width: 700px) {
+  .wk-viewseg button,
   .wk-newgoal,
   .wk-task-claim,
   .wk-task-kp,

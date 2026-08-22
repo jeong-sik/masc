@@ -3,14 +3,11 @@
 let taskboard_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_tasks_list"
     ; description =
-        "List tasks on the MASC backlog. Each row carries id, title, priority, \
-         created_at, status, and the assignee/timestamps of that status. Pass \
-         projection \"full\" to also receive description, files, contract, \
-         handoff_context, and execution_links — use it with a status filter for \
-         the task you are about to work on. For awaiting_verification, report \
-         that the task is pending a verdict from the system LLM agent at the \
-         completion-authority boundary and is not claimable by any Keeper; never \
-         Read producer sandbox paths directly."
+        "List backlog tasks. Rows carry id, title, priority, created_at, status, \
+         assignee; projection=full adds description, files, contract, \
+         handoff_context, execution_links. awaiting_verification means the task \
+         awaits the completion-authority verdict and no Keeper can claim it; \
+         never Read producer sandbox paths."
     ; input_schema =
         `Assoc
                   [ "type", `String "object"
@@ -55,9 +52,6 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                 [ "type", `String "string"
                                 ; "enum", `List [ `String "compact"; `String "full" ]
                                 ; "default", `String "compact"
-                                ; ( "description"
-                                  , `String
-                                      "Row shape: compact (default) omits description, files, contract, handoff_context, and execution_links; full returns the whole task record." )
                                 ] )
                           ] )
           ]

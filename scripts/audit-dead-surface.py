@@ -579,7 +579,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # agent_json_needs_repair, read_agent_with_repair_result).
 # 522 -> 521: dropping the Mcp_server JSON-RPC aliases removed one more
 # export (mcp_server.jsonrpc_request_to_yojson).
-DEAD_EXPORT_BASELINE = 521
+# 521 -> 519: dropping server_routes_http_common.state_switch_opt and
+# state_clock_opt removed two more dead exports.
+DEAD_EXPORT_BASELINE = 519
 
 
 def run_ratchet(count: int) -> int:

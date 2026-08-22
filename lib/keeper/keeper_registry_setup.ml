@@ -5,9 +5,7 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_id
-
-(** Failure-reason cluster re-included from Keeper_registry_types for backward compatibility. *)
-include Keeper_registry_types
+open Keeper_registry_types
 
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
@@ -45,9 +43,6 @@ let registry_entry_validation_error_to_string = function
         expected
         actual
 ;;
-
-let registry_key_parts = Keeper_registry_types.registry_key_parts
-let canonical_base_path_exn = Keeper_registry_types.canonical_base_path_exn
 
 let has_blank_string names =
   List.exists (fun name -> String.equal (String.trim name) "") names

@@ -731,12 +731,22 @@ let () =
             in
             check (float 0.001) "known cost" 1.0 decoded.estimated_cost_usd;
             check bool "typed gap" true (decoded.pricing_gap = usage.pricing_gap))
-        ; test_case "legacy usage field rejected" `Quick (fun () ->
-            let result =
-              Checkpoint.usage_of_json
-                (`Assoc [ "unpriced_model", `String "custom-model" ])
+        ; test_case "unknown usage field rejected" `Quick (fun () ->
+            let json =
+              match Checkpoint.usage_to_json Types.empty_usage with
+              | `Assoc fields -> `Assoc (fields @ [ "extra", `String "x" ])
+              | _ -> fail "usage_to_json must encode an object"
             in
-            check bool "explicit error" true (Result.is_error result))
+            match Checkpoint.usage_of_json json with
+            | Error (Error.Serialization (Error.JsonParseError { detail })) ->
+              check
+                string
+                "schema mismatch detail"
+                "Checkpoint.usage schema mismatch (missing=[], unknown=[extra], \
+                 duplicate=[])"
+                detail
+            | Error _ -> fail "expected a JsonParseError"
+            | Ok _ -> fail "unknown field must be rejected")
         ] )
     ; ( "tools"
       , [ test_case "tool_schema roundtrip" `Quick (fun () ->

@@ -3,10 +3,22 @@ name: Issue Taxonomy
 # Applies taxonomy labels from the masc-triage declaration block in the issue body.
 # The vocabulary SSOT is .github/issue-taxonomy.json. This workflow never creates labels.
 # labeled/unlabeled are not triggers: labelling would re-enter this workflow and storm.
+#
+# The hourly sweep is here because the issues events do not all arrive. On 2026-08-21, 62
+# issues were filed and this workflow ran 16 times; the rest were labelled at creation
+# time by `gh issue create --label`, which puts a human actor on the timeline event and
+# leaves nothing to reconcile the labels against the body afterwards. The measured cost of
+# that on 2026-08-22: 30 open issues whose labels disagree with their own declaration (29
+# of them missing a declared root/*), 6 carrying labels with no declaration block at all,
+# and 7 carrying none. Why the events go missing is not established, so this repairs the
+# state rather than the delivery. A run that changes nothing says nothing, so a quiet
+# repository produces no notifications.
 
 on:
   issues:
     types: [opened, edited, reopened]
+  schedule:
+    - cron: '41 * * * *'
   workflow_dispatch:
     inputs:
       issue_number:
@@ -159,7 +171,7 @@ jobs:
               if (!Number.isInteger(n) || n <= 0) { core.setFailed(`invalid issue number: ${dispatchNumber}`); return; }
               const { data } = await github.rest.issues.get({ owner, repo, issue_number: n });
               issues = [data];
-            } else if (dispatchScope === 'open') {
+            } else if (dispatchScope === 'open' || context.eventName === 'schedule') {
               // listForRepo already carries body and labels; re-fetching each issue would
               // spend the token's hourly budget before the sweep finishes.
               issues = (await github.paginate(github.rest.issues.listForRepo, {

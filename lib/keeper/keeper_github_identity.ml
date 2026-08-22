@@ -966,7 +966,8 @@ let run_inherited ~timeout_sec ~env = function
                ignore (reap ());
                Unix.WEXITED 124
              end else begin
-               (try ignore (Unix.select [] [] [] 0.05) with Unix.Unix_error _ -> ());
+               (* fire-and-forget: poll sleep; EINTR is handled by the outer wait loop *)
+               ignore (Unix.select [] [] [] 0.05);
                wait ()
              end
            | _, status -> status

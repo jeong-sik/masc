@@ -216,8 +216,8 @@ against the recipe file. Overall mean **0.965**; seven sit below 0.95.
 | monitor-internal | 0.870 | assembled from Tailwind utilities, nothing named to style |
 | approvals-history | 0.891 | component rewritten, remaining gap is `.ap-hist-kind`/`-reason`/`-lat` with no live field |
 | keepers | 0.913 | the prototype's missing CSS reset (buttons keep UA Arial) |
-| lab-performance | 0.935 | not yet diagnosed |
-| schedule | 0.945 | not yet diagnosed |
+| lab-performance | 0.935 | Korean line-breaking, below |
+| schedule | 0.945 | the prototype's missing CSS reset, as keepers |
 
 ### Live routes the design has no counterpart for
 
@@ -370,6 +370,35 @@ accent-filled pill under `.wk-viewseg` — which has no consumer anywhere in src
 
 work went **0.891 → 0.975**.
 
+
+### Systemic: the dashboard breaks Korean text properly and the mock does not
+
+`app-shell-v2.css` and `styleseed-base.css` set `word-break: keep-all`, which is
+what Korean prose needs — a word should not be split across lines. The prototype
+sets it only locally, on code blocks, so its paragraphs break mid-word: the lab
+lede reads `…같은 컴포넌트 라이브` / `러리를…` there and `…같은 컴포넌트` /
+`라이브러리를…` here.
+
+The element is otherwise identical on both sides — same font, same 12px, same
+519.781px measured box. Only the break point moves, and every line after it
+shifts. That is most of what separates lab-performance (0.935) from the rest of
+Lab, whose other four sections sit at 0.986-0.996.
+
+Nothing to fix. Matching the mock would mean splitting Korean words.
+
+### schedule and lab-performance: what the numbers turned out to be
+
+Both were open questions in this file and neither is new drift.
+
+schedule's conformance is 95.4%, the lowest measured, and 160 of its 244
+mismatches are one thing: the surface is built out of bare `<button>` elements —
+`.sch-poll-card`, `.sch-ev`, the cadence chips — which in the prototype keep the
+UA `font: 13.333px Arial` and `color: buttontext`. That last one computes to pure
+black on `.sch-ev-body` and `.sch-poll-top`; it does not show, because the design
+colours the children, but it is counted. The dashboard's reset makes those
+buttons inherit, which is what the design system specifies.
+
+lab-performance is the same reset on the nav items plus the line-breaking above.
 
 ### Systemic: the prototype ships no CSS reset
 

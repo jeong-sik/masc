@@ -1417,6 +1417,7 @@ let start_keeper_loops_owned
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
+    Server_dashboard_http_core_cache.invalidate_board_projections ();
     Sse.broadcast
       (`Assoc
           [ "jsonrpc", `String "2.0"

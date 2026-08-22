@@ -42,6 +42,17 @@ let feature_health_cache_ttl_s = 60.0
 (** Shared dashboard projection cache TTL — 120 seconds. *)
 let dashboard_projection_cache_ttl_s = 120.0
 
+(* Every cached projection of the board store. A board write drops all of
+   them so the SSE-triggered refetch reads the write instead of the
+   previous projection for the rest of the TTL. *)
+let board_projection_cache_prefixes =
+  [ "board:memory:"; "board:list:"; "board:hearths:" ]
+;;
+
+let invalidate_board_projections () =
+  List.iter Dashboard_cache.invalidate_prefix board_projection_cache_prefixes
+;;
+
 (** Track whether shell cache has been populated at least once.
     Atomic.t for cross-domain visibility: read from executor pool
     worker domains via namespace-truth and warmup helpers. *)

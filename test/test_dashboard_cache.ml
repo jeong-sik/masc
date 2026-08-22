@@ -264,6 +264,36 @@ let test_invalidate_prefix () =
   Alcotest.(check int) "proof entries recomputed" 4 !proof_counter;
   Alcotest.(check int) "non-matching prefix preserved" 1 !mission_counter
 
+(* A board write must not leave the 120s projection cache serving the
+   previous list: the dashboard refetches on notifications/board and read
+   the stale projection until the TTL lapsed (2026-08-22, #board only
+   updated after a hard refresh). *)
+let test_board_write_invalidates_every_board_projection () =
+  Dashboard_cache.invalidate_all ();
+  let memory_counter = ref 0 in
+  let list_counter = ref 0 in
+  let hearths_counter = ref 0 in
+  let unrelated_counter = ref 0 in
+  let read key counter =
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+      incr counter;
+      `Int !counter)
+  in
+  ignore (read "board:memory:-;-;recent;true;false;50;0;ws;-;true" memory_counter);
+  ignore (read "board:list:ws:-:-:true:false:recent:50:0:-:-:true:false" list_counter);
+  ignore (read "board:hearths:ws:exclude-system=true:exclude-automation=false" hearths_counter);
+  ignore (read "workspace:default" unrelated_counter);
+  Server_dashboard_http_core_cache.invalidate_board_projections ();
+  ignore (read "board:memory:-;-;recent;true;false;50;0;ws;-;true" memory_counter);
+  ignore (read "board:list:ws:-:-:true:false:recent:50:0:-:-:true:false" list_counter);
+  ignore (read "board:hearths:ws:exclude-system=true:exclude-automation=false" hearths_counter);
+  ignore (read "workspace:default" unrelated_counter);
+  Alcotest.(check int) "board memory projection recomputed" 2 !memory_counter;
+  Alcotest.(check int) "board list projection recomputed" 2 !list_counter;
+  Alcotest.(check int) "board hearths projection recomputed" 2 !hearths_counter;
+  Alcotest.(check int) "unrelated projection untouched" 1 !unrelated_counter;
+  Dashboard_cache.invalidate_all ()
+
 let test_task_mutation_hook_invalidates_all_execution_variants () =
   Dashboard_cache.invalidate_all ();
   let default_counter = ref 0 in
@@ -853,6 +883,8 @@ let () =
             test_projection_digest_cache_separates_actors;
           test_case "invalidate" `Quick test_invalidate;
           test_case "invalidate_prefix" `Quick test_invalidate_prefix;
+          test_case "board write invalidates every board projection" `Quick
+            test_board_write_invalidates_every_board_projection;
           test_case "task mutation invalidates every execution variant" `Quick
             test_task_mutation_hook_invalidates_all_execution_variants;
           test_case "stats" `Quick test_stats;

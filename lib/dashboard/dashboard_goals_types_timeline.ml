@@ -254,9 +254,15 @@ let goal_event_timeline_json event =
            [json_member_or_null] return [`Null] for every event ever written,
            so the summary silently lost the actor — the one field that says
            who moved the goal. Marked like [phase] when absent, so a producer
-           that stops writing it shows up instead of disappearing. *)
+           that stops writing it shows up instead of disappearing.
+
+           The alternative — dropping the "by %s" clause when the field is
+           absent — is what this change is fixing. The summary read
+           "phase=blocked" for months and read correctly, which is exactly
+           why nobody looked. *)
         let actor =
           payload_field "actor" |> json_to_string_opt
+          (* NDT-OK: bracketed marker, not a permissive default. *)
           |> Option.value ~default:"<missing payload.actor>"
         in
         ( "Goal Phase",

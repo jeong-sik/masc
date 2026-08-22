@@ -287,11 +287,22 @@ let supervise_keepalive
        happened. Emitting it per sweep per keeper made it 4,795 of the 20,458
        lines (23%%) written in the two hours to 2026-08-22T02:03Z, from 25
        keepers, and [Executable] — the other steady state — logs nothing at
-       all. [record_recovery_retained] above already keeps the fact on two
-       authoritative planes: a per-keeper/reason counter and an
-       [Admission_denied] lifecycle event the dashboard consumes. This is the
-       third rendering, so it belongs on the routine channel where the text
-       stays retrievable at Debug. *)
+       all.
+
+       What makes the demotion safe is that the state is re-derivable at any
+       moment from durable inputs: the keeper's meta file, its profile TOML
+       and its registry entry are what [classify_owner_execution] reads, and
+       they are all on disk. An operator asking why a keeper is not running
+       reads the readiness, not a line this sweep wrote earlier.
+
+       It is NOT the two sinks [record_recovery_retained] writes. Both are
+       process memory: [Otel_metric_store] is a Hashtbl, and
+       [Keeper_lifecycle_audit] a 50-entry ring per keeper. Neither survives a
+       restart, and this fleet restarted twelve times on 2026-08-21; the OTLP
+       exporter that would carry the counter off-process has been reporting
+       "collector unreachable" and sits on a recovery probe. Of the three, the
+       JSONL line was the only durable one — so the demotion has to rest on
+       re-derivability, not on those sinks holding the evidence. *)
     Log.Keeper.routine
       "%s: supervisor keepalive recovery retained by disabled policy: %s"
       meta.name
@@ -302,8 +313,8 @@ let supervise_keepalive
     in
     record_recovery_retained reason;
     (* Same shape as the disabled-policy arm above: a paused or dead owner is
-       a state the sweep keeps re-reading, and the counter plus the
-       [Admission_denied] lifecycle event already carry it. *)
+       a state the sweep keeps re-reading, and the durable meta/registry it
+       reads answer the question at any later time. *)
     Log.Keeper.routine
       "%s: supervisor keepalive recovery retained by paused/dead owner truth: %s"
       meta.name

@@ -608,6 +608,97 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
+def approval_selection_item(
+    token: str,
+    *,
+    action_type: str,
+    target_type: str,
+    target_id: str | None,
+    delegated_tool: str,
+    created_at: str,
+) -> dict[str, object]:
+    return {
+        "confirm_token": token,
+        "trace_id": f"trace-{token}",
+        "actor": "masc-tui",
+        "action_type": action_type,
+        "target_type": target_type,
+        "target_id": target_id,
+        "payload": {"reason": f"reason-{token}"},
+        "delegated_tool": delegated_tool,
+        "created_at": created_at,
+        "expires_at": None,
+    }
+
+
+def approval_selection_snapshot(
+    items: list[dict[str, object]],
+) -> tuple[int, object]:
+    count = len(items)
+    return (
+        200,
+        {
+            "pending_confirm_envelope": {
+                "items": items,
+                "summary": {
+                    "actor_filter": "masc-tui",
+                    "filter_active": True,
+                    "visible_count": count,
+                    "total_count": count,
+                    "hidden_count": 0,
+                    "hidden_actors": [],
+                    "confirm_required_actions": [],
+                },
+            }
+        },
+    )
+
+
+def approval_selection_http_fixtures() -> tuple[
+    HttpFixtures,
+    list[dict[str, object]],
+    dict[str, object],
+]:
+    approval_a = approval_selection_item(
+        "token-a",
+        action_type="namespace_pause",
+        target_type="workspace",
+        target_id=None,
+        delegated_tool="masc_pause",
+        created_at="2026-08-22T00:03:00Z",
+    )
+    approval_b = approval_selection_item(
+        "token-b",
+        action_type="keeper_probe",
+        target_type="keeper",
+        target_id="beta",
+        delegated_tool="masc_keeper_status",
+        created_at="2026-08-22T00:02:00Z",
+    )
+    approval_c = approval_selection_item(
+        "token-c",
+        action_type="keeper_message",
+        target_type="keeper",
+        target_id="gamma",
+        delegated_tool="masc_keeper_delegate",
+        created_at="2026-08-22T00:01:00Z",
+    )
+    approval_new = approval_selection_item(
+        "token-new",
+        action_type="keeper_recover",
+        target_type="keeper",
+        target_id="delta",
+        delegated_tool="masc_keeper_recover",
+        created_at="2026-08-22T00:04:00Z",
+    )
+    initial_items = [approval_a, approval_b, approval_c]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/operator?view=summary&include_messages=0&include_keepers=0"] = (
+        approval_selection_snapshot(initial_items)
+    )
+    return fixtures, initial_items, approval_new
+
+
 def board_selection_post(suffix: str, title: str, body: str) -> dict[str, object]:
     return {
         "id": f"post-{suffix}",
@@ -1353,6 +1444,75 @@ def assert_overview_event_rows(
     os.write(master_fd, b"q")
 
 
+def approval_selection_identity_interaction(
+    fixtures: HttpFixtures,
+    initial_items: list[dict[str, object]],
+    approval_new: dict[str, object],
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=cluster_end,
+            timeout=3.0,
+        )
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\t",
+            b"MASC Approvals (3/3, hidden 0, actor masc-tui)",
+        )
+        selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
+        selected_plain = CSI_RE.sub(b"", selected)
+        if not re.search(
+            rb">\s+masc-tui\s+keeper_probe\s+keeper\s+beta", selected_plain
+        ):
+            raise AssertionError(f"fixture did not select approval B: {selected!r}")
+
+        fixtures[
+            "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
+        ] = approval_selection_snapshot([approval_new, *initial_items])
+        refreshed = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"MASC Approvals (4/4, hidden 0, actor masc-tui)",
+        )
+        refreshed_frame = frame_containing(
+            refreshed,
+            b"MASC Approvals (4/4, hidden 0, actor masc-tui)",
+        )
+        refreshed_plain = CSI_RE.sub(b"", refreshed_frame)
+        if not re.search(
+            rb">\s+masc-tui\s+keeper_probe\s+keeper\s+beta",
+            refreshed_plain,
+        ):
+            raise AssertionError(
+                f"approval refresh changed the selected token: {refreshed!r}"
+            )
+
+        armed = send_and_wait(process, master_fd, output, b"y", b"Press y again:")
+        expected_arm = b"Press y again: keeper_probe on keeper (masc_keeper_status)"
+        if expected_arm not in armed:
+            raise AssertionError(f"approval refresh armed the wrong token: {armed!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -1787,6 +1947,7 @@ def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
     keeper_scroll_fixtures = overview_event_http_fixtures()
     keeper_scroll_gate = GatedHttpResponse((200, {"posts": []}))
+    approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
     board_selection_fixtures = board_selection_http_fixtures()
     board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
@@ -1818,6 +1979,16 @@ def run_keyboard_regression(executable: str) -> None:
         interact=assert_overview_event_rows,
         http_fixtures=overview_event_http_fixtures(),
         prepare_workspace=seed_row_budget_workspace,
+    )
+    run_terminal_scenario(
+        executable,
+        description="approval selection identity",
+        interact=approval_selection_identity_interaction(
+            approval_fixtures,
+            approval_items,
+            approval_new,
+        ),
+        http_fixtures=approval_fixtures,
     )
     run_terminal_scenario(
         executable,

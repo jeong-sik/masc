@@ -165,8 +165,6 @@ let schema_shape_json schema =
   `Assoc fields
 ;;
 
-let schema_has_property_name schema name = List.mem name (schema_property_names schema)
-
 let prepare_args ?schema:_ ~name:_ args = strip_internal_marker_args args
 
 let schema_has_properties = function
@@ -198,23 +196,6 @@ let unsupported_arg_names schema = function
       if List.mem name properties then None else Some name)
     |> List.sort_uniq String.compare
   | _ -> []
-;;
-
-let schema_has_property schema name = schema_has_property_name schema name
-
-let typed_shell_unsupported_field_hint schema names =
-  let has_shell_fields =
-    schema_has_property schema "argv" && schema_has_property schema "pipeline"
-  in
-  let has_legacy_shell_string =
-    List.exists (fun name -> String.equal name "cmd" || String.equal name "command") names
-  in
-  if has_shell_fields && has_legacy_shell_string
-  then
-    Some
-      "typed shell execution has no cmd/command field; use one non-empty argv \
-       process vector, e.g. argv=[\"git\",\"status\",\"--short\"]"
-  else None
 ;;
 
 type one_of_branch = {
@@ -317,17 +298,24 @@ let one_of_required_shape_error schema = function
   | _ -> None
 ;;
 
+(* The rejection names the fields the schema does accept, so the model can
+   correct the call from the message alone instead of guessing a new name
+   (analyst, 2026-08-22: agent → agent_name → author before it found the
+   declared shape). *)
 let schema_shape_error schema args =
   match unsupported_arg_names schema args with
   | name :: names ->
-    let names = name :: names in
-    let names_text = String.concat ", " names in
-    let hint =
-      match typed_shell_unsupported_field_hint schema names with
-      | None -> ""
-      | Some hint -> "; " ^ hint
+    let names_text = String.concat ", " (name :: names) in
+    let accepted =
+      match property_names schema with
+      | [] -> "(none)"
+      | accepted -> String.concat ", " accepted
     in
-    Some (Printf.sprintf "received unsupported field(s): %s%s" names_text hint)
+    Some
+      (Printf.sprintf
+         "received unsupported field(s): %s; accepted: %s"
+         names_text
+         accepted)
   | [] -> one_of_required_shape_error schema args
 ;;
 

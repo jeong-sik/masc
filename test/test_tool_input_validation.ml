@@ -960,9 +960,9 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       (String.length msg > 0);
     assert_policy_validation_payload ~label:"cmd string" result;
     Alcotest.(check bool)
-      "validation error points to typed argv"
+      "validation error names the accepted fields"
       true
-      (string_contains msg "argv=[\\\"git\\\",\\\"status\\\",\\\"--short\\\"]")
+      (string_contains msg "accepted: argv")
 
 let test_validate_args_tool_execute_rejects_command_string () =
   let args = `Assoc [ "command", `String "pwd" ] in
@@ -981,9 +981,9 @@ let test_validate_args_tool_execute_rejects_command_string () =
       true
       (string_contains msg "unsupported field(s): command");
     Alcotest.(check bool)
-      "validation error says command field is unavailable"
+      "validation error names the accepted fields"
       true
-      (string_contains msg "no cmd/command field")
+      (string_contains msg "accepted: argv")
 
 let test_validate_args_tool_execute_rejects_background_flag () =
   let args =
@@ -1806,7 +1806,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , "tool_execute"
       , tool_execute_schema
       , `Assoc [ "cmd", `String "git status --short" ]
-      , [ "cmd"; "non-empty argv" ] )
+      , [ "cmd"; "accepted: argv" ] )
     ; ( "keeper_task_done notes-only drift"
       , "keeper_task_done"
       , keeper_task_done_schema

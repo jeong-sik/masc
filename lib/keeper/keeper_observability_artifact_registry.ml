@@ -54,7 +54,6 @@ let entries =
     ; consumers =
         [ "Server_dashboard_http_keeper_api"
         ; "Keeper_context_observation_projection"
-        ; "Keeper_catchup_digest"
         ; "Keeper_raw_trace_retention"
         ]
     ; retention_owner = "Server_runtime_startup_maintenance"

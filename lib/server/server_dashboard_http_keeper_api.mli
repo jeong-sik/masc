@@ -15,21 +15,14 @@ val tool_calls_fleet_cache_key : masc_root:string -> string
 
 (** {1 Trajectory projection} *)
 
-val handle_keeper_catchup_judge_post :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
-    and starting an out-of-band Fusion judge run. *)
-
 val handle_keeper_fusion_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /fusion] by starting an out-of-band deliberation owned by the
     keeper in the route, with the prompt, preset and topology supplied by the
-    operator. This is the only surface that can reach the judge-of-judges and
-    staged topologies: [POST /catchup-judge] fixes both the prompt and
-    [topology = "simple"], so before this endpoint only a keeper deciding to
-    call the tool itself could run them. *)
+    operator. This is the only HTTP surface that can reach the judge-of-judges
+    and staged topologies; before it only a keeper deciding to call the tool
+    itself could run them. *)
 
 val handle_keeper_operator_note_post :
   Mcp_server.server_state ->

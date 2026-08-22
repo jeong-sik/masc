@@ -151,7 +151,6 @@
   test_keeper_event_queue_health_actionable
   test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
-  test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
   test_keeper_tool_use_failure_counter
   test_keeper_usage_trust_counter
@@ -457,7 +456,6 @@
   test_keeper_event_queue_health_actionable
   test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
-  test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
   test_keeper_tool_use_failure_counter
   test_keeper_usage_trust_counter

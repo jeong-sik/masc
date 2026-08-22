@@ -361,11 +361,9 @@ describe('workspace navigation labels', () => {
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
     expect(labelFor('planning')).toBe('Plans & Goals')
-    expect(labelFor('moderation')).toBeUndefined()
     // goals is no longer a standalone section
     const ids = sections.map(item => item.id)
     expect(ids).not.toContain('goals')
-    expect(ids).not.toContain('moderation')
   })
 
   it('hides legacy board-family sections now that Board is top-level', () => {
@@ -382,7 +380,6 @@ describe('workspace navigation labels', () => {
     expect(hiddenIds).toEqual([
       'board',
       'sub-boards',
-      'moderation',
     ])
 
     expect(normalizeRouteParams('workspace', { section: 'board', post: 'post-1' })).toMatchObject({
@@ -390,7 +387,6 @@ describe('workspace navigation labels', () => {
       post: 'post-1',
     })
     expect(normalizeRouteParams('workspace', { section: 'sub-boards' }).section).toBe('sub-boards')
-    expect(normalizeRouteParams('workspace', { section: 'moderation' }).section).toBe('moderation')
   })
 })
 

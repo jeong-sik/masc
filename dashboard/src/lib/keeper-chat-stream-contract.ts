@@ -146,15 +146,15 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED'
-      // null is the legacy wire value; a typed target names the real
-      // destination of the completed surface post (#28374).
+      // The typed target names the real destination of the completed
+      // surface post (#28374).
       value: {
-        target?: {
+        target: {
           kind?: 'dashboard' | 'discord' | 'slack'
           channel_id?: string
           thread_ts?: string
         }
-      } | null
+      }
     }
   | {
       type: 'CUSTOM'

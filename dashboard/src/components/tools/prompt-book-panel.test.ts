@@ -105,7 +105,6 @@ describe('PromptBookPanel', () => {
       { key: 'keeper', category: 'keeper' },
       { key: 'judge.board', category: 'judge' },
       { key: 'judge.effect', category: 'judge' },
-      { key: 'judge.catchup', category: 'judge' },
       { key: 'librarian', category: 'librarian' },
       { key: 'verification', category: 'verification' },
     ]

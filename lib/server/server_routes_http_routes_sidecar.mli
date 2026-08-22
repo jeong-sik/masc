@@ -18,7 +18,7 @@ module Http = Http_server_eio
 (** {1 Sidecar id validation} *)
 
 val known_ids : string list
-(** Hard-coded sidecar id allowlist (e.g. ["discord"], ["cron"]).  Path
+(** Hard-coded sidecar id allowlist (["imessage"], ["telegram"]).  Path
     routing rejects anything not in this list. *)
 
 val validate_name : string option -> (string, string) result

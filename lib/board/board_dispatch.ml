@@ -707,10 +707,6 @@ let delete_post ~post_id =
   match backend () with
   | Jsonl store -> Board.delete_post store ~post_id
 
-let delete_comment ~comment_id =
-  match backend () with
-  | Jsonl store -> Board.delete_comment store ~comment_id
-
 let search ~query ~limit =
   match backend () with
   | Jsonl store ->

@@ -163,7 +163,6 @@ val board_reactions_lookup :
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :
-  ?include_moderation:bool ->
   ?blind_votes:bool ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
@@ -171,13 +170,10 @@ val board_comment_dashboard_json :
   Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
     [author_identity] field appended for dashboard inspection.  When
-    [include_moderation] is [true], it also appends operator-only
-    [report_count] and [moderation_status] fields.  When [blind_votes]
-    is [true], score fields are hidden until [current_vote] records a
-    viewer vote. *)
+    [blind_votes] is [true], score fields are hidden until
+    [current_vote] records a viewer vote. *)
 
 val board_post_dashboard_json :
-  ?include_moderation:bool ->
   ?blind_votes:bool ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
@@ -195,8 +191,6 @@ val board_post_dashboard_json :
     - [hearth_count] = 0 or 1 (boolean-as-int for the dashboard's
       column that aggregates across multiple hearths).
     - [author_identity] from {!board_actor_identity_json}.
-    - [report_count] / [moderation_status] from {!Board_moderation}
-      only when [include_moderation] is [true].
     - [vote_blind] / [vote_blind_reason] and null score fields when
       [blind_votes] is [true] and the viewer has not voted yet.
 

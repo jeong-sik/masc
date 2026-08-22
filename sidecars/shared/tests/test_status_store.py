@@ -45,7 +45,7 @@ def test_status_store_resolves_relative_path_against_base_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("MASC_BASE_PATH", str(tmp_path))
-    store = StatusStore(".gate/runtime/slack/status.json")
+    store = StatusStore(".gate/runtime/telegram/status.json")
 
     store.write(
         ConnectorRuntimeStatus(
@@ -61,16 +61,16 @@ def test_status_store_resolves_relative_path_against_base_path(
         )
     )
 
-    assert (tmp_path / ".gate/runtime/slack/status.json").exists()
+    assert (tmp_path / ".gate/runtime/telegram/status.json").exists()
 
 
 def test_bindings_store_resolves_relative_path_against_base_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("MASC_BASE_PATH", str(tmp_path))
-    path = ".gate/runtime/slack/bindings.json"
+    path = ".gate/runtime/telegram/bindings.json"
 
     save_bindings(path, {"C123": "luna"})
 
-    assert (tmp_path / ".gate/runtime/slack/bindings.json").exists()
+    assert (tmp_path / ".gate/runtime/telegram/bindings.json").exists()
     assert load_bindings(path) == {"C123": "luna"}

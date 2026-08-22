@@ -561,7 +561,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # (measured 2026-08-20: 539). The one count of slack predates this change;
 # goal_verification's exports all have callers (dashboard joins + tests), so
 # the ledger added none.
-DEAD_EXPORT_BASELINE = 536
+# 536 -> 532: tightened to the measured count (measured 2026-08-22: 532
+# before and after this change). The four counts of slack predate it; the
+# change itself is count-neutral because the four exports it orphaned
+# (audit_log.entry_of_json_r, common.keeper_runtime_store_dirname,
+# workspace_utils_paths_backend tasks_dirname / backlog_filename) were
+# dropped from their .mli in the same PR, implementations kept where still
+# used internally.
+DEAD_EXPORT_BASELINE = 532
 
 
 def run_ratchet(count: int) -> int:

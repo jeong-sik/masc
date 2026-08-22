@@ -11,12 +11,12 @@
 
     Typed non-verdicts (evaluator unavailable, malformed reply after all
     slots failed, verdict without a stated reason, refused commit) leave the
-    pending row durable and schedule a maintenance-pulse retry — a pending
-    row is never consumed on failure, and there is no wall-clock expiry. *)
+    pending row durable and stop — a pending row is never consumed on
+    failure, nothing re-runs the same review on a clock, and there is no
+    wall-clock expiry. *)
 
 val start :
   sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Workspace_utils_backend_setup.config ->
   unit
 
@@ -30,18 +30,11 @@ module For_testing : sig
     kind : pending_kind;
   }
 
-  (** How one review ended, decoupled from the Eio scheduling loop so the
-      retry decision is a pure function of it. *)
+  (** How one review ended. [Deferred] carries the reason no verdict was
+      committed; the pending row it names is still durable. *)
   type process_outcome =
     | Committed
-    | Deferred of {
-        retryable : bool;
-        reason : string;
-      }
-
-  val should_schedule_retry : process_outcome -> bool
-  (** Whether the maintenance-pulse retry timer should arm for this outcome.
-      [false] for [Committed] and for non-retryable deferrals. *)
+    | Deferred of string
 
   val group_pending_by_goal : pending_work list -> pending_work list list
   (** Stable grouping used by the daemon: criterion work precedes proof work

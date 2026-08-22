@@ -578,7 +578,7 @@ let test_criterion_pending_drains_to_viable () =
 ;;
 
 (* (d) An unavailable evaluator is a typed non-verdict: the row stays
-   pending, the phase stays Verifying, and the outcome schedules a retry. *)
+   pending, the phase stays Verifying, and the outcome names why. *)
 let test_lane_unavailable_keeps_the_pending_row () =
   with_workspace
   @@ fun config ->
@@ -599,10 +599,11 @@ let test_lane_unavailable_keeps_the_pending_row () =
        List.iter
          (fun outcome ->
             match outcome with
-            | Agent.Deferred { retryable = true; reason = _ } ->
-              check bool "retry scheduled for a retryable deferral" true
-                (Agent.should_schedule_retry outcome)
-            | _ -> fail "an unavailable evaluator must defer retryable")
+            | Agent.Deferred reason ->
+              check bool "the deferral states a reason" true
+                (String.trim reason <> "")
+            | Agent.Committed ->
+              fail "an unavailable evaluator must not commit a verdict")
          outcomes);
   check string "the phase never left verifying" "verifying"
     (stored_phase config goal_id);

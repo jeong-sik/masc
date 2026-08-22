@@ -26,7 +26,9 @@
 
     Failure keeps evidence: an unavailable evaluator, a malformed reply after
     all slots failed, or a refused commit leaves the pending row durable and
-    schedules a maintenance-pulse retry. No wall-clock expiry anywhere. *)
+    stops. Nothing re-runs the same review on a clock — the next scan comes
+    from a Keeper requesting completion or from another review committing a
+    verdict. No wall-clock expiry and no retry timer anywhere. *)
 
 type pending_kind =
   | Criterion_check
@@ -39,15 +41,7 @@ type pending_work =
 
 type process_outcome =
   | Committed
-  | Deferred of
-      { retryable : bool
-      ; reason : string
-      }
-
-let should_schedule_retry = function
-  | Committed -> false
-  | Deferred { retryable; reason = _ } -> retryable
-;;
+  | Deferred of string
 
 let pending_kind_to_string = function
   | Criterion_check -> "criterion"
@@ -419,14 +413,13 @@ let commit_gate_verdict config ~goal_id ~verification_run_id ~decision ~evidence
 
 (* {1 Processing} *)
 
-let defer ~goal_id ~kind ~retryable ~reason =
+let defer ~goal_id ~kind ~reason =
   Log.Misc.warn
-    "goal verifier deferred goal_id=%s kind=%s retryable=%b reason=%s"
+    "goal verifier deferred goal_id=%s kind=%s reason=%s"
     goal_id
     (pending_kind_to_string kind)
-    retryable
     reason;
-  Deferred { retryable; reason }
+  Deferred reason
 ;;
 
 let admit_proof_against_criterion config (work : pending_work) =
@@ -434,9 +427,9 @@ let admit_proof_against_criterion config (work : pending_work) =
   | Criterion_check -> Ok ()
   | Completion_proof ->
     (match Goal_verification.get_record config ~goal_id:work.goal_id with
-     | Error detail -> Error (true, detail)
-     | Ok None ->
-       Error (true, "proof request has no verification ledger record")
+     | Error detail -> Error detail
+     | Ok None -> Error "proof request has no verification ledger record"
+
      | Ok (Some record) ->
        (match record.Goal_verification.criterion with
         | Goal_verification.Criterion_viable _ ->
@@ -448,26 +441,20 @@ let admit_proof_against_criterion config (work : pending_work) =
              claim by reading the claim -- the independent proof gate would be
              satisfied by prose.
 
-             Retryable: nothing is wrong with the request, there is just
-             nothing to verify yet. The pending row stays durable, and the
-             first linked Task makes the next drain admissible. *)
+             The pending row stays durable, and the first linked Task makes
+             the next drain admissible. *)
           (match linked_task_rollup config ~goal_id:work.goal_id with
-           | Error detail -> Error (true, detail)
+           | Error detail -> Error detail
            | Ok (_, _, []) ->
              Error
-               ( true
-               , "proof has no linked Task: the Goal's own metric and target \
-                  are the claim under review, not evidence for it" )
+               "proof has no linked Task: the Goal's own metric and target \
+                are the claim under review, not evidence for it"
            | Ok (_, _, _ :: _) -> Ok ())
         | Goal_verification.Criterion_pending _
         | Goal_verification.Criterion_unchecked ->
-          Error
-            ( true
-            , "proof waits until the durable criterion verdict is viable" )
+          Error "proof waits until the durable criterion verdict is viable"
         | Goal_verification.Criterion_unreachable _ ->
-          Error
-            ( false
-            , "proof refused because the durable criterion is unreachable" )))
+          Error "proof refused because the durable criterion is unreachable"))
 ;;
 
 let process_pending_work_inner
@@ -481,8 +468,7 @@ let process_pending_work_inner
   : process_outcome
   =
   match admit_proof_against_criterion config work with
-  | Error (retryable, reason) ->
-    defer ~goal_id:work.goal_id ~kind:work.kind ~retryable ~reason
+  | Error reason -> defer ~goal_id:work.goal_id ~kind:work.kind ~reason
   | Ok () ->
   match Goal_store.get_goal config ~goal_id:work.goal_id with
   | None ->
@@ -491,7 +477,6 @@ let process_pending_work_inner
     defer
       ~goal_id:work.goal_id
       ~kind:work.kind
-      ~retryable:false
       ~reason:"pending verification row names a goal that does not exist"
   | Some goal ->
     (match work.kind, goal.Goal_store.phase with
@@ -502,7 +487,7 @@ let process_pending_work_inner
      | Criterion_check, Goal_phase.Verifying ->
        (match build_review_request config goal work.kind with
         | Error detail ->
-          defer ~goal_id:work.goal_id ~kind:work.kind ~retryable:true ~reason:detail
+          defer ~goal_id:work.goal_id ~kind:work.kind ~reason:detail
         | Ok (review_request, prompt_name, lookup) ->
           (* The verdict channel drops the reason for [Approve]; capture the
              stated reason from the successful verdict tool call — exactly one
@@ -540,22 +525,12 @@ let process_pending_work_inner
                | Some reason -> reason
                | None -> Task.Anti_rationalization.gate_to_string result.gate
              in
-             (* No verdict was committed. Only a typed evaluator error says
-                anything about whether a repeat would end differently; without
-                one — a reply that skipped the verdict tool call, a prompt or
-                slot that would not resolve — nothing here justifies running
-                the same review again, so this stops instead of re-arming the
-                pulse. The row stays durable and the next real wake rescans
-                it. *)
-             let retryable =
-               match result.evaluator_error_retryable with
-               | Some retryable -> retryable
-               | None -> false
-             in
+             (* No verdict was committed. The row stays durable and the next
+                real wake rescans it — a Keeper re-requesting completion, or a
+                worker slot coming free with work still queued. *)
              defer
                ~goal_id:work.goal_id
                ~kind:work.kind
-               ~retryable
                ~reason:detail
            | Some review_verdict ->
              let evidence =
@@ -600,13 +575,11 @@ let process_pending_work_inner
                    defer
                      ~goal_id:work.goal_id
                      ~kind:work.kind
-                     ~retryable:true
                      ~reason:detail)
               | Some _ | None ->
                 defer
                   ~goal_id:work.goal_id
                   ~kind:work.kind
-                  ~retryable:true
                   ~reason:
                     "verdict without a stated reason is not a judgment; the \
                      pending row stays durable")))
@@ -621,7 +594,6 @@ let process_pending_work_inner
        defer
          ~goal_id:work.goal_id
          ~kind:work.kind
-         ~retryable:true
          ~reason:
            "proof request is pending but the phase never entered verifying; \
             waiting for the gate to re-converge"
@@ -630,7 +602,6 @@ let process_pending_work_inner
        defer
          ~goal_id:work.goal_id
          ~kind:work.kind
-         ~retryable:false
          ~reason:"proof request pending on a terminal goal; left durable"
      | Criterion_check, Goal_phase.Completed
      | Criterion_check, Goal_phase.Dropped ->
@@ -640,7 +611,6 @@ let process_pending_work_inner
        defer
          ~goal_id:work.goal_id
          ~kind:work.kind
-         ~retryable:false
          ~reason:"criterion request pending on a terminal goal; left durable")
 ;;
 
@@ -688,8 +658,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
     let registry_outcome =
       match outcome with
       | Committed -> Goal_verification_run_registry.Committed
-      | Deferred { retryable; reason } ->
-        Goal_verification_run_registry.Deferred { retryable; detail = reason }
+      | Deferred reason -> Goal_verification_run_registry.Deferred { detail = reason }
     in
     persist registry_outcome
   in
@@ -748,11 +717,8 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, string) result
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
-  ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
-  ; retry_scheduled : bool Atomic.t
-  ; retry_interval_sec : float
   ; in_flight : pending_work list Atomic.t
   }
 
@@ -791,21 +757,17 @@ let request_scan (runtime : runtime) =
   Eio.Condition.broadcast runtime.wake
 ;;
 
-let schedule_retry (runtime : runtime) =
-  if Atomic.compare_and_set runtime.retry_scheduled false true
-  then
-    Eio.Fiber.fork_daemon ~sw:runtime.sw (fun () ->
-      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
-      Atomic.set runtime.retry_scheduled false;
-      request_scan runtime;
-      `Stop_daemon)
-;;
-
+(* Rescanning is driven by what happened, not by a clock. A committed verdict
+   changes the ledger, so whatever else was queued deserves another look, and
+   the worker slot this fiber held has just come free. A run that committed
+   nothing changes nothing: scanning again would read the same rows and defer
+   them again, so it stops and waits for a real wake — a Keeper requesting
+   completion, or another worker committing. *)
 let process_goal_work (runtime : runtime) work =
   match work with
   | [] -> ()
   | representative :: _ ->
-    let retryable =
+    let committed_any =
       Eio.Switch.run (fun work_sw ->
         Eio.Switch.on_release work_sw (fun () ->
           release_review runtime representative);
@@ -815,10 +777,10 @@ let process_goal_work (runtime : runtime) work =
               "goal verifier isolated unexpected worker failure goal_id=%s detail=%s"
               representative.goal_id
               (Printexc.to_string exn);
-            true)
+            false)
           (fun () ->
-             let rec loop = function
-               | [] -> false
+             let rec loop committed = function
+               | [] -> committed
                | item :: rest ->
                  (match
                     process_pending_work
@@ -826,12 +788,12 @@ let process_goal_work (runtime : runtime) work =
                       runtime.config
                       item
                   with
-                  | Committed -> loop rest
-                  | Deferred { retryable; reason = _ } -> retryable)
+                  | Committed -> loop true rest
+                  | Deferred _ -> committed)
              in
-             loop work))
+             loop false work))
     in
-    if retryable then schedule_retry runtime
+    if committed_any then request_scan runtime
 ;;
 
 let take_items limit items =
@@ -848,8 +810,7 @@ let process_pending (runtime : runtime) =
   | Error detail ->
     Log.Misc.error
       "goal verifier ledger read failed; pending rows remain undrained: %s"
-      detail;
-    schedule_retry runtime
+      detail
   | Ok work ->
     let active = Atomic.get runtime.in_flight in
     let available = max 0 (max_concurrent_reviews - List.length active) in
@@ -869,8 +830,7 @@ let process_pending (runtime : runtime) =
           then
             Eio.Fiber.fork ~sw:runtime.sw (fun () ->
               process_goal_work runtime goal_work))
-      selected;
-    if List.length selected < List.length eligible then schedule_retry runtime
+      selected
 ;;
 
 let run (runtime : runtime) : [ `Stop_daemon ] =
@@ -881,8 +841,7 @@ let run (runtime : runtime) : [ `Stop_daemon ] =
         ~on_exn:(fun exn ->
           Log.Misc.error
             "goal verifier isolated unexpected scan failure detail=%s"
-            (Printexc.to_string exn);
-          schedule_retry runtime)
+            (Printexc.to_string exn))
         (fun () -> process_pending runtime);
       None)
     else None)
@@ -903,16 +862,13 @@ let install_callback (runtime : runtime) =
          Log.Misc.info "goal verifier scheduled goal_id=%s" goal_id))
 ;;
 
-let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
+let start ~sw ~(config : Workspace_utils_backend_setup.config) =
   Eio.Switch.check sw;
   let runtime =
     { config
     ; sw
-    ; clock
     ; wake = Eio.Condition.create ()
     ; pending = Atomic.make true
-    ; retry_scheduled = Atomic.make false
-    ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
     }
   in
@@ -964,11 +920,7 @@ module For_testing = struct
 
   type nonrec process_outcome = process_outcome =
     | Committed
-    | Deferred of
-        { retryable : bool
-        ; reason : string
-        }
+    | Deferred of string
 
-  let should_schedule_retry = should_schedule_retry
   let group_pending_by_goal = group_pending_by_goal
 end

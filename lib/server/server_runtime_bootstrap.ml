@@ -1235,11 +1235,8 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
    same post-readiness lane as the task completion authority — the stage-2
    gate is illegal to merge without it (a gate no one calls wedges every goal
    that enters [Verifying]). *)
-let start_goal_verifier ~sw ~clock (state : Mcp_server.server_state) =
-  Goal_verification_agent.start
-    ~sw
-    ~clock
-    ~config:(Mcp_server.workspace_config state)
+let start_goal_verifier ~sw (state : Mcp_server.server_state) =
+  Goal_verification_agent.start ~sw ~config:(Mcp_server.workspace_config state)
 
 let start_post_ready_owner_lanes
       ~sw
@@ -1251,7 +1248,7 @@ let start_post_ready_owner_lanes
      and stdio must install the system-LLM authority before maintenance can
      observe or resume AwaitingVerification work. *)
   start_completion_authority ~sw ~clock state;
-  start_goal_verifier ~sw ~clock state;
+  start_goal_verifier ~sw state;
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =

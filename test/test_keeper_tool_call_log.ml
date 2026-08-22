@@ -1075,15 +1075,17 @@ let test_dashboard_aggregate_groups_runtime_fields () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"k1" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"ok"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
       ~success:true ~duration_ms:2.0
       ~model:"glm-5.1" ~lane:"tool_optional"
       ~tool_choice:"auto"
       ~thinking_enabled:false ~thinking_budget:1024
       ~runtime_profile:"primary" ();
+    let failure_output = "error: {\"ok\":false,\"error\":\"boom\"}" in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k2" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
+      ~input:(`Assoc []) ~output_text:failure_output
+      ~result_bytes:(String.length failure_output)
       ~success:false ~duration_ms:3.0
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
@@ -1146,6 +1148,7 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       ~tool_name:"masc_status"
       ~input:(`Assoc [])
       ~output_text:"ok"
+      ~result_bytes:2
       ~success:true
       ~duration_ms:1.0
       ();
@@ -1210,6 +1213,7 @@ let test_dashboard_hourly_trend_numeric_ts () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
          ; ("success", `Bool true)
          ; ("duration_ms", `Float 2.0)
          ]);
@@ -1253,6 +1257,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
          ; ("success", `Bool true)
          ; ("duration_ms", `Float 2.0)
          ]);
@@ -1263,6 +1268,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "error: {\"ok\":false,\"error\":\"stale\"}")
+         ; ("result_bytes", `Int 35)
          ; ("success", `Bool false)
          ; ("duration_ms", `Float 5.0)
          ]);
@@ -1278,6 +1284,74 @@ let test_dashboard_aggregate_window_hours () =
     Alcotest.(check (option (float 0.0001))) "window echoed"
       (Some 24.0)
       (Safe_ops.json_float_opt "window_hours" summary))
+
+let test_dashboard_aggregate_drops_rows_without_result_bytes () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let now = Unix.gettimeofday () in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    (* No [result_bytes]: an inline output string must not stand in for it. *)
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "error: {\"ok\":false,\"error\":\"boom\"}")
+         ; ("success", `Bool false)
+         ; ("duration_ms", `Float 5.0)
+         ]);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "malformed row excluded from total" 1
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int) "malformed row excluded from failures" 0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    let masc_status =
+      find_bucket "masc_status" (Yojson.Safe.Util.member "by_tool" summary)
+    in
+    Alcotest.(check int) "malformed row excluded from per-tool calls" 1
+      (Safe_ops.json_int ~default:(-1) "calls" masc_status);
+    Alcotest.(check bool) "malformed row excluded from failure categories" true
+      Yojson.Safe.Util.(member "failure_categories" summary |> to_list |> List.is_empty))
+
+let test_dashboard_aggregate_only_malformed_rows_is_empty_summary () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "nothing aggregated" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
 
 let test_append_failure_records_coverage_gap () =
   with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root ->
@@ -1342,7 +1416,7 @@ let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
       ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"ok"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
       ~success:true ~duration_ms:2.0
       ~trace_id:"trace-recovered" ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
@@ -1681,6 +1755,10 @@ let () =
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"
             test_dashboard_aggregate_window_hours
+        ; eio_test "dashboard aggregate drops rows without result_bytes"
+            test_dashboard_aggregate_drops_rows_without_result_bytes
+        ; eio_test "dashboard aggregate with only malformed rows is empty"
+            test_dashboard_aggregate_only_malformed_rows_is_empty_summary
         ; eio_test "append failure records coverage gap"
             test_append_failure_records_coverage_gap
         ; eio_test "dashboard aggregate surfaces coverage gap"

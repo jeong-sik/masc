@@ -317,6 +317,37 @@ let test_checkpoint_save_load_preserves_exact_messages () =
         Alcotest.(check bool) "load preserves every source message" true
           (C.messages_of_context loaded_context = messages))
 
+(* --- persist_message: one timestamp key --- *)
+
+let test_persist_message_writes_single_ts_unix_key () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-history-ts-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session = C.create_session ~session_id:"history-ts" ~base_dir in
+      C.persist_message session (text_message "hello");
+      let path =
+        Filename.concat session.Masc.Keeper_types.session_dir "history.jsonl"
+      in
+      let line =
+        In_channel.with_open_bin path In_channel.input_all |> String.trim
+      in
+      match Yojson.Safe.from_string line with
+      | `Assoc fields ->
+          Alcotest.(check bool) "no timestamp key" false
+            (List.mem_assoc "timestamp" fields);
+          (match List.assoc_opt "ts_unix" fields with
+           | Some (`Float ts) ->
+               Alcotest.(check bool) "ts_unix is a positive epoch" true (ts > 0.0)
+           | other ->
+               Alcotest.failf "ts_unix must be a float, got %s"
+                 (match other with
+                  | Some json -> Yojson.Safe.to_string json
+                  | None -> "<missing>"))
+      | _ -> Alcotest.fail "history line is not an object")
+
 let test_checkpoint_write_accepts_exact_open_tool_cycle () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -452,6 +483,11 @@ let () =
             test_history_jsonl_text_uses_blocks_first;
           Alcotest.test_case "empty when neither" `Quick
             test_history_jsonl_text_empty_when_neither;
+        ] );
+      ( "persist_message",
+        [
+          Alcotest.test_case "writes ts_unix only" `Quick
+            test_persist_message_writes_single_ts_unix_key;
         ] );
       ( "checkpoint_projection",
         [

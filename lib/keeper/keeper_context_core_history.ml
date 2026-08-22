@@ -49,8 +49,7 @@ let persist_message ?source session msg =
                 ("source", `String source) :: fields
             | _ -> fields
           in
-          `Assoc
-            (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
+          `Assoc (("ts_unix", `Float now_ts) :: fields)
       | j -> j
     in
     let line = Yojson.Safe.to_string payload ^ "\n" in

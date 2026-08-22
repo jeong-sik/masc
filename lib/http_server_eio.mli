@@ -159,17 +159,6 @@ module Response : sig
     -> Httpun.Reqd.t
     -> unit
 
-  (** RFC 8594 deprecation headers ([Sunset], [Deprecation],
-      optional [Link] with [rel="successor-version"]).  [date]
-      MUST be HTTP-date format (RFC 7231 S7.1.1.1).  Pass via
-      [Response.json ~extra_headers:(sunset_headers ...) ...]. *)
-  val sunset_headers : date:string -> ?successor:string -> unit -> (string * string) list
-
-  (** Legacy JSON response without compression check (backwards
-      compatible — kept for callers that pre-date the
-      compression-aware {!json}). *)
-  val json_raw : ?status:Httpun.Status.t -> string -> Httpun.Reqd.t -> unit
-
   (** HTML response with ETag + conditional 304 support.  When
       the request If-None-Match header matches the quoted etag
       value, returns [`Not_modified] with no body; otherwise
@@ -238,8 +227,7 @@ module Request : sig
   val default_max_body_bytes : int
 
   (** Effective max body size, resolved at module-load time
-      from [MASC_MAX_BODY_BYTES] (preferred) or
-      [MCP_MAX_BODY_BYTES] (legacy), falling back to
+      from [MASC_MAX_BODY_BYTES], falling back to
       {!default_max_body_bytes}.  Restart required for env
       changes. *)
   val max_body_bytes : int

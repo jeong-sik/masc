@@ -178,7 +178,7 @@ let resolve_tool_call tool_index name input = name, input, find_in_index tool_in
 let schedule_tool_use ~tool_index index (id, name, input) =
   let execution_mode, completion =
     match find_in_index tool_index name with
-    | Some tool -> Tool.execution_mode tool, Tool.completion tool
+    | Some tool -> Tool.execution_mode tool ~input, Tool.completion tool
     | None -> Tool_contract.Serial, Tool_contract.Continue_after_success
   in
   { index; id; name; input; execution_mode; completion }

@@ -626,7 +626,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
           { planned_index = Atomic.fetch_and_add next_dynamic_invocation_index 1
           ; batch_index = 0
           ; batch_size = 1
-          ; execution_mode = Agent_core.Tool.execution_mode tool
+          ; execution_mode = Agent_core.Tool.execution_mode tool ~input
           }
         in
         let invocation =

@@ -189,7 +189,7 @@ let test_descriptor_some () =
      Alcotest.(check bool)
        "concurrent"
        true
-       (Tool.descriptor_execution_mode d = Tool_contract.Concurrent);
+       (Tool.descriptor_execution_mode d ~input:`Null = Tool_contract.Concurrent);
      Alcotest.(check bool)
        "ordinary completion"
        true

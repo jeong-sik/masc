@@ -48,6 +48,14 @@ type msg_entry = {
   me_request_id: string;
 }
 
+type msg_recovery_error = Recovery_blocked of string
+
+type msg_inflight_kind =
+  | Dispatch_claim
+  | Chat_post
+  | Operation_get
+  | Cleanup_delete
+
 (** Attention item for the Overview surface *)
 type attention_severity =
   | Attention_critical
@@ -262,8 +270,11 @@ type state = {
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
   mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
+  mutable msg_inflight_kind: msg_inflight_kind option;
+  mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
   mutable msg_unverified: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_recovery_error: string option;
+  mutable msg_cleanup_pending: Masc_tui_keeper_chat_projection.request option;
+  mutable msg_recovery_error: msg_recovery_error option;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -310,7 +321,10 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_drafts = [];
   msg_history = [];
   msg_inflight = None;
+  msg_inflight_kind = None;
+  msg_prepared = None;
   msg_unverified = None;
+  msg_cleanup_pending = None;
   msg_recovery_error = None;
   detail_scroll = 0;
   workspace;
@@ -331,7 +345,11 @@ let keeper_message_status_rows (state : state) =
     | Some _ | None -> 1
   in
   (if Option.is_some state.msg_inflight then 1 else 0)
+  + (if Option.is_none state.msg_inflight && Option.is_some state.msg_prepared
+     then 1
+     else 0)
   + (if Option.is_some state.msg_unverified then 1 else 0)
+  + (if Option.is_some state.msg_cleanup_pending then 1 else 0)
   + (if Option.is_some state.msg_recovery_error then 1 else 0)
   + unavailable_target
 

@@ -75,13 +75,18 @@ type stream_error =
   | Replayed_failed
   | Replayed_cancelled
 
+type protocol_error = {
+  stream_error : stream_error;
+  acceptance_observed : bool;
+}
+
 type error =
   | Transport_error of string
   | Http_error of {
       status : int;
       body : string;
     }
-  | Protocol_error of stream_error
+  | Protocol_error of protocol_error
 
 type error_certainty =
   | Verified_rejected
@@ -95,8 +100,12 @@ val same_request_identity : request -> request -> bool
 val compact_request_id : string -> string
 val terminal_safe_text : ?preserve_newlines:bool -> string -> string
 val decode_response : request:request -> string -> (response, stream_error) result
+val decode_response_with_provenance :
+  request:request -> string -> (response, protocol_error) result
 val decode_operation_reconciliation :
   request:request -> Yojson.Safe.t -> (operation_reconciliation, stream_error) result
 val stream_error_to_string : stream_error -> string
 val error_to_string : error -> string
+val protocol_error : ?acceptance_observed:bool -> stream_error -> error
+val error_acceptance_observed : error -> bool
 val error_certainty : ?was_unverified:bool -> error -> error_certainty

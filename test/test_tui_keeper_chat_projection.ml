@@ -82,6 +82,10 @@ let decode events =
   events |> List.map sse_event |> String.concat ""
   |> Chat.decode_response ~request
 
+let decode_with_provenance events =
+  events |> List.map sse_event |> String.concat ""
+  |> Chat.decode_response_with_provenance ~request
+
 let test_request_body_and_identity () =
   let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" in
   check bool "request id prefix" true
@@ -320,6 +324,55 @@ let test_finished_requires_text_end () =
   | Error error -> fail (Chat.stream_error_to_string error)
   | Ok _ -> fail "RUN_FINISHED without TEXT_MESSAGE_END was successful"
 
+let test_protocol_errors_preserve_acceptance_provenance () =
+  let unknown_custom =
+    event "CUSTOM"
+      [ "runId", `String run_id; "name", `String "KEEPER_OLD_ALIAS"
+      ; "value", `Null
+      ]
+  in
+  let accepted_cases =
+    [ "duplicate acceptance", [ acceptance (); acceptance () ]
+    ; ( "duplicate reply details"
+      , [ acceptance (); run_started; reply_details (); reply_details () ] )
+    ; "duplicate run start", [ acceptance (); run_started; run_started ]
+    ; "missing run start", [ acceptance (); text_start ]
+    ; ( "missing reply details"
+      , [ acceptance (); run_started; text_start; text_end; run_finished ] )
+    ; ( "missing text end"
+      , [ acceptance (); run_started; text_start; reply_details (); run_finished ] )
+    ; ( "unknown custom event"
+      , [ acceptance (); run_started; unknown_custom ] )
+    ]
+  in
+  List.iter
+    (fun (label, events) ->
+       match decode_with_provenance events with
+       | Error failure ->
+           check bool (label ^ " retains acceptance") true
+             failure.Chat.acceptance_observed;
+           check bool (label ^ " reaches accepted recovery") true
+             (Chat.error_acceptance_observed (Chat.Protocol_error failure))
+       | Ok _ -> fail (label ^ " unexpectedly succeeded"))
+    accepted_cases;
+  List.iter
+    (fun error ->
+       check bool "public helper infers intrinsic acceptance" true
+         (Chat.error_acceptance_observed (Chat.protocol_error error)))
+    [ Chat.Duplicate_acceptance
+    ; Chat.Duplicate_reply_details
+    ; Chat.Unknown_custom_event "unknown"
+    ; Chat.Duplicate_run_start
+    ; Chat.Missing_run_start "TEXT_MESSAGE_START"
+    ; Chat.Missing_reply_details
+    ; Chat.Missing_text_end
+    ];
+  match Chat.decode_response_with_provenance ~request "data: {bad\n\n" with
+  | Error failure ->
+      check bool "pre-accept malformed stream has no acceptance" false
+        failure.Chat.acceptance_observed
+  | Ok _ -> fail "malformed pre-accept stream unexpectedly succeeded"
+
 let test_terminal_text_sanitization () =
   let raw = "\027[31mred\027[0m\nnext\027]52;c;Y2xpcA==\007" in
   let safe = Chat.terminal_safe_text ~preserve_newlines:true raw in
@@ -341,38 +394,67 @@ let test_error_certainty () =
   check bool "transport is unverified" true
     (Chat.error_certainty (Chat.Transport_error "cut")
      = Chat.Outcome_unverified);
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "rejected" } in
+      check bool
+        (Printf.sprintf "HTTP %d before the handler is verified" status)
+        true
+        (Chat.error_certainty error = Chat.Verified_rejected))
+    [ 400; 401; 403; 404 ];
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "ambiguous" } in
+      check bool
+        (Printf.sprintf "HTTP %d may follow upstream dispatch" status)
+        true
+        (Chat.error_certainty error = Chat.Outcome_unverified))
+    [ 408; 409; 425; 429; 500; 502; 503; 504 ];
   let unauthorized : Chat.error =
     Chat.Http_error { status = 401; body = "unauthorized" }
   in
-  check bool "HTTP rejection before the handler is verified" true
-    (Chat.error_certainty unauthorized = Chat.Verified_rejected);
   check bool "uncertain reconnect keeps HTTP rejection unverified" true
     (Chat.error_certainty ~was_unverified:true unauthorized
      = Chat.Outcome_unverified);
   check bool "pre-accept rejection is verified" true
     (Chat.error_certainty
-       (Chat.Protocol_error
+       (Chat.protocol_error
           (Chat.Run_failed
              { accepted = false; message = "bad"; code = Some "invalid_input" }))
      = Chat.Verified_rejected);
+  check bool "ambiguous replay keeps invalid-input rejection unverified" true
+    (Chat.error_certainty ~was_unverified:true
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false; message = "bad"; code = Some "invalid_input" }))
+     = Chat.Outcome_unverified);
   check bool "store uncertainty is not a verified rejection" true
     (Chat.error_certainty
-       (Chat.Protocol_error
+       (Chat.protocol_error
           (Chat.Run_failed
              { accepted = false
              ; message = "store unavailable"
              ; code = Some "store_unavailable"
              }))
      = Chat.Outcome_unverified);
+  check bool "changed-source idempotency conflict keeps the fence" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "idempotency conflict"
+             ; code = Some "idempotency_conflict"
+             }))
+     = Chat.Outcome_unverified);
   check bool "uncertain retry keeps pre-accept rejection unverified" true
     (Chat.error_certainty ~was_unverified:true
-       (Chat.Protocol_error
+       (Chat.protocol_error
           (Chat.Run_failed
              { accepted = false; message = "store unavailable"; code = None }))
      = Chat.Outcome_unverified);
   check bool "post-accept failure is verified" true
     (Chat.error_certainty
-       (Chat.Protocol_error
+       (Chat.protocol_error
           (Chat.Run_failed
              { accepted = true; message = "failed"; code = None }))
      = Chat.Verified_failed)
@@ -536,6 +618,8 @@ let () =
             test_current_nonterminal_event_set
         ; test_case "finished requires text end" `Quick
             test_finished_requires_text_end
+        ; test_case "protocol errors preserve acceptance provenance" `Quick
+            test_protocol_errors_preserve_acceptance_provenance
         ; test_case "terminal text sanitization" `Quick
             test_terminal_text_sanitization
         ; test_case "request labels keep random suffix" `Quick

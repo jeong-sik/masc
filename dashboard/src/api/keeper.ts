@@ -21,7 +21,6 @@ import type {
   FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
 import type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
-import type { KeeperCatchupDigest } from './schemas/keeper-catchup-digest'
 import type {
   KeeperTransition,
   KeeperTransitionsResponse,
@@ -994,73 +993,6 @@ export async function fetchKeeperChatHistory(
     .filter((m): m is KeeperChatHistoryMessage => m !== null)
 }
 
-// Since-last-seen catch-up digest for one keeper. `sinceUnix` is the operator's
-// per-keeper last-seen cursor (unix seconds). The whole payload is decoded and
-// thrown on drift (unlike chat history's tolerant per-row drop) so a malformed
-// digest can never render a wrong count. Same raw-fetch + jsonHeaders()
-// convention as fetchKeeperChatHistory; the valibot schema is imported lazily
-// to keep it out of the initial bundle.
-export async function fetchKeeperCatchupDigest(
-  keeperName: string,
-  sinceUnix: number,
-): Promise<KeeperCatchupDigest> {
-  const resp = await fetch(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/digest?since_unix=${encodeURIComponent(String(sinceUnix))}`,
-    { headers: jsonHeaders() },
-  )
-  if (!resp.ok) {
-    throw new Error(`fetchKeeperCatchupDigest: HTTP ${resp.status} ${resp.statusText}`)
-  }
-  const data: unknown = await resp.json()
-  const { parseKeeperCatchupDigest } = await import('./schemas/keeper-catchup-digest')
-  const digest = parseKeeperCatchupDigest(data)
-  if (!digest) {
-    throw new Error('fetchKeeperCatchupDigest: invalid digest payload')
-  }
-  return digest
-}
-
-export interface KeeperCatchupJudgmentResponse {
-  ok: true
-  status: 'fusion_started'
-  runId: string
-  ownerKeeper: string
-  fusionRoute: string
-  digest: KeeperCatchupDigest
-}
-
-export async function runKeeperCatchupJudgment(
-  keeperName: string,
-  sinceUnix: number,
-): Promise<KeeperCatchupJudgmentResponse> {
-  const raw = await post<unknown>(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/catchup-judge`,
-    { since_unix: sinceUnix },
-  )
-  if (!isRecord(raw) || raw.ok !== true) {
-    throw new Error('runKeeperCatchupJudgment: invalid response envelope')
-  }
-  const runId = asString(raw.run_id)
-  const ownerKeeper = asString(raw.owner_keeper)
-  const fusionRoute = asString(raw.fusion_route)
-  if (!runId || !ownerKeeper || !fusionRoute) {
-    throw new Error('runKeeperCatchupJudgment: missing run metadata')
-  }
-  const { parseKeeperCatchupDigest } = await import('./schemas/keeper-catchup-digest')
-  const digest = parseKeeperCatchupDigest(raw.digest)
-  if (!digest) {
-    throw new Error('runKeeperCatchupJudgment: invalid digest payload')
-  }
-  return {
-    ok: true,
-    status: 'fusion_started',
-    runId,
-    ownerKeeper,
-    fusionRoute,
-    digest,
-  }
-}
-
 // --- Keeper observability API ---
 
 export interface KeeperStateDiagramResponse {
@@ -1235,9 +1167,7 @@ export async function fetchKeeperEval(name: string, limit = 10): Promise<KeeperE
   return resp.json() as Promise<KeeperEvalResponse>
 }
 
-/** Result of starting an operator-initiated deliberation. Mirrors the
-    catch-up judge envelope minus the digest (there is none: the prompt came
-    from the operator, not from a computed catch-up). */
+/** Result of starting an operator-initiated deliberation. */
 export interface KeeperFusionRunResponse {
   ok: true
   status: 'fusion_started'
@@ -1247,9 +1177,8 @@ export interface KeeperFusionRunResponse {
 }
 
 /** Start a deliberation owned by [keeperName]. This is the surface that makes
-    the judge-of-judges topologies reachable: `POST /catchup-judge` fixes both
-    the prompt and `topology = "simple"`, so before this endpoint the only way
-    to run them was a keeper deciding to call masc_fusion on its own.
+    the judge-of-judges topologies reachable from the dashboard; without it the
+    only way to run them was a keeper deciding to call masc_fusion on its own.
 
     `preset` / `topology` are omitted from the body when empty so the tool's own
     defaults apply — the client does not get a second opinion about what the

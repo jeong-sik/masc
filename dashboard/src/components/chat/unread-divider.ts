@@ -16,8 +16,8 @@ export function entryTimestampMs(entry: Pick<KeeperConversationEntry, 'timestamp
 // - null-ts items (placeholders/checkpoints) are skipped, never anchor.
 // - The first item newer than the cursor anchors the divider, but only if a read
 //   (<= cursor) item was seen first. If the very first non-null item is already
-//   unread, the read/unread boundary was trimmed by the 200-row cap: no divider
-//   (the digest card carries the true counts instead).
+//   unread, the read/unread boundary was trimmed by the 200-row cap: no divider,
+//   since a line at the very top would claim everything loaded is new.
 export function unreadDividerAnchorKey(
   items: readonly { key: string; tsMs: number | null }[],
   unreadAfterTs: number | null,

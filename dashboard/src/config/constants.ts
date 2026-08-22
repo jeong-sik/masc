@@ -84,13 +84,6 @@ export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
 export const STREAMING_THINKING_PREVIEW_CHARS = 6_000
 
-// --- Keeper catch-up digest ---
-// Minimum count of aggregate new activity (messages + turns + tasks + board +
-// lifecycle events + transport failures) required before the since-last-seen
-// digest card is rendered. Below this the card is noise; the transcript and the
-// unread divider still carry the detail. read_errors override this (fail-visible).
-export const KEEPER_DIGEST_MIN_ACTIVITY = 1
-
 // --- Buffer & cache sizes (Vite env overridable) ---
 // Defaults balance memory/render cost against available history. Users who
 // want deeper replay (e.g. Agent Core telemetry) can raise the ceiling at build

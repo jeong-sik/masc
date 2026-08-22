@@ -67,14 +67,6 @@
 .chip.k-noop { color: var(--fg-3); }
 .chip.k-error { color: var(--err); border-color: rgb(196 106 90 / .4); }
 
-.pre {
-  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
-  color: var(--fg-1); background: var(--bg-0);
-  border: 1px solid var(--line-1); border-radius: var(--r-1);
-  padding: 8px 10px; overflow: auto; max-height: 280px;
-  white-space: pre-wrap; word-break: break-word; margin: 4px 0 8px;
-}
-.pre.is-raw { max-height: 360px; }
 
 .tool-block {
   border: 1px solid var(--line-1);

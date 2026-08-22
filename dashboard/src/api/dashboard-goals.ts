@@ -276,7 +276,6 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     name,
     agent_name: agentName,
     current_task_id: asNullableString(raw.current_task_id),
-    active_goal_ids: asStringArray(raw.active_goal_ids),
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,
     runtime_id: runtimeName,

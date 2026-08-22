@@ -463,6 +463,37 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"load_selected_keeper_logs"
      >= 3);
+  check int "Board list success uses shared post replacement" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
+       ~callee:"replace_board_posts");
+  check int "Board detail success uses shared post replacement" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~callee:"replace_board_posts");
+  check int "Board post replacement reconciles selection once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"replace_board_posts"
+       ~callee:"Board_selection.reconcile_cursor");
+  check int "Board detail starts through the generation-aware projection" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"start_board_post_refresh"
+       ~callee:"Board_detail.start");
+  check int "Board detail success validates the response post identity" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~callee:"String.equal");
+  check int "Board detail completion remains valid away from the Board tab" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"board_detail_request_still_current" ~callees:[]
+       ~fields:[ "view" ]);
+  check int "Board renderer selects detail by post identity" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_board_read"
+       ~callee:"Board_detail.view_for");
   check bool "metadata refresh reconciles the selected log identity" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml"
@@ -960,8 +991,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     check int (binding ^ " exists exactly once") 1
       (Ast_grep.count_value_bindings ~module_path ~name:binding)
   in
-  let check_fields binding fields =
+  let check_fields ?(non_rendering_calls = []) binding fields =
     check_binding render_path binding;
+    let allowed_calls = sanitizer_calls @ non_rendering_calls in
     List.iter
       (fun field ->
         let total =
@@ -974,7 +1006,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         let outside =
           Ast_grep.count_field_accesses_outside_calls_in_value_binding
             ~module_path:render_path ~binding_name:binding
-            ~callees:sanitizer_calls ~fields:[ field ]
+            ~callees:allowed_calls ~fields:[ field ]
         in
         if outside <> 0 then
           failf
@@ -1031,8 +1063,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_created_at"
     ];
   check_fields "render_board_list"
-    [ "board_error"; "bp_id"; "bp_author"; "bp_title" ];
-  check_fields "render_board_read"
+    [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
+  check_fields ~non_rendering_calls:[ "Board_detail.view_for" ]
+    "render_board_read"
     [ "bp_id"
     ; "bp_author"
     ; "bp_title"

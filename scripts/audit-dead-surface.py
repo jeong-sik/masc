@@ -561,7 +561,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # (measured 2026-08-20: 539). The one count of slack predates this change;
 # goal_verification's exports all have callers (dashboard joins + tests), so
 # the ledger added none.
-DEAD_EXPORT_BASELINE = 536
+# 536 -> 532: tightened to the measured count on the compaction-snapshot
+# purge tree (#29454, measured 2026-08-22: 532). The purge removed
+# compaction_snapshots_json / cached_compaction_snapshots_json,
+# classify_compaction_snapshot_event, status_is_skipped and the
+# manifest_file_suffix export; every one still had a caller before the purge,
+# so the count did not move. The four counts of slack predate this change.
+DEAD_EXPORT_BASELINE = 532
 
 
 def run_ratchet(count: int) -> int:

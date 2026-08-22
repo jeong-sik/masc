@@ -32,39 +32,46 @@
       which does not exist).  Absolute-path enforcement happens in
       {!validate}.  PR-3 may revisit when a path SSOT module lands. *)
 
-type exec_stage = { argv : string list }
-
 type redirect_target =
   | Inherit
       (** default; child inherits the parent's file descriptor *)
   | Discard
       (** discard output / read empty input — equivalent to [/dev/null] *)
-  | File of string
-      (** absolute filesystem path.  stdout/stderr open for writing,
-          stdin opens for reading. *)
+  | File of {
+      path : string;
+      append : bool;
+    }
+      (** absolute filesystem path. [append] opens for appending instead of
+          truncating; stdin ignores it and always opens for reading. *)
+  | Fd of int
+      (** duplicate another standard descriptor of the same stage, which is
+          how [2>&1] is expressed without a shell. *)
 
-type execute_input =
-  | Exec of {
-      argv : string list;
-      cwd : string option;
-      env : (string * string) list;
-      timeout_sec : float option;
-      stdin : redirect_target;
-      stdout : redirect_target;
-      stderr : redirect_target;
-    }
-      (** [stdin], [stdout], [stderr] default to {!Inherit} when absent
-          from JSON. They express redirection in the typed schema rather
-          than as shell syntax inside an execve-style argv. *)
-  | Pipeline of {
-      stages : exec_stage list;
-      cwd : string option;
-      env : (string * string) list;
-      timeout_sec : float option;
-    }
-      (** Per-stage redirects are intentionally not exposed here — pipe
-          construction owns the inter-stage fd plumbing.  Out-of-stage
-          redirects on the pipeline's endpoints are a deferred extension. *)
+type exec_stage = {
+  argv : string list;
+  stdin : redirect_target;
+  stdout : redirect_target;
+  stderr : redirect_target;
+}
+(** One process and where its three standard streams attach. Every stage owns
+    its own redirections, including stages inside a pipeline. *)
+
+type program = {
+  head : exec_stage;
+  tail : exec_stage list;
+}
+(** One or more stages joined by pipes. The head/tail split makes the empty
+    program unrepresentable, so emptiness is not something {!validate} has to
+    check, and a single process is a program whose tail is empty. *)
+
+type execute_input = {
+  program : program;
+  cwd : string option;
+  env : (string * string) list;
+  timeout_sec : float option;
+}
+(** [cwd] and [env] apply to every stage. [timeout_sec] is an explicit
+    optional execution boundary; absence means unbounded execution. *)
 
 type validation_error =
   | Empty_argv
@@ -81,20 +88,25 @@ type validation_error =
           relative paths are rejected to
           mirror {!Cwd_not_absolute} semantics. *)
   | Cwd_not_absolute of string
-  | Pipeline_empty
-  | Pipeline_too_short
+  | Redirect_fd_unknown of {
+      fd : int;
+      target : int;
+    }
+      (** A {!Fd} redirect may only duplicate a descriptor the stage owns:
+          0, 1 or 2. *)
   | Env_key_invalid of string
 
 val of_json : Yojson.Safe.t -> (execute_input, string) result
-(** Parse the typed Execute JSON boundary.  Accepts either
-    [{argv = [program; arg...], cwd?, env?, timeout_sec?}] for [Exec] or
-    [{pipeline = [{argv = [program; arg...]}, ...], cwd?, env?}] for [Pipeline].
-    [timeout_sec] is preserved as an explicit optional execution boundary;
-    absence means unbounded execution.
-    [argv] and [pipeline] together, raw command-string fields, [{stages =
-    ...}], and other unsupported fields are intentionally rejected here.  No
-    compatibility normalization is applied at parse time.  The removed
-    [executable] field is rejected as an unsupported field. *)
+(** Parse the typed Execute JSON boundary into a {!program}.
+
+    [{argv, stdin?, stdout?, stderr?}] at the top level is a one-stage
+    program; [{pipeline = [stage, ...]}] is an n-stage one. A stage carries
+    its own redirections in both forms, so piping and redirecting are not
+    alternatives.
+
+    [argv] and [pipeline] together, raw command-string fields and other
+    unsupported fields are rejected here. No compatibility normalization is
+    applied at parse time. *)
 
 val validate : execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on

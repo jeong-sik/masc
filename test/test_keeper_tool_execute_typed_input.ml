@@ -12,16 +12,20 @@ let typed_ok input =
   | Error _ -> false
 ;;
 
-let mk_exec executable argv =
-  Execute_input.Exec
-    { argv = executable :: argv
-    ; cwd = None
-    ; env = []
-    ; timeout_sec = None
-    ; stdin = Execute_input.Inherit
-    ; stdout = Execute_input.Inherit
-    ; stderr = Execute_input.Inherit
-    }
+let mk_stage ?(stdin = Execute_input.Inherit) ?(stdout = Execute_input.Inherit)
+      ?(stderr = Execute_input.Inherit) argv
+  : Execute_input.exec_stage
+  =
+  { argv; stdin; stdout; stderr }
+;;
+
+let mk_program ?cwd ?(env = []) ?timeout_sec head tail
+  : Execute_input.execute_input
+  =
+  { program = { head; tail }; cwd; env; timeout_sec }
+;;
+
+let mk_exec executable argv = mk_program (mk_stage (executable :: argv)) []
 ;;
 
 let parse_json_exn json =
@@ -153,43 +157,11 @@ let test_case case () =
     typed
 ;;
 
-let test_pipeline_empty () =
-  let input =
-    Execute_input.Pipeline
-      { stages = []; cwd = None; env = []; timeout_sec = None }
-  in
-  Alcotest.(check bool)
-    "pipeline with empty stages is rejected"
-    false
-    (typed_ok input)
-;;
 
-let test_pipeline_single_stage_rejected () =
-  let input =
-    Execute_input.Pipeline
-      { stages = [ { argv = [ "rg"; "pattern" ] } ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      }
-  in
-  Alcotest.(check bool)
-    "pipeline with one stage is rejected"
-    false
-    (typed_ok input)
-;;
 
 let test_pipeline_stage_program_check () =
   let input =
-    Execute_input.Pipeline
-      { stages =
-          [ { argv = [ "rg"; "pattern" ] }
-          ; { argv = [ "unknown_cmd" ] }
-          ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      }
+    mk_program (mk_stage ([ "rg"; "pattern" ])) [ mk_stage ([ "unknown_cmd" ]) ]
   in
   Alcotest.(check bool)
     "pipeline: structural validation does not reject unknown executables"
@@ -258,11 +230,12 @@ let test_of_json_exec () =
           ])
   in
   match input with
-  | Execute_input.Exec { argv; cwd; env; _ } ->
+  | { Execute_input.program = { head = { argv; _ }; tail = [] }; cwd; env; _ } ->
     Alcotest.(check (list string)) "argv" [ "rg"; "pattern"; "lib/" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
-  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+    Alcotest.fail "expected a single-stage program"
 ;;
 
 let test_of_json_timeout_is_optional_and_preserved () =
@@ -276,8 +249,7 @@ let test_of_json_timeout_is_optional_and_preserved () =
         ])
   in
   let timeout = function
-    | Execute_input.Exec { timeout_sec; _ }
-    | Execute_input.Pipeline { timeout_sec; _ } ->
+    | { Execute_input.timeout_sec; _ } ->
       timeout_sec
   in
   Alcotest.(check (option (float 0.0)))
@@ -318,12 +290,13 @@ let test_of_json_accepts_single_argv_ssot () =
           ])
   in
   match input with
-  | Execute_input.Exec { argv; _ } ->
+  | { Execute_input.program = { head = { argv; _ }; tail = [] }; _ } ->
     Alcotest.(check (list string))
       "one argv owns program and arguments"
       [ "git"; "status"; "--short" ]
       argv
-  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+    Alcotest.fail "expected a single-stage program"
 ;;
 
 let test_of_json_rejects_retired_executable_field () =
@@ -350,12 +323,13 @@ let test_of_json_preserves_repeated_argument () =
           ])
   in
   match input with
-  | Execute_input.Exec { argv; _ } ->
+  | { Execute_input.program = { head = { argv; _ }; tail = [] }; _ } ->
     Alcotest.(check (list string))
       "argv remains caller-authored"
       [ "cat"; "cat"; "repos/masc/README.md" ]
       argv
-  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+    Alcotest.fail "expected a single-stage program"
 ;;
 
 let test_of_json_keeps_empty_argv_for_typed_validation () =
@@ -393,14 +367,15 @@ let test_of_json_keeps_empty_exec_for_validation () =
           ])
   in
   match input with
-  | Execute_input.Exec { argv; cwd; env; _ } ->
+  | { Execute_input.program = { head = { argv; _ }; tail = [] }; cwd; env; _ } ->
     Alcotest.(check (list string))
       "argv0 command remains caller-authored"
       [ ""; "gh"; "pr"; "list" ]
       argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env
-  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+    Alcotest.fail "expected a single-stage program"
 ;;
 
 let test_of_json_pipeline () =
@@ -418,7 +393,8 @@ let test_of_json_pipeline () =
           ])
   in
   match input with
-  | Execute_input.Pipeline { stages; cwd; env; timeout_sec = _ } ->
+  | { Execute_input.program = { head; tail }; cwd; env; timeout_sec = _ } ->
+    let stages = head :: tail in
     Alcotest.(check int) "stage count" 2 (List.length stages);
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
@@ -427,7 +403,8 @@ let test_of_json_pipeline () =
        Alcotest.(check (list string)) "first argv" [ "printf"; "hello" ] first.argv;
        Alcotest.(check (list string)) "second argv" [ "wc"; "-c" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
+  | { Execute_input.program = { tail = []; _ }; _ } ->
+    Alcotest.fail "expected a multi-stage program"
 ;;
 
 let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
@@ -446,7 +423,8 @@ let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
           ])
   in
   match input with
-  | Execute_input.Pipeline { stages; _ } ->
+  | { Execute_input.program = { head; tail }; _ } ->
+    let stages = head :: tail in
     (match stages with
      | [ first; second ] ->
        Alcotest.(check (list string))
@@ -458,7 +436,8 @@ let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
          [ "wc"; "wc"; "-c" ]
          second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
+  | { Execute_input.program = { tail = []; _ }; _ } ->
+    Alcotest.fail "expected a multi-stage program"
 ;;
 
 let test_of_json_keeps_empty_pipeline_stage_for_validation () =
@@ -479,7 +458,8 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
           ])
   in
   match input with
-  | Execute_input.Pipeline { stages; cwd; env; timeout_sec = _ } ->
+  | { Execute_input.program = { head; tail }; cwd; env; timeout_sec = _ } ->
+    let stages = head :: tail in
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
     (match stages with
@@ -490,7 +470,8 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
          first.argv;
        Alcotest.(check (list string)) "second argv" [ "head"; "-20" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
+  | { Execute_input.program = { tail = []; _ }; _ } ->
+    Alcotest.fail "expected a multi-stage program"
 ;;
 
 let test_of_json_rejects_cmd_string_only () =
@@ -619,15 +600,7 @@ let test_repeated_first_argument_preserved () =
 
 let test_pipeline_lowers_to_shell_ir_pipeline () =
   let input =
-    Execute_input.Pipeline
-      { stages =
-          [ { argv = [ "echo"; "hello world" ] }
-          ; { argv = [ "tr"; "a-z"; "A-Z" ] }
-          ]
-      ; cwd = Some "/tmp"
-      ; env = [ "LC_ALL", "C" ]
-      ; timeout_sec = None
-      }
+    mk_program ?cwd:(Some "/tmp") ~env:([ "LC_ALL", "C" ]) (mk_stage ([ "echo"; "hello world" ])) [ mk_stage ([ "tr"; "a-z"; "A-Z" ]) ]
   in
   match to_shell_ir_exn input with
   | Masc_exec.Shell_ir.Pipeline
@@ -654,15 +627,7 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
 
 let test_exec_lowering_preserves_repeated_argument () =
   let input =
-    Execute_input.Exec
-      { argv = [ "git"; "git"; "status" ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      ; stdin = Execute_input.Inherit
-      ; stdout = Execute_input.Inherit
-      ; stderr = Execute_input.Inherit
-      }
+    mk_program (mk_stage ([ "git"; "git"; "status" ])) []
   in
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
@@ -681,15 +646,7 @@ let test_exec_lowering_preserves_repeated_argument () =
 
 let test_exec_lowering_preserves_argument_equal_to_program () =
   let input =
-    Execute_input.Exec
-      { argv = [ "echo"; "echo" ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      ; stdin = Execute_input.Inherit
-      ; stdout = Execute_input.Inherit
-      ; stderr = Execute_input.Inherit
-      }
+    mk_program (mk_stage ([ "echo"; "echo" ])) []
   in
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
@@ -708,15 +665,7 @@ let test_exec_lowering_preserves_argument_equal_to_program () =
 
 let test_pipeline_lowering_preserves_argument_equal_to_program () =
   let input =
-    Execute_input.Pipeline
-      { stages =
-          [ { argv = [ "echo"; "echo" ] }
-          ; { argv = [ "wc"; "-c" ] }
-          ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      }
+    mk_program (mk_stage ([ "echo"; "echo" ])) [ mk_stage ([ "wc"; "-c" ]) ]
   in
   match Execute_input.to_shell_ir input with
   | Ok
@@ -741,15 +690,7 @@ let test_pipeline_lowering_preserves_argument_equal_to_program () =
 
 let test_pipeline_lowering_preserves_duplicate_stage_argv () =
   let input =
-    Execute_input.Pipeline
-      { stages =
-          [ { argv = [ "printf"; "printf"; "hello" ] }
-          ; { argv = [ "wc"; "wc"; "-c" ] }
-          ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      }
+    mk_program (mk_stage ([ "printf"; "printf"; "hello" ])) [ mk_stage ([ "wc"; "wc"; "-c" ]) ]
   in
   match Execute_input.to_shell_ir input with
   | Ok
@@ -788,15 +729,7 @@ let check_docker_sandbox label simple =
 
 let test_pipeline_lowers_with_injected_docker_sandbox () =
   let input =
-    Execute_input.Pipeline
-      { stages =
-          [ { argv = [ "echo"; "hello" ] }
-          ; { argv = [ "wc"; "-c" ] }
-          ]
-      ; cwd = Some "/tmp"
-      ; env = []
-      ; timeout_sec = None
-      }
+    mk_program ?cwd:(Some "/tmp") (mk_stage ([ "echo"; "hello" ])) [ mk_stage ([ "wc"; "-c" ]) ]
   in
   match
     Execute_input.to_shell_ir
@@ -819,15 +752,7 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
 
 let test_pipe_character_in_exec_argv_is_literal () =
   let input =
-    Execute_input.Exec
-      { argv = [ "echo"; "foo|bar" ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      ; stdin = Execute_input.Inherit
-      ; stdout = Execute_input.Inherit
-      ; stderr = Execute_input.Inherit
-      }
+    mk_program (mk_stage ([ "echo"; "foo|bar" ])) []
   in
   match to_shell_ir_exn input with
   | Masc_exec.Shell_ir.Simple simple ->
@@ -842,15 +767,7 @@ let test_pipe_character_in_exec_argv_is_literal () =
 let test_standalone_pipe_operator_in_exec_argv_is_literal () =
   let check_case ~name argv =
     let input =
-      Execute_input.Exec
-        { argv = "tail" :: argv
-        ; cwd = None
-        ; env = []
-        ; timeout_sec = None
-        ; stdin = Execute_input.Inherit
-        ; stdout = Execute_input.Inherit
-        ; stderr = Execute_input.Inherit
-        }
+      mk_program (mk_stage ("tail" :: argv)) []
     in
     match Execute_input.to_shell_ir input with
     | Ok (Masc_exec.Shell_ir.Simple simple) ->
@@ -883,15 +800,7 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
      No behavioral change. Single commit."
   in
   let input =
-    Execute_input.Exec
-      { argv = [ "gh"; "pr"; "create"; "--body"; body ]
-      ; cwd = None
-      ; env = []
-      ; timeout_sec = None
-      ; stdin = Execute_input.Inherit
-      ; stdout = Execute_input.Inherit
-      ; stderr = Execute_input.Inherit
-      }
+    mk_program (mk_stage ([ "gh"; "pr"; "create"; "--body"; body ])) []
   in
   match to_shell_ir_exn input with
   | Masc_exec.Shell_ir.Simple simple ->
@@ -912,15 +821,7 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
 
 let test_cwd_not_absolute () =
   let input =
-    Execute_input.Exec
-      { argv = [ "ls" ]
-      ; cwd = Some "relative/path"
-      ; env = []
-      ; timeout_sec = None
-      ; stdin = Execute_input.Inherit
-      ; stdout = Execute_input.Inherit
-      ; stderr = Execute_input.Inherit
-      }
+    mk_program ?cwd:(Some "relative/path") (mk_stage ([ "ls" ])) []
   in
   Alcotest.(check bool)
     "Cwd_not_absolute: relative cwd rejected"
@@ -930,15 +831,7 @@ let test_cwd_not_absolute () =
 
 let test_env_key_invalid () =
   let input =
-    Execute_input.Exec
-      { argv = [ "ls" ]
-      ; cwd = None
-      ; env = [ "FOO BAR", "value" ]
-      ; timeout_sec = None
-      ; stdin = Execute_input.Inherit
-      ; stdout = Execute_input.Inherit
-      ; stderr = Execute_input.Inherit
-      }
+    mk_program ~env:([ "FOO BAR", "value" ]) (mk_stage ([ "ls" ])) []
   in
   Alcotest.(check bool)
     "Env_key_invalid: env key with space rejected"
@@ -950,15 +843,7 @@ let test_shell_redirection_looking_tokens_are_literal () =
   List.iter
     (fun (token, argv) ->
       let input =
-        Execute_input.Exec
-          { argv = "find" :: argv
-          ; cwd = None
-          ; env = []
-          ; timeout_sec = None
-          ; stdin = Execute_input.Inherit
-          ; stdout = Execute_input.Inherit
-          ; stderr = Execute_input.Inherit
-          }
+        mk_program (mk_stage ("find" :: argv)) []
       in
       match Execute_input.to_shell_ir input with
       | Ok (Masc_exec.Shell_ir.Simple simple) ->
@@ -995,15 +880,7 @@ let test_legitimate_metachar_still_allowed () =
   List.iter
     (fun (rationale, argv) ->
       let input =
-        Execute_input.Exec
-          { argv = "find" :: argv
-          ; cwd = None
-          ; env = []
-          ; timeout_sec = None
-          ; stdin = Execute_input.Inherit
-          ; stdout = Execute_input.Inherit
-          ; stderr = Execute_input.Inherit
-          }
+        mk_program (mk_stage ("find" :: argv)) []
       in
       match Execute_input.validate  input with
       | Ok () -> ()
@@ -1041,15 +918,125 @@ let mk_exec_with_redirects
       ?(stderr = Execute_input.Inherit)
       ()
   =
-  Execute_input.Exec
-    { argv = executable :: argv; cwd; env; timeout_sec; stdin; stdout; stderr }
+  mk_program
+    ?cwd
+    ~env
+    ?timeout_sec
+    (mk_stage ~stdin ~stdout ~stderr (executable :: argv))
+    []
+;;
+
+(* The four shapes the IR carries must all be reachable from a Keeper call,
+   and a stage must keep its redirections inside a pipeline. Before the
+   program type these were two separate forms and the parser rejected the
+   combination outright. *)
+let stage_redirects ir n =
+  match ir with
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    (match List.nth_opt stages n with
+     | Some (Masc_exec.Shell_ir.Simple simple) -> simple.redirects
+     | Some (Masc_exec.Shell_ir.Pipeline _) ->
+       Alcotest.fail "a pipeline stage must lower to Simple"
+     | None -> Alcotest.failf "pipeline has no stage %d" n)
+  | Masc_exec.Shell_ir.Simple _ -> Alcotest.fail "expected a pipeline"
+;;
+
+let test_pipeline_stage_keeps_its_own_redirect () =
+  let input =
+    mk_program
+      (mk_stage [ "rg"; "pattern" ])
+      [ mk_stage
+          ~stdout:(Execute_input.File { path = "/tmp/out.log"; append = false })
+          [ "head"; "-20" ]
+      ]
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok ir ->
+    Alcotest.(check int) "first stage has no redirect" 0 (List.length (stage_redirects ir 0));
+    (match stage_redirects ir 1 with
+     | [ Masc_exec.Redirect_scope.File { fd; mode = Masc_exec.Redirect_scope.Write; _ } ]
+       ->
+       Alcotest.(check int) "second stage redirects fd 1" 1 fd
+     | other ->
+       Alcotest.failf "expected one write redirect on the tail stage, got %d" (List.length other))
+  | Error e ->
+    Alcotest.failf
+      "piping and redirecting in one call must lower: %a"
+      Execute_input.pp_validation_error
+      e
+;;
+
+let test_append_reaches_the_ir () =
+  let input =
+    mk_program
+      (mk_stage
+         ~stdout:(Execute_input.File { path = "/tmp/run.log"; append = true })
+         [ "echo"; "line" ])
+      []
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    (match simple.redirects with
+     | [ Masc_exec.Redirect_scope.File { mode = Masc_exec.Redirect_scope.Append; _ } ] ->
+       ()
+     | _ -> Alcotest.fail "expected a single Append redirect")
+  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+    Alcotest.fail "a one-stage program must not lower to Pipeline"
+  | Error e ->
+    Alcotest.failf "append must lower: %a" Execute_input.pp_validation_error e
+;;
+
+let test_fd_duplication_reaches_the_ir () =
+  let input = mk_program (mk_stage ~stderr:(Execute_input.Fd 1) [ "make" ]) [] in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    (match simple.redirects with
+     | [ Masc_exec.Redirect_scope.Fd_to_fd { src; dst } ] ->
+       Alcotest.(check (pair int int)) "2>&1" (2, 1) (src, dst)
+     | _ -> Alcotest.fail "expected a single Fd_to_fd redirect")
+  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+    Alcotest.fail "a one-stage program must not lower to Pipeline"
+  | Error e ->
+    Alcotest.failf "fd duplication must lower: %a" Execute_input.pp_validation_error e
+;;
+
+let test_fd_outside_the_stage_is_rejected () =
+  let input = mk_program (mk_stage ~stderr:(Execute_input.Fd 7) [ "make" ]) [] in
+  Alcotest.(check bool)
+    "a stage may only duplicate 0, 1 or 2"
+    false
+    (typed_ok input)
+;;
+
+let test_json_pipeline_with_stage_redirect_parses () =
+  let json =
+    `Assoc
+      [ ( "pipeline"
+        , `List
+            [ `Assoc [ "argv", `List [ `String "rg"; `String "pattern" ] ]
+            ; `Assoc
+                [ "argv", `List [ `String "head"; `String "-20" ]
+                ; ( "stdout"
+                  , `Assoc [ "file", `String "/tmp/out.log"; "append", `Bool true ] )
+                ]
+            ] )
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok { program = { head = _; tail = [ tail_stage ] }; _ } ->
+    (match tail_stage.stdout with
+     | Execute_input.File { path; append = true } ->
+       Alcotest.(check string) "append target" "/tmp/out.log" path
+     | _ -> Alcotest.fail "expected an appending file redirect on the tail stage")
+  | Ok _ -> Alcotest.fail "expected a two-stage program"
+  | Error msg -> Alcotest.failf "pipeline with a stage redirect must parse: %s" msg
 ;;
 
 let count_redirects ir =
   match ir with
   | Masc_exec.Shell_ir.Simple simple -> List.length simple.redirects
   | Masc_exec.Shell_ir.Pipeline _ ->
-    Alcotest.fail "single Exec must not lower to Pipeline"
+    Alcotest.fail "a one-stage program must not lower to Pipeline"
 ;;
 
 let redirect_at ir n =
@@ -1167,7 +1154,7 @@ let test_of_json_parses_discard_stderr_shorthand () =
   in
   let input = parse_json_exn json in
   match input with
-  | Execute_input.Exec { stderr = Execute_input.Discard; _ } -> ()
+  | { Execute_input.program = { head = { stderr = Execute_input.Discard; _ }; _ }; _ } -> ()
   | _ -> Alcotest.fail "of_json must produce stderr=Discard"
 ;;
 
@@ -1191,11 +1178,23 @@ let suite =
     List.map
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
     cases
-    @ [ Alcotest.test_case "pipeline_empty" `Quick test_pipeline_empty
-      ; Alcotest.test_case
-          "pipeline_single_stage_rejected"
+    @ [ Alcotest.test_case
+          "pipeline_stage_keeps_its_own_redirect"
           `Quick
-          test_pipeline_single_stage_rejected
+          test_pipeline_stage_keeps_its_own_redirect
+      ; Alcotest.test_case "append_reaches_the_ir" `Quick test_append_reaches_the_ir
+      ; Alcotest.test_case
+          "fd_duplication_reaches_the_ir"
+          `Quick
+          test_fd_duplication_reaches_the_ir
+      ; Alcotest.test_case
+          "fd_outside_the_stage_is_rejected"
+          `Quick
+          test_fd_outside_the_stage_is_rejected
+      ; Alcotest.test_case
+          "json_pipeline_with_stage_redirect_parses"
+          `Quick
+          test_json_pipeline_with_stage_redirect_parses
       ; Alcotest.test_case
           "pipeline_stage_program_check"
           `Quick

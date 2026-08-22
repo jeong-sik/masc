@@ -1,26 +1,39 @@
-type exec_stage = { argv : string list }
-
+(* Where one standard stream of a stage is attached. [Fd] duplicates another
+   descriptor of the same stage, which is how [2>&1] is expressed without a
+   shell. The IR carries all four shapes; every one of them is reachable from
+   this type. *)
 type redirect_target =
   | Inherit
   | Discard
-  | File of string
+  | File of {
+      path : string;
+      append : bool;
+    }
+  | Fd of int
 
-type execute_input =
-  | Exec of {
-      argv : string list;
-      cwd : string option;
-      env : (string * string) list;
-      timeout_sec : float option;
-      stdin : redirect_target;
-      stdout : redirect_target;
-      stderr : redirect_target;
-    }
-  | Pipeline of {
-      stages : exec_stage list;
-      cwd : string option;
-      env : (string * string) list;
-      timeout_sec : float option;
-    }
+type exec_stage = {
+  argv : string list;
+  stdin : redirect_target;
+  stdout : redirect_target;
+  stderr : redirect_target;
+}
+
+(* A command is one or more stages, each owning its own redirections. The
+   head/tail split makes the empty program unrepresentable, so there is no
+   emptiness to validate; a single process is simply a program whose tail is
+   empty, which is why redirections and multi-stage piping are no longer
+   alternatives the caller has to choose between. *)
+type program = {
+  head : exec_stage;
+  tail : exec_stage list;
+}
+
+type execute_input = {
+  program : program;
+  cwd : string option;
+  env : (string * string) list;
+  timeout_sec : float option;
+}
 
 type validation_error =
   | Empty_argv
@@ -34,8 +47,10 @@ type validation_error =
       path : string;
     }
   | Cwd_not_absolute of string
-  | Pipeline_empty
-  | Pipeline_too_short
+  | Redirect_fd_unknown of {
+      fd : int;
+      target : int;
+    }
   | Env_key_invalid of string
 
 let json_type_name (json : Yojson.Safe.t) =
@@ -82,6 +97,14 @@ let optional_string ~path fields key =
       path
       key
       (json_type_name value)
+;;
+
+let optional_bool ~path fields key =
+  match List.assoc_opt key fields with
+  | None | Some `Null -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some value ->
+    result_errorf "%s.%s must be boolean, got %s" path key (json_type_name value)
 ;;
 
 let optional_positive_float ~path fields key =
@@ -162,22 +185,39 @@ let optional_env ~path fields =
    Anything else is rejected at JSON boundary so absolute-path and
    value-range validation can stay outside [validate]. *)
 let optional_redirect_target ~path fields key =
+  let ( let* ) = Result.bind in
   match member fields key with
   | None | Some `Null -> Ok Inherit
   | Some (`Assoc props) ->
     (match List.assoc_opt "discard" props, List.assoc_opt "file" props with
      | Some (`Bool true), None -> Ok Discard
      | Some (`Bool false), None -> Ok Inherit
-     | None, Some (`String path_value) -> Ok (File path_value)
+     | None, Some (`String path_value) ->
+       let* append = optional_bool ~path:(path ^ "." ^ key) props "append" in
+       Ok (File { path = path_value; append = Option.value append ~default:false })
      | Some _, Some _ ->
        result_errorf
-         "%s.%s must specify exactly one of {discard:true} or \
-          {file:\"/abs/path\"}; received both"
+         "%s.%s must specify exactly one of {discard:true}, {file:\"/abs/path\"} \
+          or {fd:N}; received more than one"
          path
          key
+     | None, None ->
+       (match List.assoc_opt "fd" props with
+        | Some (`Int target) -> Ok (Fd target)
+        | Some value ->
+          result_errorf
+            "%s.%s.fd must be integer, got %s"
+            path
+            key
+            (json_type_name value)
+        | None ->
+          result_errorf
+            "%s.%s must be {discard:true}, {file:\"/abs/path\"} or {fd:N}"
+            path
+            key)
      | _ ->
        result_errorf
-         "%s.%s must be {discard:true} or {file:\"/abs/path\"}"
+         "%s.%s must be {discard:true}, {file:\"/abs/path\"} or {fd:N}"
          path
          key)
   | Some value ->
@@ -188,13 +228,23 @@ let optional_redirect_target ~path fields key =
       (json_type_name value)
 ;;
 
+let stage_of_fields ~path fields =
+  let ( let* ) = Result.bind in
+  let* argv = required_string_list ~path fields "argv" in
+  let* stdin = optional_redirect_target ~path fields "stdin" in
+  let* stdout = optional_redirect_target ~path fields "stdout" in
+  let* stderr = optional_redirect_target ~path fields "stderr" in
+  Ok { argv; stdin; stdout; stderr }
+;;
+
+let stage_fields = [ "argv"; "stdin"; "stdout"; "stderr" ]
+
 let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let path = Printf.sprintf "%s[%d]" path_prefix index in
   let* fields = assoc_fields ~path value in
-  let* () = reject_unknown_fields ~path ~allowed:[ "argv" ] fields in
-  let* argv = required_string_list ~path fields "argv" in
-  Ok { argv }
+  let* () = reject_unknown_fields ~path ~allowed:stage_fields fields in
+  stage_of_fields ~path fields
 ;;
 
 let parse_pipeline ~path (json : Yojson.Safe.t) =
@@ -256,32 +306,13 @@ let of_json (json : Yojson.Safe.t) =
        pipeline. To pipe through a process, put it in pipeline; do not \
        combine."
   | true, None ->
-    let* argv = required_string_list ~path:"$" fields "argv" in
-    let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
-    let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
-    let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
-    Ok (Exec { argv; cwd; env; timeout_sec; stdin; stdout; stderr })
+    let* head = stage_of_fields ~path:"$" fields in
+    Ok { program = { head; tail = [] }; cwd; env; timeout_sec }
   | false, Some (path, value) ->
-    (* Redirect fields belong only to [Exec]. Reject them with [Pipeline]
-       so no caller-provided redirect is discarded. *)
-    let redirect_present key =
-      match member fields key with
-      | None | Some `Null -> false
-      | Some _ -> true
-    in
-    if
-      redirect_present "stdin"
-      || redirect_present "stdout"
-      || redirect_present "stderr"
-    then
-      Error
-        "$.stdin / $.stdout / $.stderr are not supported with $.pipeline; typed \
-         redirects apply only to the single-process {argv} form. \
-         Put the redirecting command in its own pipeline stage, or use the \
-         {argv} form with the typed redirect fields."
-    else
-      let* stages = parse_pipeline ~path value in
-      Ok (Pipeline { stages; cwd; env; timeout_sec })
+    let* stages = parse_pipeline ~path value in
+    (match stages with
+     | [] -> result_errorf "%s must contain at least one stage" path
+     | head :: tail -> Ok { program = { head; tail }; cwd; env; timeout_sec })
   | false, None -> Error "$.argv or $.pipeline is required"
 ;;
 
@@ -330,37 +361,39 @@ let check_exec ~argv ~cwd ~env =
     Ok ()
 ;;
 
+(* A stage owns exactly the three standard descriptors, so duplicating any
+   other number would name a descriptor the stage does not have. *)
+let standard_fds = [ 0; 1; 2 ]
+
 let check_redirect_target ~fd = function
   | Inherit | Discard -> Ok ()
-  | File path when String.length path > 0 && path.[0] = '/' -> Ok ()
-  | File path -> Error (Redirect_path_not_absolute { fd; path })
+  | File { path; append = _ } when String.length path > 0 && path.[0] = '/' -> Ok ()
+  | File { path; append = _ } -> Error (Redirect_path_not_absolute { fd; path })
+  | Fd target when List.exists (Int.equal target) standard_fds -> Ok ()
+  | Fd target -> Error (Redirect_fd_unknown { fd; target })
 ;;
 
-let check_redirects ~stdin ~stdout ~stderr =
+let check_stage_redirects { argv = _; stdin; stdout; stderr } =
   let ( let* ) = Result.bind in
   let* () = check_redirect_target ~fd:0 stdin in
   let* () = check_redirect_target ~fd:1 stdout in
   check_redirect_target ~fd:2 stderr
 ;;
 
-let validate = function
-  | Exec { argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
-    let ( let* ) = Result.bind in
-    let* () = check_exec ~argv ~cwd ~env in
-    check_redirects ~stdin ~stdout ~stderr
-  | Pipeline { stages = []; _ } -> Error Pipeline_empty
-  | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
-  | Pipeline { stages; cwd; env; timeout_sec = _ } ->
-    let ( let* ) = Result.bind in
-    let* () = check_cwd cwd in
-    let* () = check_env env in
-    let rec each = function
-      | [] -> Ok ()
-      | { argv } :: rest ->
-        let* () = check_exec ~argv ~cwd:None ~env:[] in
-        each rest
-    in
-    each stages
+let stages_of { head; tail } = head :: tail
+
+let validate { program; cwd; env; timeout_sec = _ } =
+  let ( let* ) = Result.bind in
+  let* () = check_cwd cwd in
+  let* () = check_env env in
+  let rec each = function
+    | [] -> Ok ()
+    | stage :: rest ->
+      let* () = check_exec ~argv:stage.argv ~cwd:None ~env:[] in
+      let* () = check_stage_redirects stage in
+      each rest
+  in
+  each (stages_of program)
 ;;
 
 let shell_bin = function
@@ -376,7 +409,7 @@ let shell_simple
       ?cwd
       ?(env = [])
       ?(redirects = [])
-      { argv }
+      argv
   =
   let ( let* ) = Result.bind in
   let* bin, arguments = shell_bin argv in
@@ -391,52 +424,75 @@ let shell_simple
        arguments)
 ;;
 
-(* Lower the typed [redirect_target] triple into the IR-level
-   [Redirect_scope.t list]. [Inherit] yields no IR entry —
-   the child simply inherits the parent's fd.  [Discard] resolves to
-   [/dev/null] with the fd-appropriate mode (read for fd=0, write for
-   fd=1/2).  [File path] uses the caller-supplied absolute path; the
-   validation gate already rejected relative paths via
-   {!Redirect_path_not_absolute}. *)
-let redirects_of ~cwd ~stdin ~stdout ~stderr =
+(* Each standard stream carries the fd it attaches to and the direction that
+   fd flows, so neither is chosen by position at the call site. [Inherit]
+   yields no IR entry — the child keeps the parent's descriptor. *)
+type stream = {
+  fd : int;
+  reading : bool;
+}
+
+let stdin_stream = { fd = 0; reading = true }
+let stdout_stream = { fd = 1; reading = false }
+let stderr_stream = { fd = 2; reading = false }
+
+let redirect_entry ~classify { fd; reading } target =
+  let file ~path ~mode =
+    Some (Masc_exec.Redirect_scope.File { fd; target = classify path; mode })
+  in
+  match target with
+  | Inherit -> None
+  | Discard ->
+    file
+      ~path:"/dev/null"
+      ~mode:
+        (if reading then Masc_exec.Redirect_scope.Read
+         else Masc_exec.Redirect_scope.Write)
+  | File { path; append = true } -> file ~path ~mode:Masc_exec.Redirect_scope.Append
+  | File { path; append = false } ->
+    file
+      ~path
+      ~mode:
+        (if reading then Masc_exec.Redirect_scope.Read
+         else Masc_exec.Redirect_scope.Write)
+  | Fd src -> Some (Masc_exec.Redirect_scope.Fd_to_fd { src = fd; dst = src })
+;;
+
+let redirects_of_stage ~cwd { argv = _; stdin; stdout; stderr } =
   let cwd_str = Option.value cwd ~default:"/" in
   let classify path = Masc_exec.Path_scope.classify ~raw:path ~cwd:cwd_str in
-  let entry fd mode = function
-    | Inherit -> None
-    | Discard ->
-      Some
-        (Masc_exec.Redirect_scope.File
-           { fd; target = classify "/dev/null"; mode })
-    | File path ->
-      Some
-        (Masc_exec.Redirect_scope.File
-           { fd; target = classify path; mode })
-  in
   List.filter_map
     (fun x -> x)
-    [ entry 0 Masc_exec.Redirect_scope.Read stdin
-    ; entry 1 Masc_exec.Redirect_scope.Write stdout
-    ; entry 2 Masc_exec.Redirect_scope.Write stderr
+    [ redirect_entry ~classify stdin_stream stdin
+    ; redirect_entry ~classify stdout_stream stdout
+    ; redirect_entry ~classify stderr_stream stderr
     ]
 ;;
 
-let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input =
+let to_shell_ir_unvalidated
+      ?(sandbox = Masc_exec.Sandbox_target.host ())
+      { program; cwd; env; timeout_sec = _ }
+  =
   let ( let* ) = Result.bind in
-  match input with
-  | Exec { argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
-    let stage = { argv } in
-    let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
-    shell_simple ~sandbox ?cwd ~env ~redirects stage
-  | Pipeline { stages; cwd; env; timeout_sec = _ } ->
+  let lower stage =
+    shell_simple
+      ~sandbox
+      ?cwd
+      ~env
+      ~redirects:(redirects_of_stage ~cwd stage)
+      stage.argv
+  in
+  match program with
+  | { head; tail = [] } -> lower head
+  | { head; tail } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
-        | { argv } :: rest ->
-          let stage = { argv } in
-          let* simple = shell_simple ~sandbox ?cwd ~env stage in
+        | stage :: rest ->
+          let* simple = lower stage in
           loop (simple :: acc) rest
       in
-      loop [] stages
+      loop [] (head :: tail)
     in
     Ok (Keeper_tooling.Execute_shell_ir.pipeline simples)
 ;;
@@ -478,9 +534,12 @@ let pp_validation_error ppf = function
       path
   | Cwd_not_absolute path ->
     Format.fprintf ppf "cwd %S is not absolute" path
-  | Pipeline_empty -> Format.pp_print_string ppf "pipeline is empty"
-  | Pipeline_too_short ->
-    Format.pp_print_string ppf "pipeline requires at least two stages"
+  | Redirect_fd_unknown { fd; target } ->
+    Format.fprintf
+      ppf
+      "fd=%d cannot duplicate fd=%d; a stage owns only 0, 1 and 2"
+      fd
+      target
   | Env_key_invalid k ->
     Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
 ;;

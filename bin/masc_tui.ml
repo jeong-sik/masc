@@ -1821,7 +1821,16 @@ let main () =
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
-            | Overview | Keepers Keeper_message -> ())
+            | Overview ->
+                let _, _, row_budget =
+                  overview_layout state ~terminal_rows
+                in
+                state.overview_event_scroll <-
+                  Render_schedule.scroll_overview_events_older
+                    ~event_count:(List.length state.events)
+                    ~visible_rows:row_budget.attention_rows
+                    state.overview_event_scroll
+            | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -1861,7 +1870,16 @@ let main () =
                  | Planning_detail _ ->
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
-            | Overview | Keepers Keeper_message -> ())
+            | Overview ->
+                let _, _, row_budget =
+                  overview_layout state ~terminal_rows
+                in
+                state.overview_event_scroll <-
+                  Render_schedule.scroll_overview_events_newer
+                    ~event_count:(List.length state.events)
+                    ~visible_rows:row_budget.attention_rows
+                    state.overview_event_scroll
+            | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with

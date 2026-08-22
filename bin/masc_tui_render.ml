@@ -196,6 +196,24 @@ let render_dashboard (state : state) =
   finish_frame ~surface_key:"dashboard" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
 
+(** Project the shared Overview row budget and its sanitized variable inputs. *)
+let overview_layout (state : state) ~terminal_rows =
+  let attention_items =
+    match state.overview with
+    | None -> []
+    | Some overview -> overview.ov_attention_items
+  in
+  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
+  let row_budget =
+    Render_schedule.allocate_overview ~terminal_rows
+      ~has_cluster:(Option.is_some state.overview)
+      ~attention_count:(List.length attention_items)
+      ~event_count:(List.length state.events)
+      ~task_count:(List.length state.tasks)
+      ~has_task_error:(Option.is_some tasks_error)
+  in
+  attention_items, tasks_error, row_budget
+
 (** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
 let render_overview (state : state) =
   let (rows, cols) = get_terminal_size () in
@@ -257,23 +275,27 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   (* Attention panel *)
-  let attention_items =
-    match ov with
-    | None -> []
-    | Some o -> o.ov_attention_items
-  in
-  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let row_budget =
-    Render_schedule.allocate_overview ~terminal_rows:rows
-      ~has_cluster:(Option.is_some ov)
-      ~attention_count:(List.length attention_items)
-      ~event_count:(List.length state.events)
-      ~task_count:(List.length state.tasks)
-      ~has_task_error:(Option.is_some tasks_error)
+  let attention_items, tasks_error, row_budget =
+    overview_layout state ~terminal_rows:rows
   in
   let panel_width = (cols - 3) / 2 in
   let attention_title = " Attention " in
-  let events_title = " Recent Events " in
+  let event_count = List.length state.events in
+  let event_window =
+    Render_schedule.project_overview_event_window ~event_count
+      ~visible_rows:row_budget.attention_rows state.overview_event_scroll
+  in
+  state.overview_event_scroll <- event_window.oew_offset;
+  let events_title =
+    let title =
+      if event_window.oew_first_position = 0 then " Recent Events "
+      else
+        Printf.sprintf " Recent Events %d-%d/%d "
+          event_window.oew_first_position event_window.oew_last_position
+          event_count
+    in
+    fit_width title (max 0 panel_width)
+  in
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.bold attention_title Ansi.reset
@@ -297,8 +319,9 @@ let render_overview (state : state) =
       else ""
     in
     let event_str =
-      if i < List.length state.events then
-        let e = List.nth state.events i in
+      let event_index = i + event_window.oew_offset in
+      if event_index < event_count then
+        let e = List.nth state.events event_index in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
           (fit_width (Terminal_text.single_line e.content) (panel_width - 12))
@@ -339,7 +362,7 @@ let render_overview (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
     Ansi.dim state.refresh_interval state.port Ansi.reset);
 
   finish_frame ~surface_key:"overview" ~cursor:Frame_presenter.Hidden ~rows

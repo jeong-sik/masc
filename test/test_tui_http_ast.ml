@@ -645,6 +645,33 @@ let test_planning_cursor_uses_visible_goal_order () =
      >= 2)
 ;;
 
+let test_overview_events_use_scroll_projection () =
+  check int "overview renders one bounded event window" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_overview"
+       ~callee:"Render_schedule.project_overview_event_window");
+  check int "event prepend preserves one manual anchor" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"add_event"
+       ~callee:"Render_schedule.overview_event_offset_after_prepend");
+  check int "overview older input is bounded once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"main"
+       ~callee:"Render_schedule.scroll_overview_events_older");
+  check int "overview newer input is bounded once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"main"
+       ~callee:"Render_schedule.scroll_overview_events_newer");
+  check int "both overview input directions use current layout" 2
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"main" ~callee:"overview_layout")
+;;
+
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
   check bool "main loop reads a monotonic clock" true
@@ -702,11 +729,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  check int "overview consumes one shared row allocation" 1
+  check int "overview layout owns one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview"
+       ~binding_name:"overview_layout"
        ~callee:"Render_schedule.allocate_overview");
-  check int "overview bounds each variable section from that allocation" 4
+  check int "overview renderer consumes one shared layout" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_overview" ~callee:"overview_layout");
+  check int "overview bounds each variable section from that allocation" 5
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
        ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
@@ -1052,8 +1082,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ov_project"
     ; "ai_summary"
     ; "content"
-    ; "tasks_error"
     ];
+  check_fields "overview_layout" [ "tasks_error" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
     ; "approvals_error"
@@ -1209,6 +1239,10 @@ let () =
           "planning cursor uses visible goal order"
           `Quick
           test_planning_cursor_uses_visible_goal_order;
+        test_case
+          "overview events use bounded scroll projection"
+          `Quick
+          test_overview_events_use_scroll_projection;
         test_case
           "render loop uses monotonic dirty scheduling"
           `Quick

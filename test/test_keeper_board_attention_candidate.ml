@@ -261,7 +261,7 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
       kind =
         Masc.Board_dispatch.Board_vote_cast
           { target = Masc.Board_dispatch.Vote_on_comment "c-1"
-          ; target_author = "sangsu-agent"
+          ; target_author = "alpha-agent"
           ; voter = "external-author"
           ; direction = Masc.Board.Up
           }
@@ -290,8 +290,8 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
     "a vote and a post on the same post_id are distinct candidates"
     false
     (String.equal
-       (A.candidate_id_of_signal ~keeper_name:"sangsu" vote_signal)
-       (A.candidate_id_of_signal ~keeper_name:"sangsu" (signal "post-vote")))
+       (A.candidate_id_of_signal ~keeper_name:"alpha" vote_signal)
+       (A.candidate_id_of_signal ~keeper_name:"alpha" (signal "post-vote")))
 ;;
 
 let test_codec_and_context_identity_are_strict () =

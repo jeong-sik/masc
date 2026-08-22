@@ -425,19 +425,19 @@ let handle_update_priority ~tool_name ~start_time ctx args =
       "MASC workspace is not initialized"
   | Error (Workspace.Backlog_read_error detail) ->
     Tool_result.error
-      ~failure_class:Tool_result.Transient_error
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not read the backlog: %s" detail)
   | Error (Workspace.Backlog_write_error detail) ->
     Tool_result.error
-      ~failure_class:Tool_result.Transient_error
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not commit the backlog: %s" detail)
   | Error (Workspace.Lock_error error) ->
     Tool_result.error
-      ~failure_class:Tool_result.Transient_error
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not acquire the backlog lock: %s"

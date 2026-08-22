@@ -62,7 +62,6 @@ val to_agent_core_typed_result :
   ?base_path:string ->
   ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
-  ?externalization_error_recoverable:bool ->
   Tool_result.result ->
   Agent_core.Types.tool_result
 (** Convert a {!Tool_result.result} to AGENT_CORE [tool_result].  [Completed] and
@@ -70,9 +69,8 @@ val to_agent_core_typed_result :
     disposition marker in [_meta].  The adapter never parses that metadata
     back into MASC semantics.  [Failed] maps its typed [failure_class] directly
     to AGENT_CORE [recoverable]/[error_class]. [on_externalization_error] lets an
-    owning runtime keep its terminal state consistent when storage fails.
-    [externalization_error_recoverable] projects the owning tool's existing
-    retry policy; the provider receives only a bounded generic error.
+    owning runtime keep its terminal state consistent when storage fails. The
+    provider receives only a bounded generic error and no replay instruction.
 
     When typed result data contains normalized artifact references, the
     producer must first call {!attach_artifact_manifest}; the provider-facing
@@ -95,7 +93,6 @@ val agent_core_tool_of_masc :
   ?base_path:string ->
   ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
-  ?externalization_error_recoverable:bool ->
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->
@@ -117,7 +114,6 @@ val agent_core_tool_of_masc_with_execution_env :
   ?base_path:string ->
   ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
-  ?externalization_error_recoverable:bool ->
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->

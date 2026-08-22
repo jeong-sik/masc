@@ -158,7 +158,7 @@ let terminal_policy_http_error = function
 
 let failure_class_of_http_error = function
   | err when terminal_policy_http_error err -> Tool_result.Policy_rejection
-  | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Transient_error
+  | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
   | _ -> Tool_result.Runtime_failure
 
 let string_member key json =
@@ -437,8 +437,8 @@ let execution_of_vision_outcome = function
          "no_capable_runtime")
   | Vo_timeout ->
     Keeper_tool_execution.failure
-      ~class_:Tool_result.Transient_error
-      (err_json ~failure_class:Tool_result.Transient_error "timeout")
+      ~class_:Tool_result.Dependency_unavailable
+      (err_json ~failure_class:Tool_result.Dependency_unavailable "timeout")
   | Vo_invalid_structured_response detail ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure

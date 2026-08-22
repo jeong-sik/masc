@@ -697,7 +697,6 @@ function ToolCallEvidenceSection({ entry }: { entry: ToolCallEntry }) {
           ['backend', route?.backend],
           ['runtime handler', route?.runtime_handler],
           ['readonly', formatFlag(route?.readonly)],
-          ['retryable', formatFlag(route?.retryable)],
           ['status', route?.status],
           ['receipt labels', receiptLabels],
         ]}

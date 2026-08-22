@@ -1,17 +1,22 @@
 (** Structured tool result type for MASC. *)
 
 type tool_failure_class =
-  | Transient_error (** Network/timeout/rate-limit — retryable *)
+  | Dependency_unavailable (** A required external dependency was unavailable. *)
   | Policy_rejection
       (** Permission, guardrail, validation reject (RFC-0062 §3.2) — permanent.
           Covers caller-input/argument validation, not only auth/boundary. *)
-  | Runtime_failure (** Internal error/bug — non-retryable *)
-  | Workflow_rejection (** Business rule violation — non-retryable *)
+  | Runtime_failure (** Internal error/bug. *)
+  | Workflow_rejection (** Business rule violation. *)
   | Operator_cancelled
-      (** An operator interrupted the work (#28810). Not retryable by the
-          system — resending is the operator's own decision — and not an
-          internal error: consumers must not classify it as a crash. *)
+      (** An operator interrupted the work (#28810). *)
 [@@deriving yojson, show]
+
+let derived_tool_failure_class_of_yojson = tool_failure_class_of_yojson
+
+let tool_failure_class_of_yojson = function
+  | `List [ `String "Transient_error" ] -> Ok Dependency_unavailable
+  | json -> derived_tool_failure_class_of_yojson json
+;;
 
 type failure_effect_disposition =
   | Proven_pre_effect
@@ -32,7 +37,7 @@ let failure_effect_disposition_of_string = function
 ;;
 
 let tool_failure_class_to_string = function
-  | Transient_error -> "transient_error"
+  | Dependency_unavailable -> "dependency_unavailable"
   | Policy_rejection -> "policy_rejection"
   | Runtime_failure -> "runtime_failure"
   | Workflow_rejection -> "workflow_rejection"
@@ -40,7 +45,7 @@ let tool_failure_class_to_string = function
 ;;
 
 let tool_failure_class_of_string = function
-  | "transient_error" -> Some Transient_error
+  | "dependency_unavailable" | "transient_error" -> Some Dependency_unavailable
   | "policy_rejection" -> Some Policy_rejection
   | "runtime_failure" -> Some Runtime_failure
   | "workflow_rejection" -> Some Workflow_rejection
@@ -48,14 +53,11 @@ let tool_failure_class_of_string = function
   | _ -> None
 ;;
 
-let is_retryable = function
-  | Transient_error -> true
-  | Policy_rejection | Runtime_failure | Workflow_rejection | Operator_cancelled ->
-    false
-;;
-
 let log_level_of_failure_class = function
-  | Workflow_rejection | Policy_rejection | Transient_error | Operator_cancelled ->
+  | Workflow_rejection
+  | Policy_rejection
+  | Dependency_unavailable
+  | Operator_cancelled ->
     Log.Warn
   | Runtime_failure -> Log.Error
 ;;
@@ -81,8 +83,10 @@ let log_level_of_tool_call_outcome = function
     be passed explicitly at the catch boundary. *)
 let classify_from_exception (exn : exn) : tool_failure_class =
   match exn with
-  | Eio.Time.Timeout -> Transient_error
-  | Eio.Cancel.Cancelled _ -> Transient_error
+  | Eio.Time.Timeout
+  | Eio.Cancel.Cancelled Eio.Time.Timeout ->
+    Dependency_unavailable
+  | Eio.Cancel.Cancelled _ -> Operator_cancelled
   | Invalid_argument _ -> Runtime_failure
   | Failure _ -> Runtime_failure
   | _ -> Runtime_failure

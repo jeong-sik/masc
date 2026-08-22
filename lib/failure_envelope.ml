@@ -4,7 +4,6 @@ type severity =
   | Critical
 
 type recoverability =
-  | Retryable
   | Operator_action_required
   | Fatal
 
@@ -38,12 +37,10 @@ let severity_of_string = function
   | other -> Error ("unknown failure severity: " ^ other)
 
 let recoverability_to_string = function
-  | Retryable -> "retryable"
   | Operator_action_required -> "operator_action_required"
   | Fatal -> "fatal"
 
 let recoverability_of_string = function
-  | "retryable" -> Ok Retryable
   | "operator_action_required" -> Ok Operator_action_required
   | "fatal" -> Ok Fatal
   | other -> Error ("unknown failure recoverability: " ^ other)

@@ -372,8 +372,7 @@ val cache_stats : cache -> cache_stats
     [timeout_s] is explicitly supplied. Enforcing that deadline also requires
     [clock]; supplying [timeout_s] without [clock] returns [AcceptRejected]. A
     timeout owned by this wrapper surfaces as
-    [TimeoutError { phase = Http_operation; _ }] which is classified as
-    retryable by {!Retry.is_retryable}. *)
+    [TimeoutError { phase = Http_operation; _ }]. *)
 val get_sync
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock

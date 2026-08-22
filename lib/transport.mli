@@ -73,12 +73,6 @@ module Rest : sig
 
   val method_to_string : http_method -> string
   val tool_to_endpoint : string -> http_method * string
-  val parse_request :
-    http_method:string ->
-    path:string ->
-    query_params:(string * Yojson.Safe.t) list ->
-    body:string ->
-    request
   val generate_openapi_paths : unit -> Yojson.Safe.t
   val generate_openapi_document :
     ?host:string -> ?port:int -> unit -> Yojson.Safe.t

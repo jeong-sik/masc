@@ -203,6 +203,13 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         wait_source = inspect.getsource(acceptance.MissionRun.wait_for_goal_state)
         self.assertIn("goal_verifier_convergence_timeout(self.timeout)", wait_source)
 
+    def test_browser_proof_parent_outlives_inner_readiness_and_capture(self):
+        self.assertEqual(acceptance.browser_proof_subprocess_timeout(300.0), 600.0)
+        self.assertEqual(acceptance.browser_proof_subprocess_timeout(400.0), 800.0)
+        capture_source = inspect.getsource(acceptance.MissionRun.capture_browser_proof)
+        self.assertIn("browser_proof_subprocess_timeout(self.timeout)", capture_source)
+        self.assertNotIn("timeout=120", capture_source)
+
     def test_runtime_serving_evidence_requires_exact_completed_receipt_per_role(self):
         keepers = {"coordinator": "keeper-c", "reviewer": "keeper-r"}
         expected = {"coordinator": "runtime-c", "reviewer": "runtime-r"}

@@ -106,11 +106,10 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
-(* What the prompt knows about one active goal. [phase] is [None] only when the
-   id does not resolve in the store (a dangling assignment — kept visible, per
-   [active_goal_summaries]). RFC-0387 stage 2 carries the phase so a [Verifying]
-   goal is annotated rather than reading as ordinary open work — the gate must
-   not make the goal disappear from the keeper's view (review P0-1). *)
+(* What the prompt knows about one active goal. RFC-0387 stage 2 carries the
+   phase so a [Verifying] goal is annotated rather than reading as ordinary
+   open work — the gate must not make the goal disappear from the keeper's
+   view (review P0-1). *)
 type goal_summary =
   { summary_goal_id : string
   ; summary_title : string
@@ -1007,19 +1006,20 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
-       resolved them (RFC-0315); every id from the world observation remains
-       rendered even when title enrichment is partial. *)
+       resolved them (RFC-0315). The count and the list are read off the same
+       list, so the heading can never claim goals the body does not show. *)
     | Keeper_context_layers.Active_goals ->
       let active_block =
-        if observation.active_goals <> [] then
-          Some
-            (Printf.sprintf "### Active Goals (%d)\n"
-               (List.length observation.active_goals)
-            ^ (match active_goal_summaries with
-               | Some summaries -> format_goal_summaries summaries
-               | None -> format_goals observation.active_goals)
-            ^ "\n\n")
-        else None
+        let count, body =
+          match active_goal_summaries with
+          | Some summaries ->
+            List.length summaries, format_goal_summaries summaries
+          | None ->
+            ( List.length observation.active_goals
+            , format_goals observation.active_goals )
+        in
+        if count = 0 then None
+        else Some (Printf.sprintf "### Active Goals (%d)\n" count ^ body ^ "\n\n")
       in
       (* An executing Goal that no Task serves is the same fact for every
          Keeper, so it is rendered to each. Read from the Goal store, not from

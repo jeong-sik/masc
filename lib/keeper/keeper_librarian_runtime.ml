@@ -565,7 +565,6 @@ let run_best_effort
                ~source:
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
-                 ; generation = inp.generation
                  }
                ~facts:selection.facts
                ()

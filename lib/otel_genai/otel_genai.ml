@@ -159,7 +159,6 @@ let keeper_turn_attrs
       ~agent_name
       ~runtime_id
       ~trace_id
-      ~generation
       ~max_context
       ~channel
       ~is_retry
@@ -174,7 +173,6 @@ let keeper_turn_attrs
   [ Attr_key.keeper_name, `String keeper_name
   ; Attr_key.keeper_agent_name, `String agent_name
   ; Attr_key.keeper_trace_id, `String trace_id
-  ; Attr_key.keeper_generation, `Int generation
   ; Attr_key.keeper_max_context, `Int max_context
   ; Attr_key.keeper_channel, `String channel
   ; Attr_key.keeper_is_retry, `Bool is_retry
@@ -201,7 +199,6 @@ let with_keeper_turn_span
       ~agent_name
       ~runtime_id
       ~trace_id
-      ~generation
       ~max_context
       ~channel
       ~is_retry
@@ -217,7 +214,6 @@ let with_keeper_turn_span
         ~agent_name
         ~runtime_id
         ~trace_id
-        ~generation
         ~max_context
         ~channel
         ~is_retry

@@ -278,11 +278,9 @@ let error_class = function
           ( Transfer.Reservation_conflict _
           | Transfer.Receipt_conflict _
           | Transfer.Source_owner_not_paused
-          | Transfer.Source_owner_nonce_changed _
-          | Transfer.Source_owner_identity_changed
+                  | Transfer.Source_owner_identity_changed
           | Transfer.Target_owner_not_active
-          | Transfer.Target_owner_nonce_changed _
-          | Transfer.Target_owner_identity_changed
+                  | Transfer.Target_owner_identity_changed
           | Transfer.Continuation_binding_mismatch
           | Transfer.Source_queue_validation_failed _ )
       ; _
@@ -292,8 +290,7 @@ let error_class = function
           ( Source_terminal.Reservation_conflict _
           | Source_terminal.Receipt_conflict _
           | Source_terminal.Durable_owner_not_paused
-          | Source_terminal.Durable_owner_nonce_changed _
-          | Source_terminal.Durable_owner_identity_changed
+                  | Source_terminal.Durable_owner_identity_changed
           | Source_terminal.Source_queue_validation_failed _ )
       ; _
       } ->

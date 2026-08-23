@@ -55,7 +55,6 @@ let decide_and_record
     Keeper_turn_helpers.record_pre_dispatch_terminal_observation
       ~config
       ~meta
-      ~generation
       ~runtime_id:
         (           (runtime_id_of_meta meta))
       ~outcome:`Cancelled
@@ -95,7 +94,6 @@ let decide_and_record
       Keeper_turn_helpers.record_pre_dispatch_terminal_observation
         ~config
         ~meta
-        ~generation
         ~runtime_id:
           (             (runtime_id_of_meta meta))
         ~outcome:`Skipped
@@ -131,7 +129,6 @@ let decide_and_record
       Keeper_turn_helpers.record_pre_dispatch_terminal_observation
         ~config
         ~meta
-        ~generation
         ~runtime_id:
           (             (runtime_id_of_meta meta))
         ~outcome:`Error

@@ -29,7 +29,6 @@ module Snapshot_cache = struct
     let equal left right =
       String.equal left.base_path right.base_path
       && String.equal left.keeper_name right.keeper_name
-      && Int.equal left.generation right.generation
       && Float.equal left.last_turn_ts right.last_turn_ts
       && Int.equal left.approval_queue_revision right.approval_queue_revision
     ;;
@@ -40,7 +39,6 @@ module Snapshot_cache = struct
       Hashtbl.hash
         ( key.base_path
         , key.keeper_name
-        , key.generation
         , key.last_turn_ts
         , key.approval_queue_revision )
     ;;

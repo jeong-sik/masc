@@ -682,13 +682,11 @@ let accepted_pending_source_terminal_ack_replay source_terminal state =
 ;;
 
 let turn_attempt_terminal_operation_id
-      ~owner_nonce
       ~admitted_revision
       source
   =
   Printf.sprintf
-    "turn-attempt-terminal:%d:%Ld:%s"
-    owner_nonce
+    "turn-attempt-terminal:%Ld:%s"
     admitted_revision
     (source_snapshot_ref source)
 ;;
@@ -772,14 +770,12 @@ let terminalize_pending_turn
       ({ transition =
            Ack_source_terminal
              { source = prior_source
-             ; owner_nonce
              ; source_receipt = prior_source_receipt
              ; _
              }
        ; _
        } as receipt)
-    when Int.equal owner_nonce current_owner_nonce
-         && prior_source = source
+    when prior_source = source
          && turn_terminal_receipt_matches_replay
               prior_source_receipt
               source_receipt ->
@@ -794,7 +790,6 @@ let terminalize_pending_turn
     let source_terminal =
       { source
       ; source_incarnation = admitted_revision
-      ; owner_nonce = current_owner_nonce
       ; operator_operation_id
       ; source_receipt
       }
@@ -1045,13 +1040,12 @@ let transition_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_incarnation = int64_field ~context "source_incarnation" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
     let* reason = string_field ~context "reason" fields in
     let cancellation =
-      { source; source_incarnation; owner_nonce; operator_operation_id; reason }
+      { source; source_incarnation; operator_operation_id; reason }
     in
     let* () = validate_accepted_cancellation cancellation in
     Ok (Cancel_accepted cancellation)
@@ -1067,7 +1061,6 @@ let transition_of_yojson json =
           ; "operator_operation_id"
           ; "from_keeper"
           ; "to_keeper"
-          ; "target_generation"
           ; "target_trace_id"
           ]
         fields
@@ -1081,7 +1074,6 @@ let transition_of_yojson json =
     in
     let* from_keeper = string_field ~context "from_keeper" fields in
     let* to_keeper = string_field ~context "to_keeper" fields in
-    let* target_generation = int_field ~context "target_generation" fields in
     let* target_trace_id_wire = string_field ~context "target_trace_id" fields in
     let* target_trace_id =
       Keeper_id.Trace_id.of_string target_trace_id_wire
@@ -1091,11 +1083,9 @@ let transition_of_yojson json =
     let transfer =
       { source
       ; source_incarnation
-      ; owner_nonce
       ; operator_operation_id
       ; from_keeper
       ; to_keeper
-      ; target_generation
       ; target_trace_id
       }
     in
@@ -1155,7 +1145,6 @@ let transition_of_yojson json =
     let source_terminal =
       { source
       ; source_incarnation
-      ; owner_nonce
       ; operator_operation_id
       ; source_receipt
       }

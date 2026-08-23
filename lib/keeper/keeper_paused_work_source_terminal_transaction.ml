@@ -219,7 +219,6 @@ let project_receipt config receipt =
     Keeper_registry_event_queue.ack_pending_source_terminal_result
       ~base_path
       receipt.keeper_name
-      ~current_owner_nonce:current.runtime.nonce
       ~acked_at:receipt.requested_at
       ~source_terminal
     |> Result.map_error (fun detail -> Committed_ack_failed detail)
@@ -272,7 +271,6 @@ let ack_pending_under_admission config ~keeper_name request =
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name
-         ~expected_generation:request.owner_nonce
          ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
      with
      | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->

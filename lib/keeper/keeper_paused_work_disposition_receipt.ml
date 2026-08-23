@@ -6,7 +6,6 @@ type transfer_owner =
   { from_keeper : string
   ; to_keeper : string
   ; target_trace_id : Keeper_id.Trace_id.t
-  ; target_generation : int
   ; source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
   ; continuation_binding : continuation_binding
@@ -81,8 +80,6 @@ let validate receipt =
       then Error "paused-work transfer target Keeper must not be empty"
       else if String.equal transfer.from_keeper transfer.to_keeper
       then Error "paused-work transfer source and target Keepers must differ"
-      else if transfer.target_generation < 0
-      then Error "paused-work transfer target generation must not be negative"
       else if Int64.compare transfer.source_incarnation 0L < 0
       then Error "paused-work transfer source incarnation must not be negative"
       else if String.equal (String.trim transfer.source.post_id) ""

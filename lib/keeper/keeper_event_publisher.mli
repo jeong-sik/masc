@@ -69,5 +69,4 @@ val publish_runtime_execution_built :
   max_context:int ->
   effective_budget:int ->
   temperature:float ->
-  generation:int ->
   unit

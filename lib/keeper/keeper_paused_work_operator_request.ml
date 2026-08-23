@@ -108,7 +108,6 @@ let parse_transfer = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* to_keeper = nonblank "to_keeper" to_keeper in
-    let* target_generation = nonnegative_int "target_generation" target_generation in
     Ok
       (Transfer_owner
          { to_keeper
@@ -116,8 +115,6 @@ let parse_transfer = function
              Transfer.
                { source
                ; source_incarnation
-               ; owner_nonce
-               ; target_generation
                ; continuation_binding
                ; operator_operation_id
                }
@@ -154,7 +151,6 @@ let parse_source_terminal = function
          Source_terminal.
            { source
            ; source_incarnation
-           ; owner_nonce
            ; source_receipt
            ; operator_operation_id
            })

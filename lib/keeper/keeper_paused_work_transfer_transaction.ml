@@ -230,12 +230,10 @@ let receipt_matches_request ~from_keeper ~to_keeper request receipt =
   | Error _ -> false
   | Ok transfer ->
     String.equal receipt.keeper_name from_keeper
-    && Int.equal receipt.expected_generation request.owner_nonce
-    && String.equal receipt.operator_operation_id request.operator_operation_id
+      && String.equal receipt.operator_operation_id request.operator_operation_id
     && String.equal transfer.from_keeper from_keeper
     && String.equal transfer.to_keeper to_keeper
-    && Int.equal transfer.target_generation request.target_generation
-    && transfer.source = request.source
+      && transfer.source = request.source
     && Int64.equal transfer.source_incarnation request.source_incarnation
     && transfer.continuation_binding = request.continuation_binding
 ;;
@@ -250,7 +248,6 @@ let create_receipt config ~from_keeper ~to_keeper request =
     { from_keeper
     ; to_keeper
     ; target_trace_id = target_meta.runtime.trace_id
-    ; target_generation = request.target_generation
     ; source = request.source
     ; source_incarnation = request.source_incarnation
     ; continuation_binding = request.continuation_binding
@@ -259,8 +256,7 @@ let create_receipt config ~from_keeper ~to_keeper request =
   Ok
     ({ keeper_name = from_keeper
      ; expected_trace_id = source_meta.runtime.trace_id
-     ; expected_generation = request.owner_nonce
-     ; operator_operation_id = request.operator_operation_id
+      ; operator_operation_id = request.operator_operation_id
      ; requested_at = Time_compat.now ()
      ; operation = Keeper_paused_work_disposition_receipt.Transfer_owner transfer
      }
@@ -272,11 +268,9 @@ let accepted_transfer receipt
     : Keeper_registry_event_queue.accepted_transfer =
   { source = transfer.Keeper_paused_work_disposition_receipt.source
   ; source_incarnation = transfer.source_incarnation
-  ; owner_nonce = receipt.Keeper_paused_work_disposition_receipt.expected_generation
   ; operator_operation_id = receipt.operator_operation_id
   ; from_keeper = transfer.from_keeper
   ; to_keeper = transfer.to_keeper
-  ; target_generation = transfer.target_generation
   ; target_trace_id = transfer.target_trace_id
   }
 ;;
@@ -301,14 +295,7 @@ let ack_source ?intake_token config receipt transfer =
   | None ->
     let* current = read_meta config transfer.from_keeper in
     let* () =
-      if not (Int.equal current.runtime.nonce receipt.expected_generation)
-      then
-        Error
-          (Source_owner_nonce_changed
-             { expected = receipt.expected_generation
-             ; actual = current.runtime.nonce
-             })
-      else if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
+      if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
       then Error Source_owner_identity_changed
       else Ok ()
     in

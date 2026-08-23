@@ -99,7 +99,7 @@ type meta_command =
       }
   | Update_profile of profile_update
   | Handoff_identity of identity_handoff
-  | Repair_trace_generation of
+  | Repair_trace_identity of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list
       ; updated_at : string

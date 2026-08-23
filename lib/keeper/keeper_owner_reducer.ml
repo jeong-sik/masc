@@ -92,7 +92,7 @@ type meta_command =
       }
   | Update_profile of profile_update
   | Handoff_identity of identity_handoff
-  | Repair_trace_generation of
+  | Repair_trace_identity of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list
       ; updated_at : string
@@ -622,7 +622,7 @@ let apply_existing (state : state) meta command =
          ; runtime
          ; updated_at = handoff.updated_at
          })
-  | Repair_trace_generation repair ->
+  | Repair_trace_identity repair ->
     let runtime =
       { meta.runtime with
         trace_id = repair.trace_id
@@ -718,6 +718,6 @@ let error_to_string = function
   | Invalid_delta detail -> "invalid additive delta: " ^ detail
   | Keeper_identity_mismatch { expected; actual } ->
     Printf.sprintf "Keeper identity mismatch: expected=%s actual=%s" expected actual
-  | Identity_mismatch -> "Keeper trace/generation identity changed"
+  | Identity_mismatch -> "Keeper trace identity changed"
   | Snapshot_changed -> "Keeper metadata changed after cleanup was prepared"
 ;;

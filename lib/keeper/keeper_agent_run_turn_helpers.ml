@@ -152,7 +152,7 @@ let runtime_manifest_context ~keeper_name ~agent_name ~trace_id
   }
 
 let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
-    ~generation ~runtime_id ?status ?decision ?keeper_turn_id
+    ~runtime_id ?status ?decision ?keeper_turn_id
     ?agent_core_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
     ?compaction_source ~site event =
   let decision =
@@ -161,7 +161,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
     | Some keeper_turn_id ->
       let ctx =
         runtime_manifest_context ~keeper_name ~agent_name ~trace_id
-          ~generation ~keeper_turn_id
+          ~keeper_turn_id
       in
       let decision =
         match decision with
@@ -175,7 +175,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
                 ?agent_core_turn_count ?elapsed_ms ?logical_seq ?compaction_source ())
            decision)
   in
-  Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id ~generation
+  Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id
     ?keeper_turn_id ?agent_core_turn_count ?logical_seq ~event ~runtime_id ?status
     ?decision ?checkpoint_path ?receipt_path ()
   |> Keeper_runtime_manifest.append_best_effort ~site config
@@ -223,7 +223,6 @@ let make_append_manifest
     ~keeper_name
     ~agent_name
     ~trace_id
-    ~generation
     ~runtime_id
     ~(turn_start : Mtime.t)
     ~(seq_ref : int Atomic.t)
@@ -252,7 +251,6 @@ let make_append_manifest
     ~keeper_name
     ~agent_name
     ~trace_id
-    ~generation
     ~runtime_id
     ?status ?decision ?keeper_turn_id ?agent_core_turn_count
     ?elapsed_ms ?logical_seq

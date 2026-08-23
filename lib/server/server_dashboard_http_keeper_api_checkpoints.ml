@@ -13,7 +13,6 @@ let agent_core_checkpoint_summary_json
       ~(snapshot_id : string)
       ~(path : string)
       ~(is_current : bool)
-      ~(fallback_generation : int)
       (checkpoint : Agent_core.Checkpoint.t)
   =
   let generation =

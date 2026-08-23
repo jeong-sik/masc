@@ -61,7 +61,6 @@ let set_turn_context
       ?prompt_fingerprint
       ?trace_id
       ?session_id
-      ?generation
       ?turn
       ?keeper_turn_id
       ?task_id

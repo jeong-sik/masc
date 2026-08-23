@@ -214,7 +214,6 @@ let cancel_pending config ~keeper_name request =
       Keeper_registry_event_queue.cancel_pending_accepted_result
         ~base_path:config.Workspace.base_path
         keeper_name
-        ~current_owner_nonce
-        ~applied_at:(Time_compat.now ())
+          ~applied_at:(Time_compat.now ())
         ~cancellation)
 ;;

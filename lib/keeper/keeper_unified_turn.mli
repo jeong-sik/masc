@@ -109,7 +109,6 @@ val next_fail_open_runtime_for_turn
 val record_streaming_cancelled_observation
   :  config:Workspace.config
   -> run_meta:Keeper_meta_contract.keeper_meta
-  -> run_generation:int
   -> runtime_id:string
   -> keeper_turn_id:int
   -> unit

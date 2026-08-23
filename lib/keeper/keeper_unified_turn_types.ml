@@ -340,7 +340,6 @@ let record_streaming_cancelled_observation
   Keeper_turn_helpers.record_pre_dispatch_terminal_observation
     ~config
     ~meta:run_meta
-    ~generation:run_generation
     ~runtime_id
     ~outcome:`Cancelled
     ~terminal_reason_code

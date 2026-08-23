@@ -96,7 +96,6 @@ let prior_cancellation_for_request
 
 let fresh_cancellation_for_request
       ~queue_state
-      ~owner_nonce
       ~source_ref
       ~source_incarnation
       ~operator_operation_id
@@ -155,7 +154,6 @@ let prior_transfer_for_request
 let fresh_transfer_for_request
       ~queue_state
       ~keeper_name
-      ~owner_nonce
       ~source_ref
       ~source_incarnation
       ~operator_operation_id
@@ -374,7 +372,6 @@ let run_admitted_request
       ~config
       ~base_path
       ~keeper_name
-      ~owner_nonce
       request
   =
   let* queue_state =
@@ -403,7 +400,6 @@ let run_admitted_request
       | None ->
         fresh_cancellation_for_request
           ~queue_state
-          ~owner_nonce
           ~source_ref
           ~source_incarnation
           ~operator_operation_id
@@ -436,7 +432,6 @@ let run_admitted_request
           fresh_transfer_for_request
             ~queue_state
             ~keeper_name
-            ~owner_nonce
             ~source_ref
             ~source_incarnation
             ~operator_operation_id
@@ -473,7 +468,6 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
                 ~config
                 ~base_path
                 ~keeper_name
-                ~owner_nonce
                 request)
      with
      | Ok (`Ran result) -> result

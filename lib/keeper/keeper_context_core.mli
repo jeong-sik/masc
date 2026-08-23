@@ -99,7 +99,6 @@ val save_agent_core_checkpoint :
   session:session_context ->
   agent_name:string ->
   ctx:working_context ->
-  generation:int ->
   (Agent_core.Checkpoint.t, string checkpoint_write_error) result
 (** [multimodal_policy]/[keeper_name] gate RFC §2.3 site-2 image eviction at the
     checkpoint write boundary (Store_only); required so every write path is
@@ -111,7 +110,6 @@ val save_agent_core_checkpoint_classified :
   session:session_context ->
   agent_name:string ->
   ctx:working_context ->
-  generation:int ->
   ( Agent_core.Checkpoint.t * Keeper_checkpoint_store.save_agent_core_outcome
   , string checkpoint_write_error )
   result
@@ -126,7 +124,6 @@ val save_agent_core_checkpoint_if_source :
   session:session_context ->
   agent_name:string ->
   ctx:working_context ->
-  generation:int ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
   ( Agent_core.Checkpoint.t * Keeper_checkpoint_store.checkpoint_installation
   , Keeper_checkpoint_store.checkpoint_cas_error checkpoint_write_error )
@@ -141,7 +138,6 @@ module For_testing : sig
     session:session_context ->
     agent_name:string ->
     ctx:working_context ->
-    generation:int ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
     ( Agent_core.Checkpoint.t * Keeper_checkpoint_store.checkpoint_installation
     , Keeper_checkpoint_store.checkpoint_cas_error checkpoint_write_error )

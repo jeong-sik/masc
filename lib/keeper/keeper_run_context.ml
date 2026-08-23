@@ -48,7 +48,6 @@ let prepare_run_context
       ~(runtime_id : string)
       ?temperature
       ?shared_context
-      ~(generation : int)
       ()
   =
   let receipt_started_at = Masc_domain.now_iso () in

@@ -186,10 +186,6 @@ val blocker_info_of_class :
 (** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
     for [klass].  [detail] defaults to [""]. *)
 
-val blocker_info_to_json : blocker_info -> Yojson.Safe.t
-(** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses
-    a structured object so the inner [runtime_exhaustion_reason] is
-    preserved across read/write cycles. *)
 
 (** {1 Runtime attempt provenance} *)
 

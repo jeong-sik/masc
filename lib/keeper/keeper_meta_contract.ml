@@ -204,22 +204,6 @@ type blocker_info = {
 
 let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
-let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
-  let klass_payload = match info.klass with
-    | Runtime_exhausted reason ->
-      `Assoc [ "name", `String "runtime_exhausted"
-             ; "reason", runtime_exhaustion_reason_to_json reason
-             ]
-    | _ -> `String (blocker_class_to_string info.klass)
-  in
-  let fields =
-    [ "klass", klass_payload
-    ; "detail", `String info.detail
-    ]
-  in
-  `Assoc fields
-;;
-
 type runtime_attempt_record =
   { provider_id : string
   ; http_status : int option

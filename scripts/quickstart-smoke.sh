@@ -126,6 +126,30 @@ then
   exit 1
 fi
 
+# quickstart.sh waits on /health, which answers as soon as the process serves
+# HTTP. That is liveness, not readiness: the auth config is loaded later, and
+# until it is, /mcp raises Auth_config_error and answers 503 rather than the
+# 401 asserted below. /dashboard answering 200 does not close that window
+# either -- it is a third surface with its own timing.
+#
+# /health/ready is the surface that states readiness, and it reports the phase
+# it is still in. Waiting on it is not a retry around a flaky assertion: the
+# assertions below still run exactly once, against a server that has said it is
+# ready. A server that never becomes ready fails here, naming the phase it
+# stalled in, instead of failing later as a confusing wrong status code.
+ready_deadline=$((SECONDS + 60))
+ready_body="$tmp/readiness.json"
+while :; do
+  ready_code="$(curl -sS -o "$ready_body" -w '%{http_code}' \
+    "http://127.0.0.1:${port}/health/ready" || echo "000")"
+  [[ "$ready_code" == "200" ]] && break
+  if (( SECONDS >= ready_deadline )); then
+    echo "quickstart-smoke: server not ready after 60s (HTTP $ready_code): $(cat "$ready_body")" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
 dashboard_code="$(curl -sS -o /dev/null -w '%{http_code}' \
   "http://127.0.0.1:${port}/dashboard")"
 [[ "$dashboard_code" == "200" ]] || {

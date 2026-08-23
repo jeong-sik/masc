@@ -42,7 +42,11 @@ let streaming_update_min_interval_sec = 3.0
    ceiling. *)
 let default_http_timeout_sec = Masc_http_client.default_request_timeout_sec
 
-let user_agent = "masc-slack-bot/0.1 (https://github.com/jeong-sik/masc)"
+let user_agent =
+  Printf.sprintf
+    "masc-slack-bot/%s (https://github.com/jeong-sik/masc)"
+    Build_version.current
+;;
 
 let auth_headers ~token =
   [ ("Authorization", "Bearer " ^ token); ("User-Agent", user_agent) ]

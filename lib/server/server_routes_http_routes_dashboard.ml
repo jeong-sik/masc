@@ -1815,12 +1815,14 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let cache_key = "transport_health" in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_transport_health_http_json ~state))
-         in
+         (* No route cache here. The producer is not a computation — it reads a
+            published cell and derives cache_state, stale_reason and
+            stale_age_ms from it. A second 30s cache in front of that served
+            the previous "fresh" payload after the inner surface had gone to an
+            error state, and froze stale_age_ms, so a client watching the age
+            saw it stand still while the surface aged (#27652). Every other
+            route cache on this router wraps an actual computation. *)
+         let json = dashboard_transport_health_http_json ~state in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/perf" (fun request reqd ->

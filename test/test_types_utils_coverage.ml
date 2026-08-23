@@ -517,19 +517,6 @@ let test_parse_gitdir_invalid () =
 (* Workspace_utils.sanitize Tests                                     *)
 (* ============================================================ *)
 
-let test_sanitize_html () =
-  let input = "<script>alert('xss')</script>" in
-  let result = Workspace_utils.sanitize_html input in
-  check bool "no angle brackets" true
-    (not (String.contains result '<') && not (String.contains result '>'));
-  check bool "escaped lt" true (String.length result > String.length input)
-
-let test_sanitize_html_quotes () =
-  let input = "Hello \"world\" & 'friends'" in
-  let result = Workspace_utils.sanitize_html input in
-  check bool "quotes escaped" true
-    (not (String.contains result '"') && not (String.contains result '\''))
-
 let test_safe_filename () =
   let input = "file with spaces & special<chars>.txt" in
   let result = Workspace_utils.safe_filename input in
@@ -693,8 +680,6 @@ let gitdir_tests = [
 ]
 
 let sanitize_tests = [
-  "html script", `Quick, test_sanitize_html;
-  "html quotes", `Quick, test_sanitize_html_quotes;
   "safe_filename special", `Quick, test_safe_filename;
   "safe_filename valid", `Quick, test_safe_filename_valid;
 ]

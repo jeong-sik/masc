@@ -4,16 +4,6 @@ let workspace_name = "Workspace timeline"
 
 let take = List.take
 
-let decode_message_entities content =
-  content
-  |> String_util.replace_substring ~needle:"&quot;" ~by:"\""
-  |> String_util.replace_substring ~needle:"&#x27;" ~by:"'"
-  |> String_util.replace_substring ~needle:"&apos;" ~by:"'"
-  |> String_util.replace_substring ~needle:"&lt;" ~by:"<"
-  |> String_util.replace_substring ~needle:"&gt;" ~by:">"
-  |> String_util.replace_substring ~needle:"&amp;" ~by:"&"
-;;
-
 let is_space = function
   | ' ' | '\t' | '\r' | '\n' -> true
   | _ -> false
@@ -85,7 +75,7 @@ let unique_preserving_order xs =
 
 let mentions_of_message (msg : Masc_domain.message) =
   let body_mentions =
-    decode_message_entities msg.content |> words |> List.filter_map mention_of_word
+    msg.content |> words |> List.filter_map mention_of_word
   in
   let direct =
     match msg.mention with
@@ -105,7 +95,7 @@ let is_workspace_message (msg : Masc_domain.message) =
 ;;
 
 let message_json (msg : Masc_domain.message) =
-  let body = decode_message_entities msg.content in
+  let body = msg.content in
   let mentions = mentions_of_message msg in
   let base =
     [ "id", `String (message_id msg)
@@ -151,7 +141,7 @@ let mention_inbox_json ?me (msg : Masc_domain.message) =
           ; "workspace_id", `String workspace_id
           ; "ts", `String msg.timestamp
           ; "sender", `String msg.from_agent
-          ; "snippet", `String (decode_message_entities msg.content |> snippet)
+          ; "snippet", `String (snippet msg.content)
           ; "ack_at", `Null
           ])
 ;;

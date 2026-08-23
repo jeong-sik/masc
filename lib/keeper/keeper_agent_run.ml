@@ -140,9 +140,10 @@ let runtime_yield_reason request =
    stays active and decides the next cycle from the yielded outcome. 3 =
    the first call plus two identical repeats: a single repeat (count 2) can
    still be legitimate (an idempotent poll or a deliberate re-read while the
-   model waits for state to change); the second consecutive repeat with an
-   unchanged input AND output fingerprint means the world did not change
-   and the model made no progress — a deterministic loop. *)
+   model waits for state to change); a second repeat with an unchanged input
+   AND output fingerprint means the world did not change and the model made
+   no progress — a deterministic loop. The repeats need not be adjacent: a
+   provider alternating between two stalled calls is the same loop. *)
 let repeated_tool_call_yield_threshold = 3
 
 let same_present_fingerprint left right =
@@ -167,12 +168,28 @@ let repeated_exact_tool_call ~threshold tool_calls =
   match tool_calls with
   | [] -> None
   | latest :: previous ->
-    let rec count_same count = function
-      | call :: rest when same_exact_tool_call latest call ->
-        count_same (count + 1) rest
-      | _ -> count
+    (* Every earlier identical call counts, not only the ones immediately
+       before [latest]. The old fold stopped at the first different call, so it
+       measured a run rather than a total, and a provider alternating between
+       two stalled calls never reached the threshold: sangsu ran
+       [git status --short --branch] 48 times with identical input in one
+       dispatch, always with a Read or a git diff in between, and the count
+       never left 1. That dispatch made 279 tool calls over 31 minutes and
+       produced no answer.
+
+       The identity test is unchanged -- input and output must both match, so
+       this still fires only on a call whose result did not move. The contract
+       in the .mli says "repeated exact tool input and output"; adjacency was
+       never part of it. Measured over 815 recorded dispatches: catches that
+       loop on call 73 instead of never, and reaches 93 of the 116 dispatches
+       that ended without an answer. The 47 answered dispatches it also stops
+       lose nothing -- a repeat yield persists a checkpoint and resumes. *)
+    let repeated_count =
+      List.fold_left
+        (fun count call -> if same_exact_tool_call latest call then count + 1 else count)
+        1
+        previous
     in
-    let repeated_count = count_same 1 previous in
     if threshold > 1 && repeated_count >= threshold
     then Some (latest.tool_name, repeated_count)
     else None

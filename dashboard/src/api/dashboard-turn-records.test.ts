@@ -501,3 +501,54 @@ describe('keeper turn record final input composition', () => {
     )
   })
 })
+
+describe('turn-records health: live vs ok (masc#28720)', () => {
+  it('accepts a live keeper whose newest finished record is past the SLO', async () => {
+    // The live case that used to be reported as 'ok'. taskmaster on 2026-08-14:
+    // latest_age_s 539.99 against a 420s SLO with a turn running. The decoder
+    // recomputed the age, called the response a contract violation, and the
+    // memory inspector rendered "유효하지 않은 keeper turn record payload".
+    getMock.mockResolvedValue({
+      ...payload(entry()),
+      freshness_slo_s: 420,
+      latest_age_s: 540,
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_100,
+      live_turn_last_progress_at_unix: 1_700_000_200,
+      health: 'live',
+    })
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.health).toBe('live')
+    expect(response.entries.length).toBe(1)
+  })
+
+  it("accepts a keeper's first turn: live with no records yet", async () => {
+    getMock.mockResolvedValue({
+      ...payload(),
+      latest_ts_unix: null,
+      latest_ts_iso: null,
+      latest_age_s: null,
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_100,
+      live_turn_last_progress_at_unix: 1_700_000_200,
+      health: 'live',
+    })
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.health).toBe('live')
+    expect(response.entries.length).toBe(0)
+  })
+
+  it('rejects live without a turn actually running', async () => {
+    getMock.mockResolvedValue({ ...payload(entry()), health: 'live' })
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow()
+  })
+
+  it('still rejects ok when the newest record is past the SLO', async () => {
+    getMock.mockResolvedValue({
+      ...payload(entry()),
+      freshness_slo_s: 420,
+      latest_age_s: 540,
+    })
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow()
+  })
+})

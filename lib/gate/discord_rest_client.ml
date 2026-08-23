@@ -48,7 +48,9 @@ let api_base =
 (* Discord requires a specific User-Agent format:
    "DiscordBot ($url, $version)". *)
 let user_agent =
-  "DiscordBot (https://github.com/jeong-sik/masc, 0.1)"
+  Printf.sprintf
+    "DiscordBot (https://github.com/jeong-sik/masc, %s)"
+    Build_version.current
 
 let auth_headers ~token =
   [ "Authorization", "Bot " ^ token

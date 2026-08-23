@@ -7,12 +7,26 @@ import { ensureDevToken } from './dev-token'
 import { isRecord, asBoolean, asNumber, asString, asRecordArray } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
-export type TurnPromptBlockId =
-  | 'keeper_instructions'
-  | 'dynamic_context'
-  | 'temporal_summary'
-  | 'memory_os_recall'
-  | 'operator_note'
+// The type is derived from the list, and the decoder reads the list, so a
+// block id is added or removed in one place. It used to be a hand-written
+// union with a switch beside it and a second switch in dashboard-keeper-prompt:
+// the persona hard-cut (masc#27048) updated the type and one switch, the twin
+// kept `case 'persona'`, and three adversarial-review rounds ran red on it.
+export const TURN_PROMPT_BLOCK_IDS = [
+  'keeper_instructions',
+  'dynamic_context',
+  'temporal_summary',
+  'memory_os_recall',
+  'operator_note',
+] as const
+
+export type TurnPromptBlockId = (typeof TURN_PROMPT_BLOCK_IDS)[number]
+
+export function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
+  return (TURN_PROMPT_BLOCK_IDS as readonly unknown[]).includes(raw)
+    ? (raw as TurnPromptBlockId)
+    : null
+}
 
 export type TurnInputComponentId =
   | `prompt.${TurnPromptBlockId}`
@@ -240,7 +254,13 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   latest_ts_unix: number | null
   latest_ts_iso: string | null
   latest_age_s: number | null
-  health: 'empty' | 'incompatible' | 'stale' | 'ok'
+  // 'live' and 'ok' are different answers. A running turn has not written its
+  // record yet, so the newest finished record's age says nothing about whether
+  // the store is keeping up; 'ok' additionally asserts that age is inside the
+  // SLO. The server used to send 'ok' for both, and the age check below read a
+  // live keeper's over-SLO age as a contract violation and dropped the whole
+  // payload (masc#28720).
+  health: 'empty' | 'incompatible' | 'stale' | 'ok' | 'live'
   stale_reason: 'no_entries' | 'incompatible_rows' | 'freshness_slo_exceeded' | null
   keeper: string
   count: number
@@ -308,19 +328,6 @@ function wholeSecondIsoOfUnixSeconds(raw: number): string | null {
   const date = new Date(Math.floor(raw) * 1000)
   if (!Number.isFinite(date.getTime())) return null
   return date.toISOString().replace('.000Z', 'Z')
-}
-
-function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
-  switch (raw) {
-    case 'keeper_instructions':
-    case 'dynamic_context':
-    case 'temporal_summary':
-    case 'memory_os_recall':
-    case 'operator_note':
-      return raw
-    default:
-      return null
-  }
 }
 
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
@@ -839,6 +846,7 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || raw.health === 'incompatible'
     || raw.health === 'stale'
     || raw.health === 'ok'
+    || raw.health === 'live'
       ? raw.health
       : null
   const stale_reason =
@@ -882,7 +890,11 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || entries === null
     || count !== entries.length
     || entries.some(row => row.record.keeper !== keeper)
-    || (entries.length === 0) !== (health === 'empty' || health === 'incompatible')
+    // 'live' says nothing about the row count: a keeper's first turn reports it
+    // with no entries yet, and a long-running turn reports it with the previous
+    // turns' rows present.
+    || (health !== 'live'
+      && (entries.length === 0) !== (health === 'empty' || health === 'incompatible'))
     || latest_ts_unix !== latestRecordTs
     || latest_ts_iso !== expectedLatestTsIso
     || (health === 'empty'
@@ -909,6 +921,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
         || latest_age_s === null
         || latest_age_s > freshness_slo_s
         || stale_reason !== null))
+    // No age constraint: that is what 'live' means. It does require that a turn
+    // really is running, and carries no stale reason.
+    || (health === 'live' && (!live_turn_in_progress || stale_reason !== null))
   ) return null
   return {
     source,

@@ -283,6 +283,162 @@ let planning_goal_json id phase priority =
     ; "priority", `Int priority
     ]
 
+(* The ledger rows as the server actually joins them, taken from a live
+   workspace: an approval leaves [reason] null and carries its text in
+   [evidence]; a refusal fills both with the same string. *)
+let verification_json ?verdict state =
+  `Assoc
+    [ "goal_id", `String "goal-x"
+    ; ( "completion"
+      , `Assoc
+          (("state", `String state)
+           :: (match verdict with None -> [] | Some v -> [ "verdict", v ])) )
+    ; "updated_at", `String "2026-08-23T13:15:16Z"
+    ]
+;;
+
+let proven_verdict evidence =
+  `Assoc
+    [ "outcome", `String "proven"
+    ; "reason", `Null
+    ; "verification_run_id", `String "01a02ec2"
+    ; "evidence", `String evidence
+    ; "recorded_at", `String "2026-08-23T13:15:16Z"
+    ]
+;;
+
+let refuted_verdict reason =
+  `Assoc
+    [ "outcome", `String "refuted"
+    ; "reason", `String reason
+    ; "verification_run_id", `String "01a028ce"
+    ; "evidence", `String reason
+    ; "recorded_at", `String "2026-08-22T09:30:53Z"
+    ]
+;;
+
+let decoded_proof ?verification ?last_review_note () =
+  let fields =
+    [ "id", `String "goal-x"
+    ; "title", `String "Goal x"
+    ; "phase", `String "executing"
+    ; "priority", `Int 1
+    ]
+    @ (match verification with None -> [] | Some v -> [ "verification", v ])
+    @ (match last_review_note with
+       | None -> []
+       | Some note -> [ "last_review_note", `String note ])
+  in
+  match Tui_decode.decode_planning_snapshot
+          (`Assoc
+            [ "goals", `List [ `Assoc fields ]
+            ; ( "rollup"
+              , `Assoc
+                  [ "active_count", `Int 1
+                  ; "verifying_count", `Int 0
+                  ; "done_count", `Int 0
+                  ; "dropped_count", `Int 0
+                  ] )
+            ; ( "task_backlog"
+              , `Assoc
+                  [ "todo", `Int 0
+                  ; "claimed", `Int 0
+                  ; "in_progress", `Int 0
+                  ; "done", `Int 0
+                  ; "cancelled", `Int 0
+                  ] )
+            ; "generated_at", `String "2026-08-23T13:25:01Z"
+            ])
+  with
+  | Error detail -> Alcotest.fail ("planning snapshot did not decode: " ^ detail)
+  | Ok snapshot ->
+    (match snapshot.Tui_decode.pl_goals with
+     | [ goal ] -> goal
+     | goals ->
+       Alcotest.fail
+         (Printf.sprintf "expected one goal, got %d" (List.length goals)))
+;;
+
+(* The phase says "executing" for a goal nobody asked about and for one the
+   judge refused with a reason. Before this the pane could not tell them apart,
+   and the reason — the whole product of the verification lane — stopped at the
+   wire. *)
+let test_planning_goal_carries_the_judge_verdict () =
+  let proof goal = goal.Tui_decode.pg_proof in
+  Alcotest.check Alcotest.bool "an approval carries what was measured" true
+    (match
+       proof
+         (decoded_proof
+            ~verification:
+              (verification_json "proof_proven"
+                 ~verdict:
+                   (proven_verdict
+                      "The file smoke-goal-tools/measurement.txt records \
+                       smoke_tools_measured = 42, which matches the declared \
+                       target value of 42."))
+            ())
+     with
+     | Tui_decode.Proof_proven (Some evidence) ->
+       Astring.String.is_infix ~affix:"smoke_tools_measured = 42" evidence
+     | _ -> false);
+  Alcotest.check Alcotest.bool "a refusal carries why" true
+    (match
+       proof
+         (decoded_proof
+            ~verification:
+              (verification_json "proof_refuted"
+                 ~verdict:(refuted_verdict "the rollup does not attempt the work"))
+            ())
+     with
+     | Tui_decode.Proof_refuted (Some reason) ->
+       Astring.String.is_infix ~affix:"does not attempt" reason
+     | _ -> false);
+  Alcotest.check Alcotest.bool "a pending request is neither" true
+    (match proof (decoded_proof ~verification:(verification_json "proof_pending") ()) with
+     | Tui_decode.Proof_pending -> true
+     | _ -> false);
+  Alcotest.check Alcotest.bool "an idle ledger is idle" true
+    (match proof (decoded_proof ~verification:(verification_json "idle") ()) with
+     | Tui_decode.Proof_idle -> true
+     | _ -> false)
+;;
+
+(* An unreadable ledger is not an unreviewed goal. Rendering it as idle would
+   disguise corruption as quiet, which is what the server's own projection note
+   refuses to do. *)
+let test_planning_goal_separates_unreadable_from_unreviewed () =
+  Alcotest.check Alcotest.bool "a ledger error says so" true
+    (match
+       (decoded_proof
+          ~verification:
+            (`Assoc [ "state", `String "ledger_error"; "detail", `String "bad json" ])
+          ())
+         .Tui_decode.pg_proof
+     with
+     | Tui_decode.Proof_unreadable (Some detail) ->
+       Astring.String.is_infix ~affix:"bad json" detail
+     | _ -> false);
+  Alcotest.check Alcotest.bool "a state this build does not know is not silently idle" true
+    (match
+       (decoded_proof ~verification:(verification_json "proof_teleported") ())
+         .Tui_decode.pg_proof
+     with
+     | Tui_decode.Proof_unreadable _ -> true
+     | _ -> false);
+  Alcotest.check Alcotest.bool "no verification at all is idle" true
+    (match (decoded_proof ()).Tui_decode.pg_proof with
+     | Tui_decode.Proof_idle -> true
+     | _ -> false)
+;;
+
+(* With no verdict the keeper's own note is what the row has to say. *)
+let test_planning_goal_keeps_the_last_review_note () =
+  Alcotest.check (Alcotest.option Alcotest.string) "the note is decoded"
+    (Some "blocked on the platform gap")
+    (decoded_proof ~last_review_note:"blocked on the platform gap" ())
+      .Tui_decode.pg_last_review_note
+;;
+
 let planning_snapshot_json ?(running_key = "in_progress") () =
   `Assoc
     [ ( "goals"
@@ -942,6 +1098,40 @@ let test_decode_json_response_body_allows_empty_success () =
       Alcotest.failf "expected empty object, got %s" (Yojson.Safe.to_string json)
   | Error err -> Alcotest.fail err
 
+(* The tools write envelope {ok, message}: the Board compose pane reports the
+   server's own message either way, and a shape the endpoint never sends is
+   an error rather than a guessed success. *)
+let test_tool_envelope_outcome_ok_carries_message () =
+  match Tui_decode.tool_envelope_outcome (`Assoc [ ("ok", `Bool true); ("message", `String "post created") ]) with
+  | Ok "post created" -> ()
+  | Ok other -> Alcotest.failf "expected server message, got %s" other
+  | Error err -> Alcotest.fail err
+
+let test_tool_envelope_outcome_ok_without_message_defaults () =
+  match Tui_decode.tool_envelope_outcome (`Assoc [ ("ok", `Bool true) ]) with
+  | Ok "posted" -> ()
+  | Ok other -> Alcotest.failf "expected default ok note, got %s" other
+  | Error err -> Alcotest.fail err
+
+let test_tool_envelope_outcome_rejection_carries_message () =
+  match
+    Tui_decode.tool_envelope_outcome
+      (`Assoc [ ("ok", `Bool false); ("message", `String "Title must not be empty") ])
+  with
+  | Error "Title must not be empty" -> ()
+  | Error other -> Alcotest.failf "expected server rejection, got %s" other
+  | Ok other -> Alcotest.failf "expected error, got %s" other
+
+let test_tool_envelope_outcome_rejects_unexpected_shapes () =
+  let cases = [ `String "nope"; `Assoc [ ("ok", `String "yes") ]; `Assoc [] ] in
+  List.iter
+    (fun json ->
+       match Tui_decode.tool_envelope_outcome json with
+       | Error "unexpected tool response envelope" -> ()
+       | Error other -> Alcotest.failf "expected envelope error, got %s" other
+       | Ok other -> Alcotest.failf "expected error, got %s" other)
+    cases
+
 type parent_node = {
   node_id : string;
   parent_id : string option;
@@ -979,6 +1169,369 @@ let system_log_snapshot_json entries =
     ; ("latest_seq", `Int 774272)
     ; ("returned", `Int (List.length entries))
     ]
+
+(* Verification requests. The shape is [Dashboard_verification.request_to_json]
+   -- fields are asserted against what that writer emits, not against a shape
+   invented here. *)
+let verification_request_json ?(next_action = `Null)
+    ?(evidence = [ "artifact:reports/proof.json" ])
+    ?(evidence_error = `Null) () =
+  `Assoc
+    [ ("request_id", `String "vr-1")
+    ; ("task_id", `String "task-470")
+    ; ("task_title", `String "wire the approval gate")
+    ; ("request_kind", `String "task_completion")
+    ; ("request_summary", `String "tests green, gate installed")
+    ; ("next_action", next_action)
+    ; ("created_at", `String "2026-08-23T09:00:00Z")
+    ; ("submitted_by", `String "keeper.one")
+    ; ("completion_contract", `List [ `String "tests pass" ])
+    ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
+    ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
+    ; ("evidence_projection_error", evidence_error)
+    ]
+
+let verification_snapshot_json ?(total = 3) requests =
+  `Assoc
+    [ ("updated_at", `String "2026-08-23T09:00:01Z")
+    ; ("total", `Int total)
+    ; ("requests", `List requests)
+    ]
+
+(* Tool inventory. The envelope is /dashboard/tools; the rows are
+   [tool_inventory_json]. *)
+let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
+  `Assoc
+    [ ("name", `String "masc_board_post")
+    ; ("description", `String "Post to the board")
+    ; ("registered_schema", `Bool true)
+    ; ("direct_call_allowed", direct)
+    ; ("doc_refs", `List [])
+    ; ("prompt_hints", `List [])
+    ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
+    ]
+
+let tool_snapshot_json tools =
+  `Assoc
+    [ ("generated_at", `String "2026-08-23T09:00:00Z")
+    ; ("config_resolution", `Assoc [])
+    ; ("runtime_resolution", `Assoc [])
+    ; ( "tool_inventory"
+      , `Assoc
+          [ ("count", `Int (List.length tools))
+          ; ("tools", `List tools)
+          ; ("surface_summary", `Assoc [])
+          ] )
+    ; ("tool_usage", `Assoc [])
+    ]
+
+let test_decode_tool_snapshot_reads_the_live_shape () =
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "count" 1 snapshot.Tui_decode.ts_count;
+      (match snapshot.Tui_decode.ts_tools with
+       | [ t ] ->
+           Alcotest.(check string) "name" "masc_board_post"
+             t.Tui_decode.tl_name;
+           Alcotest.(check (list string)) "where it is visible"
+             [ "public_mcp" ] t.Tui_decode.tl_surfaces;
+           Alcotest.(check bool) "callable directly" true
+             t.Tui_decode.tl_direct_call
+       | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
+
+let test_decode_tool_projected_nowhere () =
+  (* A registered tool on no surface is reachable by nothing. Kept as an empty
+     list rather than dropped: that it exists and is projected nowhere is the
+     reading. *)
+  match
+    Tui_decode.decode_tool_snapshot
+      (tool_snapshot_json [ tool_entry_json ~surfaces:[] () ])
+  with
+  | Ok { Tui_decode.ts_tools = [ t ]; _ } ->
+      Alcotest.(check (list string)) "nowhere" [] t.Tui_decode.tl_surfaces
+  | Ok _ -> Alcotest.fail "expected one tool"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_tool_absent_direct_call_is_off () =
+  match
+    Tui_decode.decode_tool_snapshot
+      (tool_snapshot_json [ tool_entry_json ~direct:`Null () ])
+  with
+  | Ok { Tui_decode.ts_tools = [ t ]; _ } ->
+      Alcotest.(check bool) "absent means not callable" false
+        t.Tui_decode.tl_direct_call
+  | Ok _ -> Alcotest.fail "expected one tool"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_tool_snapshot_without_inventory_is_an_error () =
+  (* The envelope without its inventory is not an empty inventory; reading it
+     as one would draw a server that answered wrong as a server with no
+     tools. *)
+  match
+    Tui_decode.decode_tool_snapshot (`Assoc [ ("generated_at", `String "x") ])
+  with
+  | Ok _ -> Alcotest.fail "an envelope with no inventory should not decode"
+  | Error err -> Alcotest.(check bool) "says so" true (String.length err > 0)
+
+(* Connectors. Shape is each connector's own connector_json; the fields below
+   are the ones every connector emits. *)
+let connector_json ?(available = `Bool true) ?(connected = `Bool true)
+    ?(channel = `String "#release-deployment") () =
+  `Assoc
+    [ ("connector_id", `String "slack")
+    ; ("display_name", `String "Slack")
+    ; ("available", available)
+    ; ("connected", connected)
+    ; ("status", `String "ready")
+    ; ("channel", channel)
+    ; ("capabilities", `List [ `String "post" ])
+    ]
+
+let connector_snapshot_json ?(active = 1) connectors =
+  `Assoc
+    [ ("connectors", `List connectors)
+    ; ("total", `Int (List.length connectors))
+    ; ("active_count", `Int active)
+    ; ("generated_at", `String "2026-08-23T09:00:00Z")
+    ]
+
+let test_decode_connector_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json [ connector_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "total" 1 snapshot.Tui_decode.cs_total;
+      Alcotest.(check int) "active" 1 snapshot.Tui_decode.cs_active;
+      (match snapshot.Tui_decode.cs_connectors with
+       | [ c ] ->
+           Alcotest.(check string) "name" "Slack"
+             c.Tui_decode.cn_display_name;
+           Alcotest.(check bool) "available" true c.Tui_decode.cn_available;
+           Alcotest.(check bool) "connected" true c.Tui_decode.cn_connected;
+           Alcotest.(check (option string)) "channel"
+             (Some "#release-deployment") c.Tui_decode.cn_channel
+       | cs -> Alcotest.failf "expected one connector, got %d" (List.length cs))
+
+let test_decode_connector_configured_but_unreachable () =
+  (* Available and connected are different questions. A connector that is set
+     up but cannot be reached needs a different action than one that was never
+     configured, so the two are not folded. *)
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json ~active:1
+         [ connector_json ~connected:(`Bool false) () ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "configured" true c.Tui_decode.cn_available;
+      Alcotest.(check bool) "but not reachable" false c.Tui_decode.cn_connected
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_connector_absent_flags_are_off () =
+  (* Defaulting the other way would draw a dead connector as a working one. *)
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json ~active:0
+         [ connector_json ~available:`Null ~connected:`Null ~channel:`Null () ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "not available" false c.Tui_decode.cn_available;
+      Alcotest.(check bool) "not connected" false c.Tui_decode.cn_connected;
+      Alcotest.(check (option string)) "no channel" None
+        c.Tui_decode.cn_channel
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* Repositories. Shape is [repository_json] in the repositories route. *)
+let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true) () =
+  `Assoc
+    [ ("id", `String "repo-1")
+    ; ("name", `String "masc")
+    ; ("url", `String "https://github.com/jeong-sik/masc")
+    ; ("local_path", `String "/Users/dancer/me/workspace/yousleepwhen/masc")
+    ; ("aliases", `List [])
+    ; ("default_branch", `String "main")
+    ; ("keepers", `List (List.map (fun k -> `String k) keepers))
+    ; ("status", `String "ready")
+    ; ("auto_sync", auto_sync)
+    ; ("sync_interval", `Int 300)
+    ; ("created_at", `String "2026-08-01T00:00:00Z")
+    ]
+
+let repository_snapshot_json repos =
+  `Assoc [ ("repositories", `List repos); ("total", `Int (List.length repos)) ]
+
+let test_decode_repository_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "total" 1 snapshot.Tui_decode.rs_total;
+      (match snapshot.Tui_decode.rs_repositories with
+       | [ r ] ->
+           Alcotest.(check string) "name" "masc" r.Tui_decode.rp_name;
+           Alcotest.(check string) "branch" "main"
+             r.Tui_decode.rp_default_branch;
+           Alcotest.(check (list string)) "who works in it" [ "keeper.one" ]
+             r.Tui_decode.rp_keepers;
+           Alcotest.(check bool) "auto sync" true r.Tui_decode.rp_auto_sync
+       | rs -> Alcotest.failf "expected one repository, got %d" (List.length rs))
+
+let test_decode_repository_absent_auto_sync_is_off () =
+  (* A repository that does not declare auto-sync is not syncing. Reading a
+     missing flag as true would tell an operator work is being pulled that is
+     not. *)
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json ~auto_sync:`Null () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check bool) "absent means off" false r.Tui_decode.rp_auto_sync
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_repository_with_no_keepers () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json ~keepers:[] () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check (list string)) "nobody assigned yet" []
+        r.Tui_decode.rp_keepers
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
+let harness_verdict_json ?(fallback = `Null) () =
+  `Assoc
+    [ ("timestamp", `Float 1755950000.0)
+    ; ("task_id", `String "task-470")
+    ; ("task_title", `String "wire the approval gate")
+    ; ("agent_name", `String "keeper.one")
+    ; ("gate", `String "verify")
+    ; ("verdict", `String "approve")
+    ; ("evaluator_runtime", `String "glm-coding")
+    ; ("fallback_reason", fallback)
+    ]
+
+let harness_snapshot_json verdicts =
+  `Assoc
+    [ ("generated_at", `Float 1755950001.0)
+    ; ("recent_verdicts", `List verdicts)
+    ; ("calibration", `Assoc [])
+    ]
+
+let test_decode_harness_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_harness_snapshot
+      (harness_snapshot_json [ harness_verdict_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      (match snapshot.Tui_decode.hs_verdicts with
+       | [ v ] ->
+           Alcotest.(check string) "which gate ran" "verify" v.Tui_decode.hv_gate;
+           Alcotest.(check string) "what it decided" "approve"
+             v.Tui_decode.hv_verdict;
+           Alcotest.(check string) "who decided it" "glm-coding"
+             v.Tui_decode.hv_evaluator;
+           Alcotest.(check (option string)) "and it was not a fallback" None
+             v.Tui_decode.hv_fallback_reason
+       | vs -> Alcotest.failf "expected one verdict, got %d" (List.length vs))
+
+let test_decode_harness_keeps_the_fallback_reason () =
+  (* A verdict reached by a fallback is not the verdict that was asked for.
+     Dropping the reason would show the two alike. *)
+  match
+    Tui_decode.decode_harness_snapshot
+      (harness_snapshot_json
+         [ harness_verdict_json ~fallback:(`String "evaluator unreachable") () ])
+  with
+  | Ok { Tui_decode.hs_verdicts = [ v ] } ->
+      Alcotest.(check (option string)) "the reason survives"
+        (Some "evaluator unreachable") v.Tui_decode.hv_fallback_reason
+  | Ok _ -> Alcotest.fail "expected one verdict"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_harness_with_no_verdicts_is_not_an_error () =
+  (* A quiet harness is a reading, not a failure. *)
+  match Tui_decode.decode_harness_snapshot (harness_snapshot_json []) with
+  | Ok snapshot ->
+      Alcotest.(check int) "nothing recorded yet" 0
+        (List.length snapshot.Tui_decode.hs_verdicts)
+  | Error err -> Alcotest.failf "an empty harness should decode: %s" err
+
+let test_decode_verification_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json [ verification_request_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "total is what the server holds, not what it sent" 3
+        snapshot.Tui_decode.vs_total;
+      (match snapshot.Tui_decode.vs_requests with
+       | [ request ] ->
+           Alcotest.(check string) "task" "task-470"
+             request.Tui_decode.vr_task_id;
+           Alcotest.(check string) "who submitted it" "keeper.one"
+             request.Tui_decode.vr_submitted_by;
+           Alcotest.(check (list string)) "what it must produce"
+             [ "artifact:reports/proof.json" ]
+             request.Tui_decode.vr_required_artifacts;
+           Alcotest.(check (option string)) "no next action offered" None
+             request.Tui_decode.vr_next_action
+       | requests ->
+           Alcotest.failf "expected one request, got %d" (List.length requests))
+
+let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
+  (* An empty list means nothing was submitted. Evidence that exists but could
+     not be read is the error field, and folding the two together would show a
+     broken submission as an absent one. *)
+  let decode json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  let none_submitted =
+    decode (verification_snapshot_json [ verification_request_json ~evidence:[] () ])
+  in
+  Alcotest.(check (list string)) "nothing submitted" []
+    none_submitted.Tui_decode.vr_submitted_evidence;
+  Alcotest.(check (option string)) "and nothing failed to read" None
+    none_submitted.Tui_decode.vr_evidence_error;
+  let unreadable =
+    decode
+      (verification_snapshot_json
+         [ verification_request_json ~evidence:[]
+             ~evidence_error:(`String "artifact path escapes the producer root")
+             ()
+         ])
+  in
+  Alcotest.(check (option string)) "the reason survives"
+    (Some "artifact path escapes the producer root")
+    unreadable.Tui_decode.vr_evidence_error
+
+let test_decode_verification_carries_a_next_action () =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json
+         [ verification_request_json
+             ~next_action:(`String "attach the missing artifact") ()
+         ])
+  with
+  | Ok { Tui_decode.vs_requests = [ r ]; _ } ->
+      Alcotest.(check (option string)) "what would move it forward"
+        (Some "attach the missing artifact") r.Tui_decode.vr_next_action
+  | Ok _ -> Alcotest.fail "expected one request"
+  | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_system_log_snapshot_reads_the_live_shape () =
   match
@@ -1061,6 +1614,53 @@ let test_decode_system_log_requires_the_message () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_tools",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_tool_snapshot_reads_the_live_shape;
+        Alcotest.test_case "a tool projected nowhere" `Quick
+          test_decode_tool_projected_nowhere;
+        Alcotest.test_case "absent direct-call is off" `Quick
+          test_decode_tool_absent_direct_call_is_off;
+        Alcotest.test_case "no inventory is an error" `Quick
+          test_decode_tool_snapshot_without_inventory_is_an_error;
+      ] );
+    ( "decode_connectors",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_connector_snapshot_reads_the_live_shape;
+        Alcotest.test_case "configured is not reachable" `Quick
+          test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "absent flags are off" `Quick
+          test_decode_connector_absent_flags_are_off;
+      ] );
+    ( "decode_repositories",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_repository_snapshot_reads_the_live_shape;
+        Alcotest.test_case "absent auto-sync is off" `Quick
+          test_decode_repository_absent_auto_sync_is_off;
+        Alcotest.test_case "a repository with no keepers" `Quick
+          test_decode_repository_with_no_keepers;
+      ] );
+    ( "decode_harness",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_harness_snapshot_reads_the_live_shape;
+        Alcotest.test_case "keeps the fallback reason" `Quick
+          test_decode_harness_keeps_the_fallback_reason;
+        Alcotest.test_case "an empty harness is a reading" `Quick
+          test_decode_harness_with_no_verdicts_is_not_an_error;
+      ] );
+    ( "decode_verification",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_verification_snapshot_reads_the_live_shape;
+        Alcotest.test_case "no evidence is not unreadable evidence" `Quick
+          test_decode_verification_keeps_no_evidence_apart_from_unreadable;
+        Alcotest.test_case "carries a next action" `Quick
+          test_decode_verification_carries_a_next_action;
+      ] );
     ( "decode_system_logs",
       [
         Alcotest.test_case "reads the live shape" `Quick
@@ -1108,6 +1708,12 @@ let () =
           test_decode_planning_snapshot_current_contract;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
+        Alcotest.test_case "goal carries the judge verdict" `Quick
+          test_planning_goal_carries_the_judge_verdict;
+        Alcotest.test_case "unreadable is not unreviewed" `Quick
+          test_planning_goal_separates_unreadable_from_unreviewed;
+        Alcotest.test_case "keeps the last review note" `Quick
+          test_planning_goal_keeps_the_last_review_note;
       ] );
     ( "decode_fleet_safety",
       [
@@ -1171,6 +1777,14 @@ let () =
           test_decode_json_response_body_rejects_error_status;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
+        Alcotest.test_case "tool envelope ok carries the message" `Quick
+          test_tool_envelope_outcome_ok_carries_message;
+        Alcotest.test_case "tool envelope ok without message defaults" `Quick
+          test_tool_envelope_outcome_ok_without_message_defaults;
+        Alcotest.test_case "tool envelope rejection carries the message" `Quick
+          test_tool_envelope_outcome_rejection_carries_message;
+        Alcotest.test_case "tool envelope rejects unexpected shapes" `Quick
+          test_tool_envelope_outcome_rejects_unexpected_shapes;
       ] );
     ( "bounded_parent_depth",
       [

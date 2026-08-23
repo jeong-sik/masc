@@ -33,6 +33,7 @@
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
   test_broadcast_wakeup_policy
+  test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
@@ -338,6 +339,7 @@
   test_env_keeper_scrub
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
+  test_broadcast_stores_raw_text
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions

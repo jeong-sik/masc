@@ -834,19 +834,32 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
   let seq = Workspace_state.next_seq config in
   let request_id = Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
   let mention = pre_extract_mention in
-  let safe_content = sanitize_message content in
-  let safe_agent = sanitize_agent_name from_agent in
-  let safe_msg_type =
+  (* Stored as written. This used to HTML-escape the content, so a message
+     containing a double quote was persisted as [&quot;] and every consumer
+     read the entity: the TUI, the Keeper prompts, the connectors. Models then
+     quoted [&quot;] back out of their own transcript into new broadcasts.
+
+     It protected nothing. The one consumer that needs escaping does it at its
+     own boundary -- [Keeper_chat_blocks.escape_html] builds the [html] block
+     the dashboard renders -- so escaping here only made that boundary escape
+     an entity twice and draw it as text.
+
+     Agent name and message type were escaped by the same call. Both are closed
+     or validated vocabularies, so that was a no-op; they are raw here for the
+     same reason the content is. *)
+  let stored_content = content in
+  let stored_agent = from_agent in
+  let stored_msg_type =
     match String.trim msg_type with
     | "" -> "broadcast"
-    | value -> sanitize_message value
+    | value -> value
   in
   let msg = {
     request_id;
     seq;
-    from_agent = safe_agent;
-    msg_type = safe_msg_type;
-    content = safe_content;
+    from_agent = stored_agent;
+    msg_type = stored_msg_type;
+    content = stored_content;
     mention;
     mention_delivery =
       (match mention with None -> Mention_passive | Some _ -> Mention_pending);
@@ -858,11 +871,11 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
   let delivery =
     { request_id
     ; seq
-    ; rendered = Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content
-    ; from_agent = safe_agent
-    ; content = safe_content
+    ; rendered = Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" stored_agent stored_content
+    ; from_agent = stored_agent
+    ; content = stored_content
     ; mention
-    ; msg_type = safe_msg_type
+    ; msg_type = stored_msg_type
     ; mention_delivery =
         (match mention with None -> Passive | Some _ -> Pending)
     ; audience
@@ -912,11 +925,11 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
       Log.Misc.info
         ~category:Log.Broadcast
         "workspace broadcast committed from=%s mention=%s request_id=%s seq=%d bytes=%d"
-        safe_agent
+        stored_agent
         mention_label
         request_id
         seq
-        (String.length safe_content));
+        (String.length stored_content));
      notify_workspace_message_mutation config msg;
      (match backend_publish config ~channel:(broadcast_channel config)
          ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
@@ -929,14 +942,14 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
                | Backend_types.IOError _ | Backend_types.InvalidKey _
                | Backend_types.ConnectionFailed _) as e) ->
         Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
-     emit_message_activity config ~from_agent:safe_agent ~content:safe_content
+     emit_message_activity config ~from_agent:stored_agent ~content:stored_content
        ~mention ();
      let mention_delivery =
        match deferred_by_predecessor with
        | None -> deliver_committed_mention ~audience config msg
        | Some reason -> Deferred reason
      in
-     observe safe_msg_type;
+     observe stored_msg_type;
      Ok { delivery with mention_delivery })
 
 let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal

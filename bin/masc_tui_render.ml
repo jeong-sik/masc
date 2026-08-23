@@ -103,6 +103,7 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Keepers _ | Board | Approvals | Planning
+            | Verification | Harness | Repositories | Connectors | Tools
             | System_logs ->
                 "  (2 then m to answer)"
           in
@@ -505,49 +506,50 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
     ^ fit_width (Terminal_text.single_line task.title) (cols - 6)
     ^ Ansi.reset);
   (* Each status carries its own timestamps and actors; one exhaustive match
-     keeps the row and the status from disagreeing about who did what. *)
-  (let status_line, note_lines =
-     match task.task_status with
-     | Masc_domain.Todo ->
-         ("todo — unclaimed", [])
-     | Masc_domain.Claimed { assignee; claimed_at } ->
-         ( Printf.sprintf "claimed by %s at %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line claimed_at)
-         , [] )
-     | Masc_domain.InProgress { assignee; started_at } ->
-         ( Printf.sprintf "in progress by %s since %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line started_at)
-         , [] )
-     | Masc_domain.AwaitingVerification
-         { assignee; submitted_at; verification_id; _ } ->
-         ( Printf.sprintf "awaiting verification by %s, submitted %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line submitted_at)
-         , [Printf.sprintf "verification %s"
-              (Terminal_text.single_line verification_id)] )
-     | Masc_domain.Done { assignee; completed_at; notes } ->
-         ( Printf.sprintf "done by %s at %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line completed_at)
-         , match notes with None -> [] | Some note -> [note] )
-     | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
-         ( Printf.sprintf "cancelled by %s at %s"
-             (Terminal_text.single_line cancelled_by)
-             (Terminal_text.single_line cancelled_at)
-         , match reason with None -> [] | Some r -> [r] )
-   in
-   box_line buf cols
-     (Ansi.dim ^ "  status   " ^ Ansi.reset
-     ^ fit_width status_line (cols - 16));
-   List.iter
-     (fun note ->
-        box_line buf cols
-          (Ansi.dim ^ "           " ^ fit_width
-             (Terminal_text.single_line note) (cols - 16)
-          ^ Ansi.reset))
-     note_lines);
+     keeps the row and the status from disagreeing about who did what. The
+     note lines stay counted so the body budget below shrinks with them --
+     a verification id must not push the helper row off the screen. *)
+  let status_line, note_lines =
+    match task.task_status with
+    | Masc_domain.Todo -> ("todo — unclaimed", [])
+    | Masc_domain.Claimed { assignee; claimed_at } ->
+        ( Printf.sprintf "claimed by %s at %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line claimed_at)
+        , [] )
+    | Masc_domain.InProgress { assignee; started_at } ->
+        ( Printf.sprintf "in progress by %s since %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line started_at)
+        , [] )
+    | Masc_domain.AwaitingVerification
+        { assignee; submitted_at; verification_id; _ } ->
+        ( Printf.sprintf "awaiting verification by %s, submitted %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line submitted_at)
+        , [Printf.sprintf "verification %s"
+             (Terminal_text.single_line verification_id)] )
+    | Masc_domain.Done { assignee; completed_at; notes } ->
+        ( Printf.sprintf "done by %s at %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line completed_at)
+        , match notes with None -> [] | Some note -> [note] )
+    | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
+        ( Printf.sprintf "cancelled by %s at %s"
+            (Terminal_text.single_line cancelled_by)
+            (Terminal_text.single_line cancelled_at)
+        , match reason with None -> [] | Some r -> [r] )
+  in
+  box_line buf cols
+    (Ansi.dim ^ "  status   " ^ Ansi.reset
+    ^ fit_width status_line (cols - 16));
+  List.iter
+    (fun note ->
+       box_line buf cols
+         (Ansi.dim ^ "           " ^ fit_width
+            (Terminal_text.single_line note) (cols - 16)
+         ^ Ansi.reset))
+    note_lines;
   box_line buf cols
     (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
        (Terminal_text.single_line task.created_at)
@@ -599,11 +601,13 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   in
   let total_lines = List.length body_lines in
   (* Chrome above and below the scrolling body: top border, header, divider,
-     the title block, the bottom border and the helper row. Clamped through the
-     same helper the keeper log pane uses. Ten, not nine: at nine the frame came
-     out one row taller than its budget, which cost the surface the composer
-     row rather than a body row. *)
-  let content_height = max 1 (rows - 10) in
+     the title block, the bottom border, the helper row and the composer row.
+     Clamped through the same helper the keeper log pane uses. Ten, not nine:
+     at nine the frame came out one row taller than its budget, which cost the
+     surface the composer row rather than a body row. On top of the ten, the
+     status note lines vary by state -- a verification id or cancellation
+     reason must shrink the body, not push rows off the bottom. *)
+  let content_height = max 1 (rows - 10 - List.length note_lines) in
   state.task_detail_scroll <-
     min state.task_detail_scroll
       (Metrics_tail.maximum_scroll ~entry_count:total_lines
@@ -782,7 +786,77 @@ let render_approvals (state : state) =
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
 
+(* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
+   posts and 588 are automation; the 22 a person wrote are what an operator is
+   scanning for, so those are the ones that get a mark. *)
+let board_kind_mark = function
+  | Some Post_by_person -> Ansi.bold ^ "@" ^ Ansi.reset
+  | Some Post_by_automation -> Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
+  | Some Post_by_system -> " "
+  | Some (Post_kind_unknown _) -> Ansi.yellow ^ "?" ^ Ansi.reset
+  | None -> " "
+;;
+
 (** Render the Board surface (list view). *)
+(** The new-post draft. The commit-message convention is stated on screen
+    rather than assumed: first line is the title, the rest is the body. A
+    draft taller than the viewport shows its tail, where the caret is -- the
+    operator is always writing at the bottom. *)
+let render_board_compose (state : state) =
+  let (rows, cols) = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let header = Printf.sprintf " MASC Board  %s[new post]%s  %s"
+    Ansi.cyan Ansi.reset
+    (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line buf cols
+    (Ansi.dim ^ "  first line: title   rest: body   Enter: new line"
+    ^ Ansi.reset);
+  (match state.board_post_error with
+   | Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  "
+         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ^ Ansi.reset)
+   | None -> ());
+  box_divider buf cols;
+  let text_width = max 10 (cols - 8) in
+  let draft_lines =
+    String.split_on_char '\n' (Buffer.contents state.board_draft)
+    |> List.concat_map (fun line ->
+           Message_layout.wrap_words ~max_cells:text_width
+             (Terminal_text.single_line line))
+  in
+  let error_rows = if Option.is_some state.board_post_error then 1 else 0 in
+  let content_height = max 1 (rows - 8 - error_rows) in
+  let visible_lines =
+    let total = List.length draft_lines in
+    if total > content_height then
+      List.filteri
+        (fun index _ -> index >= total - content_height)
+        draft_lines
+    else draft_lines
+  in
+  List.iter
+    (fun line ->
+       box_line buf cols
+         ("  " ^ fit_width line (cols - 8)))
+    visible_lines;
+  box_bottom buf cols;
+  let prompt =
+    if state.board_compose_armed then
+      "s:send  d:discard  esc:keep writing"
+    else
+      "type to write  esc:send or discard  Tab:surfaces  q:quit"
+  in
+  Buffer.add_string buf
+    (Printf.sprintf "%s  %s%s\n" Ansi.dim prompt Ansi.reset);
+  finish_frame ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
+
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -834,10 +908,18 @@ let render_board_list (state : state) =
         let p = List.nth state.board_posts idx in
         let is_selected = idx = state.board_cursor in
         let line =
-          Printf.sprintf "  %s  %s  %s  +%d  c%d"
+          Printf.sprintf "  %s %s  %s  %s  %s  +%d  c%d"
+            (board_kind_mark p.bp_kind)
             (fit_width (Terminal_text.single_line p.bp_id) 12)
+            (Ansi.dim
+             ^ fit_width
+                 (match Terminal_text.optional_single_line p.bp_hearth with
+                  | Some hearth -> hearth
+                  | None -> "")
+                 12
+             ^ Ansi.reset)
             (fit_width (Terminal_text.single_line p.bp_author) 16)
-            (fit_width (Terminal_text.single_line p.bp_title) (cols - 52))
+            (fit_width (Terminal_text.single_line p.bp_title) (cols - 68))
             p.bp_votes
             p.bp_comment_count
         in
@@ -976,6 +1058,41 @@ let planning_phase_color = function
   | Goal_phase.Completed -> Ansi.green
   | Goal_phase.Dropped -> Ansi.gray
 
+(* Where the goal stands with the completion judge, in one column. The phase
+   reads [executing] both for a goal nobody asked about and for one the judge
+   refused; without this the two are the same row. Idle is a blank rather than
+   a glyph — most goals have never been asked, and a mark on all of them would
+   carry no information. *)
+let planning_proof_mark = function
+  | Tui_decode.Proof_idle -> " "
+  | Tui_decode.Proof_pending -> Ansi.yellow ^ "\xe2\x80\xa6" ^ Ansi.reset
+  | Tui_decode.Proof_proven _ -> Ansi.green ^ "\xe2\x9c\x93" ^ Ansi.reset
+  | Tui_decode.Proof_refuted _ -> Ansi.red ^ "\xe2\x9c\x97" ^ Ansi.reset
+  | Tui_decode.Proof_unreadable _ -> Ansi.yellow ^ "!" ^ Ansi.reset
+;;
+
+(* The line under the list, for the goal the cursor is on. A verdict without its
+   reason is a colour and nothing else; the reason is what the judge produced
+   and the only thing that says what to do next. *)
+let planning_proof_detail (goal : planning_goal) =
+  match goal.pg_proof with
+  | Tui_decode.Proof_proven None -> Some (Ansi.green, "proven")
+  | Tui_decode.Proof_proven (Some evidence) -> Some (Ansi.green, "proven: " ^ evidence)
+  | Tui_decode.Proof_refuted None -> Some (Ansi.red, "refused")
+  | Tui_decode.Proof_refuted (Some reason) -> Some (Ansi.red, "refused: " ^ reason)
+  | Tui_decode.Proof_pending -> Some (Ansi.yellow, "waiting for the completion judge")
+  | Tui_decode.Proof_unreadable None ->
+      Some (Ansi.yellow, "verification ledger unreadable")
+  | Tui_decode.Proof_unreadable (Some detail) ->
+      Some (Ansi.yellow, "verification ledger unreadable: " ^ detail)
+  | Tui_decode.Proof_idle ->
+      (* Nothing from the judge. A keeper's own note is the next best thing the
+         row has to say, and it is what the operator wrote there to be read. *)
+      Option.map
+        (fun note -> (Ansi.dim, "note: " ^ note))
+        (Terminal_text.optional_single_line goal.pg_last_review_note)
+;;
+
 (** Render the Planning surface (list view). *)
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1041,7 +1158,8 @@ let render_planning_list (state : state) =
            box_empty buf cols
          done
        end else begin
-         let content_height = rows - 12 in
+         (* One row is reserved below the list for the selected goal's verdict. *)
+         let content_height = rows - 13 in
          let scroll_offset =
            if state.planning_cursor >= content_height then
              state.planning_cursor - content_height + 1
@@ -1063,10 +1181,11 @@ let render_planning_list (state : state) =
               | None -> ""
             in
              let line =
-               Printf.sprintf "%s%s%s[%s]%s P%d  %s%s"
+               Printf.sprintf "%s%s%s[%s]%s %s P%d  %s%s"
                  indent branch status_color
                  (fit_width status_label 8)
                  Ansi.reset
+                 (planning_proof_mark g.pg_proof)
                  g.pg_priority
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
@@ -1083,7 +1202,15 @@ let render_planning_list (state : state) =
              box_line buf cols content
            end else
              box_empty buf cols
-         done
+         done;
+         match List.nth_opt goals state.planning_cursor with
+         | None -> box_empty buf cols
+         | Some selected ->
+             (match planning_proof_detail selected with
+              | None -> box_empty buf cols
+              | Some (colour, text) ->
+                  box_line buf cols
+                    (colour ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset))
        end);
 
   box_bottom buf cols;
@@ -1095,7 +1222,8 @@ let render_planning_list (state : state) =
       ~cols buf
 
 (** Render the Planning surface (detail view). *)
-let render_planning_detail (state : state) (goal : planning_goal) =
+let render_planning_detail (state : state)
+    ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -1135,15 +1263,36 @@ let render_planning_detail (state : state) (goal : planning_goal) =
          (Printf.sprintf "  Metric: %s%s" m target)
    | None -> box_empty buf cols);
   box_empty buf cols;
+  (* A lifecycle request is the one state the detail carries between frames,
+     so it gets a row rather than an event log: the arm says what the next
+     press of the same key would do, and the error says what the server said
+     when the last one was refused. *)
+  (match armed with
+   | Some armed_action ->
+       box_line buf cols
+         (Ansi.yellow ^ Printf.sprintf "  armed: %s -- same key again to send"
+            (match armed_action with
+             | Goal_phase.Public_action.Request_complete -> "request completion"
+             | Goal_phase.Public_action.Drop -> "drop"
+             | Goal_phase.Public_action.Reopen -> "reopen")
+         ^ Ansi.reset)
+   | None -> ());
+  (match state.goal_action_error with
+   | Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  "
+         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ^ Ansi.reset)
+   | None -> ());
   box_divider buf cols;
 
-  for _ = 1 to rows - 14 do
+  for _ = 1 to rows - 16 do
     box_empty buf cols
   done;
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
   finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
@@ -1949,14 +2098,18 @@ let render_keeper_message (state : state) =
              }
               : Message_layout.entry)
           in
-          let thinking_tail =
-            Keeper_chat_transcript.thinking live
-            |> String.split_on_char '\n'
-            |> List.filter (fun line -> String.trim line <> "")
-            |> List.rev
-            |> function
+          (* The whole trail, not its last line. Reasoning is the only part of
+             a live turn the durable transcript does not keep, so the pane is
+             the one place it can be read, and one line out of it says what the
+             keeper concluded without saying how it got there. Blank lines are
+             dropped because models emit runs of them; the rest is one entry
+             the layout wraps like any other body. *)
+          let thinking_entry =
+            match Keeper_chat_transcript.thinking_lines live with
             | [] -> []
-            | last :: _ -> [ entry Message_layout.Thinking "thinking" last ]
+            | lines ->
+                [ entry Message_layout.Thinking "thinking"
+                    (String.concat "\n" lines) ]
           in
           let tool_entry =
             match Keeper_chat_transcript.tool_rows live with
@@ -1974,7 +2127,7 @@ let render_keeper_message (state : state) =
                     text
                 ]
           in
-          thinking_tail @ tool_entry @ text_entry
+          thinking_entry @ tool_entry @ text_entry
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in
@@ -2083,6 +2236,15 @@ let render_keeper_message (state : state) =
                (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
                   (Keeper_chat.terminal_safe_text body)))
            queued);
+    (if state.msg_older_loading then
+       box_line_styled buf cols ~style:Ansi.dim
+         "  loading older messages…"
+     else
+       match state.msg_older_error with
+       | Some detail ->
+           box_line_styled buf cols ~style:Ansi.yellow
+             ("  older messages could not be loaded; up retries: " ^ detail)
+       | None -> ());
     (if scroll > 0 then
        box_line_styled buf cols ~style:Ansi.yellow
          (Printf.sprintf
@@ -2109,7 +2271,7 @@ let render_keeper_message (state : state) =
                | Keeper_chat_transcript.Attention -> Ansi.yellow
              in
              box_line_styled buf cols ~style ("  " ^ text))
-           (Keeper_chat_transcript.status_rows live)
+           (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
     (match state.msg_prepared with
      | Some request when state.msg_inflight = None ->
@@ -2246,7 +2408,13 @@ let render_keeper_message (state : state) =
            | None, true -> "Enter:send")
     in
     let scroll_hint =
-      if scroll > 0 then "up/down:scroll  Ctrl-E:newest" else "up:scroll back"
+      if scroll > 0 then
+        (* At the oldest row with nothing more to fetch, say so: an operator
+           pressing up against a pane that will not move should know it is the
+           start of the conversation rather than a stuck key. *)
+        if state.msg_older_exist then "up/down:scroll  Ctrl-E:newest"
+        else "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+      else "up:scroll back"
     in
     let escape_hint =
       match state.msg_live with
@@ -2373,6 +2541,516 @@ let render_system_logs (state : state) =
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
+(* What is waiting on a verdict.
+
+   The columns answer the questions an operator opens this for: which task,
+   who submitted it, and what would move it forward. Evidence counts rather
+   than paths -- a row is a queue entry, and the paths belong to whoever opens
+   the task. *)
+let render_verification (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let requests =
+    match state.verification with None -> [] | Some s -> s.Masc.Tui_decode.vs_requests
+  in
+  let shown = List.length requests in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.verification with
+    | None ->
+        Printf.sprintf " MASC Verification  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        (* Both numbers, for the same reason the log surface shows both: "12"
+           beside a list of 12 would read as "that is all of them". *)
+        Printf.sprintf " MASC Verification (%d of %d)  %s  %s" shown
+          snapshot.Masc.Tui_decode.vs_total timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-14s %-16s %-9s %s" "Task" "Submitted by" "Evidence"
+      "What it asks for"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.verification_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.verification_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.verification_scroll max_scroll) in
+  state.verification_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.verification_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (nothing waiting on a verdict)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt requests idx with
+      | None -> box_empty buf cols
+      | Some r ->
+          let open Masc.Tui_decode in
+          (* Submitted against required. A request that owes three artifacts
+             and has one is the row an operator acts on first, and the pair
+             says that where a single count would not. *)
+          let evidence =
+            match r.vr_evidence_error with
+            | Some _ -> "unreadable"
+            | None ->
+                Printf.sprintf "%d/%d"
+                  (List.length r.vr_submitted_evidence)
+                  (List.length r.vr_required_artifacts)
+          in
+          let asks =
+            match r.vr_next_action with
+            | Some action -> action
+            | None -> r.vr_summary
+          in
+          let line =
+            Printf.sprintf "  %-14s %-16s %-9s %s"
+              (Terminal_text.single_line r.vr_task_id)
+              (Terminal_text.single_line r.vr_submitted_by)
+              evidence
+              (Terminal_text.single_line asks)
+          in
+          let style =
+            (* Evidence that cannot be read is the one row that cannot be
+               judged as it stands, so it reads as a problem rather than as a
+               queue entry. *)
+            match r.vr_evidence_error with
+            | Some _ -> Ansi.red
+            | None -> Ansi.reset
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
+
+(* What the harness decided, most recent first.
+
+   A verdict reached by a fallback evaluator is not the verdict that was asked
+   for, so the row says which evaluator answered and marks the ones that were
+   not the intended one. Reading a column of "approve" without that would say
+   the gate is working when it may only be degrading quietly. *)
+let render_harness (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let verdicts =
+    match state.harness with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.hs_verdicts
+  in
+  let shown = List.length verdicts in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let fallbacks =
+    List.length
+      (List.filter
+         (fun (v : Masc.Tui_decode.harness_verdict) ->
+           Option.is_some v.Masc.Tui_decode.hv_fallback_reason)
+         verdicts)
+  in
+  let header =
+    match state.harness with
+    | None ->
+        Printf.sprintf " MASC Harness  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some _ when fallbacks > 0 ->
+        (* The count is the reading an operator opens this for: verdicts that
+           came from something other than the evaluator the gate names. *)
+        Printf.sprintf " MASC Harness (%d verdicts, %d by fallback)  %s  %s"
+          shown fallbacks timestamp (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf " MASC Harness (%d verdicts)  %s  %s" shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task" "Gate" "Verdict"
+      "Evaluator"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.harness_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.harness_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.harness_scroll max_scroll) in
+  state.harness_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.harness_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no verdicts recorded)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt verdicts idx with
+      | None -> box_empty buf cols
+      | Some v ->
+          let open Masc.Tui_decode in
+          let evaluator =
+            match v.hv_fallback_reason with
+            | None -> v.hv_evaluator
+            | Some reason ->
+                Printf.sprintf "%s (fallback: %s)" v.hv_evaluator reason
+          in
+          let line =
+            Printf.sprintf "  %-8s %-14s %-9s %-9s %s"
+              (Terminal_text.clock_timestamp
+                 (Masc_domain.iso8601_of_unix_seconds v.hv_at))
+              (Terminal_text.single_line v.hv_task_id)
+              (Terminal_text.single_line v.hv_gate)
+              (Terminal_text.single_line v.hv_verdict)
+              (Terminal_text.single_line evaluator)
+          in
+          let style =
+            match v.hv_fallback_reason with
+            | Some _ -> Ansi.yellow
+            | None -> Ansi.reset
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
+
+(* The repositories a keeper can work in.
+
+   Auto-sync and the assigned keepers are the two columns that change what an
+   operator does next: a repository nobody is assigned to will not move on its
+   own, and one that is not syncing is working from whatever was last pulled. *)
+let render_repositories (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let repos =
+    match state.repositories with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.rs_repositories
+  in
+  let shown = List.length repos in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.repositories with
+    | None ->
+        Printf.sprintf " MASC Repositories  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf " MASC Repositories (%d)  %s  %s" shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status" "Sync"
+      "Keepers"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.repositories_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.repositories_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.repositories_scroll max_scroll) in
+  state.repositories_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.repositories_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no repositories registered)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt repos idx with
+      | None -> box_empty buf cols
+      | Some r ->
+          let open Masc.Tui_decode in
+          let keepers =
+            match r.rp_keepers with
+            | [] -> "-"
+            | names -> String.concat ", " names
+          in
+          let line =
+            Printf.sprintf "  %-18s %-12s %-9s %-6s %s"
+              (Terminal_text.single_line r.rp_name)
+              (Terminal_text.single_line r.rp_default_branch)
+              (Terminal_text.single_line r.rp_status)
+              (if r.rp_auto_sync then "auto" else "manual")
+              (Terminal_text.single_line keepers)
+          in
+          (* A repository nobody works in is dim rather than absent: it is
+             registered, and that it has no keeper is the thing to notice. *)
+          let style = match r.rp_keepers with [] -> Ansi.dim | _ -> Ansi.reset in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d repositories, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
+
+(* Where the gate can deliver.
+
+   Configured and reachable are separate columns because they call for
+   different actions: one is a setup gap, the other is something that was
+   working and is not. A connector that is set up but unreachable is the row
+   an operator acts on. *)
+let render_connectors (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let connectors =
+    match state.connectors with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.cs_connectors
+  in
+  let shown = List.length connectors in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.connectors with
+    | None ->
+        Printf.sprintf " MASC Connectors  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        Printf.sprintf " MASC Connectors (%d of %d available)  %s  %s"
+          snapshot.Masc.Tui_decode.cs_active snapshot.Masc.Tui_decode.cs_total
+          timestamp (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector" "Configured"
+      "Reachable" "Status" "Channel"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.connectors_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.connectors_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.connectors_scroll max_scroll) in
+  state.connectors_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.connectors_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no connectors registered)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt connectors idx with
+      | None -> box_empty buf cols
+      | Some c ->
+          let open Masc.Tui_decode in
+          let yes_no flag = if flag then "yes" else "no" in
+          let line =
+            Printf.sprintf "  %-16s %-11s %-11s %-10s %s"
+              (Terminal_text.single_line c.cn_display_name)
+              (yes_no c.cn_available) (yes_no c.cn_connected)
+              (Terminal_text.single_line c.cn_status)
+              (Terminal_text.single_line_or ~default:"-" c.cn_channel)
+          in
+          let style =
+            (* Set up and unreachable is the row to act on: it was working.
+               Never configured is dim -- it is a choice, not a fault. *)
+            if c.cn_available && not c.cn_connected then Ansi.red
+            else if not c.cn_available then Ansi.dim
+            else Ansi.reset
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d connectors, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
+
+(* The tools a keeper can reach.
+
+   Surfaces is the column that carries the reading: a tool registered and
+   projected nowhere is reachable by nothing, which the name and description
+   do not say. *)
+let render_tools (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let tools =
+    match state.tools_inventory with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.ts_tools
+  in
+  let shown = List.length tools in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let unprojected =
+    List.length
+      (List.filter
+         (fun (t : Masc.Tui_decode.tool_entry) ->
+           t.Masc.Tui_decode.tl_surfaces = [])
+         tools)
+  in
+  let header =
+    match state.tools_inventory with
+    | None ->
+        Printf.sprintf " MASC Tools  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some _ when unprojected > 0 ->
+        Printf.sprintf " MASC Tools (%d, %d on no surface)  %s  %s" shown
+          unprojected timestamp (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf " MASC Tools (%d)  %s  %s" shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-30s %-8s %s" "Tool" "Direct" "Surfaces"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.tools_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.tools_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.tools_scroll max_scroll) in
+  state.tools_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.tools_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no tools registered)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt tools idx with
+      | None -> box_empty buf cols
+      | Some t ->
+          let open Masc.Tui_decode in
+          let surfaces =
+            match t.tl_surfaces with
+            | [] -> "none"
+            | names -> String.concat ", " names
+          in
+          let line =
+            Printf.sprintf "  %-30s %-8s %s"
+              (Terminal_text.single_line t.tl_name)
+              (if t.tl_direct_call then "yes" else "no")
+              (Terminal_text.single_line surfaces)
+          in
+          let style = if t.tl_surfaces = [] then Ansi.yellow else Ansi.reset in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -2396,6 +3074,7 @@ let render_surface (state : state) =
   | Board ->
       (match state.board_mode with
        | Board_list -> render_board_list state
+       | Board_compose -> render_board_compose state
        | Board_read post_id ->
            match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
            | Some post -> render_board_read state post
@@ -2406,9 +3085,16 @@ let render_surface (state : state) =
        | Planning_detail goal_id ->
            let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
            match List.find_opt (fun g -> g.pg_id = goal_id) goals with
-           | Some goal -> render_planning_detail state goal
+           | Some goal ->
+               render_planning_detail state
+                 ~armed:(goal_action_armed_for state goal_id) goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
+  | Verification -> render_verification state
+  | Harness -> render_harness state
+  | Repositories -> render_repositories state
+  | Connectors -> render_connectors state
+  | Tools -> render_tools state
   | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =

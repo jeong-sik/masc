@@ -213,7 +213,7 @@ let agents_drop_count () =
     ~labels:
       [
         ("surface", "workspace_agents");
-        ("reason", Safe_ops.persistence_read_drop_reason_entry_load_error);
+        ("reason", Read_drop_reason.to_wire Read_drop_reason.Entry_load_error);
       ]
     ()
 

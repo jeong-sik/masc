@@ -415,19 +415,13 @@ let read_json_file_logged ~label path : Yojson.Safe.t option =
     Log.Misc.warn "[%s] failed to read JSON from %s: %s" label path msg;
     None
 
-let persistence_read_drop_reason_list_dir_error = "list_dir_error"
-let persistence_read_drop_reason_entry_load_error = "entry_load_error"
-let persistence_read_drop_reason_invalid_payload = "invalid_payload"
-let persistence_read_drop_reason_json_syntax_error = "json_syntax_error"
-
 (* The last line of an append-only file was still being written when a tail
    reader reached it. Kept apart from [entry_load_error] because it is not a
    loss: the reader falls through to the previous complete line and the next
    read sees the row whole. Same not-a-loss family as RFC-0134's
    [concurrent_removal] and [transient_fd_pressure]. *)
-let persistence_read_drop_reason_tail_partial_write = "tail_partial_write"
-
 let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
+  let reason = Read_drop_reason.to_wire reason in
   Log.Misc.warn "[%s] persistence read drop (%s) path=%s: %s"
     surface reason path detail;
   on_drop ()
@@ -436,11 +430,12 @@ let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
    callback existed so callers could supply the counter, and every JSONL
    surface supplied the same one. *)
 let report_persistence_read_drop_counted ~surface ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store_core.inc_counter
         Otel_metric_names.metric_persistence_read_drops
-        ~labels:[ ("surface", surface); ("reason", reason) ]
+        ~labels:[ ("surface", surface); ("reason", reason_wire) ]
         ())
     ~surface ~reason ~path ~detail
 

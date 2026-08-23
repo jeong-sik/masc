@@ -21,6 +21,37 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
     fallback path (e.g. bind-related subprocess transport errors on macOS). *)
 val should_retry_unix_fallback : exn -> bool
 
+(** {1 Exit reason} *)
+
+type exit_reason =
+  | Completed of int
+      (** The program ran and returned this code. Never [124] — see
+          [Timed_out]. *)
+  | Timed_out
+      (** The run exceeded its budget and [Process_eio] killed it. The status
+          it synthesizes is [Unix.WEXITED 124], following timeout(1), so a
+          program that exits 124 on its own is indistinguishable from one that
+          was killed. That has been true since this status was introduced; the
+          variant names it instead of leaving every caller to compare against
+          the number. *)
+  | Signaled of int
+  | Stopped of int
+
+val exit_reason_of_status : Unix.process_status -> exit_reason
+(** Classify a status this module produced.
+
+    Three modules outside this one had come to read [Unix.WEXITED 124]
+    directly (repo_git, voice_bridge_core, exec_dispatch), which made the
+    number a contract nobody had written down: changing it here would have
+    left their arms unreachable with nothing to say so, and a repository whose
+    origin lookup timed out would have been skipped from discovery instead of
+    aborting it (#28651). *)
+
+val timed_out_status : Unix.process_status
+(** The status this module synthesizes for [Timed_out]. Exposed for the tests
+    and callers that construct one; classify with [exit_reason_of_status]
+    rather than comparing against it. *)
+
 (** {1 Observability hook (#9632)} *)
 
 (** Origin at which a [run_argv*] timeout budget was exhausted.

@@ -147,16 +147,40 @@ let test_full_profile_admission_uses_catalog_direct_call_policy () =
       Masc.Mcp_server_eio_tool_profile.Full
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
+  (* The corpus is every tool name this binary knows, from both places that
+     know one. [Config.raw_all_tool_schemas] is nine static lists concatenated
+     by hand and the operator family is not among them, because those tools
+     reach the surface through [Tool_spec.register] at load time instead. A
+     corpus that reads only the static side never visits a Hidden tool with
+     direct calls denied, which is the branch the control assertion at the
+     bottom of this test is here to prove was visited. *)
+  let corpus_names =
+    List.map
+      (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      Masc.Config.raw_all_tool_schemas
+    @ Tool_dispatch.all_schema_names ()
+    @ Tool_catalog.known_names ()
+    |> List.sort_uniq String.compare
+  in
   let hidden_disallowed = ref 0 in
   List.iter
-    (fun (schema : Masc_domain.tool_schema) ->
+    (fun name ->
+      let schema : Masc_domain.tool_schema =
+        { name; description = ""; input_schema = `Assoc [] }
+      in
       let metadata = Tool_catalog.metadata schema.name in
       if
         metadata.visibility = Tool_catalog.Hidden
         && not metadata.allow_direct_call_when_hidden
       then incr hidden_disallowed;
+      (* Three conditions, not two. The front-door corpus is one of them, and
+         it was invisible while this loop only walked names that were in it by
+         construction: masc_pause carries a broadcast policy and is dispatched
+         in process, but tool_control keeps its schema out of Config on
+         purpose, so the Full profile does not admit it and should not. *)
       let expected =
-        Tool_catalog.is_visible ~include_hidden:true schema.name
+        Masc.Config.is_raw_tool_name schema.name
+        && Tool_catalog.is_visible ~include_hidden:true schema.name
         && Tool_catalog.allow_direct_call schema.name
       in
       check
@@ -172,7 +196,7 @@ let test_full_profile_admission_uses_catalog_direct_call_policy () =
         (schema.name ^ " Full-profile advertisement matches admission")
         expected
         (List.mem schema.name advertised_names))
-    Masc.Config.raw_all_tool_schemas;
+    corpus_names;
   check
     bool
     "contract corpus includes a hidden direct-call denial"

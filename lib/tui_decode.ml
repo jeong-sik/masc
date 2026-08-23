@@ -51,6 +51,13 @@ type keeper_runtime = {
   kr_runtime_id : string;
 }
 
+type goal_proof =
+  | Proof_idle
+  | Proof_pending
+  | Proof_proven of string option
+  | Proof_refuted of string option
+  | Proof_unreadable of string option
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -59,6 +66,8 @@ type planning_goal = {
   pg_due_date : string option;
   pg_metric : string option;
   pg_target_value : string option;
+  pg_proof : goal_proof;
+  pg_last_review_note : string option;
 }
 
 type planning_rollup = {
@@ -778,6 +787,30 @@ let decode_json_response_body ~allow_empty ~status_code ~body :
     try Ok (Yojson.Safe.from_string body)
     with Yojson.Json_error e -> Error (Printf.sprintf "(JSON parse: %s)" e)
 
+(** The [/api/v1/tools/*] write endpoints answer one envelope,
+    [{ok : bool; message : string}]. Reduced to a one-line outcome here so
+    every call site reports the server's own message instead of re-decoding
+    the envelope -- and a shape the endpoint never sends is an error rather
+    than a guessed success. *)
+let tool_envelope_outcome (json : Yojson.Safe.t) : (string, string) result =
+  let envelope_message fields =
+    match List.assoc_opt "message" fields with
+    | Some (`String message) -> message
+    | Some _ | None -> ""
+  in
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "ok" fields with
+      | Some (`Bool ok) ->
+          let message = envelope_message fields in
+          if ok then
+            Ok (if String.equal message "" then "posted" else message)
+          else
+            Error
+              (if String.equal message "" then "request rejected" else message)
+      | _ -> Error "unexpected tool response envelope")
+  | _ -> Error "unexpected tool response envelope"
+
 let missing_field key =
   Error (Printf.sprintf "missing required field '%s'" key)
 
@@ -885,6 +918,48 @@ let decode_list label decode items =
   in
   loop 0 [] items
 
+(* The ledger row the server joins onto each goal. Two shapes reach here: the
+   record, whose [completion] names the state, and [ledger_error_to_yojson],
+   which puts ["ledger_error"] at the top with a [detail]. Read leniently — this
+   is a projection for a pane and a shape it cannot read must not cost the
+   operator the goal list — but every branch says something different, so an
+   unreadable ledger never renders as an unreviewed goal.
+
+   The text comes from [evidence] before [reason]: an approval carries its text
+   in [evidence] and leaves [reason] null, while a refusal fills both with the
+   same string. *)
+let decode_goal_proof json =
+  let string_at container key =
+    match member key container with
+    | `String value when String.trim value <> "" -> Some (String.trim value)
+    | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
+    | `Null ->
+      None
+  in
+  let verdict_text completion =
+    let verdict = member "verdict" completion in
+    match string_at verdict "evidence" with
+    | Some _ as text -> text
+    | None -> string_at verdict "reason"
+  in
+  match json with
+  | `Assoc _ ->
+    (match string_at json "state" with
+     | Some "ledger_error" -> Proof_unreadable (string_at json "detail")
+     | Some other -> Proof_unreadable (Some other)
+     | None ->
+       let completion = member "completion" json in
+       (match string_at completion "state" with
+        | Some "proof_proven" -> Proof_proven (verdict_text completion)
+        | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
+        | Some "proof_pending" -> Proof_pending
+        | Some "idle" -> Proof_idle
+        | Some other -> Proof_unreadable (Some other)
+        | None -> Proof_idle))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Proof_idle
+;;
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
@@ -898,6 +973,8 @@ let decode_planning_goal json =
   let* pg_due_date = optional_string_field json "due_date" in
   let* pg_metric = optional_string_field json "metric" in
   let* pg_target_value = optional_string_field json "target_value" in
+  let* pg_last_review_note = optional_string_field json "last_review_note" in
+  let pg_proof = decode_goal_proof (member "verification" json) in
   Ok
     {
       pg_id;
@@ -907,6 +984,8 @@ let decode_planning_goal json =
       pg_due_date;
       pg_metric;
       pg_target_value;
+      pg_proof;
+      pg_last_review_note;
     }
 
 let decode_planning_rollup json =
@@ -983,6 +1062,226 @@ let decode_system_log_entry json =
     ; sl_message
     }
 
+type tool_entry = {
+  tl_name : string;
+  tl_description : string;
+  tl_surfaces : string list;
+  tl_direct_call : bool;
+}
+
+type tool_snapshot = {
+  ts_tools : tool_entry list;
+  ts_count : int;
+}
+
+type connector = {
+  cn_id : string;
+  cn_display_name : string;
+  cn_available : bool;
+  cn_connected : bool;
+  cn_status : string;
+  cn_channel : string option;
+}
+
+type connector_snapshot = {
+  cs_connectors : connector list;
+  cs_total : int;
+  cs_active : int;
+}
+
+type repository = {
+  rp_name : string;
+  rp_local_path : string;
+  rp_default_branch : string;
+  rp_status : string;
+  rp_keepers : string list;
+  rp_auto_sync : bool;
+}
+
+type repository_snapshot = {
+  rs_repositories : repository list;
+  rs_total : int;
+}
+
+type harness_verdict = {
+  hv_at : float;
+  hv_task_id : string;
+  hv_task_title : string;
+  hv_agent : string;
+  hv_gate : string;
+  hv_verdict : string;
+  hv_evaluator : string;
+  hv_fallback_reason : string option;
+}
+
+type harness_snapshot = { hs_verdicts : harness_verdict list }
+
+type verification_request = {
+  vr_request_id : string;
+  vr_task_id : string;
+  vr_task_title : string;
+  vr_kind : string;
+  vr_summary : string;
+  vr_next_action : string option;
+  vr_submitted_by : string;
+  vr_created_at : string;
+  vr_required_artifacts : string list;
+  vr_submitted_evidence : string list;
+  vr_evidence_error : string option;
+}
+
+type verification_snapshot = {
+  vs_requests : verification_request list;
+  vs_total : int;
+}
+
+let decode_string_name_list json key =
+  let* items = optional_list_field json key in
+  decode_list key
+    (fun item ->
+       match item with
+       | `String value -> Ok value
+       | bad -> field_type_error key "a string" bad)
+    items
+
+let decode_bool_field_or json key ~default =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> Ok default
+  | bad -> field_type_error key "a bool or null" bad
+
+let decode_tool_entry json =
+  let* tl_name = required_string_field json "name" in
+  let* tl_description = required_string_field json "description" in
+  let* tl_surfaces = decode_string_name_list json "surfaces" in
+  let* tl_direct_call =
+    decode_bool_field_or json "direct_call_allowed" ~default:false
+  in
+  Ok { tl_name; tl_description; tl_surfaces; tl_direct_call }
+
+let decode_tool_snapshot json =
+  (* The tools envelope carries config and runtime resolution beside the
+     inventory; this reads the inventory and leaves the rest to the dashboard,
+     which has room to show it. *)
+  let* inventory = required_object_field json "tool_inventory" in
+  let* tools_json = required_list_field inventory "tools" in
+  let* ts_tools = decode_list "tools" decode_tool_entry tools_json in
+  let* ts_count = required_int_field inventory "count" in
+  Ok { ts_tools; ts_count }
+
+let decode_connector json =
+  let* cn_id = required_string_field json "connector_id" in
+  let* cn_display_name = required_string_field json "display_name" in
+  let* cn_status = required_string_field json "status" in
+  (* Both default to false: a connector that does not say it is available or
+     connected is not, and defaulting the other way would draw a dead
+     connector as a working one. *)
+  let* cn_available = decode_bool_field_or json "available" ~default:false in
+  let* cn_connected = decode_bool_field_or json "connected" ~default:false in
+  let* cn_channel = optional_string_field json "channel" in
+  Ok { cn_id; cn_display_name; cn_available; cn_connected; cn_status; cn_channel }
+
+let decode_connector_snapshot json =
+  let* connectors_json = required_list_field json "connectors" in
+  let* cs_connectors =
+    decode_list "connectors" decode_connector connectors_json
+  in
+  let* cs_total = required_int_field json "total" in
+  let* cs_active = required_int_field json "active_count" in
+  Ok { cs_connectors; cs_total; cs_active }
+
+let decode_repository json =
+  let* rp_name = required_string_field json "name" in
+  let* rp_local_path = required_string_field json "local_path" in
+  let* rp_default_branch = required_string_field json "default_branch" in
+  let* rp_status = required_string_field json "status" in
+  let* rp_keepers = decode_string_name_list json "keepers" in
+  let* rp_auto_sync =
+    match member "auto_sync" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "auto_sync" "a bool or null" bad
+  in
+  Ok
+    { rp_name; rp_local_path; rp_default_branch; rp_status; rp_keepers
+    ; rp_auto_sync
+    }
+
+let decode_repository_snapshot json =
+  let* repos_json = required_list_field json "repositories" in
+  let* rs_repositories =
+    decode_list "repositories" decode_repository repos_json
+  in
+  let* rs_total = required_int_field json "total" in
+  Ok { rs_repositories; rs_total }
+
+let decode_harness_verdict json =
+  let* hv_task_id = required_string_field json "task_id" in
+  let* hv_task_title = required_string_field json "task_title" in
+  let* hv_agent = required_string_field json "agent_name" in
+  let* hv_gate = required_string_field json "gate" in
+  let* hv_verdict = required_string_field json "verdict" in
+  let* hv_evaluator = required_string_field json "evaluator_runtime" in
+  let* hv_fallback_reason = optional_string_field json "fallback_reason" in
+  let* hv_at = require_float_field json "timestamp" in
+  Ok
+    { hv_at
+    ; hv_task_id
+    ; hv_task_title
+    ; hv_agent
+    ; hv_gate
+    ; hv_verdict
+    ; hv_evaluator
+    ; hv_fallback_reason
+    }
+
+let decode_harness_snapshot json =
+  let* verdicts_json = required_list_field json "recent_verdicts" in
+  let* hs_verdicts =
+    decode_list "recent_verdicts" decode_harness_verdict verdicts_json
+  in
+  Ok { hs_verdicts }
+
+let decode_verification_request json =
+  let* vr_request_id = required_string_field json "request_id" in
+  let* vr_task_id = required_string_field json "task_id" in
+  let* vr_task_title = required_string_field json "task_title" in
+  let* vr_kind = required_string_field json "request_kind" in
+  let* vr_summary = required_string_field json "request_summary" in
+  let* vr_submitted_by = required_string_field json "submitted_by" in
+  let* vr_created_at = required_string_field json "created_at" in
+  let* vr_required_artifacts =
+    decode_string_name_list json "required_artifacts"
+  in
+  let* vr_submitted_evidence =
+    decode_string_name_list json "submitted_evidence"
+  in
+  let* vr_next_action = optional_string_field json "next_action" in
+  let* vr_evidence_error =
+    optional_string_field json "evidence_projection_error"
+  in
+  Ok
+    { vr_request_id
+    ; vr_task_id
+    ; vr_task_title
+    ; vr_kind
+    ; vr_summary
+    ; vr_next_action
+    ; vr_submitted_by
+    ; vr_created_at
+    ; vr_required_artifacts
+    ; vr_submitted_evidence
+    ; vr_evidence_error
+    }
+
+let decode_verification_snapshot json =
+  let* requests_json = required_list_field json "requests" in
+  let* vs_requests =
+    decode_list "requests" decode_verification_request requests_json
+  in
+  let* vs_total = required_int_field json "total" in
+  Ok { vs_requests; vs_total }
+
 let decode_system_log_snapshot json =
   let* entries_json = required_list_field json "entries" in
   let* sys_entries = decode_list "entries" decode_system_log_entry entries_json in
@@ -999,15 +1298,6 @@ let decode_planning_snapshot json =
   let* pl_backlog = decode_planning_backlog backlog_json in
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
-
-let decode_string_name_list json key =
-  let* items = optional_list_field json key in
-  decode_list key
-    (fun item ->
-       match item with
-       | `String value -> Ok value
-       | bad -> field_type_error key "a string" bad)
-    items
 
 let required_bool_field json key =
   match member key json with

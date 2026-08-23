@@ -52,4 +52,10 @@ module For_testing : sig
        model_id:string option
     -> requested:Llm_provider.Reasoning_effort.t option
     -> Llm_provider.Reasoning_effort.t option
+
+  (** Typed map from a Codex app-server client error to the durable recovery
+      failure. A typed context overflow becomes [Input_rejected] so the
+      session admission fence holds instead of auto-replaying. *)
+  val recovery_failure_of_client_error :
+    Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
 end

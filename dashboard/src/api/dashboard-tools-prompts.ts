@@ -400,8 +400,6 @@ export interface DashboardKeeperWaitingKeeper {
       active_tool_count?: number
     } | null
   } | null
-  /** @deprecated Use source_next_actions; retained while older consumers migrate. */
-  next_action?: string | null
 }
 
 export interface DashboardKeeperWaitingInventory {

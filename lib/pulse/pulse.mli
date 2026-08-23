@@ -49,8 +49,6 @@ type lifecycle =
 type stats = {
   total_beats   : int;
   total_nudges  : int;
-  uptime_s      : float;
-  avg_interval  : float;
 }
 
 (** {1 Consumer — who rides each beat} *)

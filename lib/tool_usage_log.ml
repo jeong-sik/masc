@@ -29,14 +29,16 @@ let freshness_slo_s = Masc_time_constants.hour
 
 let store_dir masc_root = Filename.concat masc_root "tool_usage"
 
+(* Opt-in: unset keeps everything. A malformed value now means the same here
+   as in every other store (#27110). *)
 let retention_days () =
-  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. *)
-  match Sys.getenv_opt "MASC_TOOL_USAGE_LOG_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | _ -> None)
-  | None -> None
+  match
+    Env_config_core.get_retention_days
+      ~default:Env_config_core.Retain_forever
+      "MASC_TOOL_USAGE_LOG_RETENTION_DAYS"
+  with
+  | Env_config_core.Retain_forever -> None
+  | Env_config_core.Prune_after_days days -> Some days
 
 let ts_of_record = Dashboard_tool_source_freshness.latest_ts_of_record
 
@@ -50,30 +52,19 @@ let latest_ts_of_entries entries =
 
 let freshness_fields = Dashboard_tool_source_freshness.freshness_fields
 
+(* The last of four bodies this file kept alongside
+   Dashboard_tool_source_freshness. They were identical but for freshness_slo_s
+   being a constant here and a parameter there, so one vocabulary had two
+   producers and adding a state to either left the other untouched (#27157). *)
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
-  let health, stale_reason =
-    match coverage_gap with
-    | Some gap ->
-      ( "coverage_gap",
-        Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-    | None ->
-      if not exists then ("missing", "store_missing")
-      else if entry_count = 0 then ("empty", "no_entries")
-      else
-        match latest_ts with
-        | None -> ("empty", "no_entries")
-        | Some ts ->
-          let latest_age_s = Stdlib.Float.max 0.0 (now -. ts) in
-          if Stdlib.Float.compare latest_age_s freshness_slo_s > 0 then
-            ("stale", "freshness_slo_exceeded")
-          else
-            ("ok", "")
-  in
-  [
-    ("health", `String health);
-    ( "stale_reason",
-      if String.equal stale_reason "" then `Null else `String stale_reason );
-  ]
+  Dashboard_tool_source_freshness.health_fields
+    ~now
+    ~exists
+    ~entry_count
+    ~latest_ts
+    ~freshness_slo_s
+    ?coverage_gap
+    ()
 
 let coverage_gaps masc_root =
   Telemetry_coverage_gap.read_recent ~masc_root ~n:50
@@ -84,14 +75,9 @@ let coverage_gaps masc_root =
 let latest_coverage_gap gaps =
   List.rev gaps |> List.find_opt (fun _ -> true)
 
-let coverage_gap_recovered ~latest_ts gap =
-  match latest_ts, ts_of_record gap with
-  | Some source_ts, Some gap_ts when Float.compare source_ts gap_ts >= 0 ->
-    true
-  | _ -> false
-
-let active_coverage_gaps ~latest_ts gaps =
-  List.filter (fun gap -> not (coverage_gap_recovered ~latest_ts gap)) gaps
+(* Was re-typed here; the kit owns it (#27157). coverage_gap_recovered goes
+   with it — this file only ever called it through active_coverage_gaps. *)
+let active_coverage_gaps = Dashboard_tool_source_freshness.active_coverage_gaps
 
 let synthetic_store_gap ~durable_store ~stale_reason ~error =
   let now = Time_compat.now () in

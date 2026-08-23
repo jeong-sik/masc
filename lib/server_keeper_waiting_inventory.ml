@@ -252,42 +252,125 @@ let stimulus_what (stimulus : Keeper_event_queue.stimulus) =
   queue_payload_what stimulus.payload ^ urgency_what_suffix stimulus.urgency
 ;;
 
+(* Pending Connector_attention stimuli repeat one row per accepted message
+   (the intake invariant keeps every event durable), so a Keeper that cannot
+   consume right now — a blocked lane, a stalled cycle — turns the inventory
+   into a wall of identical rows under the display cap. RFC-0377 already
+   drains a same-conversation backlog in one turn, so per-event rows carry no
+   operator decision the aggregate loses: this projection collapses every
+   pending Connector_attention stimulus into one row per urgency with a count
+   and the oldest arrival. The oldest member keeps its [source_ref] /
+   [source_incarnation] so the operator boundary still resolves the row, and
+   every member event id rides in [detail]. A single pending Connector event
+   renders exactly the ungrouped row. Every non-Connector stimulus keeps its
+   own row. *)
 let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
-  List.mapi
-    (fun queue_index (selection : Keeper_event_queue_state.pending_selection) ->
-       let stimulus : Keeper_event_queue.stimulus = selection.source in
-       (* [source_ref] + [source_incarnation] are the exact-entry address the
-          operator boundary ([Server_dashboard_http_keeper_event_queue_operator])
-          resolves through [Keeper_event_queue_state.resolve_pending_selection],
-          so a row read here can be cancelled, transferred, or reprioritized
-          without a second queue projection. Both are wire strings: the ref is
-          a SHA-256 hex and the incarnation a decimal int64. *)
-       let detail =
-         `Assoc
-           ([ "queue_index", `Int queue_index
-            ; "post_id", `String stimulus.post_id
-            ; ( "source_ref"
-              , `String (Keeper_event_queue_state.source_snapshot_ref stimulus) )
-            ; ( "source_incarnation"
-              , `String (Int64.to_string selection.admitted_revision) )
-            ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
-            ; "arrived_at_unix", `Float stimulus.arrived_at
-            ; "payload_kind",
-              `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-            ]
-            @ queue_payload_detail_fields stimulus.payload)
-       in
-       { keeper_name = Some keeper_name
-       ; source
-       ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
-       ; what = stimulus_what stimulus
-       ; wake_producer = wake_producer_of_payload stimulus.payload
-       ; since = Some stimulus.arrived_at
-       ; due_at = None
-       ; next_action
-       ; detail
-       })
-    selections
+  let connector_selections =
+    List.filter_map
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         match selection.source.payload with
+         | Keeper_event_queue.Connector_attention _ -> Some selection
+         | _ -> None)
+      selections
+  in
+  let connector_count = List.length connector_selections in
+  let oldest_arrived_at =
+    List.fold_left
+      (fun oldest (selection : Keeper_event_queue_state.pending_selection) ->
+         Float.min oldest selection.source.arrived_at)
+      Float.max_float connector_selections
+  in
+  let connector_event_ids =
+    List.filter_map
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         match selection.source.payload with
+         | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
+         | _ -> None)
+      connector_selections
+    |> List.sort String.compare
+  in
+  let connectors_emitted = ref false in
+  let rec go queue_index acc = function
+    | [] -> List.rev acc
+    | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
+      let stimulus : Keeper_event_queue.stimulus = selection.source in
+      (* [source_ref] + [source_incarnation] are the exact-entry address the
+         operator boundary
+         ([Server_dashboard_http_keeper_event_queue_operator]) resolves
+         through [Keeper_event_queue_state.resolve_pending_selection], so a
+         row read here can be cancelled, transferred, or reprioritized
+         without a second queue projection. Both are wire strings: the ref
+         is a SHA-256 hex and the incarnation a decimal int64. *)
+      let base_detail =
+        [ "queue_index", `Int queue_index
+        ; "post_id", `String stimulus.post_id
+        ; ( "source_ref"
+          , `String (Keeper_event_queue_state.source_snapshot_ref stimulus) )
+        ; ( "source_incarnation"
+          , `String (Int64.to_string selection.admitted_revision) )
+        ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+        ; "arrived_at_unix", `Float stimulus.arrived_at
+        ; "payload_kind",
+          `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+        ]
+        @ queue_payload_detail_fields stimulus.payload
+      in
+      let row ~what ~since ~detail =
+        { keeper_name = Some keeper_name
+        ; source
+        ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
+        ; what
+        ; wake_producer = wake_producer_of_payload stimulus.payload
+        ; since
+        ; due_at = None
+        ; next_action
+        ; detail
+        }
+      in
+      (match stimulus.payload with
+       | Keeper_event_queue.Connector_attention _
+         when connector_count > 1 && not !connectors_emitted ->
+         connectors_emitted := true;
+         let bounded, bounded_truncated =
+           let rec take count acc = function
+             | [] -> (List.rev acc, false)
+             | _ :: _ when count <= 0 -> (List.rev acc, true)
+             | id :: rest -> take (count - 1) (id :: acc) rest
+           in
+           take 10 [] connector_event_ids
+         in
+         go
+           (queue_index + 1)
+           (row
+              ~what:
+                (Printf.sprintf
+                   "외부 메시지 도착 ×%d" connector_count
+                   ^ urgency_what_suffix stimulus.urgency)
+              ~since:(Some oldest_arrived_at)
+              ~detail:
+                (`Assoc
+                   (base_detail
+                    @ [ ("group_count", `Int connector_count)
+                      ; ( "group_event_ids"
+                        , `List (List.map (fun id -> `String id) bounded) )
+                      ; ("group_event_ids_truncated", `Bool bounded_truncated)
+                      ]))
+              :: acc)
+           rest
+       | Keeper_event_queue.Connector_attention _ when connector_count > 1 ->
+         (* Already represented by the aggregate row above. *)
+         go (queue_index + 1) acc rest
+       | _ ->
+         go
+           (queue_index + 1)
+           (row
+              ~what:(stimulus_what stimulus)
+              ~since:(Some stimulus.arrived_at)
+              ~detail:(`Assoc base_detail)
+              :: acc)
+           rest)
+  in
+  go 0 [] selections
 ;;
 
 let read_error_row ?keeper_name ~waiting_on ~next_action detail =
@@ -495,6 +578,81 @@ let external_attention_what (item : Keeper_external_attention.item) =
   | System -> Printf.sprintf "%s 시스템 알림" item.source_label
 ;;
 
+(* Same display wall as the queue rows above, from the sibling store: a
+   backlogged conversation records one pending external-attention row per
+   message. Grouping unit is the conversation — urgency × source ×
+   conversation_id — because that is what the keeper will answer (RFC-0377
+   drains a conversation backlog in one turn). One pending item renders
+   exactly the ungrouped row; a group renders the oldest arrival as [since],
+   the oldest event id as the row address, and the newest content preview.
+   Mentions and DMs can share a conversation with ambient traffic and still
+   aggregate only among their own urgency. *)
+let external_attention_grouped_rows ~keeper_name
+    (pending : Keeper_external_attention.item list) : waiting_row list =
+  let rec collect groups = function
+    | [] -> List.rev groups
+    | (item : Keeper_external_attention.item) :: rest ->
+      let key =
+        ( Keeper_external_attention.urgency_to_string item.urgency
+        , item.source_label
+        , item.conversation.conversation_id )
+      in
+      (match List.assoc_opt key groups with
+       | Some members ->
+         collect
+           ((key, item :: members) :: List.remove_assoc key groups)
+           rest
+       | None -> collect ((key, [ item ]) :: groups) rest)
+  in
+  let oldest (members : Keeper_external_attention.item list) =
+    List.fold_left
+      (fun (best : Keeper_external_attention.item)
+           (item : Keeper_external_attention.item) ->
+         if item.received_at < best.received_at then item else best)
+      (List.hd members)
+      members
+  in
+  let newest (members : Keeper_external_attention.item list) =
+    List.fold_left
+      (fun (best : Keeper_external_attention.item)
+           (item : Keeper_external_attention.item) ->
+         if item.received_at > best.received_at then item else best)
+      (List.hd members)
+      members
+  in
+  collect [] pending
+  |> List.map (fun (_, members) ->
+         let count = List.length members in
+         let anchor = oldest members in
+         let preview = (newest members).content_preview in
+         { keeper_name = Some keeper_name
+         ; source = External_attention
+         ; waiting_on = anchor.source_label
+         ; what =
+             (if count > 1 then
+                Printf.sprintf "%s ×%d" (external_attention_what anchor) count
+              else external_attention_what anchor)
+         ; wake_producer = External_attention_store
+         ; since = Some anchor.received_at
+         ; due_at = None
+         ; next_action = "keeper_process_external_attention"
+         ; detail =
+             `Assoc
+               ([ "event_id", `String anchor.event_id
+                ; "urgency",
+                  `String (Keeper_external_attention.urgency_to_string anchor.urgency)
+                ; "conversation_id", `String anchor.conversation.conversation_id
+                ; "content_preview", `String preview
+                ; "surface",
+                  Keeper_external_attention.surface_ref_to_json anchor.conversation.surface
+                ]
+               @
+               if count > 1 then
+                 [ ("group_count", `Int count) ]
+               else [])
+         })
+;;
+
 let external_attention_rows ~base_path ~keeper_name =
   match
     Keeper_external_attention.pending_for_keeper_result ~base_path ~keeper_name
@@ -512,26 +670,7 @@ let external_attention_rows ~base_path ~keeper_name =
     let pending, truncated =
       take_with_truncation external_attention_dashboard_row_limit pending
     in
-    ( pending
-      |> List.map (fun (item : Keeper_external_attention.item) ->
-        { keeper_name = Some keeper_name
-        ; source = External_attention
-        ; waiting_on = item.source_label
-        ; what = external_attention_what item
-        ; wake_producer = External_attention_store
-        ; since = Some item.received_at
-        ; due_at = None
-        ; next_action = "keeper_process_external_attention"
-        ; detail =
-            `Assoc
-              [ "event_id", `String item.event_id
-              ; "urgency", `String (Keeper_external_attention.urgency_to_string item.urgency)
-              ; "conversation_id", `String item.conversation.conversation_id
-              ; "content_preview", `String item.content_preview
-              ; "surface", Keeper_external_attention.surface_ref_to_json item.conversation.surface
-              ]
-        })
-    , truncated )
+    (external_attention_grouped_rows ~keeper_name pending, truncated)
 ;;
 
 let fusion_rows keeper_name runs =
@@ -1073,4 +1212,8 @@ let dashboard_json_for_keeper config ~keeper_name =
 
 module For_testing = struct
   let dashboard_json_with_pending_reader = dashboard_json_with_pending_reader
+
+  let external_attention_grouped_rows = external_attention_grouped_rows
+
+  let rows_for_queue_snapshot = rows_for_queue_snapshot
 end

@@ -97,6 +97,21 @@ let test_failing_outranks_degraded () =
      > Health_status.rank (Health_status.of_string "degraded"))
 ;;
 
+let test_initializing_is_not_at_risk () =
+  (* server_dashboard_http_core and operator_digest both emit "initializing"
+     as workspace_health. Undeclared, it fell to Unknown, which ranks 2 — the
+     same rung as Degraded — so is_health_at_risk (rank >= 2) reported a
+     booting workspace as at risk in the briefing (#27560). *)
+  Alcotest.(check bool)
+    "a booting workspace is not at risk"
+    false
+    (Health_status.rank (Health_status.of_string "initializing") >= 2);
+  Alcotest.(check bool)
+    "initializing and warming are the same rung"
+    true
+    (Health_status.of_string "initializing" = Health_status.of_string "warming")
+;;
+
 let test_unknown_word_is_distinguishable () =
   Alcotest.(check bool)
     "an undeclared word is not an explicit unknown"
@@ -122,6 +137,8 @@ let () =
         [
           test_case "membership is declared" `Quick test_producer_vocabulary_membership;
           test_case "failing outranks degraded" `Quick test_failing_outranks_degraded;
+          test_case "initializing is not at risk" `Quick
+            test_initializing_is_not_at_risk;
           test_case "undeclared word is distinguishable" `Quick
             test_unknown_word_is_distinguishable;
         ] );

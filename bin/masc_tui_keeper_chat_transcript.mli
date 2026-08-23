@@ -58,7 +58,13 @@ type awaiting_approval =
 
 type t
 
-val create : keeper_name:string -> request_id:string -> t
+val create :
+  keeper_name:string -> request_id:string -> started_at:float -> t
+(** [started_at] is when the request was dispatched, not when the run
+    started. The gap between the two is the part a watcher most needs an
+    age for: a request that never reaches RUN_STARTED is what hid a
+    63-minute hang (masc #29229). *)
+
 val keeper_name : t -> string
 val request_id : t -> string
 
@@ -73,6 +79,13 @@ val phase : t -> phase
 val interrupt : t -> interrupt
 val text : t -> string
 val thinking : t -> string
+
+val thinking_lines : t -> string list
+(** The reasoning trail the pane draws: every non-blank line, in order.
+    Blank lines are dropped because models emit runs of them. Not the
+    last line alone -- reasoning is the only part of a live turn the
+    durable transcript does not keep, so the pane is the one place it can
+    be read. *)
 val tool_calls : t -> tool_call list  (** In the order the stream opened them. *)
 val unreadable : t -> unreadable option
 
@@ -102,12 +115,16 @@ val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach
     a second call while it is waiting on this one. *)
 
-val status_rows : t -> (status_kind * string) list
+val status_rows : now:float -> t -> (status_kind * string) list
 (** The status rows the chat pane draws for this turn.
 
     Returned as a list rather than drawn directly because the pane's row
     budget has to know how many there are before it lays the pane out, and the
     budget answering differently from the drawing is how the unavailable row
     once went missing while the send hint still read Enter:send
-    (see [keeper_message_status_rows]). One list, counted and drawn. *)
+    (see [keeper_message_status_rows]). One list, counted and drawn.
+
+    The progress row carries the turn's age, measured against [now] rather
+    than a clock read here so a test can state the instant. A [now] before
+    [started_at] drops the age instead of printing a negative one. *)
 

@@ -554,7 +554,7 @@ let test_codex_runtime_inventory_is_unverified_until_measured () =
 
 let test_codex_runtime_cannot_enter_agent_core_runner () =
   with_codex_runtime_initialized (fun () ->
-    match Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"codex.codex" () with
+    match Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"codex.codex" () with
     | Ok _ -> Alcotest.fail "Codex official-client runtime entered the AGENT_CORE runner"
     | Error detail ->
       Alcotest.(check bool)
@@ -929,7 +929,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
     (* Known non-default id resolves to that runtime's provider, not the
        default's. *)
     (match
-       Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
+       Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
      with
      | Error msg -> Alcotest.failf "expected openai.gpt to resolve: %s" msg
      | Ok [ provider ] ->
@@ -940,7 +940,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
      | Ok providers ->
        Alcotest.failf "expected exactly one provider, got %d" (List.length providers));
     (* Empty id resolves the default runtime. *)
-    match Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"" () with
+    match Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"" () with
     | Error msg -> Alcotest.failf "expected empty id to resolve default: %s" msg
     | Ok [ provider ] ->
       Alcotest.(check string)
@@ -954,7 +954,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
 let test_rerank_resolver_errors_on_unknown_runtime_id () =
   with_runtime_initialized (fun () ->
     match
-      Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
+      Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
     with
     | Ok _ ->
       Alcotest.fail

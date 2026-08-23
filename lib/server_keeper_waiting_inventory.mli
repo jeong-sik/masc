@@ -9,6 +9,48 @@ val dashboard_json_for_keeper :
 (** The same typed projection narrowed to one keeper for latency-sensitive
     detail surfaces. It does not overwrite fleet-wide waiting metrics. *)
 
+type waiting_source =
+  | Event_queue_pending
+  | Chat_operation_queued
+  | Chat_operation_running
+  | Hitl_pending
+  | External_attention
+  | Fusion_running
+  | Schedule_waiting
+  | Owner_shutdown
+  | Operator_pending_confirm
+  | Read_error
+
+type wake_producer =
+  | Board_dispatch
+  | Board_attention_judge
+  | Keeper_owner_actor
+  | Keeper_supervisor
+  | Fusion_sink
+  | Connector_attention_hook
+  | Hitl_resolution_hook
+  | External_attention_store
+  | Schedule_store
+  | Schedule_runner
+  | Operator_pending_confirm_store
+  | Completion_authority
+  | Keeper_task_cancellation
+  | Keeper_compaction_request
+  | Keeper_workspace_message
+  | Read_model_reader
+
+type waiting_row =
+  { keeper_name : string option
+  ; source : waiting_source
+  ; waiting_on : string
+  ; what : string
+  ; wake_producer : wake_producer
+  ; since : float option
+  ; due_at : float option
+  ; next_action : string
+  ; detail : Yojson.Safe.t
+  }
+
 module For_testing : sig
   val dashboard_json_with_pending_reader :
     read_pending:
@@ -18,4 +60,21 @@ module For_testing : sig
       result) ->
     Workspace.config ->
     Yojson.Safe.t
+
+  (** Pending external-attention items grouped for display: one row per
+      (urgency, source, conversation), the oldest member anchoring the row.
+      Exposed for the grouping tests; production reads go through
+      [dashboard_json]. *)
+  val external_attention_grouped_rows :
+    keeper_name:string -> Keeper_external_attention.item list -> waiting_row list
+
+  (** Pending queue selections with Connector_attention stimuli collapsed
+      into one row per urgency. Exposed for the grouping tests; production
+      reads go through [dashboard_json]. *)
+  val rows_for_queue_snapshot :
+    keeper_name:string ->
+    source:waiting_source ->
+    next_action:string ->
+    Keeper_event_queue_state.pending_selection list ->
+    waiting_row list
 end

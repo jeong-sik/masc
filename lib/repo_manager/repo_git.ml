@@ -259,7 +259,9 @@ let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   (* Git gives a missing remote a distinct exit status, so absence stays typed
      without inspecting mutable stderr text. *)
   | Unix.WEXITED 2, _ -> Error Origin_missing
-  | Unix.WEXITED 124, _ ->
+  (* Process_eio owns what a timeout looks like; reading its number here made
+     the two modules agree by coincidence (#28651). *)
+  | status', _ when Process_eio.exit_reason_of_status status' = Process_eio.Timed_out ->
     Error (Origin_lookup_timed_out (git_failure_detail args status stdout stderr))
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
     Error (Origin_lookup_failed (git_failure_detail args status stdout stderr))

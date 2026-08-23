@@ -1,6 +1,6 @@
 ---
-status: draft
-last_verified: 2026-06-26
+status: delivered
+last_verified: 2026-08-23
 code_refs:
   - bin/masc_tui.ml
   - bin/masc_tui_types.ml
@@ -14,12 +14,35 @@ code_refs:
 # MASC TUI Roadmap (Dashboard-aligned)
 
 > 목표: Web Dashboard V2의 surface/section을 기준으로 MASC TUI에 필요한 기능을 파악하고, 기존 TUI 구현 대비 **Keep / Drop / Add / Change**를 결정한다.
-> 범위: 문서 기획 단계. 본 문서는 우선순위와 방향을 제시하며, 구현 코드는 포함하지 않는다.
 
-## Current PR Implementation Scope
+## 현재 상태 (2026-08-23)
 
-현재 PR은 P0 operator path 중 런타임에 실제 구현된 surface만 노출한다: Overview, Keepers, Board, Approvals, Planning.
-Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서의 로드맵 항목으로 남기며 production 탭 순환이나 render dispatch에는 placeholder로 노출하지 않는다.
+**P0~P2 15개 항목이 모두 구현되었습니다.** P3 5개는 아래 4절에서 TUI에 맞지 않는다고
+판단해 제외한 것들이며, 그 판단은 유지합니다.
+
+`bin/masc_tui_render.ml`이 그리는 화면은 다음과 같습니다.
+
+| 화면 | 로드맵 |
+|---|---|
+| Overview (attention + events + tasks + task detail) | P0 #1 #2 #5, P2 #11 |
+| Keepers (list / detail / logs / message) | P0, P1 #7 #8 |
+| Approvals | P0 #3 |
+| Board (list / read / compose) | P0 #4 |
+| Planning (list / detail) | P0 #5 |
+| Verification | P2 #12 |
+| Harness | P2 #15 |
+| Repositories | P2 #13 |
+| Connectors | P1 #10 |
+| Tools | P2 #14 |
+| System Logs | P1 #9 |
+
+Runtime/transport 상태(P1 #6)는 별도 화면이 아니라 Overview 헤더에 실려 있습니다.
+Fleet 상태(P1 #7)는 키퍼 목록이 담을 수 없는 값을 그 화면 안에 붙이는 방식으로 들어갔습니다.
+
+화면을 추가할 때 손대야 하는 자리는 타입(`masc_tui_types.ml`의 `surface`와
+`surface_needs`), 로더, 렌더 dispatch, 그리고 키 처리입니다. `surface_needs`는
+화면마다 필요한 데이터를 한 record로 선언하므로, 새 화면은 컴파일러가 그 record를
+채우게 만듭니다.
 
 ## 1. 현재 TUI 상태 요약
 
@@ -114,39 +137,40 @@ Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서
 
 ## 4. 우선순위
 
-> P0: 다음 구현 집중 대상. P1: 중기. P2: 후기. P3: experimental/deferred.
+> 원래의 우선순위 구분입니다. P0~P2는 모두 구현되었고, 어디에 들어갔는지를 표에
+> 적어 두었습니다. P3는 구현하지 않기로 한 항목입니다.
 
 ### P0 — Core Operator Path
 
-| # | 기능 | 근거 |
+| # | 기능 | 어디에 |
 |---|---|---|
-| 1 | **Overview / Mission Briefing 뷰** | 운영자가 가장 먼저 보는 요약. TUI도 동일 진입점 제공 |
-| 2 | **Attention / 알림 패널** | 운영자 개입이 필요한 항목( stuck agent, blocked lane 등)을 TUI에서도 노출 |
-| 3 | **Approvals Queue + Confirm/Deny** | HITL approval은 대시보드 없이도 빠르게 처리해야 함 |
-| 4 | **Board List/Read** | 비동기 커뮤니케이션의 핵심. keeper/agent 메시지 흐름 파악 |
-| 5 | **Goal/Planning Tree** | 현재 task 상태 파악. `workspace > work/planning`과 parity |
+| 1 | **Overview / Mission Briefing 뷰** | Overview |
+| 2 | **Attention / 알림 패널** | Overview 상단 |
+| 3 | **Approvals Queue + Confirm/Deny** | Approvals |
+| 4 | **Board List/Read** | Board (compose 포함) |
+| 5 | **Goal/Planning Tree** | Planning (list / detail) |
 
 ### P1 — Monitoring & Keeper Parity
 
-| # | 기능 | 근거 |
+| # | 기능 | 어디에 |
 |---|---|---|
-| 6 | **Monitoring > Runtime** | runtime lane health, transport health |
-| 7 | **Monitoring > Fleet Health (tool monitor)** | tool call health, Gate decision signals |
-| 8 | **Keeper Detail 강화** | 24h bucket, tool stats, composite phase |
-| 9 | **System Logs** | `logs` surface parity |
-| 10 | **Connector Status** | sidecar 상태 모니터링 |
+| 6 | **Monitoring > Runtime** | Overview 헤더의 transport 요약 |
+| 7 | **Monitoring > Fleet Health** | Keepers 목록 안의 fleet 상태 |
+| 8 | **Keeper Detail 강화** | Keeper Detail의 "Last 24h" |
+| 9 | **System Logs** | System Logs |
+| 10 | **Connector Status** | Connectors |
 
 ### P2 — Workspace & Lab
 
-| # | 기능 | 근거 |
+| # | 기능 | 어디에 |
 |---|---|---|
-| 11 | **Task/Work Board 상세** | task claim/assign, 우선순위 |
-| 12 | **Verification Requests** | system-LLM/HITL verdict 상태 관측 |
-| 13 | **Repository List** | multi-repo cockpit |
-| 14 | **Tool Inventory** | registered MCP tools |
-| 15 | **Harness Health** | safety harness snapshot |
+| 11 | **Task/Work Board 상세** | Overview의 task detail |
+| 12 | **Verification Requests** | Verification |
+| 13 | **Repository List** | Repositories |
+| 14 | **Tool Inventory** | Tools |
+| 15 | **Harness Health** | Harness |
 
-### P3 — Deferred / Experimental
+### P3 — 구현하지 않음
 
 | # | 기능 | 근거 |
 |---|---|---|
@@ -156,17 +180,12 @@ Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서
 | 19 | **Fusion / Code / Performance / Memory 그래프** | TUI 부적합 |
 | 20 | **Copilot Dock / Command Palette / Tweaks Panel** | TUI에서 equivalently 지원 불필요 |
 
-## 5. 제안된 다음 단계
+## 5. 그때의 미결 질문, 지금의 답
 
-1. `TUI-SPEC.md` 초안 작성 — 화면 흐름, 데이터 모델, 키바인딩, 단계별 구현 계획 정의
-2. P0 기능 중 하나(예: Overview 또는 Board)를 prototype으로 구현
-3. 기존 `masc_tui.ml`의 view 모드 enum과 render dispatch를 surface 기반으로 확장하는 설계 검토
-4. Dashboard HTTP API(`/api/v1/dashboard/*`)를 TUI 데이터 소스로 통합하는 방안 확정
-5. 사용자/운영자 피드백 수집 후 P1 범위 조정
-
-## 6. Open Questions
-
-- TUI에서의 **쓰기 작업**(confirm/action/post/comment/vote) 허용 범위는? 현재는 keeper message만 쓰기가 가능.
-- WebSocket/SSE 이벤트를 TUI에서 실시간 수신할 것인가, 아니면 폴링만 유지할 것인가?
-- TUI의 **기본 런칭 모드**: 파일시스템 스냅샷(서버 불필요) vs HTTP API(서버 필요). 두 모드를 모두 지원?
-- 인증/토큰은 dev-token (`/api/v1/dev-token`)을 어떻게 처리할 것인가?
+- **쓰기 작업은 어디까지 허용하나** — keeper 메시지, board 작성, approval confirm/deny,
+  keeper lifecycle 조작, 그리고 도구 실행 승인(y/n)까지 됩니다. 읽기 전용이 아닙니다.
+- **실시간 수신인가 폴링인가** — 둘 다입니다. keeper 채팅은 SSE 를 청크 단위로 읽어
+  도구 호출과 답변을 turn 이 도는 동안 그리고, 나머지 화면은 폴링합니다.
+- **파일시스템인가 HTTP인가** — 둘 다입니다. keeper 명부와 로그는 `.masc/` 에서 직접 읽고,
+  대시보드 계열 화면은 HTTP 로 읽습니다.
+- **인증** — `MASC_TOKEN` 이 있으면 Bearer 로 보냅니다 (`masc_tui_http.ml`의 `auth_headers`).

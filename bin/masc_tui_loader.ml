@@ -45,10 +45,7 @@ let load_keepers (base_path : string) : keeper list * string option =
              match Keeper_meta_store.read_meta config name with
              | Ok (Some meta) ->
                  Tui_decode.keeper_of_meta meta :: keepers, errors
-             | Ok None ->
-                 let err = "metadata disappeared during refresh" in
-                 report path err;
-                 keepers, (Printf.sprintf "%s: %s" name err :: errors)
+             | Ok None -> keepers, errors
              | Error err ->
                  report path err;
                  keepers, (Printf.sprintf "%s: %s" name err :: errors))
@@ -169,7 +166,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Board | Approvals | Planning | System_logs -> None
+    | Overview | Board | Approvals | Planning | Verification | Harness
+    | Repositories | Connectors | Tools | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -326,6 +324,19 @@ let decode_board_post ?(require_body = false) json =
   let* bp_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
+  let* bp_hearth = optional_string_field json "hearth" in
+  let* raw_kind = optional_string_field json "post_kind" in
+  (* Optional, and an unknown value is carried rather than rejected: the list
+     is a projection for a pane, and a post whose kind this build does not know
+     is still a post the operator should see. *)
+  let bp_kind =
+    match raw_kind with
+    | Some "direct" -> Some Post_by_person
+    | Some "automation" -> Some Post_by_automation
+    | Some "system" -> Some Post_by_system
+    | Some other -> Some (Post_kind_unknown other)
+    | None -> None
+  in
   Ok
     {
       bp_id;
@@ -335,6 +346,8 @@ let decode_board_post ?(require_body = false) json =
       bp_votes;
       bp_comment_count;
       bp_created_at;
+      bp_hearth;
+      bp_kind;
     }
 
 let decode_board_posts json_list =
@@ -458,6 +471,41 @@ let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
   match fetch_dashboard_logs ~host ~port ~limit with
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json -> Tui_decode.decode_system_log_snapshot json
+
+(** Load the tool inventory from /api/v1/dashboard/tools *)
+let load_tools ~(host : string) ~(port : int) :
+    (Tui_decode.tool_snapshot, string) result =
+  match fetch_dashboard_tools ~host ~port with
+  | Error err -> Error ("tool inventory load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_tool_snapshot json
+
+(** Load connector status from /api/v1/gate/connectors *)
+let load_connectors ~(host : string) ~(port : int) :
+    (Tui_decode.connector_snapshot, string) result =
+  match fetch_connectors ~host ~port with
+  | Error err -> Error ("connector load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_connector_snapshot json
+
+(** Load the repository list from /api/v1/repositories *)
+let load_repositories ~(host : string) ~(port : int) :
+    (Tui_decode.repository_snapshot, string) result =
+  match fetch_repositories ~host ~port with
+  | Error err -> Error ("repository load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_repository_snapshot json
+
+(** Load the harness snapshot from /api/v1/dashboard/harness-health *)
+let load_harness ~(host : string) ~(port : int) :
+    (Tui_decode.harness_snapshot, string) result =
+  match fetch_harness_health ~host ~port with
+  | Error err -> Error ("harness load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_harness_snapshot json
+
+(** Load the verification queue from /api/v1/verification/requests *)
+let load_verification ~(host : string) ~(port : int) ~(limit : int) :
+    (Tui_decode.verification_snapshot, string) result =
+  match fetch_verification_requests ~host ~port ~limit with
+  | Error err -> Error ("verification load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_verification_snapshot json
 
 (** Load planning snapshot from /api/v1/dashboard/planning *)
 let load_planning ~(host : string) ~(port : int) :

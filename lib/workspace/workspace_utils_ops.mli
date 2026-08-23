@@ -14,10 +14,6 @@ val validate_file_path : string -> (string, string) result
 
 (** {1 Sanitizers} *)
 
-val sanitize_html : string -> string
-val sanitize_agent_name : string -> string
-val sanitize_message : string -> string
-
 (** Map characters outside [a-z0-9._-] to [_HH] hex escapes;
     safe for filesystem path use. *)
 val safe_filename : string -> string

@@ -354,6 +354,98 @@ let test_goal_proof_reads_the_workspace_playground () =
   check string "the measured goal completed" "completed" (stored_phase config goal_id)
 ;;
 
+(* A refutation is not terminal. The goal goes back to Executing, the producer
+   does the work the verdict said was missing, and the next request supersedes
+   the standing refutation — no cooldown, no attempt counter, nothing that
+   spends a goal's chances. The second review is judged on what it can read
+   now, not on what the first one said. *)
+let test_refuted_goal_can_request_proof_again_and_pass () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Goal that is measured on the second try" in
+  let playground = ensure_producer_playground config "some-keeper" in
+  let artifact = Filename.concat playground "measurement.txt" in
+  let measured () = Sys.file_exists artifact in
+  (* The judge here is honest about what it can see: it approves only when the
+     measurement is actually on disk, and refuses otherwise. Nothing about the
+     round trip is stubbed — the same reviewer answers both times. *)
+  let verdicts = ref [] in
+  let reviewer =
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_
+        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
+      let dispatch =
+        match lookup with
+        | AR.Lookup_tools { dispatch; _ } -> dispatch
+        | AR.No_lookup_surface -> fail "the judge was handed no lookup surface"
+      in
+      let read =
+        dispatch
+          ~name:"tool_read_file"
+          ~args:
+            (`Assoc
+              [ "file_path", `String (Filename.concat "some-keeper" "measurement.txt") ])
+      in
+      let verdict, reason =
+        match read with
+        | Ok output when String_util.contains_substring output "pass rate: 100%" ->
+          AR.Approve, "read pass rate: 100%, which reaches the target"
+        | Ok _ | Error _ ->
+          ( AR.Reject "no measurement of the declared metric is on disk"
+          , "no measurement of the declared metric is on disk" )
+      in
+      verdicts := !verdicts @ [ (match verdict with AR.Approve -> "approve" | AR.Reject _ -> "reject") ];
+      on_tool_result
+        ~input:
+          (`Assoc
+            [ "verdict"
+            , `String (match verdict with AR.Approve -> "APPROVE" | AR.Reject _ -> "REJECT")
+            ; "reason", `String reason
+            ])
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
+      Ok (Some verdict)
+  in
+  let review () =
+    with_lane_and_reviewer
+      ~slots:(fun () -> Ok [ "verifier-a" ])
+      ~reviewer
+      (fun () -> drain config)
+  in
+  (* First round: nothing measures the metric. *)
+  check bool "nothing is measured yet" false (measured ());
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  review ();
+  check string "the unmeasured goal is refused back to executing" "executing"
+    (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_refuted _ -> ()
+   | _ -> fail "the ledger must hold the refutation");
+
+  (* The producer does the work the verdict named. *)
+  Out_channel.with_open_text artifact (fun channel ->
+    output_string channel "pass rate: 100%\n");
+
+  (* Second round: the same request, now measurable. The new request must
+     supersede the refutation in the ledger before any judge runs. *)
+  ignore
+    (must_succeed "request_complete again" (transition ctx goal_id "request_complete"));
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "the second request must leave the ledger pending, not refuted");
+  review ();
+  check (list string) "the same judge answered twice, differently"
+    [ "reject"; "approve" ] !verdicts;
+  check string "the measured goal completed on the retry" "completed"
+    (stored_phase config goal_id);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven verdict ->
+    check bool "the approval states what it measured" true
+      (String_util.contains_substring verdict.Goal_verification.evidence
+         "pass rate: 100%")
+  | _ -> fail "the ledger must hold the proven verdict"
+;;
+
 (* Regression: the Goal proof root holds every producer, and the per-producer
    checkout scan stops on its reported-checkout budget (32) when walked across
    all of them. That stop is an [Error], so building the surface failed and the
@@ -676,6 +768,8 @@ let () =
             test_proof_pending_drains_to_completed
         ; test_case "goal proof reads the workspace playground" `Quick
             test_goal_proof_reads_the_workspace_playground
+        ; test_case "a refuted goal can request proof again and pass" `Quick
+            test_refuted_goal_can_request_proof_again_and_pass
         ; test_case "goal proof surface survives a crowded playground" `Quick
             test_goal_proof_surface_survives_a_crowded_playground
         ; test_case "refuted proof returns to executing with reason" `Quick

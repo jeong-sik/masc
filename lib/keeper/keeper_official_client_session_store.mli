@@ -15,12 +15,20 @@ type settlement =
   ; turn_id : string
   }
 
+(* The provider rejected the bootstrap input itself as over capacity. Not
+   auto-superseded by [plan_claim]; reopened only by [resolve_recovery].
+   See the RFC comment on the implementation for the reason split. *)
+type input_rejection_reason =
+  | Bootstrap_floor_exceeded
+  | Effect_fenced
+
 type recovery_failure =
   | Transient_spawn_failed
   | Owner_stopped_turn
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
+  | Input_rejected of input_rejection_reason
   | Host_hook_failed
   | State_persistence_failed
   | Process_restarted
@@ -31,6 +39,10 @@ type failure_disposition =
   | Fatal
 
 val failure_disposition : recovery_failure -> failure_disposition
+
+(** Wire label of a failure; the inverse of the decoder used by [of_yojson].
+    Projections (dashboard) reuse this instead of restating labels. *)
+val recovery_failure_to_string : recovery_failure -> string
 
 type recovery_required =
   { recovery_id : string

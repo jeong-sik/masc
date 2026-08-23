@@ -128,14 +128,17 @@ let queued_count_for_testing () =
    MASC_TOOL_CALL_LOG_RETENTION_DAYS=0. *)
 let retention_days_default = 30
 
+(* Opt-out: unset prunes after [retention_days_default]. A malformed value
+   lands on that same default and warns, rather than being the one store that
+   treated garbage differently from the two that cite this one (#27110). *)
 let retention_days () =
-  match Sys.getenv_opt "MASC_TOOL_CALL_LOG_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | Some _ -> None      (* explicit 0 or negative → retain forever *)
-     | None -> Some retention_days_default  (* malformed → safe default *))
-  | None -> Some retention_days_default
+  match
+    Env_config_core.get_retention_days
+      ~default:(Env_config_core.Prune_after_days retention_days_default)
+      "MASC_TOOL_CALL_LOG_RETENTION_DAYS"
+  with
+  | Env_config_core.Retain_forever -> None
+  | Env_config_core.Prune_after_days days -> Some days
 
 let init ?cluster_name ~base_path () =
   let cluster_name =

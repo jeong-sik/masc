@@ -1298,6 +1298,15 @@ let handle_keeper_get_subroutes state req request reqd =
           ~latest_age_s
           ~freshness_slo_s:turn_record_freshness_slo_s
       in
+      (* turn-records envelope: keys begin — see
+         scripts/check-turn-records-envelope-parity.sh. The dashboard decoder
+         rejects a response whose key set is not exactly its allowlist, so a
+         field added here and nowhere else turns the whole payload into null
+         and the turn-records and Memory OS panels go blank. That happened
+         twice (#26799, #28216) and both times ended in adding the missing key
+         afterwards. The markers let a check compare this list against
+         dashboard/src/api/dashboard-turn-records.ts without guessing where the
+         literal starts. *)
       let json = `Assoc [
         ("keeper", `String name);
         ("count", `Int (List.length records));
@@ -1334,7 +1343,7 @@ let handle_keeper_get_subroutes state req request reqd =
             ~config:(Mcp_server.workspace_config state)
             ~keeper_id:name );
         ("entries", `List entries);
-      ] in
+      ] (* turn-records envelope: keys end *) in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/turn-transcript" then
     (* RFC-0233 §7: serve one keeper turn's operator request + keeper

@@ -177,6 +177,32 @@ let fetch_keeper_chat_history ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("chat history was not JSON: " ^ detail))
 
+(** Fetch one page of chat rows older than [before].
+
+    [before] absent asks for the newest window, which is what the transcript
+    fetch already returns; the pane passes a cursor, so it is required here. *)
+let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(before : float) :
+    (Masc_tui_keeper_chat_history.page, string) result =
+  let path =
+    (* %.17g rather than %h: both round-trip through float_of_string, but the
+       hex form carries a '+' in its exponent, which a query string reads as a
+       space. 17 significant digits is the shortest width that is exact for
+       every double. *)
+    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?before=%.17g"
+      (percent_encode_path_segment keeper_name)
+      before
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "chat history page returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc_tui_keeper_chat_history.page_of_json json
+      | exception Yojson.Json_error detail ->
+          Error ("chat history page was not JSON: " ^ detail))
+
 (** What the server did with a request to interrupt a keeper's current turn.
 
     [Signalled] reports that the signal reached the turn switch, and nothing
@@ -365,6 +391,40 @@ let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
 let fetch_board ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/board"
 
+(** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
+    shape -- first line is the title, the rest is the body -- and the server
+    stamps the author from the agent header, so the payload carries text
+    only. The response is the tools envelope [{ok, message}]; interpreting it
+    stays with the caller. *)
+let post_board_new ~(host : string) ~(port : int) ~(title : string)
+    ~(body : string) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc [ ("title", `String title); ("body", `String body) ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
+    ~body:(Yojson.Safe.to_string payload)
+
+(** POST /api/v1/tools/masc_goal_transition. The action travels as the tool's
+    own wire word via [Goal_phase.Public_action.to_string] rather than a
+    local literal, so the TUI and the tool cannot disagree about what
+    "drop" means. The server owns the phase rules; an invalid transition is
+    its rejection to return, not the TUI's to pre-guess. *)
+let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
+    ~(action : Goal_phase.Public_action.t)
+    ~(note : string option) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      ([ ("goal_id", `String goal_id)
+       ; ("action", `String (Goal_phase.Public_action.to_string action))
+       ]
+      @
+      match note with
+      | Some text -> [ ("note", `String text) ]
+      | None -> [])
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_goal_transition"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** Fetch /api/v1/board/<postId> (post detail + comments). *)
 let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
   get_json ~host ~port
@@ -378,6 +438,35 @@ let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port
     ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
+
+(** Fetch /api/v1/dashboard/tools. *)
+let fetch_dashboard_tools ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/tools"
+
+(** Fetch /api/v1/gate/connectors. *)
+let fetch_connectors ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/gate/connectors"
+
+(** Fetch /api/v1/repositories. *)
+let fetch_repositories ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/repositories"
+
+(** Fetch /api/v1/dashboard/harness-health. No window is passed: the surface
+    shows what the harness decided recently, and a window is a question an
+    operator asks in the dashboard rather than a default. *)
+let fetch_harness_health ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
+
+(** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
+    lists what is waiting rather than the whole history. *)
+let fetch_verification_requests ~(host : string) ~(port : int) ~(limit : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(Printf.sprintf "/api/v1/verification/requests?limit=%d" (max 1 limit))
 
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

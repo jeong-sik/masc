@@ -149,7 +149,6 @@ and goal_of_yojson = function
 
 type rollup = {
   active_count : int;
-  paused_count : int;
   verifying_count : int;
   done_count : int;
   dropped_count : int;
@@ -551,11 +550,6 @@ let compute_rollup goals =
   in
   {
     active_count = count (fun goal -> goal.phase = Goal_phase.Executing);
-    paused_count =
-      count (fun goal ->
-          match goal.phase with
-          | Goal_phase.Paused | Goal_phase.Blocked -> true
-          | _ -> false);
     verifying_count = count (fun goal -> goal.phase = Goal_phase.Verifying);
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);

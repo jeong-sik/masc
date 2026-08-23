@@ -61,8 +61,6 @@ let seed_all_phases config =
     ; goals =
         [ goal_in Goal_phase.Executing "goal-executing" "still work"
         ; goal_in Goal_phase.Verifying "goal-verifying" "proof pending"
-        ; goal_in Goal_phase.Blocked "goal-blocked" "waiting on someone"
-        ; goal_in Goal_phase.Paused "goal-paused" "set aside"
         ; goal_in Goal_phase.Completed "goal-completed" "already achieved"
         ; goal_in Goal_phase.Dropped "goal-dropped" "abandoned"
         ]

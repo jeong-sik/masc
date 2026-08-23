@@ -702,8 +702,6 @@ let planning_phase_label phase = Goal_phase.to_string phase
 
 let planning_phase_color = function
   | Goal_phase.Executing -> Ansi.cyan
-  | Goal_phase.Blocked -> Ansi.red
-  | Goal_phase.Paused -> Ansi.yellow
   | Goal_phase.Verifying -> Ansi.magenta
   | Goal_phase.Completed -> Ansi.green
   | Goal_phase.Dropped -> Ansi.gray
@@ -750,8 +748,8 @@ let render_planning_list (state : state) =
    | Some p ->
        let rollup =
          Printf.sprintf
-           "  Executing: %d  Paused/Blocked: %d  Verifying: %d  Done: %d  Dropped: %d"
-           p.pl_rollup.pr_active p.pl_rollup.pr_paused
+           "  Executing: %d  Verifying: %d  Done: %d  Dropped: %d"
+           p.pl_rollup.pr_active
            p.pl_rollup.pr_verifying p.pl_rollup.pr_done
            p.pl_rollup.pr_dropped
        in

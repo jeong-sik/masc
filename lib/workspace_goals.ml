@@ -336,10 +336,6 @@ let gate_action_requires_evidence = function
   | Goal_phase.Record_proof_proven
   | Goal_phase.Record_proof_refuted -> true
   | Goal_phase.Request_complete
-  | Goal_phase.Pause
-  | Goal_phase.Resume
-  | Goal_phase.Block
-  | Goal_phase.Unblock
   | Goal_phase.Drop
   | Goal_phase.Reopen -> false
 ;;
@@ -741,16 +737,10 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                 answer_verifying_repeat
                   ~tool_name ~start_time ctx ~goal_id ~action goal
               | Goal_phase.Executing
-              | Goal_phase.Blocked
-              | Goal_phase.Paused
               | Goal_phase.Completed
               | Goal_phase.Dropped ->
                 already_goal_response
                   ~tool_name ~start_time ~goal_id ~action ~phase goal None)
-           | Goal_phase.Public_action.Pause
-           | Goal_phase.Public_action.Resume
-           | Goal_phase.Public_action.Block
-           | Goal_phase.Public_action.Unblock
            | Goal_phase.Public_action.Drop
            | Goal_phase.Public_action.Reopen ->
              already_goal_response
@@ -802,10 +792,6 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                            ; ( "verification"
                              , Goal_verification.record_to_yojson record )
                            ]))
-           | Goal_phase.Public_action.Pause
-           | Goal_phase.Public_action.Resume
-           | Goal_phase.Public_action.Block
-           | Goal_phase.Public_action.Unblock
            | Goal_phase.Public_action.Drop
            | Goal_phase.Public_action.Reopen ->
                 (match update_goal_phase ctx goal ~phase ?note () with

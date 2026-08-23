@@ -173,7 +173,6 @@ type planning_goal = Tui_decode.planning_goal
 type planning_rollup = Tui_decode.planning_rollup
   = {
   pr_active: int;
-  pr_paused: int;
   pr_verifying: int;
   pr_done: int;
   pr_dropped: int;

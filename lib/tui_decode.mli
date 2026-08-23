@@ -67,7 +67,6 @@ type planning_goal = {
 
 type planning_rollup = {
   pr_active : int;
-  pr_paused : int;
   pr_verifying : int;
   pr_done : int;
   pr_dropped : int;

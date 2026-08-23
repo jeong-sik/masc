@@ -183,7 +183,7 @@ r_goal_transition="$(
   call_tool 5011 "masc_goal_transition" "$(
     jq -cn \
       --arg goal_id "$GOAL_ID" \
-      '{goal_id:$goal_id,action:"pause",note:"public tool sweep pause"}'
+      '{goal_id:$goal_id,action:"drop",note:"public tool sweep drop"}'
   )"
 )"
 expect_ok "masc_goal_transition" "$r_goal_transition"

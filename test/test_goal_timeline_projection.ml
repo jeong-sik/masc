@@ -69,8 +69,6 @@ let test_severity_follows_the_phase () =
       (DGT.goal_event_timeline_json
          (goal_phase_event (live_phase_payload ~phase ~actor:"alpha")))
   in
-  check (option string) "blocked" (Some "bad") (severity_of "blocked");
-  check (option string) "paused" (Some "warn") (severity_of "paused");
   check (option string) "executing" (Some "ok") (severity_of "executing");
   check (option string) "verifying" (Some "ok") (severity_of "verifying");
   check (option string) "completed" (Some "ok") (severity_of "completed");

@@ -1,7 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes use the [keeper.event_queue.state.v16]
-    [event-queue-v17.json] envelope: revision, pending stimuli, the latest
+    Current writes go to [event-queue-v17.json]. The envelope inside still
+    carries the [keeper.event_queue.state.v16] schema tag because the JSON
+    shape did not change: #29598 changed what a turn-attempt-terminal
+    operation id says, not the field layout around it. The filename is the
+    fresh-state device, the schema tag names the shape. The envelope holds
+    revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
@@ -11,6 +15,13 @@
     so its retained size is bounded by one complete state. Serializing that
     state on each transition is the intentional cost of recovery that does not
     infer missing sibling work from a delta. *)
+
+(** The durable filenames this binary reads and writes. Callers outside
+    OCaml — the deployment preflight script builds fixtures at these exact
+    names — read them from here instead of repeating the version. *)
+val snapshot_filename : string
+
+val transition_wal_filename : string
 
 type owner_identity
 type owner_identity_error

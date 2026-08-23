@@ -489,6 +489,22 @@ let current_queue_keeper_name =
   Arg.(required & opt (some string) None & info [ "keeper-name" ] ~docv:"KEEPER" ~doc)
 ;;
 
+let durable_filenames_cmd =
+  let doc = "print the durable event-queue filenames this binary reads and writes" in
+  Cmd.v
+    (Cmd.info "durable-filenames" ~doc)
+    Term.(
+      const (fun () ->
+        (* The preflight script builds fixtures at these exact names. It used
+           to spell them out, so bumping the snapshot filename in OCaml left
+           the fixtures one version behind and the self-test failed. *)
+        Printf.printf
+          "snapshot=%s\nwal=%s\n"
+          Keeper_event_queue_persistence.snapshot_filename
+          Keeper_event_queue_persistence.transition_wal_filename)
+      $ const ())
+;;
+
 let validate_current_queue_cmd =
   let doc = "validate a current event-queue through production decode and replay" in
   Cmd.v
@@ -769,7 +785,8 @@ let () =
     (Cmd.eval
        (Cmd.group
           (Cmd.info "masc-deployment-preflight-helper" ~doc)
-          [ lease_run_cmd
+          [ durable_filenames_cmd
+          ; lease_run_cmd
           ; lease_handoff_cmd
           ; tool_blob_maintenance_cmd
           ; verify_lease_owner_cmd

@@ -46,6 +46,7 @@ type surface_ref = Surface_ref.t =
     }
   | Webhook of { source : string; event_id : string }
   | Agent
+  | Broadcast
   | Gate of { label : string; address : (string * string) list }
 
 type conversation_ref = {

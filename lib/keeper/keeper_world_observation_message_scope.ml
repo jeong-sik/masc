@@ -355,8 +355,10 @@ let pending_mentions_of_messages
 ;;
 
 (* Fleet messages: keeper broadcasts projected into this keeper's transcript.
-   [Surface_ref.Agent] is the typed marker the projection writes, so the filter
-   reads a variant rather than inspecting content.
+   [Surface_ref.Broadcast] is the typed marker the fleet fanout writes; an
+   [Surface_ref.Agent] row (direct keeper-to-keeper delivery) that lands in no
+   reactive lane is the same standing context, so the filter reads the two
+   variants rather than inspecting content.
 
    Unlike the two reactive lanes this layer carries no watermark. A projected
    broadcast is context, not an outstanding obligation, and the lane
@@ -376,8 +378,8 @@ let fleet_messages_of_messages
     messages
     |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
       match m.role, m.surface with
-      | Keeper_chat_store.Role.User, Some Surface_ref.Agent ->
-        Option.is_none (lane_of ~target_ids m)
+      | Keeper_chat_store.Role.User, Some (Surface_ref.Agent | Surface_ref.Broadcast)
+        -> Option.is_none (lane_of ~target_ids m)
       | ( Keeper_chat_store.Role.User
         , Some
             ( Surface_ref.Dashboard _

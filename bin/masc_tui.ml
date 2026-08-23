@@ -1913,7 +1913,8 @@ let main () =
                  | Some k ->
                      state.view <- Keepers Keeper_detail;
                      state.detail_scroll <- 0;
-                     load_live_context state base_path k
+                     load_live_context state base_path k;
+                     load_selected_keeper_logs state base_path 200 (Some k)
                  | None -> ())
             | Board ->
                 (match state.board_mode with
@@ -1996,7 +1997,7 @@ let main () =
           ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
-         | Keepers Keeper_logs ->
+         | Keepers (Keeper_logs | Keeper_detail) ->
              load_selected_keeper_logs state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor)
          | Board ->
@@ -2005,7 +2006,7 @@ let main () =
                   start_board_post_refresh state ~host ~port ~post_id
                     ~mailbox:async_messages
               | Board_list -> ())
-         | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
+         | Overview | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning -> ());
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background

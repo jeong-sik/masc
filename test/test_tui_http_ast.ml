@@ -1208,7 +1208,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs"
        ~callee:"Terminal_text.clock_timestamp");
-  check int "keeper detail uses safe short projections for every timestamp" 5
+  (* Six: two observation timestamps in Live Context, the last turn, the oldest
+     row a partial Last 24h window reached, and the created / updated pair. Each
+     one arrives from a keeper file or a metrics row, so none may reach the
+     frame unprojected. *)
+  check int "keeper detail uses safe short projections for every timestamp" 6
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_detail"
        ~callee:"Terminal_text.short_timestamp");

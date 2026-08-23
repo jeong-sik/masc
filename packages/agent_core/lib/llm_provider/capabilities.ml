@@ -558,13 +558,6 @@ let ollama_cloud_capabilities =
   { ollama_capabilities with
     supports_response_format_json = false
   ; supports_structured_output = false
-  ; (* Cloud speaks OpenAI-compatible /v1/chat/completions, where the reasoning
-       delta is named "reasoning". The parent preset is the native /api/chat
-       wire, whose field is "thinking", and a Cloud row that turns the request
-       control wire off would otherwise inherit no streaming field at all and
-       drop the reasoning it receives (#26788). The streaming field belongs to
-       the wire, so it is stated once here rather than per model row. *)
-    reasoning_streaming_format = Delta_reasoning_field "reasoning"
   }
 ;;
 

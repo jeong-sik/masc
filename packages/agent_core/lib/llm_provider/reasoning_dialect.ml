@@ -795,33 +795,6 @@ let replay_policy_to_string = function
 
 [@@@coverage off]
 
-let%test "ollama_cloud streams reasoning even with the control wire off" =
-  (* The Cloud rows declare thinking_control_format = none because /v1 cannot
-     encode the native think toggle. That is the request axis. Deriving the
-     response axis from it reads no field at all, so the reasoning arrives and
-     is discarded (#26788). The preset states the field, so a row turning the
-     control wire off keeps it. *)
-  let caps =
-    { Capabilities.ollama_cloud_capabilities with
-      thinking_control_format = Capabilities.No_thinking_control
-    }
-  in
-  match (of_capabilities caps).streaming with
-  | Delta_field "reasoning" -> true
-  | _ -> false
-;;
-
-let%test "ollama_cloud row can still name a different streaming field" =
-  let caps =
-    { Capabilities.ollama_cloud_capabilities with
-      reasoning_streaming_format = Capabilities.Delta_reasoning_field "thinking"
-    }
-  in
-  match (of_capabilities caps).streaming with
-  | Delta_field "thinking" -> true
-  | _ -> false
-;;
-
 let%test "reasoning_replay_override Force_preserve_always lifts base no_replay" =
   let caps =
     { Capabilities.default_capabilities with

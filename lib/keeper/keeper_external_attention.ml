@@ -98,6 +98,11 @@ type event =
       ignored_at : float;
       reason : string;
     }
+  | Quarantined of {
+      event_id : string;
+      quarantined_at : float;
+      reason : string;
+    }
 
 type record_result =
   [ `Recorded
@@ -270,6 +275,14 @@ let event_to_json = function
           ("ignored_at", `Float ignored_at);
           ("reason", `String reason);
         ]
+  | Quarantined { event_id; quarantined_at; reason } ->
+      `Assoc
+        [
+          ("event", `String "quarantined");
+          ("event_id", `String event_id);
+          ("quarantined_at", `Float quarantined_at);
+          ("reason", `String reason);
+        ]
 
 let event_of_json json =
   let* tag = Json_util.require_string json "event" in
@@ -288,6 +301,11 @@ let event_of_json json =
       let* ignored_at = required_float "ignored_at" json in
       let* reason = Json_util.require_string json "reason" in
       Ok (Ignored { event_id; ignored_at; reason })
+  | "quarantined" ->
+      let* event_id = Json_util.require_string json "event_id" in
+      let* quarantined_at = required_float "quarantined_at" json in
+      let* reason = Json_util.require_string json "reason" in
+      Ok (Quarantined { event_id; quarantined_at; reason })
   | other -> Error (Printf.sprintf "unknown external attention event %S" other)
 
 let report_read_drop ~reason ~path ~detail =
@@ -388,7 +406,7 @@ let recorded_item_by_event_id events event_id =
   List.find_map
     (function
       | Recorded item when String.equal item.event_id event_id -> Some item
-      | Recorded _ | Resolved _ | Ignored _ -> None)
+      | Recorded _ | Resolved _ | Ignored _ | Quarantined _ -> None)
     events
 
 (* RFC-0377: [load_events] parses the whole file on every call, exactly the
@@ -411,7 +429,7 @@ let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
         when Hashtbl.mem wanted item.event_id
              && not (Hashtbl.mem found item.event_id) ->
         Hashtbl.add found item.event_id item
-      | Recorded _ | Resolved _ | Ignored _ -> ())
+      | Recorded _ | Resolved _ | Ignored _ | Quarantined _ -> ())
     events;
   List.filter_map
     (fun event_id ->
@@ -507,6 +525,15 @@ let mark_ignored ~base_path ~keeper_name ~event_ids ~reason ?now () =
   in
   append_many ~base_path ~keeper_name events
 
+let mark_quarantined ~base_path ~keeper_name ~event_ids ~reason ?now () =
+  let quarantined_at = now_or_default now in
+  let events =
+    List.map
+      (fun event_id -> Quarantined { event_id; quarantined_at; reason })
+      event_ids
+  in
+  append_many ~base_path ~keeper_name events
+
 type projected_state =
   | Pending of item
   | Terminal
@@ -520,7 +547,9 @@ let project_pending events =
           | Some Terminal -> ()
           | Some (Pending _) | None ->
               Hashtbl.replace tbl item.event_id (Pending item))
-      | Resolved { event_id; _ } | Ignored { event_id; _ } ->
+      | Resolved { event_id; _ }
+      | Ignored { event_id; _ }
+      | Quarantined { event_id; _ } ->
           Hashtbl.replace tbl event_id Terminal)
     events;
   Hashtbl.fold

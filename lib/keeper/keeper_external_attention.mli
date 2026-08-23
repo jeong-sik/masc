@@ -81,6 +81,18 @@ type event =
       ignored_at : float;
       reason : string;
     }
+  | Quarantined of {
+      event_id : string;
+      quarantined_at : float;
+      reason : string;
+    }
+      (** The turn holding this row's stimulus failed terminally, so the queue
+          entry was quarantined and no Keeper ever judged the row. Distinct from
+          [Ignored], which records a completed turn that chose not to reply: a
+          reader that folds the two together reports a judgement that never
+          happened. Terminal for {!pending_for_keeper} either way — the wake is
+          edge-triggered and only a new ambient message re-arms it, so a row left
+          [Recorded] after its stimulus is gone stays pending forever. *)
 
 val event_id_of_dedupe_key : string -> string
 
@@ -149,6 +161,19 @@ val mark_ignored :
   ?now:float ->
   unit ->
   (unit, string) result
+
+val mark_quarantined :
+  base_path:string ->
+  keeper_name:string ->
+  event_ids:string list ->
+  reason:string ->
+  ?now:float ->
+  unit ->
+  (unit, string) result
+(** Append [Quarantined] for rows whose stimulus was quarantined out of the
+    event queue by a terminal turn failure. Call this wherever the queue entry
+    is terminalized as failed: the queue side and this log are separate writes,
+    and skipping it leaves the row pending with nothing left to drain it. *)
 
 val load_events_result :
   base_path:string -> keeper_name:string -> (event list, string) result

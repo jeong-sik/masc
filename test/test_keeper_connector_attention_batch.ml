@@ -604,6 +604,54 @@ let test_batch_completion_acks_every_member () =
       (Q.length queued))
 ;;
 
+(* The queue entry and the external-attention row are separate writes, and the
+   wake is edge-triggered: once a disposition terminalizes the entry, only a new
+   ambient message ever arms another stimulus for that row. So a disposition
+   that terminalizes must name a terminal event. Quarantine used to name none,
+   which left the row pending with nothing able to drain it. *)
+let test_every_terminalizing_disposition_settles_its_attention_rows () =
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       (Keeper_heartbeat_loop.Batch_quarantine { detail = "deterministic rejection" })
+   with
+   | Keeper_heartbeat_loop.Settle_quarantined { detail = "deterministic rejection" } ->
+     ()
+   | Keeper_heartbeat_loop.Settle_pending_in_queue ->
+     fail
+       "quarantine drops the queue entry, so leaving the row pending strands it \
+        forever"
+   | _ -> fail "quarantine must settle as Settle_quarantined carrying its detail");
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       (Keeper_heartbeat_loop.Batch_ack_completed
+          { connector_attention_outcome = Keeper_heartbeat_loop.Attention_resolved })
+   with
+   | Keeper_heartbeat_loop.Settle_resolved -> ()
+   | _ -> fail "a completed addressed turn must settle as Settle_resolved");
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       (Keeper_heartbeat_loop.Batch_ack_completed
+          { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored })
+   with
+   | Keeper_heartbeat_loop.Settle_ignored -> ()
+   | _ -> fail "a completed unaddressed turn must settle as Settle_ignored");
+  (* These two keep the entry queued, so the turn that drains it settles the
+     row. Settling here would retire a row that is still live. *)
+  List.iter
+    (fun disposition ->
+       match
+         Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+           disposition
+       with
+       | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
+       | _ ->
+         fail
+           "a disposition that leaves the entry queued must not settle the row")
+    [ Keeper_heartbeat_loop.Batch_defer { reason = "transient_turn_failure" }
+    ; Keeper_heartbeat_loop.Batch_no_action
+    ]
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
@@ -631,6 +679,10 @@ let () =
             "pins every branch of the pure disposition function"
             `Quick
             test_batch_disposition_of_cycle_outcome_pure_branches
+        ; test_case
+            "every terminalizing disposition settles its attention rows"
+            `Quick
+            test_every_terminalizing_disposition_settles_its_attention_rows
         ] )
     ]
 ;;

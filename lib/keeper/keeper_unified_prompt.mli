@@ -120,6 +120,7 @@ val build_prompt :
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?active_goal_summaries:goal_summary list ->
+  ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts

@@ -56,7 +56,7 @@ if [ -n "$drift_hits" ]; then
   cat <<'EOF' >&2
 ✗ validate-prompt-paths: bare `.worktrees/...` reference found in config/
 
-Keepers see their config/keepers/<name>/AGENT.md instructions
+Keepers see their config/keepers/<name>.toml instructions
 as part of their system prompt. A bare `.worktrees/<branch>` path is relative
 to the server root, not the keeper sandbox — the harness rejects it as outside
 the sandbox boundary.

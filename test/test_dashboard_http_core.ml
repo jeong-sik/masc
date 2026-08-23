@@ -2252,15 +2252,9 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   in
   let keepers_dir = Filename.concat config_root "keepers" in
   mkdir_p keepers_dir;
-  List.iter
-    (fun name ->
-      let agent_dir = Filename.concat keepers_dir name in
-      mkdir_p agent_dir;
-      write_file (Filename.concat agent_dir "AGENT.md") ("Keeper " ^ name))
-    [ "base"; "alpha"; "beta" ];
   write_file
     (Filename.concat keepers_dir "base.toml")
-    "[keeper]\nautoboot_enabled = false\n";
+    "[keeper]\nautoboot_enabled = false\ninstructions = \"Keeper base\"\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
     "[keeper]\nautoboot_enabled = true\n";
@@ -3014,7 +3008,7 @@ let prepare_config_sync_keeper ~sw config name =
       ; proactive = { enabled = false }
         (* keeper_turn_up_config_persistence.persist requires instructions
            from somewhere -- explicit instructions_arg, an existing
-           AGENT.md, or here -- before it will materialize a keeper.toml.
+           keeper.toml -- before it will materialize a keeper.
            None of the three config-sync fixtures below supply the first
            two, so this stands in for "keeper already has instructions
            from its meta / prior lifecycle" the way a real config-sync

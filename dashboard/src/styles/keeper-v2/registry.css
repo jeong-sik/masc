@@ -1,8 +1,7 @@
 /* MASC v2 — Registry surface.
-   Three layers of one being: 이데아(Persona · 형상) → 실재(Keeper · 인스턴스)
-   → 런타임(Runtime · 바인딩). Persona is a SEED — copied at instantiation,
-   independent thereafter. Layer identity by hue: 이데아 = cold-ink violet,
-   실재 = brass/volt + slot color, 런타임 = neutral mono. All from the v2 spine. */
+   Two layers: 실재(Keeper · 인스턴스) → 런타임(Runtime · 바인딩). Layer
+   identity by hue: 실재 = brass/volt + slot color, 런타임 = neutral mono.
+   All from the v2 spine. */
 
 .reg { min-height: 0; overflow: hidden; }
 .reg-scroll { height: 100%; overflow-y: auto; padding: 22px 26px 60px; }

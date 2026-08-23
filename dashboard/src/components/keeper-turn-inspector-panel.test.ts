@@ -97,8 +97,8 @@ describe('KeeperTurnInspectorPanel', () => {
       traceId: 'trace-a',
       absoluteTurn: 42,
       blocks: [
-        { id: 'Persona', bytes: 1024, text: 'you are the analyst' },
-        { id: 'Operator_note', bytes: 32, text: 'check the cancel record first' },
+        { id: 'keeper_instructions', bytes: 1024, text: 'you are the analyst' },
+        { id: 'operator_note', bytes: 32, text: 'check the cancel record first' },
       ],
       assembled: null,
     })
@@ -106,11 +106,11 @@ describe('KeeperTurnInspectorPanel', () => {
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
     fireEvent.click(screen.getByRole('tab', { name: 'Typed next prompt' }))
 
-    expect(await screen.findByText('Operator_note')).toBeTruthy()
+    expect(await screen.findByText('operator_note')).toBeTruthy()
     expect(screen.getByText('1.0 KB')).toBeTruthy()
     // Text is behind a disclosure so a 200 KB block does not open by default.
     expect(screen.queryByText(/check the cancel record first/)).toBeNull()
-    fireEvent.click(screen.getByText('Operator_note'))
+    fireEvent.click(screen.getByText('operator_note'))
     expect(await screen.findByText(/check the cancel record first/)).toBeTruthy()
   })
 

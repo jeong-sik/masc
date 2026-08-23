@@ -14,6 +14,7 @@ import type {
   SSEEventType,
 } from '../types/sse'
 import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from '../lib/keeper-chat-stream-contract'
+import type { KeeperChatCustomEventName } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
 
 type SchemaIssue = { path?: string; message: string }
@@ -209,7 +210,13 @@ const KEEPER_CHAT_AG_UI_EVENT_TYPES = new Set([
   'CUSTOM',
 ])
 
-const KEEPER_CHAT_CUSTOM_EVENT_NAME_SET = new Set<string>(KEEPER_CHAT_CUSTOM_EVENT_NAMES)
+const KEEPER_CHAT_CUSTOM_EVENT_NAME_SET: ReadonlySet<string> = new Set(
+  KEEPER_CHAT_CUSTOM_EVENT_NAMES,
+)
+
+function isKeeperCustomEventName(name: string): name is KeeperChatCustomEventName {
+  return KEEPER_CHAT_CUSTOM_EVENT_NAME_SET.has(name)
+}
 const KEEPER_CHAT_AG_UI_BASE_FIELDS = ['type', 'threadId', 'timestamp'] as const
 const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['RUN_STARTED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
@@ -357,7 +364,10 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
   return ok(true)
 }
 
-function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseResult<true> {
+function validateKeeperCustomPayload(
+  name: KeeperChatCustomEventName,
+  payload: unknown,
+): SafeParseResult<true> {
   if ([
     'KEEPER_CONNECTED',
     'KEEPER_STREAM_MESSAGE_STOP',
@@ -391,7 +401,27 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
     return requiredString(targetObject.data, 'channel_id')
   }
 
-  const allowedFields: Record<string, readonly string[]> = {
+  // Total over the event names, so a name added to the contract without a
+  // field list stops the build. It used to fall back to an empty list, which
+  // made every field the producer sent read as an unexpected one: three
+  // events reached main that way and the stream failed with a message about
+  // a payload field rather than about the missing contract.
+  //
+  // The four answered above are listed with the fields they carry, so the
+  // record stays a statement about the wire rather than about this function.
+  const allowedFields: Record<KeeperChatCustomEventName, readonly string[]> = {
+    KEEPER_CONNECTED: [],
+    KEEPER_STREAM_MESSAGE_STOP: [],
+    KEEPER_STREAM_PING: [],
+    KEEPER_EXTERNAL_EFFECT_COMPLETED: ['target'],
+    KEEPER_CHAT_OPERATION_ACCEPTED: ['operation_id', 'state', 'queued_count'],
+    KEEPER_TOOL_APPROVAL_REQUESTED: [
+      'tool_call_id',
+      'tool_call_name',
+      'args',
+      'question',
+    ],
+    KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
     KEEPER_STREAM_MESSAGE_START: ['provider_message_id', 'model', 'usage'],
     KEEPER_STREAM_MESSAGE_DELTA: ['stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
@@ -404,7 +434,7 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
     KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref'],
     KEEPER_TOOL_RESULT_READY: ['tool_call_id'],
   }
-  const object = exactCustomObject(payload, name, allowedFields[name] ?? [])
+  const object = exactCustomObject(payload, name, allowedFields[name])
   if (!object.success) return object
   const value = object.data
 
@@ -433,6 +463,34 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
       return requiredInteger(value, 'index')
     case 'KEEPER_TOOL_RESULT_READY':
       return requiredString(value, 'tool_call_id')
+    case 'KEEPER_TOOL_APPROVAL_REQUESTED': {
+      const toolCallId = requiredString(value, 'tool_call_id')
+      if (!toolCallId.success) return toolCallId
+      const toolCallName = requiredString(value, 'tool_call_name')
+      if (!toolCallName.success) return toolCallName
+      const args = requiredString(value, 'args')
+      if (!args.success) return args
+      return requiredString(value, 'question')
+    }
+    case 'KEEPER_TOOL_APPROVAL_SETTLED': {
+      const toolCallId = requiredString(value, 'tool_call_id')
+      if (!toolCallId.success) return toolCallId
+      return requiredString(value, 'outcome')
+    }
+    case 'KEEPER_CHAT_OPERATION_ACCEPTED': {
+      const operationId = requiredString(value, 'operation_id')
+      if (!operationId.success) return operationId
+      const state = requiredString(value, 'state')
+      if (!state.success) return state
+      return requiredInteger(value, 'queued_count')
+    }
+    case 'KEEPER_CONNECTED':
+    case 'KEEPER_STREAM_MESSAGE_STOP':
+    case 'KEEPER_STREAM_PING':
+      // Answered above, before the field map: these carry a null payload.
+      // Listed so the switch stays total. The nested-shape event is narrowed
+      // out of the union by its own early return and cannot appear here.
+      return ok(true)
     case 'KEEPER_THINKING_DELTA': {
       const index = requiredInteger(value, 'index')
       return index.success ? requiredString(value, 'delta') : index
@@ -483,7 +541,12 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
         : fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
     }
   }
-  return fail('ag_ui_event.name', 'Expected a supported Keeper custom event name')
+  // The name reached here from the contract list, so a missing branch is a gap
+  // in this function, not an unsupported event. Typed as never so adding a name
+  // to the contract without a branch stops the build instead of failing a live
+  // turn with a message about the name being unsupported.
+  const unhandled: never = name
+  return fail('ag_ui_event.name', `No payload contract for ${String(unhandled)}`)
 }
 
 function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseResult<true> {
@@ -560,10 +623,7 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
     case 'CUSTOM':
-      if (
-        typeof value.name !== 'string'
-        || !KEEPER_CHAT_CUSTOM_EVENT_NAME_SET.has(value.name)
-      ) {
+      if (typeof value.name !== 'string' || !isKeeperCustomEventName(value.name)) {
         return fail('ag_ui_event.name', 'Expected a supported Keeper custom event name')
       }
       if (!Object.prototype.hasOwnProperty.call(value, 'value')) {

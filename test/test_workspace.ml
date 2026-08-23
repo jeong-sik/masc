@@ -2360,6 +2360,70 @@ let test_no_unclaimed_tasks_stop_signal () =
     | Masc_domain.Claim_next_no_unclaimed -> ()
     | _ -> Alcotest.fail "expected Claim_next_no_unclaimed")
 
+
+(* An absent backlog and a malformed one demand different operator actions, so
+   the read must not report the first as the second. [read_json_result] answers a
+   missing key with an empty object, which decodes as a schema violation unless
+   absence is split out first (#29562). *)
+
+let temp_workspace_dir () =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_backlog_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000000.)))
+  in
+  Unix.mkdir dir 0o755;
+  dir
+
+let schema_complaint = "must contain exactly one tasks list"
+
+let test_absent_backlog_is_not_reported_as_malformed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = temp_workspace_dir () in
+  let config = workspace_config tmp_dir in
+  (match Workspace_backlog.read_backlog_observation_with_source_r config with
+   | Ok _ -> Alcotest.fail "an absent backlog must not read as a backlog"
+   | Error message ->
+     Alcotest.(check bool)
+       "names the absent primary"
+       true
+       (str_contains message "no backlog at");
+     Alcotest.(check bool)
+       "names the absent recovery mirror"
+       true
+       (str_contains message "no recovery mirror at");
+     Alcotest.(check bool)
+       "does not claim a schema violation"
+       false
+       (str_contains message schema_complaint));
+  let _ = Workspace.reset config in
+  ()
+
+let test_malformed_backlog_still_reports_the_schema () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = temp_workspace_dir () in
+  let config = workspace_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
+  Workspace_utils.write_json config (Workspace.backlog_path config) (`Assoc []);
+  (match Workspace_backlog.read_backlog_observation_with_source_r config with
+   | Ok _ -> Alcotest.fail "an empty object is not a backlog"
+   | Error message ->
+     Alcotest.(check bool)
+       "reports the schema violation"
+       true
+       (str_contains message schema_complaint);
+     Alcotest.(check bool)
+       "does not claim the file is absent"
+       false
+       (str_contains message "no backlog at"));
+  let _ = Workspace.reset config in
+  ()
+
 let () =
   Eio_guard.enable ();
   Random.init 42;
@@ -2566,6 +2630,12 @@ let () =
     "task_identity", [
       Alcotest.test_case "BUG-006: transition/complete with unsuffixed name" `Quick test_bug006_transition_with_unsuffixed_name;
       Alcotest.test_case "BUG-006: cancel with unsuffixed name" `Quick test_bug006_cancel_with_unsuffixed_name;
+    ];
+
+
+    "backlog_absence", [
+      Alcotest.test_case "absent backlog is not reported as malformed" `Quick test_absent_backlog_is_not_reported_as_malformed;
+      Alcotest.test_case "malformed backlog still reports the schema" `Quick test_malformed_backlog_still_reports_the_schema;
     ];
 
     (* === Idle loop stop signal tests === *)

@@ -49,6 +49,13 @@ type unreadable =
   ; last_detail : string
   }
 
+(** A tool call the keeper is holding, waiting to be answered. *)
+type awaiting_approval =
+  { call_id : string
+  ; tool_name : string
+  ; question : string
+  }
+
 type t
 
 val create : keeper_name:string -> request_id:string -> t
@@ -90,6 +97,10 @@ val tool_rows : t -> string list
 type status_kind =
   | Progress  (** How the turn is going. *)
   | Attention  (** Something an operator has to know about. *)
+
+val awaiting_approval : t -> awaiting_approval option
+(** The call the turn is held at, if any. One at a time: the turn cannot reach
+    a second call while it is waiting on this one. *)
 
 val status_rows : t -> (status_kind * string) list
 (** The status rows the chat pane draws for this turn.

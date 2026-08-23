@@ -365,6 +365,19 @@ let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
 let fetch_board ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/board"
 
+(** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
+    shape -- first line is the title, the rest is the body -- and the server
+    stamps the author from the agent header, so the payload carries text
+    only. The response is the tools envelope [{ok, message}]; interpreting it
+    stays with the caller. *)
+let post_board_new ~(host : string) ~(port : int) ~(title : string)
+    ~(body : string) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc [ ("title", `String title); ("body", `String body) ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** Fetch /api/v1/board/<postId> (post detail + comments). *)
 let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
   get_json ~host ~port

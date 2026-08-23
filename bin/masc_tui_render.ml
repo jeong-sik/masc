@@ -783,6 +783,65 @@ let render_approvals (state : state) =
       ~cols buf
 
 (** Render the Board surface (list view). *)
+(** The new-post draft. The commit-message convention is stated on screen
+    rather than assumed: first line is the title, the rest is the body. A
+    draft taller than the viewport shows its tail, where the caret is -- the
+    operator is always writing at the bottom. *)
+let render_board_compose (state : state) =
+  let (rows, cols) = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let header = Printf.sprintf " MASC Board  %s[new post]%s  %s"
+    Ansi.cyan Ansi.reset
+    (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line buf cols
+    (Ansi.dim ^ "  first line: title   rest: body   Enter: new line"
+    ^ Ansi.reset);
+  (match state.board_post_error with
+   | Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  "
+         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ^ Ansi.reset)
+   | None -> ());
+  box_divider buf cols;
+  let text_width = max 10 (cols - 8) in
+  let draft_lines =
+    String.split_on_char '\n' (Buffer.contents state.board_draft)
+    |> List.concat_map (fun line ->
+           Message_layout.wrap_words ~max_cells:text_width
+             (Terminal_text.single_line line))
+  in
+  let error_rows = if Option.is_some state.board_post_error then 1 else 0 in
+  let content_height = max 1 (rows - 8 - error_rows) in
+  let visible_lines =
+    let total = List.length draft_lines in
+    if total > content_height then
+      List.filteri
+        (fun index _ -> index >= total - content_height)
+        draft_lines
+    else draft_lines
+  in
+  List.iter
+    (fun line ->
+       box_line buf cols
+         ("  " ^ fit_width line (cols - 8)))
+    visible_lines;
+  box_bottom buf cols;
+  let prompt =
+    if state.board_compose_armed then
+      "s:send  d:discard  esc:keep writing"
+    else
+      "type to write  esc:send or discard  Tab:surfaces  q:quit"
+  in
+  Buffer.add_string buf
+    (Printf.sprintf "%s  %s%s\n" Ansi.dim prompt Ansi.reset);
+  finish_frame ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
+
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -2396,6 +2455,7 @@ let render_surface (state : state) =
   | Board ->
       (match state.board_mode with
        | Board_list -> render_board_list state
+       | Board_compose -> render_board_compose state
        | Board_read post_id ->
            match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
            | Some post -> render_board_read state post

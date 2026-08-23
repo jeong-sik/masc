@@ -779,7 +779,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "overview renderer consumes one shared layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"overview_layout");
-  check int "overview bounds each variable section from that allocation" 5
+  (* 6 = the five allocation-sourced bounds plus the task-panel window, which
+     follows the cursor through the same [task_rows] value (#29684). Every
+     bound still comes from the one shared allocation above. *)
+  check int "overview bounds each variable section from that allocation" 6
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
        ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);

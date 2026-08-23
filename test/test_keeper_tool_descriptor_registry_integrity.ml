@@ -323,7 +323,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "keeper_library_search"
     ; "masc_library_add"
     ; "masc_library_list"
-    ; "masc_heartbeat"
     ; "masc_gc"
     ; "masc_get_metrics"
     ];
@@ -349,6 +348,20 @@ let test_registered_cluster_model_projections_are_explicit () =
          authority. *)
     ; "masc_runtime_verify"
     ; "masc_runtime_ollama_probe"
+      (* #29681 took these off the model surface after two months of zero
+         Keeper calls. Pinned here so the surface cannot quietly regrow: the
+         plan tools are an operator's editing surface, and heartbeat, check,
+         tool_help, and the agent screens answer questions the world-state
+         frame already carries. All stay registered for MCP/HTTP. *)
+    ; "masc_heartbeat"
+    ; "masc_check"
+    ; "masc_tool_help"
+    ; "masc_agent_card"
+    ; "masc_agent_timeline"
+    ; "masc_plan_init"
+    ; "masc_plan_update"
+    ; "masc_plan_get"
+    ; "masc_plan_set_task"
     ];
   List.iter
     (fun (name, projected_by) ->
@@ -356,6 +369,11 @@ let test_registered_cluster_model_projections_are_explicit () =
     [ "masc_library_read", "keeper_library_read"
     ; "masc_library_search", "keeper_library_search"
     ; "masc_tasks", "keeper_tasks_list"
+      (* #29681: the keeper_* twin is what the model sees. *)
+    ; "masc_add_task", "keeper_task_create"
+    ; "masc_batch_add_tasks", "keeper_task_create"
+    ; "masc_transition", "keeper_task_claim"
+    ; "masc_update_priority", "keeper_task_claim"
     ]
 ;;
 

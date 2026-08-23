@@ -1062,6 +1062,20 @@ let decode_system_log_entry json =
     ; sl_message
     }
 
+type repository = {
+  rp_name : string;
+  rp_local_path : string;
+  rp_default_branch : string;
+  rp_status : string;
+  rp_keepers : string list;
+  rp_auto_sync : bool;
+}
+
+type repository_snapshot = {
+  rs_repositories : repository list;
+  rs_total : int;
+}
+
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -1102,6 +1116,31 @@ let decode_string_name_list json key =
        | `String value -> Ok value
        | bad -> field_type_error key "a string" bad)
     items
+
+let decode_repository json =
+  let* rp_name = required_string_field json "name" in
+  let* rp_local_path = required_string_field json "local_path" in
+  let* rp_default_branch = required_string_field json "default_branch" in
+  let* rp_status = required_string_field json "status" in
+  let* rp_keepers = decode_string_name_list json "keepers" in
+  let* rp_auto_sync =
+    match member "auto_sync" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "auto_sync" "a bool or null" bad
+  in
+  Ok
+    { rp_name; rp_local_path; rp_default_branch; rp_status; rp_keepers
+    ; rp_auto_sync
+    }
+
+let decode_repository_snapshot json =
+  let* repos_json = required_list_field json "repositories" in
+  let* rs_repositories =
+    decode_list "repositories" decode_repository repos_json
+  in
+  let* rs_total = required_int_field json "total" in
+  Ok { rs_repositories; rs_total }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in

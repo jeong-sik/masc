@@ -103,7 +103,7 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Keepers _ | Board | Approvals | Planning
-            | Verification | Harness | System_logs ->
+            | Verification | Harness | Repositories | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -2743,6 +2743,100 @@ let render_harness (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
+(* The repositories a keeper can work in.
+
+   Auto-sync and the assigned keepers are the two columns that change what an
+   operator does next: a repository nobody is assigned to will not move on its
+   own, and one that is not syncing is working from whatever was last pulled. *)
+let render_repositories (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let repos =
+    match state.repositories with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.rs_repositories
+  in
+  let shown = List.length repos in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.repositories with
+    | None ->
+        Printf.sprintf " MASC Repositories  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf " MASC Repositories (%d)  %s  %s" shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status" "Sync"
+      "Keepers"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.repositories_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.repositories_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.repositories_scroll max_scroll) in
+  state.repositories_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.repositories_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no repositories registered)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt repos idx with
+      | None -> box_empty buf cols
+      | Some r ->
+          let open Masc.Tui_decode in
+          let keepers =
+            match r.rp_keepers with
+            | [] -> "-"
+            | names -> String.concat ", " names
+          in
+          let line =
+            Printf.sprintf "  %-18s %-12s %-9s %-6s %s"
+              (Terminal_text.single_line r.rp_name)
+              (Terminal_text.single_line r.rp_default_branch)
+              (Terminal_text.single_line r.rp_status)
+              (if r.rp_auto_sync then "auto" else "manual")
+              (Terminal_text.single_line keepers)
+          in
+          (* A repository nobody works in is dim rather than absent: it is
+             registered, and that it has no keeper is the thing to notice. *)
+          let style = match r.rp_keepers with [] -> Ansi.dim | _ -> Ansi.reset in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d repositories, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -2784,6 +2878,7 @@ let render_surface (state : state) =
   | Approvals -> render_approvals state
   | Verification -> render_verification state
   | Harness -> render_harness state
+  | Repositories -> render_repositories state
   | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =

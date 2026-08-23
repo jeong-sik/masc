@@ -439,6 +439,11 @@ let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
   get_json ~host ~port
     ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
 
+(** Fetch /api/v1/repositories. *)
+let fetch_repositories ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/repositories"
+
 (** Fetch /api/v1/dashboard/harness-health. No window is passed: the surface
     shows what the harness decided recently, and a window is a question an
     operator asks in the dashboard rather than a default. *)

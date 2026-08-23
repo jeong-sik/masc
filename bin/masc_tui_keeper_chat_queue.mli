@@ -32,6 +32,13 @@ val push : t -> keeper_name:string -> string -> (t * int, string) result
 val pop : t -> ((string * string) * t) option
 (** Take the oldest. [None] when nothing waits. *)
 
+val take_newest : t -> ((string * string) * t) option
+(** Take the newest waiting line. The newest is the one an operator just
+    typed and the one a mis-send hits: cancel drops it, and pulling it back
+    into the composer is the edit. The line has not been dispatched, so both
+    are local decisions with nothing to undo on the server. [None] when
+    nothing waits. *)
+
 val drop_for_keeper : t -> keeper_name:string -> t
 (** Forget what was waiting for one keeper. Used when that keeper is gone: a
     line cannot be delivered to a keeper that is no longer registered, and

@@ -62,7 +62,6 @@ let sanitize_event (value : event) =
   {
     value with
     ts_iso = Safe_ops.sanitize_text_utf8 value.ts_iso;
-    workspace_id = Safe_ops.sanitize_text_utf8 value.workspace_id;
     kind = Safe_ops.sanitize_text_utf8 value.kind;
     actor = Option.map sanitize_entity_ref value.actor;
     subject = Option.map sanitize_entity_ref value.subject;
@@ -99,7 +98,6 @@ let sanitize_event_traced (value : event) : event =
      List.map always allocates a new list, so tags are compared element-wise. *)
   let changed =
     not (sanitized.ts_iso == value.ts_iso)
-    || not (sanitized.workspace_id == value.workspace_id)
     || not (sanitized.kind == value.kind)
     || entity_ref_changed sanitized.actor value.actor
     || entity_ref_changed sanitized.subject value.subject
@@ -505,7 +503,6 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
             seq;
             ts_ms = now_ts_ms ();
             ts_iso = Masc_domain.now_iso ();
-            workspace_id = "default";  (* retained for JSONL backward compat *)
             kind;
             actor;
             subject;
@@ -582,7 +579,6 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
       ("after_seq", `Int after_seq);
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
-      ("workspace_id", `String "default");  (* backward compat *)
       ("kinds", `List (List.map (fun value -> `String value) kinds));
       ("latest_seq", `Int latest_store_seq);
       ("latest_matching_seq", `Int latest_matching_seq);
@@ -756,7 +752,6 @@ let graph_json config ?(kinds = []) ?(limit = 500)
           ~events_shown:(List.length events)
           ~events_store_total
           ~extra:[
-            ("workspace_id", `String "default");
             ("kinds", `List (List.map (fun value -> `String value) kinds));
           ] () );
       ( "stats",

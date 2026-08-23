@@ -59,5 +59,5 @@ let persist_message ?source session msg =
        [save_bytes_durable_atomic_observed] and [save_json_durable_atomic_from]
        through [save_bytes_durable_atomic_core] — and this is the only writer
        under a session directory that appends instead. *)
-    ignore (Keeper_fs.ensure_dir (Filename.dirname path));
+    let (_created : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
     Fs_compat.append_file path line

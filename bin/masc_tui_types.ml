@@ -131,6 +131,33 @@ type board_comment = {
   bc_created_at: string;
 }
 
+(** One scheduled-automation row, from the dashboard schedule projection.
+    [sch_status] stays a string rather than a variant: the pane projects the
+    store's own status vocabulary, and a status this build does not name
+    renders as itself rather than disappearing. *)
+type schedule_row = {
+  sch_schedule_id: string;
+  sch_status: string;
+  sch_source: string;
+  sch_due_at_iso: string option;
+  sch_recurrence_summary: string;
+  sch_payload_target: string option;
+  sch_payload_summary: string option;
+}
+
+(** Schedule list snapshot. [scs_request_count] is [None] exactly when the
+    store read failed -- the server reports that as [status = "unknown"]
+    rather than an empty list, and the pane keeps the two facts apart the
+    same way. *)
+type schedule_snapshot = {
+  scs_status: string;
+  scs_read_error: string option;
+  scs_request_count: int option;
+  scs_truncated: bool;
+  scs_next_due_iso: string option;
+  scs_rows: schedule_row list;
+}
+
 (** Board surface sub-mode *)
 type board_mode =
   | Board_list
@@ -297,6 +324,7 @@ type surface =
   | Board
   | Approvals
   | Planning
+  | Schedules
   | Verification
   | Harness
   | Repositories
@@ -320,8 +348,8 @@ type surface_needs = {
 let surface_needs : surface -> surface_needs = function
   | Overview -> { needs_transport = true; needs_keeper_roster = false }
   | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
-  | Board | Approvals | Planning | Verification | Harness | Repositories
-  | Connectors | Tools | Autonomy | System_logs ->
+  | Board | Approvals | Planning | Schedules | Verification | Harness
+  | Repositories | Connectors | Tools | Autonomy | System_logs ->
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
@@ -412,6 +440,17 @@ type state = {
   mutable goal_action_armed:
     (string * Goal_phase.Public_action.t) option;
   mutable goal_action_error: string option;
+  (* The schedule list and its cursor. The snapshot keeps the server's
+     ok/unknown split so a failed store read never draws as "no schedules". *)
+  mutable schedules: schedule_snapshot option;
+  mutable schedules_error: string option;
+  mutable schedule_cursor: int;
+  mutable schedule_scroll: int;
+  (* A cancel armed for a second keypress: which schedule. The cursor can move
+     between the two presses, so the schedule id is captured at arm time and a
+     press on a different row re-arms for that row. *)
+  mutable schedule_cancel_armed: string option;
+  mutable schedule_cancel_error: string option;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
@@ -584,6 +623,12 @@ let create_state ~workspace ~port ~refresh_interval = {
   planning_mode = Planning_list;
   goal_action_armed = None;
   goal_action_error = None;
+  schedules = None;
+  schedules_error = None;
+  schedule_cursor = 0;
+  schedule_scroll = 0;
+  schedule_cancel_armed = None;
+  schedule_cancel_error = None;
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;

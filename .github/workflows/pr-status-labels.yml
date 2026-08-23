@@ -47,7 +47,7 @@ jobs:
     name: Project PR state onto labels
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: .github/pull-request-labels.json
           sparse-checkout-cone-mode: false

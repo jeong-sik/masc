@@ -566,6 +566,16 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_exact_string_literals
        ~module_path:"lib/tui_decode.ml"
        ~needle:"running");
+  (* [proactive_enabled] left the keeper detail row in #29311, and that row is
+     now built from [Keeper_meta_contract] rather than raw keys, so it cannot
+     come back through it. The one literal left is [decode_keeper_runtime],
+     which reads GET /api/v1/gate/keepers -- a live route, not the durable
+     metadata the retirement was about. Counted, so a second reader still
+     fails. *)
+  check int "proactive_enabled is read only by decode_keeper_runtime" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"lib/tui_decode.ml"
+       ~needle:"proactive_enabled");
   check int "verify appears only inside verifying_count" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
@@ -579,7 +589,6 @@ let test_tui_current_projection_wiring () =
     [ "active_goal_ids"
     ; "active_model"
     ; "models"
-    ; "proactive_enabled"
     ; "initiative_enabled"
     ; "trigger_mode"
     ; "context_budget"
@@ -770,7 +779,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "overview renderer consumes one shared layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"overview_layout");
-  check int "overview bounds each variable section from that allocation" 5
+  (* 6 = the five allocation-sourced bounds plus the task-panel window, which
+     follows the cursor through the same [task_rows] value (#29684). Every
+     bound still comes from the one shared allocation above. *)
+  check int "overview bounds each variable section from that allocation" 6
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
        ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
@@ -1148,8 +1160,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "planning_error"; "pg_due_date"; "pg_title" ];
   check_fields "render_planning_detail"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
-  check_fields "render_keeper_list"
-    [ "keepers_error"; "k_current_task_id"; "k_name" ];
+  check_fields "render_keeper_list" [ "keepers_error" ];
+  (* #29626 moved the row itself into [keeper_row_content] so the list could
+     carry action affordances. The fields the row shows did not change, and
+     neither did their sanitizers -- only the binding that holds them. *)
+  check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
   check_fields "render_keeper_detail"
     [ "k_name"
     ; "k_current_task_id"

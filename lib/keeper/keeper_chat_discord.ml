@@ -360,7 +360,13 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
           match msg_id with
           | None when !external_effect_completed -> Ok ()
           | None ->
-              if String.length acc_text = 0 then
+              (* Ask whether there is anything to send, which is
+                 [delivered_text] — the accumulated text plus the tool trail.
+                 Checking [acc_text] asked about a different value: a turn that
+                 only called tools has no assistant text but does have a trail,
+                 so it settled Error while the turn layer had already settled
+                 Delivered (#26406). *)
+              if String.length delivered_text = 0 then
                 Error
                   (Discord_rest_client.Other
                      { request_id = "keeper_chat_discord.final_reply"
@@ -419,6 +425,14 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Tool_call_args _
     | Tool_call_args_snapshot _
     | Tool_call_end _
+    (* An approval prompt has no operator on a connector channel: nobody is
+       sitting there to answer y/n, and posting the question would ask a room
+       to decide something it cannot. Approval is offered on the operator's
+       own surface, so this never arrives here -- it is spelled out rather
+       than left to a catch-all so a future surface has to make the same
+       decision deliberately. *)
+    | Tool_approval_requested _
+    | Tool_approval_settled _
     | Tool_result_ready _
     | Tool_context_block _ -> continue ()
     | Link_block { url; title; description; image } ->

@@ -192,15 +192,26 @@ let test_scan_warns_on_state_transitions_only () =
   with_temp_workspace @@ fun config ->
   let name = "meta-dedupe-canary" in
   write_keeper_toml config name;
-  (* A zero generation is non-enumerated corruption: no canonical default
-     exists, so the file stays unreadable and the WARN state persists. *)
+  (* [generation] is a field this binary no longer writes (#29590), so the
+     file is undecodable; there is no canonical default to repair to. Since
+     #29610 the reader fails open — one WARN names the loss and the meta
+     reads as absent — and that WARN is deduped on the (path, detail)
+     state. *)
   let path = write_corrupted_meta config name ~field:"generation" ~value:(`Int 0) in
   let base_seq = latest_seq () in
   ignore (Keeper_meta_store.keepalive_keeper_names config);
   let first_episode =
     warns (entries_about name (keeper_entries_since base_seq))
   in
-  check int "first failure is logged" 2 (List.length first_episode);
+  check int "first failure is logged once" 1 (List.length first_episode);
+  check
+    bool
+    "the WARN says the meta is being treated as absent"
+    true
+    (List.exists
+       (fun (entry : Log.Ring.entry) ->
+          Astring.String.is_infix ~affix:"treating as absent" entry.message)
+       first_episode);
   (* Repeated scans of the same (path, failure-reason) state are silent. *)
   let repeat_seq = latest_seq () in
   ignore (Keeper_meta_store.keepalive_keeper_names config);
@@ -229,24 +240,35 @@ let test_scan_warns_on_state_transitions_only () =
   check
     int
     "identical failure after recovery logs again"
-    2
+    1
     (List.length (warns (entries_about name (keeper_entries_since relapse_seq))))
 ;;
 
-let test_non_enumerated_corruption_fails_loud () =
+(* #29610: a meta this binary cannot decode reads as absent instead of
+   refusing the keeper. The loss is named in a WARN, the corrupt file is left
+   for the operator, and nothing is silently rewritten. *)
+let test_non_enumerated_corruption_reads_as_absent () =
   with_temp_workspace @@ fun config ->
-  let name = "meta-fail-loud-canary" in
+  let name = "meta-fail-open-canary" in
   write_keeper_toml config name;
   let path = write_corrupted_meta config name ~field:"generation" ~value:(`Int 0) in
   let before = Masc_test_deps.read_file path in
+  let base_seq = latest_seq () in
   (match Keeper_meta_store.read_meta config name with
-   | Error detail ->
-     check
-       bool
-       "non-enumerated corruption still requires reset"
-       true
-       (Astring.String.is_infix ~affix:"runtime reset required" detail)
-   | Ok _ -> fail "non-enumerated corruption was silently accepted");
+   | Ok None -> ()
+   | Ok (Some _) -> fail "undecodable meta was served as a keeper"
+   | Error detail -> failf "undecodable meta was refused instead of read as absent: %s" detail);
+  let episode = warns (entries_about name (keeper_entries_since base_seq)) in
+  check int "the loss is logged once" 1 (List.length episode);
+  check
+    bool
+    "the WARN carries the decode detail"
+    true
+    (List.exists
+       (fun (entry : Log.Ring.entry) ->
+          Astring.String.is_infix ~affix:"treating as absent" entry.message
+          && Astring.String.is_infix ~affix:"generation" entry.message)
+       episode);
   check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
 ;;
 
@@ -317,9 +339,9 @@ let () =
             `Quick
             test_scan_warns_on_state_transitions_only
         ; test_case
-            "non-enumerated corruption still fails loud"
+            "non-enumerated corruption reads as absent"
             `Quick
-            test_non_enumerated_corruption_fails_loud
+            test_non_enumerated_corruption_reads_as_absent
         ] )
     ]
 ;;

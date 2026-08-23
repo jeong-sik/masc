@@ -18,6 +18,16 @@ type delta =
       }
   | Tool_ended of { call_id : string }
   | Tool_result of { call_id : string }
+  | Approval_requested of
+      { call_id : string
+      ; tool_name : string
+      ; args : string
+      ; question : string
+      }
+  | Approval_settled of
+      { call_id : string
+      ; outcome : string
+      }
   | Checkpoint
   | External_effect_completed
   | Run_failed of { message : string }
@@ -82,6 +92,45 @@ let custom_deltas fields =
       | Some value ->
           required ~event:"KEEPER_TOOL_RESULT_READY" ~field:"tool_call_id" value
             (fun call_id -> Tool_result { call_id }))
+  | Some "KEEPER_TOOL_APPROVAL_REQUESTED" -> (
+      match object_field fields "value" with
+      | None ->
+          [ Undecodable "KEEPER_TOOL_APPROVAL_REQUESTED value is not an object" ]
+      | Some value -> (
+          match
+            ( string_field value "tool_call_id"
+            , string_field value "tool_call_name"
+            , string_field value "question" )
+          with
+          | Some call_id, Some tool_name, Some question ->
+              [ Approval_requested
+                  { call_id
+                  ; tool_name
+                  ; (* Absent arguments are drawn as none rather than dropping
+                       the prompt: a reader still has to answer, and the tool
+                       name plus the question is enough to. *)
+                    args = Option.value ~default:"" (string_field value "args")
+                  ; question
+                  }
+              ]
+          | _ ->
+              [ Undecodable
+                  "KEEPER_TOOL_APPROVAL_REQUESTED needs tool_call_id, \
+                   tool_call_name and question"
+              ]))
+  | Some "KEEPER_TOOL_APPROVAL_SETTLED" -> (
+      match object_field fields "value" with
+      | None ->
+          [ Undecodable "KEEPER_TOOL_APPROVAL_SETTLED value is not an object" ]
+      | Some value -> (
+          match
+            (string_field value "tool_call_id", string_field value "outcome")
+          with
+          | Some call_id, Some outcome -> [ Approval_settled { call_id; outcome } ]
+          | _ ->
+              [ Undecodable
+                  "KEEPER_TOOL_APPROVAL_SETTLED needs tool_call_id and outcome"
+              ]))
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
   | Some _ -> []

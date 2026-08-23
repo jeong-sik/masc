@@ -94,16 +94,10 @@ sequence against a local server:
 ```sh
 KEEPER=verifier
 TOKEN="$(curl -fsS http://127.0.0.1:8935/api/v1/dashboard/dev-token | jq -er '.token')"
-OWNER_NONCE="$(
-  curl -fsS -H "Authorization: Bearer $TOKEN" \
-    "http://127.0.0.1:8935/api/v1/keepers/$KEEPER/trajectory?limit=1" |
-    jq -er '.generation'
-)"
 OPERATOR_OPERATION_ID='<stable-unique-op-id>'
 jq -cn \
-  --argjson owner_nonce "$OWNER_NONCE" \
   --arg operator_operation_id "$OPERATOR_OPERATION_ID" \
-  '{action:"resume",owner_nonce:$owner_nonce,operator_operation_id:$operator_operation_id}' |
+  '{action:"resume",operator_operation_id:$operator_operation_id}' |
 curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @- \

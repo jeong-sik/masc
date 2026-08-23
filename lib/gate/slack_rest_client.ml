@@ -47,8 +47,11 @@ let user_agent = "masc-slack-bot/0.1 (https://github.com/jeong-sik/masc)"
 let auth_headers ~token =
   [ ("Authorization", "Bearer " ^ token); ("User-Agent", user_agent) ]
 
-let parse_json_safe s =
-  try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
+(* [Safe_ops.parse_json_safe] is the parser for this shape: it trims, treats an
+   empty body as an empty object, repairs UTF-8, and hands back the decoder's
+   message. The copy that used to sit here did none of that and dropped the
+   message, so a malformed connector response arrived as a bare [None]. *)
+let parse_json_safe s = Safe_ops.parse_json_safe ~context:"slack_rest_client" s
 
 let field_opt name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -77,8 +80,8 @@ let build_post_message_request ~token ~channel_id ~text ?thread_ts () =
    transport-level 2xx check, branch on Slack's [ok] flag. *)
 let parse_post_json_response ~body =
   match parse_json_safe body with
-  | None -> Error (Other ("response not JSON: " ^ body))
-  | Some json ->
+  | Error msg -> Error (Other (Printf.sprintf "response not JSON (%s): %s" msg body))
+  | Ok json ->
     let ok =
       match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
     in
@@ -124,8 +127,8 @@ let parse_update_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
   else
     match parse_json_safe body with
-    | None -> Error (Other ("response not JSON: " ^ body))
-    | Some json ->
+    | Error msg -> Error (Other (Printf.sprintf "response not JSON (%s): %s" msg body))
+    | Ok json ->
         let ok =
           match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
         in
@@ -169,8 +172,8 @@ let parse_auth_test_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
   else
     match parse_json_safe body with
-    | None -> Error (Other ("response not JSON: " ^ body))
-    | Some json ->
+    | Error msg -> Error (Other (Printf.sprintf "response not JSON (%s): %s" msg body))
+    | Ok json ->
       let ok =
         match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
       in
@@ -221,8 +224,8 @@ let parse_users_info_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
   else
     match parse_json_safe body with
-    | None -> Error (Other ("response not JSON: " ^ body))
-    | Some json ->
+    | Error msg -> Error (Other (Printf.sprintf "response not JSON (%s): %s" msg body))
+    | Ok json ->
       let ok =
         match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
       in

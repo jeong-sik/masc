@@ -1573,6 +1573,49 @@ let test_output_preview_derives_truncation_metadata () =
         (List.assoc_opt "truncated_to" fields |> Option.map Yojson.Safe.Util.to_int)
     | _ -> Alcotest.fail "expected exactly one object entry")
 
+(* A file target and a working directory are both strings. Reported as the
+   same target_kind, a consumer reading "path" as "a file" opened a directory:
+   1,094 of 2026-08-18's 1,323 Execute rows carried a cwd that way (#29013). *)
+let test_action_radius_tells_a_file_from_a_directory () =
+  with_tmp_log (fun () ->
+    let radius_of_input input =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"k" ~tool_name:"probe" ~input ~output_text:"ok"
+        ~success:true ~duration_ms:1.0 ();
+      match Keeper_tool_call_log.read_recent ~n:1 () with
+      | [ json ] ->
+        let radius =
+          match json with
+          | `Assoc fields ->
+            Option.value (List.assoc_opt "action_radius" fields) ~default:`Null
+          | _ -> `Null
+        in
+        ( Safe_ops.json_string ~default:"" "target_kind" radius
+        , Safe_ops.json_string ~default:"" "target_path" radius )
+      | _ -> Alcotest.fail "expected exactly one entry"
+    in
+    Alcotest.(check (pair string string))
+      "file_path is a file target"
+      ("path", "lib/keeper/keeper_tool_call_log.ml")
+      (radius_of_input
+         (`Assoc [ "file_path", `String "lib/keeper/keeper_tool_call_log.ml" ]));
+    Alcotest.(check (pair string string))
+      "cwd is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "cwd", `String "repos/masc" ]));
+    Alcotest.(check (pair string string))
+      "repo_path is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "repo_path", `String "repos/masc" ]));
+    (* An explicit declaration still wins over the key it was found under. *)
+    Alcotest.(check (pair string string))
+      "declared target_kind is not overridden"
+      ("workspace", "repos/masc")
+      (radius_of_input
+         (`Assoc
+            [ "cwd", `String "repos/masc"; "target_kind", `String "workspace" ])))
+;;
+
 let test_string_input_keeps_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1777,6 +1820,8 @@ let () =
     ; ( "action_radius",
         [ eio_test "string input does not break action radius"
             test_string_input_keeps_action_radius
+        ; Alcotest.test_case "action radius tells a file from a directory" `Quick
+            test_action_radius_tells_a_file_from_a_directory
         ] )
     ; ( "async_append",
         [ eio_env_test "append queues until flush when async fiber is active"

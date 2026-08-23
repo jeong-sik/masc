@@ -13,7 +13,10 @@ module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
+module Markdown = Masc_tui_markdown
+module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
+module Task_selection = Masc_tui_task_selection
 module Status = Masc.Keeper_status_runtime
 
 let frame_lines buf =
@@ -29,6 +32,133 @@ let finish_frame ~surface_key ~cursor ~rows ~cols buf :
     cursor;
     lines = frame_lines buf;
   }
+
+(* Terminal dress for the markdown a keeper writes. The marker is the noise:
+   a backticked identifier should read as the identifier, and a fenced diff
+   should keep the alignment that made it worth fencing. Colours stay inside
+   the palette the renderer already uses, so a chat row is still recognisably
+   one of this TUI's rows. *)
+let chat_markdown_palette : Markdown.palette =
+  { strong = (Ansi.bold, Ansi.reset)
+  ; emphasis = (Ansi.dim, Ansi.reset)
+  ; code = (Ansi.cyan, Ansi.reset)
+  ; heading = (Ansi.bold ^ Ansi.white, Ansi.reset)
+  ; quote = (Ansi.dim, Ansi.reset)
+  ; link_text = (Ansi.blue, Ansi.reset)
+  ; link_target = (Ansi.dim, Ansi.reset)
+  ; rule = (Ansi.gray, Ansi.reset)
+  ; bullet = "\xe2\x80\xa2"
+  ; code_gutter = "\xe2\x94\x82 "
+  ; quote_gutter = "\xe2\x96\x8f "
+  }
+
+let chat_markdown ~width body =
+  Markdown.render ~palette:chat_markdown_palette ~width body
+
+(* The composer row every surface carries on its last terminal line.
+
+   The recipient is whichever keeper the roster cursor points at. That cursor
+   keeps its place while the operator works on another surface, so the row goes
+   on naming the last keeper they pointed at rather than emptying out. Because
+   the cursor can also move on its own -- a refresh drops a row and the one
+   below slides up -- the name is drawn every frame instead of being captured
+   when the draft was started. *)
+let composer_of_state (state : state) : Composer.t =
+  let target =
+    match selected_keeper state with
+    | None -> Composer.No_target
+    | Some keeper ->
+        if keeper_available_for_new_message state keeper.k_name then
+          Composer.Ready keeper.k_name
+        else
+          Composer.Unreachable
+            { keeper = keeper.k_name
+            ; reason =
+                (match state.keepers_error with
+                 | Some _ -> "keeper list unread"
+                 | None -> "no longer in the roster")
+            }
+  in
+  { Composer.target
+  ; focus = (if state.composer_focused then Composer.Focused else Composer.Unfocused)
+  ; draft = Buffer.contents state.msg_input
+  }
+
+let composer_prompt_text composer =
+  Printf.sprintf " %s %s " "\xe2\x80\xba" (Composer.prompt composer)
+
+(* Unfocused the row is dim and says which key opens it; focused it is drawn in
+   full and carries the cursor. Either way it occupies the same single row, so
+   taking focus does not move the frame above it. *)
+let composer_line state ~cols =
+  let composer = composer_of_state state in
+  let prompt = composer_prompt_text composer in
+  let tone =
+    match (composer.Composer.focus, composer.Composer.target) with
+    | Composer.Focused, _ -> Ansi.cyan
+    | Composer.Unfocused, Composer.Ready _ -> Ansi.dim
+    | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
+        Ansi.dim
+  in
+  let draft = Terminal_text.single_line composer.Composer.draft in
+  let hint =
+    match (composer.Composer.focus, composer.Composer.target) with
+    | Composer.Focused, _ -> ""
+    | Composer.Unfocused, Composer.Ready _ ->
+        Printf.sprintf "  (%s to write)" Composer.focus_key
+    | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) -> ""
+  in
+  let body =
+    if String.equal draft "" then prompt ^ hint else prompt ^ draft
+  in
+  tone ^ fit_width body cols ^ Ansi.reset
+
+let composer_cursor state ~rows ~cols =
+  let composer = composer_of_state state in
+  match composer.Composer.focus with
+  | Composer.Unfocused -> Frame_presenter.Hidden
+  | Composer.Focused ->
+      let prompt_cells =
+        Message_layout.display_width (composer_prompt_text composer)
+      in
+      let draft_cells =
+        Message_layout.display_width
+          (Terminal_text.single_line composer.Composer.draft)
+      in
+      Frame_presenter.Visible_at
+        { row = rows
+        ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
+        }
+
+(* Close a surface: pad its frame to the row above the composer, then draw the
+   composer on the terminal's last row.
+
+   The padding is what keeps the two in step. Each surface computes its own
+   height, and one that came out short used to leave its footer stranded
+   partway up the screen; now it would push the composer up with it, and the
+   row an operator reaches for would move per surface. *)
+let finish_surface (state : state) ~surface_key ~rows ~cols buf =
+  let body_rows = max 0 (rows - Composer.rows_for ~terminal_rows:rows) in
+  let drawn = frame_lines buf in
+  let body =
+    if List.length drawn <= body_rows then
+      drawn @ List.init (body_rows - List.length drawn) (fun _ -> "")
+    else
+      (* A surface that came out taller than its budget loses its last rows
+         rather than the composer. The body is already scrollable and the
+         composer is a fixed contract -- the row an operator reaches for cannot
+         be the one that disappears when a surface miscounts. *)
+      List.filteri (fun index _ -> index < body_rows) drawn
+  in
+  let framed = Buffer.create (String.length (Buffer.contents buf) + 256) in
+  List.iter
+    (fun line ->
+       Buffer.add_string framed line;
+       Buffer.add_char framed '\n')
+    body;
+  Buffer.add_string framed (composer_line state ~cols ^ "\n");
+  finish_frame ~surface_key ~cursor:(composer_cursor state ~rows ~cols) ~rows
+    ~cols framed
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
@@ -78,7 +208,7 @@ let task_line (task : task) =
     | Some name -> Printf.sprintf " @%s" (Terminal_text.single_line name)
     | None -> ""
   in
-  Printf.sprintf "  %s [%s] %s (%s%s) %s"
+  Printf.sprintf "%s [%s] %s (%s%s) %s"
     (task_status_icon task.status)
     (Terminal_text.single_line task.id)
     (Terminal_text.single_line task.title)
@@ -106,7 +236,10 @@ let overview_layout (state : state) ~terminal_rows =
 
 (** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
 let render_overview (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -276,23 +409,201 @@ let render_overview (state : state) =
   if row_budget.task_rows > 0 && List.is_empty state.tasks
      && Option.is_none tasks_error then
     box_line buf cols (Ansi.dim ^ "  (no tasks)" ^ Ansi.reset)
-  else
+  else begin
+    (* The panel is shorter than the list can get, so the cursor can sit below
+       the last visible row; the window follows it the way Board's does. *)
+    let task_scroll_offset =
+      max 0 (state.task_cursor - row_budget.task_rows + 1)
+    in
     for i = 0 to row_budget.task_rows - 1 do
-      let t = List.nth state.tasks i in
-      box_line buf cols (task_line t)
-    done;
+      let idx = i + task_scroll_offset in
+      if idx < List.length state.tasks then begin
+        let t = List.nth state.tasks idx in
+        let is_selected = state.task_focus && idx = state.task_cursor in
+        let content =
+          if is_selected then
+            Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ task_line t
+          else "  " ^ task_line t
+        in
+        box_line buf cols content
+      end
+    done
+  end;
+
+  (* Carry the frame to the bottom of the terminal. Without this the surface
+     stops where its content does and the footer under it lands wherever that
+     happens to be -- halfway up a tall window. *)
+  for _ = 1 to row_budget.filler_rows do
+    box_empty buf cols
+  done;
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
-    Ansi.dim state.refresh_interval state.port Ansi.reset);
+  let overview_hint =
+    if state.task_focus then "j/k:tasks  Enter:detail  esc:events"
+    else "j/k:events  t:tasks"
+  in
+  Buffer.add_string buf (Printf.sprintf "%s  %s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
+    Ansi.dim overview_hint state.refresh_interval state.port Ansi.reset);
 
-  finish_frame ~surface_key:"overview" ~cursor:Frame_presenter.Hidden ~rows
-    ~cols buf
+  finish_surface state ~surface_key:"overview" ~rows:terminal_rows
+      ~cols buf
+
+(** Render one backlog task in full, from the same load the Overview list was
+    projected from. The dispatch falls back to the Overview when the row is no
+    longer in the backlog, so the task argument always exists here. *)
+let render_task_detail (state : state) (task : Masc_domain.task) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let header = Printf.sprintf " MASC Task  %s[%s]%s  %s  %s"
+    Ansi.cyan (fit_width task.id 20) Ansi.reset timestamp
+    (connection_badge state.connection_status) in
+
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+
+  box_line buf cols
+    (Ansi.bold ^ "  "
+    ^ fit_width (Terminal_text.single_line task.title) (cols - 6)
+    ^ Ansi.reset);
+  (* Each status carries its own timestamps and actors; one exhaustive match
+     keeps the row and the status from disagreeing about who did what. *)
+  (let status_line, note_lines =
+     match task.task_status with
+     | Masc_domain.Todo ->
+         ("todo — unclaimed", [])
+     | Masc_domain.Claimed { assignee; claimed_at } ->
+         ( Printf.sprintf "claimed by %s at %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line claimed_at)
+         , [] )
+     | Masc_domain.InProgress { assignee; started_at } ->
+         ( Printf.sprintf "in progress by %s since %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line started_at)
+         , [] )
+     | Masc_domain.AwaitingVerification
+         { assignee; submitted_at; verification_id; _ } ->
+         ( Printf.sprintf "awaiting verification by %s, submitted %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line submitted_at)
+         , [Printf.sprintf "verification %s"
+              (Terminal_text.single_line verification_id)] )
+     | Masc_domain.Done { assignee; completed_at; notes } ->
+         ( Printf.sprintf "done by %s at %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line completed_at)
+         , match notes with None -> [] | Some note -> [note] )
+     | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
+         ( Printf.sprintf "cancelled by %s at %s"
+             (Terminal_text.single_line cancelled_by)
+             (Terminal_text.single_line cancelled_at)
+         , match reason with None -> [] | Some r -> [r] )
+   in
+   box_line buf cols
+     (Ansi.dim ^ "  status   " ^ Ansi.reset
+     ^ fit_width status_line (cols - 16));
+   List.iter
+     (fun note ->
+        box_line buf cols
+          (Ansi.dim ^ "           " ^ fit_width
+             (Terminal_text.single_line note) (cols - 16)
+          ^ Ansi.reset))
+     note_lines);
+  box_line buf cols
+    (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
+       (Terminal_text.single_line task.created_at)
+       (match task.created_by with
+        | Some by -> Terminal_text.single_line by
+        | None -> "-")
+       task.priority task.cycle_count
+    ^ Ansi.reset);
+  box_divider buf cols;
+
+  (* Labeled block: the label rides the first wrapped line and continuation
+     lines keep the text column, so long handoff summaries stay readable. *)
+  let labeled_lines label text =
+    let width = max 10 (cols - 16) in
+    Message_layout.wrap_words ~max_cells:width
+      (Terminal_text.single_line text)
+    |> List.mapi
+         (fun index line ->
+            if index = 0 then Printf.sprintf "  %-8s %s" label line
+            else Printf.sprintf "           %s" line)
+  in
+  let some_lines label = function
+    | None -> []
+    | Some text -> labeled_lines label text
+  in
+  let list_lines label items =
+    List.concat_map (fun item -> labeled_lines label item) items
+  in
+  let body_lines =
+    (if String.equal task.description "" then [] else labeled_lines "what" task.description)
+    @ (match task.handoff_context with
+       | None -> []
+       | Some handoff ->
+           some_lines "why" handoff.Masc_domain.reason
+           @ (if String.equal handoff.Masc_domain.summary "" then []
+              else labeled_lines "handoff" handoff.Masc_domain.summary)
+           @ some_lines "next" handoff.Masc_domain.next_step
+           @ some_lines "failure" handoff.Masc_domain.failure_mode
+           @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
+    @ (match task.contract with
+       | None -> []
+       | Some contract ->
+           (if contract.Masc_domain.strict then
+              ["  contract strict"]
+            else [])
+           @ list_lines "done-when" contract.Masc_domain.completion_contract
+           @ list_lines "evidence" contract.Masc_domain.required_evidence)
+    @ list_lines "file" task.files
+  in
+  let total_lines = List.length body_lines in
+  (* Chrome above and below the scrolling body: top border, header, divider,
+     the title block, the bottom border and the helper row. Clamped through the
+     same helper the keeper log pane uses. Ten, not nine: at nine the frame came
+     out one row taller than its budget, which cost the surface the composer
+     row rather than a body row. *)
+  let content_height = max 1 (rows - 10) in
+  state.task_detail_scroll <-
+    min state.task_detail_scroll
+      (Metrics_tail.maximum_scroll ~entry_count:total_lines
+         ~content_height);
+  let offset = state.task_detail_scroll in
+  for i = 0 to content_height - 1 do
+    let line_index = i + offset in
+    let text =
+      if line_index < total_lines then
+        List.nth body_lines line_index
+      else ""
+    in
+    box_line buf cols
+      (Ansi.dim ^ fit_width (Terminal_text.single_line text) (cols - 8)
+      ^ Ansi.reset)
+  done;
+
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  esc:back  r:refresh  | Task %s | Refresh: %.0fs%s\n"
+       Ansi.dim (Terminal_text.single_line task.id)
+       state.refresh_interval Ansi.reset);
+
+  finish_surface state ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
 let render_approvals (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -437,12 +748,15 @@ let render_approvals (state : state) =
        "%s  j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
 
-  finish_frame ~surface_key:"approvals" ~cursor:Frame_presenter.Hidden ~rows
-    ~cols buf
+  finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
+      ~cols buf
 
 (** Render the Board surface (list view). *)
 let render_board_list (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -513,12 +827,15 @@ let render_board_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  finish_frame ~surface_key:"board-list" ~cursor:Frame_presenter.Hidden ~rows
-    ~cols buf
+  finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
+      ~cols buf
 
 (** Render the Board surface (read view). *)
 let render_board_read (state : state) (list_post : board_post) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   let detail =
@@ -617,8 +934,8 @@ let render_board_read (state : state) (list_post : board_post) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  finish_frame ~surface_key:"board-read" ~cursor:Frame_presenter.Hidden ~rows
-    ~cols buf
+  finish_surface state ~surface_key:"board-read" ~rows:terminal_rows
+      ~cols buf
 
 let planning_phase_label phase = Goal_phase.to_string phase
 
@@ -630,7 +947,10 @@ let planning_phase_color = function
 
 (** Render the Planning surface (list view). *)
 let render_planning_list (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -740,12 +1060,15 @@ let render_planning_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  finish_frame ~surface_key:"planning-list" ~cursor:Frame_presenter.Hidden
-    ~rows ~cols buf
+  finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
+      ~cols buf
 
 (** Render the Planning surface (detail view). *)
 let render_planning_detail (state : state) (goal : planning_goal) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   let status_color = planning_phase_color goal.pg_phase in
@@ -792,8 +1115,8 @@ let render_planning_detail (state : state) (goal : planning_goal) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  finish_frame ~surface_key:"planning-detail" ~cursor:Frame_presenter.Hidden
-    ~rows ~cols buf
+  finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
+      ~cols buf
 
 (** Render the keeper list view *)
 (* Status is shown as a glyph and a word. The glyph is the coarse reading an
@@ -870,9 +1193,10 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
 let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
     ~status ~keeper ~runtime =
   let status_color, glyph = keeper_status_glyph status in
-  let marker =
-    if selected then Ansi.cyan ^ "\xe2\x96\xb8" ^ Ansi.reset else " "
-  in
+  (* Same gutter marker the Approvals, Board and Planning lists draw. A
+     selection cursor that changes shape when the operator switches surface
+     reads as a different control, not the same one. *)
+  let marker = if selected then Ansi.reverse ^ ">" ^ Ansi.reset else " " in
   let name =
     fit_width (Terminal_text.single_line keeper.k_name) columns.kcol_name
   in
@@ -908,7 +1232,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints state reading =
+let keeper_action_hints ?(offers_chat = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -950,9 +1274,14 @@ let keeper_action_hints state reading =
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
           ; hint Keeper_control.Shutdown "shutdown"
-          ; Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
-          ; Ansi.dim ^ "enter detail" ^ Ansi.reset
+            (* Dimmed rather than dropped, the same way an unavailable
+               lifecycle key is: chat lives in detail, and a key that vanishes
+               between surfaces reads as a key that does not exist. *)
+          ; (if offers_chat then Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
+             else Ansi.dim ^ "c chat" ^ Ansi.reset)
+          ; (if offers_chat then Ansi.dim ^ "esc back" ^ Ansi.reset
+             else Ansi.cyan ^ "enter" ^ Ansi.reset ^ " detail")
           ; Ansi.dim ^ "r refresh" ^ Ansi.reset
           ; Ansi.dim ^ "q quit" ^ Ansi.reset
           ]
@@ -1009,7 +1338,10 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ]
 
 let render_keeper_list (state : state) =
-  let rows, cols = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
   let inner = max 1 (cols - 4) in
   let readings = List.map (keeper_reading state) state.keepers in
@@ -1027,8 +1359,8 @@ let render_keeper_list (state : state) =
       now.Unix.tm_sec
   in
   let heading =
-    Printf.sprintf "%s%sMASC Keepers%s %s%d%s" " " Ansi.bold Ansi.reset
-      Ansi.white (List.length state.keepers) Ansi.reset
+    Printf.sprintf " %sMASC Keepers (%d)%s" Ansi.bold (List.length state.keepers)
+      Ansi.reset
     ^ (match keeper_roster_summary readings with
        | [] -> ""
        | parts ->
@@ -1162,20 +1494,24 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
-  Buffer.add_string buf (keeper_action_hints state selected_reading ^ "\n");
+  Buffer.add_string buf
+    (keeper_action_hints ~offers_chat:false state selected_reading ^ "\n");
 
-  finish_frame ~surface_key:"keeper-list" ~cursor:Frame_presenter.Hidden ~rows
-    ~cols buf
+  finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
+      ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
 let render_keeper_detail (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   if state.keeper_cursor >= List.length state.keepers then begin
     Buffer.add_string buf "No keeper selected.\n";
-    finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
-      ~rows ~cols buf
+    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
+      ~cols buf
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let inner = cols - 4 in  (* width inside borders *)
@@ -1371,22 +1707,24 @@ let render_keeper_detail (state : state) =
        footer names the same actions with the same keys; a detail view that
        listed a different set would read as a different set of powers. *)
     Buffer.add_string buf
-      (keeper_action_hints state (Some (keeper_reading state k))
-      ^ Ansi.dim ^ " \xc2\xb7 esc back" ^ Ansi.reset ^ "\n");
+      (keeper_action_hints state (Some (keeper_reading state k)) ^ "\n");
 
-    finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
-      ~rows ~cols buf
+    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
+      ~cols buf
   end
 
 (** Render keeper log view *)
 let render_keeper_logs (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
 
   if state.keeper_cursor >= List.length state.keepers then begin
     Buffer.add_string buf "No keeper selected.\n";
-    finish_frame ~surface_key:"keeper-logs" ~cursor:Frame_presenter.Hidden
-      ~rows ~cols buf
+    finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
+      ~cols buf
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let total_entries = List.length state.log_entries in
@@ -1488,13 +1826,15 @@ let render_keeper_logs (state : state) =
     Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  q:quit  r:refresh%s\n"
       Ansi.dim Ansi.reset);
 
-    finish_frame ~surface_key:"keeper-logs" ~cursor:Frame_presenter.Hidden
-      ~rows ~cols buf
+    finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
+      ~cols buf
   end
 
 (** Render message input/conversation view *)
 let render_keeper_message (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  (* The chat surface draws its own composer, so it keeps the whole terminal
+     rather than reserving the shared row for a second one. *)
+  let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
   match state.msg_target_keeper_name with
@@ -1537,7 +1877,7 @@ let render_keeper_message (state : state) =
         (fun message ->
           let style, role_label =
             match message.me_role with
-            | Message_user -> Message_layout.User, "you"
+            | Message_user speaker -> Message_layout.User, speaker
             | Message_keeper ->
                 ( Message_layout.Keeper
                 , Keeper_chat.terminal_safe_text message.me_keeper_name )
@@ -1613,11 +1953,13 @@ let render_keeper_message (state : state) =
        under a scroll position that was legal before it. *)
     let scroll =
       min state.msg_scroll
-        (Message_layout.max_scroll ~inner_width ~height:history_height
+        (Message_layout.max_scroll ~markdown:chat_markdown ~inner_width
+           ~height:history_height
            layout_entries)
     in
     let visible_rows =
-      Message_layout.scrolled_rows ~inner_width ~height:history_height
+      Message_layout.scrolled_rows ~markdown:chat_markdown ~inner_width
+        ~height:history_height
         ~from_bottom:scroll layout_entries
     in
 
@@ -1687,6 +2029,29 @@ let render_keeper_message (state : state) =
            (Printf.sprintf "  (processing %s…)"
               (Keeper_chat.compact_request_id request.request_id))
      | None, Some _ | None, None -> ());
+    (* What is waiting, in the order it will go. Shown in full rather than as a
+       count: an operator who typed three lines during a turn needs to see
+       which three, and a queue that only says "3 waiting" is the same silence
+       that made a refused send look like a sent one. *)
+    (match Masc_tui_keeper_chat_queue.waiting state.msg_queued with
+     | [] -> ()
+     | queued ->
+         List.iteri
+           (fun index (queued_keeper, text) ->
+             let body =
+               match String.index_opt text '\n' with
+               | None -> text
+               | Some cut -> String.sub text 0 cut ^ " …"
+             in
+             let addressed =
+               if String.equal queued_keeper keeper_name
+               then ""
+               else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
+             in
+             box_line_styled buf cols ~style:Ansi.dim
+               (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
+                  (Keeper_chat.terminal_safe_text body)))
+           queued);
     (if scroll > 0 then
        box_line_styled buf cols ~style:Ansi.yellow
          (Printf.sprintf
@@ -1827,8 +2192,13 @@ let render_keeper_message (state : state) =
           "finishing durable cleanup  Enter:blocked"
       | Some _, Some Chat_post, Some _ ->
           "replaying exact request  Enter:blocked"
-      | Some _, (Some Chat_post | None), _ -> "Enter:wait for current request"
-      | None, Some _, _ -> "Enter:wait for current request"
+      (* A turn is running and nothing durable is blocking: Enter holds the
+         line for the next one. Saying "wait" was the honest hint while the
+         send was refused; now the honest hint is what the key does. *)
+      | Some _, (Some Chat_post | None), _ | None, Some _, _ ->
+          (match Masc_tui_keeper_chat_queue.length state.msg_queued with
+           | 0 -> "Enter:queue for next turn"
+           | waiting -> Printf.sprintf "Enter:queue (%d waiting)" waiting)
       | None, None, _ ->
       match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
       with
@@ -1886,7 +2256,10 @@ let system_log_level_style : Masc.Tui_decode.system_log_level -> string = functi
   | System_level_unknown _ -> Ansi.reset
 
 let render_system_logs (state : state) =
-  let rows, cols = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
   let entries =
     match state.system_logs with None -> [] | Some s -> s.sys_entries
@@ -1966,13 +2339,25 @@ let render_system_logs (state : state) =
   Buffer.add_string buf
     (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
-  finish_frame ~surface_key:"system-logs" ~cursor:Frame_presenter.Hidden ~rows
-    ~cols buf
+  finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
+      ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
-  | Overview -> render_overview state
+  | Overview ->
+      (* Same fallback shape as Board/Planning detail: a detail id whose row
+         left the backlog renders the list, not a frame for a missing task. *)
+      (match state.task_detail_id with
+       | Some _ -> (
+           match
+             Task_selection.detail_row
+               ~detail_id:state.task_detail_id
+               ~tasks:state.tasks_domain
+           with
+           | Some task -> render_task_detail state task
+           | None -> render_overview state )
+       | None -> render_overview state)
   | Keepers Keeper_list -> render_keeper_list state
   | Keepers Keeper_detail -> render_keeper_detail state
   | Keepers Keeper_logs -> render_keeper_logs state
@@ -2010,7 +2395,10 @@ let render_terminal_too_small ~rows ~cols =
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
 let render (state : state) =
-  let rows, cols = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
   else render_surface state

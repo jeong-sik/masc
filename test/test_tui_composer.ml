@@ -1,0 +1,144 @@
+(* The composer row: what it says before a key is pressed, and which keys it
+   claims. *)
+
+module Composer = Masc_tui_composer
+
+let make ?(target = Composer.Ready "analyst") ?(focus = Composer.Unfocused)
+    ?(draft = "") () : Composer.t =
+  { target; focus; draft }
+
+let outcome_testable =
+  Alcotest.testable
+    (fun fmt outcome ->
+       Format.pp_print_string fmt
+         (match outcome with
+          | Composer.Take_focus -> "take_focus"
+          | Composer.Release_focus -> "release_focus"
+          | Composer.Send -> "send"
+          | Composer.Edit -> "edit"
+          | Composer.Pass_to_surface -> "pass"))
+    ( = )
+
+let check_key ?(label = "key") composer key expected =
+  Alcotest.(check outcome_testable) label expected
+    (Composer.classify_key composer key)
+
+(* The row exists to answer this before anything is typed. An operator who
+   cannot see the recipient finds out which keeper got the message by sending
+   it. *)
+let test_prompt_names_the_recipient () =
+  Alcotest.(check string) "the target keeper" "to analyst"
+    (Composer.prompt (make ()));
+  Alcotest.(check string) "nothing selected" "no keeper selected"
+    (Composer.prompt (make ~target:Composer.No_target ()))
+
+(* A keeper that went away keeps its name in the row. Blanking it loses the one
+   thing that explains why the draft cannot go anywhere. *)
+let test_unreachable_target_keeps_its_name_and_reason () =
+  let composer =
+    make
+      ~target:
+        (Composer.Unreachable
+           { keeper = "beta"; reason = "no longer in the roster" })
+      ()
+  in
+  Alcotest.(check string) "name and reason" "beta — no longer in the roster"
+    (Composer.prompt composer);
+  Alcotest.(check bool) "cannot send" false (Composer.can_send composer)
+
+(* Every surface binds single letters. A row that took every printable key
+   while idle would take [p] from pause and [q] from quit. *)
+let test_idle_composer_claims_only_its_focus_key () =
+  let composer = make () in
+  check_key ~label:"the focus key" composer Composer.focus_key
+    Composer.Take_focus;
+  List.iter
+    (fun key -> check_key ~label:key composer key Composer.Pass_to_surface)
+    [ "p"; "s"; "w"; "q"; "j"; "k"; "l"; "c"; "r"; "\r"; "\t"; "esc"; "2" ]
+
+(* Focus that leads nowhere is a trap: the surface keys stop working and the
+   draft still cannot be sent. *)
+let test_focus_is_refused_without_a_reachable_target () =
+  List.iter
+    (fun target ->
+       let composer = make ~target () in
+       check_key composer Composer.focus_key Composer.Pass_to_surface)
+    [ Composer.No_target
+    ; Composer.Unreachable { keeper = "beta"; reason = "gone" }
+    ]
+
+let test_focused_composer_takes_the_printable_keys () =
+  let composer = make ~focus:Composer.Focused () in
+  List.iter
+    (fun key -> check_key ~label:key composer key Composer.Edit)
+    [ "p"; "s"; "w"; "q"; "j"; "2"; "가"; " "; "\127" ]
+
+let test_focused_composer_releases_and_sends () =
+  let empty = make ~focus:Composer.Focused () in
+  check_key ~label:"release" empty Composer.release_key Composer.Release_focus;
+  (* Enter on an empty draft must not send: an empty message is not a message,
+     and the keypress should read as a no-op rather than a dispatch. *)
+  check_key ~label:"enter on empty" empty "\r" Composer.Edit;
+  let typed = make ~focus:Composer.Focused ~draft:"안녕" () in
+  check_key ~label:"enter on a draft" typed "\r" Composer.Send;
+  let blank = make ~focus:Composer.Focused ~draft:"   \n  " () in
+  check_key ~label:"enter on whitespace" blank "\r" Composer.Edit
+
+let test_input_is_refused_without_a_recipient () =
+  Alcotest.(check bool) "focused and ready" true
+    (Composer.accepts_input (make ~focus:Composer.Focused ()));
+  Alcotest.(check bool) "focused with nothing to send to" false
+    (Composer.accepts_input
+       (make ~focus:Composer.Focused ~target:Composer.No_target ()));
+  Alcotest.(check bool) "unfocused" false
+    (Composer.accepts_input (make ~focus:Composer.Unfocused ()))
+
+(* The cursor has to sit after the draft and inside the row; past the last
+   column it wraps the terminal and the frame scrolls. *)
+let test_cursor_stays_inside_the_row () =
+  Alcotest.(check int) "after the draft" 12
+    (Composer.cursor_column ~prompt_cells:8 ~draft_cells:3 ~terminal_cols:80);
+  Alcotest.(check int) "clamped at the last column" 40
+    (Composer.cursor_column ~prompt_cells:30 ~draft_cells:200
+       ~terminal_cols:40);
+  Alcotest.(check int) "never left of the first" 1
+    (Composer.cursor_column ~prompt_cells:0 ~draft_cells:0 ~terminal_cols:0)
+
+let test_send_requires_a_reachable_target () =
+  Alcotest.(check bool) "ready with text" true
+    (Composer.can_send (make ~draft:"hi" ()));
+  Alcotest.(check bool) "ready without text" false
+    (Composer.can_send (make ~draft:"" ()));
+  Alcotest.(check bool) "unreachable with text" false
+    (Composer.can_send
+       (make ~draft:"hi"
+          ~target:(Composer.Unreachable { keeper = "beta"; reason = "gone" })
+          ()))
+
+let () =
+  Alcotest.run "tui-composer"
+    [ ( "what the row says"
+      , [ Alcotest.test_case "the prompt names the recipient" `Quick
+            test_prompt_names_the_recipient
+        ; Alcotest.test_case "an unreachable target keeps its name" `Quick
+            test_unreachable_target_keeps_its_name_and_reason
+        ; Alcotest.test_case "send needs a reachable target" `Quick
+            test_send_requires_a_reachable_target
+        ] )
+    ; ( "which keys it claims"
+      , [ Alcotest.test_case "idle it claims only its focus key" `Quick
+            test_idle_composer_claims_only_its_focus_key
+        ; Alcotest.test_case "focus is refused with nowhere to send" `Quick
+            test_focus_is_refused_without_a_reachable_target
+        ; Alcotest.test_case "focused it takes the printable keys" `Quick
+            test_focused_composer_takes_the_printable_keys
+        ; Alcotest.test_case "focused it releases and sends" `Quick
+            test_focused_composer_releases_and_sends
+        ; Alcotest.test_case "input needs a recipient" `Quick
+            test_input_is_refused_without_a_recipient
+        ] )
+    ; ( "layout"
+      , [ Alcotest.test_case "the cursor stays inside the row" `Quick
+            test_cursor_stays_inside_the_row
+        ] )
+    ]

@@ -35,7 +35,12 @@ type keeper_runtime = Tui_decode.keeper_runtime
 type log_entry = Tui_decode.log_entry
 
 type msg_role =
-  | Message_user
+  | Message_user of string
+      (** A row addressed to the keeper, carrying the name to draw beside it.
+          ["you"] for what this pane sent; otherwise whoever the server named,
+          with the surface it arrived on. The role alone used to be the label,
+          which is why an agent's broadcast and the operator's own line were
+          indistinguishable. *)
   | Message_keeper
   | Message_status
   | Message_error
@@ -266,6 +271,14 @@ type surface =
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
+  (* The full domain rows the Overview list is projected from, kept so the
+     detail view can show a task after it turns terminal -- the active list
+     drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
+  mutable tasks_domain: Masc_domain.task list;
+  mutable task_focus: bool;
+  mutable task_cursor: int;
+  mutable task_detail_id: string option;
+  mutable task_detail_scroll: int;
   mutable tasks_error: string option;
   mutable events: event list;
   mutable overview_event_scroll: int;
@@ -282,6 +295,11 @@ type state = {
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
   mutable keeper_action_serial: int;
+  (* The composer occupies the last terminal row on every surface. It is drawn
+     whether or not it holds the keystrokes: an input line that appears only
+     once it is already receiving text cannot be found by looking. Focus is
+     what routes keys into it, and the operator takes and releases that. *)
+  mutable composer_focused: bool;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing. *)
@@ -342,6 +360,17 @@ type state = {
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
+  (* Messages typed while a turn was running, oldest first, each with the
+     keeper it was addressed to. Dispatch is serialized on one in-flight
+     request, so a second Enter used to be answered with "already in progress"
+     and the text was gone. Holding it and sending it when the turn settles is
+     what every other agent console does, and it is what an operator means by
+     pressing Enter twice.
+
+     The keeper travels with the text because the operator can switch keepers
+     while a turn runs; sending a queued line to whoever happens to be selected
+     later would put it in front of the wrong keeper. *)
+  mutable msg_queued: Masc_tui_keeper_chat_queue.t;
   mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
   mutable msg_inflight_kind: msg_inflight_kind option;
   mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
@@ -382,6 +411,11 @@ let keeper_available_for_new_message (state : state) keeper_name =
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];
   tasks = [];
+  tasks_domain = [];
+  task_focus = false;
+  task_cursor = 0;
+  task_detail_id = None;
+  task_detail_scroll = 0;
   tasks_error = None;
   events = [];
   overview_event_scroll = 0;
@@ -392,6 +426,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;
+  composer_focused = false;
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
@@ -436,6 +471,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
   msg_scroll = 0;
+  msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = None;
   msg_inflight_kind = None;
   msg_prepared = None;

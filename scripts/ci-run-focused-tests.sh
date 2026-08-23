@@ -199,6 +199,7 @@ normal_targets=(
   @test/runtest-test_backend
   @test/runtest-test_backend_coverage
   @test/runtest-test_blocker_class_exhaustiveness
+  @test/runtest-test_blocker_class_mirror
   @test/runtest-test_board_author_identity_10297
   @test/runtest-test_board_collect_pause_gate
   @test/runtest-test_board_context_inference_resolution
@@ -271,6 +272,9 @@ normal_targets=(
   @test/runtest-test_keeper_wire_capture
   @test/runtest-test_runtime_provider_auth_headers
   @test/runtest-test_keeper_official_client_host
+  @test/runtest-test_keeper_tool_approval_gate
+  @test/runtest-test_keeper_tool_approval_policy
+  @test/runtest-test_keeper_tool_approval_registry
   @test/runtest-test_runtime_codex_app_server
   @test/runtest-test_runtime_antigravity
   @test/runtest-test_runtime_antigravity_home
@@ -408,10 +412,15 @@ sse_targets=(
   @test/runtest-test_tui_decode
   @test/runtest-test_tui_frame_presenter
   @test/runtest-test_tui_keeper_chat_history
+  @test/runtest-test_tui_keeper_chat_queue
+  @test/runtest-test_tui_chat_queue_wiring
+  @test/runtest-test_tui_chat_surface_mirror
   @test/runtest-test_tui_keeper_chat_live
   @test/runtest-test_tui_keeper_chat_transcript
   @test/runtest-test_tui_keeper_chat_projection
   @test/runtest-test_tui_keeper_chat_recovery
+  @test/runtest-test_tui_composer
+  @test/runtest-test_tui_markdown
   @test/runtest-test_tui_keeper_control
   @test/runtest-test_tui_keeper_selection
   @test/runtest-test_tui_keyboard_input
@@ -421,6 +430,7 @@ sse_targets=(
   @test/runtest-test_tui_metrics_tail
   @test/runtest-test_tui_observation_layout
   @test/runtest-test_tui_planning_selection
+  @test/runtest-test_tui_task_detail
   @test/runtest-test_tui_http_ast
   @test/runtest-test_tui_render_schedule
   @test/runtest-test_tui_terminal_write_repair

@@ -549,7 +549,20 @@ let register_with_state_result
             commit_key_locked
         with
         | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
-          Error (Registration_shutdown_reserved operation_id)
+          (* Observed, not obeyed. The reservation records that a shutdown
+             began; one that never finalises never clears it, and refusing on
+             it stopped every registration for as long as the process lived —
+             15h32m on 2026-08-20 (#29566). Register and name what stood. *)
+          Log.Keeper.warn
+            "keeper registered while a shutdown reservation stood: keeper=%s \
+             operation=%s"
+            name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id);
+          (match commit_key_locked () with
+           | Ok () -> Ok ()
+           | Error (Lifecycle_transaction_reserved owner) ->
+             Error (Registration_lifecycle_reserved owner)
+           | Error validation_error -> Error (Registration_invalid validation_error))
         | Keeper_shutdown_intake_fence.Registration_committed
             (Error (Lifecycle_transaction_reserved owner)) ->
           Error (Registration_lifecycle_reserved owner)

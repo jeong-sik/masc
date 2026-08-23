@@ -419,7 +419,10 @@ let test_composable_output_registry_is_closed () =
         check string "JSON output schema root" "object" (schema |> member "type" |> to_string);
         (match Descriptor.keeper_model_names descriptor with
          | [ name ] -> Some name
-         | [] | _ :: _ :: _ -> fail "JSON output descriptor lacks one model name"))
+         | [] | _ :: _ :: _ ->
+           failf
+             "JSON output descriptor %S lacks one model name"
+             descriptor.Descriptor.internal_name))
     |> List.sort String.compare
   in
   check
@@ -429,9 +432,10 @@ let test_composable_output_registry_is_closed () =
     ; "keeper_artifact_read"
     ; "keeper_tasks_list"
     ; "keeper_time_now"
-    ; "masc_agent_card"
+      (* masc_agent_card and masc_agent_timeline left this list with #29681:
+         off the model surface, so no plan can name them and a composable
+         output schema had nothing to describe. *)
     ; "masc_agent_fitness"
-    ; "masc_agent_timeline"
     ; "masc_board_list"
     ; "masc_board_stats"
     ; "masc_get_metrics"
@@ -593,42 +597,6 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        ; "_unexpected", `Bool true
        ]);
   accepts
-    "masc_agent_timeline"
-    (`Assoc
-       [ "dashboard_surface", `String "/api/v1/agent-timeline"
-       ; "source", `String "agent_timeline_read_model"
-       ; "retention", `Assoc [ "scope", `String "multi_source_tail" ]
-       ; "generated_at_iso", `String "2026-08-18T00:00:00Z"
-       ; "agent", `String "albini"
-       ; ( "period"
-         , `Assoc
-             [ "from", `String "2026-08-17T00:00:00Z"
-             ; "to", `String "2026-08-18T00:00:00Z"
-             ] )
-       ; ( "events"
-         , `List
-             [ `Assoc
-                 [ "ts", `String "2026-08-17T01:00:00Z"
-                 ; "type", `String "tool_call"
-                 ; "detail", `Assoc [ "tool", `String "masc_board_stats" ]
-                 ]
-             ] )
-       ; ( "summary"
-         , `Assoc
-             [ "tasks_completed", `Int 1
-             ; "tasks_claimed", `Int 1
-             ; "messages_sent", `Int 0
-             ; "tool_calls", `Int 1
-             ; "chat_messages", `Int 0
-             ; "turns_completed", `Int 2
-             ; "total_input_tokens", `Int 100
-             ; "total_output_tokens", `Int 50
-             ; "total_cost_usd", `Float 0.01
-             ; "active_duration_minutes", `Float 60.0
-             ; "total_events", `Int 1
-             ] )
-       ]);
-  accepts
     "masc_goal_list"
     (`Assoc
        [ "status", `String "ok"
@@ -708,19 +676,6 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  ; "metrics", metrics_value
                  ]
              ] )
-       ]);
-  accepts
-    "masc_agent_card"
-    (`Assoc
-       [ "schema", `String "masc.agent_card.v1"
-       ; "name", `String "MASC"
-       ; "description", `String "MASC multi-agent workspace MCP server"
-       ; "action", `String "get"
-       ; "requested_by", `String "albini"
-       ; "base_path", `String "/tmp/masc"
-       ; "workspace_path", `String "/tmp/masc/ws"
-       ; "agent_count", `Int 2
-       ; "agent", `Null
        ])
 ;;
 
@@ -796,16 +751,49 @@ let test_request_rejects_opaque_reference () =
   let json =
     request_of_string
       {|{"nodes":[
-          {"id":"help","tool":"masc_tool_help"},
-          {"id":"reader","tool":"keeper_memory_search","after":["help"],
+          {"id":"status","tool":"keeper_context_status"},
+          {"id":"reader","tool":"keeper_memory_search","after":["status"],
            "input":{"kind":"object","fields":[
              {"name":"query",
-              "value":{"kind":"output","node":"help","pointer":"/anything"}}]}}]}|}
+              "value":{"kind":"output","node":"status","pointer":"/anything"}}]}}]}|}
   in
   match parse_request json with
   | Error (Request.Plan_rejected (Plan.Opaque_output_reference _)) -> ()
   | Error error -> failf "wrong rejection: %s" (Request.error_message error)
   | Ok _ -> fail "opaque output reference was accepted"
+;;
+
+(* An off-surface name is spelled correctly and owned by a real descriptor, so
+   it must not be reported as unknown: the author needs to be told the operator
+   entrypoint or the projecting descriptor, not sent hunting for a typo.
+   masc_tool_help is Operator_only since #29681. *)
+let test_request_rejects_off_surface_tool () =
+  let json = request_of_string {|{"nodes":[{"id":"help","tool":"masc_tool_help"}]}|} in
+  match parse_request json with
+  | Error
+      (Request.Plan_rejected
+         (Plan.Tool_off_keeper_surface
+            { tool_name = "masc_tool_help"; reason = Plan.Operator_only_tool; _ })) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "off-surface tool was accepted"
+;;
+
+(* A transport alias names the descriptor that projects it, so the rejection can
+   point at the tool the model actually has. *)
+let test_request_names_the_projecting_tool_for_an_alias () =
+  let json =
+    request_of_string {|{"nodes":[{"id":"move","tool":"masc_transition"}]}|}
+  in
+  match parse_request json with
+  | Error
+      (Request.Plan_rejected
+         (Plan.Tool_off_keeper_surface
+            { tool_name = "masc_transition"
+            ; reason = Plan.Aliased_by { projected_by = "keeper_task_claim" }
+            ; _
+            })) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "transport alias was accepted"
 ;;
 
 let test_request_rejects_dependency_cycle () =
@@ -866,7 +854,11 @@ let test_request_composable_names_match_registry () =
     Request.composable_tool_names ~descriptors:(Descriptor.all_descriptors ())
   in
   check bool "keeper_time_now is composable" true (List.mem "keeper_time_now" names);
-  check bool "masc_tool_help stays opaque" false (List.mem "masc_tool_help" names)
+  (* #29681 took masc_tool_help off the model surface, so it is now absent for
+     a second reason and no longer tells opaque from unreachable.
+     keeper_context_status is on the surface and its output is opaque. *)
+  check bool "keeper_context_status stays opaque" false
+    (List.mem "keeper_context_status" names)
 ;;
 
 let () =
@@ -881,6 +873,11 @@ let () =
             test_request_defaults_missing_input_to_empty_object
         ; test_case "unknown tool" `Quick test_request_rejects_unknown_tool
         ; test_case "opaque reference" `Quick test_request_rejects_opaque_reference
+        ; test_case "off-surface tool" `Quick test_request_rejects_off_surface_tool
+        ; test_case
+            "off-surface alias names its projector"
+            `Quick
+            test_request_names_the_projecting_tool_for_an_alias
         ; test_case "dependency cycle" `Quick test_request_rejects_dependency_cycle
         ; test_case "missing dependency" `Quick test_request_rejects_missing_dependency
         ; test_case "malformed template" `Quick test_request_rejects_malformed_template

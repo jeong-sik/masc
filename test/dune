@@ -186,6 +186,7 @@
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
+  test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
   test_ide_bridge
@@ -493,6 +494,7 @@
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
+  test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
   test_tool_definition_toml
@@ -2576,9 +2578,21 @@
   %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
 
 (test
+ (name test_tui_chat_queue_wiring)
+ (modules test_tui_chat_queue_wiring)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_operator_projection)
  (modules test_tui_operator_projection)
  (libraries alcotest masc_tui_operator_projection yojson))
+
+(test
+ (name test_tui_task_detail)
+ (modules test_tui_task_detail)
+ (libraries alcotest masc_tui_task_selection masc.masc_types))
 
 (test
  (name test_tui_keeper_chat_transcript)
@@ -2593,6 +2607,31 @@
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries alcotest masc_tui_keeper_chat_history yojson))
+
+(test
+ (name test_tui_keeper_chat_queue)
+ (modules test_tui_keeper_chat_queue)
+ (libraries alcotest astring masc_tui_keeper_chat_queue))
+
+(test
+ (name test_tui_chat_surface_mirror)
+ (modules test_tui_chat_surface_mirror)
+ (libraries alcotest masc masc_tui_keeper_chat_history yojson))
+
+(test
+ (name test_keeper_tool_approval_gate)
+ (modules test_keeper_tool_approval_gate)
+ (libraries alcotest agent_core eio eio_main fmt masc yojson))
+
+(test
+ (name test_keeper_tool_approval_policy)
+ (modules test_keeper_tool_approval_policy)
+ (libraries alcotest masc yojson))
+
+(test
+ (name test_keeper_tool_approval_registry)
+ (modules test_keeper_tool_approval_registry)
+ (libraries alcotest eio eio_main fmt masc))
 
 (test
  (name test_tui_keeper_chat_live)
@@ -2651,6 +2690,16 @@
  (name test_tui_planning_selection)
  (modules test_tui_planning_selection)
  (libraries alcotest masc_tui_planning_selection))
+
+(test
+ (name test_tui_markdown)
+ (modules test_tui_markdown)
+ (libraries alcotest masc_tui_markdown masc_tui_message_layout))
+
+(test
+ (name test_tui_composer)
+ (modules test_tui_composer)
+ (libraries alcotest masc_tui_composer masc_tui_render_schedule))
 
 (test
  (name test_tui_keeper_control)

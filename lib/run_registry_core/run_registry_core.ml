@@ -93,6 +93,14 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type cut_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; retained_entries : int
+  ; reached_end : bool
+  ; rewritten : bool
+  }
+
 module Make (Payload : Payload) = struct
   type status =
     | Running
@@ -440,10 +448,10 @@ module Make (Payload : Payload) = struct
 
   let fold_replay_events path =
     if not (Fs_compat.file_exists path)
-    then [], [], false
+    then [], [], false, 0
     else (
       try
-        let (events, malformed, _line_no), boundary =
+        let (events, malformed, line_no), boundary =
           Fs_compat.fold_appended_lines
             ~path
             ~from:0
@@ -469,7 +477,7 @@ module Make (Payload : Payload) = struct
             Log.Misc.warn "%s: replay stat failed after streaming %s" Payload.name path;
             false
         in
-        List.rev events, List.rev malformed, reached_end
+        List.rev events, List.rev malformed, reached_end, line_no - 1
       with
       | exn ->
         Log.Misc.warn
@@ -477,11 +485,15 @@ module Make (Payload : Payload) = struct
           Payload.name
           path
           (Printexc.to_string exn);
-        [], [], false)
+        [], [], false, 0)
+  ;;
+
+  let entries_of_events events =
+    List.fold_left apply_event [] events |> drop_replayed_running |> prune
   ;;
 
   let replay path =
-    let events, malformed, reached_end = fold_replay_events path in
+    let events, malformed, reached_end, _lines_read = fold_replay_events path in
     (match malformed with
      | [] -> ()
      | first :: _ as errors ->
@@ -490,16 +502,36 @@ module Make (Payload : Payload) = struct
          Payload.name
          (List.length errors)
          first);
-    let entries =
-      List.fold_left apply_event [] events
-      |> drop_replayed_running
-      |> prune
-    in
+    let entries = entries_of_events events in
     if reached_end && malformed = [] && Payload.completed_retention <> `All
     then compact_replay_log path entries;
     { entries = Atomic.make entries
     ; path = Some path
     ; mutation_mutex = Cross_context_mutex.create ()
+    }
+  ;;
+
+  (* A row the current decoder refuses can never be read again: the field it
+     carries was hard cut, and production holds no compatibility reader for it.
+     [replay] will not compact while such a row is on disk, and the row only
+     leaves through compaction — so the store stays poisoned and its retention
+     bound stops applying to it.
+
+     The cut breaks that by rewriting from the rows that do decode. It drops
+     what the operator can see it is dropping, which is why it is a deliberate
+     deployment step and not something [replay] does on its own. The
+     unterminated-tail guard still holds: a partial read must not become a
+     truncating rewrite. *)
+  let cut_replay_log ~execute path =
+    let events, malformed, reached_end, lines_read = fold_replay_events path in
+    let entries = entries_of_events events in
+    let rewritten = execute && reached_end in
+    if rewritten then compact_replay_log path entries;
+    { lines_read
+    ; malformed_lines = List.length malformed
+    ; retained_entries = List.length entries
+    ; reached_end
+    ; rewritten
     }
   ;;
 end

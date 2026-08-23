@@ -22,7 +22,6 @@ import { ringFocusClasses } from './common/ring'
 import { TimeAgo } from './common/time-ago'
 import { AgentAvatar } from './overview/agent-avatar'
 import { AgentPresence } from './common/agent-presence'
-import { AgentCapability } from './common/agent-capability'
 import { openAgentProfile } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
 import { formatDuration } from '../lib/format-time'
@@ -75,8 +74,25 @@ import { FL_TONE_LABEL, PHASE_LABEL_KO, type FleetTone } from '../lib/fleet-tone
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
-import { navigate } from '../router'
+import { hashForRoute, navigate } from '../router'
 import { operatorSnapshot } from '../operator-store'
+import { FleetAsideActions, FleetQueueSection, FleetRotationSection } from './fleet-aside-extras'
+
+// keeper-v2 fleet.jsx ChatGlyph — deep link glyph into the keeper conversation
+// console (here: the keepers surface scoped to this keeper).
+function FleetChatGlyph({ size = 14 }: { size?: number }) {
+  return html`<svg
+    viewBox="0 0 24 24"
+    width=${size}
+    height=${size}
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  ><path d="M4 5.5h16v10H9.5L5 19v-3.5H4z" /><path d="M8.5 10.2h7M8.5 13h4.5" /></svg>`
+}
 
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
@@ -1102,6 +1118,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     || selectedRow?.agent.koreanName?.trim()
     || null
   const selectedKeeperId = fleetKeeperIdEvidence(selectedRow?.keeperRuntime ?? null)
+  const selectedRuntime = fleetRuntimeEvidence(selectedRow?.keeperRuntime ?? null)
 
   // Render one fleet roster row (.fl-row), layered with the live classes /
   // test-ids the tests + CSS rely on (v2-monitoring-roster-row, data-tone,
@@ -1245,13 +1262,26 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
         <div class="fl-actcell" aria-label="액션" onClick=${(e: Event) => e.stopPropagation()}>
           ${row.keeperRuntime
-            ? html`<${KeeperActionButtons}
+            // keeper-v2 fleet.jsx: hover-revealed .fl-actions group + fl-chat
+            // deep link into the keepers conversation surface. The design's
+            // per-button .fl-act glyph buttons stay unbuilt — the live row
+            // deliberately renders text action buttons (DESIGN-PARITY.md
+            // monitor ledger: six-track grid with a 160px action cell).
+            ? html`<div class="fl-actions"><${KeeperActionButtons}
                 keeper=${row.keeperRuntime}
                 size="sm"
                 compact
                 stopPropagation
-              />`
+              /></div>`
             : html`<span class="text-2xs text-[var(--color-fg-muted)]">—</span>`}
+          ${row.keeperRuntime
+            ? html`<a
+                class="fl-chat"
+                href=${hashForRoute('keepers', { keeper: row.keeperRuntime.name.trim() })}
+                title=${`${row.displayName} 대화 콘솔 열기`}
+                aria-label=${`${row.displayName} 대화 콘솔 열기`}
+              ><${FleetChatGlyph} size=${13} /></a>`
+            : null}
         </div>
       </div>
     `
@@ -1272,13 +1302,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
         </div>
         <span class="fl-spacer"></span>
-        <button
-          type="button"
-          class="fl-create"
-          data-testid="keeper-create-entry"
-          title="Registry에서 페르소나를 골라 키퍼를 생성합니다"
-          onClick=${() => navigate('registry', {})}
-        >＋ 새 Keeper</button>
+        <!-- keeper-v2 fleet.jsx fl-top-actions: the design's second slot is the
+             프롬프트 (AGENT.md persona library) button — no live persona store
+             exists in the dashboard, so only the create action renders. -->
+        <div class="fl-top-actions">
+          <button
+            type="button"
+            class="fl-create fl-top-btn primary"
+            data-testid="keeper-create-entry"
+            title="Registry에서 페르소나를 골라 키퍼를 생성합니다"
+            onClick=${() => navigate('registry', {})}
+          >＋ 새 Keeper</button>
+        </div>
         <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
         <span class="sr-only">정상 rows ${healthNormal} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 중지 rows ${healthOffline}</span>
       </header>
@@ -1382,6 +1417,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     ${selectedKoreanName && selectedKeeperId ? ' · ' : ''}
                     ${selectedKeeperId ? html`<span class="font-mono">keeper-id · ${selectedKeeperId}</span>` : null}
                   </div>
+                ` : null}
+                ${selectedRuntime.source === 'assigned' ? html`
+                  <!-- keeper-v2 fleet.jsx fl-as-runtime: bound runtime under the
+                       aside identity block. Rendered only when a runtime is
+                       actually assigned (mark, don't fake — the 런타임 vitals
+                       grid below carries the 미확인 case). -->
+                  <div class="fl-as-runtime mono" title="바인딩된 런타임">${selectedRuntime.value}</div>
                 ` : null}
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
                   <!-- KeeperPhaseBadge below is the aside's single status
@@ -1522,16 +1564,31 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ${(selectedRow.recentTools.length > 0 || selectedRow.toolCallCount != null || selectedRow.toolAuditAt) ? html`
               <div class="fl-as-sec">
                 <h4>최근 도구</h4>
-                <div class="flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
-                  <${AgentCapability} tools=${selectedRow.recentTools} maxVisible=${5} />
-                  ${selectedRow.toolCallCount != null && selectedRow.toolCallCount > 0 ? html`
-                    <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">${selectedRow.toolCallCount}회 관찰됨</span>
-                  ` : null}
-                  ${selectedRow.toolAuditAt ? html`
-                    <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">감사 <${TimeAgo} timestamp=${selectedRow.toolAuditAt} /></span>
-                  ` : null}
-                </div>
+                ${selectedRow.recentTools.length > 0 ? html`
+                  <!-- keeper-v2 fleet.jsx fl-tools/fl-toolrow: mono rows, one
+                       per observed tool name (recent_tool_names ∪
+                       latest_tool_names). -->
+                  <div class="fl-tools">
+                    ${selectedRow.recentTools.map(tool => html`<div class="fl-toolrow">${tool}</div>`)}
+                  </div>
+                ` : null}
+                ${(selectedRow.toolCallCount != null && selectedRow.toolCallCount > 0) || selectedRow.toolAuditAt ? html`
+                  <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
+                    ${selectedRow.toolCallCount != null && selectedRow.toolCallCount > 0 ? html`
+                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">${selectedRow.toolCallCount}회 관찰됨</span>
+                    ` : null}
+                    ${selectedRow.toolAuditAt ? html`
+                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">감사 <${TimeAgo} timestamp=${selectedRow.toolAuditAt} /></span>
+                    ` : null}
+                  </div>
+                ` : null}
               </div>
+            ` : null}
+
+            ${selectedRow.keeperRuntime ? html`
+              <${FleetQueueSection} keeper=${selectedRow.keeperRuntime} />
+              <${FleetRotationSection} keeper=${selectedRow.keeperRuntime} />
+              <${FleetAsideActions} keeper=${selectedRow.keeperRuntime} />
             ` : null}
           ` : html`
             <div class="fl-as-sec">

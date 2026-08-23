@@ -453,15 +453,20 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
   if (injections.length === 0) {
     return html`<div class="mem-empty">최근 memory_os_recall 주입 없음.</div>`
   }
+  // keeper-v2/memory.jsx 메모리 형성 에피소드 timeline (.mem-timeline >
+  // .mem-tl-row): op chip / timestamp / text+range / freed bytes. Every row
+  // here is a real memory_os_recall injection, so the op chip is always
+  // 'recall' — the design's compact/summarize/evict roles have no live event
+  // source and are not rendered.
   return html`
-    <div class="mem-store">
+    <div class="mem-timeline">
       ${injections.map(inj => html`
         <div class="mem-tl-row" key=${`${inj.traceId}:${inj.turn}:${inj.digest}`}>
-          <span class="mem-kind">회상</span>
+          <span class="mem-op recall">${'◈'} 회상</span>
           <span class="mem-tl-at">${formatTimeAgo(inj.ts)}</span>
           <span class="mem-tl-text">
             <span class="mono">${inj.traceId}#${inj.turn}</span>
-            <span class="mono"> · ${inj.digest}</span>
+            <span class="mem-tl-range mono">${inj.digest}</span>
           </span>
           <span class="mem-tl-tok">${memFmtBytes(inj.bytes)}</span>
         </div>
@@ -474,8 +479,8 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
 // one meta line. The wire carries `first_seen` only (no provenance, no
 // verification time), so the meta line is the insertion age with the absolute
 // instant in the title, plus the row's place in the latest revision delta.
-// `current` is true for every store row by construction (only change.removed
-// rows carry false), so it is not echoed as a label.
+// The TTL chip (`.mem-ttl`) renders the live `current` flag: store rows are
+// current by construction, change.removed rows carry current=false (만료).
 // `srcOverride` adds the owning keeper label in the aggregate current-facts list.
 function FactRow({
   fact,
@@ -493,6 +498,9 @@ function FactRow({
       <div class="mem-store-main">
         <div class="mem-store-text">${fact.claim}</div>
         <div class="mem-store-meta">
+          ${fact.current
+            ? html`<span class="mem-ttl current">유효</span>`
+            : html`<span class="mem-ttl expired">만료</span>`}
           ${delta === 'added' ? html`<span class="mem-delta added">+ 새 기억</span>` : null}
           ${delta === 'removed' ? html`<span class="mem-delta removed">− 사라진 기억</span>` : null}
           <span class="mono" title=${formatInstant(fact.first_seen)}>저장 ${factAgeLabel(fact)}</span>
@@ -856,10 +864,16 @@ function AggregateMemoryReal({
   const categoryTotals = mergeAggregateCategoryCounts(data)
   const categorizedFacts = categoryTotals.reduce((sum, entry) => sum + entry.count, 0)
   const recentFacts = mergeAggregateFacts(data)
+  const maxRecallBytes = Math.max(1, ...data.map(row => row.recallBlockBytes))
   return html`
     <${Fragment}>
       <div class="turn-sec">
         <h4>전체 memory-os</h4>
+        <div class="mem-stats" data-testid="memory-aggregate-stats">
+          <div class="mem-stat"><span class="v mono">${keepers.length}</span><span class="k">keeper</span></div>
+          <div class="mem-stat"><span class="v mono">${shownTotal}</span><span class="k">스토어 항목</span></div>
+          <div class="mem-stat"><span class="v mono">${memFmtBytes(recallBytes)}</span><span class="k">메모리 블록</span></div>
+        </div>
         <div class="mem-trust">
           <div class="mem-trust-card">
             <span class="mem-trust-k">keepers</span>
@@ -916,7 +930,10 @@ function AggregateMemoryReal({
                   <span class="mono">${row.currentFacts}/${row.shownFacts}</span>
                   <span class="mono">${row.revision}${row.readErrors > 0 ? html` · err ${row.readErrors}` : null}</span>
                   <span class="mono">+${row.added} / −${row.removed}</span>
-                  <span class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</span>
+                  <span class="mem-td-bar">
+                    <i style=${{ width: `${(row.recallBlockBytes / maxRecallBytes) * 100}%` }}></i>
+                    <b class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</b>
+                  </span>
                 `}
             </button>`)}
         </div>

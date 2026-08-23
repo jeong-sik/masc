@@ -160,7 +160,7 @@ let model_input_projection_for_capacity
         | Ok projected -> Ok projected
         | Error error ->
           Error
-            (Runtime_model_input_tail_window.budget_error_to_string error))
+            (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
   let* windowed = windowed in
   (* Compute the next structural retry boundary from the current bounded
@@ -537,6 +537,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -612,6 +616,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count

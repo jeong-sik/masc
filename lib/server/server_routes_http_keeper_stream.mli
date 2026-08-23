@@ -112,6 +112,19 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** [{ "error": { "message": "…" } }] envelope for
     parse / handler errors. *)
 
+val handle_keeper_tool_approval :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/tool-approval].
+
+    Reads [{"name", "tool_call_id", "decision"}] where decision is
+    ["approve"] or ["deny"], and releases the matching held tool call.
+
+    Returns [{settled: true}] when a wait was actually released, and
+    [{settled: false}] when none was: the call had already timed out, was
+    answered, or was never held. That is reported rather than treated as
+    success, so an operator is not told a call was approved when nothing was
+    listening for it. *)
+
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].

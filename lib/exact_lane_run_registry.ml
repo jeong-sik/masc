@@ -245,11 +245,24 @@ let completion_error_to_string = function
   | Persistence_failed failure -> failure.detail
 ;;
 
-let storage_filename = "exact-lane-runs-v4.jsonl"
+(* v4 -> v5: #29598 removed [subject_id] from the registration payload. The
+   payload decoder is exact-field, so every v4 registration row written before
+   that cut is skipped on replay (not refused as a file: [Run_registry_core]
+   skips a row it cannot decode, logs the count, and then declines to compact
+   a store that has skipped rows). Live on 2026-08-23 that was 2,000 of 4,090
+   rows, every completed run gone from the monitor, one 2,000-line WARN per
+   boot, and a 36 MB file that can no longer shrink. The removed field rides
+   on the store version instead, as #29553 did for the event queue: this
+   binary reads only v5 and never opens v4. The rows the cut binary wrote to
+   v4 after the field was gone (45 by 11:00Z) are left behind with it.
+   [test_store_version_pins_the_registration_shape] holds the row shape and
+   this name together. *)
+let storage_filename = "exact-lane-runs-v5.jsonl"
 
 (* Re-exported from the store rather than re-derived from [Payload], so the
    bound a test reads is the bound [prune] applies. *)
 let max_completed_retained = Store.max_completed_retained
+let cut_replay_log = Store.cut_replay_log
 
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
 

@@ -1048,6 +1048,15 @@ def run_terminal_scenario(
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
+                        # The environment is inherited, so whether the TUI finds
+                        # a bearer was decided by whoever ran the test. Without
+                        # one it posts a seventh event saying so, the events
+                        # pane takes the row for it, and the task the Overview
+                        # budget assertions look for falls off the bottom --
+                        # which passes on a developer's shell and fails in CI.
+                        # The harness decides this, like it decides the port and
+                        # the terminal.
+                        "MASC_TOKEN": "masc-tui-keyboard-regression-token",
                     }
                 )
                 process = subprocess.Popen(
@@ -2097,10 +2106,14 @@ def approval_selection_identity_interaction(
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
     plain = CSI_RE.sub(b"", frame)
-    selected_row = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][ \t]+P1[ \t]+" + re.escape(title)
+    # What sits between the status bracket and the priority is the renderer's
+    # business: #29786 put a proof mark there and this assertion, which only
+    # means "this goal is the selected row", started failing as a shape
+    # mismatch.
+    selected = re.compile(
+        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]*?P1[ \t]+" + re.escape(title)
     )
-    if selected_row.search(plain) is None:
+    if selected.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")
 
 

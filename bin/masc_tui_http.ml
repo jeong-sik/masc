@@ -177,6 +177,32 @@ let fetch_keeper_chat_history ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("chat history was not JSON: " ^ detail))
 
+(** Fetch one page of chat rows older than [before].
+
+    [before] absent asks for the newest window, which is what the transcript
+    fetch already returns; the pane passes a cursor, so it is required here. *)
+let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(before : float) :
+    (Masc_tui_keeper_chat_history.page, string) result =
+  let path =
+    (* %.17g rather than %h: both round-trip through float_of_string, but the
+       hex form carries a '+' in its exponent, which a query string reads as a
+       space. 17 significant digits is the shortest width that is exact for
+       every double. *)
+    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?before=%.17g"
+      (percent_encode_path_segment keeper_name)
+      before
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "chat history page returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc_tui_keeper_chat_history.page_of_json json
+      | exception Yojson.Json_error detail ->
+          Error ("chat history page was not JSON: " ^ detail))
+
 (** What the server did with a request to interrupt a keeper's current turn.
 
     [Signalled] reports that the signal reached the turn switch, and nothing

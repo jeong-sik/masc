@@ -90,6 +90,28 @@ val addressed_label : speaker -> Surface.t option -> string
     ["vincent · slack"] — so a fleet broadcast and a direct message do not look
     alike. *)
 
+(** One page of rows older than a cursor, from
+    [GET /keepers/<name>/chat/history/page?before=<ts>].
+
+    The envelope differs from the transcript's; the rows inside are the same
+    shape, so they decode through the same reader and a page is folded and
+    ordered exactly as the first load was. *)
+type page =
+  { decoded : decoded
+  ; has_more : bool
+        (** Whether older rows exist beyond this page. False is the top of the
+            conversation. *)
+  ; next_before : float option
+        (** Cursor for the page before this one. [None] on an empty page —
+            the server computes it rather than leaving each client to derive
+            the rule. *)
+  }
+
+val page_of_json : Yojson.Safe.t -> (page, string) result
+(** Decode a [/chat/history/page] response. Fails when the envelope is not an
+    object or carries no [messages] array; a single unreadable row inside is
+    dropped and counted, as in {!rows_of_json}. *)
+
 val rows_of_json : Yojson.Safe.t -> (decoded, string) result
 (** Decode a [/chat/history] response.
 

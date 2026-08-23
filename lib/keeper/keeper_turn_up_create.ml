@@ -97,7 +97,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   tool_result_error "internal keeper trace_id generation failed"
               | Ok trace_id_t ->
                   (match
-                     Keeper_shutdown_intake_fence.run_durable_intake_if_open
+                     Keeper_shutdown_intake_fence.run_durable_intake_observing
                        ~base_path:ctx.config.base_path
                        ~keeper_name:p.name
                        (fun intake_token ->
@@ -350,23 +350,24 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 "keeper metadata was created but lane launch failed: %s"
                 (start_keepalive_outcome_to_string rejected))))))
                    with
-                   | Keeper_shutdown_intake_fence.Intake_committed result ->
-                     result
-                   | Keeper_shutdown_intake_fence.Intake_shutdown_reserved
-                       operation_id ->
-                     let detail =
-                       Printf.sprintf
-                         "keeper creation rejected by shutdown admission: keeper=%s operation=%s"
-                         p.name
-                         (Keeper_shutdown_types.Operation_id.to_string operation_id)
-                     in
+                   | result, None -> result
+                   | result, Some operation_id ->
+                     (* Observed, not obeyed. A reservation records that a
+                        shutdown began; a shutdown that never finalises never
+                        clears it, and refusing here left the sweep re-trying
+                        every 30s against a slot nothing could release —
+                        15h32m and 38,910 abandoned sessions on 2026-08-20
+                        (#29566). Creation proceeds and names what it saw. *)
                      Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string LifecycleDispatchRejections)
                        ~labels:
                          [ ("keeper", p.name)
-                         ; ("event", "create_shutdown_admission")
+                         ; ("event", "create_over_shutdown_admission")
                          ]
                        ();
-                     Log.Keeper.warn "%s" detail;
-                     Progress.stop_tracking task_id;
-                     tool_result_error detail)
+                     Log.Keeper.warn
+                       "keeper created while a shutdown reservation stood: \
+                        keeper=%s operation=%s"
+                       p.name
+                       (Keeper_shutdown_types.Operation_id.to_string operation_id);
+                     result)

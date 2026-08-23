@@ -785,6 +785,17 @@ let render_approvals (state : state) =
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
 
+(* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
+   posts and 588 are automation; the 22 a person wrote are what an operator is
+   scanning for, so those are the ones that get a mark. *)
+let board_kind_mark = function
+  | Some Post_by_person -> Ansi.bold ^ "@" ^ Ansi.reset
+  | Some Post_by_automation -> Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
+  | Some Post_by_system -> " "
+  | Some (Post_kind_unknown _) -> Ansi.yellow ^ "?" ^ Ansi.reset
+  | None -> " "
+;;
+
 (** Render the Board surface (list view). *)
 (** The new-post draft. The commit-message convention is stated on screen
     rather than assumed: first line is the title, the rest is the body. A
@@ -896,10 +907,18 @@ let render_board_list (state : state) =
         let p = List.nth state.board_posts idx in
         let is_selected = idx = state.board_cursor in
         let line =
-          Printf.sprintf "  %s  %s  %s  +%d  c%d"
+          Printf.sprintf "  %s %s  %s  %s  %s  +%d  c%d"
+            (board_kind_mark p.bp_kind)
             (fit_width (Terminal_text.single_line p.bp_id) 12)
+            (Ansi.dim
+             ^ fit_width
+                 (match Terminal_text.optional_single_line p.bp_hearth with
+                  | Some hearth -> hearth
+                  | None -> "")
+                 12
+             ^ Ansi.reset)
             (fit_width (Terminal_text.single_line p.bp_author) 16)
-            (fit_width (Terminal_text.single_line p.bp_title) (cols - 52))
+            (fit_width (Terminal_text.single_line p.bp_title) (cols - 68))
             p.bp_votes
             p.bp_comment_count
         in

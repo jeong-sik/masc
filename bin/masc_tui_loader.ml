@@ -323,6 +323,19 @@ let decode_board_post ?(require_body = false) json =
   let* bp_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
+  let* bp_hearth = optional_string_field json "hearth" in
+  let* raw_kind = optional_string_field json "post_kind" in
+  (* Optional, and an unknown value is carried rather than rejected: the list
+     is a projection for a pane, and a post whose kind this build does not know
+     is still a post the operator should see. *)
+  let bp_kind =
+    match raw_kind with
+    | Some "direct" -> Some Post_by_person
+    | Some "automation" -> Some Post_by_automation
+    | Some "system" -> Some Post_by_system
+    | Some other -> Some (Post_kind_unknown other)
+    | None -> None
+  in
   Ok
     {
       bp_id;
@@ -332,6 +345,8 @@ let decode_board_post ?(require_body = false) json =
       bp_votes;
       bp_comment_count;
       bp_created_at;
+      bp_hearth;
+      bp_kind;
     }
 
 let decode_board_posts json_list =

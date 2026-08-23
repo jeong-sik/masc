@@ -88,6 +88,22 @@ type attention_item = {
   ai_target_id: string option;
 }
 
+(** Who put a post on the board. Mirrors [Board_types.post_kind]: the wire
+    strings are ["direct"], ["automation"] and ["system"].
+
+    Worth a column because of the ratio. On this workspace's 2171 posts:
+    1561 system, 588 automation, and 22 that a person wrote. Without the
+    distinction those 22 are buried in the other 2149 and the board reads as
+    machine noise. *)
+type board_post_kind =
+  | Post_by_person
+  | Post_by_automation
+  | Post_by_system
+  | Post_kind_unknown of string
+      (** A kind this build was not taught. Named rather than folded into
+          one of the others, so a new kind shows as unfamiliar instead of
+          quietly becoming "system". *)
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -97,6 +113,14 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
+  bp_hearth: string option;
+      (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
+          sit in [verification] alone — a flat list is 71% one topic with
+          nothing saying so. *)
+  bp_kind: board_post_kind option;
+      (** [None] when the row did not say. Not folded into a kind: "the post
+          did not state one" and "the post is a system post" are different
+          facts, and only one of them is a claim about who wrote it. *)
 }
 
 (** Board comment *)

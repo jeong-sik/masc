@@ -2097,8 +2097,15 @@ def approval_selection_identity_interaction(
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
     plain = CSI_RE.sub(b"", frame)
+    # The column between the phase and the priority holds the completion
+    # judge's mark (#29767): a blank when nobody asked, and otherwise one of
+    # ... / check / cross / bang. This probe is about which row the cursor is
+    # on, so it steps over whatever the mark says rather than pinning it -- the
+    # mark has its own tests, and pinning it here made every goal that gained a
+    # verdict look like a lost selection.
     selected_row = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][ \t]+P1[ \t]+" + re.escape(title)
+        rb">[ \t]+\[[^\]\r\n]+\][ \t]+(?:[^\s\r\n]+[ \t]+)?P1[ \t]+"
+        + re.escape(title)
     )
     if selected_row.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")

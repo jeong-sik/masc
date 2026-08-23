@@ -408,6 +408,7 @@ let run_turn
       ?temperature
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
@@ -877,6 +878,7 @@ let run_turn
                       ~initial_messages
                       ~model_input_projection
                       ~hooks
+                      ?approval_gate
                       ~runtime_manifest_context
                       ~runtime_manifest_append:
                         (fun manifest ->

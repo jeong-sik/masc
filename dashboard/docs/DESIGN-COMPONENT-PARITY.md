@@ -25,48 +25,53 @@ keeper is blocked, so monitor read 52.8% on one run and 27.5% on the next, and
 the *design* side moved too. Source is the same every time, and it reaches the
 surfaces behind tabs and drawers that no click recipe covers.
 
-## Where it stands (2026-08-22)
+## Where it stands (2026-08-23, second re-measure)
 
-**1398 of 2435 design components implemented — 57.4%** (re-measured 2026-08-23; the 55.2% / 1344 figure is the 2026-08-22 baseline). The vendored kit is the
-mirror image: **42% of its 2870 selectors (1216) style nothing in the app.**
+**2006 of 2435 design components implemented — 82.4%** (baselines: 55.2% / 1344
+on 2026-08-22, 57.4% / 1398 on the first 2026-08-23 re-measure). The vendored kit
+is the mirror image: at the 57.4% mark, 42% of its 2870 selectors (1216) styled
+nothing in the app; each component build below activates rules that were already
+vendored.
 
-`lanes.css` is the shape of the problem. The Lane Queue sub-view scores 0.959,
-which reads as "the vendoring landed" — and not one `dl-` class exists anywhere
-in `src`. The stylesheet is correct for a DOM the app does not render.
-
-Orphan is not the same as wrong, though, and I got that backwards for a while.
-The kit is a vendored copy of the design's stylesheets; a rule with no consumer
-today is the copy being faithful, and is what makes the component buildable later
-without re-deriving its CSS by hand. What `design-parity-orphans.mjs` measures is
-therefore a fact about the app, not a defect in the kit: 42% of the design's
-components have no markup on this side yet.
+`lanes.css` used to be the shape of the problem — a correct stylesheet for a DOM
+the app did not render. That is closed: lanes, messages, molecules,
+monitor-more, dock and app now sit at 100%, and every surface below 60% carries
+its reason in this file or in the component header (no live signal, or a
+deliberate rename the design itself superseded).
 
 | Design file | Implemented | |
 |---|---|---|
-| palette | 0.0% | 0/16 |
-| monitor-more | 3.8% | 2/52 |
-| lanes | 5.6% | 4/72 |
-| journey | 5.7% | 3/53 |
-| internal-agents | 5.7% | 2/35 |
-| registry | 10.3% | 12/117 |
-| verify-queue | 11.6% | 8/69 |
-| messages | 21.6% | 8/37 |
-| lab | 27.5% | 11/40 |
-| command | 32.4% | 11/34 |
-| keeper-config | 36.9% | 45/122 |
-| rails | 42.4% | 70/165 |
-| fleet | 42.8% | 62/145 |
-| molecules | 44.5% | 65/146 |
-| … | | |
+| palette | 0.0% | 0/16 — `cmdk-*`; the dashboard's palette is `ninja-keys`, none of the 16 can apply |
+| data-surfaces | 11.1% | 1/9 |
+| toast | 12.5% | 1/8 |
+| organisms-5 | 37.0% | 10/27 — `kc-*` drawer; superseded by the design's own fullscreen keeper-config |
+| keepers | 55.6% | 10/18 |
+| registry | 59.0% | 69/117 — remainder is persona CRUD / keeper-create wizard, no live API |
+| rails | 62.4% | 103/165 |
+| ide | 63.2% | 24/38 |
+| tweaks-panel | 69.6% | 16/23 |
+| fleet | 74.5% | 108/145 — remainder is 실행 슬롯 WFQ band, no slot/weight telemetry |
+| lab | 75.0% | 30/40 |
+| runtime-editor | 78.1% | 75/96 |
+| connectors | 78.6% | 44/56 |
+| work | 78.6% | 151/192 — remainder needs assign-to-keeper / task-create / gate-outcome APIs |
+| board | 81.8% | 36/44 |
+| settings | 82.0% | 73/89 |
+| approvals | 82.8% | 77/93 |
+| fusion | 84.4% | 114/135 |
+| shell | 84.9% | 45/53 |
+| overview | 86.8% | 59/68 |
+| memory | 87.9% | 58/66 |
+| schedule | 91.2% | 135/148 |
+| verify-queue | 91.3% | 63/69 |
+| command | 94.1% | 32/34 |
+| internal-agents | 94.3% | 33/35 |
+| journey | 94.3% | 50/53 |
+| turn-inspector | 94.6% | 53/56 |
+| composer | 94.9% | 37/39 |
+| keeper-config | 97.5% | 119/122 |
 | logs | 97.1% | 34/35 |
-| turn-inspector | 98.2% | 55/56 |
-| dock, app | 100% | |
-
-2026-08-23: `internal-agents-monitor.ts` was rebuilt onto the design's
-`.ia-*`/`.ai-*` vocabulary, and approvals history was extended (decider pills
-from the live `decision_source` field, `.ap-hist-reason` ← `decision_reason`,
-Auto Judge summary stat). Every number on this page predates that work —
-re-run the probes before quoting them.
+| app, dock, lanes, messages, molecules, monitor-more | 100% | |
 
 ## The gap is three different problems
 
@@ -114,11 +119,11 @@ Do not rename these. The reason is written in each stylesheet's header.
 | Surface | What the design draws | What the dashboard has |
 |---|---|---|
 | Command palette | its own `cmdk-*` markup, 16 components | `ninja-keys`, a third-party web component. None of the 16 can ever apply. |
-| Lane Queue | 72 `dl-*` components | nothing; `lanes.css` is vendored anyway |
-| Journey | 53 `ev-*` components | nothing |
-| monitor-internal | `.ia-badge`, `.ai-table`, `.ai-strip` — a named vocabulary | Rebuilt onto that vocabulary 2026-08-23 (`internal-agents-monitor.ts`); re-measured 2026-08-23: 88.6% (31/35) |
+| Lane Queue | 72 `dl-*` components | built 2026-08-23 (`components/lanes/`), 100% |
+| Journey | 53 `ev-*` components | rebuilt 2026-08-23 (`components/v2/journey-v2.ts`), 50/53 — `jw-stim*` has no live signal |
+| monitor-internal | `.ia-badge`, `.ai-table`, `.ai-strip` — a named vocabulary | Rebuilt onto that vocabulary 2026-08-23 (`internal-agents-monitor.ts`); 94.3% (33/35) |
 | lab | — | Tailwind utilities assembled inline. A vendored stylesheet cannot reach a surface with nothing named to style. |
-| Verify queue | 69 `vq-*` components | 8 |
+| Verify queue | 69 `vq-*` components | built 2026-08-23 (`components/verification/verify-queue.ts`), 63/69 |
 
 ## Tokens that resolve to nothing
 

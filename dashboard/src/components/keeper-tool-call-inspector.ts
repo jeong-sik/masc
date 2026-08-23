@@ -78,22 +78,17 @@ function tryPrettyJson(s: string): string | null {
 // (keeper_runtime_contract.action_radius_json), so every consumer reads the
 // same recorded value.
 //
-// Execute rows record their cwd as target_path with target_kind "path"
-// (masc#29013) — a directory, not a file — so they are held back from Code
-// link promotion by exact identity (recorded descriptor id, with the tool
-// name covering rows that carry no route_evidence) until the writer records
-// a typed file/cwd distinction.
-const EXECUTE_DESCRIPTOR_ID = 'agent.execute'
-const EXECUTE_TOOL_NAME = 'Execute'
+// target_kind says whether the target is a file or a directory, so Code link
+// promotion reads it directly. Execute rows used to be held back here by name,
+// because their cwd arrived as target_kind "path" and there was no way to tell
+// it from a file (masc#29013); the writer now records "directory" for a cwd or
+// a repo_path.
 
-function recordsCwdAsTarget(entry: ToolCallEntry): boolean {
-  return entry.route_evidence?.descriptor_id === EXECUTE_DESCRIPTOR_ID
-    || entry.tool === EXECUTE_TOOL_NAME
-}
-
-function toolCallRouteLinks(entry: ToolCallEntry): ReadonlyArray<IdeContextRouteLink> {
+/** Pure: the route links one recorded row earns. Exported so tests can pin
+    which target_kind values promote a Code link without rendering the row. */
+export function toolCallRouteLinks(entry: ToolCallEntry): ReadonlyArray<IdeContextRouteLink> {
   const radius = entry.action_radius
-  const filePath = radius?.target_kind === 'path' && !recordsCwdAsTarget(entry)
+  const filePath = radius?.target_kind === 'path'
     ? radius.target_path ?? radius.observed_paths?.[0]
     : undefined
   const goalId = entry.goal_ids?.[0]

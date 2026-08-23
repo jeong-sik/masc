@@ -357,7 +357,7 @@ describe('Work', () => {
       const card = container.querySelector('[data-goal-id="G-1"]')
       expect(card).toBeTruthy()
       fireEvent.click(card!.querySelector('.wk-goal-h')!)
-      expect(card?.querySelector('.wk-jobs')).toBeTruthy()
+      expect(card?.querySelector('.wk-tasks')).toBeTruthy()
 
       const row = screen.getByTestId('job-row')
       expect(row).toBeTruthy()
@@ -367,6 +367,40 @@ describe('Work', () => {
       expect(within(card! as HTMLElement).getByText('Blocked job')).toBeTruthy()
       expect(screen.getByTestId('job-blocker').textContent).toContain('dependency missing')
       expect(screen.queryByTestId('job-detail')).toBeNull()
+    })
+
+    it('marks the goal list with the design tree class and shows the raw phase chip', () => {
+      goals.value = [
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = []
+
+      const { container } = render(html`<${Work} />`)
+
+      expect(container.querySelector('main.ov-flush')).toBeTruthy()
+      expect(screen.getByTestId('work-goal-list').classList.contains('wk-tree')).toBe(true)
+      expect(container.querySelector('.wk-goal-phase')?.textContent).toBe('executing')
+    })
+
+    it('renders a re-run chip on task rows carrying predecessor_task_id (RFC-0323)', () => {
+      goals.value = [
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'J-1', title: 'Rerun job', goal_id: 'G-1', status: 'todo', predecessor_task_id: 'J-0' },
+        { id: 'J-2', title: 'Plain job', goal_id: 'G-1', status: 'todo' },
+      ]
+
+      const { container } = render(html`<${Work} />`)
+
+      const card = container.querySelector('[data-goal-id="G-1"]')
+      fireEvent.click(card!.querySelector('.wk-goal-h')!)
+
+      const rerun = screen.getByTestId('job-rerun')
+      expect(rerun.textContent).toContain('J-0')
+      expect(rerun.getAttribute('title')).toContain('predecessor_task_id = J-0')
+      // Only the re-run task carries the chip.
+      expect(card?.querySelectorAll('[data-testid="job-rerun"]').length).toBe(1)
     })
 
     it('navigates to keeper workspace when keeper assignment is clicked', () => {
@@ -1206,6 +1240,37 @@ describe('Work', () => {
         expect(screen.queryByTestId('work-kanban')).toBeNull()
         expect(screen.getByTestId('work-goal-list')).toBeTruthy()
         expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
+      })
+
+      it('renders re-run chip and handoff marker on kanban cards from live task fields', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          {
+            id: 'J-1',
+            title: 'Rerun with handoff',
+            goal_id: 'G-1',
+            status: 'in_progress',
+            assignee: 'keeper-x',
+            predecessor_task_id: 'J-0',
+            handoff_context: { summary: 'handed off from keeper-y' },
+          },
+          { id: 'J-2', title: 'Plain task', goal_id: 'G-1', status: 'todo' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const board = screen.getByTestId('work-kanban')
+        const card = board.querySelector('[data-kanban-task-id="J-1"]')
+        const rerun = card?.querySelector('[data-testid="kanban-rerun"]')
+        expect(rerun?.textContent).toContain('J-0')
+        expect(card?.querySelector('[data-testid="kanban-handoff"]')).toBeTruthy()
+
+        const plain = board.querySelector('[data-kanban-task-id="J-2"]')
+        expect(plain?.querySelector('[data-testid="kanban-rerun"]')).toBeNull()
+        expect(plain?.querySelector('[data-testid="kanban-handoff"]')).toBeNull()
       })
 
       // The tree used to speak its own status spelling ("completed" for done,

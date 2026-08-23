@@ -272,6 +272,9 @@ normal_targets=(
   @test/runtest-test_keeper_wire_capture
   @test/runtest-test_runtime_provider_auth_headers
   @test/runtest-test_keeper_official_client_host
+  @test/runtest-test_keeper_tool_approval_gate
+  @test/runtest-test_keeper_tool_approval_policy
+  @test/runtest-test_keeper_tool_approval_registry
   @test/runtest-test_runtime_codex_app_server
   @test/runtest-test_runtime_antigravity
   @test/runtest-test_runtime_antigravity_home

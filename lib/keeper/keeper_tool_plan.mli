@@ -182,6 +182,15 @@ val node
   -> unit
   -> node
 
+(** Why a descriptor that exists is absent from the Keeper model surface.
+    [Unknown_tool] means no descriptor owns the name at all; these mean one
+    does, and the Keeper model still cannot call it. The two need opposite
+    answers, so they are separate errors rather than one. *)
+type off_surface_reason =
+  | Operator_only_tool
+  | Aliased_by of { projected_by : string }
+  | Unresolved_schema
+
 type error =
   | Empty_plan
   | Unknown_descriptor_id of string
@@ -190,6 +199,11 @@ type error =
   | Unknown_tool of
       { node_id : Node_id.t
       ; tool_name : string
+      }
+  | Tool_off_keeper_surface of
+      { node_id : Node_id.t
+      ; tool_name : string
+      ; reason : off_surface_reason
       }
   | Missing_dependency of
       { node_id : Node_id.t

@@ -326,10 +326,18 @@ let v5_registration_row =
 let v4_registration_row =
   {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
 
+(* Replay drops runs still marked running, because an exact-output fiber does
+   not survive a restart (#26931). So a registration row alone replays to [None]
+   whether it decoded or not, which cannot tell an accepted row from a rejected
+   one. Each row is paired with its completion, giving a decoded row a state
+   that survives and leaving [None] to mean rejection alone. *)
+let completion_row =
+  {|{"event":"complete","id":"exact-board-attention-pin","completion":{"outcome":"succeeded","elapsed_s":1.5,"output":{},"selected_slot":null}}|}
+
 let test_store_version_pins_the_registration_shape () =
   let replay_single row =
     let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
-    Fs_compat.save_file path (row ^ "\n");
+    Fs_compat.save_file path (row ^ "\n" ^ completion_row ^ "\n");
     let replayed = R.replay path in
     let status =
       R.get replayed ~run_id:"exact-board-attention-pin"
@@ -340,8 +348,8 @@ let test_store_version_pins_the_registration_shape () =
   in
   check string "the row shape below belongs to this store version"
     "exact-lane-runs-v5.jsonl" R.storage_filename;
-  check (option string) "a v5 registration row replays as a running run"
-    (Some "running") (replay_single v5_registration_row);
+  check (option string) "a v5 registration row replays as a completed run"
+    (Some "succeeded") (replay_single v5_registration_row);
   check (option string) "the field v4 carried and v5 removed is rejected, not ignored"
     None (replay_single v4_registration_row)
 ;;

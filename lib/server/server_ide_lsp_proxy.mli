@@ -92,6 +92,12 @@ module For_testing : sig
   (** Canonical handled LSP method catalog as [(wire_method, class)]. *)
   val handled_lsp_methods : unit -> (string * method_class) list
 
+  (** Methods the proxy does not answer itself, and what happens to them.
+      Disjoint from {!handled_lsp_methods} by construction: a method the
+      catalog knows is classified from the catalog, so naming it here too
+      would be two tables deciding the same thing (#28686). *)
+  val relayed_lsp_methods : unit -> (string * disposition) list
+
   (** Classify a handled method by wire name, or [None] when the method is not
       in the direct proxy catalog. *)
   val classify_handled_lsp_method : string -> method_class option

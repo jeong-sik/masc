@@ -65,6 +65,7 @@ type config =
         deliberate request budget. *)
   ; temperature : float option
   ; hooks : Agent_core.Hooks.hooks option
+  ; tool_approval : Agent_core.Hooks.tool_approval_callback option
   ; event_bus : Agent_core.Event_bus.t option
   ; session_id : string option
   ; description : string option
@@ -142,6 +143,7 @@ let default_config
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
   ; hooks = None
+  ; tool_approval = None
   ; event_bus = None
   ; session_id = None
   ; description = None
@@ -407,6 +409,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
     ; first_event_timeout_s = config.first_event_timeout_s
     ; body_timeout_s = config.body_timeout_s
     ; context_injector = config.context_injector
+    ; tool_approval = config.tool_approval
     ; event_bus = config.event_bus
     ; raw_trace = config.raw_trace
     ; description = config.description

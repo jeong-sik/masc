@@ -90,6 +90,29 @@ let composer_prompt_text composer =
 (* Unfocused the row is dim and says which key opens it; focused it is drawn in
    full and carries the cursor. Either way it occupies the same single row, so
    taking focus does not move the frame above it. *)
+(* The one line that tells an operator on any surface that a keeper is holding
+   a tool call. Returns None when nothing is held, which is the common case. *)
+let awaiting_approval_notice (state : state) =
+  match state.msg_live with
+  | None -> None
+  | Some live -> (
+      match Keeper_chat_transcript.awaiting_approval live with
+      | None -> None
+      | Some awaiting ->
+          let where =
+            match state.view with
+            | Keepers Keeper_message -> ""
+            | Overview | Keepers _ | Board | Approvals | Planning
+            | System_logs ->
+                "  (2 then m to answer)"
+          in
+          Some
+            (Printf.sprintf "  %s is holding %s%s"
+               (Terminal_text.single_line
+                  (Keeper_chat_transcript.keeper_name live))
+               (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
+               where))
+
 let composer_line state ~cols =
   let composer = composer_of_state state in
   let prompt = composer_prompt_text composer in
@@ -111,7 +134,15 @@ let composer_line state ~cols =
   let body =
     if String.equal draft "" then prompt ^ hint else prompt ^ draft
   in
-  tone ^ fit_width body cols ^ Ansi.reset
+  (* A held tool call is drawn on whatever surface the operator is looking at.
+     Its prompt lives in the chat pane, and a turn holding a call is denied
+     when the wait runs out -- so an operator reading the Board would lose the
+     call without ever seeing that it was waiting. This line says a keeper is
+     waiting and where to answer; the answer itself stays in the chat pane,
+     where it is unambiguous which keeper and which call it is for. *)
+  match awaiting_approval_notice state with
+  | Some notice -> Ansi.yellow ^ fit_width notice cols ^ Ansi.reset
+  | None -> tone ^ fit_width body cols ^ Ansi.reset
 
 let composer_cursor state ~rows ~cols =
   let composer = composer_of_state state in

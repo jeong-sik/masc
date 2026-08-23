@@ -38,6 +38,7 @@ let valid_sections =
       ; "runtime"
       ; "internal-agents"
       ; "fleet-health"
+      ; "lanes"
       ; "transport-health"
       ; "feature-health"
       ; "journey"

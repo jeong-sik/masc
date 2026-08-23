@@ -115,6 +115,7 @@ val run_named :
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->
+  ?approval_gate:Keeper_tool_approval_gate.t ->
   ?raw_trace:Agent_core.Raw_trace.t ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->

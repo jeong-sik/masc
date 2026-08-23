@@ -71,7 +71,8 @@ let test_calls_keep_stream_order () =
     ];
   check (list string) "rows read in the order the turn opened them"
     [ "read_file"; "edit_file"; "shell_light" ]
-    (Transcript.tool_calls t |> List.map (fun c -> c.Transcript.tool_name))
+    (Transcript.tool_calls t
+     |> List.map (fun (c : Transcript.tool_call) -> c.Transcript.tool_name))
 
 let test_snapshot_replaces_accumulated_args () =
   let t = fresh () in
@@ -182,6 +183,102 @@ let test_control_bytes_never_reach_the_pane () =
     (List.exists has_escape (Transcript.tool_rows t));
   check bool "no escape survives in a status row" false
     (List.exists (fun (_, text) -> has_escape text) (Transcript.status_rows t))
+
+(* The prompt. It is the one row an operator has to act on, so what matters is
+   that it appears, that it says how to answer, and that it goes away on every
+   path -- a prompt left up asks again for a call already decided. *)
+
+let approval_rows t =
+  Transcript.status_rows t
+  |> List.filter_map (fun (kind, text) ->
+         if kind = Transcript.Attention then Some text else None)
+
+let requested ~call_id ~tool_name ~question =
+  Live.Approval_requested { call_id; tool_name; args = ""; question }
+
+let test_a_held_call_shows_its_question () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    ; requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit on a.ml?"
+    ];
+  (match Transcript.awaiting_approval t with
+   | Some awaiting ->
+       check string "the held call is named" "c1"
+         awaiting.Transcript.call_id
+   | None -> fail "expected a held call");
+  match approval_rows t with
+  | [ row ] ->
+      check bool "the question is on screen" true
+        (contains ~needle:"Run Edit on a.ml?" row);
+      (* Without the keys the prompt is a statement, not a question. *)
+      check bool "and so is how to answer it" true
+        (contains ~needle:"[y]" row && contains ~needle:"[n]" row)
+  | rows -> failf "expected one prompt row, got %d" (List.length rows)
+
+let test_a_held_turn_does_not_say_it_is_working () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ];
+  match Transcript.status_rows t with
+  | (Transcript.Progress, text) :: _ ->
+      (* "working" would read as a slow tool rather than a question waiting on
+         screen for someone. *)
+      check bool "it says it is waiting on a person" true
+        (contains ~needle:"waiting for your answer" text)
+  | rows -> failf "expected a progress row, got %d rows" (List.length rows)
+
+let test_an_answer_clears_the_prompt () =
+  let t = fresh () in
+  feed t
+    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { call_id = "c1"; outcome = "approve" }
+    ];
+  check bool "nothing is held any more" true
+    (Option.is_none (Transcript.awaiting_approval t));
+  check (list string) "and no prompt is drawn" [] (approval_rows t)
+
+let test_a_timeout_clears_the_prompt_too () =
+  let t = fresh () in
+  feed t
+    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { call_id = "c1"; outcome = "timed_out" }
+    ];
+  (* The decision is over even though nobody made one. Leaving the prompt up
+     would ask again for a call that has already been denied. *)
+  check bool "the prompt is gone" true
+    (Option.is_none (Transcript.awaiting_approval t))
+
+let test_a_late_settle_for_another_call_leaves_the_prompt () =
+  let t = fresh () in
+  feed t
+    [ requested ~call_id:"c2" ~tool_name:"Write" ~question:"Run Write?"
+    ; Live.Approval_settled { call_id = "c1"; outcome = "timed_out" }
+    ];
+  match Transcript.awaiting_approval t with
+  | Some awaiting ->
+      check string "the prompt on screen is still c2's" "c2"
+        awaiting.Transcript.call_id
+  | None -> fail "a settle for a different call cleared the wrong prompt"
+
+let test_the_arguments_reach_the_call_row () =
+  let t = fresh () in
+  feed t
+    [ Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    ; Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Edit"
+        ; args = "{\"file_path\":\"lib/a.ml\"}"
+        ; question = "Run Edit on lib/a.ml?"
+        }
+    ];
+  (* A reader deciding whether to allow it needs to see what it would touch,
+     and the call's own row is where the pane already shows that. *)
+  check bool "the row names the file" true
+    (List.exists (contains ~needle:"lib/a.ml") (Transcript.tool_rows t))
 
 let kind_to_string : Transcript.status_kind -> string = function
   | Transcript.Progress -> "progress"
@@ -298,6 +395,20 @@ let () =
     ; ( "terminal safety"
       , [ test_case "control bytes never reach the pane" `Quick
             test_control_bytes_never_reach_the_pane
+        ] )
+    ; ( "held calls"
+      , [ test_case "a held call shows its question" `Quick
+            test_a_held_call_shows_its_question
+        ; test_case "a held turn does not say it is working" `Quick
+            test_a_held_turn_does_not_say_it_is_working
+        ; test_case "an answer clears the prompt" `Quick
+            test_an_answer_clears_the_prompt
+        ; test_case "a timeout clears the prompt too" `Quick
+            test_a_timeout_clears_the_prompt_too
+        ; test_case "a settle for another call leaves the prompt" `Quick
+            test_a_late_settle_for_another_call_leaves_the_prompt
+        ; test_case "the arguments reach the call row" `Quick
+            test_the_arguments_reach_the_call_row
         ] )
     ; ( "status rows"
       , [ test_case "rows grow only with what they report" `Quick

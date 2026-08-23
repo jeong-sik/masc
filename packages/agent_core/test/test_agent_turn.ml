@@ -24,7 +24,7 @@ let context_messages = function
 
 let prepared_turn = function
   | Ok prep -> prep
-  | Error detail -> Alcotest.fail detail
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
 ;;
 
 (* ── prepare_turn tests ────────────────────────────────────── *)

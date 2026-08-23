@@ -3657,7 +3657,21 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
               (Shutdown_types.Operation_id.to_string operation_id))
            detail
        | Ok () -> fail "retired Keeper identity reopened durable intake");
-      let replacement = make_meta meta.name in
+      (* A replacement incarnation is a new trace, which is what the
+         retirement fence compares. *)
+      let replacement =
+        Keeper_meta_contract.map_runtime
+          (fun runtime ->
+            { runtime with
+              trace_id =
+                (match
+                   Keeper_id.Trace_id.of_string ("trace-integ-replacement-" ^ meta.name)
+                 with
+                 | Ok trace_id -> trace_id
+                 | Error detail -> fail detail)
+            })
+          (make_meta meta.name)
+      in
       (match Keeper_meta_store.replace_snapshot config replacement with
        | Ok () -> ()
        | Error detail -> fail detail);

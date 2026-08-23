@@ -588,8 +588,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "runtime_contract agent"
       (Some "keeper-k-agent")
       (Safe_ops.json_string_opt "agent_name" runtime_contract);
-    Alcotest.(check int) "runtime_contract generation" 3
-      (Safe_ops.json_int ~default:0 "generation" runtime_contract);
     Alcotest.(check (list string)) "runtime_contract allowed_paths"
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(

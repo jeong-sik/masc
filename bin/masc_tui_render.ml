@@ -474,49 +474,50 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
     ^ fit_width (Terminal_text.single_line task.title) (cols - 6)
     ^ Ansi.reset);
   (* Each status carries its own timestamps and actors; one exhaustive match
-     keeps the row and the status from disagreeing about who did what. *)
-  (let status_line, note_lines =
-     match task.task_status with
-     | Masc_domain.Todo ->
-         ("todo — unclaimed", [])
-     | Masc_domain.Claimed { assignee; claimed_at } ->
-         ( Printf.sprintf "claimed by %s at %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line claimed_at)
-         , [] )
-     | Masc_domain.InProgress { assignee; started_at } ->
-         ( Printf.sprintf "in progress by %s since %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line started_at)
-         , [] )
-     | Masc_domain.AwaitingVerification
-         { assignee; submitted_at; verification_id; _ } ->
-         ( Printf.sprintf "awaiting verification by %s, submitted %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line submitted_at)
-         , [Printf.sprintf "verification %s"
-              (Terminal_text.single_line verification_id)] )
-     | Masc_domain.Done { assignee; completed_at; notes } ->
-         ( Printf.sprintf "done by %s at %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line completed_at)
-         , match notes with None -> [] | Some note -> [note] )
-     | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
-         ( Printf.sprintf "cancelled by %s at %s"
-             (Terminal_text.single_line cancelled_by)
-             (Terminal_text.single_line cancelled_at)
-         , match reason with None -> [] | Some r -> [r] )
-   in
-   box_line buf cols
-     (Ansi.dim ^ "  status   " ^ Ansi.reset
-     ^ fit_width status_line (cols - 16));
-   List.iter
-     (fun note ->
-        box_line buf cols
-          (Ansi.dim ^ "           " ^ fit_width
-             (Terminal_text.single_line note) (cols - 16)
-          ^ Ansi.reset))
-     note_lines);
+     keeps the row and the status from disagreeing about who did what. The
+     note lines stay counted so the body budget below shrinks with them --
+     a verification id must not push the helper row off the screen. *)
+  let status_line, note_lines =
+    match task.task_status with
+    | Masc_domain.Todo -> ("todo — unclaimed", [])
+    | Masc_domain.Claimed { assignee; claimed_at } ->
+        ( Printf.sprintf "claimed by %s at %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line claimed_at)
+        , [] )
+    | Masc_domain.InProgress { assignee; started_at } ->
+        ( Printf.sprintf "in progress by %s since %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line started_at)
+        , [] )
+    | Masc_domain.AwaitingVerification
+        { assignee; submitted_at; verification_id; _ } ->
+        ( Printf.sprintf "awaiting verification by %s, submitted %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line submitted_at)
+        , [Printf.sprintf "verification %s"
+             (Terminal_text.single_line verification_id)] )
+    | Masc_domain.Done { assignee; completed_at; notes } ->
+        ( Printf.sprintf "done by %s at %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line completed_at)
+        , match notes with None -> [] | Some note -> [note] )
+    | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
+        ( Printf.sprintf "cancelled by %s at %s"
+            (Terminal_text.single_line cancelled_by)
+            (Terminal_text.single_line cancelled_at)
+        , match reason with None -> [] | Some r -> [r] )
+  in
+  box_line buf cols
+    (Ansi.dim ^ "  status   " ^ Ansi.reset
+    ^ fit_width status_line (cols - 16));
+  List.iter
+    (fun note ->
+       box_line buf cols
+         (Ansi.dim ^ "           " ^ fit_width
+            (Terminal_text.single_line note) (cols - 16)
+         ^ Ansi.reset))
+    note_lines;
   box_line buf cols
     (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
        (Terminal_text.single_line task.created_at)
@@ -568,11 +569,13 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   in
   let total_lines = List.length body_lines in
   (* Chrome above and below the scrolling body: top border, header, divider,
-     the title block, the bottom border and the helper row. Clamped through the
-     same helper the keeper log pane uses. Ten, not nine: at nine the frame came
-     out one row taller than its budget, which cost the surface the composer
-     row rather than a body row. *)
-  let content_height = max 1 (rows - 10) in
+     the title block, the bottom border, the helper row and the composer row.
+     Clamped through the same helper the keeper log pane uses. Ten, not nine:
+     at nine the frame came out one row taller than its budget, which cost the
+     surface the composer row rather than a body row. On top of the ten, the
+     status note lines vary by state -- a verification id or cancellation
+     reason must shrink the body, not push rows off the bottom. *)
+  let content_height = max 1 (rows - 10 - List.length note_lines) in
   state.task_detail_scroll <-
     min state.task_detail_scroll
       (Metrics_tail.maximum_scroll ~entry_count:total_lines

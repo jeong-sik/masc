@@ -82,8 +82,14 @@ let unreadable t =
    and the result lands after that, so the three states are distinguishable
    and worth distinguishing: a row stuck at the middle marker is a tool that
    is running, which is exactly what an operator is waiting to know. *)
+let subject_of ~tool_name ~args =
+  if String.equal (String.trim args) "" then None
+  else Masc.Keeper_chat_tool_trail.tool_subject ~name:tool_name ~args
+
+let finished_marker = "✓"
+
 let marker_of call =
-  if call.result_ready then "✓"
+  if call.result_ready then finished_marker
   else if call.ended then "▶"
   else "·"
 
@@ -91,24 +97,35 @@ let pad_to width text =
   let length = String.length text in
   if length >= width then text else text ^ String.make (width - length) ' '
 
-let tool_rows t =
-  let calls = tool_calls t in
+(* One formatter for rows drawn live and rows read back from the transcript.
+   The names are padded to a common column so a block of calls lines up, which
+   is only meaningful within one block -- hence the width is computed per
+   call. *)
+let render_rows rows =
   let name_width =
     List.fold_left
-      (fun widest call -> max widest (String.length call.tool_name))
-      0 calls
+      (fun widest (_, tool_name, _) -> max widest (String.length tool_name))
+      0 rows
   in
   List.map
-    (fun call ->
-      match call.subject with
-      | None ->
-          safe_line (Printf.sprintf "%s %s" (marker_of call) call.tool_name)
+    (fun (marker, tool_name, args) ->
+      match subject_of ~tool_name ~args with
+      | None -> safe_line (Printf.sprintf "%s %s" marker tool_name)
       | Some subject ->
           safe_line
-            (Printf.sprintf "%s %s %s" (marker_of call)
-               (pad_to name_width call.tool_name)
+            (Printf.sprintf "%s %s %s" marker (pad_to name_width tool_name)
                subject))
-    calls
+    rows
+
+let tool_rows t =
+  tool_calls t
+  |> List.map (fun call -> (marker_of call, call.tool_name, call.args))
+  |> render_rows
+
+let completed_tool_rows pairs =
+  pairs
+  |> List.map (fun (tool_name, args) -> (finished_marker, tool_name, args))
+  |> render_rows
 
 type status_kind =
   | Progress
@@ -166,10 +183,6 @@ let status_rows t =
   ]
   |> List.filter_map (fun row -> row)
   |> List.map (fun (kind, text) -> (kind, safe_line text))
-
-let subject_of ~tool_name ~args =
-  if String.equal (String.trim args) "" then None
-  else Masc.Keeper_chat_tool_trail.tool_subject ~name:tool_name ~args
 
 (* Rewrite the one call [call_id] names, leaving the rest as they are. A
    fragment for an id that never opened is dropped rather than opening a

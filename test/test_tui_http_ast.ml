@@ -79,6 +79,15 @@ let test_keeper_chat_uses_current_async_contract () =
        ~binding_name:"apply_keeper_chat_result"
        ~callee:"Keeper_chat.same_request_identity"
      >= 1);
+  (* The pane draws the durable transcript merged with this session's rows.
+     Reading state.msg_history directly is what it did when the scrollback was
+     session-only, and going back to that would silently drop the saved
+     conversation while everything still compiled. *)
+  check bool "the chat pane draws the merged transcript" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_keeper_message"
+       ~callee:"chat_rows_for"
+     >= 1);
   check int "same-ID reconnect never mints a fresh request" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"retry_keeper_message"

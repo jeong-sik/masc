@@ -155,6 +155,27 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
+(** Fetch a keeper's durable chat transcript.
+
+    The pane's scrollback used to be session-local while the server kept the
+    transcript all along. *)
+let fetch_keeper_chat_history ~(host : string) ~(port : int)
+    ~(keeper_name : string) :
+    (Masc_tui_keeper_chat_history.decoded, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/chat/history"
+      (percent_encode_path_segment keeper_name)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "chat history returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc_tui_keeper_chat_history.rows_of_json json
+      | exception Yojson.Json_error detail ->
+          Error ("chat history was not JSON: " ^ detail))
+
 (** What the server did with a request to interrupt a keeper's current turn.
 
     [Signalled] reports that the signal reached the turn switch, and nothing

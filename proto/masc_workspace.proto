@@ -46,8 +46,11 @@ message HeartbeatAck {
   int64 timestamp_ms = 1;
   int32 active_agent_count = 2;
   int32 pending_task_count = 3;
-  // Exact legacy wire codec: pause | resume | wakeup | claim:<task_id>.
-  // Application code decodes this field to a closed Keeper_directive type.
+  // Wire codec: pause | wakeup | claim:<task_id>. These are exactly the
+  // constructors of the closed Keeper_directive type this field decodes to;
+  // anything else is a decode error. ("resume" was listed here and has never
+  // been one of them — a client sending it got a decode failure, not the
+  // behaviour the comment promised.)
   repeated string directives = 4;
 }
 

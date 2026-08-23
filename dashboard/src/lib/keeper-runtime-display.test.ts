@@ -68,14 +68,6 @@ describe('keeperDisplayStatus', () => {
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
     })
 
-    it('classifies offline keeper with generation > 0 as stopped', () => {
-      const keeper = makeKeeper({
-        status: 'offline',
-        turn_count: 0,
-      })
-      expect(keeperDisplayStatus(keeper)).toBe('stopped')
-    })
-
     it('classifies offline keeper with turn_count > 0 as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',

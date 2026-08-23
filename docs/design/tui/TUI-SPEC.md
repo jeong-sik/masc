@@ -81,7 +81,7 @@ type surface =
 
 `bin/masc_tui_types.ml` 의 `type surface` 가 위 모양 그대로 구현돼 있다. 옛 `view_mode` 의
 `Keeper_list | Keeper_detail | Keeper_logs | Keeper_message` 는 keepers surface 안쪽 상태로
-들어갔고, `Dashboard` 는 어느 surface 로도 남지 않았다 (렌더러만 남아 있는 상태는 #29563).
+들어갔고, `Dashboard` 는 surface 로도 렌더러로도 남지 않았다.
 
 ### 2.3 데이터 로더 전략
 

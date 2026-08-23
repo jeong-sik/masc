@@ -124,7 +124,12 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Exact current count. Adding an unwired suite is a regression.
-UNWIRED_BASELINE=509
+# 509 -> 159: wired every declared-but-unrun suite that actually passes.
+# Each of the 350 was built and run before being listed, so none of them
+# arrived red. The 159 left over failed that check -- some only under the
+# local bash 3.2 / relative-path conditions the suite assumes, some for real
+# -- and each needs its own look before it can be wired.
+UNWIRED_BASELINE=159
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

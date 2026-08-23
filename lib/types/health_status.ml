@@ -19,7 +19,12 @@ type t =
 let of_string_opt raw =
   match String.lowercase_ascii (String.trim raw) with
   | "ok" | "good" | "healthy" -> Some Ok
-  | "warming" -> Some Warming
+  (* [initializing] is what the dashboard core and the operator digest emit for
+     a workspace that has not finished starting. It was absent here, so it fell
+     to [Unknown], which ranks 2 — the same rung as [Degraded] and [Stale] — and
+     [is_health_at_risk] (rank >= 2) reported a booting workspace as at risk in
+     the briefing. It is the same state [Warming] already names (#27560). *)
+  | "warming" | "initializing" -> Some Warming
   | "snapshot_not_ready" -> Some Snapshot_not_ready
   | "degraded" | "interrupted" -> Some Degraded
   | "stale" -> Some Stale

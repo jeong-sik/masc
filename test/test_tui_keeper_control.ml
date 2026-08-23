@@ -482,6 +482,45 @@ let test_roster_decode_rejects_an_unknown_status () =
          in
          contains "quarantined")
 
+(* A 401 means two different things and only one of them is fixed by supplying
+   a token. The line used to give the "set MASC_TOKEN" advice for both, which
+   is wrong advice for the operator who already has a credential the server
+   rejected. *)
+let test_unauthorized_tells_apart_missing_from_rejected () =
+  let missing =
+    Masc_tui_keeper_control.roster_failure_message ~credential_sent:false
+      Masc_tui_keeper_control.Roster_unauthorized
+  in
+  let rejected =
+    Masc_tui_keeper_control.roster_failure_message ~credential_sent:true
+      Masc_tui_keeper_control.Roster_unauthorized
+  in
+  Alcotest.(check bool) "no credential says how to get one" true
+    (Astring.String.is_infix ~affix:"masc-login" missing
+     && Astring.String.is_infix ~affix:"MASC_TOKEN" missing);
+  Alcotest.(check bool) "a rejected credential says it was rejected" true
+    (Astring.String.is_infix ~affix:"rejected" rejected);
+  Alcotest.(check bool)
+    "and does not tell an operator who has one to go get one" false
+    (Astring.String.is_infix ~affix:"need an operator token" rejected);
+  Alcotest.(check bool) "the two lines differ" true
+    (not (String.equal missing rejected))
+;;
+
+(* The other failures do not depend on whether a credential was sent. *)
+let test_other_failures_are_unaffected_by_the_credential () =
+  let both f =
+    ( Masc_tui_keeper_control.roster_failure_message ~credential_sent:false f
+    , Masc_tui_keeper_control.roster_failure_message ~credential_sent:true f )
+  in
+  let a, b = both (Masc_tui_keeper_control.Roster_unreachable "connection refused") in
+  Alcotest.(check string) "unreachable reads the same" a b;
+  Alcotest.(check bool) "and carries the detail" true
+    (Astring.String.is_infix ~affix:"connection refused" a);
+  let a, b = both (Masc_tui_keeper_control.Roster_malformed "bad json") in
+  Alcotest.(check string) "malformed reads the same" a b
+;;
+
 let () =
   Alcotest.run "tui-keeper-control"
     [ ( "reading"
@@ -557,5 +596,9 @@ let () =
             test_roster_decode_reads_rows
         ; Alcotest.test_case "unknown status is rejected" `Quick
             test_roster_decode_rejects_an_unknown_status
+        ; Alcotest.test_case "401 tells missing apart from rejected" `Quick
+            test_unauthorized_tells_apart_missing_from_rejected
+        ; Alcotest.test_case "other failures ignore the credential" `Quick
+            test_other_failures_are_unaffected_by_the_credential
         ] )
     ]

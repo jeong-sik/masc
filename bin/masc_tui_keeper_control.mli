@@ -60,9 +60,14 @@ type roster_failure =
   | Roster_unreachable of string
   | Roster_malformed of string
 
-val roster_failure_message : roster_failure -> string
+val roster_failure_message : credential_sent:bool -> roster_failure -> string
 (** One terminal line naming the failure and, where there is one, the action
-    that clears it. *)
+    that clears it.
+
+    [credential_sent] is whether the request carried a bearer token at all. A
+    refusal with one is a rejected credential and a refusal without one is a
+    missing credential; only the second is fixed by providing a token, and the
+    line used to give that advice for both. *)
 
 val roster_failure_of_status : status:int -> body:string -> roster_failure
 (** Classify a non-2xx roster read. Decided on the status code, so a server

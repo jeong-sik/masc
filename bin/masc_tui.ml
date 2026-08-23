@@ -197,6 +197,24 @@ let parse_args () =
       | None -> Filename.basename base
   in
 
+  (* [masc-login] already wrote this process's bearer token to
+     [<base>/.masc/auth/masc-tui.token]. Reading it is the difference between a
+     working keeper pane and "live keeper status and lifecycle actions need an
+     operator token — set MASC_TOKEN and restart masc-tui" on a machine where
+     the credential was provisioned. A missing or unreadable file stays silent:
+     that is the un-provisioned case the message above is for. *)
+  let stored_token =
+    let path =
+      Auth_login.token_file_path ~base_path:base ~agent_name:"masc-tui"
+    in
+    try
+      if Sys.file_exists path then
+        Some (In_channel.with_open_text path In_channel.input_all)
+      else None
+    with Sys_error _ -> None
+  in
+  Masc_tui_http.set_operator_token stored_token;
+
   (base, r, !port, !refresh)
 
 let save_message_draft state =
@@ -1648,7 +1666,9 @@ let apply_keeper_roster_load state = function
       remember_surface_error state ~surface:"keeper roster"
         ~current_error:state.keeper_roster_error
         ~set_error:(fun value -> state.keeper_roster_error <- value)
-        (Keeper_control.roster_failure_message failure)
+        (Keeper_control.roster_failure_message
+           ~credential_sent:(Masc_tui_http.has_operator_token ())
+           failure)
 
 let apply_planning_load state = function
   | Ok planning ->

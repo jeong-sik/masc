@@ -56,9 +56,17 @@ type roster_failure =
   | Roster_unreachable of string
   | Roster_malformed of string
 
-let roster_failure_message = function
+(* [credential_sent] separates two situations the old single line ran
+   together. With no credential the operator has to provision one; with a
+   credential the server rejected, telling them to set one is wrong advice —
+   they have one and it does not work. *)
+let roster_failure_message ~credential_sent = function
+  | Roster_unauthorized when credential_sent ->
+      "live keeper status was refused: the stored operator credential was \
+       rejected — re-run masc-login and restart masc-tui"
   | Roster_unauthorized ->
-      "live keeper status and lifecycle actions need an operator token — export MASC_TOKEN and restart masc-tui"
+      "live keeper status and lifecycle actions need an operator token — run \
+       masc-login, or export MASC_TOKEN, and restart masc-tui"
   | Roster_unreachable detail -> "live keeper status unavailable: " ^ detail
   | Roster_malformed detail -> "live keeper status unreadable: " ^ detail
 

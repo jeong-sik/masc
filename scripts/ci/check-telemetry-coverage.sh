@@ -51,9 +51,32 @@ file_has_telemetry_reference() {
   rg -q 'Metrics_store_eio|Otel(_|\.)|Log\.[A-Za-z_]+|telemetry|metric_' "$path"
 }
 
+# The name an OCaml [let] or [and] binds on this line, empty when it binds none.
+bound_name() {
+  rg -o "^[[:space:]]*(let|and)[[:space:]]+(rec[[:space:]]+)?([A-Za-z_][A-Za-z0-9_']*)" \
+    -r '$3' <<< "$1"
+}
+
+# Reads the bound name rather than the whole line. The previous test was
+# 'let.*dispatch', which matched every call site of a module whose name carries
+# the word: `let events = Board_dispatch.get_karma_ledger ...` binds [events]
+# and defines no handler, yet it was reported as one.
 is_action_handler_line() {
-  local text="$1"
-  rg -q 'let.*handle_|let.*spawn|let.*dispatch' <<< "$text"
+  local name
+  name="$(bound_name "$1")"
+  [ -n "$name" ] || return 1
+  rg -q 'handle_|spawn|dispatch' <<< "$name"
+}
+
+# True when [name] is not defined in the file as it stood at [ref]. The scan
+# reads a --unified=0 diff, where a re-indented line and a line that gained a
+# parameter both arrive as additions, so "the line is new" does not mean "the
+# handler is new". A file absent at [ref] is new in full.
+handler_is_new() {
+  local ref="$1" path="$2" name="$3"
+  local before
+  before="$(git show "${ref}:${path}" 2>/dev/null)" || return 0
+  ! rg -q "^[[:space:]]*(let|and)[[:space:]]+(rec[[:space:]]+)?${name}([[:space:]]|\\(|$)" <<< "$before"
 }
 
 has_tel_ok_comment() {
@@ -72,10 +95,12 @@ scan_new_action_handlers_without_telemetry() {
   local new_line_no=0
   local raw=""
   local source_label=""
+  local before_ref=""
   local text=""
 
   scan_diff_stream() {
     source_label="$1"
+    before_ref="$2"
     current_path=""
     new_line_no=0
     while IFS= read -r raw; do
@@ -99,6 +124,8 @@ scan_new_action_handlers_without_telemetry() {
           if [[ "$raw" != "+++"* && ( "$current_path" == lib/*.ml || "$current_path" == bin/*.ml ) && "$new_line_no" -gt 0 ]]; then
             text="${raw:1}"
             if is_action_handler_line "$text" \
+               && handler_is_new "$before_ref" "$current_path" \
+                    "$(bound_name "$text")" \
                && ! file_has_telemetry_reference "$current_path" \
                && ! has_tel_ok_comment "$current_path" "$new_line_no"; then
               failures+=("${source_label}: ${current_path}:${new_line_no}: ${text}")
@@ -117,11 +144,17 @@ scan_new_action_handlers_without_telemetry() {
     done
   }
 
-  scan_diff_stream "${base_ref}...${head_ref}" \
+  # The pre-image of a three-dot diff is the merge base, not the base tip: a
+  # handler main gained after the branch point is absent from that image and
+  # must still read as new here.
+  local range_before
+  range_before="$(git merge-base "${base_ref}" "${head_ref}" 2>/dev/null || echo "${base_ref}")"
+
+  scan_diff_stream "${base_ref}...${head_ref}" "${range_before}" \
     < <(git diff --unified=0 "${base_ref}...${head_ref}" -- lib/ bin/ || true)
-  scan_diff_stream "staged" \
+  scan_diff_stream "staged" "HEAD" \
     < <(git diff --cached --unified=0 -- lib/ bin/ || true)
-  scan_diff_stream "worktree" \
+  scan_diff_stream "worktree" "HEAD" \
     < <(git diff --unified=0 -- lib/ bin/ || true)
 
   if [ "${#failures[@]}" -gt 0 ]; then

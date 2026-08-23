@@ -322,6 +322,7 @@ normal_targets=(
   @test/runtest-test_workspace_root_state_parity
   @test/runtest-test_dashboard_keeper_name
   @test/runtest-test_dashboard_briefing
+  @test/runtest-test_broadcast_stores_raw_text
   @test/runtest-test_keeper_model_input_demotion
   @test/runtest-test_tool_type_label
   @test/runtest-test_telemetry_eio_pbt

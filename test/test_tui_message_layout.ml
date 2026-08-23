@@ -187,8 +187,11 @@ let test_input_cursor_uses_visible_terminal_cells () =
   let column terminal_cols input =
     Layout.input_cursor_column ~terminal_cols ~input
   in
-  (* The caret is measured from the prefix the pane renders ("  > "), so what
-     the operator typed and what the screen shows end at the same column. *)
+  (* Screen columns, one-based. The pane draws this line inside a box, so the
+     prefix ("  > ") starts at column 3 and the caret sits three columns right
+     of the prefix width. These used to be the prefix width alone, which is
+     where the caret went and not where the text was (#29866); the PTY suite
+     reads the real screen and expects 8 for a single "A". *)
   check int "empty input starts after the prompt" 7 (column 80 "");
   check int "prompt constant matches the pane prefix" 4
     Layout.chat_input_prompt_cells;

@@ -1045,6 +1045,16 @@ def run_terminal_scenario(
                 environment.update(
                     {
                         "MASC_BASE_PATH": base_path,
+                        # Without a reachable operator token the TUI opens
+                        # with an extra startup event and a different composer
+                        # state. Inheriting the developer's MASC_TOKEN made
+                        # that depend on whose shell ran the suite, so it
+                        # passed locally and failed on CI, where nothing
+                        # exports one. The value is never checked -- the TUI
+                        # only asks whether a token is reachable -- so a fixed
+                        # one pins the state every assertion below was written
+                        # against.
+                        "MASC_TOKEN": "tui-keyboard-test-token",
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
@@ -2106,14 +2116,14 @@ def approval_selection_identity_interaction(
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
     plain = CSI_RE.sub(b"", frame)
-    # What sits between the status bracket and the priority is the renderer's
-    # business: #29786 put a proof mark there and this assertion, which only
-    # means "this goal is the selected row", started failing as a shape
-    # mismatch.
-    selected = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]*?P1[ \t]+" + re.escape(title)
+    # The row carries a proof mark between the status bracket and the
+    # priority: " " when idle, and one of the pending/proven/refuted/
+    # unreadable glyphs otherwise (masc_tui_render.planning_proof_mark).
+    # This pattern predated the mark and matched only the idle spacing.
+    selected_row = re.compile(
+        rb">[ \t]+\[[^\]\r\n]+\][ \t]*\S?[ \t]*P1[ \t]+" + re.escape(title)
     )
-    if selected.search(plain) is None:
+    if selected_row.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")
 
 

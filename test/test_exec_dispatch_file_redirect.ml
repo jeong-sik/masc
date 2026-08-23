@@ -32,7 +32,12 @@ let bin name =
   | Error (`Unknown raw) -> Alcotest.failf "unknown exec program: %s" raw
 ;;
 
-let target p = E.Path_scope.classify ~raw:p ~cwd:temp_dir
+let target p =
+  E.Redirect_scope.In_command_namespace (E.Path_scope.classify ~raw:p ~cwd:temp_dir)
+;;
+
+let host_target p =
+  E.Redirect_scope.on_this_host (E.Path_scope.classify ~raw:p ~cwd:temp_dir) p
 
 let simple ?(redirects = []) ?sandbox executable args =
   { E.Shell_ir.bin = bin executable
@@ -106,7 +111,7 @@ let test_stdin_from_dev_null_runs () =
         ~redirects:
           [ E.Redirect_scope.File
               { fd = 0
-              ; target = E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir
+              ; target = E.Redirect_scope.In_command_namespace (E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir)
               ; mode = E.Redirect_scope.Read
               }
           ]
@@ -144,7 +149,7 @@ let test_discard_still_drops_without_touching_a_file () =
         ~redirects:
           [ E.Redirect_scope.File
               { fd = 1
-              ; target = E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir
+              ; target = E.Redirect_scope.In_command_namespace (E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir)
               ; mode = E.Redirect_scope.Write
               }
           ]
@@ -186,7 +191,9 @@ let test_relative_target_without_a_cwd_is_refused () =
         ~redirects:
           [ E.Redirect_scope.File
               { fd = 1
-              ; target = E.Path_scope.classify ~raw:"relative-out.txt" ~cwd:temp_dir
+              ; target =
+                  E.Redirect_scope.In_command_namespace
+                    (E.Path_scope.classify ~raw:"relative-out.txt" ~cwd:temp_dir)
               ; mode = E.Redirect_scope.Write
               }
           ]
@@ -296,12 +303,81 @@ let test_fd_merge_groups_by_stream_not_by_time () =
     Alcotest.(check string) "and nothing is left on stderr" "" result.stderr)
 ;;
 
+let docker_sandbox () =
+  E.Sandbox_target.docker
+    ~image:"redirect-image"
+    ~runner:(fun ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
+      Alcotest.fail "the runner must not be reached when the target is unresolved")
+    ()
+;;
+
+(* A sandboxed stage names paths as the sandbox sees them. Opening one of
+   those here would hit whatever this host happens to have at that path, so
+   an untranslated target is refused and the command does not run. *)
+let test_sandboxed_stage_refuses_an_untranslated_target () =
+  with_runtime (fun () ->
+    let s =
+      simple
+        ~sandbox:(docker_sandbox ())
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1
+              ; target = target (path "sandbox-out.txt")
+              ; mode = E.Redirect_scope.Write
+              }
+          ]
+        "printf"
+        [ "hello" ]
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "it did not report success" false (exited_zero result);
+    Alcotest.(check bool)
+      "and it says the path is the sandbox's"
+      true
+      (Astring.String.is_infix ~affix:"sandbox" result.stderr))
+;;
+
+(* Once a layer that knows the mounts has resolved it, the same stage writes
+   the file, because the path now names something on this filesystem. *)
+let test_sandboxed_stage_writes_a_resolved_target () =
+  with_runtime (fun () ->
+    let out = path "sandbox-resolved.txt" in
+    remove_if_present out;
+    let ran = ref false in
+    let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+      ran := true;
+      Unix.WEXITED 0, "from the container", ""
+    in
+    let s =
+      simple
+        ~sandbox:(E.Sandbox_target.docker ~image:"redirect-image" ~runner ())
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1; target = host_target out; mode = E.Redirect_scope.Write }
+          ]
+        "printf"
+        [ "hello" ]
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "the stage was not refused" true !ran;
+    Alcotest.(check string) "the bytes did not come back" "" result.stdout;
+    Alcotest.(check string) "they are in the file" "from the container" (read_file out))
+;;
+
 let () =
   (try Sys.mkdir temp_dir 0o700 with Sys_error _ -> ());
   Alcotest.run
     "exec dispatch file redirect"
     [ ( "dispatch"
-      , [ Alcotest.test_case "stdout_lands_on_disk" `Quick test_stdout_lands_on_disk
+      , [ Alcotest.test_case
+            "sandboxed_stage_refuses_an_untranslated_target"
+            `Quick
+            test_sandboxed_stage_refuses_an_untranslated_target
+        ; Alcotest.test_case
+            "sandboxed_stage_writes_a_resolved_target"
+            `Quick
+            test_sandboxed_stage_writes_a_resolved_target
+        ; Alcotest.test_case "stdout_lands_on_disk" `Quick test_stdout_lands_on_disk
         ; Alcotest.test_case "append_adds_to_the_file" `Quick test_append_adds_to_the_file
         ; Alcotest.test_case
             "stdin_from_dev_null_runs"

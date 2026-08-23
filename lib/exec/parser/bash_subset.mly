@@ -6,8 +6,14 @@ type stage_part =
   | Redirect of Redirect_scope.t
 
 let file_redirect fd target mode =
+  (* A parsed command writes paths as it sees them. Nothing here knows which
+     filesystem that is, so the target stays untranslated and a sandboxed
+     dispatch refuses it rather than opening whatever this host has. *)
   Redirect_scope.File
-    { fd; target = Path_scope.classify ~raw:target ~cwd:"."; mode }
+    { fd
+    ; target = Redirect_scope.In_command_namespace (Path_scope.classify ~raw:target ~cwd:".")
+    ; mode
+    }
 ;;
 %}
 

@@ -261,7 +261,9 @@ let validate_shell_ir_paths ?workdir shell_ir =
       let rec validate_redirects = function
         | [] -> Ok ()
         | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
-          let target = Masc_exec.Path_scope.raw target in
+          let target =
+            Masc_exec.Path_scope.raw (Masc_exec.Redirect_scope.target_as_written target)
+          in
           (match validate_path_value ~requires_existing_dir:false target with
            | Ok () -> validate_redirects rest
            | Error _ as err -> err)

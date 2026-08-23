@@ -88,6 +88,13 @@ type execute_input = {
 type validation_error =
   | Empty_argv
   | Empty_program
+  | Redirect_outside_the_sandbox_mount of {
+      path : string;
+      visible_root : string;
+    }
+      (** A sandboxed command's redirect target has to sit inside the mount
+          that the sandbox and this host share; outside it, the same path
+          names two different files and only one of them is reachable here. *)
   | Directory_change_is_not_a_program of { requested : string }
       (** [cd] changes the shell's own directory. Run as a program it changes
           the directory of a child that exits immediately, so the command the
@@ -132,8 +139,22 @@ val validate : execute_input -> (unit, validation_error) result
     inferred, rejected as shell syntax, or rewritten.  No side effects, no
     exceptions. *)
 
+(** Which filesystem a redirect target names. A keeper running in a container
+    writes paths as the container sees them; [Bound_mount] carries the two
+    roots that make one of those a path on this host, which holds only inside
+    the shared mount. Without it the target stays in the command's namespace
+    and a sandboxed dispatch refuses it rather than opening whatever this host
+    has at that path. *)
+type redirect_namespace =
+  | Command_filesystem
+  | Bound_mount of {
+      visible_root : string;
+      host_root : string;
+    }
+
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->
+  ?namespace:redirect_namespace ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Lower [input] into {!Masc_exec.Shell_ir.t} without structural validation.
@@ -143,6 +164,7 @@ val to_shell_ir_unvalidated :
 
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
+  ?namespace:redirect_namespace ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]

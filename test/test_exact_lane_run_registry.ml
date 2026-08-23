@@ -188,7 +188,7 @@ let test_running_shape_has_no_invented_completion () =
 ;;
 
 let test_current_storage_generation () =
-  check string "current store file" "exact-lane-runs-v4.jsonl" R.storage_filename
+  check string "current store file" "exact-lane-runs-v5.jsonl" R.storage_filename
 ;;
 
 (* The retained-run bound exists to serve the internal-agents monitor, which

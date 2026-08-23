@@ -245,7 +245,12 @@ let completion_error_to_string = function
   | Persistence_failed failure -> failure.detail
 ;;
 
-let storage_filename = "exact-lane-runs-v4.jsonl"
+(* v4 -> v5: #29598 removed [subject_id] from the registration payload and the
+   payload decoder is exact-field, so a v4 file written before that cut is
+   refused as a whole (2,000 of 4,000 live rows carried the key on
+   2026-08-23). The removed field rides on the store version, as #29553 did
+   for the event queue: this binary reads only v5 and never opens v4. *)
+let storage_filename = "exact-lane-runs-v5.jsonl"
 
 (* Re-exported from the store rather than re-derived from [Payload], so the
    bound a test reads is the bound [prune] applies. *)

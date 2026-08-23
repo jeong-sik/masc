@@ -262,6 +262,17 @@ let parse_pipeline ~path (json : Yojson.Safe.t) =
     result_errorf "%s must be array, got %s" path (json_type_name value)
 ;;
 
+(* Splits off the last element while keeping the caller's non-emptiness in the
+   arguments: the first element is a separate parameter, so there is no empty
+   case to handle. Returns the last element and everything before it. *)
+let rec split_last first rest =
+  match rest with
+  | [] -> first, []
+  | next :: more ->
+    let last, middle = split_last next more in
+    last, first :: middle
+;;
+
 let of_json (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields = assoc_fields ~path:"$" json in
@@ -310,9 +321,39 @@ let of_json (json : Yojson.Safe.t) =
     Ok { program = { head; tail = [] }; cwd; env; timeout_sec }
   | false, Some (path, value) ->
     let* stages = parse_pipeline ~path value in
+    (* Top-level redirections describe the program's own ends, which is where
+       a shell puts them: stdin feeds the first stage and stdout/stderr come
+       off the last. A stage that declared its own keeps it — the explicit
+       one wins over the program-level default. *)
+    let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
+    let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
+    let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
+    let default_to fallback = function
+      | Inherit -> fallback
+      | declared -> declared
+    in
     (match stages with
      | [] -> result_errorf "%s must contain at least one stage" path
-     | head :: tail -> Ok { program = { head; tail }; cwd; env; timeout_sec })
+     | [ only ] ->
+       let only =
+         { only with
+           stdin = default_to stdin only.stdin
+         ; stdout = default_to stdout only.stdout
+         ; stderr = default_to stderr only.stderr
+         }
+       in
+       Ok { program = { head = only; tail = [] }; cwd; env; timeout_sec }
+     | head :: second :: rest ->
+       let head = { head with stdin = default_to stdin head.stdin } in
+       let last, middle = split_last second rest in
+       let last =
+         { last with
+           stdout = default_to stdout last.stdout
+         ; stderr = default_to stderr last.stderr
+         }
+       in
+       Ok
+         { program = { head; tail = middle @ [ last ] }; cwd; env; timeout_sec })
   | false, None -> Error "$.argv or $.pipeline is required"
 ;;
 

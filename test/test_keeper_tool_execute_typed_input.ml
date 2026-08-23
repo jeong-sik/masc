@@ -403,8 +403,6 @@ let test_of_json_pipeline () =
        Alcotest.(check (list string)) "first argv" [ "printf"; "hello" ] first.argv;
        Alcotest.(check (list string)) "second argv" [ "wc"; "-c" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | { Execute_input.program = { tail = []; _ }; _ } ->
-    Alcotest.fail "expected a multi-stage program"
 ;;
 
 let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
@@ -436,8 +434,6 @@ let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
          [ "wc"; "wc"; "-c" ]
          second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | { Execute_input.program = { tail = []; _ }; _ } ->
-    Alcotest.fail "expected a multi-stage program"
 ;;
 
 let test_of_json_keeps_empty_pipeline_stage_for_validation () =
@@ -470,8 +466,6 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
          first.argv;
        Alcotest.(check (list string)) "second argv" [ "head"; "-20" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | { Execute_input.program = { tail = []; _ }; _ } ->
-    Alcotest.fail "expected a multi-stage program"
 ;;
 
 let test_of_json_rejects_cmd_string_only () =
@@ -524,25 +518,60 @@ let test_of_json_rejects_exec_and_pipeline_together () =
     (String_util.contains_substring_ci msg "mutually exclusive")
 ;;
 
-(* Pipeline은 redirect_target triple을 갖지 않는다(Exec variant 전용). stdin/stdout/stderr가
-   pipeline과 함께 오면 이전에는 of_json이 조용히 버렸다(silent failure). 명시적 거부를 고정. *)
-let test_of_json_rejects_pipeline_with_redirect () =
-  let msg =
-    parse_json_error
+(* The redirect used to be dropped on the way in, so of_json rejected the
+   combination rather than lose it silently. Stages own their redirections
+   now, and a top-level one describes the program's own ends the way a shell
+   does: stdin feeds the first stage, stdout and stderr come off the last. *)
+let test_of_json_stage_redirect_beats_the_top_level_one () =
+  let input =
+    parse_json_exn
       (`Assoc
           [ ( "pipeline"
             , `List
-                [ `Assoc
-                    [ "argv", `List [ `String "printf"; `String "x" ] ]
+                [ `Assoc [ "argv", `List [ `String "printf"; `String "x" ] ]
+                ; `Assoc
+                    [ "argv", `List [ `String "wc" ]
+                    ; "stdout", `Assoc [ "file", `String "/tmp/stage.log" ]
+                    ]
+                ] )
+          ; "stdout", `Assoc [ "file", `String "/tmp/program.log" ]
+          ])
+  in
+  match input.Execute_input.program with
+  | { head = _; tail = [ last ] } ->
+    (match last.stdout with
+     | Execute_input.File { path; _ } ->
+       Alcotest.(check string)
+         "an explicit stage redirect is not overwritten"
+         "/tmp/stage.log"
+         path
+     | _ -> Alcotest.fail "expected the stage's own file redirect")
+  | _ -> Alcotest.fail "expected a two-stage program"
+;;
+
+let test_of_json_pipeline_carries_the_top_level_redirect () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc [ "argv", `List [ `String "printf"; `String "x" ] ]
                 ; `Assoc [ "argv", `List [ `String "wc" ] ]
                 ] )
           ; "stdout", `Assoc [ "file", `String "/tmp/out.log" ]
           ])
   in
-  Alcotest.(check bool)
-    "error states redirects unsupported with pipeline"
-    true
-    (String_util.contains_substring_ci msg "not supported with $.pipeline")
+  match input.Execute_input.program with
+  | { head; tail = [ last ] } ->
+    Alcotest.(check bool)
+      "first stage keeps the pipe"
+      true
+      (head.stdout = Execute_input.Inherit);
+    (match last.stdout with
+     | Execute_input.File { path; append = false } ->
+       Alcotest.(check string) "last stage takes the redirect" "/tmp/out.log" path
+     | _ -> Alcotest.fail "expected the top-level redirect on the last stage")
+  | _ -> Alcotest.fail "expected a two-stage program"
 ;;
 
 let test_of_json_rejects_stages_alias () =
@@ -1092,7 +1121,7 @@ let test_redirect_discard_combinations () =
 let test_redirect_file_absolute_path_emits_ir () =
   let input =
     mk_exec_with_redirects
-      ~stdout:(Execute_input.File "/tmp/out.log")
+      ~stdout:(Execute_input.File { path = "/tmp/out.log"; append = false })
       ()
   in
   match Execute_input.to_shell_ir  input with
@@ -1112,7 +1141,7 @@ let test_redirect_file_absolute_path_emits_ir () =
 let test_redirect_file_relative_path_rejected () =
   let input =
     mk_exec_with_redirects
-      ~stderr:(Execute_input.File "relative/path.log")
+      ~stderr:(Execute_input.File { path = "relative/path.log"; append = false })
       ()
   in
   match Execute_input.validate  input with
@@ -1274,9 +1303,13 @@ let suite =
           `Quick
           test_of_json_rejects_exec_and_pipeline_together
       ; Alcotest.test_case
-          "of_json_rejects_pipeline_with_redirect"
+          "of_json_pipeline_carries_the_top_level_redirect"
           `Quick
-          test_of_json_rejects_pipeline_with_redirect
+          test_of_json_pipeline_carries_the_top_level_redirect
+      ; Alcotest.test_case
+          "of_json_stage_redirect_beats_the_top_level_one"
+          `Quick
+          test_of_json_stage_redirect_beats_the_top_level_one
       ; Alcotest.test_case
           "of_json_rejects_stages_alias"
           `Quick

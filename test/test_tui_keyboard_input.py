@@ -394,7 +394,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "trace_id": f"trace-{name}",
         "multimodal_policy": "inherit",
         "trace_history": [],
-        "generation": 1,
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started",
@@ -579,8 +578,20 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
     }
 
 
+def fleet_safety_fixture() -> HttpResponse:
+    """A fleet reading the TUI can decode.
+
+    Without it the poll fails and the TUI records a "fleet safety data
+    unreliable" event, which is correct behaviour but adds a row to scenarios
+    that are counting the event list. Only "status" is required; the rest of
+    the section defaults.
+    """
+    return (200, {"keeper_fleet_safety": {"status": "ok"}})
+
+
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
+        "/health?full=1": fleet_safety_fixture(),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
         "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
@@ -1303,7 +1314,11 @@ def keeper_selection_identity_interaction(
 
     keepers_path = Path(base_path) / ".masc" / "keepers"
     beta_metadata = keeper_metadata("beta")
-    beta_metadata["generation"] = 29453
+    # A value the keeper list draws, so pressing r below is observable. This
+    # used to ride on the keeper's generation counter, which the schema no
+    # longer has; the current task id is drawn in the list's Current Task
+    # column and serves the same purpose.
+    beta_metadata["current_task_id"] = "task-29453"
     (keepers_path / "beta.json").write_text(json.dumps(beta_metadata), encoding="utf-8")
     (keepers_path / "aardvark.json").write_text(
         json.dumps(keeper_metadata("aardvark")), encoding="utf-8"
@@ -1351,7 +1366,7 @@ def keeper_selection_identity_interaction(
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1mbeta")
     alpha_metadata = keeper_metadata("alpha")
-    alpha_metadata["generation"] = 29454
+    alpha_metadata["current_task_id"] = "task-29454"
     (keepers_path / "alpha.json").write_text(
         json.dumps(alpha_metadata), encoding="utf-8"
     )

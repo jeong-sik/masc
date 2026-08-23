@@ -276,6 +276,8 @@ type surface =
   | Verification
   | Harness
   | Repositories
+  | Connectors
+  | Tools
   | System_logs
 
 (** What a surface needs loaded to draw itself.
@@ -294,7 +296,7 @@ let surface_needs : surface -> surface_needs = function
   | Overview -> { needs_transport = true; needs_keeper_roster = false }
   | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
   | Board | Approvals | Planning | Verification | Harness | Repositories
-  | System_logs ->
+  | Connectors | Tools | System_logs ->
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
@@ -380,6 +382,12 @@ type state = {
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
+  mutable tools_inventory: Tui_decode.tool_snapshot option;
+  mutable tools_error: string option;
+  mutable tools_scroll: int;
+  mutable connectors: Tui_decode.connector_snapshot option;
+  mutable connectors_error: string option;
+  mutable connectors_scroll: int;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
@@ -537,6 +545,12 @@ let create_state ~workspace ~port ~refresh_interval = {
   goal_action_error = None;
   system_logs = None;
   system_logs_error = None;
+  tools_inventory = None;
+  tools_error = None;
+  tools_scroll = 0;
+  connectors = None;
+  connectors_error = None;
+  connectors_scroll = 0;
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;

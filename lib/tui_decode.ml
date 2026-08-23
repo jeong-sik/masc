@@ -1062,6 +1062,33 @@ let decode_system_log_entry json =
     ; sl_message
     }
 
+type tool_entry = {
+  tl_name : string;
+  tl_description : string;
+  tl_surfaces : string list;
+  tl_direct_call : bool;
+}
+
+type tool_snapshot = {
+  ts_tools : tool_entry list;
+  ts_count : int;
+}
+
+type connector = {
+  cn_id : string;
+  cn_display_name : string;
+  cn_available : bool;
+  cn_connected : bool;
+  cn_status : string;
+  cn_channel : string option;
+}
+
+type connector_snapshot = {
+  cs_connectors : connector list;
+  cs_total : int;
+  cs_active : int;
+}
+
 type repository = {
   rp_name : string;
   rp_local_path : string;
@@ -1116,6 +1143,52 @@ let decode_string_name_list json key =
        | `String value -> Ok value
        | bad -> field_type_error key "a string" bad)
     items
+
+let decode_bool_field_or json key ~default =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> Ok default
+  | bad -> field_type_error key "a bool or null" bad
+
+let decode_tool_entry json =
+  let* tl_name = required_string_field json "name" in
+  let* tl_description = required_string_field json "description" in
+  let* tl_surfaces = decode_string_name_list json "surfaces" in
+  let* tl_direct_call =
+    decode_bool_field_or json "direct_call_allowed" ~default:false
+  in
+  Ok { tl_name; tl_description; tl_surfaces; tl_direct_call }
+
+let decode_tool_snapshot json =
+  (* The tools envelope carries config and runtime resolution beside the
+     inventory; this reads the inventory and leaves the rest to the dashboard,
+     which has room to show it. *)
+  let* inventory = required_object_field json "tool_inventory" in
+  let* tools_json = required_list_field inventory "tools" in
+  let* ts_tools = decode_list "tools" decode_tool_entry tools_json in
+  let* ts_count = required_int_field inventory "count" in
+  Ok { ts_tools; ts_count }
+
+let decode_connector json =
+  let* cn_id = required_string_field json "connector_id" in
+  let* cn_display_name = required_string_field json "display_name" in
+  let* cn_status = required_string_field json "status" in
+  (* Both default to false: a connector that does not say it is available or
+     connected is not, and defaulting the other way would draw a dead
+     connector as a working one. *)
+  let* cn_available = decode_bool_field_or json "available" ~default:false in
+  let* cn_connected = decode_bool_field_or json "connected" ~default:false in
+  let* cn_channel = optional_string_field json "channel" in
+  Ok { cn_id; cn_display_name; cn_available; cn_connected; cn_status; cn_channel }
+
+let decode_connector_snapshot json =
+  let* connectors_json = required_list_field json "connectors" in
+  let* cs_connectors =
+    decode_list "connectors" decode_connector connectors_json
+  in
+  let* cs_total = required_int_field json "total" in
+  let* cs_active = required_int_field json "active_count" in
+  Ok { cs_connectors; cs_total; cs_active }
 
 let decode_repository json =
   let* rp_name = required_string_field json "name" in

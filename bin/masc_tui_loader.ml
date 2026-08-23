@@ -167,7 +167,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Board | Approvals | Planning | Verification | Harness
-    | Repositories | System_logs -> None
+    | Repositories | Connectors | Tools | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -456,6 +456,20 @@ let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
   match fetch_dashboard_logs ~host ~port ~limit with
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json -> Tui_decode.decode_system_log_snapshot json
+
+(** Load the tool inventory from /api/v1/dashboard/tools *)
+let load_tools ~(host : string) ~(port : int) :
+    (Tui_decode.tool_snapshot, string) result =
+  match fetch_dashboard_tools ~host ~port with
+  | Error err -> Error ("tool inventory load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_tool_snapshot json
+
+(** Load connector status from /api/v1/gate/connectors *)
+let load_connectors ~(host : string) ~(port : int) :
+    (Tui_decode.connector_snapshot, string) result =
+  match fetch_connectors ~host ~port with
+  | Error err -> Error ("connector load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_connector_snapshot json
 
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :

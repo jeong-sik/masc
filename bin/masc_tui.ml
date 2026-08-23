@@ -417,6 +417,8 @@ type async_msg =
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
+  | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
+  | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
@@ -576,6 +578,43 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 (* Load the verification queue. Its own fiber, like every other surface fetch:
    the pane stays responsive and a slow server costs the list rather than the
    keypress that asked for it. *)
+let launch_tools_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_tools ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Tools_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
+
+let launch_connectors_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_connectors ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Connectors_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+
 let launch_repositories_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -2536,6 +2575,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The transcript is left as it was and the session rows stay: a
              failed load must not be the reason the pane goes blank. *)
           state.msg_loaded_error <- Some detail)
+  | Tools_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.tools_inventory <- Some snapshot;
+          state.tools_error <- None
+      | Error detail -> state.tools_error <- Some detail)
+  | Connectors_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.connectors <- Some snapshot;
+          state.connectors_error <- None
+      | Error detail -> state.connectors_error <- Some detail)
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2913,6 +2964,8 @@ let main () =
             | Harness -> launch_harness_load state ~mailbox:async_messages
             | Repositories ->
                 launch_repositories_load state ~mailbox:async_messages
+            | Connectors -> launch_connectors_load state ~mailbox:async_messages
+            | Tools -> launch_tools_load state ~mailbox:async_messages
             | Overview | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -2937,7 +2990,13 @@ let main () =
             | Harness ->
                 launch_repositories_load state ~mailbox:async_messages;
                 state.view <- Repositories
-            | Repositories -> state.view <- System_logs
+            | Repositories ->
+                launch_connectors_load state ~mailbox:async_messages;
+                state.view <- Connectors
+            | Connectors ->
+                launch_tools_load state ~mailbox:async_messages;
+                state.view <- Tools
+            | Tools -> state.view <- System_logs
             | System_logs -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
@@ -2992,7 +3051,7 @@ let main () =
                 end
                 else state.task_focus <- false
             | Keepers Keeper_list | Approvals | Verification | Harness
-            | Repositories | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -3058,6 +3117,9 @@ let main () =
             | Harness -> state.harness_scroll <- state.harness_scroll + 1
             | Repositories ->
                 state.repositories_scroll <- state.repositories_scroll + 1
+            | Connectors ->
+                state.connectors_scroll <- state.connectors_scroll + 1
+            | Tools -> state.tools_scroll <- state.tools_scroll + 1
             | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
@@ -3128,6 +3190,12 @@ let main () =
             | Repositories ->
                 if state.repositories_scroll > 0 then
                   state.repositories_scroll <- state.repositories_scroll - 1
+            | Connectors ->
+                if state.connectors_scroll > 0 then
+                  state.connectors_scroll <- state.connectors_scroll - 1
+            | Tools ->
+                if state.tools_scroll > 0 then
+                  state.tools_scroll <- state.tools_scroll - 1
             | System_logs ->
                 if state.system_logs_scroll > 0 then
                   state.system_logs_scroll <- state.system_logs_scroll - 1
@@ -3182,7 +3250,7 @@ let main () =
                  | Planning_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
             | Approvals | Verification | Harness | Repositories
-            | System_logs -> ())
+            | Connectors | Tools | System_logs -> ())
        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
@@ -3191,7 +3259,7 @@ let main () =
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
             | Overview | Keepers _ | Board | Approvals | Planning
-            | Verification | Harness | Repositories | System_logs -> ())
+            | Verification | Harness | Repositories | Connectors | Tools | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -3221,7 +3289,7 @@ let main () =
                  | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | Verification | Harness
-            | Repositories | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from detail only. Opening detail is the act that names the
               target: on the roster the cursor moves by itself when a refresh
@@ -3241,7 +3309,7 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | Verification | Harness
-            | Repositories | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -3262,7 +3330,7 @@ let main () =
                 | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | Verification | Harness
-            | Repositories | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) ->
@@ -3270,7 +3338,7 @@ let main () =
                   Keeper_control.Shutdown
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | Verification | Harness
-            | Repositories | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -3289,7 +3357,7 @@ let main () =
                   Keeper_control.Wakeup
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Approvals | Planning | Verification | Harness | Repositories
-            | System_logs -> ())
+            | Connectors | Tools | System_logs -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -3331,6 +3399,13 @@ let main () =
              (* Registration and keeper assignment change from elsewhere, so
                 the list is refreshed on the tick like the surfaces above. *)
              launch_repositories_load state ~mailbox:async_messages
+         | Connectors ->
+             (* Reachability is the column that moves on its own. *)
+             launch_connectors_load state ~mailbox:async_messages
+         | Tools ->
+             (* The inventory is near-static, but a tool whose projection
+                changes is exactly what this surface is read for. *)
+             launch_tools_load state ~mailbox:async_messages
          | Overview | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;

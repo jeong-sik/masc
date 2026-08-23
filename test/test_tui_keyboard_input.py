@@ -123,6 +123,41 @@ def assert_workspace_payload_is_inert(output: bytearray) -> None:
         )
 
 
+# A needle is either literal bytes or a compiled pattern. Patterns exist so an
+# assertion can name what it means -- "this row is highlighted" -- without also
+# pinning the column widths around it. #29777 widened the Board row by one
+# column and every literal that had baked the old gutter into itself stopped
+# matching, which reads as "the selection broke" rather than "the row moved".
+def find_needle(
+    haystack: bytes | bytearray,
+    needle: bytes | re.Pattern[bytes],
+    start: int = 0,
+) -> int:
+    if isinstance(needle, bytes):
+        return haystack.find(needle, start)
+    found = needle.search(bytes(haystack), start)
+    return found.start() if found else -1
+
+
+def end_of_needle(
+    haystack: bytes | bytearray,
+    needle: bytes | re.Pattern[bytes],
+    start: int = 0,
+) -> int:
+    if isinstance(needle, bytes):
+        return haystack.find(needle, start) + len(needle)
+    found = needle.search(bytes(haystack), start)
+    assert found is not None
+    return found.end()
+
+
+def selected_row(post_id: bytes) -> re.Pattern[bytes]:
+    """The highlighted list row for `post_id`, whatever sits in the gutter."""
+    return re.compile(
+        rb"\x1b\[7m>\x1b\[0m(?:\x1b\[[0-9;]*m|[ \xc2\xb7@?])*" + re.escape(post_id)
+    )
+
+
 def read_available(master_fd: int, output: bytearray) -> None:
     while True:
         try:
@@ -148,7 +183,7 @@ def wait_for_output(
     timeout: float,
 ) -> None:
     deadline = time.monotonic() + timeout
-    while needle not in output[start:]:
+    while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
@@ -169,7 +204,7 @@ def send_and_wait(
     start = len(output)
     os.write(master_fd, data)
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
-    needle_end = output.find(needle, start) + len(needle)
+    needle_end = end_of_needle(output, needle, start)
     wait_for_output(
         process,
         master_fd,
@@ -180,6 +215,52 @@ def send_and_wait(
     )
     frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
     return bytes(output[start:frame_end])
+
+
+# How many screens the Tab cycle holds is a property of the code under test,
+# not of this test. Spelling it as a literal run of tabs made every screen
+# added to the cycle silently retarget these assertions: #29768 added five
+# screens, and the five tabs that used to close the loop stopped at the first
+# new one, so the assertion timed out on a needle that was never going to
+# arrive.
+#
+# Walking one press at a time asserts what the assertions meant -- this screen
+# is reachable by tabbing -- and survives the cycle changing length. Adjacency
+# is still asserted directly by the single-tab calls elsewhere; this helper is
+# only for the calls that were closing a loop.
+#
+# The bound is a liveness guard, not the cycle length: it has to exceed the
+# cycle so a reachable screen is always found, and it reports the screen it
+# never reached instead of leaving a bare needle timeout behind.
+TAB_CYCLE_BOUND = 24
+
+
+def tab_until(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    needle: bytes,
+) -> bytes:
+    for _ in range(TAB_CYCLE_BOUND):
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"\t")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=start,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, start) + len(FRAME_END)
+        frame = bytes(output[start:frame_end])
+        if needle in frame:
+            return frame
+    raise AssertionError(
+        f"tabbed {TAB_CYCLE_BOUND} times without reaching {needle!r}; "
+        f"last frame: {bytes(output[-1500:])!r}"
+    )
 
 
 def release_and_wait_for_frame(
@@ -193,7 +274,7 @@ def release_and_wait_for_frame(
     start = len(output)
     response.release.set()
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
-    needle_end = output.find(needle, start) + len(needle)
+    needle_end = end_of_needle(output, needle, start)
     wait_for_output(
         process,
         master_fd,
@@ -1784,7 +1865,7 @@ def assert_overview_event_rows(
     )
 
     send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
-    send_and_wait(process, master_fd, output, b"\t\t\t\t\t", b"MASC Overview")
+    tab_until(process, master_fd, output, b"MASC Overview")
 
     # The smallest viewport that still fits the whole Overview budget. It grew
     # by one row when the composer took the terminal's last line, so this is
@@ -1852,13 +1933,7 @@ def assert_overview_event_rows(
     send_and_wait(process, master_fd, output, b"j", b"Recent Events 5-6/6")
 
     send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-    send_and_wait(
-        process,
-        master_fd,
-        output,
-        b"\t\t\t\t\t",
-        b"Recent Events 5-6/6",
-    )
+    tab_until(process, master_fd, output, b"Recent Events 5-6/6")
     resize_and_wait(
         process,
         master_fd,
@@ -2196,14 +2271,14 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
         send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
         send_and_wait(process, master_fd, output, b"\t", b"MASC Board (3)")
-        selected_b = b"\x1b[7m>\x1b[0m   post-b"
-        selected_a = b"\x1b[7m>\x1b[0m   post-a"
-        selected_new = b"\x1b[7m>\x1b[0m   post-new"
+        selected_b = selected_row(b"post-b")
+        selected_a = selected_row(b"post-a")
+        selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
         send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
 
         board = send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (3)")
-        if selected_b not in board or selected_a in board:
+        if not selected_b.search(board) or selected_a.search(board):
             raise AssertionError(
                 f"Board detail return changed the selected post: {board!r}"
             )
@@ -2220,7 +2295,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
             },
         )
         board = send_and_wait(process, master_fd, output, b"r", b"post-new")
-        if selected_b not in board or selected_new in board:
+        if not selected_b.search(board) or selected_new.search(board):
             raise AssertionError(
                 f"Board list refresh changed the selected post: {board!r}"
             )
@@ -2277,7 +2352,7 @@ def board_detail_isolation_interaction(b_failure: GatedHttpResponse) -> Interact
                 master_fd,
                 output,
                 b"j",
-                b"\x1b[7m>\x1b[0m   post-b",
+                selected_row(b"post-b"),
             )
 
             loading = send_and_wait(process, master_fd, output, b"\r", b"list-body-b")
@@ -2357,7 +2432,7 @@ def board_detail_authority_interaction(
 
             late_list.release.set()
             send_and_wait(process, master_fd, output, b"\t", b"MASC Planning")
-            send_and_wait(process, master_fd, output, b"\t", b"MASC System Logs")
+            tab_until(process, master_fd, output, b"MASC System Logs")
             send_and_wait(process, master_fd, output, b"\t", b"late-list-applied")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
@@ -2409,7 +2484,7 @@ def board_missing_target_interaction(
                 master_fd,
                 output,
                 b"j",
-                b"\x1b[7m>\x1b[0m   post-b",
+                selected_row(b"post-b"),
             )
             send_and_wait(process, master_fd, output, b"\r", b"b-initial-comment")
 
@@ -2425,10 +2500,10 @@ def board_missing_target_interaction(
             if not late_b.requested.wait(timeout=3.0):
                 raise AssertionError("late Board B request did not reach its fixture")
             for expected in (
-                b"\x1b[7m>\x1b[0m   post-a",
+                selected_row(b"post-a"),
                 b"Enter:read",
             ):
-                if expected not in board:
+                if find_needle(board, expected) < 0:
                     raise AssertionError(
                         f"missing Board target did not restore list mode: {board!r}"
                     )

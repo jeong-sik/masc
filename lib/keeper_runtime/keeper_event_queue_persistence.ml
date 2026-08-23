@@ -75,7 +75,13 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v16.json"
+(* v17: #29598 dropped owner_nonce from the turn-attempt-terminal operation
+   id, so a v16 snapshot written by the previous binary carries ids this
+   binary no longer generates ("turn-attempt-terminal:1:16:..." against
+   "turn-attempt-terminal:16:..."). Replay detection matches on that id, so
+   reading the old snapshot would let one source-terminal apply twice. Fresh
+   state on a new filename, per the #29553 precedent — no compat reader. *)
+let snapshot_filename = "event-queue-v17.json"
 let transition_wal_filename = "event-queue-transitions-v6.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string

@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v16.json"
+    "event-queue-v17.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -1627,7 +1627,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v16.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v17.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in

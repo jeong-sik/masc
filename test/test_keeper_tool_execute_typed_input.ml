@@ -1275,12 +1275,62 @@ let test_truncate_and_append_reach_different_ir_modes () =
      = Masc_exec.Redirect_scope.Append)
 ;;
 
+(* The dispatcher merges captured output, so descriptor 0 is not something a
+   stream can be sent into. Accepting it produced a fabricated exit 1 with the
+   process never spawned. *)
+let test_fd_zero_is_not_a_duplication_target () =
+  let input = mk_program (mk_stage ~stderr:(Execute_input.Output_to_fd 0) [ "make" ]) [] in
+  match Execute_input.validate input with
+  | Ok () -> Alcotest.fail "descriptor 0 must not be a duplication target"
+  | Error (Execute_input.Redirect_fd_unknown { fd; target }) ->
+    Alcotest.(check int) "the reported stream" 2 fd;
+    Alcotest.(check int) "the reported target" 0 target
+  | Error err ->
+    Alcotest.failf "expected Redirect_fd_unknown, got %a" Execute_input.pp_validation_error err
+;;
+
+(* stdin has no duplication to offer for the same reason, so the key is not
+   part of its shape at all. *)
+let test_of_json_rejects_fd_on_stdin () =
+  let json =
+    `Assoc [ "argv", `List [ `String "cat" ]; "stdin", `Assoc [ "fd", `Int 1 ] ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "stdin must not accept a duplication target"
+  | Error _ -> ()
+;;
+
+(* {"discard": false} names no shape. Reading it as "not redirected" made an
+   explicit declaration indistinguishable from an absent key, and the
+   program-level redirect then overwrote it. *)
+let test_of_json_rejects_discard_false () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "make" ]; "stderr", `Assoc [ "discard", `Bool false ] ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "{discard:false} names nothing and must be rejected"
+  | Error _ -> ()
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
     cases
     @ [ Alcotest.test_case
+          "fd_zero_is_not_a_duplication_target"
+          `Quick
+          test_fd_zero_is_not_a_duplication_target
+      ; Alcotest.test_case
+          "fd_on_stdin_is_rejected"
+          `Quick
+          test_of_json_rejects_fd_on_stdin
+      ; Alcotest.test_case
+          "discard_false_is_rejected"
+          `Quick
+          test_of_json_rejects_discard_false
+      ; Alcotest.test_case
           "output_file_without_a_write_mode_is_rejected"
           `Quick
           test_of_json_rejects_an_output_file_without_a_write_mode

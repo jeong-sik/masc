@@ -7,7 +7,6 @@ type input_source =
   | Inherit_input
   | Empty_input
   | Read_file of { path : string }
-  | Input_from_fd of int
 
 type output_sink =
   | Inherit_output
@@ -195,21 +194,19 @@ let optional_input_source ~path fields key =
   | Some props ->
     let reject () =
       result_errorf
-        "%s.%s must name exactly one of {discard:true}, {file:\"/abs/path\"} or \
-         {fd:N}"
+        "%s.%s must name exactly one of {discard:true} or \
+         {file:\"/abs/path\"}. Omit the key to leave stdin alone; \
+         {discard:false} names nothing."
         path
         key
     in
     (match
        ( List.assoc_opt "discard" props
        , List.assoc_opt "file" props
-       , List.assoc_opt "fd" props
        , List.length props )
      with
-     | Some (`Bool true), None, None, 1 -> Ok Empty_input
-     | Some (`Bool false), None, None, 1 -> Ok Inherit_input
-     | None, Some (`String path_value), None, 1 -> Ok (Read_file { path = path_value })
-     | None, None, Some (`Int target), 1 -> Ok (Input_from_fd target)
+     | Some (`Bool true), None, 1 -> Ok Empty_input
+     | None, Some (`String path_value), 1 -> Ok (Read_file { path = path_value })
      | _ -> reject ())
 ;;
 
@@ -226,7 +223,8 @@ let optional_output_sink ~path fields key =
     let reject () =
       result_errorf
         "%s.%s must name exactly one of {discard:true}, \
-         {truncate:\"/abs/path\"}, {append:\"/abs/path\"} or {fd:N}"
+         {truncate:\"/abs/path\"}, {append:\"/abs/path\"} or {fd:N}. Omit the \
+         key to leave the stream alone; {discard:false} names nothing."
         path
         key
     in
@@ -238,7 +236,6 @@ let optional_output_sink ~path fields key =
        , List.length props )
      with
      | Some (`Bool true), None, None, None, 1 -> Ok Discard_output
-     | Some (`Bool false), None, None, None, 1 -> Ok Inherit_output
      | None, Some (`String path_value), None, None, 1 ->
        Ok (Truncate_file { path = path_value })
      | None, None, Some (`String path_value), None, 1 ->
@@ -425,13 +422,14 @@ let check_exec ~argv ~cwd ~env =
     Ok ()
 ;;
 
-(* A stage owns exactly the three standard descriptors, so duplicating any
-   other number would name a descriptor the stage does not have. Naming them
-   keeps the numbers out of the call sites that attach each stream. *)
+(* Naming the descriptors keeps the numbers out of the call sites that attach
+   each stream. Only 1 and 2 can receive a duplicated stream: a merge is
+   carried out by the dispatcher on captured output, and stdin is not a
+   capture. *)
 let stdin_fd = 0
 let stdout_fd = 1
 let stderr_fd = 2
-let standard_fds = [ stdin_fd; stdout_fd; stderr_fd ]
+let duplicable_fds = [ stdout_fd; stderr_fd ]
 
 let check_path ~fd path =
   if String.length path > 0 && path.[0] = '/' then Ok ()
@@ -439,14 +437,13 @@ let check_path ~fd path =
 ;;
 
 let check_fd ~fd target =
-  if List.exists (Int.equal target) standard_fds then Ok ()
+  if List.exists (Int.equal target) duplicable_fds then Ok ()
   else Error (Redirect_fd_unknown { fd; target })
 ;;
 
 let check_input_source ~fd = function
   | Inherit_input | Empty_input -> Ok ()
   | Read_file { path } -> check_path ~fd path
-  | Input_from_fd target -> check_fd ~fd target
 ;;
 
 let check_output_sink ~fd = function
@@ -523,8 +520,6 @@ let input_entry ~classify source =
   | Inherit_input -> None
   | Empty_input -> file dev_null
   | Read_file { path } -> file path
-  | Input_from_fd src ->
-    Some (Masc_exec.Redirect_scope.Fd_to_fd { src = stdin_fd; dst = src })
 ;;
 
 let output_entry ~classify ~fd sink =

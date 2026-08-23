@@ -31,11 +31,11 @@ let fd_property =
   ( "fd"
   , `Assoc
       [ "type", `String "integer"
-      ; "enum", `List [ `Int 0; `Int 1; `Int 2 ]
+      ; "enum", `List [ `Int 1; `Int 2 ]
       ; ( "description"
         , `String
-            "Duplicate another standard descriptor of this same stage, the \
-             typed form of '2>&1'. A stage owns only 0, 1 and 2." )
+            "Send this stream into another of the stage's output descriptors, \
+             the typed form of '2>&1'." )
       ] )
 ;;
 
@@ -44,7 +44,6 @@ let input_source_properties =
   ; path_property
       ~name:"file"
       ~description:"Absolute path to read from, the typed form of '<'."
-  ; fd_property
   ]
 ;;
 

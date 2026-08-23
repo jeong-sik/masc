@@ -36,8 +36,8 @@ type input_source =
   | Inherit_input  (** default; the child keeps the parent's stdin *)
   | Empty_input  (** read nothing — [/dev/null] *)
   | Read_file of { path : string }  (** absolute path opened for reading *)
-  | Input_from_fd of int
-      (** read from another standard descriptor of the same stage *)
+      (** stdin cannot duplicate another descriptor: a merge is carried out on
+          captured output and stdin is not a capture. *)
 
 type output_sink =
   | Inherit_output  (** default; the child keeps the parent's descriptor *)

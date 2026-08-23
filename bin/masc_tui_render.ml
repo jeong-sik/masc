@@ -1344,11 +1344,7 @@ let render_keeper_message (state : state) =
 
     (* Message history *)
     let history_height = max 0 (rows - 10 - status_rows) in
-    let messages =
-      List.filter
-        (fun message -> String.equal message.me_keeper_name keeper_name)
-        state.msg_history
-    in
+    let messages = chat_rows_for state keeper_name in
     let layout_entries =
       List.map
         (fun message ->
@@ -1495,6 +1491,17 @@ let render_keeper_message (state : state) =
            (Printf.sprintf "  (processing %s…)"
               (Keeper_chat.compact_request_id request.request_id))
      | None, Some _ | None, None -> ());
+    (match state.msg_loaded_error with
+     | Some detail ->
+         box_line_styled buf cols ~style:Ansi.yellow
+           ("  saved conversation could not be loaded; showing this session \
+             only: " ^ detail)
+     | None -> ());
+    (if state.msg_loaded_dropped > 0 then
+       box_line_styled buf cols ~style:Ansi.yellow
+         (Printf.sprintf
+            "  %d saved row(s) could not be read and are not shown"
+            state.msg_loaded_dropped));
     (match state.msg_live with
      | Some live ->
          List.iter

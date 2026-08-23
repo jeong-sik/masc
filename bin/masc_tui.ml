@@ -8,6 +8,7 @@ module Board_detail = Masc_tui_board_detail
 module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_history = Masc_tui_keeper_chat_history
 module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
@@ -316,6 +317,8 @@ type async_msg =
   | Keeper_chat_stream_unavailable of Keeper_chat.request * string
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
+  | Keeper_chat_history_loaded of
+      string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
   | Keeper_chat_cleanup_done of Keeper_chat.request * (unit, string) result
@@ -330,6 +333,11 @@ let current_clock_text () =
   Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
     now.Unix.tm_sec
 
+let clock_text_of_unix at =
+  let time = Unix.localtime at in
+  Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
+    time.Unix.tm_sec
+
 let append_chat_history state request role text =
   let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   state.msg_history <-
@@ -340,6 +348,7 @@ let append_chat_history state request role text =
           me_timestamp = current_clock_text ();
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
+          me_at = Unix.gettimeofday ();
         } ]
 
 let remember_unverified state request = state.msg_unverified <- Some request
@@ -423,6 +432,68 @@ let settle_live_turn state (request : Keeper_chat.request) =
    signalled the running fiber, and a turn parked in an uncancellable section
    keeps going after that (masc #29229). The stream ending is the proof, so the
    pane keeps drawing until it does. *)
+(* Load the keeper's durable transcript. Runs on its own fiber: the pane stays
+   responsive, and a slow or unreachable server costs the scrollback rather than
+   the keypress that asked for it. *)
+let launch_keeper_history_load state ~mailbox ~keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_chat_history_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_chat_history_loaded
+           (keeper_name, Error "Eio switch is unavailable"))
+
+(* Rows this session wrote that the transcript now carries. Dropped so the same
+   turn is not drawn twice, once from each source.
+
+   Notices are kept: the server has no row for "the dispatch was blocked" or
+   "the recovery fence needs Ctrl-R". A transport failure is the one overlap --
+   the server records those too -- so one can show twice. Keeping a duplicate
+   error beats dropping one the server never saw. *)
+let forget_session_rows_the_transcript_holds state keeper_name =
+  state.msg_history <-
+    List.filter
+      (fun entry ->
+        (not (String.equal entry.me_keeper_name keeper_name))
+        ||
+        match entry.me_role with
+        | Message_status | Message_error -> true
+        | Message_user | Message_keeper | Message_tool -> false)
+      state.msg_history
+
+let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
+  let role, text =
+    match row.Keeper_chat_history.kind with
+    | Keeper_chat_history.Said_by_operator -> (Message_user, row.text)
+    | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text)
+    | Keeper_chat_history.Delivery_failed -> (Message_error, row.text)
+    | Keeper_chat_history.Tool_calls rows ->
+        (Message_tool, String.concat "\n" rows)
+  in
+  { me_role = role
+  ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+  ; me_timestamp = clock_text_of_unix row.Keeper_chat_history.at
+  ; me_keeper_name = keeper_name
+  ; (* The transcript carries no request id: these rows predate this session, or
+       came from another client. The pane shows the compacted id beside a row,
+       so an empty one is what says "not from a request this session made". *)
+    me_request_id = ""
+  ; me_at = row.Keeper_chat_history.at
+  }
+
 let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -1549,6 +1620,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           | Some _ | None -> ())
   | Keeper_chat_done (request, was_replay, result, acknowledge) ->
       settle_live_turn state request;
+      (* The server persists the user row, the reply and the tool calls before
+         it ends the stream, so by now the transcript holds this turn. Reloading
+         makes the record the thing on screen; the rows settle_live_turn just
+         committed are what stands if the load fails. *)
+      launch_keeper_history_load state ~mailbox
+        ~keeper_name:request.Keeper_chat.keeper_name;
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -1697,6 +1774,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 add_event state "error"
                   ("Keeper recovery cleanup retry failed: " ^ detail))
        | Some _ | None -> ())
+  | Keeper_chat_history_loaded (keeper_name, result) -> (
+      match result with
+      | Ok { Keeper_chat_history.rows; dropped } ->
+          state.msg_loaded <-
+            List.map (msg_entry_of_history_row keeper_name) rows;
+          state.msg_loaded_keeper <- Some keeper_name;
+          state.msg_loaded_error <- None;
+          state.msg_loaded_dropped <- dropped;
+          forget_session_rows_the_transcript_holds state keeper_name
+      | Error detail ->
+          (* The transcript is left as it was and the session rows stay: a
+             failed load must not be the reason the pane goes blank. *)
+          state.msg_loaded_error <- Some detail)
   | Keeper_chat_reconciled (request, result) ->
       if apply_keeper_chat_reconciliation state ~base_path request result then
         load_from_masc_dir state base_path
@@ -1951,7 +2041,13 @@ let main () =
                      start_board_post_refresh state ~host ~port ~post_id
                        ~mailbox:async_messages
                  | Board_list -> ())
-            | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
+            | Keepers Keeper_message ->
+                (match state.msg_target_keeper_name with
+                 | Some keeper_name ->
+                     launch_keeper_history_load state ~mailbox:async_messages
+                       ~keeper_name
+                 | None -> ())
+            | Overview | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
@@ -2182,6 +2278,8 @@ let main () =
                    && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper state keeper.k_name;
+                launch_keeper_history_load state ~mailbox:async_messages
+                  ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | System_logs -> ())

@@ -69,6 +69,14 @@ val thinking : t -> string
 val tool_calls : t -> tool_call list  (** In the order the stream opened them. *)
 val unreadable : t -> unreadable option
 
+val completed_tool_rows : (string * string) list -> string list
+(** Rows for tool calls read back from the durable transcript, given as
+    (tool name, argument text) pairs in the order they were made.
+
+    Formatted by the same function {!tool_rows} uses, so a turn watched live
+    and the same turn scrolled back after a restart read identically. They
+    always carry the finished marker: a persisted call is one that returned. *)
+
 val tool_rows : t -> string list
 (** One line per tool call, in stream order, the way the pane draws them: a
     marker for how far the call got, the tool's name, and the argument it is

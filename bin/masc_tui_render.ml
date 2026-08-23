@@ -358,9 +358,10 @@ let render_overview (state : state) =
            | Observer_off -> ""
            | Observer_opening -> "  feed: opening"
            | Observer_live { events; _ } -> Printf.sprintf "  feed: live %d" events
-           | Observer_closed { reason; events; _ } ->
-               Printf.sprintf "  feed: closed after %d (%s)" events
-                 (Terminal_text.single_line reason)
+           | Observer_closed { events; _ } ->
+               (* The reason is in Recent Events and on the Acting status
+                  row; here it would push the count off a narrow row. *)
+               Printf.sprintf "  feed: closed after %d" events
          in
          let cluster_line =
            Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"

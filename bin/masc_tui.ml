@@ -1827,12 +1827,16 @@ let apply_http_surfaces state results =
    the stream, and whether to open another is the main loop's decision. *)
 let launch_observer state ~host ~port ~mailbox =
   state.observer <- Observer_opening;
+  let session = state.mcp_session in
   let run () =
     let result =
       try
         match
-          Masc_tui_http.open_mcp_session ~host ~port
-            ~client_version:Runtime_build_version.current
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
         with
         | Error detail -> Error detail
         | Ok session_id -> (
@@ -2558,6 +2562,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       open_observer_if_due state ~host:(Env_config_core.masc_host ())
         ~port:state.port ~mailbox
   | Observer_opened session_id ->
+      state.mcp_session <- Some session_id;
       state.observer <-
         Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
       add_event state "observer" "runtime event feed open"
@@ -2594,6 +2599,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       in
       state.observer <-
         Observer_closed { reason; at = Unix.gettimeofday (); events };
+      (* A stream the server refused outright delivered nothing. The session
+         it was asked under is dropped so the next attempt opens a fresh one;
+         a stream that ran and ended keeps the session for the next. *)
+      if events = 0 then state.mcp_session <- None;
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_generation) ->
       http_refresh_inflight := false;

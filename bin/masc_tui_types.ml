@@ -507,6 +507,11 @@ type state = {
   mutable autonomy_error: string option;
   mutable autonomy_scroll: int;
   mutable observer: observer_status;
+  mutable mcp_session: string option;
+      (** The MCP session the server issued, kept across streams: the server
+          holds it after a stream closes, so reopening the feed and calling
+          tools reuse it rather than minting one per attempt. Cleared when
+          the server refuses it. *)
   mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -685,6 +690,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   autonomy_error = None;
   autonomy_scroll = 0;
   observer = Observer_off;
+  mcp_session = None;
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;

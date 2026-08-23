@@ -14,9 +14,12 @@
     {2 Opening the stream}
 
     The MCP transport registers an observer only for a session it has seen
-    [initialize]. Without the session id the route answers a JSON-RPC
-    [-32600 "unknown session"] rather than a stream. The id comes back in the
-    [Mcp-Session-Id] response header of the initialize POST, not in its body.
+    [initialize]. Without a known session id the route refuses the
+    registration with a JSON-RPC error object ([SSE registration failed:
+    unknown session ...]) rather than opening a stream. The id comes back in
+    the [Mcp-Session-Id] response header of the initialize POST, not in its
+    body, and the server keeps the session after the stream closes, so one
+    session serves every stream and tool call the TUI makes.
 
     {2 What the server sends}
 

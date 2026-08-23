@@ -591,7 +591,7 @@ let test_fleet_summary_surfaces_durable_event_queue_read_error () =
   check_member_string "durable queue read error path" path "path" read_error
 ;;
 
-let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
+let test_fleet_summary_treats_unreadable_durable_queue_as_empty () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "parse-broken-durable-queue-keeper" in
   let path = event_queue_snapshot_path ~base_path ~keeper_name in
@@ -603,38 +603,21 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
+  (* #29610 fail-open: an unreadable snapshot is an absent snapshot — the
+     queue starts empty and the WAL replays on top, so the fleet summary
+     sees an empty queue, not a read error. The loss is logged at WARN by
+     the reader; it does not degrade the fleet status. *)
   check_member_string
-    "durable queue parse error makes fleet status unknown"
-    "unknown"
+    "unreadable durable queue is treated as empty"
+    "empty"
     "status"
     fleet;
-  check_list_has_string
-    "durable queue parse error reason is explicit"
-    "durable_event_queue_read_error"
-    (fleet |> member "status_reasons");
-  check bool "durable queue parse error requires operator action" true
+  check bool "unreadable durable queue does not require operator action" false
     (fleet |> member "operator_action_required" |> to_bool);
-  check int "durable queue parse error counted" 1
+  check int "unreadable durable queue is not a read error" 0
     (fleet |> member "durable_event_queue_read_error_count" |> to_int);
-  let keeper_error =
-    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue parse error keeper name"
-    keeper_name
-    "keeper_name"
-    keeper_error;
-  check int "keeper durable queue parse error counted" 1
-    (keeper_error |> member "read_error_count" |> to_int);
-  let read_error =
-    keeper_error |> member "read_errors" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue parse error kind"
-    "parse_failed"
-    "kind"
-    read_error;
-  check_member_string "durable queue parse error path" path "path" read_error
+  check int "unreadable durable queue has no backlog" 0
+    (fleet |> member "durable_event_queue_count" |> to_int)
 ;;
 
 let test_lock_free_observation_rejects_generation_change () =
@@ -1198,9 +1181,9 @@ let () =
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_read_error
         ; test_case
-            "fleet summary surfaces durable event queue parse errors"
+            "fleet summary treats unreadable durable queue as empty"
             `Quick
-            test_fleet_summary_surfaces_durable_event_queue_parse_error
+            test_fleet_summary_treats_unreadable_durable_queue_as_empty
         ; test_case
             "lock-free observation rejects generation change"
             `Quick

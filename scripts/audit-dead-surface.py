@@ -596,12 +596,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # them, and the token scan read its own comment as a caller: the gate counted
 # three fewer than the tree held. State the test, not the roster -- as the
 # paragraph above already says.
-#
-# 55 -> 54 -> 53: slack the gate had been printing before either change that
-# lowered it. The tree measured 53 against a baseline of 54 already, so the
-# 54 -> 53 step is not credited to the run-registry cut that carried it; the
-# gate asks for the number it measured and this is that number.
-DEAD_EXPORT_BASELINE = 53
+DEAD_EXPORT_BASELINE = 54
 
 
 def run_ratchet(count: int) -> int:

@@ -21,6 +21,12 @@ let push queue ~keeper_name text =
 
 let pop = function [] -> None | head :: rest -> Some (head, rest)
 
+let take_newest queue =
+  match List.rev queue with
+  | [] -> None
+  | newest :: reversed_rest -> Some (newest, List.rev reversed_rest)
+;;
+
 let drop_for_keeper queue ~keeper_name =
   List.filter (fun (queued, _) -> not (String.equal queued keeper_name)) queue
 ;;

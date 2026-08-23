@@ -19,6 +19,13 @@ module Ansi = struct
   let magenta = "\027[35m"
   let cyan = "\027[36m"
   let white = "\027[37m"
+
+  (* SGR 39 restores the terminal's own text colour. [white] is a colour like
+     any other -- on a light background it is the background -- so a fallback
+     that means "nothing special about this value" has to say default, not
+     white. Unlike [reset] it leaves bold and dim alone, so it can sit inside
+     an emphasised run without flattening it. *)
+  let default_fg = "\027[39m"
   let gray = "\027[90m"
 
   let _bg_black = "\027[40m"
@@ -44,6 +51,17 @@ module Ansi = struct
   let box_r = "\xe2\x94\xa4"  (* right tee *)
   let _box_x = "\xe2\x94\xbc"  (* cross *)
 end
+
+(** A screen title.
+
+    Emphasis belongs to the words that name the screen, not to the whole header
+    line. Headers interpolate coloured badges, and the reset that closes a badge
+    also closes any style wrapped around the line, so styling the line bolded a
+    different amount of text on every screen -- as far as its first badge, which
+    sits in a different place each time. Eight screens wrapped the line and eight
+    drew it plain, and the four styles that came out of that were not a
+    decision. *)
+let screen_title text = Ansi.bold ^ text ^ Ansi.reset
 
 (** Terminal size changes only after SIGWINCH. Cache the process-backed probe so
     an idle TUI does not spawn [tput] twice per frame. *)
@@ -107,7 +125,7 @@ let agent_icon name =
 (** Agent color — deterministic by name hash, vendor-agnostic *)
 let agent_color name =
   let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
-  if is_keeper name then Ansi.white
+  if is_keeper name then Ansi.default_fg
   else colors.(Hashtbl.hash name mod Array.length colors)
 
 (** Status color *)
@@ -117,7 +135,7 @@ let status_color status =
   | "idle" | "online" -> Ansi.green
   | "offline" -> Ansi.gray
   | "error" -> Ansi.red
-  | _ -> Ansi.white
+  | _ -> Ansi.default_fg
 
 (** Task status icon *)
 let task_status_icon status =
@@ -143,7 +161,7 @@ let soul_color profile =
   | "delivery" -> Ansi.green
   | "balanced" -> Ansi.cyan
   | "creative" -> Ansi.yellow
-  | _ -> Ansi.white
+  | _ -> Ansi.default_fg
 
 (** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
 let ctx_color ratio =

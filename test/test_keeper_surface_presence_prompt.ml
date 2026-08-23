@@ -217,8 +217,15 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
   in
   check bool "section header states the depth" true
     (contains ~needle:"### Your Recent Actions (1 turns)" user);
+  (* A successful call states the tool and the turn, not the arguments: #29701
+     narrowed this on purpose, because a keeper asking what a call of its own
+     did is asking a question the board, task and goal sections answer. The
+     rejected row below still carries its arguments, which is the half that
+     tells the keeper what to change. *)
   check bool "the work it already did is stated" true
-    (contains ~needle:{|- [turn 27486] keeper_board_post {"title":"status"} -> ok|} user);
+    (contains ~needle:{|- [turn 27486] keeper_board_post -> ok|} user);
+  check bool "a successful call does not replay its arguments" false
+    (contains ~needle:{|keeper_board_post {"title":"status"}|} user);
   check bool "the rejected call is stated with its arguments" true
     (contains ~needle:{|keeper_broadcast {} -> REJECTED: "message": MISSING|} user);
   check bool "rows are marked as context" true

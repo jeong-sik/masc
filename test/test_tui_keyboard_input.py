@@ -34,6 +34,28 @@ FRAME_START = b"\x1b[?7l"
 FULL_REDRAW = b"\x1b[2J"
 CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
 CURSOR_RE = re.compile(rb"\x1b\[(\d+);(\d+)H\x1b\[\?25h")
+
+# Mirrors [Masc_tui_message_layout.chat_input_prompt_prefix], which the pane
+# renders and the caret is measured from. #29822 made those two share one
+# constant so they could not drift, and corrected the prefix from a hardcoded
+# 7 to the 4 cells the pane actually draws. This fixture had the pre-#29822
+# columns written out as literals in four places, so it kept asserting the
+# three-cell offset the fix removed.
+CHAT_INPUT_PROMPT_PREFIX = "  > "
+CHAT_INPUT_PROMPT_CELLS = len(CHAT_INPUT_PROMPT_PREFIX)
+
+
+def caret_column(display_cells: int) -> int:
+    """One-based caret column after [display_cells] of typed text.
+
+    [Masc_tui_message_layout.input_cursor_column] is
+    [chat_input_prompt_cells + display_width input], clamped to the spacer
+    before the right border. The clamp is not modelled here: every call site
+    below is far from the edge, and a fixture that reimplements the clamp
+    would be asserting its own arithmetic rather than the pane's.
+    """
+    return CHAT_INPUT_PROMPT_CELLS + display_cells
+
 POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 BOARD_CELL_BODY = ("한" * 20) + " " + ("한" * 20)
@@ -2097,8 +2119,12 @@ def approval_selection_identity_interaction(
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
     plain = CSI_RE.sub(b"", frame)
+    # The row is: marker, indent/branch, [phase], proof mark, P<n>, title.
+    # #29786 put the proof mark between the phase and the priority; the ANSI
+    # colour around it is already stripped above, so what is left is one cell
+    # that is a space when a goal has no verdict yet and a glyph when it does.
     selected_row = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][ \t]+P1[ \t]+" + re.escape(title)
+        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]{0,3}[ \t]+P1[ \t]+" + re.escape(title)
     )
     if selected_row.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")
@@ -2567,7 +2593,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text="A",
-            cursor_column=8,
+            cursor_column=caret_column(1),
         )
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
 
@@ -2584,7 +2610,9 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text=combining_text,
-            cursor_column=8,
+            # "e" + combining acute is two code points and one display cell;
+            # the caret landing here is what this case is for.
+            cursor_column=caret_column(1),
         )
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
 
@@ -2597,7 +2625,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text=expected_text,
-            cursor_column=13,
+            cursor_column=caret_column(6),
         )
         narrow_frame = resize_and_wait(
             process,
@@ -2614,7 +2642,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=16,
             input_text=expected_text,
-            cursor_column=13,
+            cursor_column=caret_column(6),
         )
         resize_and_wait(
             process,

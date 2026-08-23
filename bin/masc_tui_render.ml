@@ -2072,6 +2072,7 @@ let render_keeper_message (state : state) =
             | Message_status -> Message_layout.Status, "status"
             | Message_error -> Message_layout.Error, "error"
             | Message_tool -> Message_layout.Tool, "tools"
+            | Message_thinking -> Message_layout.Thinking, "thinking"
           in
           ({ style;
              timestamp = message.me_timestamp;

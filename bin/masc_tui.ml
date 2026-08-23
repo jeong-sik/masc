@@ -754,7 +754,8 @@ let forget_session_rows_the_transcript_holds state keeper_name =
         ||
         match entry.me_role with
         | Message_status | Message_error -> true
-        | Message_user _ | Message_keeper | Message_tool -> false)
+        | Message_user _ | Message_keeper | Message_tool | Message_thinking ->
+            false)
       state.msg_history
 
 let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
@@ -767,6 +768,8 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
     | Keeper_chat_history.Delivery_failed -> (Message_error, row.text)
     | Keeper_chat_history.Tool_calls rows ->
         (Message_tool, String.concat "\n" rows)
+    | Keeper_chat_history.Reasoning lines ->
+        (Message_thinking, String.concat "\n" lines)
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text

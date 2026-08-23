@@ -199,6 +199,21 @@ and navigation stay responsive while the turn runs.
   Enter:send  Esc:back  Ctrl-U:clear line
 ```
 
+The pane opens on the keeper's durable transcript. A turn the keeper ran on
+its own is drawn as what it did, not as a blank line: a `thinking` row with
+the reasoning the server kept and a count of the steps it withheld, then a
+`tools` block with one row per call - the finished glyph for a call that
+returned, `✗` for one that returned an error, `·` for one the trace never
+saw finish, each with its duration - and then whatever the turn said.
+
+```
+ [21:41:34] thinking
+   (2 reasoning steps, content withheld)
+ [21:41:34] tools
+   ✓ masc_task_history · 32ms
+   ✗ tool_execute · 1.2s
+```
+
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
 without visible text become explicit status or error rows; partial text is never

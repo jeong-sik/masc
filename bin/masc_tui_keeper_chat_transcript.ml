@@ -125,31 +125,64 @@ let pad_to width text =
 (* One formatter for rows drawn live and rows read back from the transcript.
    The names are padded to a common column so a block of calls lines up, which
    is only meaningful within one block -- hence the width is computed per
-   call. *)
+   call. A trailer, when a row has one, goes after the subject: it is the
+   part only a persisted step knows (how long the call took), and a row
+   without one draws exactly as before. *)
 let render_rows rows =
   let name_width =
     List.fold_left
-      (fun widest (_, tool_name, _) -> max widest (String.length tool_name))
+      (fun widest (_, tool_name, _, _) -> max widest (String.length tool_name))
       0 rows
   in
+  let with_trailer text = function
+    | None -> text
+    | Some trailer -> Printf.sprintf "%s \xc2\xb7 %s" text trailer
+  in
   List.map
-    (fun (marker, tool_name, args) ->
+    (fun (marker, tool_name, args, trailer) ->
       match subject_of ~tool_name ~args with
-      | None -> safe_line (Printf.sprintf "%s %s" marker tool_name)
+      | None ->
+          safe_line
+            (with_trailer (Printf.sprintf "%s %s" marker tool_name) trailer)
       | Some subject ->
           safe_line
-            (Printf.sprintf "%s %s %s" marker (pad_to name_width tool_name)
-               subject))
+            (with_trailer
+               (Printf.sprintf "%s %s %s" marker (pad_to name_width tool_name)
+                  subject)
+               trailer))
     rows
 
 let tool_rows t =
   tool_calls t
-  |> List.map (fun call -> (marker_of call, call.tool_name, call.args))
+  |> List.map (fun call -> (marker_of call, call.tool_name, call.args, None))
   |> render_rows
 
 let completed_tool_rows pairs =
   pairs
-  |> List.map (fun (tool_name, args) -> (finished_marker, tool_name, args))
+  |> List.map (fun (tool_name, args) -> (finished_marker, tool_name, args, None))
+  |> render_rows
+
+type persisted_tool_outcome =
+  | Returned
+  | Failed
+  | Never_returned
+  | Outcome_unrecorded
+
+(* The live markers say how far a call got; a persisted step says how it
+   ended. They share the finished glyph so a call that returned reads the
+   same whether it was watched or scrolled back to. A failure gets its own
+   glyph rather than the finished one: "returned" and "returned an error" are
+   different facts, and a block of twenty calls is scanned by glyph. *)
+let persisted_marker = function
+  | Returned -> finished_marker
+  | Failed -> "\xe2\x9c\x97"
+  | Never_returned -> "\xc2\xb7"
+  | Outcome_unrecorded -> "?"
+
+let persisted_tool_rows steps =
+  steps
+  |> List.map (fun (outcome, tool_name, args, duration) ->
+         (persisted_marker outcome, tool_name, args, duration))
   |> render_rows
 
 type status_kind =

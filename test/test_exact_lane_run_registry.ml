@@ -143,6 +143,117 @@ let test_missing_selected_slot_is_not_replayed () =
   remove_if_exists path
 ;;
 
+(* #29277. A hard cut leaves rows carrying a field no current decoder reads.
+   Such a row only leaves the log through compaction, and [replay] declines to
+   compact while one is present — so the store keeps it, and the retention
+   bound stops applying to that store. Live evidence on 2026-08-23: 2 000 rows
+   in [exact-lane-runs-v4.jsonl] surviving every boot, 36 MB serving zero
+   readable runs. This pins that the deployment cut is the way out. *)
+let test_hard_cut_artifact_does_not_poison_compaction_forever () =
+  let path = Filename.temp_file "exact-lane-hard-cut-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"live-run"
+    ~lane:R.Board_attention
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"live-run"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let live_lines =
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+  in
+  (* A registration written before the field was cut, same shape the live
+     store held. *)
+  let artifact =
+    match Yojson.Safe.from_string (List.nth live_lines 0) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "id"
+              then name, `String "hard-cut-run"
+              else if String.equal name "registration"
+              then (
+                match value with
+                | `Assoc registration ->
+                  name, `Assoc (("subject_id", `String "s-1") :: registration)
+                | _ -> fail "registration event must carry an object payload")
+              else name, value)
+           fields)
+    | _ -> fail "registration event must be an object"
+  in
+  Fs_compat.save_file
+    path
+    (String.concat "\n" (live_lines @ [ Yojson.Safe.to_string artifact; "" ]));
+  let replayed = R.replay path in
+  check
+    (option string)
+    "the readable run still replays"
+    (Some "succeeded")
+    (R.get replayed ~run_id:"live-run"
+     |> Option.map (fun run -> R.status_label run.R.status));
+  let after_replay : Run_registry_core.cut_report =
+    R.cut_replay_log ~execute:false path
+  in
+  check int "replay left the unreadable row on disk" 1 after_replay.malformed_lines;
+  let cut : Run_registry_core.cut_report = R.cut_replay_log ~execute:true path in
+  check bool "the cut rewrote the store" true cut.rewritten;
+  check int "the cut dropped the unreadable row" 1 cut.malformed_lines;
+  let after_cut : Run_registry_core.cut_report =
+    R.cut_replay_log ~execute:false path
+  in
+  check int "nothing unreadable is left" 0 after_cut.malformed_lines;
+  check int "the readable run survived the cut" 1 after_cut.retained_entries;
+  check
+    (option string)
+    "and still replays"
+    (Some "succeeded")
+    (R.replay path
+     |> R.get ~run_id:"live-run"
+     |> Option.map (fun run -> R.status_label run.R.status));
+  remove_if_exists path
+;;
+
+(* The unterminated-tail guard is the one the cut keeps: a partial read must
+   not become a truncating rewrite. *)
+let test_cut_refuses_a_store_with_an_unterminated_tail () =
+  let path = Filename.temp_file "exact-lane-torn-tail-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"live-run"
+    ~lane:R.Board_attention
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"live-run"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let content = Fs_compat.load_file path in
+  Fs_compat.save_file path (content ^ "{\"event\":\"reg");
+  let cut : Run_registry_core.cut_report = R.cut_replay_log ~execute:true path in
+  check bool "the cut left the store alone" false cut.rewritten;
+  check
+    string
+    "the bytes are untouched"
+    (content ^ "{\"event\":\"reg")
+    (Fs_compat.load_file path);
+  remove_if_exists path
+;;
+
 let test_blank_selected_slot_is_rejected_before_write () =
   let registry = R.create () in
   R.register_running
@@ -498,6 +609,10 @@ let () =
             test_missing_selected_slot_is_not_replayed
         ; test_case "blank selected slot is rejected before write" `Quick
             test_blank_selected_slot_is_rejected_before_write
+        ; test_case "hard-cut artifact does not poison compaction forever" `Quick
+            test_hard_cut_artifact_does_not_poison_compaction_forever
+        ; test_case "cut refuses a store with an unterminated tail" `Quick
+            test_cut_refuses_a_store_with_an_unterminated_tail
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
         ; test_case "current storage generation" `Quick test_current_storage_generation
         ; test_case "exact history is not cross-lane pruned" `Quick

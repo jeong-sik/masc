@@ -579,6 +579,74 @@ let tool_blob_maintenance_cmd =
          $ delete_previous_candidates))
 ;;
 
+(* A hard-cut field leaves rows no current decoder can read. [replay] refuses
+   to compact while such a row is on disk and the row only leaves through
+   compaction, so the store keeps it and its retention bound stops applying —
+   #29277. Cutting the store is a deployment step because it drops rows, and
+   the operator has to see how many before authorising it. *)
+let run_registry_cuts =
+  [ ( Masc.Exact_lane_run_registry.storage_filename
+    , Masc.Exact_lane_run_registry.cut_replay_log )
+  ; Fusion_run_registry.storage_filename, Fusion_run_registry.cut_replay_log
+  ; ( Masc.Verification_run_registry.storage_filename
+    , Masc.Verification_run_registry.cut_replay_log )
+  ; ( Masc.Goal_verification_run_registry.storage_filename
+    , Masc.Goal_verification_run_registry.cut_replay_log )
+  ]
+;;
+
+let cut_run_registries base_path ~execute =
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  let dropped_total =
+    List.fold_left
+      (fun dropped_total (filename, cut) ->
+         let path = Filename.concat masc_dir filename in
+         let report = cut ~execute path in
+         Printf.printf
+           "%s lines=%d unreadable=%d retained=%d rewritten=%b\n%!"
+           filename
+           report.Run_registry_core.lines_read
+           report.malformed_lines
+           report.retained_entries
+           report.rewritten;
+         dropped_total + report.malformed_lines)
+      0
+      run_registry_cuts
+  in
+  if execute
+  then Ok ()
+  else if dropped_total = 0
+  then Ok ()
+  else
+    (* Reporting a store that needs cutting is not a preflight failure; the
+       operator decides. The distinct exit code lets the deploy script tell
+       "nothing to cut" from "rows are being dropped" without parsing stdout. *)
+    errorf
+      "%d unreadable row(s) across the run registries; re-run with --execute to \
+       cut them"
+      dropped_total
+;;
+
+let execute_cut =
+  let doc = "Rewrite each store, dropping the rows no current decoder reads." in
+  Arg.(value & flag & info [ "execute" ] ~doc)
+;;
+
+let cut_run_registries_cmd =
+  let doc =
+    "report run-registry rows the current decoders refuse; --execute rewrites \
+     the stores without them"
+  in
+  Cmd.v
+    (Cmd.info "cut-run-registries" ~doc)
+    Term.(
+      ret
+        (const (fun base_path execute ->
+           cmdliner_result (cut_run_registries base_path ~execute))
+         $ base_path
+         $ execute_cut))
+;;
+
 let owner_pid =
   let doc = "Expected process ID of the current BasePath lease owner." in
   Arg.(required & opt (some int) None & info [ "owner-pid" ] ~docv:"PID" ~doc)
@@ -648,5 +716,6 @@ let () =
           ; validate_current_wal_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
+          ; cut_run_registries_cmd
           ]))
 ;;

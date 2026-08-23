@@ -50,6 +50,14 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type cut_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; retained_entries : int
+  ; rewritten : bool
+  }
+(** What a deployment-time store cut read and what it kept. *)
+
 module Make (Payload : Payload) : sig
   type status =
     | Running
@@ -90,6 +98,14 @@ module Make (Payload : Payload) : sig
 
   val list_entries : t -> entry list
   val get : t -> id:string -> entry option
+  val cut_replay_log : execute:bool -> string -> cut_report
+  (** Rewrites [path] from the rows the current decoders accept, dropping the
+      rows they refuse. A hard-cut field leaves rows that can never decode
+      again; [replay] declines to compact while any of them is on disk, so
+      without this the store keeps them and its retention bound stops
+      applying. [execute:false] measures and reports without writing. A file
+      whose last line is unterminated is never rewritten — [rewritten] is
+      [false] and the report still carries the counts. *)
 end
 
 (** Single-owner lifecycle for a process-wide registry. The first installation

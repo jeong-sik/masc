@@ -49,4 +49,9 @@ type global_install_error = Already_installed
 
 val global : unit -> t
 val install_global : t -> (unit, global_install_error) result
+val storage_filename : string
 val max_completed_retained : int
+
+val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
+(** Deployment-time store cut for {!storage_filename}. See
+    {!Run_registry_core.Make.cut_replay_log}. *)

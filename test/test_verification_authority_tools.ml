@@ -59,22 +59,6 @@ let with_surface f =
   | Ok surface -> f config surface
 ;;
 
-let with_forest producers f =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = temp_dir () in
-  Eio.Switch.run
-  @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> rm_rf dir);
-  let config = Workspace_core.default_config dir in
-  ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  List.iter (ensure_producer config) producers;
-  match VAT.create_forest ~config ~producers with
-  | Error reason -> Alcotest.failf "forest creation failed: %s" reason
-  | Ok forest -> f config forest
-;;
-
 let require_layout = function
   | Ok layout -> layout
   | Error detail -> Alcotest.failf "root layout unavailable: %s" detail
@@ -275,74 +259,6 @@ let test_workspace_producer_gets_owned_read_surface () =
          (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
 ;;
 
-let test_forest_requires_and_enforces_exact_producer () =
-  let producer_a = "producer-a" in
-  let producer_b = "producer-b" in
-  with_forest [ producer_a; producer_b ] (fun config forest ->
-    let file_name = "proof.txt" in
-    Out_channel.with_open_text
-      (Filename.concat (producer_playground config producer_a) file_name)
-      (fun channel -> output_string channel "proof from producer-a\n");
-    Out_channel.with_open_text
-      (Filename.concat (producer_playground config producer_b) file_name)
-      (fun channel -> output_string channel "proof from producer-b\n");
-    let schemas = VAT.forest_schemas forest in
-    Alcotest.(check (list string))
-      "forest surface"
-      [ "verification_read_file"; "verification_search_files"; "masc_web_fetch" ]
-      (List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas);
-    let read producer =
-      VAT.dispatch_forest
-        forest
-        ~name:"verification_read_file"
-        ~args:
-          (`Assoc
-            [ "producer", `String producer
-            ; "file_path", `String file_name
-            ])
-    in
-    (match read producer_b with
-     | Error detail -> Alcotest.failf "producer-b read failed: %s" detail
-     | Ok output ->
-       Alcotest.(check bool)
-         "the selected tree supplied the bytes"
-         true
-         (Astring.String.is_infix ~affix:"proof from producer-b" output));
-    (match read "producer-c" with
-     | Ok output -> Alcotest.failf "unadmitted producer read succeeded: %s" output
-     | Error detail ->
-       Alcotest.(check bool)
-         "refusal lists the closed set"
-         true
-         (Astring.String.is_infix ~affix:"producer-a, producer-b" detail));
-    match
-      VAT.dispatch_forest
-        forest
-        ~name:"verification_read_file"
-        ~args:(`Assoc [ "file_path", `String file_name ])
-    with
-    | Ok output -> Alcotest.failf "producer-free read succeeded: %s" output
-    | Error detail ->
-      Alcotest.(check bool)
-        "producer is mandatory"
-        true
-        (Astring.String.is_infix ~affix:"producer is required" detail))
-;;
-
-(* The prompt states the exact tools attached to the review request. *)
-(* masc task-403 (vrf-8bac5f46, 2026-08-21): the prompt told the evaluator its
-   tools were "pointed at the producer's tree". They are pointed at the
-   producer's sandbox root, which holds checkouts rather than being one, so an
-   evaluator that read that literally opened dune-project, .git, lib/,
-   README.md, Makefile, src and bin — 77 consecutive failed reads, no verdict,
-   and a producer that never learned why.
-
-   Where a checkout sits is the producer's own choice — [repos/masc] is one
-   keeper's convention written in its config, not a layout the system imposes —
-   so the checkouts are found by [Keeper_playground_checkouts], which looks for
-   a [.git] entry wherever it is. A scan that hardcoded [repos/] here would be
-   the fourth such scan, and that module exists to have removed the other
-   three. *)
 let make_checkout root relative =
   let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
   let rec mkdir_p path =
@@ -386,34 +302,6 @@ let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
         "partial discovery names its limit"
         true
         (Astring.String.is_infix ~affix:"checkout discovery is partial" detail))
-;;
-
-let test_forest_layout_reserves_each_producer () =
-  let producers = List.init 9 (fun index -> Printf.sprintf "producer-%02d" index) in
-  with_forest producers (fun config forest ->
-    List.iter
-      (fun producer_name ->
-         let root = producer_playground config producer_name in
-         for index = 0 to 19 do
-           Unix.mkdir (Filename.concat root (Printf.sprintf "entry-%02d" index)) 0o755
-         done)
-      producers;
-    let layout = VAT.forest_root_layout forest |> require_layout in
-    List.iter
-      (fun producer_name ->
-         Alcotest.(check bool)
-           (producer_name ^ " retains a reserved layout slice")
-           true
-           (List.exists
-              (Astring.String.is_infix ~affix:(producer_name ^ ":"))
-              layout))
-      producers;
-    Alcotest.(check bool)
-      "the last producer retains entries beyond the old global prefix cap"
-      true
-      (List.exists
-         (Astring.String.is_infix ~affix:"producer-08: entry-19")
-         layout))
 ;;
 
 let test_root_layout_reports_entries_and_discovered_checkouts () =
@@ -466,7 +354,6 @@ let test_prompt_states_the_root_and_not_a_repository () =
             (AR.Lookup_tools
                { schemas = VAT.schemas surface
                ; dispatch = VAT.dispatch surface
-               ; scope = AR.Producer_tree
                ; root_layout = VAT.root_layout surface |> require_layout
                })
           request
@@ -511,7 +398,6 @@ let test_prompt_states_the_available_surface () =
         (AR.Lookup_tools
            { schemas = VAT.schemas surface
            ; dispatch = VAT.dispatch surface
-           ; scope = AR.Producer_tree
            ; root_layout = VAT.root_layout surface |> require_layout
            })
     in
@@ -609,10 +495,6 @@ let () =
             `Quick test_search_refuses_a_call_without_its_required_pattern
         ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
             test_workspace_producer_gets_owned_read_surface
-        ; Alcotest.test_case
-            "forest requires and enforces exact producer"
-            `Quick
-            test_forest_requires_and_enforces_exact_producer
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick
@@ -637,10 +519,6 @@ let () =
             "root_layout fails closed when checkout discovery is partial"
             `Quick
             test_root_layout_fails_closed_when_checkout_discovery_is_partial
-        ; Alcotest.test_case
-            "forest layout reserves each producer"
-            `Quick
-            test_forest_layout_reserves_each_producer
         ; Alcotest.test_case
             "prompt states the root instead of implying a repository"
             `Quick

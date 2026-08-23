@@ -135,11 +135,6 @@ type system_log_snapshot = {
   sys_latest_seq : int;
 }
 
-(** One task waiting on a verdict, as the verification surface lists it. *)
-(** One verdict the harness recorded: which gate ran on which task, what it
-    decided, and which evaluator decided it. *)
-(** A repository the workspace tracks. *)
-(** A connector the gate can deliver through. *)
 (** A registered tool, as the inventory lists it. *)
 type tool_entry = {
   tl_name : string;
@@ -155,6 +150,7 @@ type tool_snapshot = {
   ts_count : int;
 }
 
+(** A connector the gate can deliver through. *)
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -173,6 +169,7 @@ type connector_snapshot = {
   cs_active : int;  (** How many the server counted as available. *)
 }
 
+(** A repository the workspace tracks. *)
 type repository = {
   rp_name : string;
   rp_local_path : string;
@@ -187,6 +184,8 @@ type repository_snapshot = {
   rs_total : int;
 }
 
+(** One verdict the harness recorded: which gate ran on which task, what it
+    decided, and which evaluator decided it. *)
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -205,6 +204,7 @@ type harness_snapshot = {
   hs_verdicts : harness_verdict list;  (** newest first, as the server sends *)
 }
 
+(** One task waiting on a verdict, as the verification surface lists it. *)
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;

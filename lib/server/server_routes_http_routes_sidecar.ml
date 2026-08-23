@@ -126,7 +126,6 @@ let attempt_record_json (record : attempt_record) =
   `Assoc
     [ "connector_id", `String record.connector_id
     ; "generation", `Int attempt.generation
-    ; "attempt_id", `String attempt.attempt_id
     ; "attempt_number", `Int attempt.attempt_number
     ; "last_attempt_result", `String (Attempt.result_to_string attempt.last_result)
     ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at record) )
@@ -178,7 +177,6 @@ let attempt_record_of_json_result = function
     let ( let* ) = Result.bind in
     let* connector_id = required_string_field fields "connector_id" in
     let* generation = required_int_field fields "generation" in
-    let* attempt_id = required_string_field fields "attempt_id" in
     let* attempt_number = required_int_field fields "attempt_number" in
     let* last_attempt_result = required_string_field fields "last_attempt_result" in
     let* last_result =
@@ -197,7 +195,6 @@ let attempt_record_of_json_result = function
       { connector_id
       ; attempt =
           { generation
-          ; attempt_id
           ; attempt_number
           ; last_result
           ; next_retry_unix
@@ -541,7 +538,6 @@ let attempt_fields = function
       , `String (Attempt.result_to_string attempt.attempt.last_result) )
     ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at attempt) )
     ; "operator_next_action", `String attempt.operator_next_action
-    ; "attempt_id", `String attempt.attempt.attempt_id
     ]
 ;;
 

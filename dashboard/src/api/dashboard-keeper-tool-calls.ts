@@ -48,10 +48,11 @@ export type ToolCallRuntimeContract = {
 
 // What the call targeted. The server derives this once at record time by
 // parsing the redacted input (lib/keeper/keeper_runtime_contract.ml
-// action_radius_json), so every consumer reads the same value. Note that
-// Execute rows record their cwd here (masc#29013): target_kind "path" does
-// not guarantee a file target. tool_name / success / duration_ms duplicate
-// the top-level row and are not repeated here.
+// action_radius_json), so every consumer reads the same value. target_kind is
+// "path" for a file target and "directory" for a cwd or repo_path — Execute
+// rows used to report their cwd as "path" and there was no way to tell the two
+// apart (masc#29013). tool_name / success / duration_ms duplicate the
+// top-level row and are not repeated here.
 export type ToolCallActionRadius = {
   action_key?: string
   target_kind?: string

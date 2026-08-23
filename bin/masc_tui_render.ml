@@ -139,13 +139,26 @@ let composer_cursor state ~rows ~cols =
    row an operator reaches for would move per surface. *)
 let finish_surface (state : state) ~surface_key ~rows ~cols buf =
   let body_rows = max 0 (rows - Composer.rows_for ~terminal_rows:rows) in
-  let drawn = List.length (frame_lines buf) in
-  for _ = drawn + 1 to body_rows do
-    Buffer.add_char buf '\n'
-  done;
-  Buffer.add_string buf (composer_line state ~cols ^ "\n");
+  let drawn = frame_lines buf in
+  let body =
+    if List.length drawn <= body_rows then
+      drawn @ List.init (body_rows - List.length drawn) (fun _ -> "")
+    else
+      (* A surface that came out taller than its budget loses its last rows
+         rather than the composer. The body is already scrollable and the
+         composer is a fixed contract -- the row an operator reaches for cannot
+         be the one that disappears when a surface miscounts. *)
+      List.filteri (fun index _ -> index < body_rows) drawn
+  in
+  let framed = Buffer.create (String.length (Buffer.contents buf) + 256) in
+  List.iter
+    (fun line ->
+       Buffer.add_string framed line;
+       Buffer.add_char framed '\n')
+    body;
+  Buffer.add_string framed (composer_line state ~cols ^ "\n");
   finish_frame ~surface_key ~cursor:(composer_cursor state ~rows ~cols) ~rows
-    ~cols buf
+    ~cols framed
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
@@ -440,7 +453,10 @@ let render_overview (state : state) =
     projected from. The dispatch falls back to the Overview when the row is no
     longer in the backlog, so the task argument always exists here. *)
 let render_task_detail (state : state) (task : Masc_domain.task) =
-  let (rows, cols) = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -551,9 +567,12 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
     @ list_lines "file" task.files
   in
   let total_lines = List.length body_lines in
-  (* Five chrome rows above and below: top, header, divider+title block opener,
-     bottom, helper. Clamped through the same helper the keeper log pane uses. *)
-  let content_height = max 1 (rows - 9) in
+  (* Chrome above and below the scrolling body: top border, header, divider,
+     the title block, the bottom border and the helper row. Clamped through the
+     same helper the keeper log pane uses. Ten, not nine: at nine the frame came
+     out one row taller than its budget, which cost the surface the composer
+     row rather than a body row. *)
+  let content_height = max 1 (rows - 10) in
   state.task_detail_scroll <-
     min state.task_detail_scroll
       (Metrics_tail.maximum_scroll ~entry_count:total_lines
@@ -577,8 +596,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
        Ansi.dim (Terminal_text.single_line task.id)
        state.refresh_interval Ansi.reset);
 
-  finish_frame ~surface_key:"task-detail" ~cursor:Frame_presenter.Hidden ~rows
-    ~cols buf
+  finish_surface state ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
 let render_approvals (state : state) =

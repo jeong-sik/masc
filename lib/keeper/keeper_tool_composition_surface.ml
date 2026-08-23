@@ -186,7 +186,6 @@ let observe_node_result
         (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
       ?trace_id:context.trace_id
       ?session_id:context.session_id
-      ?generation:context.generation
       ~turn:(Agent_core.Tool_contract.Invocation.turn parent_invocation)
       ?keeper_turn_id:context.keeper_turn_id
       ?task_id:context.task_id

@@ -11,7 +11,6 @@
 val run :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  generation:int ->
   turn:int ->
   agent_core_turn_count:int ->
   actual_tools:string list ->

@@ -299,7 +299,6 @@ type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
   ; proactive_rt : proactive_runtime
-  ; nonce : int
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
@@ -311,7 +310,6 @@ type agent_runtime_state =
   ; board_reactive_turn_count : int
   ; mention_reactive_turn_count : int
   ; noop_turn_count : int
-  ; last_blocker : blocker_info option
   ; last_runtime_attempt : runtime_attempt_record option
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
@@ -370,7 +368,6 @@ let mark_resumed (m : keeper_meta) : keeper_meta =
   { m with
     paused = false
   ; latched_reason = None
-  ; runtime = { m.runtime with last_blocker = None }
   }
 ;;
 

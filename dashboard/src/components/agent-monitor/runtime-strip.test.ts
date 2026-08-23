@@ -98,19 +98,6 @@ describe('AgentRuntimeStrip', () => {
     expect(fill!.classList.contains('warn')).toBe(true)
   })
 
-  it('renders generation when present', () => {
-    mockFindKeeper.mockReturnValue({
-      pipeline_stage: null,
-      context_ratio: null,
-      generation: 42,
-    })
-    mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
-    const container = document.createElement('div')
-    render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
-    expect(container.textContent).toContain('GEN')
-    expect(container.textContent).toContain('42')
-  })
-
   it('does not load runtime catalog when no runtime evidence exists', () => {
     mockFindKeeper.mockReturnValue({
       pipeline_stage: null,

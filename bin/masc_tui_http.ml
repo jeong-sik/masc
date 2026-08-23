@@ -197,3 +197,16 @@ let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/planning"
+
+(** Fetch the operator fleet reading from /health?full=1.
+
+    The operator snapshot does not carry it: [keeper_fleet_safety] is assembled
+    in lib/server from a scan the operator projection has no path to, and the
+    dependency runs server -> operator, not back. So this reads the health
+    surface the dashboard already reads for the same facts.
+
+    [full=1] is the only shape that carries the section. It is a wider payload
+    than the fleet reading alone, which is why the caller polls it on the fleet
+    view rather than on every tick. *)
+let fetch_fleet_safety ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/health?full=1"

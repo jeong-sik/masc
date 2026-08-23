@@ -415,7 +415,6 @@ let keepers_json
                          ; "status", `String status
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
-                         ; "generation", `Int meta.runtime.nonce
                          ; "turn_count", `Int meta.runtime.usage.total_turns
                          ; ( "keeper_keepalive_interval_s"
                            , `Float keeper_keepalive_interval_s )
@@ -478,10 +477,6 @@ let keepers_json
                                     String.trim meta.runtime.proactive_rt.last_preview
                                   in
                                   if value = "" then None else Some value) )
-                           ; ( "last_blocker"
-                             , match meta.runtime.last_blocker with
-                               | Some info -> Keeper_meta_contract.blocker_info_to_json info
-                               | None -> `Null )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
                            ; ( "recent_activity"

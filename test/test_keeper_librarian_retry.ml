@@ -51,7 +51,6 @@ let input () : Librarian.input =
       Ids.Turn_ref.make
         ~trace_id:"trace-selection"
         ~absolute_turn:7
-  ; generation = 7
   ; keeper_instructions = "You are the retry-test keeper."
   ; current =
       Some

@@ -85,7 +85,6 @@ let degraded_keeper_dashboard_row
          | Some keeper_id -> `String (Keeper_id.Uid.to_string keeper_id)
          | None -> `Null )
      ; ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id))
-     ; ("generation", `Int m.runtime.nonce)
      ; ("current_task_id",
         Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id))
@@ -742,7 +741,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("emoji", `String profile.emoji);
               ("koreanName", `String profile.korean_name);
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
-              ("generation", `Int m.runtime.nonce);
               ( "current_task_id",
                 Json_util.string_opt_to_json
                   (Option.map Keeper_id.Task_id.to_string m.current_task_id) );
@@ -1036,7 +1034,6 @@ let execution_trust_row_of_meta
       , `String
           (Keeper_status_runtime.keeper_surface_status ~diagnostic) )
     ; ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id))
-    ; ("generation", `Int m.runtime.nonce)
     ; ( "current_task_id"
       , Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id) )

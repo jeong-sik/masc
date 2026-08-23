@@ -83,7 +83,6 @@ type t =
   { execution_ids : Ids.Execution_id.t list
   ; keeper : string
   ; agent_name : string
-  ; generation : int
   ; turn_kind : turn_kind
   ; trace_id : string
   ; absolute_turn : int
@@ -178,7 +177,6 @@ let to_json (r : t) : Yojson.Safe.t =
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
      ; ("keeper", `String r.keeper)
      ; ("agent_name", `String r.agent_name)
-     ; ("generation", `Int r.generation)
      ; ("turn_kind", `String (turn_kind_to_string r.turn_kind))
      ; ("trace_id", `String r.trace_id)
      ; ("absolute_turn", `Int r.absolute_turn)
@@ -450,7 +448,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             [ "execution_ids"
             ; "keeper"
             ; "agent_name"
-            ; "generation"
             ; "turn_kind"
             ; "trace_id"
             ; "absolute_turn"
@@ -497,8 +494,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* keeper = as_nonempty_string "keeper" keeper_json in
       let* agent_name_json = require "agent_name" fields in
       let* agent_name = as_nonempty_string "agent_name" agent_name_json in
-      let* generation_json = require "generation" fields in
-      let* generation = as_nonnegative_int "generation" generation_json in
       let* turn_kind_json = require "turn_kind" fields in
       let* turn_kind_string = as_string "turn_kind" turn_kind_json in
       let* turn_kind = turn_kind_of_string turn_kind_string in
@@ -617,7 +612,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         { execution_ids
         ; keeper
         ; agent_name
-        ; generation
         ; turn_kind
         ; trace_id
         ; absolute_turn

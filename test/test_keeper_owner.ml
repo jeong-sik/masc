@@ -277,7 +277,6 @@ let test_reducer_rejects_invalid_compaction_numbers () =
   let command =
     Reducer.Record_compaction_commit
       { trace_id = meta.runtime.trace_id
-      ; generation = meta.runtime.nonce
       ; commit_count = 1
       ; at = Float.nan
       ; before_bytes = 0
@@ -324,10 +323,6 @@ let test_profile_update_preserves_owner_runtime_state () =
     "profile update preserves additive turns"
     current.runtime.usage.total_turns
     committed.runtime.usage.total_turns;
-  check int
-    "profile update preserves generation"
-    current.runtime.nonce
-    committed.runtime.nonce;
   check bool "profile update changes autoboot" true committed.autoboot_enabled
 ;;
 
@@ -371,7 +366,6 @@ let test_turn_delta_preserves_concurrent_compaction_observation () =
          state
          (Record_compaction_commit
             { trace_id = before.runtime.trace_id
-            ; generation = before.runtime.nonce
             ; commit_count = 1
             ; at = 99.0
             ; before_bytes = 4096
@@ -2516,7 +2510,6 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
            Keeper_lifecycle_reservation.acquire
              ~base_path
              ~keeper_name:meta.name
-             ~expected_generation:meta.runtime.nonce
              ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
          with
          | Ok token -> token
@@ -2569,7 +2562,6 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
            Keeper_lifecycle_reservation.acquire
              ~base_path
              ~keeper_name:meta.name
-             ~expected_generation:0
              ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
          with
          | Ok token -> token

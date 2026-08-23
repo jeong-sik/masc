@@ -8,7 +8,6 @@ type transfer_owner =
   { from_keeper : string
   ; to_keeper : string
   ; target_trace_id : Keeper_id.Trace_id.t
-  ; target_generation : int
   ; source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
   ; continuation_binding : continuation_binding
@@ -28,7 +27,6 @@ type operation =
 type t =
   { keeper_name : string
   ; expected_trace_id : Keeper_id.Trace_id.t
-  ; expected_generation : int
   ; operator_operation_id : string
   ; requested_at : float
   ; operation : operation

@@ -381,7 +381,6 @@ let run_keeper_cycle
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
       ~(observation : Keeper_world_observation.world_observation)
-      ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?shared_context
@@ -444,7 +443,6 @@ let run_keeper_cycle
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
     ; manifest_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; manifest_generation = Some generation
     ; manifest_keeper_turn_id = Some keeper_turn_id
     }
   in
@@ -589,7 +587,6 @@ let run_keeper_cycle
             record_pre_dispatch_terminal_observation
               ~config
               ~meta
-              ~generation
               ~runtime_id:effective_runtime_runtime_name
               ~outcome:`Error
               ~terminal_reason_code
@@ -642,8 +639,7 @@ let run_keeper_cycle
               ~runtime_id:initial_execution.runtime_id
               ~max_context:initial_execution.max_context
               ~effective_budget:initial_execution.max_context_resolution.effective_budget
-              ~temperature:initial_execution.temperature
-              ~generation;
+              ~temperature:initial_execution.temperature;
             let turn_id = keeper_turn_id in
             let (_ : Keeper_turn_attempt_observer.start_observation) =
               Keeper_turn_attempt_observer.record_turn_start
@@ -699,7 +695,7 @@ let run_keeper_cycle
                    ~masc_root
                    ~keeper_name:meta.name
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~generation:meta.runtime.nonce ()
+                   ()
                in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
@@ -856,7 +852,6 @@ let run_keeper_cycle
                            ; event_bus
                            ; event_bus_integrity_error_snapshot
                            ; tool_completed_count_snapshot
-                           ; generation
                            ; keeper_turn_id
                            ; meta
                            ; turn_ctx_cell
@@ -1261,7 +1256,6 @@ let run_keeper_cycle
     Keeper_unified_turn_phase_gate.decide_and_record
       ~config
       ~meta
-      ~generation
       ~keeper_turn_id
       ~append_phase_gate_decision:append_phase_gate_decision_for_gate
       ~turn_state

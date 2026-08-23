@@ -151,7 +151,6 @@ type t =
   { keeper_name : string
   ; agent_name : string
   ; trace_id : string
-  ; generation : int
   ; turn_count : int option
   ; agent_core_turn_count : int option
   ; current_task_id : string option

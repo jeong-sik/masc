@@ -101,7 +101,6 @@ let make_operation ~keeper_name ~phase ~turn_disposition =
   ; keeper_name
   ; lane_ownership = Dormant_meta
   ; trace_id = trace_id_exn "trace-reconciliation-settlement-test"
-  ; generation = 1
   ; actor = "test"
   ; cleanup_intent = { reason = Operator_stop_retain_meta; remove_session = false }
   ; turn_disposition

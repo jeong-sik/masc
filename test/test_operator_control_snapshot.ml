@@ -414,17 +414,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
           {
             meta with
             paused = true;
-            runtime =
-              {
-                meta.runtime with
-                last_blocker =
-                  Some
-                    (Keeper_meta_contract.blocker_info_of_class
-                      ~detail:
-                         "No configured provider runtime remained available"
-                       (Keeper_meta_contract.Runtime_exhausted
-                          Keeper_meta_contract.No_providers_available));
-              };
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
@@ -721,16 +710,6 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
         {
           meta with
           paused = true;
-          runtime =
-            {
-              meta.runtime with
-              last_blocker =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"No configured provider runtime remained available"
-                     (Keeper_meta_contract.Runtime_exhausted
-                        Keeper_meta_contract.No_providers_available));
-            };
         }
       in
       (match Keeper_meta_store.replace_snapshot config meta with
@@ -1106,7 +1085,6 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-audit");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "tool_use");
             ("latency_ms", `Int 1);
@@ -1121,7 +1099,6 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-audit");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "text_response");
             ("latency_ms", `Int 1);
@@ -1246,7 +1223,6 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-recent-tools");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "tool_use");
             ("latency_ms", `Int 1);
@@ -1262,7 +1238,6 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
               ("ts", `String (Masc_domain.now_iso ()));
               ("ts_unix", `Float (Time_compat.now ()));
               ("trace_id", `String "trace-lightweight-recent-tools");
-              ("generation", `Int 0);
               ("channel", `String "turn");
               ("turn_mode", `String "text_response");
               ("latency_ms", `Int 1);

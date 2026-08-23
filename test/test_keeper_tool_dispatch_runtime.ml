@@ -907,7 +907,6 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
               ~cell:turn_ctx_cell
               ~agent_name
               ~trace_id
-              ~generation:0
               ~turn:0
               ~keeper_turn_id:1
               ();
@@ -916,7 +915,6 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 ~config
                 ~meta_ref:(ref meta)
                 ~turn_ctx_cell
-                ~generation:0
                 ~trace_id
                 ~keeper_turn_id:1
                 ~on_after_turn_ordinal:ignore

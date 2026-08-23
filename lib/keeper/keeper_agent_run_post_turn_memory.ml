@@ -69,7 +69,6 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
 let run
   ~config
   ~(meta : Keeper_meta_contract.keeper_meta)
-  ~generation
   ~turn
   ~agent_core_turn_count
   ~actual_tools
@@ -128,7 +127,6 @@ let run
           let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
           let librarian_input : Keeper_librarian.input =
             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-            ; generation
             ; keeper_instructions = meta.instructions
             ; current = current_selection
             ; max_recall_fact_bytes =

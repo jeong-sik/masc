@@ -380,7 +380,6 @@ end
             and checkpoint message history, returns the final turn system prompt
      @param user_message The user's message to the keeper
     @param runtime_id Runtime profile name for model selection
-     @param generation Current generation counter
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback.
@@ -403,7 +402,6 @@ let run_turn
       ?user_blocks
       ~(runtime_id : string)
       ?world_observation
-      ~(generation : int)
       ?(history_user_source = "direct_user")
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
       ?(history_assistant_source = "direct_assistant")
@@ -480,7 +478,6 @@ let run_turn
       ~runtime_id
       ?temperature
       ?shared_context
-      ~generation
       ()
   in
   let meta = ctx.meta in
@@ -503,7 +500,6 @@ let run_turn
       ~keeper_name:meta.name
       ~agent_name:meta.agent_name
       ~trace_id
-      ~generation
       ~keeper_turn_id:manifest_keeper_turn_id
   in
   let checkpoint_path =
@@ -516,7 +512,6 @@ let run_turn
       ~keeper_name:meta.name
       ~agent_name:meta.agent_name
       ~trace_id
-      ~generation
       ~runtime_id:runtime_id_string
       ~turn_start
       ~seq_ref
@@ -584,7 +579,6 @@ let run_turn
       ~shared_context
       ~context_injector
       ~start_turn_count
-      ~generation
       ~keeper_turn_id:manifest_keeper_turn_id
       ~turn_kind
       ~runtime_id
@@ -1098,7 +1092,7 @@ let run_turn
                            Keeper_agent_run_finalize_response.finalize
                              ~config ~meta ~publication_recovery
                              ~ctx_snapshot:ctx_work
-                             ~generation ~profile_defaults
+                             ~profile_defaults
                              ~manifest_keeper_turn_id
                              ~session ~append_manifest
                              ~model:manifest_model_label
@@ -1173,7 +1167,6 @@ let run_turn
          Keeper_agent_run_receipt.finalize
            ~config
            ~meta
-           ~generation
            ~manifest_keeper_turn_id
            ~runtime_id:settled_runtime_id
            ~keeper_visible_sandbox_root
@@ -1338,7 +1331,6 @@ let run_turn
           ~config
           ~keeper_name:meta.name
           ~agent_name:meta.agent_name
-          ~generation
           ~turn_kind
           ~trace_id
           ~absolute_turn:manifest_keeper_turn_id

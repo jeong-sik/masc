@@ -1847,21 +1847,11 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
         Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let timeout_paused =
-          { (make_keeper_meta
-               ~name:"timeout-without-policy"
-               ~trace_id:"trace-timeout-without-policy"
-               ~paused:true
-               ())
-            with
-            runtime =
-              { (make_keeper_meta ()).runtime with
-                last_blocker =
-                  Some
-                    (Keeper_meta_contract.blocker_info_of_class
-                       ~detail:"turn_timeout"
-                       Keeper_meta_contract.Stale_turn_timeout);
-              };
-          }
+          make_keeper_meta
+            ~name:"timeout-without-policy"
+            ~trace_id:"trace-timeout-without-policy"
+            ~paused:true
+            ()
         in
         write_keeper_meta_exn config timeout_paused;
         let request = Httpun.Request.create `GET "/health" in
@@ -1876,9 +1866,7 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
                row |> member "name" |> to_string = "timeout-without-policy")
         in
         Alcotest.(check string) "pause kind" "unclassified_paused"
-          (detail |> member "pause_kind" |> to_string);
-        Alcotest.(check string) "last blocker class" "stale_turn_timeout"
-          (detail |> member "last_blocker" |> member "klass" |> to_string)))
+          (detail |> member "pause_kind" |> to_string)))
 
 let test_health_json_reports_dormant_task_owner_as_advisory () =
   with_temp_dir "health-active-task-owner-without-fiber" (fun dir ->
@@ -2705,20 +2693,6 @@ let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
         let paused =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
             ~paused:true ()
-        in
-        let paused =
-          {
-            paused with
-            runtime =
-              {
-                paused.runtime with
-                last_blocker =
-                  Some
-                    (Keeper_meta_contract.blocker_info_of_class
-                       ~detail:"operator pause diagnostic"
-                       Keeper_meta_contract.Stale_turn_timeout);
-              };
-          }
         in
         let running_a =
           make_keeper_meta ~name:"capacity-running-a"
@@ -4314,7 +4288,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
         ; keeper_name = fenced_keeper.name
         ; lane_ownership = Keeper_shutdown_types.Dormant_meta
         ; trace_id = fenced_keeper.runtime.trace_id
-        ; generation = fenced_keeper.runtime.nonce
         ; actor = "startup-test"
         ; cleanup_intent =
             { reason = Keeper_shutdown_types.Operator_stop_retain_meta

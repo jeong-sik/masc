@@ -107,25 +107,5 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
              meta.runtime.proactive_rt.consecutive_noop_count + 1
            else meta.runtime.proactive_rt.consecutive_noop_count);
       };
-      last_blocker =
-        (* Merge: typed klass from core_error becomes authoritative;
-           detail is the public-reason preview as observability context.
-           When the agent-core error carries no typed mapping we refuse to
-           fabricate a class — the previous string-only stamp is the
-           substring anti-pattern this refactor closes (CLAUDE.md
-           "워크어라운드 거부 기준 #2").  cap_blocker_detail preserves a
-           structured [masc_agent_core_error] payload up to ~2000 chars (#9933) and
-           truncates plain narrative to the narrative budget. *)
-        (match core_error with
-         | Some err ->
-             (match Keeper_status_bridge.blocker_class_of_core_error err with
-              | Some klass ->
-                  let detail =
-                    Keeper_internal_error.cap_blocker_detail public_reason
-                  in
-                  Some (Keeper_meta_contract.blocker_info_of_class
-                          ~detail klass)
-              | None -> None)
-         | None -> None);
     };
   }

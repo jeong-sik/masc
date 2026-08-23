@@ -28,7 +28,6 @@ module Attr_key : sig
   val keeper_name : string
   val keeper_agent_name : string
   val keeper_trace_id : string
-  val keeper_generation : string
   val keeper_max_context : string
   val keeper_channel : string
   val keeper_is_retry : string
@@ -95,7 +94,6 @@ val with_keeper_turn_span
   -> agent_name:string
   -> runtime_id:string
   -> trace_id:string
-  -> generation:int
   -> max_context:int
   -> channel:string
   -> is_retry:bool

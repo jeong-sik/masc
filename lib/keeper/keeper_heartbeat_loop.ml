@@ -691,15 +691,6 @@ let run_keepalive_unified_turn
         let paused_info =
           if meta_after_triage.paused
           then (
-            let blocker_str =
-              match meta_after_triage.runtime.last_blocker with
-              | Some info ->
-                let trimmed = String.trim info.detail in
-                if String.equal trimmed ""
-                then Keeper_meta_contract.blocker_class_to_string info.klass
-                else trimmed
-              | None -> "unknown"
-            in
             let paused_since_sec =
               match
                 Workspace_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
@@ -707,7 +698,7 @@ let run_keepalive_unified_turn
               | Some ts -> int_of_float (max 0.0 (Time_compat.now () -. ts))
               | None -> -1
             in
-            Printf.sprintf " blocker=%s paused_since=%ds" blocker_str paused_since_sec)
+            Printf.sprintf " paused_since=%ds" paused_since_sec)
           else ""
         in
         let log_not_scheduled =
@@ -763,7 +754,6 @@ let run_keepalive_unified_turn
                 meta_after_triage.name
                 (Int64.of_float (audit_wall_clock *. 1000.0)))
            ~keeper_name:meta_after_triage.name
-           ~generation:meta_after_triage.runtime.nonce
            ~turn_verdict:turn_decision.verdict
            ~wall_clock:audit_wall_clock
            ?tool_diversity_entropy
@@ -896,7 +886,6 @@ let run_keepalive_unified_turn
         Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
           ~base_path:ctx.config.base_path
           meta_after_triage.name
-          ~current_owner_nonce:meta_after_triage.runtime.nonce
           ~applied_at:(Time_compat.now ())
           ~selection
           ~detail
@@ -907,7 +896,6 @@ let run_keepalive_unified_turn
         Keeper_registry_event_queue.terminalize_pending_turn_completed_result
           ~base_path:ctx.config.base_path
           meta_after_triage.name
-          ~current_owner_nonce:meta_after_triage.runtime.nonce
           ~applied_at:(Time_compat.now ())
           ~selection
         |> record_terminal_selection_result ~label:"turn completion"
@@ -1028,7 +1016,6 @@ let run_keepalive_unified_turn
                   ~keeper_name:meta_after_triage.name
                   (Keeper_owner_reducer.Record_compaction_commit
                      { trace_id = meta_after_triage.runtime.trace_id
-                     ; generation = meta_after_triage.runtime.nonce
                      ; commit_count
                      ; at = Unix.gettimeofday () (* NDT-OK: stamps when this commit landed; no branch reads it *)
                      ; before_bytes

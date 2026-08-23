@@ -8,26 +8,23 @@
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
 (** Exact operator authority for terminally cancelling one accepted event.
-    [source_incarnation] and [owner_nonce] fence the observed paused owner;
+    [source_incarnation] fences the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 (** Exact causal authority for terminally transferring one accepted event.
-    [target_generation] and [target_trace_id] prevent delayed outbox replay
+    [target_trace_id] prevents delayed outbox replay
     from projecting into a purged or same-name replacement Keeper. *)
 
 type source_terminal_receipt =
@@ -45,7 +42,6 @@ type source_terminal_receipt =
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -177,7 +173,6 @@ val defer_pending :
     the active queue while independent work is waiting. *)
 
 val cancel_pending_accepted :
-  current_owner_nonce:int ->
   applied_at:float ->
   cancellation:accepted_cancellation ->
   t ->
@@ -187,7 +182,6 @@ val cancel_pending_accepted :
     through a source-bearing WAL outbox entry by persistence. *)
 
 val transfer_pending_accepted :
-  current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
   t ->
@@ -197,7 +191,6 @@ val transfer_pending_accepted :
     the replay authority until the target projection completes. *)
 
 val ack_pending_source_terminal :
-  current_owner_nonce:int ->
   applied_at:float ->
   source_terminal:accepted_source_terminal ->
   t ->
@@ -208,7 +201,6 @@ val ack_pending_source_terminal :
     authority. *)
 
 val terminalize_pending_turn_attempt :
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:pending_selection ->
   detail:string ->
@@ -221,7 +213,6 @@ val terminalize_pending_turn_attempt :
     diagnostic [detail] never participates in admission or idempotency. *)
 
 val terminalize_pending_turn_completed :
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:pending_selection ->
   t ->

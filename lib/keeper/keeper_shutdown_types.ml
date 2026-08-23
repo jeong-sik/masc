@@ -166,7 +166,6 @@ type t =
   ; keeper_name : string
   ; lane_ownership : lane_ownership
   ; trace_id : Keeper_id.Trace_id.t
-  ; generation : int
   ; actor : string
   ; cleanup_intent : cleanup_intent
   ; turn_disposition : turn_disposition
@@ -488,7 +487,6 @@ let immutable_fields_equal left right =
   && String.equal left.keeper_name right.keeper_name
   && lane_ownership_equal left.lane_ownership right.lane_ownership
   && Keeper_id.Trace_id.equal left.trace_id right.trace_id
-  && Int.equal left.generation right.generation
   && String.equal left.actor right.actor
   && cleanup_intent_equal left.cleanup_intent right.cleanup_intent
   && turn_disposition_equal left.turn_disposition right.turn_disposition

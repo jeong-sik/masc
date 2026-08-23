@@ -19,7 +19,6 @@ let fact claim : Types.fact =
 let source =
   { Current.kind = Current.Librarian
   ; trace_id = "health-test"
-  ; generation = 1
   }
 ;;
 

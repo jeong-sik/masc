@@ -568,7 +568,6 @@ let test_batch_completion_acks_every_member () =
                 Keeper_registry_event_queue.terminalize_pending_turn_completed_result
                   ~base_path
                   keeper_name
-                  ~current_owner_nonce:meta.Keeper_meta_contract.runtime.nonce
                   ~applied_at:1000.0
                   ~selection
               with

@@ -78,7 +78,6 @@ type event =
   | Handoff_started
   | Handoff_completed of
       { new_trace_id : string
-      ; generation : int
       }
   | Handoff_failed of { reason : string }
   | Operator_pause
@@ -110,7 +109,7 @@ let event_to_string = function
   | Compaction_completed -> "compaction_completed"
   | Compaction_failed r -> Printf.sprintf "compaction_failed(%s)" r.reason
   | Handoff_started -> "handoff_started"
-  | Handoff_completed r -> Printf.sprintf "handoff_completed(gen=%d)" r.generation
+  | Handoff_completed _ -> "handoff_completed"
   | Handoff_failed r -> Printf.sprintf "handoff_failed(%s)" r.reason
   | Operator_pause -> "operator_pause"
   | Operator_resume -> "operator_resume"

@@ -21,7 +21,6 @@ val runtime_manifest_context :
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
-  generation:int ->
   keeper_turn_id:int ->
   Keeper_runtime_manifest.turn_context
 
@@ -48,7 +47,6 @@ val make_append_manifest :
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
-  generation:int ->
   runtime_id:string ->
   turn_start:Mtime.t ->
   seq_ref:int Atomic.t ->

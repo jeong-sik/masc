@@ -31,19 +31,16 @@ type 'a observed_change =
 
 type turn_runtime_delta =
   { expected_trace_id : Keeper_id.Trace_id.t
-  ; expected_generation : int
   ; usage : usage_delta
   ; counters : turn_counter_deltas
   ; next_keeper_id : Keeper_id.Uid.t option
   ; next_agent_name : string
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
-  ; next_generation : int
   ; next_last_handoff_ts : float
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
   ; last_autonomous_action_at : string observed_change
-  ; last_blocker : Keeper_meta_contract.blocker_info option observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }
@@ -53,7 +50,6 @@ type identity_handoff =
   ; agent_name : string
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
-  ; generation : int
   ; updated_at : string
   }
 
@@ -95,10 +91,9 @@ type meta_command =
       }
   | Update_profile of profile_update
   | Handoff_identity of identity_handoff
-  | Repair_trace_generation of
+  | Repair_trace_identity of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list
-      ; generation : int
       ; updated_at : string
       }
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
@@ -108,8 +103,7 @@ type meta_command =
       ; updated_at : string
       }
   | Turn_failed of
-      { blocker : Keeper_meta_contract.blocker_info
-      ; usage : usage_delta option
+      { usage : usage_delta option
       ; updated_at : string
       }
   | Commit_turn_runtime of turn_runtime_delta
@@ -118,13 +112,8 @@ type meta_command =
       { task_id : Keeper_id.Task_id.t option
       ; updated_at : string
       }
-  | Set_blocker of
-      { blocker : Keeper_meta_contract.blocker_info option
-      ; updated_at : string
-      }
   | Record_compaction_commit of
       { trace_id : Keeper_id.Trace_id.t
-      ; generation : int
       ; commit_count : int
       ; at : float
       ; before_bytes : int
@@ -167,7 +156,7 @@ type error =
       { expected : string
       ; actual : string
       }
-  | Identity_generation_mismatch
+  | Identity_mismatch
   | Snapshot_changed
 
 let create ~keeper_name meta =
@@ -357,7 +346,6 @@ let turn_runtime_delta_of_snapshots
     let* () = validate_delta usage in
     Ok
       { expected_trace_id = before_rt.trace_id
-      ; expected_generation = before_rt.nonce
       ; usage
       ; counters =
           { proactive_count
@@ -375,7 +363,6 @@ let turn_runtime_delta_of_snapshots
       ; next_agent_name = after.agent_name
       ; next_trace_id = after_rt.trace_id
       ; next_trace_history = after_rt.trace_history
-      ; next_generation = after_rt.nonce
       ; next_last_handoff_ts = after_rt.last_handoff_ts
       ; compaction_observation =
           observed_change before_rt.compaction_rt after_rt.compaction_rt
@@ -385,7 +372,6 @@ let turn_runtime_delta_of_snapshots
           observed_change
             before_rt.last_autonomous_action_at
             after_rt.last_autonomous_action_at
-      ; last_blocker = observed_change before_rt.last_blocker after_rt.last_blocker
       ; message_scope_ack_id =
           observed_change before_rt.message_scope_ack_id after_rt.message_scope_ack_id
       ; updated_at = after.updated_at
@@ -443,8 +429,7 @@ let apply_turn_runtime_delta
   =
   if
     not (Keeper_id.Trace_id.equal meta.runtime.trace_id delta.expected_trace_id)
-    || not (Int.equal meta.runtime.nonce delta.expected_generation)
-  then Error Identity_generation_mismatch
+  then Error Identity_mismatch
   else
     let* meta = add_usage meta delta.usage in
     let runtime = meta.runtime in
@@ -525,7 +510,6 @@ let apply_turn_runtime_delta
       { runtime with
         trace_id = delta.next_trace_id
       ; trace_history = delta.next_trace_history
-      ; nonce = delta.next_generation
       ; last_handoff_ts = delta.next_last_handoff_ts
       ; compaction_rt
       ; proactive_rt
@@ -540,7 +524,6 @@ let apply_turn_runtime_delta
       ; board_reactive_turn_count
       ; mention_reactive_turn_count
       ; noop_turn_count
-      ; last_blocker = apply_observed_change runtime.last_blocker delta.last_blocker
       ; message_scope_ack_id =
           apply_observed_change runtime.message_scope_ack_id delta.message_scope_ack_id
       }
@@ -570,11 +553,10 @@ let apply_existing (state : state) meta command =
     let resumed = Keeper_meta_contract.mark_resumed meta in
     Ok (with_meta state { resumed with updated_at })
   | Reset_latch { updated_at } ->
-    let runtime = { meta.runtime with last_blocker = None } in
     Ok
       (with_meta
          state
-         { meta with paused = false; latched_reason = None; runtime; updated_at })
+         { meta with paused = false; latched_reason = None; updated_at })
   | Retain_shutdown_latch { latch; updated_at } ->
     let (Operator_stopped : shutdown_latch) = latch in
     let latched_reason =
@@ -620,7 +602,6 @@ let apply_existing (state : state) meta command =
       { meta.runtime with
         trace_id = handoff.trace_id
       ; trace_history = handoff.trace_history
-      ; nonce = handoff.generation
       }
     in
     Ok
@@ -632,12 +613,11 @@ let apply_existing (state : state) meta command =
          ; runtime
          ; updated_at = handoff.updated_at
          })
-  | Repair_trace_generation repair ->
+  | Repair_trace_identity repair ->
     let runtime =
       { meta.runtime with
         trace_id = repair.trace_id
       ; trace_history = repair.trace_history
-      ; nonce = repair.generation
       }
     in
     Ok (with_meta state { meta with runtime; updated_at = repair.updated_at })
@@ -646,15 +626,11 @@ let apply_existing (state : state) meta command =
   | Turn_succeeded { usage; updated_at } ->
     (match add_usage meta usage with
      | Error _ as error -> error
-     | Ok meta ->
-       let runtime = { meta.runtime with last_blocker = None } in
-       Ok (with_meta state { meta with runtime; updated_at }))
-  | Turn_failed { blocker; usage; updated_at } ->
+     | Ok meta -> Ok (with_meta state { meta with updated_at }))
+  | Turn_failed { usage; updated_at } ->
     (match update_usage meta usage with
      | Error _ as error -> error
-     | Ok meta ->
-       let runtime = { meta.runtime with last_blocker = Some blocker } in
-       Ok (with_meta state { meta with runtime; updated_at }))
+     | Ok meta -> Ok (with_meta state { meta with updated_at }))
   | Commit_turn_runtime delta ->
     (match apply_turn_runtime_delta meta delta with
      | Error _ as error -> error
@@ -665,16 +641,11 @@ let apply_existing (state : state) meta command =
      | Ok meta -> Ok (with_meta state meta))
   | Set_current_task { task_id; updated_at } ->
     Ok (with_meta state { meta with current_task_id = task_id; updated_at })
-  | Set_blocker { blocker; updated_at } ->
-    let runtime = { meta.runtime with last_blocker = blocker } in
-    Ok (with_meta state { meta with runtime; updated_at })
   | Record_compaction_commit
-      { trace_id; generation; commit_count; at; before_bytes; after_bytes; updated_at }
+      { trace_id; commit_count; at; before_bytes; after_bytes; updated_at }
     ->
-    if
-      not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
-      || not (Int.equal meta.runtime.nonce generation)
-    then Error Identity_generation_mismatch
+    if not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
+    then Error Identity_mismatch
     else if commit_count < 0
     then Error (Invalid_delta "compaction commit count is negative")
     else if not (Float.is_finite at)
@@ -731,6 +702,6 @@ let error_to_string = function
   | Invalid_delta detail -> "invalid additive delta: " ^ detail
   | Keeper_identity_mismatch { expected; actual } ->
     Printf.sprintf "Keeper identity mismatch: expected=%s actual=%s" expected actual
-  | Identity_generation_mismatch -> "Keeper trace/generation identity changed"
+  | Identity_mismatch -> "Keeper trace identity changed"
   | Snapshot_changed -> "Keeper metadata changed after cleanup was prepared"
 ;;

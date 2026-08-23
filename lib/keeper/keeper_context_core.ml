@@ -45,11 +45,8 @@ let checkpoint_for_persistence
     ~(session : session_context)
     ~(agent_name : string)
     ~(ctx : working_context)
-    ~(generation : int)
   : (Agent_core.Checkpoint.t, Keeper_compaction_unit.structural_error) result =
   let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
-  Agent_core.Context.set_scoped checkpoint_context Agent_core.Context.Session
-    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
      Delegate keeper, evict any inline image to a handle-only placeholder BEFORE
@@ -90,7 +87,6 @@ let save_agent_core_checkpoint_classified
     ~session
     ~agent_name
     ~ctx
-    ~generation
   =
   match
     checkpoint_for_persistence
@@ -99,7 +95,6 @@ let save_agent_core_checkpoint_classified
       ~session
       ~agent_name
       ~ctx
-      ~generation
   with
   | Error error -> Error (Tool_history_invalid error)
   | Ok checkpoint ->
@@ -118,7 +113,6 @@ let save_agent_core_checkpoint_if_source_with
     ~session
     ~agent_name
     ~ctx
-    ~generation
     ~expected_source_ref
   =
   match
@@ -128,7 +122,6 @@ let save_agent_core_checkpoint_if_source_with
       ~session
       ~agent_name
       ~ctx
-      ~generation
   with
   | Error error -> Error (Tool_history_invalid error)
   | Ok checkpoint ->
@@ -176,7 +169,6 @@ let save_agent_core_checkpoint
     ~session
     ~agent_name
     ~ctx
-    ~generation
   =
   match
     save_agent_core_checkpoint_classified
@@ -185,20 +177,10 @@ let save_agent_core_checkpoint
       ~session
       ~agent_name
       ~ctx
-      ~generation
   with
   | Ok (checkpoint, Keeper_checkpoint_store.Saved _)
   | Ok (checkpoint, Keeper_checkpoint_store.Stale_noop _) -> Ok checkpoint
   | Error e -> Error e
-
-let checkpoint_generation (cp : Agent_core.Checkpoint.t) ~(fallback : int) : int =
-  match
-    Agent_core.Context.get_scoped cp.context Agent_core.Context.Session
-      Keeper_checkpoint_store.keeper_generation_context_key
-  with
-  | Some (`Int value) -> value
-  | Some (`Intlit raw) -> Option.value ~default:fallback (int_of_string_opt raw)
-  | _ -> fallback
 
 (* ================================================================ *)
 (* Checkpoint Loading                                                *)

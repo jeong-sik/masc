@@ -968,7 +968,6 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Registered_lane (Lane.id lane)
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "tester"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -1255,7 +1254,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; keeper_name = name
         ; lane_ownership = Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "tester"
         ; cleanup_intent = { reason; remove_session = false }
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -1650,7 +1648,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
              ~reason:Shutdown_types.Operator_stop_retain_meta
              ~phase:blocked_phase) with
           trace_id = live_meta.runtime.trace_id
-        ; generation = live_meta.runtime.nonce
         }
       in
       (match Shutdown_store.persist_new ~config live_blocked with
@@ -2018,7 +2015,6 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           ; lane_ownership =
               Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
           ; trace_id = meta.runtime.trace_id
-          ; generation = meta.runtime.nonce
           ; actor = "tester"
           ; cleanup_intent = retain_operator_cleanup
           ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2161,7 +2157,6 @@ let test_terminal_shutdown_recovery_releases_admission () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Dormant_meta
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "tester"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2240,7 +2235,6 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "tester"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2459,10 +2453,6 @@ let test_dashboard_purge_resolution_is_fail_closed () =
         (Keeper_id.Trace_id.equal
            persisted.runtime.trace_id
            target.meta.runtime.trace_id);
-      check int
-        "resolved exact metadata generation"
-        persisted.runtime.nonce
-        target.meta.runtime.nonce;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
@@ -2475,7 +2465,6 @@ let test_dashboard_purge_resolution_is_fail_closed () =
         ; keeper_name = persisted.name
         ; lane_ownership = Shutdown_types.Dormant_meta
         ; trace_id = persisted.runtime.trace_id
-        ; generation = persisted.runtime.nonce
         ; actor = "supervisor"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -3134,7 +3123,6 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         ; lane_ownership =
             Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -3282,7 +3270,6 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
               ; lane_ownership =
                   Shutdown_types.Registered_lane (Lane.id entry.lane)
               ; trace_id = meta.runtime.trace_id
-              ; generation = meta.runtime.nonce
               ; actor = "operator"
               ; cleanup_intent
               ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -3472,7 +3459,6 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Dormant_meta
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = dashboard_purge_cleanup meta.name meta
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -3666,10 +3652,20 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
               (Shutdown_types.Operation_id.to_string operation_id))
            detail
        | Ok () -> fail "retired Keeper identity reopened durable intake");
+      (* A replacement incarnation is a new trace, which is what the
+         retirement fence compares. *)
       let replacement =
-        make_meta meta.name
-        |> Keeper_meta_contract.map_runtime (fun runtime ->
-          { runtime with nonce = runtime.nonce + 1 })
+        Keeper_meta_contract.map_runtime
+          (fun runtime ->
+            { runtime with
+              trace_id =
+                (match
+                   Keeper_id.Trace_id.of_string ("trace-integ-replacement-" ^ meta.name)
+                 with
+                 | Ok trace_id -> trace_id
+                 | Error detail -> fail detail)
+            })
+          (make_meta meta.name)
       in
       (match Keeper_meta_store.replace_snapshot config replacement with
        | Ok () -> ()
@@ -3730,7 +3726,6 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
         ; lane_ownership =
             Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = remove_meta_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -3788,7 +3783,6 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
          ; keeper_name = meta.name
          ; lane_ownership = Shutdown_types.Dormant_meta
          ; trace_id = meta.runtime.trace_id
-         ; generation = meta.runtime.nonce
          ; actor = "operator"
          ; cleanup_intent = remove_meta_cleanup
          ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -3886,7 +3880,6 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
         ; lane_ownership =
             Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -3975,7 +3968,6 @@ let test_librarian_rejection_unregisters_with_lifecycle_authority () =
           Keeper_lifecycle_reservation.acquire
             ~base_path:config.base_path
             ~keeper_name
-            ~expected_generation:meta.runtime.nonce
             ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
         with
         | Ok token -> token

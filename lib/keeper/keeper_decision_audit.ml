@@ -37,16 +37,15 @@ let resolve_cached cache mu compute =
 type decision_record = {
   cycle_id : string;
   keeper_name : string;
-  generation : int;
   turn_verdict : Keeper_world_observation.turn_verdict;
   wall_clock : float;
   tool_diversity_entropy : float option;
 }
 
-let make ~cycle_id ~keeper_name ~generation
+let make ~cycle_id ~keeper_name
     ~turn_verdict ~wall_clock
     ?tool_diversity_entropy () =
-  { cycle_id; keeper_name; generation;
+  { cycle_id; keeper_name;
     turn_verdict; wall_clock;
     tool_diversity_entropy }
 
@@ -58,7 +57,6 @@ let to_json (r : decision_record) : Yojson.Safe.t =
   `Assoc [
     "cycle_id", `String r.cycle_id;
     "keeper_name", `String r.keeper_name;
-    "generation", `Int r.generation;
     "turn_verdict", `String
       (match r.turn_verdict with
        | Keeper_world_observation.Run _ -> "run"

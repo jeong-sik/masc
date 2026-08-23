@@ -108,7 +108,6 @@ let make_operation ~keeper_name ~phase ~cleanup_intent =
   ; keeper_name
   ; lane_ownership = Dormant_meta
   ; trace_id = trace_id_exn "trace-ownerless-admission-release-test"
-  ; generation = 1
   ; actor = "test"
   ; cleanup_intent
   ; turn_disposition = No_inflight_turn

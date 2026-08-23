@@ -32,7 +32,6 @@ type post_turn_lifecycle = {
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
-  turn_generation : int;
   checkpoint_bytes : int;
   message_count : int;
 }
@@ -42,7 +41,6 @@ type compaction_recovery = {
   checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
-  turn_generation : int;
   commit_count : int;
 }
 
@@ -87,20 +85,15 @@ let checkpoint_load_error_detail = function
 let checkpoint_identity_error_detail = function
   | Keeper_checkpoint_store.Session_id_invalid detail ->
     "invalid session id: " ^ detail
-  | Generation_missing -> "checkpoint generation is missing"
-  | Generation_not_integer -> "checkpoint generation is not an integer"
-  | Ref_create_failed (Keeper_checkpoint_ref.Negative_generation generation) ->
-    Printf.sprintf "negative checkpoint generation: %d" generation
-  | Ref_create_failed (Negative_turn_count turn_count) ->
+  | Ref_create_failed (Keeper_checkpoint_ref.Negative_turn_count turn_count) ->
     Printf.sprintf "negative checkpoint turn count: %d" turn_count
   | Ref_create_failed (Invalid_sha256 digest) ->
     Printf.sprintf "invalid checkpoint SHA-256: %s" digest
 
 let checkpoint_ref_detail (reference : Keeper_checkpoint_ref.t) =
   Printf.sprintf
-    "trace_id=%s generation=%d turn_count=%d sha256=%s"
+    "trace_id=%s turn_count=%d sha256=%s"
     (Keeper_id.Trace_id.to_string reference.trace_id)
-    reference.generation
     reference.turn_count
     reference.sha256
 
@@ -150,9 +143,8 @@ let compaction_recovery_error_to_string = function
     ^ Keeper_compact_policy.compaction_rejection_to_string reason
   | No_compaction { source; reason } ->
     Printf.sprintf
-      "no compaction for trace_id=%s generation=%d turn_count=%d sha256=%s: %s"
+      "no compaction for trace_id=%s turn_count=%d sha256=%s: %s"
       (Keeper_id.Trace_id.to_string source.trace_id)
-      source.generation
       source.turn_count
       source.sha256
       (Keeper_compaction_outcome.no_compaction_reason_to_string reason)
@@ -295,22 +287,12 @@ let apply_post_turn_lifecycle
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
-        turn_generation = meta.runtime.nonce;
         checkpoint_bytes = 0;
         message_count = 0;
       }
   | Some cp ->
       let ctx = context_of_agent_core_checkpoint cp in
-      let current_generation =
-        checkpoint_generation cp ~fallback:meta.runtime.nonce
-      in
-      let base_meta =
-        if current_generation = meta.runtime.nonce then meta
-        else
-          map_runtime
-            (fun rt -> { rt with nonce = current_generation })
-            meta
-      in
+      let base_meta = meta in
       let decision = Keeper_compact_policy.Not_requested in
       let meta_after_context_check =
         map_runtime
@@ -335,7 +317,6 @@ let apply_post_turn_lifecycle
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
-        turn_generation = current_generation;
         checkpoint_bytes = serialized_bytes ctx;
         message_count = message_count ctx;
       }
@@ -382,7 +363,6 @@ type prepared_compaction =
   { session : Keeper_context_core.session_context
   ; source_ref : Keeper_checkpoint_ref.t
   ; retry_meta : keeper_meta
-  ; turn_generation : int
   ; prepared_trigger : Compaction_trigger.t
   ; context : Keeper_context_core.working_context
   ; evidence : Keeper_compaction_evidence.t
@@ -453,14 +433,8 @@ let prepare_compaction_admitted
       ();
     Error (Checkpoint_ref_load_failed error)
   | Ok (checkpoint, source_ref) ->
-    let turn_generation =
-      checkpoint_generation checkpoint ~fallback:meta.runtime.nonce
-    in
     let ctx = context_of_agent_core_checkpoint checkpoint in
-    let retry_meta =
-      if turn_generation = meta.runtime.nonce then meta
-      else map_runtime (fun rt -> { rt with nonce = turn_generation }) meta
-    in
+    let retry_meta = meta in
     let preparation : Keeper_compact_policy.compaction_preparation =
       compact_for_request
         ~meta:retry_meta
@@ -481,7 +455,6 @@ let prepare_compaction_admitted
          { session
          ; source_ref
          ; retry_meta
-         ; turn_generation
          ; prepared_trigger
          ; context = preparation.context
          ; evidence
@@ -547,7 +520,6 @@ let commit_prepared_compaction_with
   let { session
       ; source_ref
       ; retry_meta
-      ; turn_generation
       ; prepared_trigger
       ; context
       ; evidence
@@ -599,7 +571,6 @@ let commit_prepared_compaction_with
            ~session
            ~agent_name:retry_meta.agent_name
            ~ctx:commit_context
-           ~generation:turn_generation
            ~expected_source_ref:source_ref
        with
        | Ok
@@ -610,7 +581,6 @@ let commit_prepared_compaction_with
            ; checkpoint_installation = installed
            ; trigger = prepared_trigger
            ; evidence
-           ; turn_generation
            ; commit_count
            }
          in

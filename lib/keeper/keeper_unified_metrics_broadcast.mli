@@ -5,6 +5,5 @@ val broadcast_compaction :
 
 val broadcast_lifecycle_events :
   name:string ->
-  turn_generation:int ->
   handoff_json:Yojson.Safe.t option ->
   unit

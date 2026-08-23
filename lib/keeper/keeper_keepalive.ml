@@ -919,7 +919,6 @@ let start_keepalive
            ?intake_token
            ~base_path:ctx.config.base_path
            ~keeper_name:m.name
-           ~expected_generation:0
            ~register:(fun token intake_token ->
              match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
              | Some current -> Error (`Already_registered current)

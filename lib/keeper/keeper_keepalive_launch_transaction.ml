@@ -77,7 +77,6 @@ let run
       ?intake_token
       ~base_path
       ~keeper_name
-      ~expected_generation
       ~register
       ~rollback
       launch
@@ -104,7 +103,6 @@ let run
            Keeper_lifecycle_reservation.acquire
              ~base_path
              ~keeper_name
-             ~expected_generation
              ~purpose:Keeper_lifecycle_reservation.Keepalive_launch
          with
          | Ok token -> Ok (token, true)

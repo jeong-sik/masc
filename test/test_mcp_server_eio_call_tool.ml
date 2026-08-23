@@ -663,7 +663,6 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check (option string) "session_id"
         (Some "session-explicit")
         ctx.session_id;
-      check bool "generation present" true (Option.is_some ctx.generation);
       check (option int) "turn" (Some 1) ctx.turn;
       check (option int) "keeper_turn_id" (Some 1) ctx.keeper_turn_id;
       check (option string) "task_id" (Some "task-123") ctx.task_id;
@@ -786,10 +785,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "runtime contract agent"
         (Masc.Keeper_identity.keeper_agent_name keeper_name)
         (runtime_contract |> U.member "agent_name" |> U.to_string);
-      check bool "runtime contract has generation" true
-        (match runtime_contract |> U.member "generation" with
-         | `Int _ -> true
-         | _ -> false);
       check string "runtime contract sandbox profile"
         (row |> U.member "sandbox_profile" |> U.to_string)
         (runtime_contract |> U.member "sandbox_profile" |> U.to_string);

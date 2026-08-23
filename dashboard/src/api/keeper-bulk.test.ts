@@ -37,8 +37,8 @@ describe('bulkKeeperDirective', () => {
 
     const res = await bulkKeeperDirective(
       [
-        { name: 'rondo', ownerGeneration: 3, operatorOperationId: 'resume-rondo-1' },
-        { name: 'qa-king', ownerGeneration: 5, operatorOperationId: 'resume-qa-1' },
+        { name: 'rondo', operatorOperationId: 'resume-rondo-1' },
+        { name: 'qa-king', operatorOperationId: 'resume-qa-1' },
       ],
       'resume',
     )
@@ -52,12 +52,10 @@ describe('bulkKeeperDirective', () => {
       targets: [
         {
           name: 'rondo',
-          owner_nonce: 3,
           operator_operation_id: 'resume-rondo-1',
         },
         {
           name: 'qa-king',
-          owner_nonce: 5,
           operator_operation_id: 'resume-qa-1',
         },
       ],
@@ -79,8 +77,8 @@ describe('bulkKeeperDirective', () => {
 
     const res = await bulkKeeperDirective(
       [
-        { name: 'rondo', ownerGeneration: 3, operatorOperationId: 'resume-rondo-2' },
-        { name: 'ghost', ownerGeneration: 0, operatorOperationId: 'resume-ghost-1' },
+        { name: 'rondo', operatorOperationId: 'resume-rondo-2' },
+        { name: 'ghost', operatorOperationId: 'resume-ghost-1' },
       ],
       'resume',
     )

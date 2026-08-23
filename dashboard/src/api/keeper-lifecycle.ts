@@ -27,7 +27,6 @@ interface KeeperResumeOptions extends KeeperControlOptions {
 }
 
 interface PendingResumeIntent {
-  ownerGeneration: number
   operatorOperationId: string
 }
 
@@ -39,18 +38,14 @@ function createResumeOperationId(): string {
 
 function resumeIntent(
   name: string,
-  ownerGeneration: number,
   explicitOperationId?: string,
 ): PendingResumeIntent {
   if (explicitOperationId) {
-    return { ownerGeneration, operatorOperationId: explicitOperationId }
+    return { operatorOperationId: explicitOperationId }
   }
   const pending = pendingResumeIntents.get(name)
-  if (pending?.ownerGeneration === ownerGeneration) return pending
-  const created = {
-    ownerGeneration,
-    operatorOperationId: createResumeOperationId(),
-  }
+  if (pending) return pending
+  const created = { operatorOperationId: createResumeOperationId() }
   pendingResumeIntents.set(name, created)
   return created
 }
@@ -62,9 +57,6 @@ function clearCommittedResumeIntent(name: string, intent: PendingResumeIntent): 
   }
 }
 
-function isOwnerGeneration(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0
-}
 async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
   try {
     const body = await resp.text()
@@ -376,23 +368,13 @@ export function pauseKeeper(
 
 export async function resumeKeeper(
   name: string,
-  ownerGeneration: number | null | undefined,
   opts: KeeperResumeOptions = {},
 ): Promise<KeeperLifecycleResponse> {
-  if (!isOwnerGeneration(ownerGeneration)) {
-    return {
-      ok: false,
-      action: 'resume',
-      name,
-      error: `Cannot resume ${name}: current owner generation is unavailable`,
-    }
-  }
-  const intent = resumeIntent(name, ownerGeneration, opts.operatorOperationId)
+  const intent = resumeIntent(name, opts.operatorOperationId)
   const result = await safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     {
       action: 'resume',
-      owner_nonce: intent.ownerGeneration,
       operator_operation_id: intent.operatorOperationId,
     },
     `Failed to resume ${name}`,
@@ -425,7 +407,6 @@ export type BulkKeeperDirectiveAction = 'pause' | 'resume' | 'wakeup'
 
 export interface BulkKeeperResumeTarget {
   name: string
-  ownerGeneration: number
   operatorOperationId?: string
 }
 
@@ -467,27 +448,10 @@ export async function bulkKeeperDirective(
   const names = subjects.map(subject => typeof subject === 'string' ? subject : subject.name)
   const fallbackError = `Failed to ${action} ${subjects.length} keeper(s)`
   const resumeTargets = action === 'resume' ? subjects as BulkKeeperResumeTarget[] : []
-  const invalidResumeTarget = resumeTargets.find(
-    target => typeof target.name !== 'string' || !isOwnerGeneration(target.ownerGeneration),
-  )
-  if (invalidResumeTarget) {
-    const error = `Cannot resume ${invalidResumeTarget.name}: current owner generation is unavailable`
-    return {
-      ok: false,
-      action,
-      requested: subjects.length,
-      succeeded: 0,
-      results: names.map(name => ({ name, ok: false, error })),
-    }
-  }
   const resumeIntents = action === 'resume'
     ? resumeTargets.map(target => ({
         name: target.name,
-        intent: resumeIntent(
-          target.name,
-          target.ownerGeneration,
-          target.operatorOperationId,
-        ),
+        intent: resumeIntent(target.name, target.operatorOperationId),
       }))
     : []
   const body = action === 'resume'
@@ -495,7 +459,6 @@ export async function bulkKeeperDirective(
         action,
         targets: resumeIntents.map(({ name, intent }) => ({
           name,
-          owner_nonce: intent.ownerGeneration,
           operator_operation_id: intent.operatorOperationId,
         })),
       }

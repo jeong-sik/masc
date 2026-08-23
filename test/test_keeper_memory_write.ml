@@ -128,7 +128,7 @@ let replace_current_facts ~keepers_dir ~keeper_id facts =
     ~keeper_id
     ~expected_revision:None
     ~now:(Time_compat.now ())
-    ~source:{ Current.kind = Current.Librarian; trace_id = "seed"; generation = 1 }
+    ~source:{ Current.kind = Current.Librarian; trace_id = "seed" }
     ~facts
     ()
   |> function

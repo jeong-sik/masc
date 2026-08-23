@@ -13,7 +13,6 @@ type token
 
 type snapshot = Keeper_registry_types.lifecycle_reservation_snapshot =
   { owner_id : string
-  ; expected_generation : int
   ; purpose : purpose
   }
 
@@ -34,7 +33,6 @@ val release_outcome_to_string : release_outcome -> string
 val acquire :
   base_path:string ->
   keeper_name:string ->
-  expected_generation:int ->
   purpose:purpose ->
   (token, acquire_error) result
 
@@ -46,7 +44,6 @@ val authorize :
   (unit, snapshot) result
 
 val owner_id : token -> string
-val expected_generation : token -> int
 val release : token -> release_outcome
 
 (** Serialize one ownership check plus authority mutation for this keeper key

@@ -121,7 +121,6 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~config
     ~keeper_name:meta.name
     ~agent_name:meta.agent_name
-    ~generation:meta.runtime.nonce
     ~turn_kind:Turn_record.Autonomous
     ~trace_id
     ~absolute_turn:turn

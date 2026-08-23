@@ -819,9 +819,60 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
 
+  (* Fleet reading — what the roster below cannot say.
+
+     The rows are one per running keeper, so a keeper the fleet wanted and
+     could not start is simply absent from them. These lines carry the
+     server's own count of that gap and name the keepers behind it. *)
+  (match state.fleet_safety, state.fleet_safety_error with
+   | _, Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  fleet: " ^ fit_width err (cols - 12) ^ Ansi.reset)
+   | None, None -> ()
+   | Some fleet, None ->
+       let tone =
+         if fleet.fs_operator_action_required then Ansi.red
+         else if String.equal fleet.fs_status "ok" then Ansi.green
+         else Ansi.yellow
+       in
+       let blocker =
+         match fleet.fs_blocker with None -> "" | Some b -> "  blocker: " ^ b
+       in
+       box_line buf cols
+         (Printf.sprintf "%s  fleet %s   running %d/%d   capacity %d/%d%s%s"
+            tone fleet.fs_status
+            fleet.fs_running_count fleet.fs_bootable_count
+            (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
+            fleet.fs_target_reaction_capacity blocker Ansi.reset);
+       let counts =
+         [ ("paused", fleet.fs_paused_count)
+         ; ("failing", fleet.fs_failing_count)
+         ; ("recovering", fleet.fs_recovering_count)
+         ; ("task owner without fiber", fleet.fs_active_task_owner_without_fiber_count)
+         ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
+         ]
+         |> List.filter (fun (_, n) -> n > 0)
+         |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n)
+       in
+       if counts <> [] then
+         box_line buf cols
+           (Ansi.dim ^ "  " ^ String.concat "   " counts ^ Ansi.reset);
+       (* Which keepers are missing is the subtraction, done here rather than
+          read from a field: the server reports what should run and what does,
+          and the difference is this reader's to take. *)
+       let missing =
+         List.filter
+           (fun name -> not (List.mem name fleet.fs_executable_names))
+           fleet.fs_bootable_names
+       in
+       if missing <> [] then
+         box_line buf cols
+           (Printf.sprintf "%s  not running: %s%s" Ansi.red
+              (String.concat ", " missing) Ansi.reset));
+
   (* Column headers *)
-  let col_header = Printf.sprintf "  %s  %-20s %5s  %-8s %10s  %s"
-    " " "Name" "Gen" "Paused" "Turns" "Current Task" in
+  let col_header = Printf.sprintf "  %s  %-20s  %-8s %10s  %s"
+    " " "Name" "Paused" "Turns" "Current Task" in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.dim (fit_width col_header (cols - 4)) Ansi.reset
@@ -892,20 +943,17 @@ let render_keeper_list (state : state) =
         let name_col =
           Printf.sprintf "%-20s" (Terminal_text.single_line k.k_name)
         in
-        let gen_col = Printf.sprintf "%5d" k.k_generation in
         let turns_col = Printf.sprintf "%10d" k.k_total_turns in
         let line_content =
           if is_selected then
             Ansi.reverse ^ ">" ^ Ansi.reset
             ^ "  " ^ Ansi.bold ^ name_col ^ Ansi.reset
-            ^ " " ^ gen_col
             ^ "  " ^ paused_str
             ^ " " ^ turns_col
             ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
           else
             " "
             ^ "  " ^ name_col
-            ^ " " ^ gen_col
             ^ "  " ^ paused_str
             ^ " " ^ turns_col
             ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
@@ -962,7 +1010,6 @@ let render_keeper_detail (state : state) =
     (* Identity section *)
     add_section "Identity";
     add_row "Name:" (Terminal_text.single_line k.k_name);
-    add_row "Generation:" (string_of_int k.k_generation);
     add_row "Paused:"
       (if k.k_paused then Ansi.yellow ^ "yes" ^ Ansi.reset
        else Ansi.dim ^ "no" ^ Ansi.reset);
@@ -972,7 +1019,6 @@ let render_keeper_detail (state : state) =
     add_section "Current Work";
     add_row "Task:"
       (Terminal_text.single_line_or ~default:"-" k.k_current_task_id);
-    add_row "Last Blocker:" (Tui_decode.keeper_blocker_for_terminal k);
     add_empty ();
 
     (* Live Context section (Phase 2) *)

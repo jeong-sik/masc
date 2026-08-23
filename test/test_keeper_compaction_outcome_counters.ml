@@ -43,7 +43,6 @@ let persist_commit_projection config meta ~commit_count =
       ~keeper_name:meta.Masc.Keeper_meta_contract.name
       (Masc.Keeper_owner_reducer.Record_compaction_commit
          { trace_id = meta.runtime.trace_id
-         ; generation = meta.runtime.nonce
          ; commit_count
          ; at = commit_at
          ; before_bytes = 0
@@ -91,7 +90,6 @@ let test_missing_keeper_has_no_commit_state () =
         (Masc.Keeper_owner_reducer.Record_compaction_commit
            { trace_id =
                (make_meta ~name:"compaction-unregistered").runtime.trace_id
-           ; generation = 1
            ; commit_count = 1
            ; at = commit_at
            ; before_bytes = 0

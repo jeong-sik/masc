@@ -58,7 +58,7 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Handoff_completed r ->
     obj
       "handoff_completed"
-      [ "new_trace_id", `String r.new_trace_id; "generation", `Int r.generation ]
+      [ "new_trace_id", `String r.new_trace_id ]
   | Handoff_failed r -> obj "handoff_failed" [ "reason", `String r.reason ]
   | Operator_pause -> obj "operator_pause" []
   | Operator_resume -> obj "operator_resume" []

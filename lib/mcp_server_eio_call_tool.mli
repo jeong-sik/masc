@@ -64,7 +64,6 @@ type keeper_runtime_mcp_log_context = {
   model : string;
   trace_id : string option;
   session_id : string option;
-  generation : int option;
   turn : int option;
   keeper_turn_id : int option;
   task_id : string option;

@@ -83,7 +83,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
             (Masc.Keeper_types_profile.multimodal_policy_to_string
                Masc.Keeper_types_profile.default_multimodal_policy)
         | Schema.Trace_history -> `List []
-        | Schema.Generation -> `Int 1
         | Schema.Last_handoff_ts -> `Float 0.
         | Schema.Created_at | Schema.Updated_at ->
           `String "1970-01-01T00:00:00Z"
@@ -123,7 +122,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_autonomous_action_at -> `String ""
         | Schema.Last_compaction_decision -> `String "initialized"
         | Schema.Message_scope_ack_id
-        | Schema.Last_blocker
         | Schema.Last_runtime_attempt
         | Schema.Latched_reason
         | Schema.Current_task_id

@@ -38,20 +38,12 @@ let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     (meta : Keeper_meta_contract.keeper_meta) =
   let elapsed = pause_elapsed_sec now meta in
-  let last_blocker = meta.runtime.last_blocker in
   `Assoc [
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
     ("pause_kind", `String (pause_kind_to_wire (pause_kind meta)));
     ("paused_elapsed_sec", Json_util.float_opt_to_json elapsed);
-    ( "last_blocker"
-    , match last_blocker with
-      | Some info -> Keeper_meta_contract.blocker_info_to_json info
-      | None -> `Null );
-    ( "missing_pause_root_cause"
-    , `Bool
-        (Option.is_none meta.latched_reason
-         && Option.is_none meta.runtime.last_blocker) );
+    ("missing_pause_root_cause", `Bool (Option.is_none meta.latched_reason));
   ]
 
 let registry_paused_keeper_names () =
@@ -935,28 +927,6 @@ let active_task_owner_fiber_scan_semantics =
    credentialed non-keeper client task owners are reported separately as \
    advisory rows"
 
-let paused_keeper_last_blocker_json paused_keepers_json name =
-  match paused_keepers_json with
-  | `Assoc fields -> (
-    match List.assoc_opt "details" fields with
-    | Some (`List details) ->
-      (match
-         details
-         |> List.find_map (function
-           | `Assoc detail_fields
-             when (match List.assoc_opt "name" detail_fields with
-                   | Some (`String detail_name) -> String.equal detail_name name
-                   | _ -> false) ->
-               (match List.assoc_opt "last_blocker" detail_fields with
-                | Some last_blocker -> Some last_blocker
-                | None -> Some `Null)
-           | _ -> None)
-       with
-       | Some last_blocker -> last_blocker
-       | None -> `Null)
-    | Some _ | None -> `Null)
-  | _ -> `Null
-
 (* Maximum length of the diagnostic string surfaced on public [/health]
    fields via [public_health_diagnostic_preview]. Operational limit (UX
    contract for operator-facing snippets), not a security bound — full
@@ -988,7 +958,6 @@ let public_health_diagnostic_preview ?base_path ~keeper_name text =
 
 let blocked_keeper_detail_json
     ?base_path
-    ?(last_blocker = `Null)
     ?phase_detail
     ~execution_snapshot
     ~keeper_bootstrap_enabled
@@ -1143,7 +1112,6 @@ let blocked_keeper_detail_json
          | Some cause -> `String (keeper_non_executable_cause_to_wire cause)
          | None -> `Null );
        ("phase", Json_util.string_opt_to_json phase_name);
-       ("last_blocker", last_blocker);
        ("bootable", `Bool is_bootable);
        ("reaction_capacity", `Bool is_capacity);
        ("paused", `Bool is_paused);
@@ -1660,7 +1628,6 @@ let keeper_fleet_safety_health_json
            (fun name ->
              blocked_keeper_detail_json
                ?base_path:runtime_base_path
-               ~last_blocker:(paused_keeper_last_blocker_json paused_keepers_json name)
                ?phase_detail:(phase_detail name)
                ~execution_snapshot
                ~keeper_bootstrap_enabled

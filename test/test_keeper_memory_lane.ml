@@ -45,7 +45,6 @@ let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn 
   Post_turn_memory.run
     ~config
     ~meta
-    ~generation:turn
     ~turn
     ~agent_core_turn_count:1
     ~actual_tools:[]

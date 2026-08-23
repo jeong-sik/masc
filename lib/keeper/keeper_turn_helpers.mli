@@ -47,7 +47,6 @@ val pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface
 val record_pre_dispatch_terminal_observation :
   config:Workspace.config ->
   meta:keeper_meta ->
-  generation:int ->
   runtime_id:string ->
   outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->

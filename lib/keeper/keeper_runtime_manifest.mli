@@ -129,7 +129,6 @@ val make :
   keeper_name:string ->
   ?agent_name:string ->
   trace_id:string ->
-  ?generation:int ->
   ?keeper_turn_id:int ->
   ?agent_core_turn_count:int ->
   ?logical_seq:int ->

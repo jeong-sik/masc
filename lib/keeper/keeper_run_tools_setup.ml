@@ -177,7 +177,6 @@ let prepare_agent_setup
       ~(shared_context : Agent_core.Context.t)
       ~(context_injector : Agent_core.Hooks.context_injector)
       ~(start_turn_count : int)
-      ~(generation : int)
       ~(keeper_turn_id : int)
       ~(turn_kind : Turn_record.turn_kind)
       ~(runtime_id : string)
@@ -474,7 +473,7 @@ let prepare_agent_setup
   Keeper_run_tools_hooks.assemble_hooks
     ~ctx ~session ~turn_system_prompt ~user_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
-    ~start_turn_count ~generation
+    ~start_turn_count
     ~runtime_id_string ~is_retry
     ~config_root ~runtime_config_path
     ~trajectory_acc

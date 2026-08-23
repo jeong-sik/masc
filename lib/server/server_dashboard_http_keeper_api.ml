@@ -201,7 +201,6 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
                  | Keeper_memory_os_current.Librarian -> "librarian"
                  | Explicit_write -> "explicit_write") )
           ; "trace_id", `String source.trace_id
-          ; "generation", `Int source.generation
           ] )
   in
   let current_facts = List.length facts in
@@ -1462,7 +1461,6 @@ let handle_keeper_get_subroutes state req request reqd =
                `Assoc [
                  ("keeper", `String name);
                  ("trace_id", `String trace_id);
-                 ("generation", `Int m.runtime.nonce);
                  ("total_entries", `Int total);
                  ("showing", `Int (List.length recent));
                  ("entries", `List (List.map

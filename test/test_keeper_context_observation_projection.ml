@@ -31,7 +31,6 @@ let sample_record
   { execution_ids = []
   ; keeper = "beta"
   ; agent_name = "beta-agent"
-  ; generation = 7
   ; turn_kind = Turn_record.Direct
   ; trace_id = sample_trace
   ; absolute_turn

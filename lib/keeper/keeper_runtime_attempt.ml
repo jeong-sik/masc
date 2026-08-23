@@ -163,12 +163,7 @@ let core_error_to_runtime_outcome err =
        Some
          (Runtime_attempt_fsm.Call_err
             (Llm_provider.Http_client.AcceptRejected { reason }))
-    | Agent_core.Error.Config
-        (Agent_core.Error.InvalidConfig { field = "runtime_mcp_auth"; detail }) ->
-       Some
-         (Runtime_attempt_fsm.Call_err
-            (Llm_provider.Http_client.AcceptRejected { reason = detail }))
-     | Agent_core.Error.Agent _
+    | Agent_core.Error.Agent _
      | Agent_core.Error.Config _
      | Agent_core.Error.Mcp _
      | Agent_core.Error.Serialization _

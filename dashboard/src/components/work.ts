@@ -29,6 +29,7 @@ import { statusLabel } from '../lib/status-label'
 import { GoalCreateForm } from './goals/goal-create-form'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import { claimTask as claimTaskAction } from '../api/actions'
+import { VerifyQueue } from './verification/verify-queue'
 import { showToast } from './common/toast'
 import { errorToString } from '../lib/format-string'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
@@ -634,6 +635,13 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
         <span class="wk-task-id mono">${task.id}</span>
         <span class="wk-task-title">
           ${task.title}
+          ${task.predecessor_task_id ? html`
+            <span
+              class="wk-rerun"
+              data-testid="job-rerun"
+              title=${`RFC-0323 재실행 · predecessor_task_id = ${task.predecessor_task_id}`}
+            >↻ 재실행 ← ${task.predecessor_task_id}</span>
+          ` : null}
           ${blocker ? html`<span class="wk-task-block" data-testid="job-blocker">⚠ ${blocker}</span>` : null}
           ${hasDetail ? html`<span class="wk-task-chev">${open ? '\u25BE' : '\u25B8'}</span>` : null}
         </span>
@@ -725,6 +733,7 @@ function GoalCard({
         <span class="wk-prog-lbl mono">
           ${progress.done}/${progress.total}${progress.verify > 0 ? ` · 검증 ${progress.verify}` : ''}${progress.blocked > 0 ? ` · 막힘 ${progress.blocked}` : ''}
         </span>
+        <span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>
         ${goal.metric ? html`
           <span
             class="wk-metric mono"
@@ -736,7 +745,7 @@ function GoalCard({
         ` : null}
       </div>
       ${open ? html`
-        <div class="wk-jobs">
+        <div class="wk-tasks">
           <${GoalProjectionDossier} node=${goalNode} reviewNote=${goal.last_review_note} />
           ${goalTasks.map(t => html`<${TaskRow} key=${t.id} task=${t} onClaim=${onClaim} />`)}
         </div>
@@ -871,13 +880,13 @@ interface WorkAsideProps {
 }
 
 // ── View mode persistence ───────────────────────────────────────────────────
-type WorkView = 'list' | 'kanban'
+type WorkView = 'list' | 'kanban' | 'verify'
 const WK_VIEW_KEY = 'v2.workView'
 
 function readStoredWorkView(): WorkView {
   try {
     const v = localStorage.getItem(WK_VIEW_KEY)
-    if (v === 'kanban') return 'kanban'
+    if (v === 'kanban' || v === 'verify') return v
   } catch (_) { /* storage unavailable */ }
   return 'list'
 }
@@ -964,6 +973,13 @@ function KanbanCard({
         <span class=${`wk-kcard-prio prio-${normalizedPrio}`}>P${p}</span>
       </div>
       <div class="wk-kcard-title">${task.title}</div>
+      ${task.predecessor_task_id ? html`
+        <div
+          class="wk-kcard-rerun"
+          data-testid="kanban-rerun"
+          title=${`predecessor_task_id = ${task.predecessor_task_id}`}
+        >↻ 재실행 ← ${task.predecessor_task_id}</div>
+      ` : null}
       ${blocker ? html`<div class="wk-kcard-block">⚠ ${blocker}</div>` : null}
       ${hasDescription ? html`<p class="wk-kcard-desc">${description}</p>` : null}
       ${task._goalId
@@ -978,6 +994,8 @@ function KanbanCard({
         `
         : null}
       <div class="wk-kcard-foot">
+        ${task.handoff_context?.summary ? html`<span class="wk-kcard-ho" data-testid="kanban-handoff" title="핸드오프 이력">⇄</span>` : null}
+        <span class="wk-spacer"></span>
         ${task.assignee
           ? html`
             <button
@@ -1581,7 +1599,7 @@ function WorkSurfaceV2() {
   }, [])
 
   return html`
-    <main class=${`ov ov-2col ${goalCreateOpen ? 'ov-with-panel' : ''}`}>
+    <main class=${`ov ov-flush ov-2col ${goalCreateOpen ? 'ov-with-panel' : ''}`}>
       <div class="ov-scroll">
         <header class="ov-head wk-head">
           <div>
@@ -1607,6 +1625,14 @@ function WorkSurfaceV2() {
                 data-testid="work-view-kanban"
                 onClick=${() => switchView('kanban')}
               >칸반</button>
+              <button
+                type="button"
+                class=${view === 'verify' ? 'on' : ''}
+                role="tab"
+                aria-selected=${view === 'verify'}
+                data-testid="work-view-verify"
+                onClick=${() => switchView('verify')}
+              >검증</button>
             </div>
             <button
               type="button"
@@ -1674,10 +1700,12 @@ function WorkSurfaceV2() {
             </section>
           ` : null}
 
-          ${view === 'list'
+          ${view === 'verify'
+            ? html`<${VerifyQueue} />`
+            : view === 'list'
             ? /* flat priority-sorted list */
               displayGoals.length > 0 ? html`
-                <div class="wk-list" data-testid="work-goal-list">
+                <div class="wk-list wk-tree" data-testid="work-goal-list">
                   ${[...displayGoals]
                     .sort((a, b) => (a.priority ?? GOAL_PRIORITY_MAX) - (b.priority ?? GOAL_PRIORITY_MAX) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
                     .map(g => html`

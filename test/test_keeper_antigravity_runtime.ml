@@ -764,7 +764,7 @@ let test_capacity_undeclared_passes_source_through () =
     (match project [ plain_user_message "only" ] with
      | Ok projected ->
        check int "source projection untouched" 2 (List.length projected)
-     | Error detail -> fail detail)
+     | Error detail -> fail (Agent_core.Error.to_string detail))
   | Ok None -> fail "undeclared capacity dropped the source projection"
   | Error error -> fail (Agent_core.Error.to_string error)
 ;;
@@ -786,7 +786,7 @@ let test_capacity_windows_history_to_tail () =
   | Ok None -> fail "declared capacity produced no projection"
   | Ok (Some project) ->
     (match project history with
-     | Error detail -> fail detail
+     | Error detail -> fail (Agent_core.Error.to_string detail)
      | Ok windowed ->
        let kept = List.length windowed in
        check bool "capacity drops oldest history" true (kept < 10);
@@ -825,7 +825,7 @@ let test_capacity_bounds_an_appending_source_projection () =
   | Ok None -> fail "declared capacity produced no projection"
   | Ok (Some project) ->
     (match project history with
-     | Error detail -> fail detail
+     | Error detail -> fail (Agent_core.Error.to_string detail)
      | Ok projected ->
        let prompt_bytes =
          match
@@ -880,7 +880,7 @@ let test_capacity_counts_rendered_role_framing () =
   | Ok None -> fail "declared capacity produced no projection"
   | Ok (Some project) ->
     (match project history with
-     | Error detail -> fail detail
+     | Error detail -> fail (Agent_core.Error.to_string detail)
      | Ok projected ->
        check bool "role framing forces a history cut" true
          (List.length projected < List.length history);

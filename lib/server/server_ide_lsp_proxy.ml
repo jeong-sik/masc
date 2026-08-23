@@ -818,49 +818,70 @@ type method_disposition =
   | Reject_write_adjacent
   | Unknown_forwarded_method of string
 
+(* Methods this proxy does not answer itself, and what happens to them.
+
+   The catalog above owns every method the proxy can answer; this table owns
+   the rest. The five that RFC-0378 rung E turned into plain relays —
+   definition, references, documentSymbol, documentHighlight, inlayHint — used
+   to be spelled here as well as there, which is two places deciding the same
+   thing about the same method. [classify_forwarded_method] now asks the
+   catalog first, so they appear once, and
+   [test_forwarded_methods_are_not_also_catalog_methods] fails if a method
+   comes to be named twice again (#28686). *)
+type relay_disposition =
+  | Relay_read_only
+  | Deny_write_adjacent
+
+let relayed_methods =
+  [ "textDocument/signatureHelp", Relay_read_only
+  ; "textDocument/declaration", Relay_read_only
+  ; "textDocument/typeDefinition", Relay_read_only
+  ; "textDocument/implementation", Relay_read_only
+  ; "textDocument/documentColor", Relay_read_only
+  ; "textDocument/colorPresentation", Relay_read_only
+  ; "textDocument/documentLink", Relay_read_only
+  ; "textDocument/selectionRange", Relay_read_only
+  ; "textDocument/linkedEditingRange", Relay_read_only
+  ; "textDocument/moniker", Relay_read_only
+  ; "textDocument/prepareCallHierarchy", Relay_read_only
+  ; "textDocument/prepareTypeHierarchy", Relay_read_only
+  ; "textDocument/semanticTokens/full", Relay_read_only
+  ; "textDocument/semanticTokens/full/delta", Relay_read_only
+  ; "textDocument/semanticTokens/range", Relay_read_only
+    (* Denied explicitly rather than left to the unknown branch, so the refusal
+       says "not permitted" instead of "unrecognized". *)
+  ; "textDocument/rename", Deny_write_adjacent
+  ; "textDocument/prepareRename", Deny_write_adjacent
+  ; "textDocument/formatting", Deny_write_adjacent
+  ; "textDocument/rangeFormatting", Deny_write_adjacent
+  ; "textDocument/onTypeFormatting", Deny_write_adjacent
+  ; "textDocument/willSaveWaitUntil", Deny_write_adjacent
+  ; "workspace/executeCommand", Deny_write_adjacent
+  ; "workspace/applyEdit", Deny_write_adjacent
+  ]
+;;
+
 let classify_forwarded_method method_ =
-  match method_ with
-  | "textDocument/signatureHelp"
-  | "textDocument/declaration"
-  | "textDocument/typeDefinition"
-  | "textDocument/implementation"
-  | "textDocument/documentColor"
-  | "textDocument/colorPresentation"
-  | "textDocument/documentLink"
-  | "textDocument/selectionRange"
-  | "textDocument/linkedEditingRange"
-  | "textDocument/moniker"
-  | "textDocument/prepareCallHierarchy"
-  | "textDocument/prepareTypeHierarchy"
-  | "textDocument/semanticTokens/full"
-  | "textDocument/semanticTokens/full/delta"
-  | "textDocument/semanticTokens/range"
-  (* RFC-0378 rung E: these five had MASC-overlay handlers that read the
-     lifetime-4-rows annotations store; the overlay died with that need,
-     and the native language-server behavior relays like any other
-     read-only method. *)
-  | "textDocument/definition"
-  | "textDocument/references"
-  | "textDocument/documentSymbol"
-  | "textDocument/documentHighlight"
-  | "textDocument/inlayHint" -> Forward_read_only
-  (* Everything else — textDocument/rename, prepareRename, formatting,
-     rangeFormatting, onTypeFormatting, willSaveWaitUntil,
-     workspace/executeCommand, workspace/applyEdit — is denied explicitly.
-     Unrecognized methods preserve their wire spelling for diagnostics. *)
-  | "textDocument/rename"
-  | "textDocument/prepareRename"
-  | "textDocument/formatting"
-  | "textDocument/rangeFormatting"
-  | "textDocument/onTypeFormatting"
-  | "textDocument/willSaveWaitUntil"
-  | "workspace/executeCommand"
-  | "workspace/applyEdit" -> Reject_write_adjacent
-  (* workspace/symbol and the LSP */resolve methods intentionally stay out of
-     the forward set: their payloads do not carry a [textDocument.uri], and this
-     multi-language proxy has no SSOT for selecting one server process. They are
-     rejected below as [Unknown_forwarded_method] with the original method name. *)
-  | unknown -> Unknown_forwarded_method unknown
+  match lsp_method_of_string method_ with
+  (* A catalog method reaching the relay path is one the dispatch above has no
+     arm for. Its classification already says whether the language server may
+     answer it. Mutation, Lifecycle and Status are all handled before this
+     point; refusing them here is the answer that cannot be wrong. *)
+  | Some catalog_method ->
+    (match lsp_method_classification catalog_method with
+     | Lsp_method_catalog.Read_only -> Forward_read_only
+     | Lsp_method_catalog.Mutation
+     | Lsp_method_catalog.Lifecycle
+     | Lsp_method_catalog.Status -> Reject_write_adjacent)
+  | None ->
+    (* workspace/symbol and the LSP */resolve methods are deliberately absent
+       from both tables: their payloads carry no [textDocument.uri], and this
+       multi-language proxy has no SSOT for choosing a server process. They
+       arrive here as [Unknown_forwarded_method] with their wire spelling. *)
+    (match List.assoc_opt method_ relayed_methods with
+     | Some Relay_read_only -> Forward_read_only
+     | Some Deny_write_adjacent -> Reject_write_adjacent
+     | None -> Unknown_forwarded_method method_)
 ;;
 
 (** Handle textDocument/codeLens — merge LSP response with MASC overlays. *)
@@ -1414,6 +1435,16 @@ module For_testing = struct
 
   let classify_handled_lsp_method method_ =
     Option.map lsp_method_classification (lsp_method_of_string method_)
+  ;;
+
+  let relayed_lsp_methods () =
+    List.map
+      (fun (method_, relay) ->
+         ( method_
+         , match relay with
+           | Relay_read_only -> Forward_read_only
+           | Deny_write_adjacent -> Reject_write_adjacent ))
+      relayed_methods
   ;;
 
 end

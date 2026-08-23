@@ -1921,3 +1921,143 @@ describe('AgentRoster live-only cards', () => {
     expect(fleetCss).toContain('.fl-attn-item[data-sev="bad"]')
   })
 })
+
+describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
+  let container: HTMLDivElement
+
+  function seedKeeperRow(overrides: Partial<Keeper> = {}): void {
+    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'nick0cave',
+        agent_name: 'keeper-nick0cave-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        runtime_canonical: 'claude',
+        recent_tool_names: ['keeper_tasks_list', 'keeper_board_get'],
+        latest_tool_call_count: 2,
+        ...overrides,
+      } as Keeper,
+    ]
+  }
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = true
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.useRealTimers()
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = false
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
+  })
+
+  it('groups the header create action under fl-top-actions with the design button class', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const wrap = container.querySelector('.fl-top .fl-top-actions')
+    const create = wrap?.querySelector('[data-testid="keeper-create-entry"]')
+    expect(create?.classList.contains('fl-top-btn')).toBe(true)
+    expect(create?.classList.contains('primary')).toBe(true)
+  })
+
+  it('wraps keeper row actions in the design hover group and adds the chat deep link', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const cell = container.querySelector('[data-testid="keeper-operations-row"] .fl-actcell') as HTMLElement
+    expect(cell.querySelector('.fl-actions [data-testid="keeper-action-buttons"]')).not.toBeNull()
+    const chat = cell.querySelector('a.fl-chat') as HTMLAnchorElement
+    expect(chat.getAttribute('href')).toContain('keepers')
+    expect(chat.getAttribute('href')).toContain('nick0cave')
+    expect(chat.getAttribute('title')).toContain('대화 콘솔 열기')
+  })
+
+  it('renders neither the actions group nor the chat link for an agent without a keeper runtime', async () => {
+    agents.value = [makeAgent({ name: 'taskmaster-proud-bear', status: 'active' })]
+    keepers.value = []
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="agent-only" />`, container)
+    })
+    await flushUi()
+
+    const cell = container.querySelector('[data-testid="keeper-operations-row"] .fl-actcell') as HTMLElement
+    expect(cell.querySelector('.fl-actions')).toBeNull()
+    expect(cell.querySelector('a.fl-chat')).toBeNull()
+  })
+
+  it('shows the bound runtime under the aside identity block only when assigned', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+    expect(container.querySelector('.fl-as-id .fl-as-runtime')?.textContent).toBe('claude')
+
+    seedKeeperRow({ runtime_canonical: undefined, runtime_id: undefined })
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+    expect(container.querySelector('.fl-as-id .fl-as-runtime')).toBeNull()
+  })
+
+  it('lists recent tools as fl-toolrow rows and keeps the live count chip', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('.fl-tools .fl-toolrow')
+    expect(Array.from(rows).map(el => el.textContent)).toEqual([
+      'keeper_tasks_list',
+      'keeper_board_get',
+    ])
+    expect(container.textContent).toContain('2회 관찰됨')
+  })
+
+  it('renders the aside action bar from live keeper action visibility', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const keys = Array.from(
+      container.querySelectorAll('[data-testid="fleet-aside-actions"] .fl-actbar .fl-btn'),
+    ).map(el => (el as HTMLElement).dataset.action)
+    expect(keys).toEqual(['pause', 'wakeup', 'shutdown'])
+  })
+})

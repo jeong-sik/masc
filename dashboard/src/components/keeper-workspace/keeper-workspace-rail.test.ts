@@ -10,6 +10,8 @@ import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail
 import { selectedTask } from '../goals/task-detail-selection'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
+import type { DashboardKeeperWaitingInventory } from '../../api'
+import { keeperWaitingInventoryStates } from '../../keeper-waiting-inventory-store'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
 
 // The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
@@ -120,6 +122,13 @@ function mkTask(partial: Partial<Task>): Task {
   return { id: 'T-0', title: 'task', ...partial } as Task
 }
 
+// The runtime card follows the design's collapsed-by-default disclosure
+// (rails.jsx RailRuntime): click `.rtc-head` to open `.rtc-detail`.
+function openRuntimeDetail(container: Element): void {
+  const head = container.querySelector('.rtc-head') as HTMLButtonElement | null
+  if (head) fireEvent.click(head)
+}
+
 beforeEach(() => {
   selectedTask.value = null
   tasks.value = [
@@ -133,6 +142,7 @@ afterEach(() => {
   tasks.value = []
   selectedTask.value = null
   shellAuthSummary.value = null
+  keeperWaitingInventoryStates.value = {}
   runtimeRawSpecOpen.value = false
   vi.clearAllMocks()
   vi.useRealTimers()
@@ -151,6 +161,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders the runtime vitals (throughput section removed)', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    openRuntimeDetail(container)
     // The 처리량 (throughput) section was removed from the keeper rail as
     // low-signal in the detail view; the 런타임 section keeps its vitals.
     expect(container.textContent).not.toContain('처리량')
@@ -219,6 +230,7 @@ describe('KeeperWorkspaceRail', () => {
   it('shows the model line as missing when no model was reported', () => {
     const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('runpod_gemma')
     // v2 always renders the model cell; when no model is reported it falls back
@@ -232,6 +244,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.pending' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="loading"]')).not.toBeNull()
@@ -245,6 +258,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.failed' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="error"]')).not.toBeNull()
@@ -260,6 +274,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.unregistered' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="missing"]')).not.toBeNull()
@@ -451,6 +466,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.minimax-m3' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-mode="chat-template-kwargs"]')).not.toBeNull()
@@ -548,6 +564,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'runpod.gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('gemma')
@@ -596,6 +613,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.unknown-wire' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="unknown"]')).not.toBeNull()
@@ -636,6 +654,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.deepseek-v3-1' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-mode="ollama-think"]')).not.toBeNull()
@@ -929,5 +948,144 @@ describe('KeeperWorkspaceRail', () => {
     tasks.value = []
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     expect(container.textContent).toContain('할당된 태스크 없음')
+  })
+
+  it('renders the design rtc-spec rows from catalog max context/output only', async () => {
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
+      providers: [
+        {
+          provider: 'ollama_cloud.spec',
+          runtime_id: 'ollama_cloud.spec',
+          model_api_name: 'spec-model',
+          max_context: 131072,
+          max_output_tokens: 65536,
+          temperature: 0.65,
+          top_p: 0.91,
+          tools_support: true,
+          thinking_support: true,
+          streaming: true,
+          models: ['spec-model'],
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.spec' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.rtc-spec')?.textContent).toContain('최대 컨텍스트')
+    })
+    const specs = Array.from(container.querySelectorAll('.rtc-spec')).map(node => node.textContent)
+    expect(specs[0]).toContain('최대 출력')
+    // Sampling row renders only catalog-declared fields — never the design's
+    // hardcoded mock (`temp 0.3 · top_p 0.95 · max_tokens 4,096`).
+    expect(specs[1]).toContain('샘플링 temp 0.65 · top_p 0.91')
+    expect(container.textContent).not.toContain('temp 0.3')
+  })
+
+  it('renders rtc-spec placeholders instead of inventing context/output limits', () => {
+    const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
+    const spec = container.querySelector('.rtc-spec')
+    expect(spec?.textContent).toContain('최대 컨텍스트 — · 최대 출력 —')
+    expect(container.textContent).not.toContain('샘플링')
+  })
+
+  it('renders the heartbeat line from the keepalive interval and last heartbeat', () => {
+    const k = mkKeeper({
+      keeper_keepalive_interval_s: 60,
+      last_heartbeat: new Date(Date.now() - 15_000).toISOString(),
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const hb = container.querySelector('.rail-hb')
+    expect(hb).not.toBeNull()
+    expect(hb?.textContent).toContain('heartbeat 60s')
+    expect(hb?.textContent).toContain('다음 wake ~45s')
+    expect(hb?.querySelector('.rail-hb-note')?.textContent).toBe('poll')
+  })
+
+  it('omits the heartbeat line when no keepalive interval is reported', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    expect(container.querySelector('.rail-hb')).toBeNull()
+  })
+
+  it('marks heartbeat observation errors instead of substituting a stale ETA', () => {
+    const k = mkKeeper({
+      keeper_keepalive_interval_s: 60,
+      last_heartbeat: new Date(Date.now() - 15_000).toISOString(),
+      heartbeat_observation_error: 'ledger unreadable',
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const hb = container.querySelector('.rail-hb')
+    expect(hb?.textContent).toContain('다음 wake ~—')
+    expect(hb?.querySelector('.rail-hb-note')?.textContent).toBe('관측 오류')
+    expect(hb?.getAttribute('title')).toBe('ledger unreadable')
+  })
+
+  it('renders the drain card with owned tasks while Draining', () => {
+    const k = mkKeeper({ lifecycle_phase: 'Draining' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const card = container.querySelector('.drain-card')
+    expect(card).not.toBeNull()
+    expect(card?.getAttribute('data-phase')).toBe('Draining')
+    expect(container.querySelector('.drain-badge')?.textContent).toBe('Draining')
+    expect(container.querySelector('.drain-count')?.textContent).toContain('1건 비우는 중')
+    expect(container.querySelector('.drain-t-id')?.textContent).toBe('T-4412')
+    expect(container.querySelector('.drain-t-title')?.textContent).toContain('세그먼트 리텐션')
+    expect(container.querySelector('.drain-t-state')?.textContent).toBe('in_progress')
+    expect(container.textContent).not.toContain('T-9999')
+  })
+
+  it('renders the handoff gloss and no event flush while HandingOff', () => {
+    const k = mkKeeper({ lifecycle_phase: 'HandingOff' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    expect(container.textContent).toContain('핸드오프 진행')
+    expect(container.querySelector('.drain-gloss')?.textContent).toContain('인계 중')
+    expect(container.querySelector('.drain-eventq')).toBeNull()
+  })
+
+  it('lists queued stimuli from the waiting inventory while Draining', () => {
+    const inventory = {
+      schema: 'masc.dashboard.keeper_waiting_inventory.v3',
+      source: 'server_keeper_waiting_inventory',
+      keepers: [
+        {
+          keeper_name: 'masc-improver',
+          state: 'waiting',
+          waiting_count: 1,
+          waiting_count_truncated: false,
+          sources: { event_queue_pending: 1 },
+          truncated_sources: {},
+          waiting_on: [
+            {
+              source: 'event_queue_pending',
+              waiting_on: 'board_mention',
+              what: 'board mention 대기',
+              wake_producer: 'board watcher',
+              since: 1_800_000_000,
+              since_iso: '2027-01-15T00:00:00Z',
+              next_action: 'drain',
+            },
+          ],
+        },
+      ],
+    } as unknown as DashboardKeeperWaitingInventory
+    keeperWaitingInventoryStates.value = {
+      'masc-improver': { inventory, ready: true, loading: false, error: null },
+    }
+    const k = mkKeeper({ lifecycle_phase: 'Draining' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    expect(container.querySelector('.drain-eventq-h')?.textContent).toBe('대기 자극 flush')
+    const ev = container.querySelector('.drain-ev')
+    expect(ev?.querySelector('.drain-ev-kind')?.textContent).toBe('board_mention')
+    expect(ev?.querySelector('.drain-ev-from')?.textContent).toBe('board watcher')
+    expect(ev?.querySelector('.drain-ev-at')?.textContent).not.toBe('—')
+  })
+
+  it('does not render the drain card for a running keeper', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    expect(container.querySelector('.drain-card')).toBeNull()
   })
 })

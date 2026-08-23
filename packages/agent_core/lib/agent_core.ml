@@ -99,6 +99,7 @@ module Agent_lifecycle = Agent_lifecycle
 module Agent_lifecycle_events = Agent_lifecycle_events
 module Agent_turn = Agent_turn
 module Agent_tools = Agent_tools
+module Agent_tool_pre_execution_gate = Agent_tool_pre_execution_gate
 module Agent_checkpoint = Agent_checkpoint
 module Terminal_tool_receipt = Terminal_tool_receipt
 module Agent = Agent

@@ -198,7 +198,7 @@ let test_full_flow_externalize_reference_serve () =
         | Error error ->
           Alcotest.failf
             "provider projection failed: %s"
-            error
+            (Agent_core.Error.to_string error)
       in
       let projected_content = extract_tool_content (List.hd projected) in
       Alcotest.(check string) "provider content keeps artifact reference"

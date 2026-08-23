@@ -34,9 +34,13 @@ type context_fit_admission =
   | Body_only
   | Require_exact_fit
 
-(** Caller-owned provider-message projection. [Error detail] aborts the turn
-    before request measurement or dispatch. Canonical Agent state is unchanged. *)
-type model_input_projection = Types.message list -> (Types.message list, string) result
+(** Caller-owned provider-message projection. [Error e] aborts the turn before
+    request measurement or dispatch; canonical Agent state is unchanged. The
+    error is the caller's own typed fact, not a rendered string: a projection
+    that refuses because this candidate's declared ceiling cannot carry the
+    turn says so with [Error.Api (ContextOverflow _)], which the lane loop
+    already rotates on. *)
+type model_input_projection = Types.message list -> (Types.message list, Error.t) result
 
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 

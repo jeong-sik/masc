@@ -169,6 +169,7 @@ val prepare_turn :
     copy kept. *)
 
 val dynamic_tools :
+  tool_approval:Agent_core.Hooks.tool_approval_callback option ->
   runtime_label:string ->
   keeper_name:string ->
   turn_count:int ->
@@ -182,7 +183,18 @@ val dynamic_tools :
   pre_tool_rejects:rejected_tool_call list ref ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
   (dynamic_tool list, Agent_core.Error.t) result
-(** Project Agent Core tools onto one official-client turn. Three consecutive
+(** Project Agent Core tools onto one official-client turn.
+
+    [tool_approval] settles a [pre_tool_use] hook that answers
+    [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --
+    both paths go through
+    {!Agent_core.Agent_tool_pre_execution_gate.settle}. Without it such a
+    decision is rejected rather than admitted, so a caller that does not
+    supply one is no more permissive than before.
+
+    Required rather than optional so a new runtime lane cannot inherit [None]
+    by saying nothing. Silence is how one lane came to offer a decision the
+    other refused. Three consecutive
     calls with the same tool, canonical input, disposition, and output produce
     [abort_turn]; this is the official-client equivalent of Agent Core's
     repeated exact tool boundary and prevents a vendor-owned loop from holding

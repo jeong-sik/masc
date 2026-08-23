@@ -31,7 +31,7 @@ type context_fit_admission =
   | Body_only
   | Require_exact_fit
 
-type model_input_projection = message list -> (message list, string) result
+type model_input_projection = message list -> (message list, Error.t) result
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 
 type options =

@@ -355,10 +355,11 @@ describe('KeeperToolCallInspector render', () => {
           success: true,
           duration_ms: 42,
           // Recorded shape for Execute rows: the writer stores the cwd as
-          // target_path (masc#29013) — a directory, not a file.
+          // target_path and says so with target_kind "directory" (masc#29013).
+          // It used to say "path", which a file target also says.
           action_radius: {
             action_key: 'Execute',
-            target_kind: 'path',
+            target_kind: 'directory',
             target_path: 'repos/masc',
             observed_paths: ['repos/masc'],
             error: null,

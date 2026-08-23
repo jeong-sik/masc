@@ -197,6 +197,7 @@ val run_turn
   -> ?temperature:float
   -> ?on_event:(Agent_core.Types.sse_event -> unit)
   -> ?on_tool_result_ready:(tool_call_id:string -> unit)
+  -> ?approval_gate:Keeper_tool_approval_gate.t
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string

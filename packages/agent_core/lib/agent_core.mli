@@ -68,6 +68,14 @@ module Agent_lifecycle = Agent_lifecycle
 module Agent_lifecycle_events = Agent_lifecycle_events
 module Agent_turn = Agent_turn
 module Agent_tools = Agent_tools
+
+(** How one [pre_tool_use] decision settles into run / block / reject.
+
+    Exposed because a host that runs tools outside {!Agent_tools} -- a provider
+    with its own tool loop -- has to reach the same verdict for the same
+    decision. Deciding it twice is how the same hook came to mean different
+    things depending on which runtime a caller was bound to. *)
+module Agent_tool_pre_execution_gate = Agent_tool_pre_execution_gate
 module Agent_checkpoint = Agent_checkpoint
 module Terminal_tool_receipt = Terminal_tool_receipt
 module Agent = Agent

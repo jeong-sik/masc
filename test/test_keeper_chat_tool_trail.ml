@@ -34,11 +34,40 @@ let test_subject_pattern_before_path () =
     (Some "agent block")
 ;;
 
+(* The known keys are a preference, not a gate. A shape none of them matches is
+   still named by its arguments, because the alternative is a bare tool name:
+   on one live keeper three of six calls had no matching key
+   ([keeper_tasks_audit {"limit":20}], [masc_agent_timeline
+   {"agent_name":…,"limit":5,…}], [masc_agent_card {}]) and scrolled back
+   saying only that some tool ran. *)
 let test_subject_absent_keys () =
   check_subject
-    "an argument shape with no known key names nothing"
+    "an argument shape with no known key is named by its arguments"
     ~args:{|{"include_done":true,"if_revision":12}|}
-    None
+    (Some {|{"include_done":true,"if_revision":12}|})
+;;
+
+(* The empty object is the one shape that legitimately names nothing: there is
+   no argument to show. *)
+let test_subject_empty_object () =
+  check_subject "an empty argument object names nothing" ~args:"{}" None
+;;
+
+(* The six tool calls one live keeper had actually made, as the transcript
+   stored them. Three of them named nothing before the fallback, which is what
+   sent an operator looking for the tool trail that was already there. *)
+let test_subject_names_the_live_masc_shapes () =
+  check_subject "an agent timeline is named by whose it is"
+    ~args:
+      {|{"agent_name":"keeper-taskmaster-agent","limit":5,"include_tasks":true}|}
+    (Some "keeper-taskmaster-agent");
+  check_subject "an audit with only a limit still says its limit"
+    ~args:{|{"limit":20}|}
+    (Some {|{"limit":20}|});
+  check_subject "a card with no arguments names nothing" ~args:"{}" None;
+  check_subject "an Execute is named by the command it ran"
+    ~args:{|{"argv":["git","-C","repos/masc","status","--short"]}|}
+    (Some "git -C repos/masc status --short")
 ;;
 
 let test_subject_empty_args () = check_subject "no arguments name nothing" ~args:"" None
@@ -198,6 +227,9 @@ let () =
         ; Alcotest.test_case "file_path" `Quick test_subject_file_path
         ; Alcotest.test_case "pattern before path" `Quick test_subject_pattern_before_path
         ; Alcotest.test_case "unknown keys" `Quick test_subject_absent_keys
+        ; Alcotest.test_case "empty object" `Quick test_subject_empty_object
+        ; Alcotest.test_case "live masc shapes" `Quick
+            test_subject_names_the_live_masc_shapes
         ; Alcotest.test_case "empty args" `Quick test_subject_empty_args
         ; Alcotest.test_case "empty value" `Quick test_subject_empty_value
         ; Alcotest.test_case "partial json" `Quick test_subject_partial_json

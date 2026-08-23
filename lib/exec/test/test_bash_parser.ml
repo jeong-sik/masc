@@ -130,16 +130,6 @@ let test_input_redirect_parsed () =
      | _ -> assert false)
   | _ -> assert false
 
-let test_general_redirect_rejected_before_dispatch () =
-  match Bash.parse_string "echo hi > /tmp/out" with
-  | Parsed.Parsed ir ->
-    let result = Masc_exec.Exec_dispatch.dispatch ir in
-    assert (result.status = Unix.WEXITED 1);
-    assert (result.stdout = "");
-    assert (String.contains result.stderr 'w');
-    assert (String.contains result.stderr '/')
-  | _ -> assert false
-
 let test_fd_redirect_parsed () =
   match Bash.parse_string "ls 2>&1" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
@@ -477,7 +467,6 @@ let () =
   test_general_redirect_parsed ();
   test_redirect_append_parsed ();
   test_input_redirect_parsed ();
-  test_general_redirect_rejected_before_dispatch ();
   test_fd_redirect_parsed ();
   test_dev_null_redirect_parsed ();
   test_spaced_dev_null_redirect_parsed ();

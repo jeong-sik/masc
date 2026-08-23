@@ -10,7 +10,7 @@ use crate::game::lifecycle::TrpgLifecycleState;
 
 use super::mcp_rpc::mcp_tool_call;
 use super::{
-    actor_admin_set_status, actor_admin_workspace_id, clear_trpg_dom, refresh_actor_admin_list,
+    clear_trpg_dom,
     render_auto_round_toggle, set_current_workspace_id, set_element_display,
     sync_session_pause_buttons, unique_non_empty,
 };
@@ -851,20 +851,6 @@ fn apply_workspace_switch_from_ui(
     {
         input.set_value("");
     }
-    let doc_for_refresh = doc.clone();
-    wasm_bindgen_futures::spawn_local(async move {
-        if let Ok(rows) = refresh_actor_admin_list(&doc_for_refresh).await {
-            actor_admin_set_status(
-                &doc_for_refresh,
-                &format!(
-                    "workspace {} 액터 {}명",
-                    actor_admin_workspace_id(),
-                    rows.len()
-                ),
-                "status-ok",
-            );
-        }
-    });
     let doc_for_workspaces = doc.clone();
     wasm_bindgen_futures::spawn_local(async move {
         if let Err(e) = refresh_workspaces_from_server(&doc_for_workspaces).await {

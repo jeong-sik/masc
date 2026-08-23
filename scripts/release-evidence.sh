@@ -10,7 +10,7 @@ The bundle includes:
   - artifact install smoke (`--version` from an installed location)
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
-  - dashboard read-path captures for briefing + namespace truth
+  - dashboard read-path captures for briefing + project snapshot
   - Keeper V01-V15 compile/regression conformance logs + correlated bundle
   - RW01-RW16 real-world multi-Keeper bundle is verified separately after an isolated runtime run
 
@@ -67,9 +67,9 @@ status_json="$out_dir/masc-status.json"
 briefing_headers="$out_dir/dashboard-briefing.headers"
 briefing_body="$out_dir/dashboard-briefing.body"
 briefing_json="$out_dir/dashboard-briefing.json"
-namespace_headers="$out_dir/namespace-truth.headers"
-namespace_body="$out_dir/namespace-truth.body"
-namespace_json="$out_dir/namespace-truth.json"
+snapshot_headers="$out_dir/project-snapshot.headers"
+snapshot_body="$out_dir/project-snapshot.body"
+snapshot_json="$out_dir/project-snapshot.json"
 dev_token_json="$out_dir/dashboard-dev-token.json"
 install_version_stdout="$out_dir/install-version.stdout"
 install_version_stderr="$out_dir/install-version.stderr"
@@ -344,11 +344,15 @@ curl -sS -D "$briefing_headers" -o "$briefing_body" \
 normalize_http_json "$briefing_headers" "$briefing_body" "$briefing_json" \
   "/api/v1/dashboard/briefing"
 
-curl -sS -D "$namespace_headers" -o "$namespace_body" \
+# #29766 folded two byte-identical routes for this snapshot into one and kept
+# /project-snapshot. It read "nothing fetches namespace-truth" from the
+# dashboard sources; this script fetches it, and answered 404 on every PR from
+# then on.
+curl -sS -D "$snapshot_headers" -o "$snapshot_body" \
   -H 'Accept: application/json' \
-  "${BASE_URL}/api/v1/dashboard/namespace-truth"
-normalize_http_json "$namespace_headers" "$namespace_body" "$namespace_json" \
-  "/api/v1/dashboard/namespace-truth"
+  "${BASE_URL}/api/v1/dashboard/project-snapshot"
+normalize_http_json "$snapshot_headers" "$snapshot_body" "$snapshot_json" \
+  "/api/v1/dashboard/project-snapshot"
 
 # The live smoke has completed. Stop its isolated server before executing the
 # lifecycle matrix so process/port-sensitive scenarios observe a clean host.
@@ -370,7 +374,7 @@ python3 - \
   "$tools_json" \
   "$status_json" \
   "$briefing_json" \
-  "$namespace_json" \
+  "$snapshot_json" \
   "$initialize_json" \
   "$server_log" \
   "$lifecycle_bundle_json" \
@@ -392,7 +396,7 @@ from datetime import datetime, timezone
     tools_json,
     status_json,
     briefing_json,
-    namespace_json,
+    snapshot_json,
     initialize_json,
     server_log,
     lifecycle_bundle_json,
@@ -407,7 +411,7 @@ health = load(health_json)
 tools = load(tools_json)
 status = load(status_json)
 briefing = load(briefing_json)
-namespace_truth = load(namespace_json)
+project_snapshot = load(snapshot_json)
 initialize = load(initialize_json)
 lifecycle = load(lifecycle_bundle_json)
 
@@ -420,7 +424,7 @@ for item in content:
       break
 
 briefing_keys = sorted(briefing.keys())[:10]
-namespace_keys = sorted(namespace_truth.keys())[:10]
+snapshot_keys = sorted(project_snapshot.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -461,7 +465,7 @@ md = f"""# Release Evidence Bundle
 ## Dashboard Read Paths
 
 - `/api/v1/dashboard/briefing` returned HTTP-shaped JSON with keys: `{", ".join(briefing_keys)}`
-- `/api/v1/dashboard/namespace-truth` returned keys: `{", ".join(namespace_keys)}`
+- `/api/v1/dashboard/project-snapshot` returned keys: `{", ".join(snapshot_keys)}`
 
 ## Keeper Full-Lifecycle Conformance
 
@@ -481,7 +485,7 @@ md = f"""# Release Evidence Bundle
 - `tools-list.json`
 - `masc-status.json`
 - `dashboard-briefing.json`
-- `namespace-truth.json`
+- `project-snapshot.json`
 - `server.log`
 - `keeper-full-lifecycle/bundle.json`
 - `keeper-full-lifecycle/bundle.md`

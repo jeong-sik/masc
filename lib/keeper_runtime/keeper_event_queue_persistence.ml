@@ -233,22 +233,27 @@ let read_primary_current_unlocked owner =
   | Error _ as error -> error
   | Ok None -> Ok Primary_missing
   | Ok (Some json) ->
+    (* Fail open. A snapshot this binary cannot decode is an absent snapshot:
+       the queue starts empty and the WAL replays on top, which is the same
+       path a first boot takes. Refusing instead stopped the whole fleet three
+       times on 2026-08-23, every time on a field or variant this binary had
+       itself stopped writing, and every time with nothing pending. What is
+       lost is the pending stimuli and the idempotence ledger in the
+       unreadable file; the WARN below is the record of that loss. *)
+    let fail_open detail =
+      Log.Keeper.warn
+        "event queue snapshot unreadable at %s, starting from an empty queue \
+         (pending stimuli and the disposition ledger in it are lost): %s"
+        path
+        detail;
+      Ok Primary_missing
+    in
     (match schema_field json with
-     | Error message ->
-       Error
-         (reset_required_message
-            ~path
-            ~surface:"event queue snapshot"
-            message)
+     | Error message -> fail_open message
      | Ok _ ->
        (match State.of_yojson json with
         | Ok state -> Ok (Primary_current state)
-        | Error message ->
-          Error
-            (reset_required_message
-               ~path
-               ~surface:"event queue snapshot"
-               message)))
+        | Error message -> fail_open message))
 ;;
 
 let read_primary_unlocked = read_primary_current_unlocked

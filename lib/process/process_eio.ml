@@ -699,11 +699,54 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
       s)
   |> unix_status_of_eio_status
 
+type output_destination =
+  | Captured
+  | Written_to of {
+      path : string;
+      append : bool;
+    }
+
+type input_origin =
+  | Inherited
+  | From_string of string
+  | Read_from of { path : string }
+
+(* [Inherited] / [Captured] mean the stage takes the pipeline's own plumbing:
+   the pipe from the stage before it, the pipe to the stage after it, the
+   stderr this runtime collects. A file replaces that plumbing for one stream,
+   which is how a shell reads `a > f | b` -- b's stdin is still the link, and
+   it simply reaches EOF with nothing in it. *)
 type pipeline_stage = {
   argv : string list;
   env : string array option;
   cwd : string option;
+  stdin : input_origin;
+  stdout : output_destination;
+  stderr : output_destination;
 }
+
+let plumbed_stage ~argv ~env ~cwd =
+  { argv; env; cwd; stdin = Inherited; stdout = Captured; stderr = Captured }
+;;
+
+(* Opening a stage's file happens deep inside the spawn loop, where a Result
+   cannot be threaded out without restructuring the pipe choreography around
+   it. The exception is caught at the entry point and becomes the Error the
+   caller sees; it never escapes this module. *)
+exception Pipeline_redirect_failed of string
+
+let stage_holds_a_file { stdin; stdout; stderr; _ } =
+  let source_is_a_file =
+    match stdin with
+    | Inherited | From_string _ -> false
+    | Read_from _ -> true
+  in
+  let sink_is_a_file = function
+    | Captured -> false
+    | Written_to _ -> true
+  in
+  source_is_a_file || sink_is_a_file stdout || sink_is_a_file stderr
+;;
 
 let effective_cwd default_cwd = function
   | None -> default_cwd
@@ -957,18 +1000,6 @@ let run_argv_with_stdin_and_status
       argv
   in
   (status, output_for_status ~status ~stdout ~stderr)
-
-type output_destination =
-  | Captured
-  | Written_to of {
-      path : string;
-      append : bool;
-    }
-
-type input_origin =
-  | Inherited
-  | From_string of string
-  | Read_from of { path : string }
 
 (* A file redirect is opened before the spawn, the way a shell does it, so a
    path that cannot be opened stops the command instead of letting it run with
@@ -1276,15 +1307,16 @@ let run_argv_with_status_split_streaming
 
 let run_argv_pipeline_with_status_split ?timeout_sec
     ?on_stdout_chunk ?on_stderr_chunk
-    (stages : pipeline_stage list) : Unix.process_status * string * string =
+    (stages : pipeline_stage list) :
+    (Unix.process_status * string * string, string) result =
   let timeout_sec = validate_timeout_sec timeout_sec in
   let fallback_buffered () =
     let rec chain prev_stdout = function
       | [] -> (Unix.WEXITED 0, prev_stdout, "")
-      | [ { argv; env; cwd } ] ->
+      | [ { argv; env; cwd; _ } ] ->
           run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec ?env
             ?cwd ~stdin_content:prev_stdout argv
-      | { argv; env; cwd } :: rest ->
+      | { argv; env; cwd; _ } :: rest ->
           let status, stdout, stderr =
             run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec
               ?env ?cwd ~stdin_content:prev_stdout argv
@@ -1296,9 +1328,9 @@ let run_argv_pipeline_with_status_split ?timeout_sec
     let result =
       match stages with
       | [] -> (Unix.WEXITED 0, "", "")
-      | [ { argv; env; cwd } ] ->
+      | [ { argv; env; cwd; _ } ] ->
           run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
-      | { argv; env; cwd } :: rest ->
+      | { argv; env; cwd; _ } :: rest ->
           let status, stdout, stderr =
             run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
           in
@@ -1317,11 +1349,22 @@ let run_argv_pipeline_with_status_split ?timeout_sec
      | _ -> ());
     result
   in
+  let holds_files = List.exists stage_holds_a_file stages in
+  let without_eio () =
+    (* The buffered fallback chains stages through strings and has no way to
+       hand a child a file. Running it anyway would drop the redirect. *)
+    if holds_files
+    then
+      Error
+        "a pipeline stage names a file, which needs the Eio runtime this \
+         process has not initialized"
+    else Ok (fallback_buffered ())
+  in
   with_spawn_guard (fun () ->
-      if not (is_initialized ()) then fallback_buffered ()
+      if not (is_initialized ()) then without_eio ()
       else
         match get_proc_mgr (), get_clock (), get_cwd_default () with
-        | Error _, _, _ | _, Error _, _ | _, _, Error _ -> fallback_buffered ()
+        | Error _, _, _ | _, Error _, _ | _, _, Error _ -> without_eio ()
         | Ok pm, Ok clk, Ok default_cwd ->
             let label =
               stages
@@ -1352,21 +1395,60 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                        (fun _ -> Eio.Process.pipe ~sw pm)
                        stages
                    in
+                   (* A file named by a stage replaces the plumbing it would
+                      otherwise take. The pipe is still created and still
+                      closed below, so the drain choreography does not change:
+                      an unused read end simply reaches EOF empty. *)
+                   let opened_files = ref [] in
+                   let sink_flow ~fallback = function
+                     | Captured -> (fallback :> closable_sink)
+                     | Written_to { path; append } ->
+                       (match open_sink ~sw ~fs:default_cwd ~path ~append with
+                        | Ok sink ->
+                          let sink = (sink :> closable_sink) in
+                          opened_files := sink :: !opened_files;
+                          sink
+                        | Error message -> raise (Pipeline_redirect_failed message))
+                   in
+                   let source_flow ~fallback = function
+                     | Inherited -> fallback
+                     | From_string content ->
+                       Some
+                         (Eio.Flow.string_source content
+                          :> Eio.Flow.source_ty Eio.Resource.t)
+                     | Read_from { path } ->
+                       (match open_source ~sw ~fs:default_cwd path with
+                        | Ok source ->
+                          Some (source :> Eio.Flow.source_ty Eio.Resource.t)
+                        | Error message -> raise (Pipeline_redirect_failed message))
+                   in
                    let procs =
                      stages
                      |> List.mapi (fun idx stage ->
                        Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status
                          ~argv:stage.argv ?env:stage.env ?cwd:stage.cwd ();
                        let stdin =
-                         if idx = 0 then None
-                         else Some (fst (List.nth links (idx - 1)))
+                         source_flow
+                           ~fallback:
+                             (if idx = 0
+                              then None
+                              else
+                                Some
+                                  (fst (List.nth links (idx - 1))
+                                   :> Eio.Flow.source_ty Eio.Resource.t))
+                           stage.stdin
                        in
                        let stdout =
-                         if idx = List.length stages - 1
-                         then final_stdout_w
-                         else snd (List.nth links idx)
+                         sink_flow
+                           ~fallback:
+                             (if idx = List.length stages - 1
+                              then final_stdout_w
+                              else snd (List.nth links idx))
+                           stage.stdout
                        in
-                       let stderr = snd (List.nth stderr_pairs idx) in
+                       let stderr =
+                         sink_flow ~fallback:(snd (List.nth stderr_pairs idx)) stage.stderr
+                       in
                        let proc =
                          Eio.Process.spawn
                            ~sw
@@ -1381,6 +1463,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                        phase_ref := Timeout_origin.Command;
                        proc)
                    in
+                   List.iter Eio.Flow.close !opened_files;
                    Eio.Flow.close final_stdout_w;
                    List.iter
                      (fun (r, w) ->
@@ -1434,11 +1517,15 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                      with_explicit_timeout_exn clk timeout_sec (fun () ->
                        let statuses, () = Eio.Fiber.pair await_all drain_all in
                        let stderr = stderr_contents () in
-                       (pipeline_status statuses, Exec_buffer.render stdout_buf, stderr))
+                       Ok
+                         ( pipeline_status statuses
+                         , Exec_buffer.render stdout_buf
+                         , stderr ))
                    with Explicit_process_timeout timeout_sec ->
                      List.iter (reap_proc_with_clock clk) procs;
                      raise (Explicit_process_timeout timeout_sec))
              with
+             | Pipeline_redirect_failed message -> Error message
              | Explicit_process_timeout timeout_sec ->
                  Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                    timeout_sec (Timeout_origin.to_label !phase_ref) label;
@@ -1453,21 +1540,22 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                        ()
                    else streamed_stderr
                  in
-                 (Unix.WEXITED 124, Exec_buffer.render stdout_buf, stderr)
+                 Ok (Unix.WEXITED 124, Exec_buffer.render stdout_buf, stderr)
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn ->
                  if should_retry_unix_fallback exn then (
                    Log.Misc.warn
                      "[Process_eio] pipeline bind error, retrying via Unix fallback: %s — %s"
                      label (Printexc.to_string exn);
-                   fallback_buffered ())
+                   without_eio ())
                  else (
                    Log.Misc.error "[Process_eio] pipeline error: %s — %s" label
                      (Printexc.to_string exn);
-                   ( Unix.WEXITED 127,
-                     "",
-                     process_error_output ~label
-                       ~reason:(reason_of_exn_for_output exn) () ))))
+                   Ok
+                     ( Unix.WEXITED 127,
+                       "",
+                       process_error_output ~label
+                         ~reason:(reason_of_exn_for_output exn) () ))))
 
 let run_argv_with_status ?timeout_sec ?env ?cwd
     (argv : string list) : Unix.process_status * string =

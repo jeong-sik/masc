@@ -201,6 +201,44 @@ let test_relative_target_without_a_cwd_is_refused () =
       (Astring.String.is_infix ~affix:"cwd" result.stderr))
 ;;
 
+let pipeline stages = E.Exec_dispatch.dispatch (E.Shell_ir.Pipeline stages)
+
+(* A stage naming a file used to knock the whole pipeline off real process
+   pipes and onto a buffered chain that runs each stage to completion in turn.
+   `yes` only stops when its reader closes, so that chain never returned. This
+   finishing at all is the assertion. *)
+let test_a_stage_redirect_keeps_real_pipes () =
+  with_runtime (fun () ->
+    let out = path "pipeline-out.txt" in
+    remove_if_present out;
+    let result =
+      pipeline
+        [ E.Shell_ir.Simple (simple "yes" [ "line" ])
+        ; E.Shell_ir.Simple
+            (simple
+               ~redirects:
+                 [ E.Redirect_scope.File
+                     { fd = 1; target = target out; mode = E.Redirect_scope.Write }
+                 ]
+               "head"
+               [ "-1" ])
+        ]
+    in
+    ignore result;
+    Alcotest.(check string) "the last stage wrote the file" "line\n" (read_file out))
+;;
+
+let test_pipeline_still_pipes_without_a_redirect () =
+  with_runtime (fun () ->
+    let result =
+      pipeline
+        [ E.Shell_ir.Simple (simple "printf" [ "a\nb\nc\n" ])
+        ; E.Shell_ir.Simple (simple "head" [ "-2" ])
+        ]
+    in
+    Alcotest.(check string) "the pipe still carries bytes" "a\nb\n" result.stdout)
+;;
+
 let () =
   (try Sys.mkdir temp_dir 0o700 with Sys_error _ -> ());
   Alcotest.run
@@ -217,6 +255,14 @@ let () =
             "discard_still_drops_without_touching_a_file"
             `Quick
             test_discard_still_drops_without_touching_a_file
+        ; Alcotest.test_case
+            "a_stage_redirect_keeps_real_pipes"
+            `Quick
+            test_a_stage_redirect_keeps_real_pipes
+        ; Alcotest.test_case
+            "pipeline_still_pipes_without_a_redirect"
+            `Quick
+            test_pipeline_still_pipes_without_a_redirect
         ; Alcotest.test_case
             "relative_target_without_a_cwd_is_refused"
             `Quick

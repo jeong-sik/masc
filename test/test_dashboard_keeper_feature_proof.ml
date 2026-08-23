@@ -252,6 +252,93 @@ let test_stopped_keeper_fails_board_reactive_autonomy () =
     (U.member "status" feature |> U.to_string)
 ;;
 
+(* A keeper whose record will not open did not fail to exercise the feature --
+   it failed to be read. Reporting it under both readings puts one name in two
+   lists that mean opposite things, and every surface drawing the report shows
+   it twice, once as a keeper to go chase and once as a record to go fix. *)
+let corrupt_keeper_record config name =
+  let path = Masc.Keeper_types_profile.keeper_meta_path config name in
+  let out = open_out path in
+  output_string out "{ this is not a keeper record";
+  close_out out
+;;
+
+let read_error_keepers feature =
+  feature
+  |> U.member "keeper_evidence"
+  |> U.member "read_errors"
+  |> U.to_list
+  |> List.map (fun entry -> U.member "keeper" entry |> U.to_string)
+  |> List.sort compare
+;;
+
+let test_unreadable_keeper_is_not_reported_as_missing () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "runtime_liveness" in
+  check
+    (list string)
+    "the readable keeper is observed"
+    [ "alive" ]
+    (keeper_names feature "observed_keepers");
+  check
+    (list string)
+    "the unreadable one is not blamed for the feature"
+    []
+    (keeper_names feature "missing_keepers");
+  check
+    (list string)
+    "it is reported as a record that would not open"
+    [ "broken" ]
+    (read_error_keepers feature)
+;;
+
+(* Setting the unreadable keeper aside must not promote the fleet. Nothing is
+   known about that keeper, and unknown does not become proven by being moved
+   out of the missing list. *)
+let test_unreadable_keeper_still_blocks_pass () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "runtime_liveness" in
+  check
+    string
+    "a fleet with an unreadable record is not proven"
+    "warn"
+    (U.member "status" feature |> U.to_string)
+;;
+
+(* [scheduled_proactive_autonomy] counted its read errors over the keepers it
+   had already filtered to proactive-enabled, which a keeper with no readable
+   meta can never reach. The field could only ever be empty, which reads as
+   "every record opened". *)
+let test_scheduled_proactive_reports_unreadable_records () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "scheduled_proactive_autonomy" in
+  check
+    (list string)
+    "the unreadable record is named here too"
+    [ "broken" ]
+    (read_error_keepers feature);
+  check
+    bool
+    "and it keeps the feature off pass"
+    false
+    (U.member "status" feature |> U.to_string = "pass")
+;;
+
 let test_persistence_duration_tiers_use_durable_turn_history () =
   with_workspace
   @@ fun config ->
@@ -313,6 +400,20 @@ let () =
             "keeper without turns fails"
             `Quick
             test_keeper_without_turns_fails_runtime_liveness
+        ] )
+    ; ( "unreadable_is_not_missing"
+      , [ test_case
+            "an unreadable record is not a missing keeper"
+            `Quick
+            test_unreadable_keeper_is_not_reported_as_missing
+        ; test_case
+            "and it still keeps the feature off pass"
+            `Quick
+            test_unreadable_keeper_still_blocks_pass
+        ; test_case
+            "scheduled proactive reports it too"
+            `Quick
+            test_scheduled_proactive_reports_unreadable_records
         ] )
     ; ( "counter_features_are_dated"
       , [ test_case

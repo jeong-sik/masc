@@ -205,9 +205,12 @@ let tool_execute_cwd_field =
       [ "type", `String "string"
       ; ( "description"
         , `String
-            "Optional working directory for the command. Must stay within the keeper \
-             sandbox or an explicit allowed path. Pass a relative cwd, typically '.'. \
-             The Keeper-visible absolute root is informational, not a cwd input. \
+            "Working directory for the command, and the only way to set one: \
+             there is no shell, so 'cd' runs as a program, changes the \
+             directory of a child that exits, and reports success having done \
+             nothing. Must stay within the keeper sandbox or an explicit \
+             allowed path. Pass a relative cwd, typically '.'. The \
+             Keeper-visible absolute root is informational, not a cwd input. \
              Docker host absolute paths are unavailable." )
       ] )
 ;;

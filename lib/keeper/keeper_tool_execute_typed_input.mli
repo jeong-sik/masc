@@ -88,6 +88,12 @@ type execute_input = {
 type validation_error =
   | Empty_argv
   | Empty_program
+  | Directory_change_is_not_a_program of { requested : string }
+      (** [cd] changes the shell's own directory. Run as a program it changes
+          the directory of a child that exits immediately, so the command the
+          caller meant never runs — and [cd] ignores its extra arguments and
+          exits zero, so the call is reported successful with no output. Use
+          the [cwd] field. *)
   | Argv_contains_nul of {
       index : int;
       token : string;

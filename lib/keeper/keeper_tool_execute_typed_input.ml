@@ -50,6 +50,7 @@ type execute_input = {
 type validation_error =
   | Empty_argv
   | Empty_program
+  | Directory_change_is_not_a_program of { requested : string }
   | Argv_contains_nul of {
       index : int;
       token : string;
@@ -463,11 +464,22 @@ let check_env env =
   loop env
 ;;
 
+(* [cd] is the shell's own directory, not a program. Spawned, it changes the
+   directory of a child that exits immediately, so whatever the caller chained
+   after it never runs. It also ignores the extra arguments and exits zero, so
+   the call comes back successful with no output -- an empty answer that reads
+   like a real one. Measured: 60 such calls, 56 of them reported successful and
+   empty. Refusing it is not a judgement about argv content; there is no
+   invocation of [cd] as a program that does anything. *)
+let directory_change_program = "cd"
+
 let check_exec ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   match argv with
   | [] -> Error Empty_argv
   | program :: _ when String.equal program "" -> Error Empty_program
+  | program :: _ when String.equal (Filename.basename program) directory_change_program ->
+    Error (Directory_change_is_not_a_program { requested = String.concat " " argv })
   | _ ->
     let* () = check_argv argv in
     let* () = check_cwd cwd in
@@ -652,6 +664,14 @@ let to_shell_ir ?sandbox input =
 ;;
 
 let pp_validation_error ppf = function
+  | Directory_change_is_not_a_program { requested } ->
+    Format.fprintf
+      ppf
+      "cd is the shell's own directory, not a program: %S would change the \
+       directory of a child that exits immediately, and anything chained after \
+       it would not run. Put the directory in the cwd field instead, and if you \
+       meant to run one command after another use then."
+      requested
   | Empty_argv ->
     Format.pp_print_string ppf
       "argv is empty — provide a non-empty process vector, \

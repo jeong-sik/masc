@@ -1384,12 +1384,64 @@ let test_a_continuation_lowers_to_a_sequence () =
        Alcotest.failf "lowering failed: %a" Execute_input.pp_validation_error err)
 ;;
 
+(* Measured on the live log: 60 calls ran cd as a program and 56 came back
+   successful with empty output. The keeper had asked for a git log, a git
+   status, a build; it got an empty answer that reads like a real one. *)
+let test_cd_as_a_program_is_refused () =
+  let input =
+    mk_program (mk_stage [ "cd"; "/tmp"; "&&"; "git"; "log" ]) []
+  in
+  match Execute_input.validate input with
+  | Ok () -> Alcotest.fail "cd runs and exits before the real command"
+  | Error (Execute_input.Directory_change_is_not_a_program { requested }) ->
+    Alcotest.(check bool)
+      "the message quotes what was asked for"
+      true
+      (String.length requested > 0)
+  | Error err ->
+    Alcotest.failf
+      "expected Directory_change_is_not_a_program, got %a"
+      Execute_input.pp_validation_error
+      err
+;;
+
+(* An absolute path to it is the same program. *)
+let test_cd_by_absolute_path_is_refused () =
+  let input = mk_program (mk_stage [ "/usr/bin/cd"; "/tmp" ]) [] in
+  match Execute_input.validate input with
+  | Ok () -> Alcotest.fail "the path does not change what cd does"
+  | Error (Execute_input.Directory_change_is_not_a_program _) -> ()
+  | Error err ->
+    Alcotest.failf "expected the cd rejection, got %a" Execute_input.pp_validation_error err
+;;
+
+(* A program whose name merely contains those letters is untouched. *)
+let test_a_program_named_like_cd_still_runs () =
+  let input = mk_program (mk_stage [ "cdparanoia"; "--version" ]) [] in
+  match Execute_input.validate input with
+  | Ok () -> ()
+  | Error err ->
+    Alcotest.failf "cdparanoia is a program: %a" Execute_input.pp_validation_error err
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
     cases
     @ [ Alcotest.test_case
+          "cd_as_a_program_is_refused"
+          `Quick
+          test_cd_as_a_program_is_refused
+      ; Alcotest.test_case
+          "cd_by_absolute_path_is_refused"
+          `Quick
+          test_cd_by_absolute_path_is_refused
+      ; Alcotest.test_case
+          "a_program_named_like_cd_still_runs"
+          `Quick
+          test_a_program_named_like_cd_still_runs
+      ; Alcotest.test_case
           "conditional_continuation_parses"
           `Quick
           test_of_json_parses_a_conditional_continuation

@@ -292,9 +292,13 @@ let write_state config state =
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
 
+(* The suffix used to be [Hashtbl.hash (gettimeofday ())] masked to 16 bits.
+   Two goals minted in the same millisecond hash near-identical clock values,
+   so the part meant to separate them was the part most correlated with what
+   it was separating. [Random_id] is the entropy source the rest of the tree
+   uses; take 4 bytes from it instead. *)
 let gen_goal_id () =
-  Printf.sprintf "goal-%d-%04x" (now_ms ())
-    (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF)
+  Printf.sprintf "goal-%d-%s" (now_ms ()) (Random_id.hex ~bytes:4)
 
 let find_goal goals id =
   List.find_opt (fun goal -> String.equal goal.id id) goals

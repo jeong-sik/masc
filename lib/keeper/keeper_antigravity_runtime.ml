@@ -151,7 +151,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes source_projection
     with
     | Ok projected -> Ok projected
     | Error error ->
-      Error (Runtime_model_input_tail_window.budget_error_to_string error))
+      Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes

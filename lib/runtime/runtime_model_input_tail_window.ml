@@ -69,6 +69,22 @@ let budget_error_to_string = function
       newest_atom_bytes
 ;;
 
+(* Both constructors say one thing: this candidate's declared ceiling cannot
+   carry material this turn has to transmit. That is a per-candidate capacity
+   bound, not a defect in the request -- keeper_turn_driver.ml states the same
+   rationale for the provider-raised case, "a later lane candidate with a
+   larger context window can still serve the same turn" -- so it is named with
+   the constructor the lane loop already rotates on rather than a new one.
+
+   [limit] is [None] because it is tokens (keeper_turn_runtime_budget reads it
+   as [Provider_overflow { limit_tokens }]) and this window measures bytes.
+   Reporting a byte figure there would be read as a token count. *)
+let budget_error_to_core_error error =
+  Agent_core.Error.Api
+    (Llm_provider.Retry.ContextOverflow
+       { message = budget_error_to_string error; limit = None })
+;;
+
 (* A message is pinned when it must survive every cut: [System] entries
    (defensive — the runtime carries the system prompt out of band) and any
    message with extra-system-context provenance. [Invalid]/[Duplicate]

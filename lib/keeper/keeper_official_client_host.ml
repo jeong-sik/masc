@@ -315,9 +315,11 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | None -> Ok messages
     | Some project ->
       (try
-         match project messages with
-         | Ok projected -> Ok projected
-         | Error detail -> Error (config_error ~field:"model_input_projection" detail)
+         (* The projection names its own failure. Wrapping it as
+            [InvalidConfig { field = "model_input_projection" }] renamed a
+            per-candidate capacity bound into a request defect, and no reader
+            of that field ever existed. *)
+         project messages
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->

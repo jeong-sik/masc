@@ -91,7 +91,7 @@ let model_input_projection_for_capacity
         | Ok projected -> Ok projected
         | Error error ->
           Error
-            (Runtime_model_input_tail_window.budget_error_to_string error))
+            (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
   let* windowed = windowed in
   let () =

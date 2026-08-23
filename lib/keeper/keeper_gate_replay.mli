@@ -93,7 +93,7 @@ val project_model_input :
   base_path:string ->
   model_evidence ->
   Agent_core.Types.message list ->
-  (Agent_core.Types.message list, string) result
+  (Agent_core.Types.message list, Agent_core.Error.t) result
 (** Append the canonical typed artifact reference as an explicit provider-only
     message. Exact replay bytes remain in durable storage and are read through
     [keeper_artifact_read], so replay evidence cannot bypass provider-input

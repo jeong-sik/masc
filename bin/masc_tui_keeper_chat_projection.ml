@@ -205,6 +205,29 @@ let error_to_string = function
       Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded (String.trim body))
   | Protocol_error { stream_error; _ } -> stream_error_to_string stream_error
 
+(* A reconciliation read asks "what happened to the operation". 401 and 403 do
+   not answer that question: the request stopped before the handler, so the
+   operation is untouched and still on the server. [error_certainty] below reads
+   the same two statuses on the dispatch POST as proof the operation was never
+   created. Both readings are right for their own caller, which is why they stay
+   separate predicates rather than one shared classifier. *)
+let reader_unauthenticated = function
+  | Http_error { status = 401 | 403; _ } -> true
+  | Http_error _ | Transport_error _ | Protocol_error _ -> false
+
+(* The bearer lives in the environment of the process, so a masc-tui started
+   before MASC_TOKEN was exported carries none and every write route refuses it.
+   Naming the remedy keeps the operator from reading a raw server error body and
+   guessing which side is broken. *)
+let unauthenticated_reader_remedy =
+  "This masc-tui holds no operator token, so it cannot read the operation \
+   back; the operation itself is untouched on the server. Export MASC_TOKEN, \
+   restart masc-tui, then press Ctrl-R to settle this request."
+
+let reconciliation_failure_detail error =
+  if reader_unauthenticated error then unauthenticated_reader_remedy
+  else error_to_string error |> terminal_safe_text
+
 let stream_error_acceptance_observed = function
   | Stream_interrupted { accepted }
   | Run_failed { accepted; _ } -> accepted

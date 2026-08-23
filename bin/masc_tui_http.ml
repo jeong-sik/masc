@@ -30,9 +30,15 @@ let sanitize_header_value value =
 
 let default_agent_name = "masc-tui"
 
+(* One name for the bearer the write routes require, so the header builder and
+   the surfaces that report its absence cannot disagree about whether this
+   process holds one. *)
+let operator_token () = first_nonempty_env [ "MASC_TOKEN" ]
+let operator_token_present () = Option.is_some (operator_token ())
+
 let auth_headers () =
   let agent_header = [ ("X-MASC-Agent", default_agent_name) ] in
-  match first_nonempty_env [ "MASC_TOKEN" ] with
+  match operator_token () with
   | Some token ->
       ("Authorization", "Bearer " ^ sanitize_header_value token) :: agent_header
   | None -> agent_header

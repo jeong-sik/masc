@@ -58,7 +58,7 @@ type roster_failure =
 
 let roster_failure_message = function
   | Roster_unauthorized ->
-      "live keeper status and lifecycle actions need an operator token — set        MASC_TOKEN and restart masc-tui"
+      "live keeper status and lifecycle actions need an operator token — export MASC_TOKEN and restart masc-tui"
   | Roster_unreachable detail -> "live keeper status unavailable: " ^ detail
   | Roster_malformed detail -> "live keeper status unreadable: " ^ detail
 

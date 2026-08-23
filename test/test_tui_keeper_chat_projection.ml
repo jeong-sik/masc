@@ -459,6 +459,61 @@ let test_error_certainty () =
              { accepted = true; message = "failed"; code = None }))
      = Chat.Verified_failed)
 
+let test_reader_unauthenticated () =
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "unauthorized" } in
+      check bool
+        (Printf.sprintf "HTTP %d means the reader could not ask" status)
+        true
+        (Chat.reader_unauthenticated error);
+      (* The same status on the dispatch POST proves the operation was never
+         created. A reconciliation read must not borrow that conclusion, so the
+         two predicates are pinned together here: if someone collapses them,
+         this pair stops disagreeing and the test fails. *)
+      check bool
+        (Printf.sprintf "HTTP %d still reads as a verified dispatch rejection" status)
+        true
+        (Chat.error_certainty error = Chat.Verified_rejected))
+    [ 401; 403 ];
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "other" } in
+      check bool
+        (Printf.sprintf "HTTP %d is not an authentication failure" status)
+        false
+        (Chat.reader_unauthenticated error))
+    [ 400; 404; 409; 500; 503 ];
+  check bool "a cut transport is not an authentication failure" false
+    (Chat.reader_unauthenticated (Chat.Transport_error "cut"));
+  check bool "a protocol failure is not an authentication failure" false
+    (Chat.reader_unauthenticated
+       (Chat.protocol_error
+          (Chat.Run_failed { accepted = false; message = "bad"; code = None })))
+
+let test_reconciliation_failure_detail () =
+  let refused : Chat.error =
+    Chat.Http_error
+      { status = 401
+      ; body = {|{"error":"[AuthError] Unauthorized","auth_error_code":"missing_token"}|}
+      }
+  in
+  let detail = Chat.reconciliation_failure_detail refused in
+  check bool "a refused read names the missing token" true
+    (String_util.string_contains_substring ~needle:"MASC_TOKEN" detail);
+  check bool "a refused read says the operation survives" true
+    (String_util.string_contains_substring ~needle:"untouched on the server" detail);
+  check bool "a refused read does not paste the server body" false
+    (String_util.string_contains_substring ~needle:"auth_error_code" detail);
+  let upstream : Chat.error =
+    Chat.Http_error { status = 503; body = "owner_stopping" }
+  in
+  let detail = Chat.reconciliation_failure_detail upstream in
+  check bool "every other failure keeps the server words" true
+    (String_util.string_contains_substring ~needle:"owner_stopping" detail);
+  check bool "every other failure does not claim a missing token" false
+    (String_util.string_contains_substring ~needle:"MASC_TOKEN" detail)
+
 let operation_json state fields =
   let input =
     Masc.Keeper_chat_operation_payload.input_to_json
@@ -625,6 +680,10 @@ let () =
         ; test_case "request labels keep random suffix" `Quick
             test_request_labels_keep_random_suffix
         ; test_case "typed error certainty" `Quick test_error_certainty
+        ; test_case "unauthenticated reader keeps the operation open" `Quick
+            test_reader_unauthenticated
+        ; test_case "reconciliation failure detail" `Quick
+            test_reconciliation_failure_detail
         ; test_case "operation reconciliation projection" `Quick
             test_operation_reconciliation_projection
         ; test_case "operation reconciliation uses server-canonical message" `Quick

@@ -415,6 +415,7 @@ type async_msg =
   | Keeper_chat_older_loaded of
       string * float * (Keeper_chat_history.page, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
+  | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
@@ -573,6 +574,24 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 (* Load the verification queue. Its own fiber, like every other surface fetch:
    the pane stays responsive and a slow server costs the list rather than the
    keypress that asked for it. *)
+let launch_harness_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_harness ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Harness_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None -> enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+
 let launch_verification_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -2421,6 +2440,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The transcript is left as it was and the session rows stay: a
              failed load must not be the reason the pane goes blank. *)
           state.msg_loaded_error <- Some detail)
+  | Harness_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.harness <- Some snapshot;
+          state.harness_error <- None
+      | Error detail -> state.harness_error <- Some detail)
   | Verification_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2781,6 +2806,7 @@ let main () =
                  | None -> ())
             | Verification ->
                 launch_verification_load state ~mailbox:async_messages
+            | Harness -> launch_harness_load state ~mailbox:async_messages
             | Overview | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -2799,7 +2825,10 @@ let main () =
                    waiting". *)
                 launch_verification_load state ~mailbox:async_messages;
                 state.view <- Verification
-            | Verification -> state.view <- System_logs
+            | Verification ->
+                launch_harness_load state ~mailbox:async_messages;
+                state.view <- Harness
+            | Harness -> state.view <- System_logs
             | System_logs -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
@@ -2853,7 +2882,8 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Keepers Keeper_list | Approvals | Verification | System_logs -> ())
+            | Keepers Keeper_list | Approvals | Verification | Harness
+            | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -2916,6 +2946,7 @@ let main () =
                 end
             | Verification ->
                 state.verification_scroll <- state.verification_scroll + 1
+            | Harness -> state.harness_scroll <- state.harness_scroll + 1
             | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
@@ -2980,6 +3011,9 @@ let main () =
             | Verification ->
                 if state.verification_scroll > 0 then
                   state.verification_scroll <- state.verification_scroll - 1
+            | Harness ->
+                if state.harness_scroll > 0 then
+                  state.harness_scroll <- state.harness_scroll - 1
             | System_logs ->
                 if state.system_logs_scroll > 0 then
                   state.system_logs_scroll <- state.system_logs_scroll - 1
@@ -3033,7 +3067,7 @@ let main () =
                       | None -> ())
                  | Planning_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Verification | System_logs -> ())
+            | Approvals | Verification | Harness | System_logs -> ())
        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
@@ -3042,7 +3076,7 @@ let main () =
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
             | Overview | Keepers _ | Board | Approvals | Planning
-            | Verification | System_logs -> ())
+            | Verification | Harness | System_logs -> ())
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
@@ -3060,7 +3094,8 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | System_logs -> ())
+            | Board | Approvals | Planning | Verification | Harness
+            | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from detail only. Opening detail is the act that names the
               target: on the roster the cursor moves by itself when a refresh
@@ -3079,7 +3114,8 @@ let main () =
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | System_logs -> ())
+            | Board | Approvals | Planning | Verification | Harness
+            | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -3099,14 +3135,16 @@ let main () =
                       "No lifecycle action applies to this keeper yet"
                 | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | System_logs -> ())
+            | Board | Approvals | Planning | Verification | Harness
+            | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | System_logs -> ())
+            | Board | Approvals | Planning | Verification | Harness
+            | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -3124,7 +3162,7 @@ let main () =
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Planning | Verification | System_logs -> ())
+            | Approvals | Planning | Verification | Harness | System_logs -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -3161,6 +3199,7 @@ let main () =
                 another arrives. Refreshed on the same tick as the surfaces
                 above rather than only on a keypress. *)
              launch_verification_load state ~mailbox:async_messages
+         | Harness -> launch_harness_load state ~mailbox:async_messages
          | Overview | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;

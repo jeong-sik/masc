@@ -1042,6 +1042,66 @@ let verification_snapshot_json ?(total = 3) requests =
     ; ("requests", `List requests)
     ]
 
+(* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
+let harness_verdict_json ?(fallback = `Null) () =
+  `Assoc
+    [ ("timestamp", `Float 1755950000.0)
+    ; ("task_id", `String "task-470")
+    ; ("task_title", `String "wire the approval gate")
+    ; ("agent_name", `String "keeper.one")
+    ; ("gate", `String "verify")
+    ; ("verdict", `String "approve")
+    ; ("evaluator_runtime", `String "glm-coding")
+    ; ("fallback_reason", fallback)
+    ]
+
+let harness_snapshot_json verdicts =
+  `Assoc
+    [ ("generated_at", `Float 1755950001.0)
+    ; ("recent_verdicts", `List verdicts)
+    ; ("calibration", `Assoc [])
+    ]
+
+let test_decode_harness_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_harness_snapshot
+      (harness_snapshot_json [ harness_verdict_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      (match snapshot.Tui_decode.hs_verdicts with
+       | [ v ] ->
+           Alcotest.(check string) "which gate ran" "verify" v.Tui_decode.hv_gate;
+           Alcotest.(check string) "what it decided" "approve"
+             v.Tui_decode.hv_verdict;
+           Alcotest.(check string) "who decided it" "glm-coding"
+             v.Tui_decode.hv_evaluator;
+           Alcotest.(check (option string)) "and it was not a fallback" None
+             v.Tui_decode.hv_fallback_reason
+       | vs -> Alcotest.failf "expected one verdict, got %d" (List.length vs))
+
+let test_decode_harness_keeps_the_fallback_reason () =
+  (* A verdict reached by a fallback is not the verdict that was asked for.
+     Dropping the reason would show the two alike. *)
+  match
+    Tui_decode.decode_harness_snapshot
+      (harness_snapshot_json
+         [ harness_verdict_json ~fallback:(`String "evaluator unreachable") () ])
+  with
+  | Ok { Tui_decode.hs_verdicts = [ v ] } ->
+      Alcotest.(check (option string)) "the reason survives"
+        (Some "evaluator unreachable") v.Tui_decode.hv_fallback_reason
+  | Ok _ -> Alcotest.fail "expected one verdict"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_harness_with_no_verdicts_is_not_an_error () =
+  (* A quiet harness is a reading, not a failure. *)
+  match Tui_decode.decode_harness_snapshot (harness_snapshot_json []) with
+  | Ok snapshot ->
+      Alcotest.(check int) "nothing recorded yet" 0
+        (List.length snapshot.Tui_decode.hs_verdicts)
+  | Error err -> Alcotest.failf "an empty harness should decode: %s" err
+
 let test_decode_verification_snapshot_reads_the_live_shape () =
   match
     Tui_decode.decode_verification_snapshot
@@ -1189,6 +1249,15 @@ let test_decode_system_log_requires_the_message () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_harness",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_harness_snapshot_reads_the_live_shape;
+        Alcotest.test_case "keeps the fallback reason" `Quick
+          test_decode_harness_keeps_the_fallback_reason;
+        Alcotest.test_case "an empty harness is a reading" `Quick
+          test_decode_harness_with_no_verdicts_is_not_an_error;
+      ] );
     ( "decode_verification",
       [
         Alcotest.test_case "reads the live shape" `Quick

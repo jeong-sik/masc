@@ -103,7 +103,7 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Keepers _ | Board | Approvals | Planning
-            | Verification | System_logs ->
+            | Verification | Harness | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -2565,6 +2565,117 @@ let render_verification (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
+(* What the harness decided, most recent first.
+
+   A verdict reached by a fallback evaluator is not the verdict that was asked
+   for, so the row says which evaluator answered and marks the ones that were
+   not the intended one. Reading a column of "approve" without that would say
+   the gate is working when it may only be degrading quietly. *)
+let render_harness (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let verdicts =
+    match state.harness with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.hs_verdicts
+  in
+  let shown = List.length verdicts in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let fallbacks =
+    List.length
+      (List.filter
+         (fun (v : Masc.Tui_decode.harness_verdict) ->
+           Option.is_some v.Masc.Tui_decode.hv_fallback_reason)
+         verdicts)
+  in
+  let header =
+    match state.harness with
+    | None ->
+        Printf.sprintf " MASC Harness  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some _ when fallbacks > 0 ->
+        (* The count is the reading an operator opens this for: verdicts that
+           came from something other than the evaluator the gate names. *)
+        Printf.sprintf " MASC Harness (%d verdicts, %d by fallback)  %s  %s"
+          shown fallbacks timestamp (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf " MASC Harness (%d verdicts)  %s  %s" shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task" "Gate" "Verdict"
+      "Evaluator"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.harness_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.harness_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.harness_scroll max_scroll) in
+  state.harness_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.harness_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no verdicts recorded)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt verdicts idx with
+      | None -> box_empty buf cols
+      | Some v ->
+          let open Masc.Tui_decode in
+          let evaluator =
+            match v.hv_fallback_reason with
+            | None -> v.hv_evaluator
+            | Some reason ->
+                Printf.sprintf "%s (fallback: %s)" v.hv_evaluator reason
+          in
+          let line =
+            Printf.sprintf "  %-8s %-14s %-9s %-9s %s"
+              (Terminal_text.clock_timestamp
+                 (Masc_domain.iso8601_of_unix_seconds v.hv_at))
+              (Terminal_text.single_line v.hv_task_id)
+              (Terminal_text.single_line v.hv_gate)
+              (Terminal_text.single_line v.hv_verdict)
+              (Terminal_text.single_line evaluator)
+          in
+          let style =
+            match v.hv_fallback_reason with
+            | Some _ -> Ansi.yellow
+            | None -> Ansi.reset
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -2603,6 +2714,7 @@ let render_surface (state : state) =
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
   | Verification -> render_verification state
+  | Harness -> render_harness state
   | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =

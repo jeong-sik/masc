@@ -224,7 +224,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                  check bool
                    (name ^ " executes serially")
                    true
-                   (Agent_core.Tool.execution_mode tool
+                   (Agent_core.Tool.execution_mode tool ~input:`Null
                     = Agent_core.Tool_contract.Serial);
                  check bool
                    (name ^ " continues after success")
@@ -254,7 +254,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                   check bool
                     (name ^ " execution mode matches its descriptor")
                     true
-                    (Agent_core.Tool.execution_mode tool = expected_mode);
+                    (Agent_core.Tool.execution_mode tool ~input:`Null = expected_mode);
                   check bool
                     (name ^ " continues after success")
                     true
@@ -264,7 +264,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                   check bool
                     (name ^ " terminal tools are serial")
                     true
-                    (Agent_core.Tool.execution_mode tool
+                    (Agent_core.Tool.execution_mode tool ~input:`Null
                      = Agent_core.Tool_contract.Serial);
                   check bool
                     (name ^ " terminal completion preserves unknown effect outcome")

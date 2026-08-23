@@ -320,12 +320,69 @@ let test_missing_descriptor_defaults_to_serial () =
     string
     "serial"
     (Tool_contract.show_execution_mode Tool_contract.Serial)
-    (Tool_contract.show_execution_mode (Tool.execution_mode tool));
+    (Tool_contract.show_execution_mode (Tool.execution_mode tool ~input:`Null));
   check
     string
     "continue"
     (Tool_contract.show_completion Tool_contract.Continue_after_success)
     (Tool_contract.show_completion (Tool.completion tool))
+;;
+
+let concurrent_when_read_path input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "mode" fields with
+     | Some (`String "read") -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let test_concurrent_when_admits_only_proven_read_only () =
+  let tool =
+    Tool.create
+      ~descriptor:(Tool.ordinary_descriptor_concurrent_when concurrent_when_read_path)
+      ~name:"scoped"
+      ~description:""
+      ~parameters:[]
+      (fun _ -> Ok { Types.content = "ok"; _meta = None })
+  in
+  let mode input = Tool_contract.show_execution_mode (Tool.execution_mode tool ~input) in
+  check
+    string
+    "proven read-only input is concurrent"
+    (Tool_contract.show_execution_mode Tool_contract.Concurrent)
+    (mode (`Assoc [ "mode", `String "read" ]));
+  check
+    string
+    "effectful input is serial"
+    (Tool_contract.show_execution_mode Tool_contract.Serial)
+    (mode (`Assoc [ "mode", `String "write" ]));
+  check
+    string
+    "input the predicate cannot classify is serial"
+    (Tool_contract.show_execution_mode Tool_contract.Serial)
+    (mode (`Assoc [ "unrelated", `String "x" ]));
+  check
+    string
+    "absent input is serial"
+    (Tool_contract.show_execution_mode Tool_contract.Serial)
+    (mode `Null)
+;;
+
+let test_concurrent_when_reports_its_shape_not_a_mode () =
+  let descriptor =
+    Some (Tool.ordinary_descriptor_concurrent_when concurrent_when_read_path)
+  in
+  match Tool.descriptor_to_yojson descriptor with
+  | `Assoc fields ->
+    check
+      string
+      "declared shape, not a resolved mode"
+      "concurrent_when_read_only"
+      (match List.assoc_opt "execution_mode" fields with
+       | Some (`String value) -> value
+       | _ -> "<missing>")
+  | _ -> fail "descriptor_to_yojson: expected an object"
 ;;
 
 let test_terminal_descriptor_is_serial_and_terminal () =
@@ -341,7 +398,7 @@ let test_terminal_descriptor_is_serial_and_terminal () =
     string
     "terminal is serial"
     (Tool_contract.show_execution_mode Tool_contract.Serial)
-    (Tool_contract.show_execution_mode (Tool.execution_mode tool));
+    (Tool_contract.show_execution_mode (Tool.execution_mode tool ~input:`Null));
   check
     string
     "terminal completion"
@@ -411,6 +468,14 @@ let () =
     ; ( "yojson_roundtrip"
       , [ test_case "execution_mode" `Quick test_execution_mode_yojson_roundtrip
         ; test_case "descriptor None" `Quick test_descriptor_to_yojson_none
+        ; test_case
+            "concurrent_when admits only proven read-only input"
+            `Quick
+            test_concurrent_when_admits_only_proven_read_only
+        ; test_case
+            "concurrent_when reports its declared shape"
+            `Quick
+            test_concurrent_when_reports_its_shape_not_a_mode
         ; test_case
             "missing descriptor is serial"
             `Quick

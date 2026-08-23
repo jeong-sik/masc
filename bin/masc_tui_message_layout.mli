@@ -57,9 +57,9 @@ val input_cursor_row :
 
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
-    immediately before the right border. Measured from the prefix the pane
-    renders ([chat_input_prompt_prefix]), so the caret lands where the typed
-    text ends. *)
+    immediately before the right border. Counts the box border and its spacer
+    as well as the prefix the pane renders ([chat_input_prompt_prefix]), so
+    the caret lands where the typed text ends. *)
 
 val chat_input_prompt_prefix : string
 (** The chat pane's composer prefix. The pane renders it and the caret is

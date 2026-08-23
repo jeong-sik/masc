@@ -253,9 +253,17 @@ let chat_input_prompt_prefix = "  > "
 
 let chat_input_prompt_cells = display_width chat_input_prompt_prefix
 
+(* The pane draws this line inside a box: [box_line_styled] writes the border
+   and one spacer before the content, so the prefix starts at column 3, not
+   column 1. The caret was measured from the prefix alone and landed two
+   columns left of the text it was supposed to follow (#29866). *)
+let box_content_start_column = 3
+
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in
-  min last_column (chat_input_prompt_cells + display_width input)
+  min
+    last_column
+    (box_content_start_column + chat_input_prompt_cells + display_width input)
 
 (* Metadata rows read down the pane as a column: [timestamp] speaker request.
    Speakers vary in width, so every role label is padded to one fixed column

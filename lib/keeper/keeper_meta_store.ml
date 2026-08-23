@@ -116,6 +116,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
       ();
     if Problem_report_state.should_report ~site:Meta_read ~path ~detail
     then Log.Keeper.warn "keeper meta parse failed for %s: %s" path detail;
+    ignore (Store_unreadable.register ~site:"meta_read" ~path ~detail);
     Error
       (Printf.sprintf
          "keeper meta invalid current schema at %s; runtime reset \
@@ -126,6 +127,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
   if not (Fs_compat.file_exists path)
   then (
     Problem_report_state.clear ~site:Meta_read ~path;
+    Store_unreadable.clear ~site:"meta_read" ~path;
     Ok None)
   else (
     match Safe_ops.read_json_file_safe path with
@@ -136,6 +138,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
          if Problem_report_state.note_recovered ~site:Meta_read ~path
          then Log.Keeper.info "keeper meta parse recovered for %s" path;
          Problem_report_state.clear ~site:Meta_repair ~path;
+         Store_unreadable.clear ~site:"meta_read" ~path;
          Ok (Some meta)
        | Error e ->
          (* Issue #28844: a non-canonical enumerated field used to brick every
@@ -393,6 +396,7 @@ let keepalive_keeper_names config =
           "keepalive_keeper_names: meta read failed for %s, dropping from keepalive set: %s"
           name
           msg;
+      Store_unreadable.register ~site:"keepalive_scan" ~path ~detail:msg |> ignore;
       None)
 ;;
 
@@ -436,6 +440,7 @@ let persistent_agent_names config =
           "persistent_agent_names: meta read failed for %s, treating as non-persistent: %s"
           name
           msg;
+      Store_unreadable.register ~site:"persistent_scan" ~path ~detail:msg |> ignore;
       None)
 ;;
 

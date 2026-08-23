@@ -2499,6 +2499,8 @@
 
 (include stanzas/test_keeper_meta_invalid_recovery.inc)
 
+(include stanzas/test_store_unreadable.inc)
+
 (include stanzas/test_keeper_compact_recovery_tool_surface.inc)
 
 (test

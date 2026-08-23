@@ -1,6 +1,5 @@
 type t =
   { trace_id : Keeper_id.Trace_id.t
-  ; generation : int
   ; turn_count : int
   ; sha256 : string
   }

@@ -95,7 +95,6 @@ val with_keeper_turn_span
   -> agent_name:string
   -> runtime_id:string
   -> trace_id:string
-  -> generation:int
   -> max_context:int
   -> channel:string
   -> is_retry:bool

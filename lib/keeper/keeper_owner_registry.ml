@@ -94,9 +94,11 @@ let load_all config =
            reject keeper_name detail;
            loop metas ((keeper_name, detail) :: unavailable) rest
          | Ok None ->
-           let detail = "metadata disappeared during owner inventory load" in
-           reject keeper_name detail;
-           loop metas ((keeper_name, detail) :: unavailable) rest
+           (* Absent, including a file the store could not decode (it has
+              already said so at WARN). Nothing is fenced: [unavailable] has
+              no removal path, and boot materialisation must be able to
+              create the declared keeper through [create_meta]. *)
+           loop metas unavailable rest
          | Ok (Some meta) when not (String.equal keeper_name meta.name) ->
            let detail =
              Printf.sprintf

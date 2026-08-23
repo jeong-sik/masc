@@ -345,10 +345,8 @@ let configure_exact_output_registry ?config_root () =
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
        warn_rejected_exact_output_slots registry;
-       let generation = Runtime_exact_output_registry.generation registry in
        Log.Misc.info
-         "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
-         generation
+         "exact_output: immutable resolver-and-lane registry published%s"
          catalog_description;
        warn_optional_exact_output_lane
          registry

@@ -47,7 +47,6 @@ let test_round_trip_preserves_exact_evidence () =
     registry
     ~run_id:"run-1"
     ~lane:R.Librarian
-    ~subject_id:"trace-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
@@ -77,7 +76,6 @@ let test_completion_without_slot_receipt_writes_explicit_null () =
     registry
     ~run_id:"run-no-receipt"
     ~lane:R.Board_attention
-    ~subject_id:"candidate-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input `Null);
@@ -108,7 +106,6 @@ let test_missing_selected_slot_is_not_replayed () =
     registry
     ~run_id:"legacy-run"
     ~lane:R.Board_attention
-    ~subject_id:"candidate-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input `Null);
@@ -152,7 +149,6 @@ let test_blank_selected_slot_is_rejected_before_write () =
     registry
     ~run_id:"blank-slot"
     ~lane:R.Librarian
-    ~subject_id:"trace-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input `Null);
@@ -179,7 +175,6 @@ let test_running_shape_has_no_invented_completion () =
     registry
     ~run_id:"run-live"
     ~lane:R.Board_attention
-    ~subject_id:"candidate-1"
     ~actor:"keeper-a"
     ~started_at:20.0
     ~input:(R.Exact_input `Null);
@@ -224,7 +219,6 @@ let test_completed_runs_are_bounded () =
       registry
       ~run_id
       ~lane:R.Librarian
-      ~subject_id:run_id
       ~actor:"keeper-a"
       ~started_at:(float_of_int index)
       ~input:(R.Exact_input (`Assoc [ "index", `Int index ]));
@@ -265,7 +259,6 @@ let test_exact_history_is_not_pruned_across_lanes () =
       registry
       ~run_id
       ~lane
-      ~subject_id:run_id
       ~actor:"keeper-a"
       ~started_at:(float_of_int index)
       ~input:(R.Exact_input (`Assoc [ "index", `Int index ]));
@@ -291,7 +284,6 @@ let test_failed_durable_registration_is_not_published_in_memory () =
         registry
         ~run_id:"not-published"
         ~lane:R.Librarian
-        ~subject_id:"trace"
         ~actor:"keeper-a"
         ~started_at:1.0
         ~input:(R.Exact_input `Null);
@@ -312,7 +304,6 @@ let test_failed_durable_completion_is_explicitly_visible () =
     registry
     ~run_id:"completion-not-published"
     ~lane:R.Librarian
-    ~subject_id:"trace"
     ~actor:"keeper-a"
     ~started_at:1.0
     ~input:(R.Exact_input `Null);
@@ -417,7 +408,6 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
              registry
              ~run_id:"writer-blocked-on-durable-lock"
              ~lane:R.Compaction
-             ~subject_id:"trace"
              ~actor:"keeper-a"
              ~started_at:1.0
              ~input:(R.Exact_input `Null));
@@ -443,7 +433,6 @@ let test_pages_are_a_total_order_over_equal_timestamps () =
          registry
          ~run_id
          ~lane:R.Librarian
-         ~subject_id:"trace-1"
          ~actor:"keeper-a"
          ~started_at:10.0
          ~input:(R.Exact_input (`Assoc [ "n", `Int 1 ])))
@@ -474,7 +463,6 @@ let test_summary_carries_no_payload () =
     registry
     ~run_id:"run-1"
     ~lane:R.Librarian
-    ~subject_id:"trace-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "conversation_history", `String "…megabytes…" ]));

@@ -684,7 +684,6 @@ let plan_preserves_exact_future_progress
 
 type prepared_lane =
   { window : planning_window
-  ; registry_generation : int64
   ; ordered_slot_ids : string list
   ; selected_slots : Runtime_exact_output_registry.selected_slot list
   ; flow_attempt : Exact_output.flow_attempt
@@ -776,15 +775,13 @@ let prepare_lane
   let* window =
     planning_window_for_units units |> Result.map_error (fun _ -> Invalid_plan)
   in
-  let registry_generation = Runtime_exact_output_registry.generation registry in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Error
         (Runtime_exact_output_registry.Exact_lane_unconfigured
            { lane_id = missing_lane_id }) ->
       Log.Keeper.warn
         ~keeper_name
-        "compaction exact lane is unconfigured generation=%Ld lane_id=%s"
-        registry_generation
+        "compaction exact lane is unconfigured lane_id=%s"
         missing_lane_id;
       Error Exact_lane_unconfigured
   | Error
@@ -792,8 +789,7 @@ let prepare_lane
            { lane_id = empty_lane_id }) ->
       Log.Keeper.warn
         ~keeper_name
-        "compaction exact lane has no admitted opaque slots generation=%Ld lane_id=%s"
-        registry_generation
+        "compaction exact lane has no admitted opaque slots lane_id=%s"
         empty_lane_id;
       Error Exact_target_selection_failed
   | Ok { selected_slots } ->
@@ -820,8 +816,7 @@ let prepare_lane
         | Error _ ->
           Log.Keeper.warn
             ~keeper_name
-            "compaction exact flow admission rejected generation=%Ld lane_id=%s candidate_count=%d"
-            registry_generation
+            "compaction exact flow admission rejected lane_id=%s candidate_count=%d"
             lane_id
             (List.length candidates);
           Error Exact_admission_failed
@@ -830,14 +825,12 @@ let prepare_lane
            | Error _ ->
              Log.Keeper.error
                ~keeper_name
-               "compaction exact flow identity allocation failed generation=%Ld lane_id=%s"
-               registry_generation
+               "compaction exact flow identity allocation failed lane_id=%s"
                lane_id;
              Error Exact_attempt_start_failed
            | Ok flow_attempt ->
              Ok
                { window
-               ; registry_generation
                ; ordered_slot_ids =
                    List.map
                      (fun (slot : Runtime_exact_output_registry.selected_slot) ->
@@ -916,14 +909,12 @@ let execute_prepared_lane_current
     registry
     ~run_id
     ~lane:Exact_lane_run_registry.Compaction
-    ~subject_id:(Int64.to_string prepared_lane.registry_generation)
     ~actor:keeper_name
     ~started_at
     ~input:
       (Exact_lane_run_registry.Exact_input
          (`Assoc
-         [ "registry_generation", `Intlit (Int64.to_string prepared_lane.registry_generation)
-         ; "slot_ids", `List (List.map (fun id -> `String id) prepared_lane.ordered_slot_ids)
+         [ "slot_ids", `List (List.map (fun id -> `String id) prepared_lane.ordered_slot_ids)
          ; "prior_summary", prior_summary
          ; ( "window_units"
            , eligible_units_json (planning_window_sources prepared_lane.window) )
@@ -1317,7 +1308,6 @@ module For_testing = struct
   ;;
 
   let flow_slot_ids prepared_lane = prepared_lane.ordered_slot_ids
-  let registry_generation prepared_lane = prepared_lane.registry_generation
 
   let attempt_observations prepared_lane =
     let evidence : Exact_output.flow_evidence =

@@ -147,7 +147,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
              selected_slots)
     in
     require_slots "replacement-only lane" registry;
-    let stable_generation = Registry.generation registry in
+    let stable_registry_snapshot = registry in
     let prepared =
       match Registry.prepare_replacement ~lanes with
       | Ok prepared -> prepared
@@ -158,10 +158,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     in
     (match Registry.current () with
      | Ok current ->
-       Alcotest.(check int64)
+       Alcotest.(check bool)
          "pure preparation does not fence current"
-         stable_generation
-         (Registry.generation current)
+         true
+         (current == stable_registry_snapshot)
      | Error error ->
        Alcotest.failf
          "pure preparation fenced current: %s"
@@ -201,10 +201,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "same-lane finish did not republish: %s"
           (Registry.publication_error_to_string error)
     in
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "same lanes preserve registry generation"
-      stable_generation
-      (Registry.generation after_noop);
+      true
+      (after_noop == stable_registry_snapshot);
     require_slots "same-lane finish preserves slots" after_noop;
     let successor_prepared =
       match Registry.prepare_replacement ~lanes with
@@ -242,10 +242,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "successor abort did not restore the published registry: %s"
           (Registry.publication_error_to_string error)
     in
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "stale tokens preserve registry generation"
-      stable_generation
-      (Registry.generation after_stale_tokens);
+      true
+      (after_stale_tokens == stable_registry_snapshot);
     require_slots "stale tokens preserve slots" after_stale_tokens;
     let stable_file = Fs_compat.load_file runtime_path in
     let stable_runtime = Runtime.get_default_runtime_id () in
@@ -278,10 +278,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
       "failed published save preserves runtime cache"
       stable_runtime
       (Runtime.get_default_runtime_id ());
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "failed published save preserves registry generation"
-      stable_generation
-      (Registry.generation after_failed_save);
+      true
+      (after_failed_save == stable_registry_snapshot);
     require_slots "failed published save preserves slots" after_failed_save;
     let stale_prepared =
       match Registry.prepare_replacement ~lanes with
@@ -291,7 +291,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "stale-candidate preparation failed: %s"
           (Registry.publication_error_to_string error)
     in
-    let concurrent_registry =
+    let (_ : Registry.t) =
       match Registry.publish ~lanes replacement_snapshot with
       | Ok registry -> registry
       | Error error ->
@@ -299,12 +299,9 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "concurrent publication fixture failed: %s"
           (Registry.publication_error_to_string error)
     in
-    let concurrent_generation = Registry.generation concurrent_registry in
     Registry.reserve_replacement stale_prepared
     |> require_replacement_base_changed
-         "stale prepared candidate"
-         ~expected_generation:(Some stable_generation)
-         ~actual_generation:(Some concurrent_generation);
+         "stale prepared candidate";
     let successor_prepared =
       match Registry.prepare_replacement ~lanes with
       | Ok prepared -> prepared
@@ -465,7 +462,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
         "required lane fixture failed to publish: %s"
         (Registry.publication_error_to_string error)
   in
-  let stable_generation = Registry.generation stable_registry in
+  let stable_registry_snapshot = stable_registry in
   (match
      Registry.publish
        ~required_lane_ids:[ required_lane ]
@@ -481,10 +478,10 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
    | Ok _ -> Alcotest.fail "unknown required slot must block publication");
   match Registry.current () with
   | Ok current ->
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "failed required publication preserves the prior generation"
-      stable_generation
-      (Registry.generation current)
+      true
+      (current == stable_registry_snapshot)
   | Error error ->
     Alcotest.failf
       "failed required publication lost the prior registry: %s"
@@ -616,7 +613,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
      Alcotest.failf
        "expected one unbound rejected slot, got %d"
        (List.length rejected));
-  let stable_generation = Registry.generation unbound_optional_registry in
+  let stable_registry_snapshot = unbound_optional_registry in
   write_file
     runtime_path
     (runtime_toml
@@ -631,10 +628,10 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
        (Printexc.to_string exn));
   (match Registry.current () with
    | Ok registry ->
-     Alcotest.(check int64)
+     Alcotest.(check bool)
        "failed mandatory admission preserves the published registry"
-       stable_generation
-       (Registry.generation registry)
+       true
+       (registry == stable_registry_snapshot)
    | Error error ->
      Alcotest.failf
        "failed mandatory admission lost the published registry: %s"
@@ -689,31 +686,25 @@ let test_published_registry_value_is_generation_stable () =
       Alcotest.failf "failed to publish immutable generation fixture: %s" detail
   in
   let first = publish [ replacement_target ] in
-  let first_generation = Runtime_exact_output_registry.generation first in
   let second = publish [ replacement_secondary_target ] in
-  let second_generation = Runtime_exact_output_registry.generation second in
-  Alcotest.(check int64)
-    "later publication advances generation"
-    (Int64.succ first_generation)
-    second_generation;
-  Alcotest.(check int64)
-    "captured publication retains its generation"
-    first_generation
-    (Runtime_exact_output_registry.generation first);
+  Alcotest.(check bool)
+    "later publication replaces the earlier one"
+    true
+    (not (first == second));
   (match Runtime_exact_output_registry.resolve_lane first ~lane_id with
    | Ok _ -> ()
    | Error _ ->
      Alcotest.fail
-       "captured publication must remain resolvable after the global generation swaps");
+       "captured publication must remain resolvable after the global swap");
   (match Runtime_exact_output_registry.resolve_lane second ~lane_id with
    | Ok _ -> ()
    | Error _ -> Alcotest.fail "latest publication must remain resolvable");
   match Runtime_exact_output_registry.current () with
   | Ok current ->
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "global registry points at the latest publication"
-      second_generation
-      (Runtime_exact_output_registry.generation current)
+      true
+      (current == second)
   | Error _ -> Alcotest.fail "latest publication must be globally installed"
 ;;
 

@@ -266,10 +266,6 @@ let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
     "MASC opaque declaration order"
     [ "prepare-first"; "prepare-second" ]
     (C.For_testing.flow_slot_ids prepared);
-  Alcotest.(check int64)
-    "one immutable MASC registry generation"
-    (Registry.generation registry)
-    (C.For_testing.registry_generation prepared);
   Alcotest.(check (list string))
     "AGENT_CORE freezes the effective candidate snapshot"
     [ "prepare-first"; "prepare-second" ]
@@ -397,9 +393,9 @@ let test_published_replacement_cannot_mix_prepared_generation () =
   in
   let registry_b = publish_exn ~slot_ids:[ "replacement-slot" ] snapshot_b in
   Alcotest.(check bool)
-    "MASC publication generation advances"
+    "MASC publication replaces the registry"
     true
-    (Int64.compare (Registry.generation registry_a) (Registry.generation registry_b) < 0);
+    (not (registry_a == registry_b));
   let completed =
     execute_prepared_lane
       ~keeper_name:"keeper-frozen-a"

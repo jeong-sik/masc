@@ -3304,9 +3304,6 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
      | Error detail -> failf "baseline exact save failed: %s" detail
      | Ok () -> ());
     let stable_registry = registry_exn () in
-    let stable_generation =
-      Runtime_exact_output_registry.generation stable_registry
-    in
     let degraded = content ~default:"local.libr" "missing-slot" in
     (match Runtime.save_config_text ~runtime_config_path:path degraded with
      | Error detail ->
@@ -3316,11 +3313,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check string "degraded save commits runtime cache" "local.libr"
       (Runtime.get_default_runtime_id ());
     let after_degraded = registry_exn () in
-    let degraded_generation =
-      Runtime_exact_output_registry.generation after_degraded
-    in
-    check bool "degraded save advances registry generation" true
-      (Int64.compare degraded_generation stable_generation > 0);
+    check bool "degraded save republishes the registry" true
+      (not (after_degraded == stable_registry));
     check bool "degraded save leaves optional lane without admitted slots" true
       (lane_has_no_admitted_slots
          ~lane_id:"compaction_exact"
@@ -3341,8 +3335,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
          check string "write failure preserves runtime cache" "local.libr"
            (Runtime.get_default_runtime_id ());
          let after_write_failure = registry_exn () in
-         check int64 "write failure preserves registry generation" degraded_generation
-           (Runtime_exact_output_registry.generation after_write_failure);
+         check bool "write failure preserves the published registry" true
+           (after_write_failure == after_degraded);
          check bool "write failure preserves no-admitted lane" true
            (lane_has_no_admitted_slots
               ~lane_id:"compaction_exact"
@@ -3358,11 +3352,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check string "valid save commits runtime cache" "local.chat"
       (Runtime.get_default_runtime_id ());
     let replaced = registry_exn () in
-    check bool "valid save advances registry generation" true
-      (Int64.compare
-         (Runtime_exact_output_registry.generation replaced)
-         degraded_generation
-       > 0);
+    check bool "valid save republishes the registry" true
+      (not (replaced == after_degraded));
     check (list string) "valid save commits registry slots" [ "slot-b" ]
       (slots_exn ~lane_id:"compaction_exact" replaced);
     check bool "valid save does not synthesize HITL lane" true

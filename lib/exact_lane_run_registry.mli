@@ -45,7 +45,6 @@ type run_input = Exact_input of Yojson.Safe.t
 type run =
   { run_id : string
   ; lane : lane
-  ; subject_id : string
   ; actor : string
   ; started_at : float
   ; input : run_input
@@ -79,7 +78,6 @@ val register_running
   :  t
   -> run_id:string
   -> lane:lane
-  -> subject_id:string
   -> actor:string
   -> started_at:float
   -> input:run_input

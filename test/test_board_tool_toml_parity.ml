@@ -1458,16 +1458,16 @@ let strip_fields removed (schema : Yojson.Safe.t) =
              ( "required"
              , `List
                  (List.filter
-                    (function
+                    (fun (entry : Yojson.Safe.t) ->
+                      match entry with
                       | `String name -> not (List.mem name removed)
                       | `Int _ | `Intlit _ | `Bool _ | `Null | `Float _
-                      | `String _ | `Assoc _ | `List _ | `Tuple _ | `Variant _
-                        -> true)
+                      | `Assoc _ | `List _ -> true)
                     required) )
            | _ -> key, value)
          fields)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
-  | `Tuple _ | `Variant _ -> schema
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    schema
 ;;
 
 (* The model-visible surface: every board row either equals its keeper
@@ -1494,7 +1494,7 @@ let test_model_visible_board_rows_are_byte_identical () =
          { canonical with input_schema = strip_fields removed canonical.input_schema })
   in
   let rows =
-    Keeper_tool_descriptor.model_visible_schemas () |> List.filter is_board_row
+    Masc.Keeper_tool_descriptor.model_visible_schemas () |> List.filter is_board_row
   in
   check bool "the eight projections reach the model surface" true
     (List.for_all

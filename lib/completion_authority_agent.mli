@@ -48,16 +48,23 @@ module For_testing : sig
     ; verification_id : string
     }
 
-  val retain_settled
-    :  awaiting:review_key list
-    -> review_key list
-    -> review_key list
-  (** Which already-settled review keys a backlog read still shows as awaiting
-      verification. [process_pending] is a level read over the whole backlog, so
-      any unrelated submission re-scans every awaiting Task; a [Deferred] key is
-      held back from those re-scans until the producer or operator moves, and
-      this drops it again once the Task advances or is re-submitted under a new
-      [verification_id]. Suppression is per key, never per Task, so a fresh
-      submission is never held back. Pure, so the pruning rule is checkable
-      without a backlog or an Eio runtime. *)
+  type scan_scope =
+    | Whole_backlog
+    | Targets of review_key list
+
+  val entries_in_scope
+    :  scope:scan_scope
+    -> (review_key * 'a) list
+    -> (review_key * 'a) list
+  (** The awaiting entries one wake is allowed to review. The submission hook
+      receives [task], [assignee] and [verification_id]; forwarding that identity
+      as [Targets] is what keeps one submission from re-reviewing every other
+      awaiting Task. The level read over the whole backlog re-ran a settled
+      review on identical input until a producer acted (task-443, 2026-08-23: 45
+      attempts in 5h against the same 1,012,551-byte atom).
+
+      [Whole_backlog] stays for boot recovery and for a failed backlog read,
+      which have no key to name. Pure, so the scope rule is checkable without a
+      backlog or an Eio runtime. *)
+
 end

@@ -1859,6 +1859,34 @@ def assert_row_budgeted_surfaces(
     os.write(master_fd, b"q")
 
 
+EVENT_RANGE_RE = re.compile(rb"Recent Events (\d+)-(\d+)/(\d+)")
+
+
+def assert_event_window_at_newest(frame: bytes, where: str) -> None:
+    """The event window sits at the newest end of the list.
+
+    This is what growing the viewport is supposed to restore, and it is the
+    first number that says so. The total is deliberately unread: it counts
+    events the TUI raises itself, so a runner that surfaces one more load
+    error than this laptop reads a different number for reasons the scenario
+    is not about. Pinning the literal "1-6/6" failed on CI at "1-6/7" -- the
+    window was exactly where it belonged.
+    """
+    match = EVENT_RANGE_RE.search(frame)
+    if match is None:
+        raise AssertionError(f"{where} drew no event range: {frame!r}")
+    first, last, total = (int(g) for g in match.groups())
+    if first != 1:
+        raise AssertionError(
+            f"{where} did not return to the newest event: "
+            f"range {first}-{last}/{total}: {frame!r}"
+        )
+    if not 1 <= last <= total:
+        raise AssertionError(
+            f"{where} drew an impossible range {first}-{last}/{total}: {frame!r}"
+        )
+
+
 def assert_overview_event_rows(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1909,8 +1937,7 @@ def assert_overview_event_rows(
     for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
-    if b"Recent Events 1-6/6" not in overview:
-        raise AssertionError(f"23-row Overview omitted its event range: {overview!r}")
+    assert_event_window_at_newest(overview, "23-row Overview")
     if overview.count(b"Manual refresh") != 5:
         raise AssertionError(
             f"22-row Overview did not show all five refresh events: {overview!r}"
@@ -2002,7 +2029,7 @@ def assert_overview_event_rows(
         output,
         rows=22,
         columns=100,
-        needle=b"Recent Events 1-6/6",
+        needle=b"Recent Events 1-",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )

@@ -151,6 +151,17 @@ def end_of_needle(
     return found.end()
 
 
+def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
+    """A screen header, matched across the emphasis that closes the title.
+
+    The words naming the screen carry the emphasis, so the reset that ends it
+    sits between the name and the counts after it. Spelling a header as one
+    literal asserted that those bytes are adjacent, which is a fact about
+    styling rather than about what the screen is showing.
+    """
+    return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
+
+
 def selected_row(post_id: bytes) -> re.Pattern[bytes]:
     """The highlighted list row for `post_id`, whatever sits in the gutter."""
     return re.compile(
@@ -287,8 +298,10 @@ def release_and_wait_for_frame(
     return bytes(output[start:frame_end])
 
 
-def frame_containing(segment: bytes, needle: bytes) -> bytes:
-    needle_offset = segment.find(needle)
+def frame_containing(
+    segment: bytes, needle: bytes | re.Pattern[bytes]
+) -> bytes:
+    needle_offset = find_needle(segment, needle)
     frame_start = segment.rfind(FRAME_START, 0, needle_offset + 1)
     frame_end = segment.find(FRAME_END, needle_offset)
     if needle_offset < 0 or frame_start < 0 or frame_end < 0:
@@ -1477,7 +1490,7 @@ def keeper_selection_identity_interaction(
     missing = send_and_wait(process, master_fd, output, b"r", b"29454")
     missing_plain = CSI_RE.sub(b"", missing)
     failures = []
-    if b"MASC Keepers (1)" not in missing_plain:
+    if find_needle(missing_plain, screen_header(b"MASC Keepers", b" (1)")) < 0:
         failures.append("missing beta detail did not return to MASC Keepers (1)")
     if b"Keeper: alpha" in missing_plain:
         failures.append("missing beta detail silently retargeted to Keeper: alpha")
@@ -1587,9 +1600,9 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             master_fd,
             output,
             b"\x1b",
-            b"MASC Keepers (1)",
+            screen_header(b"MASC Keepers", b" (1)"),
         )
-        keepers_frame = frame_containing(keepers, b"MASC Keepers (1)")
+        keepers_frame = frame_containing(keepers, screen_header(b"MASC Keepers", b" (1)"))
         if b"Keeper: alpha" in CSI_RE.sub(b"", keepers_frame):
             raise AssertionError(
                 f"Esc opened alpha detail after beta disappeared: {keepers!r}"
@@ -2063,7 +2076,9 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             b"\t",
-            b"MASC Approvals (3/3, hidden 0, actor masc-tui)",
+            screen_header(
+                b"MASC Approvals", b" (3/3, hidden 0, actor masc-tui)"
+            ),
         )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
         selected_plain = CSI_RE.sub(b"", selected)
@@ -2080,11 +2095,15 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             b"r",
-            b"MASC Approvals (4/4, hidden 0, actor masc-tui)",
+            screen_header(
+                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+            ),
         )
         refreshed_frame = frame_containing(
             refreshed,
-            b"MASC Approvals (4/4, hidden 0, actor masc-tui)",
+            screen_header(
+                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+            ),
         )
         refreshed_plain = CSI_RE.sub(b"", refreshed_frame)
         if not re.search(
@@ -2134,7 +2153,7 @@ def open_loaded_planning(
     )
     send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Board (0)")
+    send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (0)"))
     send_and_wait(process, master_fd, output, b"\t", b"plan-alpha-29424")
 
 
@@ -2283,14 +2302,14 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
 
         send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
         send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Board (3)")
+        send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (3)"))
         selected_b = selected_row(b"post-b")
         selected_a = selected_row(b"post-a")
         selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
         send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
 
-        board = send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (3)")
+        board = send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)"))
         if not selected_b.search(board) or selected_a.search(board):
             raise AssertionError(
                 f"Board detail return changed the selected post: {board!r}"
@@ -2343,7 +2362,7 @@ def open_loaded_board(
         master_fd,
         output,
         b"\t",
-        f"MASC Board ({post_count})".encode(),
+        screen_header(b"MASC Board", f" ({post_count})".encode()),
     )
 
 
@@ -2359,7 +2378,7 @@ def board_detail_isolation_interaction(b_failure: GatedHttpResponse) -> Interact
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             send_and_wait(process, master_fd, output, b"\r", b"a-only-comment")
-            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (2)")
+            send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (2)"))
             send_and_wait(
                 process,
                 master_fd,
@@ -2462,7 +2481,7 @@ def board_detail_authority_interaction(
                 )
 
             board_list = send_and_wait(
-                process, master_fd, output, b"\x1b", b"MASC Board (3)"
+                process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)")
             )
             if b"post-c" not in board_list:
                 raise AssertionError(
@@ -2507,9 +2526,9 @@ def board_missing_target_interaction(
             )
             fixtures["/api/v1/board/post-b?format=flat"] = late_b
             board_update = send_and_wait(
-                process, master_fd, output, b"r", b"MASC Board (1)"
+                process, master_fd, output, b"r", screen_header(b"MASC Board", b" (1)")
             )
-            board = frame_containing(board_update, b"MASC Board (1)")
+            board = frame_containing(board_update, screen_header(b"MASC Board", b" (1)"))
             if not late_b.requested.wait(timeout=3.0):
                 raise AssertionError("late Board B request did not reach its fixture")
             for expected in (

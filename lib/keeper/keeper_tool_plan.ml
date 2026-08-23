@@ -578,6 +578,18 @@ type node =
 
 let node ~id ~tool_name ?(after = []) ~input () = { id; tool_name; input; after }
 
+(* Why a real descriptor is absent from the Keeper model surface. Kept apart
+   from [Unknown_tool] because the two need opposite answers: a misspelled name
+   is fixed by correcting it, while an off-surface name is spelled correctly and
+   is reached through the operator entrypoint or the descriptor that projects
+   it. #29681 moved 13 descriptors to Operator_only/Transport_alias, and with
+   only [Unknown_tool] to report, every one of them told the plan author to hunt
+   for a typo that was not there. *)
+type off_surface_reason =
+  | Operator_only_tool
+  | Aliased_by of { projected_by : string }
+  | Unresolved_schema
+
 type error =
   | Empty_plan
   | Unknown_descriptor_id of string
@@ -586,6 +598,11 @@ type error =
   | Unknown_tool of
       { node_id : Node_id.t
       ; tool_name : string
+      }
+  | Tool_off_keeper_surface of
+      { node_id : Node_id.t
+      ; tool_name : string
+      ; reason : off_surface_reason
       }
   | Missing_dependency of
       { node_id : Node_id.t
@@ -623,6 +640,15 @@ let error_to_string = function
     Printf.sprintf "descriptor tool name %S is ambiguous" tool_name
   | Unknown_tool { node_id; tool_name } ->
     Printf.sprintf "node %S names unknown tool %S" (Node_id.to_string node_id) tool_name
+  | Tool_off_keeper_surface { node_id; tool_name; reason } ->
+    Printf.sprintf
+      "node %S names tool %S, which exists but is not on the Keeper model surface (%s)"
+      (Node_id.to_string node_id)
+      tool_name
+      (match reason with
+       | Operator_only_tool -> "operator-only"
+       | Aliased_by { projected_by } -> Printf.sprintf "projected by %S" projected_by
+       | Unresolved_schema -> "no resolved schema")
   | Missing_dependency { node_id; dependency } ->
     Printf.sprintf
       "node %S depends on missing node %S"
@@ -690,6 +716,30 @@ let descriptor_entries descriptors =
     descriptors
 ;;
 
+(* Names owned by descriptors the Keeper model cannot call. [registered_names]
+   is the name-integrity view, so it still carries transport-alias names after
+   [keeper_model_names] has gone empty — which is exactly what tells an
+   off-surface name apart from one nothing owns. This index never admits
+   execution; it only names the rejection. *)
+let off_surface_entries descriptors =
+  List.concat_map
+    (fun descriptor ->
+       match Keeper_tool_descriptor.keeper_model_names descriptor with
+       | _ :: _ -> []
+       | [] ->
+         let reason =
+           match descriptor.Keeper_tool_descriptor.keeper_model_projection with
+           | Keeper_tool_descriptor.Operator_only -> Operator_only_tool
+           | Keeper_tool_descriptor.Transport_alias { projected_by } ->
+             Aliased_by { projected_by }
+           | Keeper_tool_descriptor.Preferred_public_name
+           | Keeper_tool_descriptor.Internal_name -> Unresolved_schema
+         in
+         Keeper_tool_descriptor.registered_names descriptor
+         |> List.map (fun name -> name, reason))
+    descriptors
+;;
+
 let canonicalize_descriptors descriptors =
   let rec canonicalize resolved = function
     | [] -> Ok (List.rev resolved)
@@ -721,12 +771,18 @@ let node_for_id nodes id =
   List.find_opt (fun node -> Node_id.equal node.id id) nodes
 ;;
 
-let validate_known_tools descriptors nodes =
+let validate_known_tools descriptors off_surface nodes =
   List.find_map
     (fun node ->
        match descriptor_for_name descriptors node.tool_name with
        | Some _ -> None
-       | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name }))
+       | None ->
+         (match List.assoc_opt node.tool_name off_surface with
+          | Some reason ->
+            Some
+              (Tool_off_keeper_surface
+                 { node_id = node.id; tool_name = node.tool_name; reason })
+          | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name })))
     nodes
 ;;
 
@@ -878,10 +934,11 @@ let create ~descriptors nodes =
         | Some id -> Error (Duplicate_node_id id)
         | None ->
           let descriptors = descriptor_entries canonical_descriptors in
+          let off_surface = off_surface_entries canonical_descriptors in
           (match first_duplicate String.equal (List.map fst descriptors) with
            | Some name -> Error (Duplicate_tool_name name)
            | None ->
-             (match validate_known_tools descriptors nodes with
+             (match validate_known_tools descriptors off_surface nodes with
               | Some error -> Error error
               | None ->
                 (match validate_output_schemas descriptors nodes with

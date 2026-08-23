@@ -2662,6 +2662,11 @@
   yojson))
 
 (test
+ (name test_tui_keeper_activity)
+ (modules test_tui_keeper_activity)
+ (libraries alcotest masc masc_tui_keeper_activity))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))

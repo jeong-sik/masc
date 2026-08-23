@@ -95,6 +95,31 @@ let create ~config ~producer =
   Ok { ownership_root; config; producer_scope; tools }
 ;;
 
+(* The Goal proof surface. A Goal names no producer: it is a shared intent
+   that any Keeper may advance, so there is no owned tree to bind the tools
+   to. The root is the shared playground prefix — one fixed workspace
+   location, the same for every Goal, derived from nothing the Goal happens
+   to be linked to. Every producer's tree sits under it, so a measurement
+   written anywhere in the workspace is reachable.
+
+   [tool_search_files] is absent. Its containment runs through a Keeper's
+   sandbox meta and this surface has no Keeper identity; reimplementing that
+   jail here would be a second containment boundary to keep correct. The
+   judge navigates from [root_layout] instead, which names the producers and
+   the checkouts under them. *)
+let create_goal_proof ~(config : Workspace.config) =
+  let open Result.Syntax in
+  let* tools = resolve_tools [ Read_file; Web_fetch ] in
+  let project_root =
+    Workspace_verification_store.project_root_of_base_path config.base_path
+  in
+  let ownership_root =
+    Env_config_core.strip_trailing_slashes
+      (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
+  in
+  Ok { ownership_root; config; producer_scope = Workspace_producer; tools }
+;;
+
 (* The listing answers one question for the evaluator: where do the paths the
    submitter wrote actually resolve. Two facts do that, and they are different
    facts.

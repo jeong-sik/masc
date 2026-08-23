@@ -17,6 +17,13 @@ type t
 val create :
   config:Workspace.config -> producer:string -> (t, string) result
 
+val create_goal_proof : config:Workspace.config -> (t, string) result
+(** The Goal proof surface: read and web-fetch rooted at the shared playground
+    prefix. A Goal names no producer, so there is no owned tree to bind to and
+    no producer set to derive; this root is the same fixed workspace location
+    for every Goal. [tool_search_files] is absent — its containment runs
+    through a Keeper's sandbox meta, which this surface has none of. *)
+
 val root_layout : t -> (string list, string) result
 (** The paths the lookup tools resolve against, listed from disk at review
     time and relative to the ownership root: bounded immediate entries plus

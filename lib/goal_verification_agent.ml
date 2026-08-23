@@ -165,17 +165,64 @@ let collect_pending config : (pending_work list, string) result =
    own — nothing about Tasks reaches the judge, because a Task proves its own
    contract and says nothing about a Goal's metric. *)
 
-let render_proof_prompt (goal : Goal_store.goal) =
+(* The judge is told what it holds. A surface it is never described cannot be
+   used: an evaluator that held read tools and was told nothing about them
+   spent the whole review guessing paths (masc#29250). *)
+let render_lookup_section (lookup : Task.Anti_rationalization.lookup_surface) =
+  match lookup with
+  | Task.Anti_rationalization.No_lookup_surface ->
+    Ok
+      "You hold no tool that opens anything. Nothing here can measure the \
+       declared metric, so the only verdict this review can reach honestly is \
+       a refusal that says so."
+  | Task.Anti_rationalization.Lookup_tools { schemas; dispatch = _; root_layout } ->
+    let tool_names =
+      schemas
+      |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      |> String.concat ", "
+    in
+    let root_layout_lines =
+      match root_layout with
+      | [] -> "  (this root is empty)"
+      | entries ->
+        entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n"
+    in
+    Prompt_registry.render_prompt_template
+      Prompt_names.goal_verification_lookup
+      [ "lookup_tools", tool_names; "lookup_root_layout", root_layout_lines ]
+;;
+
+let render_proof_prompt ~lookup (goal : Goal_store.goal) =
+  let open Result.Syntax in
   let declared = function
     | Some value when String.trim value <> "" -> value
     | Some _ | None -> "(not declared)"
   in
+  let* lookup_section = render_lookup_section lookup in
   Prompt_registry.render_prompt_template
     Prompt_names.goal_verification_proof
     [ "goal_title", goal.Goal_store.title
     ; "metric", declared goal.Goal_store.metric
     ; "target_value", declared goal.Goal_store.target_value
+    ; "lookup_section", lookup_section
     ]
+;;
+
+(* The Goal proof read surface. It is built here rather than derived from
+   anything the Goal links to: the root is the shared playground, one fixed
+   workspace location, and every producer's tree sits under it. An unreadable
+   root is not turned into "the tree is empty" — the review defers with the
+   reason and the pending row stays durable. *)
+let goal_proof_lookup config =
+  let open Result.Syntax in
+  let* tools = Verification_authority_tools.create_goal_proof ~config in
+  let* root_layout = Verification_authority_tools.root_layout tools in
+  Ok
+    (Task.Anti_rationalization.Lookup_tools
+       { schemas = Verification_authority_tools.schemas tools
+       ; dispatch = Verification_authority_tools.dispatch tools
+       ; root_layout
+       })
 ;;
 
 (* {1 Verdict commit}
@@ -235,6 +282,12 @@ let process_pending_work_inner
   | Some goal ->
     (match goal.Goal_store.phase with
      | Goal_phase.Verifying ->
+       (match goal_proof_lookup config with
+        | Error detail ->
+          defer
+            ~goal_id:work.goal_id
+            ~reason:("goal proof lookup surface unavailable: " ^ detail)
+        | Ok lookup ->
        (* The verdict channel drops the reason for [Approve]; capture the
           stated reason from the successful verdict tool call — exactly one
           such call exists per review, and it belongs to the winning slot
@@ -268,8 +321,8 @@ let process_pending_work_inner
                "[goal-proof-review] goal_id=%s %s"
                work.goal_id
                message)
-           ~render_prompt:(fun () -> render_proof_prompt goal)
-           ~lookup:Task.Anti_rationalization.No_lookup_surface
+           ~render_prompt:(fun () -> render_proof_prompt ~lookup goal)
+           ~lookup
            ~on_tool_result
            ()
        in
@@ -330,7 +383,7 @@ let process_pending_work_inner
                   ~goal_id:work.goal_id
                   ~reason:
                     "verdict without a stated reason is not a judgment; the \
-                     pending row stays durable"))
+                     pending row stays durable")))
      | Goal_phase.Executing ->
        (* The crash window of persist-before-model-call: the durable request
           exists but the phase write never landed. Reviewing now would produce

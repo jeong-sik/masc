@@ -108,10 +108,11 @@ let test_every_section_template_renders () =
     cases
 ;;
 
-(* The Goal proof template renders the goal's own declaration and nothing
-   else. A variable it stops placing would leave the judge asked to compare a
-   metric it was never shown. *)
-let test_goal_proof_prompt_renders_the_declaration () =
+(* The Goal proof template renders the goal's own declaration and the surface
+   the judge holds. A variable it stops placing would leave the judge asked to
+   compare a metric it was never shown, or holding read tools nobody described
+   to it. *)
+let test_goal_proof_prompt_renders_its_variables () =
   init ();
   match
     Prompt_registry.render_prompt_template
@@ -119,6 +120,7 @@ let test_goal_proof_prompt_renders_the_declaration () =
       [ "goal_title", marker "goal_title"
       ; "metric", marker "metric"
       ; "target_value", marker "target_value"
+      ; "lookup_section", marker "lookup_section"
       ]
   with
   | Error detail -> failf "goal proof prompt render failed: %s" detail
@@ -127,7 +129,27 @@ let test_goal_proof_prompt_renders_the_declaration () =
       (fun name ->
          check bool (name ^ " is rendered") true
            (Astring.String.is_infix ~affix:(marker name) text))
-      [ "goal_title"; "metric"; "target_value" ]
+      [ "goal_title"; "metric"; "target_value"; "lookup_section" ]
+;;
+
+(* The Goal lookup template describes the tools and the root they resolve
+   against. It is the Goal's own: the task template's prose names a producer
+   sandbox and a submitter, neither of which a Goal has. *)
+let test_goal_lookup_template_renders_the_surface () =
+  init ();
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.goal_verification_lookup
+      [ "lookup_tools", marker "lookup_tools"
+      ; "lookup_root_layout", marker "root_layout"
+      ]
+  with
+  | Error detail -> failf "goal lookup prompt render failed: %s" detail
+  | Ok text ->
+    check bool "the tools are named" true
+      (Astring.String.is_infix ~affix:(marker "lookup_tools") text);
+    check bool "the root listing is placed" true
+      (Astring.String.is_infix ~affix:(marker "root_layout") text)
 ;;
 
 let () =
@@ -147,9 +169,13 @@ let () =
             `Quick
             test_every_section_template_renders
         ; test_case
-            "the goal proof prompt renders the goal's declaration"
+            "the goal proof prompt renders its variables"
             `Quick
-            test_goal_proof_prompt_renders_the_declaration
+            test_goal_proof_prompt_renders_its_variables
+        ; test_case
+            "the goal lookup template renders the surface"
+            `Quick
+            test_goal_lookup_template_renders_the_surface
         ] )
     ]
 ;;

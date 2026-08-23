@@ -16,6 +16,10 @@ val verification : string
 (** Task completion review against the submitted evidence snapshot. *)
 
 val goal_verification_proof : string
+
+val goal_verification_lookup : string
+(** The read-only surface the Goal proof judge holds, described to it. A
+    surface the judge is never told about is a surface it never uses. *)
 (** Goal completion proof review (RFC-0387 B3): did the goal's declared
     metric reach its declared target value? *)
 

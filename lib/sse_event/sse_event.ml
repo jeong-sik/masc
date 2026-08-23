@@ -198,7 +198,7 @@ let turn_completed
 
 (** Emit a [turn_ready] envelope.  The wrapper computes [count] from
     [List.length tool_names] and [names_hash] as the first 16 chars
-    of [Digest.to_hex (Digest.string (String.concat "\n" tool_names))],
+    of the SHA-256 hex of [String.concat "\n" tool_names],
     matching runtime arm at runtime_event_bridge.ml:615-624 (pre-PR-3). *)
 let turn_ready
       ~(ts_unix : float)
@@ -210,7 +210,7 @@ let turn_ready
   : Yojson.Safe.t
   =
   let names_hash =
-    Digest.to_hex (Digest.string (String.concat "\n" tool_names))
+    Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
   in
   let payload_json =
     let p : Sse_event_t.turn_ready_payload =

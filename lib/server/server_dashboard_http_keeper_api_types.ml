@@ -22,6 +22,7 @@ let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_turn_records = "/turn-records"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
+let keeper_suffix_trajectory = "/trajectory"
 
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value
@@ -161,8 +162,18 @@ let is_keeper_checkpoints_get_path req_path =
 let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
 
-let keeper_get_permission req_path =
-  if keeper_path_ends_with req_path keeper_suffix_turn_records
+(* [include_thinking] is not in the path, so the caller reads it and passes it
+   here: this table is where a route's permission is decided, and deciding it
+   somewhere else is how the two doors ended up different.
+
+   `/raw-trace` requires CanAdmin because it returns hidden reasoning.
+   `/trajectory?include_thinking=true` returns the same reasoning and required
+   nothing, so the admin gate on the first door was reachable around. Same
+   data, same gate. *)
+let keeper_get_permission ?(include_thinking = false) req_path =
+  if keeper_path_ends_with req_path keeper_suffix_trajectory && include_thinking
+  then Some Masc_domain.CanAdmin
+  else if keeper_path_ends_with req_path keeper_suffix_turn_records
   then Some Masc_domain.CanReadState
   else if
     is_keeper_checkpoints_get_path req_path

@@ -1982,7 +1982,13 @@ let add_routes ~sw ~clock router =
            request
            reqd
        | None ->
-         (match Keeper_api.keeper_get_permission (Http.Request.path request) with
+         (match
+            Keeper_api.keeper_get_permission
+              ~include_thinking:
+                (Server_utils.bool_query_param request "include_thinking"
+                   ~default:false)
+              (Http.Request.path request)
+          with
           | Some permission ->
            with_token_permission_auth ~permission
              (fun state _agent_name req reqd ->

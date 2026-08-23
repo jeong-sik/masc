@@ -85,7 +85,14 @@ val extract_keeper_name_for_suffix : string -> string -> string
 val is_keeper_paused_work_get_path : string -> bool
 (** [true] for authenticated [GET /api/v1/keepers/<name>/paused-work] paths. *)
 
-val keeper_get_permission : string -> Masc_domain.permission option
+val keeper_get_permission
+  :  ?include_thinking:bool
+  -> string
+  -> Masc_domain.permission option
+(** The permission a GET on this keeper subroute requires. [include_thinking]
+    comes from the query string, which the path alone does not carry: a
+    trajectory asked for with hidden reasoning needs the same [CanAdmin] that
+    [/raw-trace] needs, because it returns the same thing. *)
 (** Mandatory token-bound permission for sensitive keeper GET sub-routes.
     Exact turn evidence requires [CanReadState]. Raw retained traces, Memory OS
     change journals, checkpoint state, and paused-work operator state require

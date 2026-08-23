@@ -1,6 +1,6 @@
 ---
 status: draft
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 code_refs:
   - bin/masc_tui.ml
   - bin/masc_tui_types.ml
@@ -68,7 +68,7 @@ writes no terminal output. Terminal dimensions are probed once, cached, and
 invalidated by `SIGWINCH`; the signal handler only sets an atomic flag and the
 main fiber performs the later process-backed probe.
 
-### 2.2 확장된 view enum (제안)
+### 2.2 Surface enum
 
 ```ocaml
 type surface =
@@ -79,7 +79,9 @@ type surface =
   | Planning
 ```
 
-기존 `view_mode` (Dashboard | Keeper_list | Keeper_detail | Keeper_logs | Keeper_message)은 keepers surface 내부 상태로 재편된다.
+`bin/masc_tui_types.ml` 의 `type surface` 가 위 모양 그대로 구현돼 있다. 옛 `view_mode` 의
+`Keeper_list | Keeper_detail | Keeper_logs | Keeper_message` 는 keepers surface 안쪽 상태로
+들어갔고, `Dashboard` 는 어느 surface 로도 남지 않았다 (렌더러만 남아 있는 상태는 #29563).
 
 ### 2.3 데이터 로더 전략
 

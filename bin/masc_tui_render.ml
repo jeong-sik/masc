@@ -3485,6 +3485,153 @@ let render_keeper_calls (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
+(* The runtime's event feed, newest first, for watching every keeper act at
+   once. Rows are built from the events the TUI holds; the filter decides
+   which kinds draw; a completed call is paired with its start for a
+   duration. Scrolling away from the newest row freezes the view and counts
+   what arrives above it, so an operator reading the past is not pushed off
+   it by the present. *)
+let render_acting (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let module Acting = Masc_tui_acting in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let held = List.length state.acting in
+  (* Visible rows, newest first. The duration lookup walks the events older
+     than the completion, which in a newest-first list is the tail after it. *)
+  let visible =
+    let rec walk acc = function
+      | [] -> List.rev acc
+      | entry :: older ->
+          let event = entry.ae_event in
+          if Acting.visible state.acting_filter event then
+            let duration_ms =
+              match event with
+              | Masc_tui_observer.Agent_core
+                  ({ Masc_tui_observer.kind = Masc_tui_observer.Tool_completed; _ }
+                   as completed) ->
+                  Acting.duration_of_completion
+                    ~before:(List.map (fun e -> e.ae_event) older)
+                    completed
+              | Masc_tui_observer.Agent_core _
+              | Masc_tui_observer.Keeper_heartbeat _
+              | Masc_tui_observer.Keeper_turn_complete _
+              | Masc_tui_observer.Keeper_composite_changed _
+              | Masc_tui_observer.Keeper_chat_appended _
+              | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
+                  None
+            in
+            walk (Acting.row_of_event ~duration_ms event :: acc) older
+          else walk acc older
+    in
+    walk [] state.acting
+  in
+  let shown = List.length visible in
+  let feed =
+    match state.observer with
+    | Observer_off -> "feed: off"
+    | Observer_opening -> "feed: opening"
+    | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
+    | Observer_closed { events; reason; _ } ->
+        Printf.sprintf "feed: closed after %d (%s)" events
+          (Terminal_text.single_line reason)
+  in
+  let header =
+    Printf.sprintf " MASC Acting (%d of %d held, %s)  %s  %s" shown held
+      (Acting.filter_label state.acting_filter) timestamp
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let dropped =
+    if state.acting_dropped = 0 then ""
+    else Printf.sprintf "  dropped %d" state.acting_dropped
+  in
+  let undecodable =
+    if state.acting_undecodable = 0 then ""
+    else Printf.sprintf "  undecodable %d" state.acting_undecodable
+  in
+  let unseen =
+    if state.acting_unseen = 0 then ""
+    else Printf.sprintf "  %d new above (g)" state.acting_unseen
+  in
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-8s %-16s %s %-16s %s" "Time" "Keeper" " " "Event"
+      "Detail"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  let chrome_rows = 9 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.acting_scroll max_scroll) in
+  state.acting_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.observer with
+      | Observer_off | Observer_opening -> "  (no events yet: the feed is not open)"
+      | Observer_live _ ->
+          if held = 0 then "  (no events yet)"
+          else "  (nothing under this filter; f shows everything)"
+      | Observer_closed _ ->
+          if held = 0 then "  (the feed closed before any event arrived)"
+          else "  (nothing under this filter; f shows everything)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt visible idx with
+      | None -> box_empty buf cols
+      | Some row ->
+          let style =
+            match row.Acting.glyph with
+            | Acting.Call_started -> Ansi.cyan
+            | Acting.Call_returned -> Ansi.green
+            | Acting.Turn_boundary -> Ansi.reset
+            | Acting.Turn_settled -> Ansi.bold
+            | Acting.Failure -> Ansi.red
+            | Acting.Attention -> Ansi.yellow
+            | Acting.Quiet -> Ansi.dim
+          in
+          let clock =
+            if row.Acting.at <= 0. then "--:--:--"
+            else
+              Terminal_text.clock_timestamp
+                (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
+          in
+          let line =
+            Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
+              (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+              (Acting.glyph_text row.Acting.glyph)
+              (fit_width (Terminal_text.single_line row.Acting.label) 16)
+              (Terminal_text.single_line row.Acting.detail)
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d rows, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"acting" ~rows:terminal_rows ~cols buf
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -3530,6 +3677,7 @@ let render_surface (state : state) =
   | Connectors -> render_connectors state
   | Tools -> render_tools state
   | Autonomy -> render_autonomy state
+  | Acting -> render_acting state
   | System_logs -> render_system_logs state
   | Schedules -> render_schedules state
 

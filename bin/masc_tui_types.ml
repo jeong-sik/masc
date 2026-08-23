@@ -349,6 +349,7 @@ type keeper_mode =
 (** Top-level TUI surface. *)
 type surface =
   | Overview
+  | Acting
   | Keepers of keeper_mode
   | Board
   | Approvals
@@ -376,6 +377,7 @@ type surface_needs = {
 
 let surface_needs : surface -> surface_needs = function
   | Overview -> { needs_transport = true; needs_keeper_roster = false }
+  | Acting -> { needs_transport = false; needs_keeper_roster = false }
   | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
   | Board | Approvals | Planning | Schedules | Verification | Harness
   | Repositories | Connectors | Tools | Autonomy | System_logs ->
@@ -513,6 +515,9 @@ type state = {
   mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
+  mutable acting_scroll: int;  (** rows from the newest, 0 = pinned to the newest *)
+  mutable acting_unseen: int;  (** events that arrived while scrolled away from the newest *)
+  mutable acting_filter: Masc_tui_acting.filter;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -721,6 +726,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
+  acting_scroll = 0;
+  acting_unseen = 0;
+  acting_filter = Masc_tui_acting.Actions;
   verification = None;
   verification_error = None;
   verification_scroll = 0;

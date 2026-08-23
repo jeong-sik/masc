@@ -236,9 +236,26 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.detail_scroll <- 0;
     if not target_registered then state.log_scroll <- 0;
     true
-  | "\r" | "\n" ->
+  | "\r" ->
     let text = Buffer.contents state.msg_input in
-    if String.trim text <> "" then submit_message text;
+    if String.trim text <> "" then begin
+      (* Back to the newest row: the turn that is about to start is drawn
+         there, and staying scrolled back would hide the send. *)
+      state.msg_scroll <- 0;
+      submit_message text
+    end;
+    true
+  | "\n" ->
+    (* Ctrl-J, or Return on a terminal that still translates it. A composer
+       that cannot hold two lines makes an operator send two messages for one
+       thought. *)
+    Buffer.add_char state.msg_input '\n';
+    true
+  | "up" ->
+    state.msg_scroll <- state.msg_scroll + 1;
+    true
+  | "down" ->
+    state.msg_scroll <- max 0 (state.msg_scroll - 1);
     true
   | "\127" | "\b" ->
     let new_content =
@@ -255,8 +272,13 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       retry_message ();
       true
     end else if c = Some 21 then begin
-      (* Ctrl-U: clear line *)
+      (* Ctrl-U: clear the composer *)
       Buffer.clear state.msg_input;
+      true
+    end else if c = Some 5 then begin
+      (* Ctrl-E: back to the newest row. Scrolling down one row at a time from
+         far back is worse than a key that ends the trip. *)
+      state.msg_scroll <- 0;
       true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       Buffer.add_string state.msg_input s;
@@ -2025,7 +2047,14 @@ let main () =
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
-  let new_term = { old_term with Unix.c_icanon = false; c_echo = false } in
+  (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
+     default translation on, Return is delivered as LF -- the same byte Ctrl-J
+     sends -- and the composer cannot tell "send this" from "start a new line".
+     LF still submits below if some terminal sends it for Return, so this only
+     ever adds a key. *)
+  let new_term =
+    { old_term with Unix.c_icanon = false; c_echo = false; c_icrnl = false }
+  in
 
   let frame_presenter =
     Frame_presenter.create

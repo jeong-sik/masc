@@ -295,6 +295,80 @@ let test_trailing_whitespace_lines_do_not_hide_reply () =
        (fun (row : Layout.row) -> String.equal row.text "  reply")
        rows)
 
+(* The composer. Its row count has to be independent of the terminal width,
+   because the pane's row budget is computed before the width is applied. *)
+let test_composer_splits_on_newlines_only () =
+  check (list string) "each newline is its own line"
+    [ "first"; "second"; "third" ]
+    (Layout.composer_lines ~max_rows:5 "first\nsecond\nthird");
+  check (list string) "a long single line stays one line"
+    [ String.make 400 'x' ]
+    (Layout.composer_lines ~max_rows:5 (String.make 400 'x'))
+
+let test_composer_keeps_the_newest_lines () =
+  check (list string) "the oldest lines scroll off, not the newest"
+    [ "3"; "4"; "5" ]
+    (Layout.composer_lines ~max_rows:3 "1\n2\n3\n4\n5")
+
+let test_an_empty_composer_is_one_empty_line () =
+  (* One line, so the pane draws the prompt with nothing after it rather than
+     drawing no prompt row at all. *)
+  check (list string) "empty is a single empty line" [ "" ]
+    (Layout.composer_lines ~max_rows:5 "")
+
+let test_a_trailing_newline_opens_a_line () =
+  check (list string) "the line the operator just started is shown"
+    [ "typed"; "" ]
+    (Layout.composer_lines ~max_rows:5 "typed\n")
+
+(* Scrollback. Ten one-line entries render to twenty rows -- a metadata row and
+   a body row each -- so the arithmetic below is checkable by hand. *)
+let ten_entries =
+  List.init 10 (fun index ->
+      entry Layout.Keeper "keeper.one" "tui-..dddddddd"
+        (Printf.sprintf "line-%d" index))
+
+let text_of rows = List.map (fun (row : Layout.row) -> row.text) rows
+
+let test_total_rows_counts_metadata_and_body () =
+  check int "two rows per single-line entry" 20
+    (Layout.total_rows ~inner_width:40 ten_entries)
+
+let test_unscrolled_is_the_existing_window () =
+  check (list string) "from_bottom = 0 is visible_rows exactly"
+    (text_of (Layout.visible_rows ~inner_width:40 ~height:6 ten_entries))
+    (text_of
+       (Layout.scrolled_rows ~inner_width:40 ~height:6 ~from_bottom:0
+          ten_entries))
+
+let test_scrolling_back_moves_the_window () =
+  let window =
+    Layout.scrolled_rows ~inner_width:40 ~height:4 ~from_bottom:4 ten_entries
+    |> text_of
+  in
+  check int "the window is the height asked for" 4 (List.length window);
+  check bool "it shows the entries above the hidden ones" true
+    (List.exists (fun text -> String.equal text "  line-6") window
+     && List.exists (fun text -> String.equal text "  line-7") window);
+  check bool "and not the newest ones" false
+    (List.exists (fun text -> String.equal text "  line-9") window)
+
+let test_max_scroll_stops_at_the_oldest_row () =
+  let height = 6 in
+  let limit = Layout.max_scroll ~inner_width:40 ~height ten_entries in
+  check int "twenty rows minus one screenful" 14 limit;
+  let window =
+    Layout.scrolled_rows ~inner_width:40 ~height ~from_bottom:limit ten_entries
+    |> text_of
+  in
+  check bool "the oldest entry is on screen at the limit" true
+    (List.exists (fun text -> String.equal text "  line-0") window)
+
+let test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping () =
+  check (list string) "a position past the oldest row shows nothing" []
+    (Layout.scrolled_rows ~inner_width:40 ~height:6 ~from_bottom:100 ten_entries
+     |> text_of)
+
 let () =
   run "tui_message_layout"
     [ ( "message rows"
@@ -320,5 +394,27 @@ let () =
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick
             test_trailing_whitespace_lines_do_not_hide_reply
+        ] )
+    ; ( "composer"
+      , [ test_case "splits on newlines only" `Quick
+            test_composer_splits_on_newlines_only
+        ; test_case "keeps the newest lines" `Quick
+            test_composer_keeps_the_newest_lines
+        ; test_case "empty is one empty line" `Quick
+            test_an_empty_composer_is_one_empty_line
+        ; test_case "a trailing newline opens a line" `Quick
+            test_a_trailing_newline_opens_a_line
+        ] )
+    ; ( "scrollback"
+      , [ test_case "total rows counts metadata and body" `Quick
+            test_total_rows_counts_metadata_and_body
+        ; test_case "unscrolled matches the existing window" `Quick
+            test_unscrolled_is_the_existing_window
+        ; test_case "scrolling back moves the window" `Quick
+            test_scrolling_back_moves_the_window
+        ; test_case "max scroll stops at the oldest row" `Quick
+            test_max_scroll_stops_at_the_oldest_row
+        ; test_case "scrolling past the top shows nothing" `Quick
+            test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping
         ] )
     ]

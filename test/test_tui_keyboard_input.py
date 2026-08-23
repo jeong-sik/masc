@@ -394,7 +394,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "trace_id": f"trace-{name}",
         "multimodal_policy": "inherit",
         "trace_history": [],
-        "generation": 1,
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started",
@@ -579,8 +578,20 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
     }
 
 
+def fleet_safety_fixture() -> HttpResponse:
+    """A fleet reading the TUI can decode.
+
+    Without it the poll fails and the TUI records a "fleet safety data
+    unreliable" event, which is correct behaviour but adds a row to scenarios
+    that are counting the event list. Only "status" is required; the rest of
+    the section defaults.
+    """
+    return (200, {"keeper_fleet_safety": {"status": "ok"}})
+
+
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
+        "/health?full=1": fleet_safety_fixture(),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
         "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
@@ -1303,7 +1314,11 @@ def keeper_selection_identity_interaction(
 
     keepers_path = Path(base_path) / ".masc" / "keepers"
     beta_metadata = keeper_metadata("beta")
-    beta_metadata["generation"] = 29453
+    # A value the keeper list draws, so pressing r below is observable. This
+    # used to ride on the keeper's generation counter, which the schema no
+    # longer has; the current task id is drawn in the list's Current Task
+    # column and serves the same purpose.
+    beta_metadata["current_task_id"] = "task-29453"
     (keepers_path / "beta.json").write_text(json.dumps(beta_metadata), encoding="utf-8")
     (keepers_path / "aardvark.json").write_text(
         json.dumps(keeper_metadata("aardvark")), encoding="utf-8"
@@ -1351,7 +1366,7 @@ def keeper_selection_identity_interaction(
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1mbeta")
     alpha_metadata = keeper_metadata("alpha")
-    alpha_metadata["generation"] = 29454
+    alpha_metadata["current_task_id"] = "task-29454"
     (keepers_path / "alpha.json").write_text(
         json.dumps(alpha_metadata), encoding="utf-8"
     )
@@ -2574,6 +2589,59 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def composer_newline_interaction(requests: HttpRequests) -> Interaction:
+    """Ctrl-J opens a line; Return sends.
+
+    The two are one byte apart only because the TUI turns off the terminal's
+    CR-to-LF translation. With it on, Return arrives as LF -- the byte Ctrl-J
+    sends -- and the composer cannot tell them apart. This drives a real
+    terminal, so it fails if that setting is ever restored.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+
+        send_and_wait(process, master_fd, output, b"first", b"> first")
+        # Ctrl-J. The prompt stays on the first line and the second is indented
+        # under it, so the two rows read as one message.
+        second_frame = send_and_wait(
+            process, master_fd, output, b"\nsecond", b"    second"
+        )
+        rendered = CSI_RE.sub(b"", second_frame).decode("utf-8")
+        if "> first" not in rendered:
+            raise AssertionError(f"composer lost its first line: {rendered!r}")
+        if "firstsecond" in rendered:
+            raise AssertionError(f"composer joined the two lines: {rendered!r}")
+
+        # Return sends what Ctrl-J composed, newline and all.
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body)["message"]
+        if message != "first\nsecond":
+            raise AssertionError(f"the newline did not survive the send: {message!r}")
+        # The fixture answers 503, so the turn settles rather than streaming.
+        # Esc then leaves the pane instead of interrupting, and q quits from
+        # the detail view -- in the pane it would be typed into the composer.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
     missing_target_requests: HttpRequests = []
@@ -2598,6 +2666,20 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=utf8_requests,
+    )
+    composer_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Composer newline and send",
+        interact=composer_newline_interaction(composer_requests),
+        http_fixtures={
+            "/health?full=1": fleet_safety_fixture(),
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after composer request capture"},
+            ),
+        },
+        http_requests=composer_requests,
     )
     run_terminal_scenario(
         executable,

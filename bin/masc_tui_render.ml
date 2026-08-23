@@ -1607,9 +1607,18 @@ let render_keeper_message (state : state) =
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in
+    let inner_width = max 1 (cols - 4) in
+    (* Clamped here rather than where the key is handled: the limit depends on
+       the terminal width and the pane's height, and a resize changes both
+       under a scroll position that was legal before it. *)
+    let scroll =
+      min state.msg_scroll
+        (Message_layout.max_scroll ~inner_width ~height:history_height
+           layout_entries)
+    in
     let visible_rows =
-      Message_layout.visible_rows ~inner_width:(max 1 (cols - 4))
-        ~height:history_height layout_entries
+      Message_layout.scrolled_rows ~inner_width ~height:history_height
+        ~from_bottom:scroll layout_entries
     in
 
     if visible_rows = [] then begin
@@ -1678,6 +1687,11 @@ let render_keeper_message (state : state) =
            (Printf.sprintf "  (processing %s…)"
               (Keeper_chat.compact_request_id request.request_id))
      | None, Some _ | None, None -> ());
+    (if scroll > 0 then
+       box_line_styled buf cols ~style:Ansi.yellow
+         (Printf.sprintf
+            "  scrolled back %d row(s); down or Ctrl-E returns to the newest"
+            scroll));
     (match state.msg_loaded_error with
      | Some detail ->
          box_line_styled buf cols ~style:Ansi.yellow
@@ -1778,15 +1792,27 @@ let render_keeper_message (state : state) =
       box_line_styled buf cols ~style:Ansi.red unavailable_message
     end;
     let input = Buffer.contents state.msg_input in
+    let composer =
+      Message_layout.composer_lines
+        ~max_rows:Message_layout.composer_max_rows input
+      |> List.map (Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)))
+    in
+    (* The cursor sits on the last composer line, which the row budget has
+       already made room for. *)
     let visible_input =
-      Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)) input
+      match List.rev composer with [] -> "" | last :: _ -> last
     in
     let input_row =
       Message_layout.input_cursor_row ~terminal_rows:rows ~history_height
         ~status_rows
     in
-    box_line_styled buf cols ~style:Ansi.cyan
-      (Printf.sprintf "  > %s" visible_input);
+    List.iteri
+      (fun index line ->
+        (* Only the first line carries the prompt; the rest line up under it so
+           a wrapped thought reads as one message rather than several. *)
+        let prefix = if index = 0 then "  > " else "    " in
+        box_line_styled buf cols ~style:Ansi.cyan (prefix ^ line))
+      composer;
 
     box_bottom buf cols;
 
@@ -1818,6 +1844,9 @@ let render_keeper_message (state : state) =
            | None, false -> "Enter:disabled (Keeper unavailable)"
            | None, true -> "Enter:send")
     in
+    let scroll_hint =
+      if scroll > 0 then "up/down:scroll  Ctrl-E:newest" else "up:scroll back"
+    in
     let escape_hint =
       match state.msg_live with
       | Some live
@@ -1828,8 +1857,8 @@ let render_keeper_message (state : state) =
       | None -> "Esc:back"
     in
     let footer =
-      Printf.sprintf "%s  %s  %s  Ctrl-U:clear line%s" Ansi.dim enter_hint
-        escape_hint Ansi.reset
+      Printf.sprintf "%s  %s  Ctrl-J:newline  %s  %s  Ctrl-U:clear%s" Ansi.dim
+        enter_hint scroll_hint escape_hint Ansi.reset
     in
     Buffer.add_string buf
       (Message_layout.fit_width footer (max 1 (cols - 1)));

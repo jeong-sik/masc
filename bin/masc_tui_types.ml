@@ -337,6 +337,11 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  (* How many rows above the newest the chat pane is showing. 0 is the bottom,
+     where the pane follows a running turn. Held rather than derived: an
+     operator reading back should stay where they are while the keeper keeps
+     talking. *)
+  mutable msg_scroll: int;
   mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
   mutable msg_inflight_kind: msg_inflight_kind option;
   mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
@@ -430,6 +435,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_scroll = 0;
   msg_inflight = None;
   msg_inflight_kind = None;
   msg_prepared = None;
@@ -468,6 +474,18 @@ let chat_rows_for (state : state) keeper_name =
     (fun left right -> Float.compare left.me_at right.me_at)
     (loaded @ session)
 
+(* Rows the composer needs beyond its first. Folded into the status-row count
+   because that one number already sets both the history height and the cursor
+   row, so a composer that grew would otherwise push the cursor off the line it
+   is editing. *)
+let composer_extra_rows (state : state) =
+  let lines =
+    Masc_tui_message_layout.composer_lines
+      ~max_rows:Masc_tui_message_layout.composer_max_rows
+      (Buffer.contents state.msg_input)
+  in
+  max 0 (List.length lines - 1)
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -489,6 +507,8 @@ let keeper_message_status_rows (state : state) =
          List.length (Masc_tui_keeper_chat_transcript.status_rows live))
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
+  + (if state.msg_scroll > 0 then 1 else 0)
+  + composer_extra_rows state
 
 let approval_items (state : state) =
   match state.approval_snapshot with

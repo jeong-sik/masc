@@ -2011,6 +2011,29 @@ let render_keeper_message (state : state) =
            (Printf.sprintf "  (processing %s…)"
               (Keeper_chat.compact_request_id request.request_id))
      | None, Some _ | None, None -> ());
+    (* What is waiting, in the order it will go. Shown in full rather than as a
+       count: an operator who typed three lines during a turn needs to see
+       which three, and a queue that only says "3 waiting" is the same silence
+       that made a refused send look like a sent one. *)
+    (match Masc_tui_keeper_chat_queue.waiting state.msg_queued with
+     | [] -> ()
+     | queued ->
+         List.iteri
+           (fun index (queued_keeper, text) ->
+             let body =
+               match String.index_opt text '\n' with
+               | None -> text
+               | Some cut -> String.sub text 0 cut ^ " …"
+             in
+             let addressed =
+               if String.equal queued_keeper keeper_name
+               then ""
+               else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
+             in
+             box_line_styled buf cols ~style:Ansi.dim
+               (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
+                  (Keeper_chat.terminal_safe_text body)))
+           queued);
     (if scroll > 0 then
        box_line_styled buf cols ~style:Ansi.yellow
          (Printf.sprintf
@@ -2151,8 +2174,13 @@ let render_keeper_message (state : state) =
           "finishing durable cleanup  Enter:blocked"
       | Some _, Some Chat_post, Some _ ->
           "replaying exact request  Enter:blocked"
-      | Some _, (Some Chat_post | None), _ -> "Enter:wait for current request"
-      | None, Some _, _ -> "Enter:wait for current request"
+      (* A turn is running and nothing durable is blocking: Enter holds the
+         line for the next one. Saying "wait" was the honest hint while the
+         send was refused; now the honest hint is what the key does. *)
+      | Some _, (Some Chat_post | None), _ | None, Some _, _ ->
+          (match Masc_tui_keeper_chat_queue.length state.msg_queued with
+           | 0 -> "Enter:queue for next turn"
+           | waiting -> Printf.sprintf "Enter:queue (%d waiting)" waiting)
       | None, None, _ ->
       match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
       with

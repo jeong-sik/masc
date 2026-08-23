@@ -9,6 +9,7 @@ module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_history = Masc_tui_keeper_chat_history
+module Chat_queue = Masc_tui_keeper_chat_queue
 module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
@@ -652,7 +653,15 @@ let persist_keeper_message_fence ~base_path request =
   Terminal_write_repair.note ();
   Keeper_chat_recovery.persist_pending ~base_path request
 
-let rec start_keeper_message state ~base_path ~mailbox text =
+let queue_keeper_message state ~keeper_name text =
+  match Chat_queue.push state.msg_queued ~keeper_name text with
+  | Error _ as error -> error
+  | Ok (queue, waiting) ->
+      state.msg_queued <- queue;
+      Ok waiting
+;;
+
+let rec start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   match state.msg_prepared with
   | Some request ->
       add_event state "error"
@@ -674,10 +683,27 @@ let rec start_keeper_message state ~base_path ~mailbox text =
        ^ detail)
   | None ->
   match state.msg_inflight with
-  | Some request ->
-      add_event state "system"
-        (Printf.sprintf "Keeper message already in progress: %s"
-           request.request_id)
+  | Some request -> (
+      (* A turn is running. Hold the line rather than refusing it: the operator
+         pressed Enter meaning "send this next", and the turn settling is what
+         "next" is. *)
+      match
+        match keeper_name with
+        | Some _ -> keeper_name
+        | None -> state.msg_target_keeper_name
+      with
+      | None -> add_event state "error" "Cannot queue: no Keeper is selected"
+      | Some target -> (
+          match queue_keeper_message state ~keeper_name:target text with
+          | Error detail -> add_event state "error" detail
+          | Ok waiting ->
+              clear_current_message_draft state;
+              add_event state "message"
+                (Printf.sprintf
+                   "Queued for %s behind %s (%d waiting)"
+                   (Keeper_chat.terminal_safe_text target)
+                   request.request_id
+                   waiting)))
   | None -> (
       match state.msg_unverified with
       | Some request ->
@@ -686,7 +712,9 @@ let rec start_keeper_message state ~base_path ~mailbox text =
                "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
                request.request_id)
       | None ->
-      match state.msg_target_keeper_name with
+      match
+        (match keeper_name with Some _ -> keeper_name | None -> state.msg_target_keeper_name)
+      with
       | None -> add_event state "error" "Cannot send: no Keeper is selected"
       | Some _ when Option.is_some state.keepers_error ->
           add_event state "error"
@@ -824,6 +852,57 @@ let launch_keeper_cleanup state ~base_path ~mailbox request =
       enqueue_async mailbox
         (Keeper_chat_cleanup_done
            (request, Error "Eio switch is unavailable"))
+
+(* Send the oldest waiting line, once. Only one at a time: dispatch is
+   serialized on a single in-flight request, and the next settle drains the
+   next. Nothing is sent while a prepared fence, an unverified outcome, or a
+   blocked recovery is standing — those want the operator's Ctrl-R, and
+   pushing a queued line into them would turn a wait into an error. The queue
+   keeps its place and drains when the block clears. *)
+let drain_queued_message state ~base_path ~mailbox =
+  (* One send per settle: dispatch is serialized on a single in-flight request
+     and the next settle drains the next. The loop is only for lines that
+     cannot be sent at all — it skips past them to reach one that can, rather
+     than stopping the whole queue behind a keeper that left.
+
+     Recursion stays inside so the exported name has no self-call: a wiring
+     test that counts calls to it would otherwise be satisfied by this
+     function calling itself, and pass with nothing else calling it at all. *)
+  let rec next () =
+    match Chat_queue.pop state.msg_queued with
+    | None -> ()
+    | Some ((keeper_name, text), rest) ->
+        (* Nothing is sent while a prepared fence, an unverified outcome, or a
+           blocked recovery is standing — those want the operator's Ctrl-R, and
+           pushing a queued line into them would turn a wait into an error. The
+           queue keeps its place and drains when the block clears. *)
+        if
+          Option.is_none state.msg_inflight
+          && Option.is_none state.msg_prepared
+          && Option.is_none state.msg_unverified
+          && Option.is_none state.msg_recovery_error
+        then
+          if keeper_available_for_new_message state keeper_name
+          then (
+            state.msg_queued <- rest;
+            start_keeper_message ~keeper_name state ~base_path ~mailbox text)
+          else (
+            (* The keeper this was written to is no longer registered. Sending
+               it would fail; holding it would leave a count reporting work that
+               never moves. Say what is being let go, and let it go. *)
+            let before = Chat_queue.length state.msg_queued in
+            state.msg_queued <-
+              Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
+            add_event state "error"
+              (Printf.sprintf
+                 "Keeper %s is no longer registered; %d queued message(s) for \
+                  it were not sent"
+                 (Keeper_chat.terminal_safe_text keeper_name)
+                 (before - Chat_queue.length state.msg_queued));
+            next ())
+  in
+  next ()
+;;
 
 let clear_keeper_chat_recovery state ~base_path request =
   match Keeper_chat_recovery.clear_pending ~base_path request with
@@ -1954,7 +2033,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             apply_keeper_chat_result state ~base_path
               ~dispatch_was_replay:was_replay request result)
       in
-      if applied then load_from_masc_dir state base_path
+      if applied then load_from_masc_dir state base_path;
+      (* The turn settled, so "next" has arrived for whatever was waiting. *)
+      drain_queued_message state ~base_path ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
       (* Identity-guarded: a late chunk from a superseded turn must not draw
          into the one now running. *)

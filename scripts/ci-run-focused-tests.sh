@@ -409,6 +409,8 @@ sse_targets=(
   @test/runtest-test_tui_decode
   @test/runtest-test_tui_frame_presenter
   @test/runtest-test_tui_keeper_chat_history
+  @test/runtest-test_tui_keeper_chat_queue
+  @test/runtest-test_tui_chat_queue_wiring
   @test/runtest-test_tui_chat_surface_mirror
   @test/runtest-test_tui_keeper_chat_live
   @test/runtest-test_tui_keeper_chat_transcript

@@ -862,6 +862,7 @@ let handle_keeper_msg_stream_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?continuation_channel
       ctx
       message
@@ -881,6 +882,7 @@ let handle_keeper_msg_stream_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ctx

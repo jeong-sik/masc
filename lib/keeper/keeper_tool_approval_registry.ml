@@ -37,6 +37,11 @@ type t =
 
 let create () = { waiters = []; mutex = Stdlib.Mutex.create () }
 
+(* Created at load, so there is no moment where a wait or an answer arrives
+   before the registry exists. *)
+let shared_registry = create ()
+let shared () = shared_registry
+
 let same_key (left : pending) (right : pending) =
   String.equal left.keeper_name right.keeper_name
   && String.equal left.tool_call_id right.tool_call_id

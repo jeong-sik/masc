@@ -10,6 +10,7 @@ let keeper_chat_timeout_sec = 180.0
    pins that this literal appears once so they cannot drift apart. *)
 let keeper_chat_stream_path = "/api/v1/keepers/chat/stream"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
+let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 
 let trim_nonempty value =
   let trimmed = String.trim value in
@@ -214,6 +215,32 @@ let decode_interrupt_signal json =
            ; detail = string_of "detail"
            })
   | Some _ | None -> Error "interrupt response has no signalled flag"
+
+(** Answer a tool call the keeper is holding.
+
+    [settled] reports whether a wait was actually released. False means the
+    call had already timed out or been answered, so the pane says that rather
+    than showing the answer as taken. *)
+let post_keeper_tool_approval ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(tool_call_id : string) ~(allow : bool) :
+    (bool, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ ("name", `String keeper_name)
+         ; ("tool_call_id", `String tool_call_id)
+         ; ("decision", `String (if allow then "approve" else "deny"))
+         ])
+  in
+  match post_json ~host ~port ~path:keeper_tool_approval_path ~body with
+  | Error detail -> Error detail
+  | Ok json -> (
+      match json with
+      | `Assoc fields -> (
+          match List.assoc_opt "settled" fields with
+          | Some (`Bool settled) -> Ok settled
+          | Some _ | None -> Error "approval response has no settled flag")
+      | _ -> Error "approval response was not a JSON object")
 
 let post_keeper_turn_interrupt ~(host : string) ~(port : int)
     ~(keeper_name : string) : (interrupt_signal, string) result =

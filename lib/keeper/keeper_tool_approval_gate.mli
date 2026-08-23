@@ -5,9 +5,14 @@
 
     - a [pre_tool_use] hook, which decides {i whether} to ask — from
       {!Keeper_tool_approval_policy}
-    - a [tool_approval] callback, which {i does} the asking — publishing the
-      question to the chat stream and parking on
-      {!Keeper_tool_approval_registry} until an answer or the timeout
+    - a [tool_approval] callback, which {i does} the asking — handing the
+      question to [publish] and parking on {!Keeper_tool_approval_registry}
+      until an answer or the timeout
+
+    [publish] takes an event rather than a stream so the caller decides where
+    it goes: the chat handler already owns one path for the events it sends a
+    reader, and a second stream would need a fiber to drain it into the
+    first.
 
     Built together here so a caller cannot install one without the other. A
     hook that asks with no callback to answer rejects every call it stops; a
@@ -20,7 +25,7 @@ type t =
 
 val create :
   registry:Keeper_tool_approval_registry.t ->
-  events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+  publish:(Keeper_chat_events.keeper_chat_event -> unit) ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   keeper_name:string ->
   timeout_sec:float ->

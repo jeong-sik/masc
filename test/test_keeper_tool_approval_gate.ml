@@ -3,6 +3,7 @@ open Alcotest
 module Gate = Masc.Keeper_tool_approval_gate
 module Registry = Masc.Keeper_tool_approval_registry
 module Events = Masc.Keeper_chat_events
+module Keeper_chat_events_publish = Masc.Keeper_chat_events
 
 let keeper = "keeper.one"
 
@@ -46,7 +47,9 @@ let with_gate ~timeout_sec f =
       let registry = Registry.create () in
       let events = Events.create () in
       let gate =
-        Gate.create ~registry ~events ~clock ~keeper_name:keeper ~timeout_sec
+        Gate.create ~registry
+          ~publish:(Keeper_chat_events_publish.publish events)
+          ~clock ~keeper_name:keeper ~timeout_sec
       in
       f ~clock ~registry ~events ~gate)
 

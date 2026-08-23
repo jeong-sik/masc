@@ -18,6 +18,14 @@ type t
 
 val create : unit -> t
 
+val shared : unit -> t
+(** The registry the running server uses.
+
+    One instance rather than an installed slot: the turn fiber that waits and
+    the HTTP handler that answers have to reach the same waits, and a slot
+    would add a state where one of them reaches nothing. [create] stays for
+    tests, which want an empty one per case. *)
+
 (** What an operator said about one tool call. *)
 type decision =
   | Approve

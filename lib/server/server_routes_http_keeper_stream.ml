@@ -243,6 +243,76 @@ let turn_instructions_for_request payload =
 
 let direct_message_of_request payload = payload.direct_message
 
+(* How long a held tool call waits for an operator.
+
+   Long enough to read the question and decide -- an operator glancing away
+   should not come back to a denied call. Short enough that a turn does not
+   sit on a provider connection all afternoon when the reader has walked
+   away: the chat stream's own silence bound is the same order, and a wait
+   outliving it would hold a turn whose reader is already gone. *)
+let keeper_tool_approval_timeout_sec = 180.0
+
+(* Answer a held tool call.
+
+   The reply says whether a wait was actually released. A late answer -- one
+   whose call already timed out, or was never held -- reports [settled: false]
+   rather than reading as success, so an operator is not told a call was
+   approved when nothing was listening for it. *)
+let handle_keeper_tool_approval state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let parsed =
+      try
+        match Yojson.Safe.from_string body_str with
+        | `Assoc fields ->
+          let field name =
+            match List.assoc_opt name fields with
+            | Some (`String value) -> Ok (String.trim value)
+            | Some _ | None ->
+              Error (Printf.sprintf "%s (string) is required" name)
+          in
+          let ( let* ) = Result.bind in
+          let* keeper_name = field "name" in
+          let* tool_call_id = field "tool_call_id" in
+          let* decision_raw = field "decision" in
+          (match Keeper_tool_approval_registry.decision_of_string decision_raw with
+           | Some decision -> Ok (keeper_name, tool_call_id, decision)
+           | None ->
+             Error
+               (Printf.sprintf "decision must be approve or deny, got %S"
+                  decision_raw))
+        | _ -> Error "JSON object body required"
+      with
+      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+    in
+    match parsed with
+    | Error msg ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json msg)
+    | Ok (keeper_name, tool_call_id, decision) ->
+      if not (Keeper_registry.is_registered ~base_path keeper_name)
+      then
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json "keeper not registered")
+      else (
+        let settled =
+          Keeper_tool_approval_registry.settle
+            (Keeper_tool_approval_registry.shared ())
+            ~keeper_name ~tool_call_id decision
+        in
+        Log.Keeper.info
+          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b"
+          keeper_name tool_call_id
+          (Keeper_tool_approval_registry.decision_to_string decision)
+          settled;
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc
+             [ ("settled", `Bool settled)
+             ; ( "decision"
+               , `String (Keeper_tool_approval_registry.decision_to_string decision) )
+             ])))
+;;
+
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -679,6 +749,7 @@ let execute_keeper_stream_tool_streaming
       ?auth_token:_
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ~admission_token
       state
       ~agent_name
@@ -709,6 +780,7 @@ let execute_keeper_stream_tool_streaming
           ~on_text_delta
           ?on_event
           ?on_tool_result_ready
+          ?approval_gate
           keeper_ctx
           ~continuation_channel
           ~message
@@ -1367,6 +1439,18 @@ let process_single_turn ~user_row_origin ~submission
     push_worker_event
       (Stream_chat_event (Keeper_chat_events.Tool_result_ready { tool_call_id }))
   in
+  (* A gate only for turns an operator started here: this request is open,
+     someone is reading it, and the answer has somewhere to come back to. An
+     autonomous cycle gets none -- nobody is watching it, so every call it
+     made would wait out the timeout and then be denied. *)
+  let approval_gate =
+    Keeper_tool_approval_gate.create
+      ~registry:(Keeper_tool_approval_registry.shared ())
+      ~publish:(fun event -> push_worker_event (Stream_chat_event event))
+      ~clock
+      ~keeper_name:payload.name
+      ~timeout_sec:keeper_tool_approval_timeout_sec
+  in
   let accumulated_media_blocks () =
     match
       Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
@@ -1455,6 +1539,7 @@ let process_single_turn ~user_row_origin ~submission
                 ?auth_token
                 state ~agent_name ~message:direct_message ~on_event
                 ~on_tool_result_ready
+                ~approval_gate
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
                 ~admission_token
             in

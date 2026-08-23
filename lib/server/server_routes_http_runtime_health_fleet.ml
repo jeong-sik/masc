@@ -42,7 +42,6 @@ let keeper_owner_health_json () =
       ; "running_operation_count", `Int 0
       ; "terminal_operation_count", `Int 0
       ; "interrupted_operation_count", `Int 0
-      ; "operation_store_unavailable_count", `Int 0
       ; "keepers", `List []
       ]
   | Some state ->
@@ -139,7 +138,6 @@ let keeper_owner_health_json () =
         , `Int (sum (fun (_, _, _, _, _, count, _, _) -> count)) )
       ; ( "interrupted_operation_count"
         , `Int (sum (fun (_, _, _, _, _, _, count, _) -> count)) )
-      ; "operation_store_unavailable_count", `Int unavailable_count
       ; "keepers", `List (List.map (fun (json, _, _, _, _, _, _, _) -> json) rows)
       ]
 ;;
@@ -413,32 +411,26 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ; "counts_complete", `Bool false
       ; "oldest_arrived_at_unix", `Null
       ; "oldest_age_seconds", `Null
-      ; "runnable_pending_count", `Int 0
       ; "runnable_backlog_count", `Int 0
       ; "runnable_oldest_arrived_at_unix", `Null
       ; "runnable_oldest_age_seconds", `Null
       ; "runnable_by_keeper", `List []
-      ; "recoverable_pending_count", `Int 0
       ; "recoverable_backlog_count", `Int 0
       ; "recoverable_oldest_arrived_at_unix", `Null
       ; "recoverable_oldest_age_seconds", `Null
       ; "recoverable_by_keeper", `List []
-      ; "retained_disabled_pending_count", `Int 0
       ; "retained_disabled_backlog_count", `Int 0
       ; "retained_disabled_oldest_arrived_at_unix", `Null
       ; "retained_disabled_oldest_age_seconds", `Null
       ; "retained_disabled_by_keeper", `List []
-      ; "paused_dead_pending_count", `Int 0
       ; "paused_dead_backlog_count", `Int 0
       ; "paused_dead_oldest_arrived_at_unix", `Null
       ; "paused_dead_oldest_age_seconds", `Null
       ; "paused_dead_by_keeper", `List []
-      ; "shutdown_fenced_pending_count", `Int 0
       ; "shutdown_fenced_backlog_count", `Int 0
       ; "shutdown_fenced_oldest_arrived_at_unix", `Null
       ; "shutdown_fenced_oldest_age_seconds", `Null
       ; "shutdown_fenced_by_keeper", `List []
-      ; "unclassified_pending_count", `Int 0
       ; "unclassified_count", `Int 0
       ; "unclassified_oldest_arrived_at_unix", `Null
       ; "unclassified_oldest_age_seconds", `Null

@@ -672,7 +672,6 @@ let keeper_identity_drift_health_json_of_scan scan =
         `Int (List.length scan.materializable_configured_names) );
       ( "materializable_configured_keeper_names",
         json_string_list scan.materializable_configured_names );
-      ("persisted_meta_count", `Int (List.length scan.persisted_meta_names));
       ("persisted_meta_names", json_string_list scan.persisted_meta_names);
       ("configured_without_meta_count", `Int configured_without_meta_count);
       ( "configured_without_meta_names",

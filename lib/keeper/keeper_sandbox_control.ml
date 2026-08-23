@@ -630,7 +630,6 @@ let live_status_json ?(include_preflight = true)
       ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
       ("effective_mode", `String (container_mode meta containers));
       ("managed_container_kind", `String managed_kind);
-      ("container_count", `Int (List.length containers));
       ("containers",
        `List (List.map Keeper_sandbox_runtime.live_container_to_yojson containers));
       ( "preflight",

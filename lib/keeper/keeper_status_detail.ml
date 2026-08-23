@@ -701,8 +701,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("auto_execution_session_enabled", `Bool false);
            ("autonomy", `Assoc [
              ("turn_count", `Int m.runtime.autonomous_turn_count);
-             ("tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
-             ("text_turn_count", `Int m.runtime.autonomous_text_turn_count);
              ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
              ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
              ("noop_turn_count", `Int m.runtime.noop_turn_count);

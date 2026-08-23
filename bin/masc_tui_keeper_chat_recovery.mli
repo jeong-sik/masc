@@ -50,7 +50,7 @@ type dispatch_claim =
   | Replay_dispatch
   | Accepted_dispatch
   | Rejected_dispatch
-(** A claim is returned while the cross-process dispatch lock is held.
+(** A claim is returned once the fence has been advanced to match it.
     [First_dispatch] is the only path from [Prepared]. [Reconcile_dispatch]
     authorizes zero POSTs and exact operation lookup only. [Replay_dispatch]
     rewrites an existing [Replayable] fence to [Dispatching] durably before
@@ -85,9 +85,16 @@ val with_dispatch_claim :
   request ->
   (dispatch_claim -> 'a) ->
   ('a, string) result
-(** Hold the cross-process dispatch lock across [f]. The exact fence is
-    re-read under its transaction lock and advanced monotonically before [f]
-    runs. Callers keep this scope through result application/acknowledgement. *)
+(** Win the exact fence, then run [f] with the claim it granted.
+
+    The fence is re-read under its own transaction lock and advanced
+    monotonically before [f] runs, and that lock is released before it does.
+    Exclusion is the phases' job, not the caller's scope: a second claimer
+    reads [Dispatching] and gets [Reconcile_dispatch], which authorizes no
+    POST, and [persist_pending] refuses both a different request and a rewrite
+    of [Dispatching]. Holding a lock across [f] added nothing to that and cost
+    every other TUI on the workspace its turn whenever one turn stopped
+    settling. *)
 
 val with_dispatch_lock :
   base_path:string -> (unit -> 'a) -> ('a, string) result

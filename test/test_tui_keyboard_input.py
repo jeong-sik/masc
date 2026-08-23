@@ -1843,6 +1843,63 @@ def assert_row_budgeted_surfaces(
     os.write(master_fd, b"q")
 
 
+EVENT_RANGE_RE = re.compile(rb"Recent Events (\d+)-(\d+)/(\d+)")
+
+
+def event_total(frame: bytes, where: str) -> int:
+    """How many events the pane says it holds, read from the screen.
+
+    The count is not fixed by the fixture: it includes events the TUI raises
+    itself, and a runner that surfaces one more load error than a laptop reads
+    a different number. Every range below is built from this so the scenario
+    asserts scroll positions -- which is its subject -- rather than a list
+    length it does not control.
+    """
+    match = EVENT_RANGE_RE.search(frame)
+    if match is None:
+        raise AssertionError(f"{where} drew no event range: {frame!r}")
+    return int(match.group(3))
+
+
+def event_range(first: int, last: int, total: int) -> bytes:
+    return f"Recent Events {first}-{last}/{total}".encode()
+
+
+def newest_window(height: int, total: int) -> bytes:
+    """The window resting against the newest event."""
+    return event_range(1, min(height, total), total)
+
+
+def oldest_window(height: int, total: int) -> bytes:
+    """The window resting against the oldest event."""
+    return event_range(max(1, total - height + 1), total, total)
+
+
+def assert_event_window_at_newest(frame: bytes, where: str) -> None:
+    """The event window sits at the newest end of the list.
+
+    This is what growing the viewport is supposed to restore, and it is the
+    first number that says so. The total is deliberately unread: it counts
+    events the TUI raises itself, so a runner that surfaces one more load
+    error than this laptop reads a different number for reasons the scenario
+    is not about. Pinning the literal "1-6/6" failed on CI at "1-6/7" -- the
+    window was exactly where it belonged.
+    """
+    match = EVENT_RANGE_RE.search(frame)
+    if match is None:
+        raise AssertionError(f"{where} drew no event range: {frame!r}")
+    first, last, total = (int(g) for g in match.groups())
+    if first != 1:
+        raise AssertionError(
+            f"{where} did not return to the newest event: "
+            f"range {first}-{last}/{total}: {frame!r}"
+        )
+    if not 1 <= last <= total:
+        raise AssertionError(
+            f"{where} drew an impossible range {first}-{last}/{total}: {frame!r}"
+        )
+
+
 def assert_overview_event_rows(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1893,8 +1950,7 @@ def assert_overview_event_rows(
     for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
-    if b"Recent Events 1-6/6" not in overview:
-        raise AssertionError(f"23-row Overview omitted its event range: {overview!r}")
+    assert_event_window_at_newest(overview, "23-row Overview")
     if overview.count(b"Manual refresh") != 5:
         raise AssertionError(
             f"22-row Overview did not show all five refresh events: {overview!r}"
@@ -1913,7 +1969,8 @@ def assert_overview_event_rows(
     for expected in (b"Manual refresh", b"task-1", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"Recent Events 1-2/6" not in overview:
+    total = event_total(overview, "14-row Overview")
+    if newest_window(2, total) not in overview:
         raise AssertionError(f"14-row Overview omitted its event range: {overview!r}")
     if overview.count(b"Manual refresh") != 2:
         raise AssertionError(
@@ -1931,18 +1988,18 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=99,
-        needle=b"Recent Events 5-6/6",
+        needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
     if b"TUI started" not in oldest:
         raise AssertionError(f"Overview could not reach its oldest event: {oldest!r}")
 
-    send_and_wait(process, master_fd, output, b"jk", b"Recent Events 4-5/6")
-    send_and_wait(process, master_fd, output, b"j", b"Recent Events 5-6/6")
+    send_and_wait(process, master_fd, output, b"jk", event_range(total - 2, total - 1, total))
+    send_and_wait(process, master_fd, output, b"j", oldest_window(2, total))
 
     send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-    tab_until(process, master_fd, output, b"Recent Events 5-6/6")
+    tab_until(process, master_fd, output, oldest_window(2, total))
     resize_and_wait(
         process,
         master_fd,
@@ -1971,7 +2028,7 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=100,
-        needle=b"Recent Events 5-6/6",
+        needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -1986,7 +2043,7 @@ def assert_overview_event_rows(
         output,
         rows=22,
         columns=100,
-        needle=b"Recent Events 1-6/6",
+        needle=b"Recent Events 1-",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -1999,33 +2056,33 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=100,
-        needle=b"Recent Events 1-2/6",
+        needle=newest_window(2, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
     scroll_to_oldest()
-    send_and_wait(process, master_fd, output, b"r", b"Recent Events 6-7/7")
+    send_and_wait(process, master_fd, output, b"r", oldest_window(2, total + 1))
     anchored = resize_and_wait(
         process,
         master_fd,
         output,
         rows=14,
         columns=99,
-        needle=b"Recent Events 6-7/7",
+        needle=oldest_window(2, total + 1),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
     if b"TUI started" not in anchored or anchored.count(b"Manual refresh") != 1:
         raise AssertionError(f"event prepend changed the manual anchor: {anchored!r}")
 
-    send_and_wait(process, master_fd, output, b"k", b"Recent Events 5-6/7")
+    send_and_wait(process, master_fd, output, b"k", event_range(total - 1, total, total + 1))
     newer = resize_and_wait(
         process,
         master_fd,
         output,
         rows=14,
         columns=100,
-        needle=b"Recent Events 5-6/7",
+        needle=event_range(total - 1, total, total + 1),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -2105,6 +2162,15 @@ def approval_selection_identity_interaction(
 
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
+    """The goal named by [title] is the row the cursor is on.
+
+    Anchored on the gutter marker and the title, with the columns between them
+    left unread. Those columns carry a phase label, a proof mark and a priority,
+    and each is its own contract with its own tests; pinning their exact shape
+    here made this assertion fail whenever one of them changed. It did:
+    #29786 put a proof mark between the phase and the priority, and this regex
+    had required whitespace there.
+    """
     plain = CSI_RE.sub(b"", frame)
     # What sits between the status bracket and the priority is the renderer's
     # business: #29786 put a proof mark there and this assertion, which only

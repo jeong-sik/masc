@@ -186,6 +186,7 @@
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
+  test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
   test_ide_bridge
@@ -493,6 +494,7 @@
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
+  test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
   test_tool_definition_toml

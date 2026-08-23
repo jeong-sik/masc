@@ -115,6 +115,38 @@ let test_tool_task_done_nonexistent_logs () =
   check bool "stderr contains [Task] prefix for done on missing task"
     true (str_contains output "[Task]")
 
+(* A Todo task carries no start time, so cancelling it has no duration to
+   report. [now () -. 60.0] used to stand in, and [Metrics_store_eio] averages
+   [completed_at -. started_at], so the row landed as a real one-minute task
+   (#29355). No start means no row. *)
+let test_task_metric_is_not_recorded_without_a_real_start () =
+  with_test_workspace @@ fun config ->
+  ignore (Workspace.init config ~agent_name:(Some "test-agent"));
+  ignore
+    (Workspace.add_task config ~title:"never claimed" ~priority:1
+       ~description:"cancelled straight from Todo");
+  let recorded = ref 0 in
+  let previous = Atomic.get Workspace_hooks.record_task_metric_fn in
+  Atomic.set
+    Workspace_hooks.record_task_metric_fn
+    (fun _config ~agent_id:_ ~task_id:_ ~started_at:_ ~completed_at:_ ~success:_
+      ~error_message:_ ~collaborators:_ ~handoff_from:_ ~handoff_to:_ ->
+      incr recorded);
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.record_task_metric_fn previous)
+    (fun () ->
+       let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
+       let args =
+         `Assoc
+           [ ("task_id", `String "task-001")
+           ; ("action", `String "cancel")
+           ; ("reason", `String "no work was started")
+           ]
+       in
+       ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx args);
+       check int "no metric row for a Todo task with no start time" 0 !recorded)
+;;
+
 (** Cancelling a task_id that does not exist → "[Task]" eprintf. Driven through
     [handle_transition], the entry point production actually dispatches; the
     dedicated [handle_cancel_task] this used to call had no dispatch at all. *)
@@ -143,5 +175,7 @@ let () =
         `Quick test_tool_task_done_nonexistent_logs;
       test_case "cancel on missing task logs [task]"
         `Quick test_tool_task_cancel_nonexistent_logs;
+      test_case "no metric row without a real start time"
+        `Quick test_task_metric_is_not_recorded_without_a_real_start;
     ];
   ]

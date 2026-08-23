@@ -199,6 +199,7 @@ normal_targets=(
   @test/runtest-test_backend
   @test/runtest-test_backend_coverage
   @test/runtest-test_blocker_class_exhaustiveness
+  @test/runtest-test_blocker_class_mirror
   @test/runtest-test_board_author_identity_10297
   @test/runtest-test_board_collect_pause_gate
   @test/runtest-test_board_context_inference_resolution

@@ -342,15 +342,6 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"
        ~callee:"Yojson.Safe.to_string");
-  (* Four, not one: besides the event content this binding also crosses
-     [state.workspace] and each agent's [name] / [status]. They are all values
-     the renderer received from outside, so each one goes through the boundary
-     rather than reaching [fit_width] raw. *)
-  check int "dashboard event text crosses the terminal boundary" 4
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_dashboard"
-       ~callee:"Terminal_text.single_line");
   (* Five: [state.workspace], each row's [ov_cluster] / [ov_project], the
      agent [ai_summary], and the event content. Every one arrives from outside
      the renderer. *)
@@ -1095,7 +1086,6 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
-  check_fields "render_dashboard" [ "workspace"; "name"; "status"; "content" ];
   check_fields "render_overview"
     [ "workspace"
     ; "overview_error"

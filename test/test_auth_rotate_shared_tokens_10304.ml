@@ -164,6 +164,43 @@ let test_shared_group_rotates_to_unique () =
   check int "audit is clean after rotation"
     0 (List.length (Auth.audit_token_uniqueness base))
 
+(* --- 2b. bearer lookup follows the rotation ---------------------- *)
+
+(* The live lockout (#26235) was on the bearer path, not this file's named
+   path: [verify_token ~agent_name] reads the credential directly, while an
+   MCP request arrives with a token and no name and goes through the hash
+   index. A rotation that left that index holding the pre-rotation hashes
+   rejected every token on disk, including the one the caller had just read
+   from the file it was told to use. *)
+let test_bearer_lookup_follows_rotation () =
+  with_temp_base @@ fun base ->
+  ignore
+    (seed_shared_credential base ~agent_name:"alice" ~role:Masc_domain.Worker
+       ~raw_token:"shared-bearer-token");
+  ignore
+    (seed_shared_credential base ~agent_name:"bob" ~role:Masc_domain.Worker
+       ~raw_token:"shared-bearer-token");
+  (* Populate the index before rotating: a lookup that only ever runs on a
+     cold index cannot observe the staleness this pins. *)
+  (match Auth.find_static_credential_by_token base ~token:"shared-bearer-token" with
+   | Ok _ | Error _ -> ());
+  ignore (Auth.rotate_shared_tokens base : Auth.rotation_outcome list);
+  [ "alice"; "bob" ]
+  |> List.iter (fun agent_name ->
+         let rotated = raw_token_value base agent_name in
+         match Auth.find_static_credential_by_token base ~token:rotated with
+         | Ok cred ->
+             check string
+               (agent_name ^ " bearer resolves to its own credential")
+               agent_name cred.agent_name
+         | Error e ->
+             failf "%s rotated token should verify as a bearer: %s"
+               agent_name (Masc_domain.masc_error_to_string e));
+  match Auth.find_static_credential_by_token base ~token:"shared-bearer-token" with
+  | Error _ -> ()
+  | Ok cred ->
+      failf "pre-rotation token still resolves to %s" cred.agent_name
+
 (* --- 3. role preserved across rotation -------------------------- *)
 
 let test_rotation_preserves_role () =
@@ -278,6 +315,8 @@ let () =
             test_shared_group_rotates_to_unique;
           test_case "role preserved across rotation" `Quick
             test_rotation_preserves_role;
+          test_case "bearer lookup follows the rotation" `Quick
+            test_bearer_lookup_follows_rotation;
         ] );
       ( "ordering",
         [

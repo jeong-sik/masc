@@ -708,16 +708,25 @@ let test_execute_typed_env_wrapper_target_allowed () =
     (parse_bool_field raw "typed");
   Alcotest.(check int) "env wrapper exit status" 0 (parse_status_exit_code raw)
 
-let test_execute_typed_single_stage_pipeline_rejected () =
+(* A one-stage pipeline is a single process, not a malformed pipeline: the
+   pipeline form and the argv form describe the same program now, so this
+   runs instead of being refused for having too few stages. *)
+let test_execute_typed_single_stage_pipeline_runs () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_tool_execute_runtime.handle_tool_execute
-    ~turn_sandbox_factory:None
-    ~config
-    ~meta
-    ~args:(tool_execute_typed_single_stage_pipeline_args ~cwd:playground)
-    ()
-  |> check_typed_validation_error "pipeline requires at least two stages"
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_single_stage_pipeline_args ~cwd:playground)
+      ()
+  in
+  Alcotest.(check (option bool))
+    "single-stage pipeline runs"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check int) "exit status" 0 (parse_status_exit_code raw)
 
 let test_execute_typed_repeated_executable_arg_is_preserved () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local
@@ -2227,8 +2236,8 @@ let () =
             "tool_execute typed env wrapper target executes"
             `Quick test_execute_typed_env_wrapper_target_allowed;
           Alcotest.test_case
-            "tool_execute typed single-stage pipeline is rejected"
-            `Quick test_execute_typed_single_stage_pipeline_rejected;
+            "tool_execute typed single-stage pipeline runs"
+            `Quick test_execute_typed_single_stage_pipeline_runs;
           Alcotest.test_case
             "tool_execute typed repeated executable arg is preserved"
             `Quick test_execute_typed_repeated_executable_arg_is_preserved;

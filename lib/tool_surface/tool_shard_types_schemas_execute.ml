@@ -2,13 +2,101 @@
     schema.
 
     The public descriptor exposes one command SSOT: a non-empty [argv] process
-    vector for a single process, or [pipeline] containing non-empty [argv]
-    vectors for explicit Shell IR pipelines. Raw [cmd] strings and the retired
+    vector for a single process, or [pipeline] containing stages for explicit
+    Shell IR pipelines. Either form is a program of one or more stages, and a
+    stage owns its own redirections. Raw [cmd] strings and the retired
     duplicate [executable] field are intentionally absent from the schema.
 
     Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout,
     stderr. This sentence is the contract line checked by
     scripts/check-execute-async-surface.sh — update both together. *)
+
+(* A redirect is an optional object naming exactly one shape; absent keeps
+   the inherited descriptor. Reading and writing admit different names, so
+   each direction carries its own property set and a stream never accepts a
+   name it cannot honour. *)
+let discard_property = "discard", `Assoc [ "type", `String "boolean" ]
+
+let path_property ~name ~description =
+  ( name
+  , `Assoc
+      [ "type", `String "string"
+      ; "minLength", `Float 1.
+      ; "pattern", `String "^/"
+      ; "description", `String description
+      ] )
+;;
+
+let fd_property =
+  ( "fd"
+  , `Assoc
+      [ "type", `String "integer"
+      ; "enum", `List [ `Int 1; `Int 2 ]
+      ; ( "description"
+        , `String
+            "Send this stream into another of the stage's output descriptors, \
+             the typed form of '2>&1'." )
+      ] )
+;;
+
+let input_source_properties =
+  [ discard_property
+  ; path_property
+      ~name:"file"
+      ~description:"Absolute path to read from, the typed form of '<'."
+  ]
+;;
+
+let output_sink_properties =
+  [ discard_property
+  ; path_property
+      ~name:"truncate"
+      ~description:"Absolute path to replace, the typed form of '>'."
+  ; path_property
+      ~name:"append"
+      ~description:"Absolute path to add to, the typed form of '>>'."
+  ; fd_property
+  ]
+;;
+
+(* Each branch requires one name and forbids the rest. Branches are selected
+   by position so the generator never compares the names themselves. *)
+let exactly_one_of names : Yojson.Safe.t =
+  let indexed = List.mapi (fun index name -> index, name) names in
+  let branch (index, chosen) =
+    `Assoc
+      [ "required", `List [ `String chosen ]
+      ; ( "allOf"
+        , `List
+            (List.filter_map
+               (fun (other_index, other) ->
+                  if Int.equal index other_index
+                  then None
+                  else
+                    Some
+                      (`Assoc
+                          [ "not", `Assoc [ "required", `List [ `String other ] ] ]))
+               indexed) )
+      ]
+  in
+  `List (List.map branch indexed)
+;;
+
+(* The object's own keys carry their meaning, so the wrapper adds no
+   description of its own. [oneOf] is derived from the properties, which is
+   why the two cannot drift apart. *)
+let redirect_field ~name ~properties =
+  ( name
+  , `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc properties
+      ; "additionalProperties", `Bool false
+      ; "oneOf", exactly_one_of (List.map fst properties)
+      ] )
+;;
+
+let stdin_field ~name = redirect_field ~name ~properties:input_source_properties
+let stdout_field ~name = redirect_field ~name ~properties:output_sink_properties
 
 let tool_execute_exec_stage_schema =
   `Assoc
@@ -30,6 +118,9 @@ let tool_execute_exec_stage_schema =
                        matches a file literally named 'foo*.ml'. Pass exact paths, \
                        or discover exact paths before invoking the program." )
                 ] )
+          ; stdin_field ~name:"stdin"
+          ; stdout_field ~name:"stdout"
+          ; stdout_field ~name:"stderr"
           ] )
     ; "required", `List [ `String "argv" ]
     ; "additionalProperties", `Bool false
@@ -63,9 +154,10 @@ let tool_execute_pipeline_field =
       ; ( "description"
         , `String
             "Typed pipeline form: ordered exec stages. Use this instead of putting \
-             '|' in argv. Stage argv uses the selected sandbox namespace, and relative \
-             path operands resolve against the typed cwd. Mutually exclusive with \
-             top-level argv." )
+             '|' in argv. Each stage may carry its own stdin/stdout/stderr, so \
+             piping and redirecting combine in one call. Stage argv uses the \
+             selected sandbox namespace, and relative path operands resolve \
+             against the typed cwd. Mutually exclusive with top-level argv." )
       ] )
 ;;
 
@@ -106,78 +198,9 @@ let tool_execute_timeout_sec_field =
       ] )
 ;;
 
-(* Each redirect is an optional object choosing exactly one of
-   [{discard: true}] (equivalent to
-   [/dev/null]) or [{file: "/abs/path"}].  Absent keeps the default
-   [inherit] behaviour. *)
-let redirect_target_properties =
-  [ "discard", `Assoc [ "type", `String "boolean" ]
-  ; ( "file"
-    , `Assoc
-        [ "type", `String "string"
-        ; "minLength", `Float 1.
-        ; ( "description"
-          , `String
-              "Absolute filesystem path for the redirect target. \
-               Relative paths are rejected." )
-        ] )
-  ]
-;;
-
-let redirect_target_one_of : Yojson.Safe.t =
-  `List
-    [ `Assoc
-        [ "required", `List [ `String "discard" ]
-        ; "not", `Assoc [ "required", `List [ `String "file" ] ]
-        ]
-    ; `Assoc
-        [ "required", `List [ `String "file" ]
-        ; "not", `Assoc [ "required", `List [ `String "discard" ] ]
-        ]
-    ]
-;;
-
-let redirect_field ~name ~description =
-  ( name
-  , `Assoc
-      [ "type", `String "object"
-      ; "description", `String description
-      ; "properties", `Assoc redirect_target_properties
-      ; "additionalProperties", `Bool false
-      ; "oneOf", redirect_target_one_of
-      ] )
-;;
-
-let tool_execute_stdin_field =
-  redirect_field
-    ~name:"stdin"
-    ~description:
-      "Optional typed stdin redirect: {discard:true} feeds empty input, \
-       {file:\"/abs/path\"} reads from an absolute path. Default \
-       behaviour (field absent) inherits the parent's stdin."
-;;
-
-let tool_execute_stdout_field =
-  redirect_field
-    ~name:"stdout"
-    ~description:
-      "Optional typed stdout redirect: {discard:true} drops the output, \
-       {file:\"/abs/path\"} writes to an absolute path. Use this instead \
-       of putting shell syntax like '>/tmp/out' inside argv (which the \
-       typed gate rejects)."
-;;
-
-let tool_execute_stderr_field =
-  redirect_field
-    ~name:"stderr"
-    ~description:
-      "Optional typed stderr redirect: {discard:true} drops stderr \
-       (equivalent to '2>/dev/null'), {file:\"/abs/path\"} writes to an \
-       absolute path. Use this instead of putting '2>/dev/null' or \
-       similar into argv — the typed gate rejects redirection-shape \
-       argv tokens and surfaces this field as the \
-       alternative."
-;;
+let tool_execute_stdin_field = stdin_field ~name:"stdin"
+let tool_execute_stdout_field = stdout_field ~name:"stdout"
+let tool_execute_stderr_field = stdout_field ~name:"stderr"
 
 let tool_execute_description =
   "Execute a typed process invocation inside the Keeper sandbox. Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. Provide either \

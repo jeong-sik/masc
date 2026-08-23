@@ -226,6 +226,15 @@ let retry_after_header response =
   | [] | _ :: _ :: _ -> None
 ;;
 
+let content_type_header response =
+  match Http.Header.get (Cohttp.Response.headers response) "content-type" with
+  | None -> None
+  | Some raw ->
+    (match String.trim raw with
+     | "" -> None
+     | trimmed -> Some trimmed)
+;;
+
 let close_connection connection =
   try Eio.Cancel.protect (fun () -> Eio.Resource.close connection) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -388,9 +397,14 @@ let post_sync_once_after_commit
        Error (staged_error error)
      | Ok response_body ->
        let retry_after_header = retry_after_header response in
+       let content_type = content_type_header response in
        release_connection ();
        Ok
-         ({ status = response_status; body = response_body; retry_after_header }
+         ({ status = response_status
+          ; body = response_body
+          ; retry_after_header
+          ; content_type
+          }
           : Http_client.raw_sync_response))
 ;;
 

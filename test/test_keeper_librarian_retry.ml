@@ -90,11 +90,13 @@ let dropped_json ?(reason = "superseded by newer state") id =
 ;;
 
 (* Defaults keep the totality contract satisfied for the default input:
-   current = [A; B], retained = [A], so B must carry a drop statement. *)
+   current = [A; B], retained = [A], so B must carry a drop statement.
+   Model output speaks in surrogate identities: [m1] is current_a,
+   [m2] is current_b; the parser maps them back to real identities. *)
 let selection_json
-      ?(retained = [ current_a_id ])
+      ?(retained = [ "m1" ])
       ?(new_claims = [])
-      ?(dropped = [ dropped_json current_b_id ])
+      ?(dropped = [ dropped_json "m2" ])
       ()
   =
   `Assoc
@@ -143,7 +145,7 @@ let test_oversized_selection_is_rejected_without_local_truncation () =
     selection_json
       ~retained:[]
       ~new_claims:[ new_claim ~claim:(String.make 512 'x') () ]
-      ~dropped:[ dropped_json current_a_id; dropped_json current_b_id ]
+      ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
       ()
   in
   match
@@ -202,19 +204,28 @@ let test_unknown_and_duplicate_retained_ids_reject () =
    | Error error ->
      failf "wrong unknown-id error: %s" (Librarian.parse_error_to_string error)
    | Ok _ -> fail "unknown retained id accepted");
-  match parse (selection_json ~retained:[ current_a_id; current_a_id ] ()) with
-  | Error (Librarian.Duplicate_retained_memory_id identity)
+  (match parse (selection_json ~retained:[ "m1"; "m1" ] ()) with
+   | Error (Librarian.Duplicate_retained_memory_id identity)
+     when String.equal identity current_a_id -> ()
+   | Error error ->
+     failf "wrong duplicate-id error: %s" (Librarian.parse_error_to_string error)
+   | Ok _ -> fail "duplicate retained id accepted");
+  (* The wire contract moved to surrogate identities: the real digest is no
+     longer valid input, so a stale digest recopied from conversation history
+     rejects instead of silently matching nothing. *)
+  match parse (selection_json ~retained:[ current_a_id ] ()) with
+  | Error (Librarian.Unknown_retained_memory_id identity)
     when String.equal identity current_a_id -> ()
   | Error error ->
-    failf "wrong duplicate-id error: %s" (Librarian.parse_error_to_string error)
-  | Ok _ -> fail "duplicate retained id accepted"
+    failf "wrong stale-digest error: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "real digest accepted as retained id"
 ;;
 
 let test_new_claim_cannot_collide_with_retained_identity () =
   match
     parse
       (selection_json
-         ~retained:[ current_a_id ]
+         ~retained:[ "m1" ]
          ~new_claims:[ new_claim ~claim:"keep A" () ]
          ())
   with
@@ -230,7 +241,7 @@ let test_new_claim_cannot_recreate_dropped_current_identity () =
     parse
       (selection_json
          ~retained:[]
-         ~dropped:[ dropped_json current_a_id; dropped_json current_b_id ]
+         ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
          ~new_claims:[ new_claim ~claim:"keep A" () ]
          ())
   with
@@ -254,7 +265,7 @@ let test_totality_rejects_unaccounted_current_id () =
     parse
       (`Assoc
          [ Librarian.wire_field_retained_memory_ids
-         , `List [ `String current_a_id ]
+         , `List [ `String "m1" ]
          ; Librarian.wire_field_new_claims, `List []
          ])
   with
@@ -277,7 +288,7 @@ let test_dropped_statements_validate () =
   (match
      parse
        (selection_json
-          ~dropped:[ dropped_json current_b_id; dropped_json current_b_id ]
+          ~dropped:[ dropped_json "m2"; dropped_json "m2" ]
           ())
    with
    | Error (Librarian.Duplicate_dropped_memory_id identity)
@@ -288,7 +299,7 @@ let test_dropped_statements_validate () =
   (match
      parse
        (selection_json
-          ~dropped:[ dropped_json current_a_id; dropped_json current_b_id ]
+          ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
           ())
    with
    | Error (Librarian.Dropped_memory_id_also_retained identity)
@@ -299,7 +310,7 @@ let test_dropped_statements_validate () =
    | Ok _ -> fail "dropped id overlapping retained accepted");
   match
     parse
-      (selection_json ~dropped:[ dropped_json ~reason:"  " current_b_id ] ())
+      (selection_json ~dropped:[ dropped_json ~reason:"  " "m2" ] ())
   with
   | Error Librarian.Dropped_schema_mismatch -> ()
   | Error error ->
@@ -325,7 +336,7 @@ let test_duplicate_object_fields_reject () =
     | `Assoc fields ->
       `Assoc
         (( Librarian.wire_field_retained_memory_ids
-         , `List [ `String current_a_id ] )
+         , `List [ `String "m1" ] )
          :: fields)
     | _ -> assert false
   in
@@ -382,10 +393,12 @@ let test_removed_contract_fields_reject () =
 let test_prompt_contains_exact_current_selection () =
   let variables = Librarian.prompt_variables (input ()) in
   let current_memory = List.assoc "current_memory" variables in
-  check bool "contains A identity" true
-    (String_util.contains_substring current_memory ("\"memory_id\": \"" ^ current_a_id ^ "\""));
-  check bool "contains B identity" true
-    (String_util.contains_substring current_memory ("\"memory_id\": \"" ^ current_b_id ^ "\""));
+  check bool "contains A surrogate identity" true
+    (String_util.contains_substring current_memory "\"memory_id\": \"m1\"");
+  check bool "contains B surrogate identity" true
+    (String_util.contains_substring current_memory "\"memory_id\": \"m2\"");
+  check bool "cryptographic identity is not prompt context" false
+    (String_util.contains_substring current_memory current_a_id);
   check bool "presentation timestamp is not prompt context" false
     (String_util.contains_substring current_memory "first_seen")
 ;;

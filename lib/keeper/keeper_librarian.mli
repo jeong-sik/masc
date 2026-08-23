@@ -4,7 +4,14 @@
     new conversation. It returns existing fact identities to retain and new
     facts to add. Every existing identity must be retained or explicitly
     dropped. The LLM owns selection within the rendered-fact byte budget; no
-    deterministic ranking, recency rule, or migration path participates. *)
+    deterministic ranking, recency rule, or migration path participates.
+
+    Wire identities are short surrogate tokens ([m1], [m2], ... in
+    current-fact order), not the cryptographic [memory_id]: a 64-hex digest
+    cannot be echoed verbatim reliably, and stale digests linger in
+    conversation-history recall renderings. The parser maps surrogates back to
+    real identities before validation, so [selection] always carries real
+    identities and unknown tokens stay fail-closed. *)
 
 type current_selection =
   { facts : Keeper_memory_os_types.fact list }

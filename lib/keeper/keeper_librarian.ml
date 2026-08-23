@@ -101,9 +101,19 @@ let format_messages_for_prompt messages =
     |> String.concat "\n\n---\n\n"
 ;;
 
-let current_fact_json fact =
+(* The LLM never sees the cryptographic identity. A 64-hex digest cannot be
+   echoed verbatim reliably — observed live 2026-08-22 (masc#29558): hamming-1
+   miscopies of current identities and stale digests recopied from recall
+   renderings in conversation history, each looping for hours under exact
+   decoding. The prompt renders short surrogate identities [m1], [m2], ... in
+   current-fact order, and the parser maps them back to real identities before
+   validation. Unknown tokens still reject the whole answer, so a stale or
+   invented identity stays fail-closed. *)
+let surrogate_id_of_index index = Printf.sprintf "m%d" (index + 1)
+
+let current_fact_json index fact =
   `Assoc
-    [ wire_field_memory_id, `String (memory_id fact)
+    [ wire_field_memory_id, `String (surrogate_id_of_index index)
     ; ( "fact"
       , `Assoc
           [ wire_field_claim, `String fact.claim
@@ -114,7 +124,7 @@ let current_fact_json fact =
 
 let current_selection_json (current : current_selection) =
   `Assoc
-    [ "facts", `List (List.map current_fact_json current.facts) ]
+    [ "facts", `List (List.mapi current_fact_json current.facts) ]
 ;;
 
 let format_current_selection_for_prompt
@@ -274,6 +284,35 @@ let current_facts_by_id facts =
     facts
 ;;
 
+let surrogate_identity_map facts =
+  List.mapi (fun index fact -> surrogate_id_of_index index, memory_id fact) facts
+  |> List.to_seq
+  |> String_map.of_seq
+;;
+
+let translate_retained_ids ~by_surrogate retained_memory_ids =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | token :: rest ->
+      (match String_map.find_opt token by_surrogate with
+       | Some identity -> loop (identity :: acc) rest
+       | None -> Error (Unknown_retained_memory_id token))
+  in
+  loop [] retained_memory_ids
+;;
+
+let translate_dropped_ids ~by_surrogate dropped =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (statement : dropped_statement) :: rest ->
+      (match String_map.find_opt statement.memory_id by_surrogate with
+       | Some identity ->
+         loop ({ statement with memory_id = identity } :: acc) rest
+       | None -> Error (Unknown_dropped_memory_id statement.memory_id))
+  in
+  loop [] dropped
+;;
+
 let current_facts inp =
   match inp.current with
   | None -> []
@@ -384,14 +423,24 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                    , traverse dropped_statement_of_json dropped_items
                  with
                  | Some new_claims, Some dropped ->
+                   let by_surrogate =
+                     surrogate_identity_map (current_facts inp)
+                   in
                    (match
-                      materialize_facts
-                        ~current_facts:(current_facts inp)
-                        ~retained_memory_ids
-                        ~new_claims
-                        ~dropped
+                      ( translate_retained_ids
+                          ~by_surrogate
+                          retained_memory_ids
+                      , translate_dropped_ids ~by_surrogate dropped )
                     with
-                    | Ok facts ->
+                   | Ok retained_memory_ids, Ok dropped ->
+                     (match
+                        materialize_facts
+                          ~current_facts:(current_facts inp)
+                          ~retained_memory_ids
+                          ~new_claims
+                          ~dropped
+                      with
+                      | Ok facts ->
                       (match
                          Keeper_memory_os_budget.measure
                            ~max_bytes:inp.max_recall_fact_bytes
@@ -409,6 +458,7 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                            (Recall_fact_budget_exceeded
                               { actual_bytes; max_bytes }))
                     | Error _ as error -> error)
+                   | (Error _ as error), _ | _, (Error _ as error) -> error)
                  | Some _, None -> Error Dropped_schema_mismatch
                  | None, _ -> Error Claim_schema_mismatch)))
         | _ -> Error Missing_required_fields))

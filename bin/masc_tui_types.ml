@@ -347,6 +347,17 @@ type state = {
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
+  (* Messages typed while a turn was running, oldest first, each with the
+     keeper it was addressed to. Dispatch is serialized on one in-flight
+     request, so a second Enter used to be answered with "already in progress"
+     and the text was gone. Holding it and sending it when the turn settles is
+     what every other agent console does, and it is what an operator means by
+     pressing Enter twice.
+
+     The keeper travels with the text because the operator can switch keepers
+     while a turn runs; sending a queued line to whoever happens to be selected
+     later would put it in front of the wrong keeper. *)
+  mutable msg_queued: Masc_tui_keeper_chat_queue.t;
   mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
   mutable msg_inflight_kind: msg_inflight_kind option;
   mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
@@ -441,6 +452,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
   msg_scroll = 0;
+  msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = None;
   msg_inflight_kind = None;
   msg_prepared = None;

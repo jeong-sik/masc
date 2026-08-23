@@ -2578,6 +2578,13 @@
   %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
 
 (test
+ (name test_tui_chat_queue_wiring)
+ (modules test_tui_chat_queue_wiring)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_operator_projection)
  (modules test_tui_operator_projection)
  (libraries alcotest masc_tui_operator_projection yojson))
@@ -2595,6 +2602,11 @@
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries alcotest masc_tui_keeper_chat_history yojson))
+
+(test
+ (name test_tui_keeper_chat_queue)
+ (modules test_tui_keeper_chat_queue)
+ (libraries alcotest astring masc_tui_keeper_chat_queue))
 
 (test
  (name test_tui_chat_surface_mirror)

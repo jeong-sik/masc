@@ -230,6 +230,12 @@
  (libraries masc_tui_keeper_chat_projection yojson))
 
 (library
+ (name masc_tui_keeper_chat_queue)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_queue)
+ (libraries))
+
+(library
  (name masc_tui_keeper_chat_history)
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
@@ -350,6 +356,7 @@
   masc_tui_keeper_chat_history
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_recovery
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control

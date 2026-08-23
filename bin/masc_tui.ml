@@ -432,6 +432,7 @@ type async_msg =
       * Keeper_control.action
       * (Keeper_control.outcome, string) result
   | Board_new_post_done of (string, string) result
+  | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
@@ -2144,6 +2145,69 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
    send-or-discard, so a stray key during writing cannot publish. Returns
    false for keys this pane does not own, so Tab and quit keep their global
    meaning. *)
+(* Send a comment through the tools route. Same fiber-and-mailbox shape as
+   the other board writes; the route stamps the author. *)
+let start_board_comment state ~mailbox ~(post_id : string)
+    ~(content : string) =
+  state.board_post_error <- None;
+  add_event state "system" "commenting on Board";
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_comment () =
+    let result =
+      match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Board_new_post_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_comment
+  | None -> run_comment ()
+
+(* Send a vote through the tools route. The voter is stamped by the route,
+   so the payload says only which post and which way. *)
+let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
+  add_event state "system"
+    (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_vote () =
+    let result =
+      match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Board_vote_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_vote
+  | None -> run_vote ()
+
+(* The vote keys on the list row under the cursor. Two presses: the first
+   names the post and direction, the same press again sends it. The post id
+   is captured at arm time, so moving the cursor between presses re-arms
+   for the new row rather than voting on the one the operator left. *)
+let handle_board_vote_key state ~mailbox ~(up : bool) =
+  match state.board_mode with
+  | Board_list -> (
+      match List.nth_opt state.board_posts state.board_cursor with
+      | None -> ()
+      | Some post -> (
+          match state.board_vote_armed with
+          | Some (armed_post, armed_up)
+            when String.equal armed_post post.bp_id && armed_up = up ->
+              state.board_vote_armed <- None;
+              start_board_vote state ~mailbox ~post_id:post.bp_id ~up
+          | Some _ | None ->
+              state.board_vote_armed <- Some (post.bp_id, up);
+              add_event state "system"
+                (Printf.sprintf "press %s again to vote %s on %s"
+                   (if up then "v" else "V")
+                   (if up then "up" else "down")
+                   post.bp_id)))
+  | Board_read _ | Board_compose -> ()
+
 let handle_board_compose_key state ~mailbox (key : string) : bool =
   if
     state.board_compose_armed
@@ -2155,21 +2219,40 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
       state.board_compose_armed <- not state.board_compose_armed;
       true
   | "s" | "S" when state.board_compose_armed -> (
-      let title, body = split_board_draft (Buffer.contents state.board_draft) in
-      match String.split_on_char '\n' (String.trim title) with
-      | [] | [ "" ] ->
-          state.board_compose_armed <- false;
-          state.board_post_error <- Some "the first line (title) is empty";
-          true
-      | _ ->
-          state.board_compose_armed <- false;
-          start_board_post state ~mailbox ~title ~body;
-          true )
+      (* A reply sends the whole draft as one comment; a new post still
+         splits title from body at the first line. *)
+      match state.board_compose_reply_to with
+      | Some post_id ->
+          let content = Buffer.contents state.board_draft in
+          if String.equal (String.trim content) "" then begin
+            state.board_compose_armed <- false;
+            state.board_post_error <- Some "the comment is empty";
+            true
+          end else begin
+            state.board_compose_armed <- false;
+            start_board_comment state ~mailbox ~post_id ~content;
+            true
+          end
+      | None ->
+          let title, body =
+            split_board_draft (Buffer.contents state.board_draft)
+          in
+          match String.split_on_char '\n' (String.trim title) with
+          | [] | [ "" ] ->
+              state.board_compose_armed <- false;
+              state.board_post_error <- Some "the first line (title) is empty";
+              true
+          | _ ->
+              state.board_compose_armed <- false;
+              start_board_post state ~mailbox ~title ~body;
+              true )
   | "d" | "D" when state.board_compose_armed ->
       Buffer.clear state.board_draft;
       state.board_compose_armed <- false;
       state.board_post_error <- None;
-      state.board_mode <- Board_list;
+      (match state.board_compose_reply_to with
+       | Some post_id -> state.board_mode <- Board_read post_id
+       | None -> state.board_mode <- Board_list);
       add_event state "system" "Board draft discarded";
       true
   | "\r" | "\n" ->
@@ -2315,23 +2398,50 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       start_http_refresh state ~host:(Env_config_core.masc_host ())
         ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
   | Board_new_post_done result -> (
+      (* The same envelope carries a new post and a comment; where the
+         operator lands afterwards is the only difference. A comment returns
+         to the post it answered (and refreshes that detail), a post to the
+         list. *)
+      let reply_to = state.board_compose_reply_to in
       match result with
       | Ok message ->
           Buffer.clear state.board_draft;
           state.board_compose_armed <- false;
+          state.board_compose_reply_to <- None;
           state.board_post_error <- None;
-          state.board_mode <- Board_list;
+          (match reply_to with
+           | Some post_id -> state.board_mode <- Board_read post_id
+           | None -> state.board_mode <- Board_list);
           add_event state "system" ("Board: " ^ message);
           (* The posted row is the half the periodic refresh has not fetched
              yet; without this the operator returns to a list that does not
-             contain what they just published. *)
+             contain what they just published. A comment refreshes the
+             detail too, so the reply is visible the moment it lands. *)
           start_http_refresh state ~host:(Env_config_core.masc_host ())
-            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox;
+          (match reply_to with
+           | Some post_id ->
+               start_board_post_refresh state
+                 ~host:(Env_config_core.masc_host ())
+                 ~port:state.port ~post_id ~mailbox
+           | None -> ())
       | Error err ->
           state.board_compose_armed <- false;
           (* The draft stays: a rejected post is usually one field short, and
              losing the text over it would make the error a dead end. *)
           state.board_post_error <- Some err)
+  | Board_vote_done result -> (
+      match result with
+      | Ok message ->
+          state.board_vote_armed <- None;
+          add_event state "system" ("Board vote: " ^ message);
+          (* The score is drawn from the list; refresh it rather than
+             waiting out the interval to see the arrow land. *)
+          start_http_refresh state ~host:(Env_config_core.masc_host ())
+            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+      | Error err ->
+          state.board_vote_armed <- None;
+          add_event state "error" ("Board vote failed: " ^ err))
   | Goal_transition_done result -> (
       match result with
       | Ok message ->
@@ -2861,6 +2971,8 @@ let main () =
           minutes ago for something else. Same rule for an armed goal action. *)
        | Keepers _, Some ("s" | "S") -> ()
        | Keepers _, Some _ -> state.keeper_action_pending <- None
+       | Board, Some ("v" | "V") -> ()
+       | Board, Some _ -> state.board_vote_armed <- None
        | Planning, Some ("c" | "C" | "x" | "X" | "o" | "O") -> ()
        | Planning, Some _ -> state.goal_action_armed <- None
        | _ -> ());
@@ -3284,6 +3396,34 @@ let main () =
              | _ -> Goal_phase.Public_action.Reopen
            in
            handle_goal_action_key state ~mailbox:async_messages ~action
+       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
+           (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
+              letters stay navigation-free there. The first press arms, the
+              same press submits; the server owns the phase rules. *)
+           let action =
+             match key with
+             | Some ("c" | "C") -> Goal_phase.Public_action.Request_complete
+             | Some ("x" | "X") -> Goal_phase.Public_action.Drop
+             | _ -> Goal_phase.Public_action.Reopen
+           in
+           handle_goal_action_key state ~mailbox:async_messages ~action
+       | Some "c" | Some "C" when state.view = Board ->
+           (* Reply to the post being read. Same pane as a new post; the
+              reply target decides the payload and where the operator
+              lands after it sends. *)
+           (match state.board_mode with
+            | Board_read post_id ->
+                state.board_mode <- Board_compose;
+                state.board_compose_armed <- false;
+                state.board_compose_reply_to <- Some post_id;
+                state.board_post_error <- None
+            | Board_list | Board_compose -> ())
+       | Some "v" | Some "V" when state.view = Board ->
+           (* Lowercase votes up, uppercase votes down -- the shift is the
+              direction, so neither reading needs a second keypress to
+              choose one. *)
+           handle_board_vote_key state ~mailbox:async_messages
+             ~up:(match key with Some "v" -> true | _ -> false)
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
@@ -3363,6 +3503,7 @@ let main () =
                  | Board_list ->
                      state.board_mode <- Board_compose;
                      state.board_compose_armed <- false;
+                     state.board_compose_reply_to <- None;
                      state.board_post_error <- None
                  | Board_read _ | Board_compose -> ())
             | Keepers (Keeper_list | Keeper_detail) ->

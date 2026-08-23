@@ -431,6 +431,29 @@ let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_goal_transition"
     ~body:(Yojson.Safe.to_string payload)
 
+(** POST /api/v1/tools/masc_board_vote. [up] rides as a bool rather than a
+    string so no direction word exists here to drift from the tool's. *)
+let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
+    ~(up : bool) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      [ ("post_id", `String post_id)
+      ; ("direction", `String (if up then "up" else "down"))
+      ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_board_vote"
+    ~body:(Yojson.Safe.to_string payload)
+
+(** POST /api/v1/tools/masc_board_comment. The author is stamped by the
+    route from the agent header, exactly as for a new post. *)
+let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
+    ~(content : string) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc [ ("post_id", `String post_id); ("content", `String content) ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** Fetch /api/v1/board/<postId> (post detail + comments). *)
 let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
   get_json ~host ~port

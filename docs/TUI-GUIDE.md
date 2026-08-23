@@ -280,6 +280,12 @@ a new line, and sending is armed rather than pressed - `esc` offers
 operator's agent identity; the server stamps the author. A rejected post
 keeps the draft and shows the server's message.
 
+`v` votes the row under the cursor up, `V` votes it down - the shift key is
+the direction. Like every irreversible action here, the first press arms and
+the same press again sends. In a post, `c` replies: the same compose pane
+opens with the post as its target, the whole draft is the comment, and
+sending returns to the post with the reply visible.
+
 ### Planning
 
 Goals with backlog rollups.

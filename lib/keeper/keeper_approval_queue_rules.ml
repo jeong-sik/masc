@@ -34,15 +34,11 @@ let rec atomic_update atomic f =
 
 let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
 
-let id_rng = Random.State.make_self_init ()
-let id_rng_mu = Stdlib.Mutex.create ()
-
-let make_generated_id prefix =
-  let uuid =
-    Stdlib.Mutex.protect id_rng_mu (fun () -> Uuidm.v4_gen id_rng ())
-  in
-  prefix ^ "_" ^ Uuidm.to_string uuid
-;;
+(* This module used to own an RNG and a mutex to reimplement what [Random_id]
+   already provides. Its own entropy source meant the guarantee here was
+   whatever [Random.State.make_self_init] gives, separate from the one the
+   other 28 call sites rely on. *)
+let make_generated_id prefix = prefix ^ "_" ^ Random_id.uuid_v7 ()
 
 (* Rule reads and writes include Eio file operations and are also reached by
    synchronous dashboard/test callers. Both contexts therefore share one

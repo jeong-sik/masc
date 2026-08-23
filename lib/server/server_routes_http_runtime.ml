@@ -153,7 +153,6 @@ let agent_card_json ~request_authority request =
             ("task_backlog", `Bool true);
             ("keeper_runtime", `Bool true);
             ("dashboard", `Bool true);
-            ("graphql_readonly", `Bool true);
           ] );
     ]
 

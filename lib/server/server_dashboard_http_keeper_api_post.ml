@@ -307,8 +307,6 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ("manifest_total_rows_scope", `String manifest_scan.scan_scope);
               ( "manifest_total_rows_exact",
                 `Bool (manifest_scan.scanned_lines < manifest_scan.scan_line_limit) );
-              ("manifest_scan_line_limit", `Int manifest_scan.scan_line_limit);
-              ("manifest_scanned_lines", `Int manifest_scan.scanned_lines);
               ( "manifest_scan_diagnostics"
               , runtime_manifest_scan_diagnostics_json manifest_scan );
               ("manifest_returned_rows", `Int (List.length manifest_rows));

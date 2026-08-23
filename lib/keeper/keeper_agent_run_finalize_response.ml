@@ -166,7 +166,6 @@ let finalize
                        (Keeper_replay_checkpoint
                         .replay_suffix_prune_reason_to_string reason)
                    | None -> `Null) );
-                ("pipeline_checkpoint_reused", `Bool already_persisted);
                 ( "completion_contract_result"
                 , `String
                     (Keeper_execution_receipt

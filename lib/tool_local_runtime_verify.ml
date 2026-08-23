@@ -295,7 +295,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
       ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
       ("active_slots_now", `Int active_slots_now);
-      ("peak_hot_slots", `Int active_slots_now);
       ("configured_capacity", `Int configured_capacity);
       ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
       ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
@@ -327,7 +326,6 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
       ("actual_ctx", `Null);
       ("active_slots_now", `Int 0);
-      ("peak_hot_slots", `Int 0);
       ("configured_capacity", `Int 0);
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
       ("runtime_blocker", `String "agent_core_discovery_unavailable");

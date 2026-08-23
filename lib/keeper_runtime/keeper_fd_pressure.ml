@@ -302,7 +302,6 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
      ; "system_max_files", option_int_to_yojson system_max_files
      ; "system_remaining_files", option_int_to_yojson system_remaining
      ; "system_max_files_per_process", option_int_to_yojson max_files_per_process
-     ; "system_fd_probe_supported", `Bool (Option.is_some system_fds)
      ]
      @ projection_fields ())
 ;;

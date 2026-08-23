@@ -252,7 +252,6 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
                  | Some (`Int n) -> `Int n
                  | _ -> `Int 0)
              | _ -> `Int 0);
-            "proof_source_count", `Int (List.length proof_sources);
           ] );
       ( "verification",
         `Assoc

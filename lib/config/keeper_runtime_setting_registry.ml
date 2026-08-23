@@ -822,7 +822,6 @@ let schema_to_yojson () =
     ; "active_count", `Int (List.length active)
     ; "toml_count", `Int toml_count
     ; "env_only_count", `Int env_only_count
-    ; "retired_count", `Int (List.length all - List.length active)
     ; "settings", `List (List.map setting_to_yojson all)
     ]
 ;;

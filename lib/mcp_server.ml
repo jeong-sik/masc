@@ -628,8 +628,6 @@ let publication_recovery_available_snapshot_to_health_yojson
           [ "discovered_owner", `Int discovered_owner_count
           ; "invalid_owner_name", `Int invalid_owner_name_count
           ; "owner_identity_rejected", `Int owner_identity_rejected_count
-          ; "owner_inspection_pending", `Int owners.inspection_pending
-          ; "owner_inspection_running", `Int owners.inspection_running
           ; ( "owner_reconciliation_pending"
             , `Int owners.reconciliation_pending )
           ; ( "owner_reconciliation_running"

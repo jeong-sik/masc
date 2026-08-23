@@ -767,7 +767,6 @@ let graph_json config ?(kinds = []) ?(limit = 500)
             ("agent_count", `Int (count_kind "agent"));
             ("task_count", `Int (count_kind "task"));
             ("decision_count", `Int (count_kind "decision"));
-            ("operation_count", `Int (count_kind "operation"));
             ("active_agents", `Int active_agents);
           ] );
       ("stats_history", `List stats_history);

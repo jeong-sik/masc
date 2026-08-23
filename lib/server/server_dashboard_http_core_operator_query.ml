@@ -8,7 +8,6 @@
 (* Sibling dependencies — already extracted in earlier godfile decomp PRs. *)
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
-let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
 
 let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
   `Assoc
@@ -18,7 +17,6 @@ let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
     ; "background_refresh_interval_s", `Float operator_refresh_interval_s
-    ; "request_timeout_s", `Float dashboard_request_timeout_s
     ; ( "cache_policy"
       , `String "default publication refreshes synchronously when stale"
       )

@@ -918,7 +918,6 @@ let execute_prepared_lane_current
          ; "prior_summary", prior_summary
          ; ( "window_units"
            , eligible_units_json (planning_window_sources prepared_lane.window) )
-         ; "source_unit_count", `Int (List.length prepared_lane.window.source_units)
          ]));
   let complete outcome output =
     match
@@ -1149,7 +1148,6 @@ let execute_prepared_lane_current
                 (Observability_redact.redact_preview
                    ~max_len:512
                    completed.plan.summary) )
-          ; "summary_bytes", `Int (String.length completed.plan.summary)
           ; "keep_from_unit_index", `Int completed.plan.keep_from_unit_index
           ; "slot_id", `String evidence.slot_id
           ; "call_id", `String evidence.call_id

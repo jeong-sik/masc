@@ -100,7 +100,6 @@ let handle_note_add ~tool_name ~start_time ctx args : Tool_result.result =
       let response = `Assoc [
         Plan_action_outcome.(status_field Added);
         ("task_id", `String task_id);
-        ("note_count", `Int (List.length plan_ctx.Planning_eio.notes));
       ] in
       Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | Error e ->

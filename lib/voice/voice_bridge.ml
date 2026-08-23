@@ -398,7 +398,6 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; "audio_size", `Int file_size
                     ; ( "message_preview"
                       , `String
                           (String.sub message 0 (min 50 (String.length message))) )
@@ -415,7 +414,6 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; "audio_size", `Int file_size
                     ; ( "message_preview"
                       , `String
                           (String.sub message 0 (min 50 (String.length message))) )
@@ -423,7 +421,6 @@ let attempt_tts_endpoint
                     ; "local_playback_reason"
                       , `String
                           "blocking local players failed; handed audio file to macOS open"
-                    ; "open_handoff_seconds", `Float handoff_seconds
                     ]
                     @ audio_payload_fields ~audio_file ~audio_device))
                endpoint)
@@ -435,7 +432,6 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; "audio_size", `Int file_size
                     ; ( "message_preview"
                       , `String
                           (String.sub message 0 (min 50 (String.length message))) )
@@ -493,7 +489,6 @@ let attempt_tts_endpoint
              | Some (audio_file, file_size) ->
                let audio_fields =
                  [ "audio_file", `String audio_file
-                 ; "audio_size", `Int file_size
                  ]
                  @ audio_payload_fields ~audio_file ~audio_device
                in

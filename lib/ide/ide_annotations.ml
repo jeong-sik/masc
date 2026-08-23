@@ -68,7 +68,6 @@ let deletion_json id keeper_id ts =
     [ deletion_key, `Bool true
     ; "id", `String id
     ; "keeper_id", `String keeper_id
-    ; "deleted_at_ms", `Intlit (Int64.to_string ts)
     ]
 ;;
 

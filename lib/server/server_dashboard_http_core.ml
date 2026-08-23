@@ -695,7 +695,6 @@ let dashboard_shell_http_json
        ; "fallback_source", `String fallback_source
        ; "timeout_cache_key", `String cache_key
        ; "timeout_sec", `Float timeout_sec
-       ; "timeout_light", `Bool light
        ]
        @ shell_projection_trace_diagnostics cache_key)
   in

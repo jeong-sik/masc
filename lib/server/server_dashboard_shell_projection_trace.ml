@@ -127,8 +127,6 @@ let diagnostics cache_key =
     ]
   | Some snap ->
     [ "projection_timing_status", `String (status_string snap.snapshot_status)
-    ; "projection_timing_light", `Bool snap.snapshot_light
-    ; "projection_timing_elapsed_ms", `Int snap.snapshot_elapsed_ms
     ; ( "projection_timing_active"
       , `List (List.rev snap.snapshot_active |> List.map (fun label -> `String label)) )
     ; ( "projection_timing_top"

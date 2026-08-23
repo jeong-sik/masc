@@ -1418,7 +1418,6 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "keeper_name", `String keeper_name
     ; "status", `String status
     ; "operator_action_required", `Bool (degraded_signal_count > 0)
-    ; "scanned_row_limit", `Int limit
     ; "scanned_row_count", `Int scanned_row_count
     ; "row_count", `Int !row_count
     ; "stimulus_count", `Int !stimulus_count
@@ -1448,7 +1447,6 @@ let error_summary ~keeper_name ~limit error =
     ; "keeper_name", `String keeper_name
     ; "status", `String "unknown"
     ; "operator_action_required", `Bool true
-    ; "scanned_row_limit", `Int limit
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
     ; "stimulus_count", `Int 0
@@ -1505,7 +1503,6 @@ let unavailable_fleet_summary_json () =
     ; "operator_action_required", `Bool false
     ; "keeper_count", `Int 0
     ; "keeper_names", `List []
-    ; "scanned_row_limit_per_keeper", `Int 0
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
     ; "stimulus_count", `Int 0
@@ -1758,7 +1755,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
           (status_reasons <> []) )
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
-    ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
     ; "scanned_row_count", `Int (total_int "scanned_row_count")
     ; "row_count", `Int row_count
     ; "stimulus_count", `Int (total_int "stimulus_count")

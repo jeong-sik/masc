@@ -163,9 +163,6 @@ let run
      with an empty user message, so it short-circuited to a constant
      [performed=false] while re-reading 50 history lines per turn. *)
   (try
-     let used_search =
-       List.exists (fun t -> t = "keeper_memory_search") actual_tools
-     in
      let post_turn_ms =
        Keeper_timing.round1
          ((Time_compat.now () -. post_turn_t0) *. 1000.0)
@@ -177,7 +174,6 @@ let run
           ; "keeper_name", `String meta.name
           ; "turn", `Int turn
           ; "agent_core_turn_count", `Int agent_core_turn_count
-          ; "used_memory_search", `Bool used_search
           ; "post_turn_ms", `Float post_turn_ms
           ]
           @ (match inference_telemetry with

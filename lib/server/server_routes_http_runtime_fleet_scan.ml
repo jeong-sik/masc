@@ -1134,7 +1134,6 @@ let keeper_fleet_safety_health_json
     ; "autoboot_enabled_keeper_count", `Int target_count
     ; ( "autoboot_enabled_keeper_names"
       , `List (List.map (fun name -> `String name) autoboot_scan.autoboot_names) )
-    ; "autoboot_enabled_read_error_count", `Int (List.length autoboot_scan.read_errors)
     ; ( "autoboot_enabled_read_errors"
       , `List
           (List.map

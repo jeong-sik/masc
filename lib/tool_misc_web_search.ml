@@ -470,9 +470,6 @@ let fetch_tavily ~timeout_sec ~query ~limit =
             ("query", `String query);
             ("max_results", `Int limit);
             ("search_depth", `String "basic");
-            ("include_answer", `Bool false);
-            ("include_images", `Bool false);
-            ("include_raw_content", `Bool false);
           ]
         |> Yojson.Safe.to_string
       in

@@ -128,7 +128,6 @@ let review_notes
              ; "task_id", `String request.task_id
              ; "worker", `String request.worker
              ; "created_at", `Float request.created_at
-             ; "criteria_count", `Int (List.length request.criteria)
              ] )
        ; ( "submitted_evidence_metadata"
          , Workspace_verification_store.submitted_evidence_access_metadata_to_yojson

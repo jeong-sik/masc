@@ -104,7 +104,6 @@ let host_execution_location_json
     ; "playground_root", `String playground
     ; "relative_cwd", relative_cwd
     ; "relative_path_base", `String cwd
-    ; "argv_relative_paths_resolve_against_cwd", `Bool true
     ; "repo_name", Json_util.string_opt_to_json repo_name
     ; "repo_root", Json_util.string_opt_to_json repo_root
     ]

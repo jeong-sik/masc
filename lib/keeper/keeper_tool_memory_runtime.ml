@@ -45,7 +45,6 @@ let valid_memory_search_source_strings =
 type fact_match =
   { claim : string
   ; category : string
-  ; first_seen : float
   }
 
 let read_current_facts ~keepers_dir ~keeper_id =
@@ -83,7 +82,6 @@ let search_durable_facts
     |> List.map (fun (fact : Keeper_memory_os_types.fact) ->
       { claim = fact.claim
       ; category = Keeper_memory_os_types.category_to_string fact.category
-      ; first_seen = fact.first_seen
       })
   in
   take limit matches, total_candidates
@@ -93,7 +91,6 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
   `Assoc
     [ "text", `String m.claim
     ; "category", `String m.category
-    ; "first_seen_ts_unix", `Float m.first_seen
     ]
 ;;
 
@@ -395,7 +392,6 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       { error_kind = Title_too_long
       ; extras =
           [ "max_chars", `Int keeper_memory_write_max_title_chars
-          ; "title_chars", `Int (String.length title)
           ]
       }
   else if content = ""
@@ -410,7 +406,6 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
         { error_kind = Content_too_long
         ; extras =
             [ "max_chars", `Int keeper_memory_write_max_body_chars
-            ; "body_chars", `Int (String.length body)
             ]
         }
     else Memory_write_ok { body }

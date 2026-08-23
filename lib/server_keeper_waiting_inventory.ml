@@ -604,27 +604,30 @@ let external_attention_grouped_rows ~keeper_name
            rest
        | None -> collect ((key, [ item ]) :: groups) rest)
   in
-  let oldest (members : Keeper_external_attention.item list) =
-    List.fold_left
-      (fun (best : Keeper_external_attention.item)
-           (item : Keeper_external_attention.item) ->
-         if item.received_at < best.received_at then item else best)
-      (List.hd members)
-      members
-  in
-  let newest (members : Keeper_external_attention.item list) =
-    List.fold_left
-      (fun (best : Keeper_external_attention.item)
-           (item : Keeper_external_attention.item) ->
-         if item.received_at > best.received_at then item else best)
-      (List.hd members)
-      members
-  in
   collect [] pending
-  |> List.map (fun (_, members) ->
+  |> List.filter_map (fun (_, members) ->
+         (* Groups form from at least one item, so the empty case is
+            structural, not partial: it cannot happen and renders nothing. *)
+         match members with
+         | [] -> None
+         | first :: _ ->
          let count = List.length members in
-         let anchor = oldest members in
-         let preview = (newest members).content_preview in
+         let extremes =
+           List.fold_left
+             (fun ((oldest, newest) : Keeper_external_attention.item
+                                           * Keeper_external_attention.item)
+                  (item : Keeper_external_attention.item) ->
+                let oldest' =
+                  if item.received_at < oldest.received_at then item else oldest
+                in
+                let newest' =
+                  if item.received_at > newest.received_at then item else newest
+                in
+                (oldest', newest'))
+             (first, first) members
+         in
+         let anchor, latest = extremes in
+         let preview = latest.content_preview in
          { keeper_name = Some keeper_name
          ; source = External_attention
          ; waiting_on = anchor.source_label
@@ -650,7 +653,8 @@ let external_attention_grouped_rows ~keeper_name
                if count > 1 then
                  [ ("group_count", `Int count) ]
                else [])
-         })
+         }
+         |> Option.some)
 ;;
 
 let external_attention_rows ~base_path ~keeper_name =

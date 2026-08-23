@@ -2707,7 +2707,7 @@
 (test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
- (libraries alcotest masc masc_tui_keeper_control yojson))
+ (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))
 
 (test
  (name test_tui_keeper_selection)

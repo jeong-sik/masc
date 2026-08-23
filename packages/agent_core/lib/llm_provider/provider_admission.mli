@@ -32,8 +32,12 @@
     otherwise. Waiting joins a FIFO; cancellation while waiting does not
     leak a permit (see {!Slot_scheduler.with_permit}).
 
-    Conflicting declarations for the same endpoint identity keep the first
-    declaration authoritative and emit one diagnostic warning per identity. *)
+    Two configs naming the same endpoint identity with different allowances
+    raise [Invalid_argument]. Neither declaration outranks the other, so
+    honouring the one that dispatched first made the effective limit a
+    function of runtime order. The raise happens before the permit is taken,
+    so no provider request goes out under a limit its caller did not
+    declare. *)
 val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
 
 (** Point-in-time scheduler snapshot for [config]'s endpoint identity, or

@@ -12,16 +12,16 @@ let http_error_detail = function
 
 let get_json ~sw ~net url =
   match Http_client.get_sync ~sw ~net ~url ~headers:[] () with
-  | Ok (code, body) when code >= 200 && code < 300 ->
+  | Ok { status; body; _ } when status >= 200 && status < 300 ->
     (try Ok (Yojson.Safe.from_string body) with
      | Yojson.Json_error msg -> Error msg)
-  | Ok (code, _) -> Error (Printf.sprintf "HTTP %d" code)
+  | Ok { status; _ } -> Error (Printf.sprintf "HTTP %d" status)
   | Error error -> Error (http_error_detail error)
 ;;
 
 let probe_liveness ~sw ~net url =
   match Http_client.get_sync ~sw ~net ~url ~headers:[] () with
-  | Ok (code, _) when code >= 200 && code < 300 -> Ok ()
-  | Ok (code, _) -> Error (Printf.sprintf "HTTP %d" code)
+  | Ok { status; _ } when status >= 200 && status < 300 -> Ok ()
+  | Ok { status; _ } -> Error (Printf.sprintf "HTTP %d" status)
   | Error error -> Error (http_error_detail error)
 ;;

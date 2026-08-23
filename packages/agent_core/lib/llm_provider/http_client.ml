@@ -1146,6 +1146,15 @@ let retry_after_header_of_response_headers resp_headers =
   | Some raw -> parse_retry_after_seconds ~now:(Unix.gettimeofday ()) raw
 ;;
 
+let content_type_of_response_headers resp_headers =
+  match Http.Header.get resp_headers "content-type" with
+  | None -> None
+  | Some raw ->
+    (match String.trim raw with
+     | "" -> None
+     | trimmed -> Some trimmed)
+;;
+
 let header_has_token headers name token =
   match Http.Header.get headers name with
   | None -> false
@@ -1323,6 +1332,7 @@ type raw_sync_response =
   { status : int
   ; body : string
   ; retry_after_header : float option
+  ; content_type : string option
   }
 
 type validated_sync_request =
@@ -1376,7 +1386,9 @@ let%test "Retry-After is captured once with explicit duplicate ambiguity" =
     headers |> Http.Header.of_list |> capture_response_header_evidence |> snd
   in
   let retry_after_header = capture [ "Retry-After", "7" ] in
-  let response = { status = 429; body = "rate limited"; retry_after_header } in
+  let response =
+    { status = 429; body = "rate limited"; retry_after_header; content_type = None }
+  in
   let duplicate = capture [ "Retry-After", "7"; "retry-after", "8" ] in
   response.retry_after_header = Some 7.0
   && response.retry_after_header = retry_after_header
@@ -1831,8 +1843,14 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
           Cohttp_eio.Client.get ~sw client ~headers:hdr origin.uri
         in
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+        let resp_headers = Cohttp.Response.headers resp in
         let* body_str = read_response_body resp_body in
-        Ok (code, body_str))))
+        Ok
+          { status = code
+          ; body = body_str
+          ; retry_after_header = retry_after_header_of_response_headers resp_headers
+          ; content_type = content_type_of_response_headers resp_headers
+          })))
 ;;
 
 let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
@@ -1870,8 +1888,14 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
           ~resp_headers:(Cohttp.Response.headers resp)
           headers_with_length;
         profile_request_on_client_error ~url ~code ~request_body:body;
+        let resp_headers = Cohttp.Response.headers resp in
         let* body_str = read_response_body resp_body in
-        Ok (code, body_str))))
+        Ok
+          { status = code
+          ; body = body_str
+          ; retry_after_header = retry_after_header_of_response_headers resp_headers
+          ; content_type = content_type_of_response_headers resp_headers
+          })))
 ;;
 
 let post_sync_once_after_validation
@@ -2097,7 +2121,12 @@ let post_sync_once_after_validation
         | Ok () ->
           Ok
             { response =
-                { status = response_status; body = response_body; retry_after_header }
+                { status = response_status
+                ; body = response_body
+                ; retry_after_header
+                ; content_type =
+                    content_type_of_response_headers (Cohttp.Response.headers response)
+                }
             ; response_header_evidence
             }))
 ;;

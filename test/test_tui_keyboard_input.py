@@ -2811,7 +2811,11 @@ def observer_http_fixtures() -> HttpFixtures:
     """The MCP session handshake and a one-frame observer stream."""
 
     return {
-        "/health?full=1": fleet_safety_fixture(),
+        # The feed opens only after a refresh reaches the server, and the
+        # connection reading counts the overview, board, planning, and
+        # approval loads - so one of those must answer.
+        "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
+        "/api/v1/board": (200, {"posts": []}),
         "/mcp": RawHttpResponse(
             200,
             json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode(),

@@ -2,7 +2,7 @@
   "_comment": "Model-facing prose inside OCaml. Regenerate with scripts/model-prose-ratchet.sh --update.",
   "_scanner": "scripts/model-prose-scan.py (rules (i) structural slots, (ii) allowlist files)",
   "_rfc": "docs/rfc/RFC-prompts-and-tool-definitions-outside-ocaml.md",
-  "measured_commit": "46982ca2c099da0bb131af8b5852f84cb61bbf03",
+  "measured_commit": "088ebbbf290ba5ca1660f153a3115fbbfddb2b97",
   "allowlist_files": [
     "lib/eval_calibration.ml",
     "lib/exec_policy/exec_policy.ml",
@@ -43,8 +43,8 @@
     "packages/agent_core/lib/sessions_types.ml": "inline let%test fixtures"
   },
   "total": {
-    "bytes": 98856,
-    "count": 1025
+    "bytes": 84806,
+    "count": 882
   },
   "files": {
     "bin/gen_tool_descriptors.ml": {
@@ -84,7 +84,7 @@
       "count": 5
     },
     "lib/keeper/keeper_schema.ml": {
-      "bytes": 5367,
+      "bytes": 5348,
       "count": 55
     },
     "lib/keeper/keeper_tool_composition_surface.ml": {
@@ -152,7 +152,7 @@
       "count": 1
     },
     "lib/task/anti_rationalization.ml": {
-      "bytes": 1449,
+      "bytes": 1187,
       "count": 25
     },
     "lib/task/tool_task_schemas.ml": {
@@ -195,10 +195,6 @@
       "bytes": 780,
       "count": 5
     },
-    "lib/tool_schemas/tool_schemas_workspace_extra.ml": {
-      "bytes": 866,
-      "count": 6
-    },
     "lib/tool_surface/tool_help_registry.ml": {
       "bytes": 3049,
       "count": 43
@@ -208,7 +204,7 @@
       "count": 10
     },
     "lib/tool_surface/tool_shard_types_schemas_execute.ml": {
-      "bytes": 3504,
+      "bytes": 3200,
       "count": 13
     },
     "lib/tool_surface/tool_shard_types_schemas_filesystem.ml": {
@@ -234,10 +230,6 @@
     "lib/tool_surface/tool_shard_types_schemas_voice.ml": {
       "bytes": 1642,
       "count": 14
-    },
-    "lib/verification_authority_tools.ml": {
-      "bytes": 61,
-      "count": 1
     },
     "packages/agent_core/lib/agent/agent_tools.ml": {
       "bytes": 531,

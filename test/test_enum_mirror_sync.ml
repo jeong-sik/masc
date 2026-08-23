@@ -154,6 +154,25 @@ let test_schedule_contract_mirrors () =
     ; "recurrence_kind", Schedule_contract_values.recurrence_kind_strings
     ]
 ;;
+(* The three Goal tool schemas moved into config/tools/masc_goal_*.toml, where
+   the enum arrays are literals: nothing in TOML can read an OCaml variant. The
+   variants stay the owners, so check each property directly rather than
+   accepting any matching enum elsewhere — a constructor added to either one
+   without editing its file would otherwise ship a schema that never offers the
+   value, and the tool would reject what its own documentation advertised. *)
+let test_goal_tool_enum_mirrors () =
+  List.iter
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Goal property %s matches its variant" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Tool_schemas_workspace_extra.schemas ~property))
+    [ "phase", List.map Goal_phase.to_string Goal_phase.all
+    ; ( "action"
+      , List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all )
+    ]
+;;
+
 (* Board sub-board access. [Masc.Board] owns the vocabulary through
    [sub_board_access_of_string_opt]; the schema writes the three strings by
    hand, in two places. *)
@@ -265,6 +284,7 @@ let () =
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
+        ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
         ; test_case "reclaim_policy values decode" `Quick

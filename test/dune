@@ -2804,3 +2804,8 @@
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
  (libraries alcotest yojson masc masc_test_deps))
+
+(test
+ (name test_goal_tool_toml_parity)
+ (modules test_goal_tool_toml_parity)
+ (libraries alcotest yojson masc.tool_schemas masc_types))

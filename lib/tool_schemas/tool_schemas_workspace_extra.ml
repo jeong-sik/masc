@@ -1,102 +1,39 @@
-(** MCP tool schemas for shared Goal planning and lifecycle operations. *)
+(** MCP tool schemas for shared Goal planning and lifecycle operations, read
+    from the binary-embedded [config/tools/masc_goal_*.toml] declarations (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2).
+
+    One file declares one tool; [schema_of_name] decodes it through
+    [Tool_definition_toml] once at module initialization. A missing file or a
+    declaration that does not decode refuses the boot instead of advertising a
+    partial Goal surface.
+
+    The [phase] and [action] enums are literals in those files, mirroring
+    [Goal_phase.all] and [Goal_phase.Public_action.all]. Nothing in TOML can
+    derive them from the variants, so [test_enum_mirror_sync] compares the
+    published values against their owners — a constructor added to either
+    variant without editing its file fails there rather than shipping a schema
+    that never offers the value. *)
 
 open Masc_domain
 
-let goal_phase_enum = List.map Goal_phase.to_string Goal_phase.all
-
-let goal_transition_action_enum =
-  List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all
+let schema_of_name name : tool_schema =
+  let rel = "tools/" ^ name ^ ".toml" in
+  match Embedded_config.read rel with
+  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
+  | Some contents ->
+    (match Tool_definition_toml.load ~name ~contents with
+     | Ok { Tool_definition_toml.schema; _ } -> schema
+     | Error message -> failwith message)
 ;;
 
-let enum_schema ?description values =
-  `Assoc
-    ([ "type", `String "string"
-     ; "enum", `List (List.map (fun value -> `String value) values)
-     ]
-     @
-     match description with
-     | Some description -> [ "description", `String description ]
-     | None -> [])
-;;
-
+(* B1 — creation requires metric and target_value — is deliberately not a
+   schema-level [required] on masc_goal_upsert: the one tool serves both create
+   and update, and JSON Schema [required] is unconditional, so declaring it
+   would reject every metadata update of an existing goal. The create/update
+   split is only decidable against the store, so the handler enforces it on the
+   creation branch (Goal_store.upsert_goal, inside the write lock). *)
 let schemas : tool_schema list =
-  [ { name = "masc_goal_list"
-    ; description =
-        "List shared planning goals, optionally filtered by explicit lifecycle phase."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "phase"
-                  , enum_schema
-                      ~description:"Optional explicit Goal lifecycle phase filter"
-                      goal_phase_enum )
-                ] )
-          ; "additionalProperties", `Bool false
-          ]
-    }
-  ; { name = "masc_goal_upsert"
-    ; description =
-        "Create or update Goal metadata and parent linkage. Creation requires a \
-         measurable success condition: metric and target_value (RFC-0387 B1). Use \
-         masc_goal_transition for lifecycle changes."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ "id", `Assoc [ "type", `String "string" ]
-                ; "title", `Assoc [ "type", `String "string" ]
-                ; ( "metric"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Required (non-blank) when the upsert creates a new \
-                             goal (RFC-0387 B1); optional on update." )
-                      ] )
-                ; ( "target_value"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Required (non-blank) when the upsert creates a new \
-                             goal (RFC-0387 B1); optional on update." )
-                      ] )
-                ; "due_date", `Assoc [ "type", `String "string" ]
-                ; "priority", `Assoc [ "type", `String "integer" ]
-                ] )
-          ; "additionalProperties", `Bool false
-          ]
-      (* B1 is NOT expressed in a schema-level [required] array on purpose:
-         this one tool serves both create and update, and JSON Schema
-         [required] is unconditional — listing metric/target_value there would
-         reject every metadata update of an existing goal. The create/update
-         split is only decidable against the store, so the handler enforces
-         the requirement on the creation branch (Goal_store.upsert_goal,
-         inside the write lock). *)
-    }
-  ; { name = "masc_goal_transition"
-    ; description =
-        "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate). \
-         request_complete no longer completes the Goal directly: it moves \
-         executing -> verifying and persists a durable proof request. Verifier \
-         verdicts are application-owned typed commits and are deliberately not \
-         accepted by this MCP tool. A Goal whose criterion was judged \
-         unreachable is refused on request_complete."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ "goal_id", `Assoc [ "type", `String "string" ]
-                ; "action", enum_schema goal_transition_action_enum
-                ; "note", `Assoc [ "type", `String "string" ]
-                ] )
-          ; "required", `List [ `String "goal_id"; `String "action" ]
-          ; "additionalProperties", `Bool false
-          ]
-    }
-  ]
+  List.map
+    schema_of_name
+    [ "masc_goal_list"; "masc_goal_upsert"; "masc_goal_transition" ]
 ;;

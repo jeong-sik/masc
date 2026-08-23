@@ -11,7 +11,6 @@ module Ansi = struct
   let bold = "\027[1m"
   let dim = "\027[2m"
 
-  let _black = "\027[30m"
   let red = "\027[31m"
   let green = "\027[32m"
   let yellow = "\027[33m"
@@ -28,10 +27,6 @@ module Ansi = struct
   let default_fg = "\027[39m"
   let gray = "\027[90m"
 
-  let _bg_black = "\027[40m"
-  let _bg_blue = "\027[44m"
-  let bg_white = "\027[47m"
-
   (* Cursor movement *)
   let move_to row col = Printf.sprintf "\027[%d;%dH" row col
 
@@ -45,11 +40,8 @@ module Ansi = struct
   let box_tr = "\xe2\x94\x90" (* top-right corner *)
   let box_bl = "\xe2\x94\x94" (* bottom-left corner *)
   let box_br = "\xe2\x94\x98" (* bottom-right corner *)
-  let _box_t = "\xe2\x94\xac"  (* top tee *)
-  let _box_b = "\xe2\x94\xb4"  (* bottom tee *)
   let box_l = "\xe2\x94\x9c"  (* left tee *)
   let box_r = "\xe2\x94\xa4"  (* right tee *)
-  let _box_x = "\xe2\x94\xbc"  (* cross *)
 end
 
 (** A screen title.
@@ -113,21 +105,6 @@ module Terminal_text = struct
   let clock_timestamp text = Masc.Tui_decode.clock_timestamp_for_terminal text
 end
 
-let is_keeper name =
-  String.length name >= 7 && String.sub name 0 7 = "keeper-"
-
-(** Agent icon — deterministic by name hash, vendor-agnostic *)
-let agent_icon name =
-  let icons = [| "\xf0\x9f\x9f\xa3"; "\xf0\x9f\x94\xb5"; "\xf0\x9f\x9f\xa2"; "\xf0\x9f\x9f\xa1"; "\xf0\x9f\x94\xb4" |] in
-  if is_keeper name then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
-  else icons.(Hashtbl.hash name mod Array.length icons)
-
-(** Agent color — deterministic by name hash, vendor-agnostic *)
-let agent_color name =
-  let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
-  if is_keeper name then Ansi.default_fg
-  else colors.(Hashtbl.hash name mod Array.length colors)
-
 (** Status color *)
 let status_color status =
   match status with
@@ -154,15 +131,6 @@ let priority_indicator p =
   else if p <= 3 then Ansi.yellow ^ "!" ^ Ansi.reset
   else ""
 
-(** Soul profile color *)
-let soul_color profile =
-  match profile with
-  | "relationship" -> Ansi.magenta
-  | "delivery" -> Ansi.green
-  | "balanced" -> Ansi.cyan
-  | "creative" -> Ansi.yellow
-  | _ -> Ansi.default_fg
-
 (** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
 let ctx_color ratio =
   if ratio >= 0.8 then Ansi.red
@@ -181,16 +149,6 @@ let ctx_bar ratio width =
     (String.make filled '#')
     (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
-
-(** Format channel name with color *)
-let channel_color ch =
-  match ch with
-  | "heartbeat" -> Ansi.dim ^ "hb" ^ Ansi.reset
-  | "turn" -> Ansi.cyan ^ "turn" ^ Ansi.reset
-  | "compaction" -> Ansi.yellow ^ "comp" ^ Ansi.reset
-  | "handoff" -> Ansi.magenta ^ "hand" ^ Ansi.reset
-  | "initiative" -> Ansi.blue ^ "init" ^ Ansi.reset
-  | s -> s
 
 (** Shared helper: draw box top border *)
 let box_top buf cols =

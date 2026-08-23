@@ -326,10 +326,18 @@ let v5_registration_row =
 let v4_registration_row =
   {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
 
+(* Paired with the registration so replay has something to hand back: a
+   registration on its own is a run that was in flight when the process
+   stopped, and [drop_replayed_running] discards those by design. Without the
+   completion both fixtures answer [None] and the v4 assertion below passes
+   whether the field is rejected or silently ignored. *)
+let completion_row =
+  {|{"event":"complete","id":"exact-board-attention-pin","completion":{"outcome":"succeeded","elapsed_s":1.0,"output":null,"selected_slot":null}}|}
+
 let test_store_version_pins_the_registration_shape () =
-  let replay_single row =
+  let replay_registration row =
     let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
-    Fs_compat.save_file path (row ^ "\n");
+    Fs_compat.save_file path (row ^ "\n" ^ completion_row ^ "\n");
     let replayed = R.replay path in
     let status =
       R.get replayed ~run_id:"exact-board-attention-pin"
@@ -340,10 +348,10 @@ let test_store_version_pins_the_registration_shape () =
   in
   check string "the row shape below belongs to this store version"
     "exact-lane-runs-v5.jsonl" R.storage_filename;
-  check (option string) "a v5 registration row replays as a running run"
-    (Some "running") (replay_single v5_registration_row);
+  check (option string) "a v5 registration row replays"
+    (Some "succeeded") (replay_registration v5_registration_row);
   check (option string) "the field v4 carried and v5 removed is rejected, not ignored"
-    None (replay_single v4_registration_row)
+    None (replay_registration v4_registration_row)
 ;;
 
 (* The retained-run bound exists to serve the internal-agents monitor, which

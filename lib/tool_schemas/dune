@@ -30,6 +30,9 @@
   masc_core
   masc.task_handlers
   masc.masc_tool_surface
+  ; tool_schemas_workspace_extra reads config/tools/masc_goal_*.toml
+  ; from the binary-embedded config tree.
+  masc.embedded_config
   masc.masc_goal))
 
 ;; RFC-0057 Phase 0 — capture bin/gen_tool_descriptors.exe stdout into

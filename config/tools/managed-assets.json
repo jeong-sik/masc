@@ -20,6 +20,9 @@
     "masc_board_sub_board_get.toml",
     "masc_board_sub_board_list.toml",
     "masc_board_sub_board_update.toml",
-    "masc_board_vote.toml"
+    "masc_board_vote.toml",
+    "masc_goal_list.toml",
+    "masc_goal_transition.toml",
+    "masc_goal_upsert.toml"
   ]
 }

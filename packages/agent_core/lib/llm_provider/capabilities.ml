@@ -952,12 +952,19 @@ let apply_declarative_capability_overrides overrides =
     | Some required -> required && supports_tool_choice
     | None -> base.supports_required_tool_choice && supports_tool_choice
   in
+  (* Read only this field's own override, the way
+     [supports_required_tool_choice] above does. Consulting
+     [overrides.supports_tool_choice] here made an omission mean "yes": a
+     catalog row that declared `supports_tool_choice = true` and left
+     `supports_named_tool_choice` out was answered `true`, so the record
+     claimed a capability nobody wrote down. 21 rows in models.toml are
+     shaped that way. An absent field now falls through to the base record
+     like every sibling, and a row that really does support named choice has
+     to say so. *)
   let supports_named_tool_choice =
-    match overrides.supports_named_tool_choice, overrides.supports_tool_choice with
-    | Some named, _ -> named && supports_tool_choice
-    | None, Some true -> true
-    | None, Some false -> false
-    | None, None -> base.supports_named_tool_choice && supports_tool_choice
+    match overrides.supports_named_tool_choice with
+    | Some named -> named && supports_tool_choice
+    | None -> base.supports_named_tool_choice && supports_tool_choice
   in
   let override_int_opt base_val = function
     | Some n -> Some n
@@ -1479,6 +1486,53 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; reasoning_streaming_format = None
   ; reasoning_replay = None
   }
+;;
+
+let%test "named tool choice needs its own declaration, not a sibling override" =
+  (* A row that turns tool_choice on and says nothing about named choice used
+     to be answered `true`, so the record advertised a capability the catalog
+     never declared. 21 rows in models.toml are shaped this way. *)
+  let entry =
+    { (test_catalog_entry "named-choice-omitted") with
+      base_label = Some "openai_chat"
+    ; supports_tools = Some true
+    ; supports_tool_choice = Some true
+    }
+  in
+  let derived = apply_catalog_entry entry in
+  let base =
+    match capabilities_for_provider_label "openai_chat" with
+    | Some c -> c
+    | None -> default_capabilities
+  in
+  derived.supports_tool_choice
+  && derived.supports_named_tool_choice = base.supports_named_tool_choice
+;;
+
+let%test "named tool choice honours an explicit declaration" =
+  let entry =
+    { (test_catalog_entry "named-choice-declared") with
+      base_label = Some "openai_chat"
+    ; supports_tools = Some true
+    ; supports_tool_choice = Some true
+    ; supports_named_tool_choice = Some true
+    }
+  in
+  (apply_catalog_entry entry).supports_named_tool_choice
+;;
+
+let%test "named tool choice cannot outlive tool choice" =
+  (* Declaring named choice while tool choice is off stays false: the sibling
+     fields are conjoined, not independent. *)
+  let entry =
+    { (test_catalog_entry "named-choice-without-tool-choice") with
+      base_label = Some "openai_chat"
+    ; supports_tools = Some true
+    ; supports_tool_choice = Some false
+    ; supports_named_tool_choice = Some true
+    }
+  in
+  not (apply_catalog_entry entry).supports_named_tool_choice
 ;;
 
 let qwen3_family_test_entry id_prefix : Model_catalog.model_entry =

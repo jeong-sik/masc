@@ -29,16 +29,7 @@ let websocket_url_from_base_url base_url =
 let configured_http_port () = Env_config_core.masc_http_port_int ()
 let configured_http_host () = Env_config_core.masc_host ()
 
-let ipaddr_is_unspecified = function
-  | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
-  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-;;
-
-let is_unspecified_host host =
-  match Ipaddr.of_string (String.trim host) with
-  | Ok ip -> ipaddr_is_unspecified ip
-  | Error _ -> false
-;;
+let is_unspecified_host = Masc_network_defaults.is_unspecified_host
 
 let is_canonical_loopback_alias host =
   let normalized = String.trim host |> String.lowercase_ascii in

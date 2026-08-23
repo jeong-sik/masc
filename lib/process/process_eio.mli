@@ -191,15 +191,28 @@ type pipeline_stage = {
   argv : string list;
   env : string array option;
   cwd : string option;
+  stdin : input_origin;
+  stdout : output_destination;
+  stderr : output_destination;
 }
-(** One argv-only process stage in a native pipeline. *)
+(** One process stage in a native pipeline.
+
+    [Inherited] and [Captured] mean the stage takes the pipeline's own
+    plumbing: the pipe from the stage before it, the pipe to the stage after
+    it, the stderr this runtime collects. A file replaces that plumbing for
+    one stream, which is how a shell reads [a > f | b] -- b's stdin is still
+    the link and simply reaches EOF with nothing in it. *)
+
+val plumbed_stage :
+  argv:string list -> env:string array option -> cwd:string option -> pipeline_stage
+(** A stage whose three streams all follow the pipeline's plumbing. *)
 
 val run_argv_pipeline_with_status_split :
   ?timeout_sec:float ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
   pipeline_stage list ->
-  (Unix.process_status * string * string)
+  (Unix.process_status * string * string, string) result
 (** Run host stages as a native pipeline. Adjacent stages are connected with
     process pipes so intermediate stdout is streamed with backpressure rather
     than buffered into OCaml strings. The returned stdout is the final stage's

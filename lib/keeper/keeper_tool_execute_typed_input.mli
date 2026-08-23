@@ -46,7 +46,9 @@ type output_sink =
   | Append_file of { path : string }  (** absolute path, shell [>>] *)
   | Output_to_fd of int
       (** duplicate another standard descriptor of the same stage, which is
-          how [2>&1] is expressed without a shell. *)
+          how [2>&1] is expressed without a shell. The dispatcher captures the
+          two streams separately and joins them afterwards, so the merged text
+          is grouped by stream rather than ordered by time. *)
 
 type exec_stage = {
   argv : string list;
@@ -65,18 +67,33 @@ type program = {
     program unrepresentable, so emptiness is not something {!validate} has to
     check, and a single process is a program whose tail is empty. *)
 
+type conditional =
+  | And_then  (** run the next program only if the one before it exited zero *)
+  | Or_else  (** run the next program only if the one before it did not *)
+
 type execute_input = {
   program : program;
+  next : (conditional * program) list;
+      (** programs to run after [program], each guarded by how the one before
+          it ended. Empty for a single program. The guard looks at whatever
+          ran last, so a run of them reads left to right, as a shell reads
+          [a && b || c]. *)
   cwd : string option;
   env : (string * string) list;
   timeout_sec : float option;
 }
-(** [cwd] and [env] apply to every stage. [timeout_sec] is an explicit
-    optional execution boundary; absence means unbounded execution. *)
+(** [cwd] and [env] apply to every stage of every program. [timeout_sec] is an
+    explicit optional execution boundary; absence means unbounded execution. *)
 
 type validation_error =
   | Empty_argv
   | Empty_program
+  | Directory_change_is_not_a_program of { requested : string }
+      (** [cd] changes the shell's own directory. Run as a program it changes
+          the directory of a child that exits immediately, so the command the
+          caller meant never runs — and [cd] ignores its extra arguments and
+          exits zero, so the call is reported successful with no output. Use
+          the [cwd] field. *)
   | Argv_contains_nul of {
       index : int;
       token : string;

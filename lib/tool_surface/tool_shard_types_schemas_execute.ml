@@ -35,7 +35,9 @@ let fd_property =
       ; ( "description"
         , `String
             "Send this stream into another of the stage's output descriptors, \
-             the typed form of '2>&1'." )
+             the typed form of '2>&1'. The two streams are captured \
+             separately and joined afterwards, so the merged text is grouped \
+             by stream, not ordered by time." )
       ] )
 ;;
 
@@ -98,35 +100,9 @@ let redirect_field ~name ~properties =
 let stdin_field ~name = redirect_field ~name ~properties:input_source_properties
 let stdout_field ~name = redirect_field ~name ~properties:output_sink_properties
 
-let tool_execute_exec_stage_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ( "argv"
-            , `Assoc
-                [ "type", `String "array"
-                ; "items", `Assoc [ "type", `String "string" ]
-                ; "minItems", `Int 1
-                ; ( "description"
-                  , `String
-                      "Non-empty process vector: argv[0] is the executable and \
-                       remaining tokens are arguments. Shell \
-                       metacharacters are data; use pipeline for multi-stage \
-                       execution. Wildcards (*, ?, [...]) are NOT expanded: argv \
-                       reaches the process unchanged with no shell, so 'foo*.ml' \
-                       matches a file literally named 'foo*.ml'. Pass exact paths, \
-                       or discover exact paths before invoking the program." )
-                ] )
-          ; stdin_field ~name:"stdin"
-          ; stdout_field ~name:"stdout"
-          ; stdout_field ~name:"stderr"
-          ] )
-    ; "required", `List [ `String "argv" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
+(* One argv definition for both the top level and a pipeline stage. Written
+   twice, the two wordings said the same things in different words and could
+   drift apart. *)
 let tool_execute_argv_field =
   ( "argv"
   , `Assoc
@@ -135,15 +111,30 @@ let tool_execute_argv_field =
       ; "minItems", `Int 1
       ; ( "description"
         , `String
-            "Typed single-process form: a non-empty process vector. argv[0] is \
-             the executable and remaining tokens are arguments, all passed verbatim. \
-             Filesystem arguments use the selected sandbox namespace; relative path \
-             operands resolve against the typed cwd. Docker cannot access host \
-             absolute paths. \
-             A literal '|' token is data, not a pipe. Wildcards (*, ?, [...]) are \
-             NOT expanded either: there is no shell, so 'foo*.ml' is a literal \
-             filename, not a glob. Use exact paths or list a directory first." )
+            "Non-empty process vector: argv[0] is the executable and remaining \
+             tokens are arguments, all passed verbatim. There is no shell, so a \
+             literal '|', '&&' or '>' token is data, not an operator, and \
+             wildcards (*, ?, [...]) are not expanded: 'foo*.ml' names a file \
+             called 'foo*.ml'. Use pipeline, then, and the redirect fields \
+             instead, and pass exact paths. Filesystem arguments use the \
+             selected sandbox namespace; relative operands resolve against the \
+             typed cwd, and Docker cannot reach host absolute paths." )
       ] )
+;;
+
+let tool_execute_exec_stage_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ tool_execute_argv_field
+          ; stdin_field ~name:"stdin"
+          ; stdout_field ~name:"stdout"
+          ; stdout_field ~name:"stderr"
+          ] )
+    ; "required", `List [ `String "argv" ]
+    ; "additionalProperties", `Bool false
+    ]
 ;;
 
 let tool_execute_pipeline_field =
@@ -158,6 +149,41 @@ let tool_execute_pipeline_field =
              piping and redirecting combine in one call. Stage argv uses the \
              selected sandbox namespace, and relative path operands resolve \
              against the typed cwd. Mutually exclusive with top-level argv." )
+      ] )
+;;
+
+(* One continuation: the same program shape as the top level, plus the status
+   it waits for. Written as a status rather than an operator name so the model
+   states the condition instead of translating shell syntax. *)
+let tool_execute_then_field =
+  ( "then"
+  , `Assoc
+      [ "type", `String "array"
+      ; ( "items"
+        , `Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc
+                  [ ( "on"
+                    , `Assoc
+                        [ "type", `String "string"
+                        ; "enum", `List [ `String "success"; `String "failure" ]
+                        ] )
+                  ; tool_execute_argv_field
+                  ; tool_execute_pipeline_field
+                  ; stdin_field ~name:"stdin"
+                  ; stdout_field ~name:"stdout"
+                  ; stdout_field ~name:"stderr"
+                  ] )
+            ; "required", `List [ `String "on" ]
+            ; "additionalProperties", `Bool false
+            ] )
+      ; ( "description"
+        , `String
+            "Programs to run after this one, each guarded by how the one \
+             before it ended, the typed form of '&&' and '||'. Use this \
+             instead of putting those operators in argv, where nothing reads \
+             them. Guards apply left to right." )
       ] )
 ;;
 
@@ -179,9 +205,12 @@ let tool_execute_cwd_field =
       [ "type", `String "string"
       ; ( "description"
         , `String
-            "Optional working directory for the command. Must stay within the keeper \
-             sandbox or an explicit allowed path. Pass a relative cwd, typically '.'. \
-             The Keeper-visible absolute root is informational, not a cwd input. \
+            "Working directory for the command, and the only way to set one: \
+             there is no shell, so 'cd' runs as a program, changes the \
+             directory of a child that exits, and reports success having done \
+             nothing. Must stay within the keeper sandbox or an explicit \
+             allowed path. Pass a relative cwd, typically '.'. The \
+             Keeper-visible absolute root is informational, not a cwd input. \
              Docker host absolute paths are unavailable." )
       ] )
 ;;
@@ -222,6 +251,7 @@ let tool_execute_schema : Masc_domain.tool_schema =
   let properties =
     [ tool_execute_argv_field
     ; tool_execute_pipeline_field
+    ; tool_execute_then_field
     ; tool_execute_env_field
     ; tool_execute_cwd_field
     ; tool_execute_timeout_sec_field

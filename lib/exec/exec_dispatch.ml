@@ -397,20 +397,39 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
 
 let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
 
+(* A stage's own redirections travel with it, so a pipeline that names a file
+   still runs on real process pipes. Dropping to the buffered chain instead
+   would run each stage to completion in turn, which has no backpressure: a
+   producer that only stops when its reader closes -- `yes | head -1` -- never
+   stops at all. *)
 let host_pipeline_specs ?base_host_env stages =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
     | Shell_ir.Simple simple :: rest ->
         (match simple.sandbox with
-         | Host when simple.redirects = [] ->
+         | Host ->
              let argv, _env, cwd = process_spec_of_simple simple in
-             let stage : Process_eio.pipeline_stage =
-               { argv; env = resolve_host_env ?base_host_env simple.env; cwd }
-             in
-             loop (stage :: acc) rest
-         | _unsupported -> None)
-        [@warning "-4"]
-    | Shell_ir.Pipeline _ :: _ -> None
+             (match redirect_plan_of_redirects ~cwd simple.redirects with
+              | Error _ -> None
+              | Ok (plan, attach) when plan = default_redirect_plan ->
+                  let stage : Process_eio.pipeline_stage =
+                    { argv
+                    ; env = resolve_host_env ?base_host_env simple.env
+                    ; cwd
+                    ; stdin = attach.stdin_from
+                    ; stdout = attach.stdout_to
+                    ; stderr = attach.stderr_to
+                    }
+                  in
+                  loop (stage :: acc) rest
+              (* A capture-side plan -- a merge or a discard -- is applied to
+                 captured text after the run, which a per-stage pipeline has no
+                 place to do. Those stay on the existing path. *)
+              | Ok _ -> None)
+         | Docker _ -> None)
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
   in
   loop [] stages
 
@@ -435,7 +454,9 @@ let docker_pipeline_specs stages =
              loop (Some pipeline_runner) (Some sandbox_target) (stage :: acc) rest
          | _ -> None)
         [@warning "-4"]
-    | Shell_ir.Pipeline _ :: _ -> None
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
   in
   loop None None [] stages
 
@@ -465,20 +486,21 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
     | _ ->
         (match host_pipeline_specs ?base_host_env stages with
          | Some specs ->
-             let status, stdout, stderr =
-               match on_output_chunk with
-               | None ->
-                   Process_eio.run_argv_pipeline_with_status_split
-                     ?timeout_sec
-                     specs
-               | Some on_chunk ->
-                   Process_eio.run_argv_pipeline_with_status_split
-                     ?timeout_sec
-                     ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
-                     ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
-                     specs
-               in
-             { status; stdout; stderr }
+             (match
+                match on_output_chunk with
+                | None ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec
+                      specs
+                | Some on_chunk ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec
+                      ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                      ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                      specs
+              with
+              | Ok (status, stdout, stderr) -> { status; stdout; stderr }
+              | Error message -> unsupported_redirect_result message)
          | None -> (
              match docker_pipeline_specs stages with
              | Some (runner, specs) ->
@@ -552,11 +574,14 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                            ~status
                            ~stderr
                            rest)
-                   | Pipeline _ :: _ ->
+                   | (Pipeline _ | Sequence _) :: _ ->
                        { status = Unix.WEXITED 1
                        ; stdout = ""
                        ; stderr =
-                           stderr ^ "nested pipeline not supported in native dispatch"
+                           stderr
+                           ^ "a pipeline stage that is itself a pipeline or a \
+                              sequence needs a subshell, which native dispatch \
+                              does not spawn"
                        }
                  in
                  (match stages with
@@ -616,11 +641,42 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                             ~status
                             ~stderr:first_result.stderr
                             rest)
-                    | Pipeline _ ->
+                    | Pipeline _ | Sequence _ ->
                         invalid_pipeline
-                          "nested pipeline not supported in native dispatch" ))))
+                          "a pipeline stage that is itself a pipeline or a \
+                           sequence needs a subshell, which native dispatch \
+                           does not spawn" ))))
   in
   emit_unseen_captured_output on_output_chunk emitted result
+
+(* [a && b] runs b only when a exited zero, and [a || b] only when it did
+   not, exactly as a shell reads them. Whatever ran last decides, so a run of
+   connectors reads left to right without any precedence of its own. Output
+   from every command that ran is concatenated in the order it ran. *)
+and dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail () =
+  let run ir = dispatch ?base_host_env ?timeout_sec ?on_output_chunk ir in
+  let took_the_branch connector (status : Unix.process_status) =
+    match connector, status with
+    | Shell_ir.And_if, Unix.WEXITED 0 -> true
+    | Shell_ir.And_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> false
+    | Shell_ir.Or_if, Unix.WEXITED 0 -> false
+    | Shell_ir.Or_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> true
+  in
+  let rec step acc = function
+    | [] -> acc
+    | (connector, ir) :: rest ->
+      if not (took_the_branch connector acc.status)
+      then step acc rest
+      else (
+        let next = run ir in
+        step
+          { status = next.status
+          ; stdout = acc.stdout ^ next.stdout
+          ; stderr = acc.stderr ^ next.stderr
+          }
+          rest)
+  in
+  step (run head) tail
 
 and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
@@ -628,3 +684,5 @@ and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
     dispatch_simple ?base_host_env ?timeout_sec ?on_output_chunk s
   | Pipeline stages ->
     dispatch_pipeline ?base_host_env ?timeout_sec ?on_output_chunk stages
+  | Sequence { head; tail } ->
+    dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail ()

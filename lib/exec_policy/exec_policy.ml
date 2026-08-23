@@ -75,6 +75,9 @@ let rec shell_ir_has_unquoted_glob = function
   | Masc_exec.Shell_ir.Simple simple -> simple_has_unquoted_glob simple
   | Masc_exec.Shell_ir.Pipeline stages ->
     List.exists shell_ir_has_unquoted_glob stages
+  | Masc_exec.Shell_ir.Sequence { head; tail } ->
+    shell_ir_has_unquoted_glob head
+    || List.exists (fun (_connector, part) -> shell_ir_has_unquoted_glob part) tail
 ;;
 
 let validate_no_unquoted_glob ast =
@@ -277,19 +280,17 @@ let validate_shell_ir_paths ?workdir shell_ir =
       in
       let rec validate_parsed_shell_ir = function
         | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
-        | Masc_exec.Shell_ir.Pipeline stages ->
-          let rec loop = function
-            | [] -> Ok ()
-            | Masc_exec.Shell_ir.Simple simple :: rest ->
-              (match validate_simple simple with
-               | Ok () -> loop rest
-               | Error _ as err -> err)
-            | Masc_exec.Shell_ir.Pipeline nested :: rest ->
-              (match validate_parsed_shell_ir (Masc_exec.Shell_ir.Pipeline nested) with
-               | Ok () -> loop rest
-               | Error _ as err -> err)
-          in
-          loop stages
+        | Masc_exec.Shell_ir.Pipeline stages -> validate_each stages
+        | Masc_exec.Shell_ir.Sequence { head; tail } ->
+          (match validate_parsed_shell_ir head with
+           | Error _ as err -> err
+           | Ok () -> validate_each (List.map snd tail))
+      and validate_each = function
+        | [] -> Ok ()
+        | part :: rest ->
+          (match validate_parsed_shell_ir part with
+           | Ok () -> validate_each rest
+           | Error _ as err -> err)
       in
       validate_parsed_shell_ir shell_ir
 ;;

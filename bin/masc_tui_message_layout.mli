@@ -38,7 +38,14 @@ val display_width : string -> int
 
 val fit_width : string -> int -> string
 (** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar
-    or renderer-owned ANSI CSI sequence. *)
+    or renderer-owned ANSI CSI sequence. Short text is padded to the budget. *)
+
+val split_cells : max_cells:int -> string -> string list
+(** Hard-split text into chunks of at most [max_cells] cells, breaking between
+    complete scalars and never inside a renderer-owned ANSI CSI sequence. No
+    chunk is padded, and concatenating them returns the input. Use where the
+    text has no word boundaries to wrap at -- a fenced code line, an
+    identifier longer than the frame. *)
 
 val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading [~] and the
@@ -62,16 +69,36 @@ val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
     Words wider than the budget are split between complete UTF-8 scalars. *)
 
-val visible_rows : inner_width:int -> height:int -> entry list -> row list
+val visible_rows :
+  ?markdown:(width:int -> string -> string list) ->
+  inner_width:int ->
+  height:int ->
+  entry list ->
+  row list
 (** Render chat entries into cell-bounded, UTF-8-safe physical rows and retain
-    the newest rows. The newest entry always keeps its metadata row. *)
+    the newest rows. The newest entry always keeps its metadata row.
 
-val total_rows : inner_width:int -> entry list -> int
+    [markdown] renders one body into rows already wrapped to the width it is
+    given. Supplied by the caller so this module keeps no terminal vocabulary;
+    omitted, a body is wrapped as the plain text it always was. Every scroll
+    function takes the same argument, and passing it to one but not another
+    would measure the pane against a different height than it draws. *)
+
+val total_rows :
+  ?markdown:(width:int -> string -> string list) ->
+  inner_width:int ->
+  entry list ->
+  int
 (** How many physical rows [entries] render to at this width — what a scroll
     position is measured against. *)
 
 val scrolled_rows :
-  inner_width:int -> height:int -> from_bottom:int -> entry list -> row list
+  ?markdown:(width:int -> string -> string list) ->
+  inner_width:int ->
+  height:int ->
+  from_bottom:int ->
+  entry list ->
+  row list
 (** The window of [height] rows ending [from_bottom] rows above the newest.
 
     [from_bottom = 0] is {!visible_rows} exactly, so the unscrolled pane keeps
@@ -79,7 +106,12 @@ val scrolled_rows :
     newest entry holds its metadata row and loses body lines instead. Scrolled
     back, every row is already whole, and the window is a plain slice. *)
 
-val max_scroll : inner_width:int -> height:int -> entry list -> int
+val max_scroll :
+  ?markdown:(width:int -> string -> string list) ->
+  inner_width:int ->
+  height:int ->
+  entry list ->
+  int
 (** The largest [from_bottom] that still shows a row — how far back the pane
     can go before it would scroll past the oldest entry. *)
 

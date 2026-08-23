@@ -449,6 +449,17 @@ const runtimeBlockerLabels = {
   agent_core_unrecognized_stop_reason: 'Agent Core 미식별 정지 사유',
   agent_core_guardrail_violation: 'Agent Core 가드레일 위반',
   agent_core_tripwire_violation: 'Agent Core Tripwire 위반',
+  agent_core_input_required: 'Agent Core 입력 대기',
+  capacity_backpressure: '공급자 용량 초과',
+  gate_replay_repair_required: '승인 기록 복구 필요',
+  incomplete_tool_transcript: '도구 기록 깨짐',
+  internal_bridge_exception: '브리지 예외',
+  internal_contract_rejected: '내부 계약 거절',
+  internal_unhandled_exception: '처리하지 못한 예외',
+  provider_attempt_effect_fenced: '중복 실행 위험으로 차단',
+  receipt_persistence_failed: 'Receipt 저장 실패',
+  terminal_effect_failed: '마무리 처리 실패',
+  tool_correction_lost: '도구 수정 내용 유실',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(

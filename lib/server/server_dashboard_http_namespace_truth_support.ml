@@ -399,6 +399,31 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
           ~recommended_action:"Review approvals in Operations"
           ~requires_decision:true ~provenance:"derived" ()
         :: !events;
+    (* Tool calls a keeper is holding right now. Unlike the rows above, these
+       expire: a held call is denied when its wait runs out, so an operator
+       who never sees it loses the call rather than deferring it. Read live
+       from the registry -- there is nothing durable to read, because the wait
+       exists only while the turn is parked on it. *)
+    (match Keeper_tool_approval_registry.pending
+             (Keeper_tool_approval_registry.shared ())
+     with
+     | [] -> ()
+     | held ->
+       let names =
+         held
+         |> List.map (fun (p : Keeper_tool_approval_registry.pending) ->
+              p.keeper_name)
+         |> List.sort_uniq String.compare
+       in
+       events :=
+         attention_event_json ~severity:"bad" ~kind:"tool_approval_held"
+           ~summary:
+             (Printf.sprintf
+                "%d tool call(s) waiting on you: %s"
+                (List.length held) (String.concat ", " names))
+           ~recommended_action:"Answer in the keeper's chat before the wait ends"
+           ~requires_decision:true ~provenance:"live" ()
+         :: !events);
     List.rev !events
   in
   let keeper_events =

@@ -40,7 +40,7 @@ let test_unobserved_offers_nothing () =
   check_actions "no action without a roster" [] (Control.available r);
   Alcotest.(check (option action_testable))
     "no primary without a roster" None (Control.primary r);
-  Alcotest.(check string) "status is unknown" "unknown" (Control.status_label r)
+  Alcotest.(check string) "status is unread" "unread" (Control.status_label r)
 
 let test_absent_offers_boot () =
   let r = reading ~liveness:Control.Absent "analyst" in
@@ -306,12 +306,12 @@ let test_short_roster_is_partial () =
       Alcotest.fail "a roster short of its own total is not complete"
   | Control.Roster_unobserved -> Alcotest.fail "the route did answer"
 
-let test_short_roster_reads_unknown_not_offline () =
+let test_short_roster_reads_unread_not_offline () =
   let roster = Control.roster_of_reading ~rows:[] ~truncated:false ~total:10 in
   let r = { Control.name = "analyst"; paused = false
           ; liveness = Control.liveness_of_roster roster "analyst" }
   in
-  Alcotest.(check string) "unknown, not offline" "unknown"
+  Alcotest.(check string) "unread, not offline" "unread"
     (Control.status_label r);
   check_actions "no action on an unread keeper" [] (Control.available r)
 
@@ -563,8 +563,8 @@ let () =
     ; ( "roster completeness"
       , [ Alcotest.test_case "a roster short of its total is partial" `Quick
             test_short_roster_is_partial
-        ; Alcotest.test_case "a missing row reads unknown, not offline" `Quick
-            test_short_roster_reads_unknown_not_offline
+        ; Alcotest.test_case "a missing row reads unread, not offline" `Quick
+            test_short_roster_reads_unread_not_offline
         ; Alcotest.test_case "a clamped roster is partial" `Quick
             test_truncated_roster_is_partial
         ; Alcotest.test_case "a partial roster still confirms its rows" `Quick

@@ -114,7 +114,7 @@ let display_status reading =
 
 let status_label reading =
   match display_status reading with
-  | None -> "unknown"
+  | None -> "unread"
   | Some status -> Status.control_plane_status_to_string status
 
 type action =

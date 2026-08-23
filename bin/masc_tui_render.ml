@@ -1139,7 +1139,7 @@ let render_planning_list (state : state) =
               ^ fit_width err (cols - 24)
               ^ ")" ^ Ansi.reset)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (no planning data)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
        for _ = 1 to rows - 10 do
          box_empty buf cols
        done
@@ -1348,7 +1348,7 @@ let render_schedules (state : state) =
               ^ fit_width err (cols - 24)
               ^ ")" ^ Ansi.reset)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (no schedule data)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
        for _ = 1 to rows - 10 do
          box_empty buf cols
        done
@@ -1482,7 +1482,7 @@ let render_schedules (state : state) =
    glyph per label. *)
 let keeper_status_glyph (status : Status.control_plane_status option) =
   match status with
-  | None -> (Ansi.dim, "?")
+  | None -> (Ansi.dim, "-")
   | Some Status.Cp_paused -> (Ansi.yellow, "\xe2\x97\x8b")
   | Some (Status.Cp_surface surface) -> (
       match surface with
@@ -1493,9 +1493,13 @@ let keeper_status_glyph (status : Status.control_plane_status option) =
       | Status.Surface_inactive -> (Ansi.yellow, "\xe2\x97\x90")
       | Status.Surface_offline -> (Ansi.gray, "\xc3\x97"))
 
+(* [None] is a roster that was not read, not a status the roster could not
+   name: the word says so, and it is the word the header's tally uses for
+   the same keepers, so a column of ten of them and "10 unread" above it
+   are one fact drawn twice rather than two. *)
 let keeper_status_word (status : Status.control_plane_status option) =
   match status with
-  | None -> "unknown"
+  | None -> "unread"
   | Some value -> Status.control_plane_status_to_string value
 
 (* The runtime id is [provider.model], and the provider half repeats inside the
@@ -2690,9 +2694,12 @@ let render_system_logs (state : state) =
   state.system_logs_scroll <- scroll;
   if total_entries = 0 then begin
     let empty =
-      match state.system_logs_error with
-      | Some _ -> "  (load failed; the count above is not a reading)"
-      | None -> "  (no entries)"
+      match
+        empty_page_of ~snapshot:state.system_logs ~error:state.system_logs_error
+      with
+      | Page_failed -> "  (load failed; the count above is not a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no entries)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -2781,9 +2788,13 @@ let render_verification (state : state) =
   state.verification_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.verification_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (nothing waiting on a verdict)"
+      match
+        empty_page_of ~snapshot:state.verification
+          ~error:state.verification_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (nothing waiting on a verdict)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -2903,9 +2914,10 @@ let render_harness (state : state) =
   state.harness_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.harness_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no verdicts recorded)"
+      match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no verdicts recorded)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3001,9 +3013,13 @@ let render_repositories (state : state) =
   state.repositories_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.repositories_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no repositories registered)"
+      match
+        empty_page_of ~snapshot:state.repositories
+          ~error:state.repositories_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no repositories registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3097,9 +3113,12 @@ let render_connectors (state : state) =
   state.connectors_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.connectors_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no connectors registered)"
+      match
+        empty_page_of ~snapshot:state.connectors ~error:state.connectors_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no connectors registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3199,9 +3218,12 @@ let render_tools (state : state) =
   state.tools_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.tools_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no tools registered)"
+      match
+        empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no tools registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3352,9 +3374,10 @@ let render_autonomy (state : state) =
   state.autonomy_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.autonomy_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (the report named no features)"
+      match empty_page_of ~snapshot:state.autonomy ~error:state.autonomy_error with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (the report named no features)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do

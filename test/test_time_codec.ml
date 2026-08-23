@@ -55,6 +55,26 @@ let test_compact_offset_requires_explicit_compatibility () =
   | Ok actual -> check (float 0.000_001) "compact offset" 0.0 actual
 ;;
 
+let test_rfc3339_of_unix_ms_shape () =
+  (* The shape the sub-second callers used to
+     spell out by hand. *)
+  let t = 1_787_803_506.789 in
+  Alcotest.(check string)
+    "millisecond form"
+    "2026-08-27T04:05:06.789Z"
+    (Time_codec.rfc3339_of_unix_ms t)
+;;
+
+let test_rfc3339_of_unix_ms_agrees_on_whole_seconds () =
+  let t = 1_787_803_506.0 in
+  let whole = Time_codec.rfc3339_of_unix t in
+  let with_ms = Time_codec.rfc3339_of_unix_ms t in
+  Alcotest.(check string)
+    "same prefix up to the seconds field"
+    whole
+    (String.sub with_ms 0 (String.length whole - 1) ^ "Z")
+;;
+
 let () =
   run
     "Time_codec"
@@ -73,6 +93,13 @@ let () =
             "compact offset is explicit compatibility"
             `Quick
             test_compact_offset_requires_explicit_compatibility
+        ] )
+    ; ( "rfc3339 writer"
+      , [ test_case "millisecond shape" `Quick test_rfc3339_of_unix_ms_shape
+        ; test_case
+            "agrees with the whole-second writer"
+            `Quick
+            test_rfc3339_of_unix_ms_agrees_on_whole_seconds
         ] )
     ]
 ;;

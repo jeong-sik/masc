@@ -169,12 +169,7 @@ let timestamp () =
     tm.Unix.tm_sec
 
 (** ISO 8601 timestamp for JSON *)
-let timestamp_iso () =
-  let t = Time_compat.now () in
-  let tm = Unix.gmtime t in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+let timestamp_iso () = Time_codec.rfc3339_of_unix (Time_compat.now ())
 
 (** #10392: pure helper that formats the UTC date for filename
     construction.  Both [Ring.date_string] and the yesterday/cutoff

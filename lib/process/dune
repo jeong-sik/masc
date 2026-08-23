@@ -19,6 +19,7 @@
   masc_core
   masc_log
   time_compat
+  masc.time_codec
   masc_cancel_safe
   eio
   eio.unix

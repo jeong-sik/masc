@@ -121,14 +121,14 @@ val persistence_read_drop_reason_invalid_payload : string
     (e.g. record-of-yojson [Error _], required field missing). *)
 
 val persistence_read_drop_reason_json_syntax_error : string
-
-val persistence_read_drop_reason_tail_partial_write : string
-(** The final line of an append-only file was mid-write when a tail reader
-    parsed it. Not data loss; see [Read_drop_reason.Tail_partial_write]. *)
 (** [Yojson.Json_error] raised while parsing a single line/value.  Use
     this when the load step is logically split from the parse step
     (typical of JSONL surfaces) so the metric distinguishes "file
     unreadable" from "lines malformed". *)
+
+val persistence_read_drop_reason_tail_partial_write : string
+(** The final line of an append-only file was mid-write when a tail reader
+    parsed it. Not data loss; see [Read_drop_reason.Tail_partial_write]. *)
 
 val report_persistence_read_drop :
   on_drop:(unit -> unit) ->

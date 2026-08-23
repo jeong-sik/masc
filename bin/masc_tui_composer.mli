@@ -1,0 +1,82 @@
+(** The composer row every surface carries on its last terminal line.
+
+    It is one row, always drawn, and it answers two questions before a key is
+    ever pressed: which keeper a message would reach, and whether it could be
+    sent at all. Those are the two facts an operator cannot recover after the
+    fact, and the roster surface is where the answer changes under them — the
+    cursor moves on its own when a refresh drops a row.
+
+    Focus is separate from presence. The surfaces bind single letters to
+    lifecycle and navigation, so a row that swallowed every printable key would
+    take [p] from pause; the operator takes focus explicitly and the row says
+    how. Nothing here performs I/O or reads the terminal. *)
+
+(** What the composer can do for the keeper it is pointed at. *)
+type target =
+  | No_target
+      (** No keeper is selected — an empty roster, or a surface reached before
+          one ever was. *)
+  | Unreachable of {
+      keeper : string;
+      reason : string;
+    }
+      (** A keeper is named but a message cannot be sent to it, and this is
+          why. The name is kept rather than cleared: an operator who typed a
+          draft for it needs to see which keeper went away, not an empty row. *)
+  | Ready of string
+
+(** Whether the row is taking keystrokes. *)
+type focus =
+  | Unfocused
+  | Focused
+
+type t = {
+  target : target;
+  focus : focus;
+  draft : string;
+}
+
+val rows_for : terminal_rows:int -> int
+(** Terminal rows the composer occupies in this viewport. Every surface lays
+    its frame out against this many rows fewer than the terminal has.
+
+    Zero on a viewport that has no row to spare. A surface pushed under the
+    fixed-chrome budget shows a resize gate instead of itself, so a convenience
+    row that costs the surface is worse than no row: the composer yields. *)
+
+val focus_key : string
+(** The key that moves focus into the composer from any surface. *)
+
+val release_key : string
+(** The key that returns focus to the surface. *)
+
+val prompt : t -> string
+(** The label before the draft: who the message would reach, or why it could
+    not be sent. Plain text — the caller styles and fits it. *)
+
+val accepts_input : t -> bool
+(** Whether a keystroke should reach the draft. False when the row is
+    unfocused, and false when there is nothing to send to, so a draft cannot
+    be typed into a row that has no recipient. *)
+
+val can_send : t -> bool
+(** Whether the draft can be dispatched: a reachable target and a draft that is
+    not only whitespace. *)
+
+(** What a keypress does to the composer. *)
+type key_outcome =
+  | Take_focus
+  | Release_focus
+  | Send
+  | Edit
+      (** The key belongs to the draft; the caller applies it to the buffer. *)
+  | Pass_to_surface
+      (** The key is not the composer's; the surface handles it as before. *)
+
+val classify_key : t -> string -> key_outcome
+(** Route one keypress. An unfocused composer claims only {!focus_key}, and
+    only when it has somewhere to send; everything else reaches the surface, so
+    no existing binding changes while the row sits idle. *)
+
+val cursor_column : prompt_cells:int -> draft_cells:int -> terminal_cols:int -> int
+(** One-based terminal column for the text cursor, clamped inside the row. *)

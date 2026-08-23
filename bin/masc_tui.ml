@@ -12,6 +12,7 @@ module Keeper_chat_history = Masc_tui_keeper_chat_history
 module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
+module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
@@ -1780,6 +1781,69 @@ let handle_keeper_action state ~base_path ~mailbox action =
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
+(* The composer as the key loop sees it. The renderer builds the same reading
+   for the row it draws, so the key that lands and the row the operator read
+   before pressing it agree on who the recipient is. *)
+let composer_state (state : state) : Composer.t =
+  let target =
+    match selected_keeper state with
+    | None -> Composer.No_target
+    | Some keeper ->
+        if keeper_available_for_new_message state keeper.k_name then
+          Composer.Ready keeper.k_name
+        else
+          Composer.Unreachable
+            { keeper = keeper.k_name
+            ; reason =
+                (match state.keepers_error with
+                 | Some _ -> "keeper list unread"
+                 | None -> "no longer in the roster")
+            }
+  in
+  { Composer.target
+  ; focus =
+      (if state.composer_focused then Composer.Focused else Composer.Unfocused)
+  ; draft = Buffer.contents state.msg_input
+  }
+
+(* Apply one keystroke the composer claimed. Sending routes through the same
+   chat surface the [c] key opens, so a message typed on the roster and one
+   typed in the chat view take the identical dispatch path. *)
+let handle_composer_key state ~base_path ~mailbox key =
+  let composer = composer_state state in
+  match Composer.classify_key composer key with
+  | Composer.Pass_to_surface -> false
+  | Composer.Take_focus ->
+      (match composer.Composer.target with
+       | Composer.Ready keeper_name ->
+           (* Taking focus is what names the recipient: the draft that follows
+              belongs to the keeper the row showed at that moment. *)
+           if
+             state.msg_target_keeper_name <> Some keeper_name
+           then open_message_for_keeper state keeper_name;
+           state.composer_focused <- true
+       | Composer.No_target | Composer.Unreachable _ -> ());
+      true
+  | Composer.Release_focus ->
+      save_message_draft state;
+      state.composer_focused <- false;
+      true
+  | Composer.Send ->
+      state.composer_focused <- false;
+      let text = Buffer.contents state.msg_input in
+      state.msg_scroll <- 0;
+      state.view <- Keepers Keeper_message;
+      start_keeper_message state ~base_path ~mailbox text;
+      true
+  | Composer.Edit ->
+      let _handled =
+        handle_message_key state
+          ~submit_message:(fun _ -> ())
+          ~retry_message:(fun () -> ())
+          key
+      in
+      true
+
 let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   function
   | Http_refresh_done results ->
@@ -2209,7 +2273,21 @@ let main () =
        | Keepers _, Some ("s" | "S") -> ()
        | Keepers _, Some _ -> state.keeper_action_pending <- None
        | _ -> ());
+      (* The composer sees the key first, and takes it only when it has one to
+         take: unfocused it claims a single key, and only with somewhere to
+         send. Everything it does not claim reaches the surface with its
+         meaning unchanged, so no existing binding moved when the row
+         appeared. The chat surface is excluded — it draws its own composer. *)
+      let composer_claimed =
+        (not compact_viewport)
+        && state.view <> Keepers Keeper_message
+        &&
+        match key with
+        | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
+        | None -> false
+      in
       (match key with
+       | Some _ when composer_claimed -> ()
        | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
            raise Break
        | Some _ when compact_viewport -> ()

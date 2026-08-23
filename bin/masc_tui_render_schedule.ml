@@ -170,29 +170,38 @@ type overview_allocation = {
   attention_rows : int;
   task_error_rows : int;
   task_rows : int;
+  filler_rows : int;
 }
+
+(* The task block's share of the viewport when attention wants more rows than
+   there are. A quarter, so a fleet with a long attention list still shows some
+   of the backlog, and a viewport too small to spare four rows gives it one. *)
+let overview_task_reservation ~available = max 1 (available / 4)
 
 let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
     ~task_count ~has_task_error =
   (* Ten rows are invariant chrome; the cluster/project row is present only
-     after a briefing has loaded. Reserve one row for a nonempty task block,
-     then size the shared Attention / Recent Events panel from either side. *)
+     after a briefing has loaded. What is left is shared by the Attention /
+     Recent Events panel and the task block, and whatever neither needs becomes
+     filler so the frame reaches the bottom of the terminal.
+
+     The blocks are bounded by how many items they have, not by a constant.
+     They used to stop at six and five rows whatever the terminal offered, so a
+     44-row window drew 22 rows of frame and left its own footer sitting in the
+     middle of the screen with the backlog cut off above it. *)
   let fixed_rows = 10 + (if has_cluster then 1 else 0) in
   let available = max 0 (terminal_rows - fixed_rows) in
-  let desired_panel_rows =
-    min 6 (max 1 (max attention_count event_count))
-  in
+  let desired_panel_rows = max 1 (max attention_count event_count) in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =
-    if task_count <= 0 then
-      if has_task_error then 0 else 1
-    else
-      min (if has_task_error then 4 else 5) task_count
+    if task_count <= 0 then if has_task_error then 0 else 1 else task_count
   in
   let desired_task_block_rows =
     desired_task_error_rows + desired_task_rows
   in
-  let reserved_task_rows = min 1 desired_task_block_rows in
+  let reserved_task_rows =
+    min desired_task_block_rows (overview_task_reservation ~available)
+  in
   let attention_rows =
     min desired_panel_rows (max 0 (available - reserved_task_rows))
   in
@@ -203,7 +212,10 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
   let task_rows =
     min desired_task_rows (max 0 (task_block_rows - task_error_rows))
   in
-  { attention_rows; task_error_rows; task_rows }
+  let filler_rows =
+    max 0 (available - attention_rows - task_error_rows - task_rows)
+  in
+  { attention_rows; task_error_rows; task_rows; filler_rows }
 
 type board_read_allocation = {
   body_rows : int;

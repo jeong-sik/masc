@@ -2066,6 +2066,29 @@ let rec remove_tree path =
     else Unix.unlink path
 ;;
 
+let rec mkdir_p path =
+  if not (Sys.file_exists path)
+  then (
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    Unix.mkdir path 0o755)
+;;
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun channel -> output_string channel content)
+;;
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+;;
+
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+;;
+
 let test_root_inventory_loads_and_extends_exactly_once () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2400,9 +2423,13 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
             operation_corrupt_dir
             Keeper_chat_operation_store.database_file)
          0o755;
+       (* Decodes to nothing: the store reads it as absent (#29610). *)
        Yojson.Safe.to_file
          (Filename.concat keepers_dir "inventory-corrupt.json")
          (`Assoc []);
+       (* Cannot be read at all: a directory where the file should be. *)
+       let unreadable_path = Filename.concat keepers_dir "inventory-unreadable.json" in
+       Unix.mkdir unreadable_path 0o755;
        Yojson.Safe.to_file
          (Filename.concat keepers_dir "inventory-path-name.json")
          (Keeper_meta_json.meta_to_json (make_meta "inventory-payload-name"));
@@ -2418,31 +2445,175 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
             | Error (Owner_registry.Owner_unavailable _) -> ()
             | Error error -> fail (Owner_registry.lookup_error_to_string error)
             | Ok _ -> fail ("invalid owner started: " ^ keeper_name))
-         [ "inventory-corrupt"
+         [ "inventory-unreadable"
          ; "inventory-path-name"
          ; "inventory-operation-corrupt"
          ];
-       (match
-          Owner_registry.get ~base_path ~keeper_name:"inventory-payload-name"
-        with
-        | Error (Owner_registry.Owner_not_found _) -> ()
-        | Error error -> fail (Owner_registry.lookup_error_to_string error)
-        | Ok _ -> fail "payload-only identity unexpectedly gained an owner");
+       List.iter
+         (fun keeper_name ->
+            match Owner_registry.get ~base_path ~keeper_name with
+            | Error (Owner_registry.Owner_not_found _) -> ()
+            | Error error ->
+              fail
+                ("absent name was fenced: "
+                 ^ Owner_registry.lookup_error_to_string error)
+            | Ok _ -> fail ("absent name gained an owner: " ^ keeper_name))
+         [ "inventory-corrupt"; "inventory-payload-name" ];
        (match
           Owner_registry.create_meta
             ~base_path
-            (make_meta "inventory-corrupt")
+            (make_meta "inventory-unreadable")
         with
         | Error
             (Owner_registry.Command_lookup_failed
               (Owner_registry.Owner_unavailable _)) ->
           ()
         | Error error -> fail (Owner_registry.command_error_to_string error)
-        | Ok _ -> fail "corrupt durable owner was overwritten as a new Keeper");
+        | Ok _ -> fail "unreadable durable owner was overwritten as a new Keeper");
+       check bool
+         "the unreadable path is left as it was"
+         true
+         (Sys.is_directory unreadable_path);
+       (match
+          Owner_registry.create_meta
+            ~base_path
+            (make_meta "inventory-corrupt")
+        with
+        | Ok (Some committed) ->
+          check string "absent name is created in place" "inventory-corrupt" committed.name
+        | Ok None -> fail "create of an absent name removed metadata"
+        | Error error -> fail (Owner_registry.command_error_to_string error));
+       (match Keeper_meta_store.read_meta config "inventory-corrupt" with
+        | Ok (Some persisted) ->
+          check string
+            "the undecodable file is replaced by the created snapshot"
+            "inventory-corrupt"
+            persisted.name
+        | Ok None -> fail "created snapshot was not persisted"
+        | Error detail -> fail detail);
        check int
          "invalid snapshots do not split owner identity"
-         1
+         2
          (Owner_registry.For_testing.installed_owner_count ~base_path))
+;;
+
+(* #29708: the inventory is installed before declared keepers are
+   materialised. A persisted meta this binary cannot decode reads as absent
+   (#29610); fencing that name made [create_meta] refuse the materialisation
+   with [Owner_unavailable] until the file was stripped by hand and the
+   process restarted. *)
+let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes () =
+  init_runtime_default_for_tests ();
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  let name = "inventory-undecodable-declared" in
+  let previous_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" previous_config_dir;
+      Config_dir_resolver.reset ();
+      Keeper_registry.For_testing.clear ();
+      Keeper_runtime.reset_test_state base_path;
+      remove_tree base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-boot-test"));
+       let config_dir = Filename.concat base_path ".masc/config" in
+       mkdir_p (Filename.concat config_dir "keepers");
+       Unix.putenv "MASC_CONFIG_DIR" config_dir;
+       Config_dir_resolver.reset ();
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+       write_file
+         (Filename.concat keepers_dir (name ^ ".toml"))
+         (Printf.sprintf
+            "[keeper]\nname = \"%s\"\ninstructions = \"test keeper\"\nsandbox_profile = \"local\"\n"
+            name);
+       Keeper_meta_store.replace_snapshot config (make_meta name) |> Result.get_ok;
+       let meta_path = Keeper_types_profile.keeper_meta_path config name in
+       let undecodable =
+         `Assoc
+           (Yojson.Safe.Util.to_assoc (Yojson.Safe.from_file meta_path)
+            @ [ "last_compaction_check_ts", `Float 0. ])
+       in
+       Yojson.Safe.to_file meta_path undecodable;
+       let expected_warn =
+         Printf.sprintf
+           "keeper meta unreadable at %s, treating as absent (accumulated \
+            counters in it are lost; the declaration re-materialises the \
+            keeper): invalid current keeper meta: fields outside the current \
+            schema: last_compaction_check_ts; runtime reset required"
+           meta_path
+       in
+       let baseline = latest_log_seq () in
+       Eio.Switch.run @@ fun sw ->
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+        | Ok count -> check int "an undecodable meta installs no owner" 0 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       (match Owner_registry.get ~base_path ~keeper_name:name with
+        | Error (Owner_registry.Owner_not_found _) -> ()
+        | Error error ->
+          fail
+            ("undecodable meta was fenced: "
+             ^ Owner_registry.lookup_error_to_string error)
+        | Ok _ -> fail "undecodable meta started an owner");
+       let ctx : _ Keeper_types_profile.context =
+         { config
+         ; agent_name = "owner-boot-test"
+         ; sw
+         ; clock = Eio.Stdenv.clock env
+         ; proc_mgr = None
+         ; net = None
+         ; publication_recovery_provider =
+             Masc_test_deps.non_runtime_publication_recovery_provider
+         }
+       in
+       Fun.protect
+         ~finally:(fun () -> Keeper_runtime.stop_keepalive ~base_path name)
+         (fun () ->
+            (match Keeper_runtime.load_or_materialize_boot_meta ctx name with
+             | Error detail ->
+               fail ("boot did not re-materialise the declared keeper: " ^ detail)
+             | Ok resolution ->
+               check bool
+                 "declared keeper is re-materialised at boot"
+                 true
+                 resolution.Keeper_runtime.materialized;
+               check string
+                 "the re-materialised keeper is the declared one"
+                 name
+                 resolution.Keeper_runtime.meta.name);
+            (match Owner_registry.get ~base_path ~keeper_name:name with
+             | Ok _ -> ()
+             | Error error ->
+               fail
+                 ("re-materialised keeper has no owner: "
+                  ^ Owner_registry.lookup_error_to_string error));
+            let warns =
+              Log.Ring.recent
+                ~limit:1000
+                ~module_filter:"Keeper"
+                ~since_seq:baseline
+                ~order:`Oldest_first
+                ()
+              |> List.filter (fun (entry : Log.Ring.entry) ->
+                   entry.level = Log.Warn && String.equal entry.message expected_warn)
+            in
+            check int "the loss is named once, in the store's WARN" 1 (List.length warns);
+            (match Keeper_meta_store.read_meta config name with
+             | Ok (Some persisted) ->
+               check bool
+                 "the re-materialised snapshot replaced the undecodable file"
+                 false
+                 (Keeper_id.Trace_id.equal
+                    persisted.runtime.trace_id
+                    (make_meta name).runtime.trace_id)
+             | Ok None -> fail "re-materialised meta was not persisted"
+             | Error detail -> fail detail);
+            check bool
+              "no boot failure is recorded"
+              true
+              (Option.is_none (Keeper_runtime.boot_meta_failure_for ~base_path ~name))))
 ;;
 
 let test_registry_reads_owner_atomic_projection () =
@@ -2755,6 +2926,10 @@ let () =
             "root inventory isolates invalid owner snapshots"
             `Quick
             test_root_inventory_isolates_invalid_owner_snapshots
+        ; test_case
+            "root inventory reads an undecodable meta as absent and boot re-materialises it"
+            `Quick
+            test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
         ; test_case
             "registry reads owner Atomic projection"
             `Quick

@@ -45,10 +45,7 @@ let load_keepers (base_path : string) : keeper list * string option =
              match Keeper_meta_store.read_meta config name with
              | Ok (Some meta) ->
                  Tui_decode.keeper_of_meta meta :: keepers, errors
-             | Ok None ->
-                 let err = "metadata disappeared during refresh" in
-                 report path err;
-                 keepers, (Printf.sprintf "%s: %s" name err :: errors)
+             | Ok None -> keepers, errors
              | Error err ->
                  report path err;
                  keepers, (Printf.sprintf "%s: %s" name err :: errors))

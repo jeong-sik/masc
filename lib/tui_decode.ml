@@ -1062,6 +1062,19 @@ let decode_system_log_entry json =
     ; sl_message
     }
 
+type harness_verdict = {
+  hv_at : float;
+  hv_task_id : string;
+  hv_task_title : string;
+  hv_agent : string;
+  hv_gate : string;
+  hv_verdict : string;
+  hv_evaluator : string;
+  hv_fallback_reason : string option;
+}
+
+type harness_snapshot = { hs_verdicts : harness_verdict list }
+
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
@@ -1089,6 +1102,33 @@ let decode_string_name_list json key =
        | `String value -> Ok value
        | bad -> field_type_error key "a string" bad)
     items
+
+let decode_harness_verdict json =
+  let* hv_task_id = required_string_field json "task_id" in
+  let* hv_task_title = required_string_field json "task_title" in
+  let* hv_agent = required_string_field json "agent_name" in
+  let* hv_gate = required_string_field json "gate" in
+  let* hv_verdict = required_string_field json "verdict" in
+  let* hv_evaluator = required_string_field json "evaluator_runtime" in
+  let* hv_fallback_reason = optional_string_field json "fallback_reason" in
+  let* hv_at = require_float_field json "timestamp" in
+  Ok
+    { hv_at
+    ; hv_task_id
+    ; hv_task_title
+    ; hv_agent
+    ; hv_gate
+    ; hv_verdict
+    ; hv_evaluator
+    ; hv_fallback_reason
+    }
+
+let decode_harness_snapshot json =
+  let* verdicts_json = required_list_field json "recent_verdicts" in
+  let* hs_verdicts =
+    decode_list "recent_verdicts" decode_harness_verdict verdicts_json
+  in
+  Ok { hs_verdicts }
 
 let decode_verification_request json =
   let* vr_request_id = required_string_field json "request_id" in

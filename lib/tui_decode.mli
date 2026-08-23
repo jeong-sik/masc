@@ -136,6 +136,26 @@ type system_log_snapshot = {
 }
 
 (** One task waiting on a verdict, as the verification surface lists it. *)
+(** One verdict the harness recorded: which gate ran on which task, what it
+    decided, and which evaluator decided it. *)
+type harness_verdict = {
+  hv_at : float;
+  hv_task_id : string;
+  hv_task_title : string;
+  hv_agent : string;
+  hv_gate : string;
+  hv_verdict : string;
+  hv_evaluator : string;
+  hv_fallback_reason : string option;
+      (** Why the named evaluator did not run, when something else did. A
+          verdict reached by a fallback is not the verdict that was asked for,
+          and the surface says so rather than showing them alike. *)
+}
+
+type harness_snapshot = {
+  hs_verdicts : harness_verdict list;  (** newest first, as the server sends *)
+}
+
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
@@ -273,6 +293,9 @@ type transport_health = {
 
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
+
+val decode_harness_snapshot :
+  Yojson.Safe.t -> (harness_snapshot, string) result
 
 val decode_verification_snapshot :
   Yojson.Safe.t -> (verification_snapshot, string) result

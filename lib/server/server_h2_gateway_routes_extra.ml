@@ -170,8 +170,13 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
           int_query_param httpun_request "limit" ~default:500
           |> clamp ~min_v:1 ~max_v:5000
         in
+        (* TEL-OK: read-only projection mirroring the HTTP/1 arm
+           [board_karma_ledger_json], which emits none either. This route
+           exists to make the two protocols answer identically, so telemetry
+           on one arm only would reintroduce the asymmetry it closes. *)
         let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
         let totals =
+          (* TEL-OK: same read, same H1 counterpart, same reason. *)
           Board_dispatch.get_all_karma ()
           |> List.sort (fun (_, a) (_, b) -> compare b a)
         in

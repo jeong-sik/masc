@@ -1048,6 +1048,15 @@ def run_terminal_scenario(
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
+                        # The environment is inherited, so whether the TUI finds
+                        # a bearer was decided by whoever ran the test. Without
+                        # one it posts a seventh event saying so, the events
+                        # pane takes the row for it, and the task the Overview
+                        # budget assertions look for falls off the bottom --
+                        # which passes on a developer's shell and fails in CI.
+                        # The harness decides this, like it decides the port and
+                        # the terminal.
+                        "MASC_TOKEN": "masc-tui-keyboard-regression-token",
                     }
                 )
                 process = subprocess.Popen(

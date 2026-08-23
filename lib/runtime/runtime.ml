@@ -1521,6 +1521,25 @@ let max_prompt_bytes_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
+(* Two declarations bound a model input, and which one applies depends on the
+   path: [Keeper_antigravity_runtime] projects against the model's
+   [max-prompt-bytes], while the generic driver takes the binding's
+   [max-request-body-bytes] through [validate_request_body_cap]. A caller that
+   has to fit inside whatever this runtime will enforce has to satisfy both,
+   so the smaller declared value is the answer. They count different things —
+   prompt bytes against whole-request bytes — which is why this is the ceiling
+   for something known to be a part of the input, not a budget for the input
+   itself. *)
+let declared_input_byte_ceiling_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | None -> None
+  | Some rt ->
+    (match rt.model.max_prompt_bytes, rt.binding.max_request_body_bytes with
+     | None, None -> None
+     | Some only, None | None, Some only -> Some only
+     | Some prompt_bytes, Some body_bytes -> Some (min prompt_bytes body_bytes))
+;;
+
 let default_preserve_thinking_for_model (_rt : t) : bool option =
   (* AGENT_CORE owns provider/model capability truth and can preserve reasoning when
      the provider contract requires it. MASC must not turn "request-side

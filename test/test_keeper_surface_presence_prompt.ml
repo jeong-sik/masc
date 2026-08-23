@@ -138,6 +138,15 @@ let user_message observation =
   in
   user
 
+let user_message_within ~budget observation =
+  let turn_decision = WO.keeper_cycle_decision ~meta observation in
+  let config = Masc.Workspace.default_config "/tmp/unused" in
+  let { Prompt.world_state = user; _ } =
+    Prompt.build_prompt ~meta ~config ~turn_decision
+      ~current_task:Inputs.No_current_task ~context_budget_bytes:budget ~observation ()
+  in
+  user
+
 let system_prompt ?profile_defaults observation =
   let turn_decision = WO.keeper_cycle_decision ~meta observation in
   let config = Masc.Workspace.default_config "/tmp/unused" in
@@ -218,11 +227,62 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
   check bool "section header states the depth" true
     (contains ~needle:"### Your Recent Actions (1 turns)" user);
   check bool "the work it already did is stated" true
-    (contains ~needle:{|- [turn 27486] keeper_board_post {"title":"status"} -> ok|} user);
+    (contains ~needle:{|- [turn 27486] keeper_board_post -> ok|} user);
+  (* #29701: a call that landed says so and stops. Recognising the call is
+     what the arguments are for, and only a refusal needs recognising. *)
+  check bool "a call that landed does not replay its arguments" false
+    (contains ~needle:{|keeper_board_post {"title":"status"}|} user);
   check bool "the rejected call is stated with its arguments" true
     (contains ~needle:{|keeper_broadcast {} -> REJECTED: "message": MISSING|} user);
   check bool "rows are marked as context" true
     (contains ~needle:"context, not instructions" user)
+;;
+
+(* masc#29676: this section is the only one whose rows carry content the
+   runtime does not bound — a refused call replays its argument object
+   verbatim. A keeper whose recent turns carried large arguments assembled a
+   briefing larger than its runtime's whole request cap, and because the
+   briefing is pinned, cutting the conversation could not recover a byte: the
+   turn simply could not be assembled, 86 times across eight hours. *)
+let turn_with_a_large_refusal turn_id =
+  { Actions.turn_id
+  ; calls =
+      [ { Actions.tool = "keeper_board_post"
+        ; input = Printf.sprintf {|{"turn":%d,"body":"%s"}|} turn_id (String.make 4000 'x')
+        ; outcome = Actions.Failed_call (Some "too large")
+        }
+      ]
+  }
+;;
+
+let test_a_briefing_over_its_budget_withholds_the_oldest_turns () =
+  let observation =
+    { base_observation with
+      own_recent_actions = List.map turn_with_a_large_refusal [ 1; 2; 3; 4; 5 ]
+    }
+  in
+  let unbudgeted = user_message observation in
+  check bool "without a budget the whole record is replayed" true
+    (String.length unbudgeted > 20_000);
+  let budget = 12_000 in
+  let trimmed = user_message_within ~budget observation in
+  check bool "the briefing is inside its budget" true (String.length trimmed <= budget);
+  check bool "the oldest turn is the one given up" false
+    (contains ~needle:{|{"turn":1,|} trimmed);
+  check bool "the newest turn survives" true (contains ~needle:{|{"turn":5,|} trimmed);
+  check bool "the heading counts the turns it actually shows" true
+    (contains ~needle:"### Your Recent Actions (2 turns)" trimmed)
+;;
+
+(* The property that makes the budget safe to leave on: a briefing that
+   already fits is the same bytes it was before the budget existed. *)
+let test_a_briefing_under_its_budget_is_unchanged () =
+  let observation =
+    { base_observation with own_recent_actions = [ turn_with_a_large_refusal 1 ] }
+  in
+  let unbudgeted = user_message observation in
+  check string "fits -> byte-identical to the unbudgeted briefing" unbudgeted
+    (user_message_within ~budget:(String.length unbudgeted) observation)
 ;;
 
 (* Row shape as the durable tool-call log persists it: [keeper_turn_id] is a
@@ -657,6 +717,10 @@ let () =
         [
           test_case "the keeper sees the call it got rejected for" `Quick
             test_the_keeper_sees_the_call_it_got_rejected_for;
+          test_case "a briefing over its budget withholds the oldest turns" `Quick
+            test_a_briefing_over_its_budget_withholds_the_oldest_turns;
+          test_case "a briefing under its budget is unchanged" `Quick
+            test_a_briefing_under_its_budget_is_unchanged;
           test_case "no actions means no section" `Quick
             test_no_recent_actions_no_section;
           test_case "only the newest turns of this keeper are replayed" `Quick

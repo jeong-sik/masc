@@ -1786,11 +1786,15 @@ def assert_overview_event_rows(
     send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\t\t\t\t\t", b"MASC Overview")
 
+    # The smallest viewport that still fits the whole Overview budget. It grew
+    # by one row when the composer took the terminal's last line, so this is
+    # 23 rather than 22; the assertions below are the same budget, not a
+    # larger one.
     overview = resize_and_wait(
         process,
         master_fd,
         output,
-        rows=22,
+        rows=23,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -1798,9 +1802,9 @@ def assert_overview_event_rows(
     )
     for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
-            raise AssertionError(f"22-row Overview omitted {expected!r}: {overview!r}")
+            raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
     if b"Recent Events 1-6/6" not in overview:
-        raise AssertionError(f"22-row Overview omitted its event range: {overview!r}")
+        raise AssertionError(f"23-row Overview omitted its event range: {overview!r}")
     if overview.count(b"Manual refresh") != 5:
         raise AssertionError(
             f"22-row Overview did not show all five refresh events: {overview!r}"

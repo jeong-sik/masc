@@ -2665,6 +2665,16 @@
  (libraries alcotest masc_tui_planning_selection))
 
 (test
+ (name test_tui_markdown)
+ (modules test_tui_markdown)
+ (libraries alcotest masc_tui_markdown masc_tui_message_layout))
+
+(test
+ (name test_tui_composer)
+ (modules test_tui_composer)
+ (libraries alcotest masc_tui_composer masc_tui_render_schedule))
+
+(test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
  (libraries alcotest masc masc_tui_keeper_control yojson))

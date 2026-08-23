@@ -797,7 +797,6 @@ let run_keeper_invocation_turn_admitted_inner
                       (Keeper_turn_outcome.to_label
                          result.turn_outcome) );
                   ("model", `String surface_model_used);
-                  ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);
                   ( "tool_call_evidence",
                     `List tool_call_evidence );

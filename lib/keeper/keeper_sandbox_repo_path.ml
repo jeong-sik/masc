@@ -103,7 +103,6 @@ let host_execution_location_json
     ; "scope", `String (string_of_execution_location_scope scope)
     ; "playground_root", `String playground
     ; "relative_cwd", relative_cwd
-    ; "relative_path_base", `String cwd
     ; "repo_name", Json_util.string_opt_to_json repo_name
     ; "repo_root", Json_util.string_opt_to_json repo_root
     ]
@@ -142,7 +141,7 @@ let execution_location_json ~config ~meta ~args ~cwd =
         else `Null
     in
     let path_fields =
-      [ "cwd"; "playground_root"; "relative_path_base"; "repo_root" ]
+      [ "cwd"; "playground_root"; "repo_root" ]
     in
     let rec project = function
       | `Assoc fields ->

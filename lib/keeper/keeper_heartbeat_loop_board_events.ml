@@ -113,7 +113,6 @@ let fleet_health_json ~base_path ~keeper_names =
     ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
-    ; "failed_keeper_count", `Int (List.length failures)
     ; "failure_count", `Int (List.length failures)
     ; "failures", `List (List.map (failure_snapshot_to_json ~now) failures)
     ]

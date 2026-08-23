@@ -870,9 +870,10 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
 let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
     ~status ~keeper ~runtime =
   let status_color, glyph = keeper_status_glyph status in
-  let marker =
-    if selected then Ansi.cyan ^ "\xe2\x96\xb8" ^ Ansi.reset else " "
-  in
+  (* Same gutter marker the Approvals, Board and Planning lists draw. A
+     selection cursor that changes shape when the operator switches surface
+     reads as a different control, not the same one. *)
+  let marker = if selected then Ansi.reverse ^ ">" ^ Ansi.reset else " " in
   let name =
     fit_width (Terminal_text.single_line keeper.k_name) columns.kcol_name
   in
@@ -908,7 +909,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints state reading =
+let keeper_action_hints ?(offers_chat = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -950,9 +951,14 @@ let keeper_action_hints state reading =
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
           ; hint Keeper_control.Shutdown "shutdown"
-          ; Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
-          ; Ansi.dim ^ "enter detail" ^ Ansi.reset
+            (* Dimmed rather than dropped, the same way an unavailable
+               lifecycle key is: chat lives in detail, and a key that vanishes
+               between surfaces reads as a key that does not exist. *)
+          ; (if offers_chat then Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
+             else Ansi.dim ^ "c chat" ^ Ansi.reset)
+          ; (if offers_chat then Ansi.dim ^ "esc back" ^ Ansi.reset
+             else Ansi.cyan ^ "enter" ^ Ansi.reset ^ " detail")
           ; Ansi.dim ^ "r refresh" ^ Ansi.reset
           ; Ansi.dim ^ "q quit" ^ Ansi.reset
           ]
@@ -1027,8 +1033,8 @@ let render_keeper_list (state : state) =
       now.Unix.tm_sec
   in
   let heading =
-    Printf.sprintf "%s%sMASC Keepers%s %s%d%s" " " Ansi.bold Ansi.reset
-      Ansi.white (List.length state.keepers) Ansi.reset
+    Printf.sprintf " %sMASC Keepers (%d)%s" Ansi.bold (List.length state.keepers)
+      Ansi.reset
     ^ (match keeper_roster_summary readings with
        | [] -> ""
        | parts ->
@@ -1162,7 +1168,8 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
-  Buffer.add_string buf (keeper_action_hints state selected_reading ^ "\n");
+  Buffer.add_string buf
+    (keeper_action_hints ~offers_chat:false state selected_reading ^ "\n");
 
   finish_frame ~surface_key:"keeper-list" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
@@ -1371,8 +1378,7 @@ let render_keeper_detail (state : state) =
        footer names the same actions with the same keys; a detail view that
        listed a different set would read as a different set of powers. *)
     Buffer.add_string buf
-      (keeper_action_hints state (Some (keeper_reading state k))
-      ^ Ansi.dim ^ " \xc2\xb7 esc back" ^ Ansi.reset ^ "\n");
+      (keeper_action_hints state (Some (keeper_reading state k)) ^ "\n");
 
     finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf

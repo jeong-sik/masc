@@ -1495,7 +1495,11 @@ let apply_keeper_chat_reconciliation state ~base_path request result =
               about it. Routing this through the certainty classifier would
               clear the recovery fence for an operation that is still running. *)
            remember_unverified state request;
-           let detail = Keeper_chat.reconciliation_failure_detail error in
+           let detail =
+             Keeper_chat.reconciliation_failure_detail
+               ~credential_sent:(Masc_tui_http.operator_token_present ())
+               error
+           in
            append_chat_history state request Message_error
              ("Operation reconciliation failed; outcome remains unverified. "
             ^ detail);
@@ -1648,7 +1652,9 @@ let apply_keeper_roster_load state = function
       remember_surface_error state ~surface:"keeper roster"
         ~current_error:state.keeper_roster_error
         ~set_error:(fun value -> state.keeper_roster_error <- value)
-        (Keeper_control.roster_failure_message failure)
+        (Keeper_control.roster_failure_message
+           ~credential_sent:(Masc_tui_http.operator_token_present ())
+           failure)
 
 let apply_planning_load state = function
   | Ok planning ->

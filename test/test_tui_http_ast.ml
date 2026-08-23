@@ -1060,14 +1060,30 @@ let test_missing_operator_token_is_reported () =
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
        ~callee:"Masc_tui_http.install_operator_token");
-  check int "startup reads whether this process holds a bearer" 1
-    (Ast_grep.count_calls
+  (* Not a call count on [operator_token_present]: every surface that reports a
+     refusal now reads it, so counting occurrences stopped saying anything about
+     the startup line. The notice's own words are what must not disappear. *)
+  check int "startup still names both places a bearer could come from" 1
+    (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui.ml"
-       ~callee:"Masc_tui_http.operator_token_present");
-  check int "reconciliation routes its failure through the typed detail" 1
-    (Ast_grep.count_calls
+       ~needle:"neither MASC_TOKEN nor this workspace");
+  (* Both refusal surfaces must ask what this process actually holds. Passing a
+     constant would compile and read plausibly while asserting something the
+     401 never established -- which is the failure these lines exist to end. *)
+  check int "the chat surface asks whether a bearer was presented" 1
+    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
        ~module_path:"bin/masc_tui.ml"
-       ~callee:"Keeper_chat.reconciliation_failure_detail");
+       ~binding_name:"apply_keeper_chat_reconciliation"
+       ~callee:"Keeper_chat.reconciliation_failure_detail"
+       ~label:"credential_sent"
+       ~nested_callee:"Masc_tui_http.operator_token_present");
+  check int "the roster surface asks the same question" 1
+    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"apply_keeper_roster_load"
+       ~callee:"Keeper_control.roster_failure_message"
+       ~label:"credential_sent"
+       ~nested_callee:"Masc_tui_http.operator_token_present");
   check int "the bearer env name is read in one place" 1
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_http.ml"

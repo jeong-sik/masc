@@ -43,10 +43,15 @@ let log_path ~base_path =
 (* The TUI holds the terminal in raw mode, so the script's own stdout would land
    in the middle of a frame. Everything it prints goes to the log instead, and
    the exit status of the spawn is what the operator sees. *)
-(* TEL-OK: the outcome reaches the operator as a Recent Events line through
-   {!val:describe}, and the script's own account of the start is in the log this
-   opens. A Log call here would print into the frame the TUI is drawing, which
-   is the same reason the child's output is redirected below. *)
+(* The outcome reaches the operator as a Recent Events line through
+   {!val:describe}, and the script's own account of the start is in the log
+   this opens. A Log call here would print into the frame the TUI is drawing,
+   which is the same reason the child's output is redirected below.
+
+   The marker below sits on its own line: check-telemetry-coverage.sh reads
+   only two lines either side of the flagged one, so a rationale long enough to
+   be worth writing pushes the token out of that window. *)
+(* TEL-OK: reported to the operator as an event; see the note above. *)
 let spawn ~script ~base_path ~port =
   let log = log_path ~base_path in
   (try

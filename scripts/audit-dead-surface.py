@@ -596,7 +596,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # them, and the token scan read its own comment as a caller: the gate counted
 # three fewer than the tree held. State the test, not the roster -- as the
 # paragraph above already says.
-DEAD_EXPORT_BASELINE = 55
+DEAD_EXPORT_BASELINE = 54
 
 
 def run_ratchet(count: int) -> int:

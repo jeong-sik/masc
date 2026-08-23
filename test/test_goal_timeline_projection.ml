@@ -40,7 +40,7 @@ let live_phase_payload ~phase ~actor =
 let test_normalizes_a_phase_event () =
   let json =
     DGT.goal_event_timeline_json
-      (goal_phase_event (live_phase_payload ~phase:"completed" ~actor:"rondo"))
+      (goal_phase_event (live_phase_payload ~phase:"completed" ~actor:"alpha"))
   in
   check (option string) "kind is the event type" (Some "goal_phase") (field "kind" json);
   check (option string) "lane" (Some "goal") (field "lane" json);
@@ -53,12 +53,12 @@ let test_normalizes_a_phase_event () =
 let test_summary_names_the_actor () =
   let json =
     DGT.goal_event_timeline_json
-      (goal_phase_event (live_phase_payload ~phase:"blocked" ~actor:"sangsu"))
+      (goal_phase_event (live_phase_payload ~phase:"blocked" ~actor:"alpha"))
   in
   check
     (option string)
     "summary carries phase and actor"
-    (Some "phase=blocked by sangsu")
+    (Some "phase=blocked by alpha")
     (field "summary" json)
 ;;
 
@@ -67,7 +67,7 @@ let test_severity_follows_the_phase () =
     field
       "severity"
       (DGT.goal_event_timeline_json
-         (goal_phase_event (live_phase_payload ~phase ~actor:"sangsu")))
+         (goal_phase_event (live_phase_payload ~phase ~actor:"alpha")))
   in
   check (option string) "executing" (Some "ok") (severity_of "executing");
   check (option string) "verifying" (Some "ok") (severity_of "verifying");
@@ -85,7 +85,7 @@ let test_unparseable_phase_is_not_ok () =
     field
       "severity"
       (DGT.goal_event_timeline_json
-         (goal_phase_event (live_phase_payload ~phase ~actor:"sangsu")))
+         (goal_phase_event (live_phase_payload ~phase ~actor:"alpha")))
   in
   check (option string) "token no producer writes" (Some "warn") (severity_of "retired");
   check (option string) "empty token" (Some "warn") (severity_of "");
@@ -115,7 +115,7 @@ let test_unknown_event_type_keeps_its_token () =
          [ "ts", `String "2026-08-05T23:03:13Z"
          ; "goal_id", `String "goal-1"
          ; "event_type", `String "goal_owner"
-         ; "payload", `Assoc [ "owner", `String "taskmaster" ]
+         ; "payload", `Assoc [ "owner", `String "alpha" ]
          ])
   in
   check (option string) "kind" (Some "goal_owner") (field "kind" json);
@@ -164,7 +164,7 @@ let test_tree_field_is_normalized () =
   let json =
     DG.tree_node_to_json
       ~events_for_goal:(fun _ ->
-        [ goal_phase_event (live_phase_payload ~phase:"blocked" ~actor:"sangsu") ])
+        [ goal_phase_event (live_phase_payload ~phase:"blocked" ~actor:"alpha") ])
       node
   in
   match timeline_events_of json with
@@ -177,7 +177,7 @@ let test_tree_field_is_normalized () =
     check
       (option string)
       "summary"
-      (Some "phase=blocked by sangsu")
+      (Some "phase=blocked by alpha")
       (field "summary" event);
     check (option string) "raw event_type is gone" None (field "event_type" event)
   | items ->

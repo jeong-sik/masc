@@ -840,7 +840,7 @@ let test_model_without_reasoning_effort_leaves_it_unset () =
    entirely (claude-code, codex-app-server, both fixed at 300s in the adapter).
    A max-effort binding could therefore not be given more wall clock than a
    low-effort one sharing its provider. Live evidence, 2026-08-10: keeper
-   analyst on claude_code.claude-opus-5-max failed every turn with "timed out
+   delta on claude_code.claude-opus-5-max failed every turn with "timed out
    after 300.000s" at 5,884 bytes of system+user input.
 
    The rejection case is the load-bearing one, but only for values that state

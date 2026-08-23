@@ -38,6 +38,11 @@ type waiting_row =
   { keeper_name : string option
   ; source : waiting_source
   ; waiting_on : string
+  ; what : string
+      (** Operator sentence for the row, derived from the row's typed fields.
+          The raw vocabulary ([waiting_on], [wake_producer], [next_action],
+          [detail]) stays for the technical disclosure; this is what the
+          queue reads as by default. *)
   ; wake_producer : wake_producer
   ; since : float option
   ; due_at : float option
@@ -128,6 +133,7 @@ let waiting_row_json (row : waiting_row) =
     [ "keeper_name", Json_util.string_opt_to_json row.keeper_name
     ; "source", `String (source_to_string row.source)
     ; "waiting_on", `String row.waiting_on
+    ; "what", `String row.what
     ; "wake_producer", `String (wake_producer_to_string row.wake_producer)
     ; "since", Json_util.float_opt_to_json row.since
     ; "since_iso", unix_iso_json row.since
@@ -183,6 +189,69 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
   | Manual_compaction_requested -> []
 ;;
 
+let board_signal_what (signal : Keeper_event_queue.board_stimulus) =
+  match signal.kind with
+  | Post_created -> Printf.sprintf "%s의 새 글" signal.author
+  | Comment_added -> Printf.sprintf "%s의 댓글" signal.author
+  | Reaction_changed change ->
+    Printf.sprintf
+      "%s의 반응 %s"
+      change.user_id
+      (if change.reacted then "추가" else "제거")
+  | Vote_cast change ->
+    Printf.sprintf
+      "%s의 %s 투표"
+      change.voter
+      (match change.direction with
+       | Vote_up -> "찬성"
+       | Vote_down -> "반대")
+;;
+
+(* One operator sentence per payload kind, from the payload's own typed
+   fields. Every kind is enumerated: a new stimulus has to say what an
+   operator should read it as before it can reach the queue view. *)
+let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = function
+  | Board_signal signal -> board_signal_what signal
+  | Board_attention attention ->
+    Printf.sprintf "%s (관련성 판정 통과)" (board_signal_what attention.signal)
+  | Bootstrap -> "기동 직후 첫 턴"
+  | Fusion_completed completion ->
+    (match completion.terminal with
+     | Fusion_succeeded _ -> Printf.sprintf "Fusion 결과 도착 · %s" completion.run_id
+     | Fusion_failed _ -> Printf.sprintf "Fusion 실패 · %s" completion.run_id
+     | Fusion_cancelled -> Printf.sprintf "Fusion 취소됨 · %s" completion.run_id)
+  | Schedule_due wake ->
+    Printf.sprintf
+      "예약 실행 시각 도래 · %s"
+      (match wake.title with
+       | Some title -> title
+       | None -> wake.schedule_id)
+  | Connector_attention _ -> "외부 메시지 도착"
+  | Hitl_resolved resolution ->
+    (match resolution.decision with
+     | Hitl_approved -> Printf.sprintf "운영자 승인됨 · %s" resolution.approval_id
+     | Hitl_rejected _ -> Printf.sprintf "운영자 거절됨 · %s" resolution.approval_id)
+  | Manual_compaction_requested -> "운영자 압축 요청"
+  | Completion_authority_rejected rejection ->
+    Printf.sprintf "작업 %s 완료 증거 거절됨" rejection.car_task_id
+  | Task_cancelled cancellation ->
+    Printf.sprintf
+      "%s가 작업 %s 취소"
+      cancellation.tc_cancelled_by
+      cancellation.tc_task_id
+  | Workspace_message message -> Printf.sprintf "%s가 보낸 메시지" message.wmsg_from
+;;
+
+let urgency_what_suffix : Keeper_event_queue.urgency -> string = function
+  | Immediate -> " (즉시)"
+  | Normal -> ""
+  | Low -> " (낮은 우선순위)"
+;;
+
+let stimulus_what (stimulus : Keeper_event_queue.stimulus) =
+  queue_payload_what stimulus.payload ^ urgency_what_suffix stimulus.urgency
+;;
+
 let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
   List.mapi
     (fun queue_index (selection : Keeper_event_queue_state.pending_selection) ->
@@ -211,6 +280,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
        { keeper_name = Some keeper_name
        ; source
        ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
+       ; what = stimulus_what stimulus
        ; wake_producer = wake_producer_of_payload stimulus.payload
        ; since = Some stimulus.arrived_at
        ; due_at = None
@@ -224,6 +294,7 @@ let read_error_row ?keeper_name ~waiting_on ~next_action detail =
   { keeper_name
   ; source = Read_error
   ; waiting_on
+  ; what = Printf.sprintf "대기 기록 읽기 실패 · %s" waiting_on
   ; wake_producer = Read_model_reader
   ; since = None
   ; due_at = None
@@ -294,6 +365,7 @@ let chat_operation_rows ~base_path keeper_name =
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_queued
           ; waiting_on = "owner_fifo"
+          ; what = Printf.sprintf "운영자 채팅 %d건 대기" projection.queued_count
           ; wake_producer = Keeper_owner_actor
           ; since = None
           ; due_at = None
@@ -309,6 +381,7 @@ let chat_operation_rows ~base_path keeper_name =
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_running
           ; waiting_on = "keeper_turn"
+          ; what = "운영자와 진행 중인 대화"
           ; wake_producer = Keeper_owner_actor
           ; since = None
           ; due_at = None
@@ -331,6 +404,7 @@ let owner_shutdown_rows ~base_path keeper_name =
     [ { keeper_name = Some keeper_name
       ; source = Read_error
       ; waiting_on = "keeper_owner"
+      ; what = "대기 기록 읽기 실패 · keeper_owner"
       ; wake_producer = Read_model_reader
       ; since = None
       ; due_at = None
@@ -365,6 +439,7 @@ let owner_shutdown_rows ~base_path keeper_name =
       [ { keeper_name = Some keeper_name
         ; source = Owner_shutdown
         ; waiting_on = "shutdown"
+        ; what = "종료 정리 중"
         ; wake_producer = Keeper_owner_actor
         ; since = None
         ; due_at = None
@@ -391,6 +466,7 @@ let hitl_rows keeper_name pending =
     { keeper_name = Some keeper_name
     ; source = Hitl_pending
     ; waiting_on = entry.tool_name
+    ; what = Printf.sprintf "운영자 승인 대기 · %s" entry.tool_name
     ; wake_producer = Hitl_resolution_hook
     ; since = Some entry.requested_at
     ; due_at = None
@@ -409,6 +485,14 @@ let hitl_rows keeper_name pending =
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
           ]
     })
+;;
+
+let external_attention_what (item : Keeper_external_attention.item) =
+  match item.urgency with
+  | Keeper_external_attention.Mention -> Printf.sprintf "%s 멘션" item.source_label
+  | Direct_message -> Printf.sprintf "%s DM" item.source_label
+  | Ambient -> Printf.sprintf "%s 대화 (멘션 없음)" item.source_label
+  | System -> Printf.sprintf "%s 시스템 알림" item.source_label
 ;;
 
 let external_attention_rows ~base_path ~keeper_name =
@@ -433,6 +517,7 @@ let external_attention_rows ~base_path ~keeper_name =
         { keeper_name = Some keeper_name
         ; source = External_attention
         ; waiting_on = item.source_label
+        ; what = external_attention_what item
         ; wake_producer = External_attention_store
         ; since = Some item.received_at
         ; due_at = None
@@ -461,6 +546,7 @@ let fusion_rows keeper_name runs =
           { keeper_name = Some keeper_name
           ; source = Fusion_running
           ; waiting_on = run.run_id
+          ; what = Printf.sprintf "Fusion 실행 중 · %s" run.preset
           ; wake_producer = Fusion_sink
           ; since = Some run.started_at
           ; due_at = None
@@ -482,6 +568,7 @@ let pending_confirm_row ?keeper_name
   { keeper_name
   ; source = Operator_pending_confirm
   ; waiting_on = entry.action_type
+  ; what = Printf.sprintf "운영자 확인 대기 · %s" entry.action_type
   ; wake_producer = Operator_pending_confirm_store
   ; since = None
   ; due_at = None
@@ -558,6 +645,7 @@ let schedule_rows ~keeper_names state =
     { keeper_name = schedule_keeper_owner keeper_names request
     ; source = Schedule_waiting
     ; waiting_on = schedule_waiting_on request
+    ; what = Printf.sprintf "예약 실행 · %s" request.schedule_id
     ; wake_producer =
         (match request.status with
          | Scheduled | Due | Running -> Schedule_runner
@@ -861,6 +949,7 @@ let pending_approval_read_error error =
   { keeper_name = None
   ; source = Read_error
   ; waiting_on = "keeper_gate_pending_store"
+  ; what = "대기 기록 읽기 실패 · keeper_gate_pending_store"
   ; wake_producer = Read_model_reader
   ; since = None
   ; due_at = None

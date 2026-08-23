@@ -85,8 +85,8 @@ let write_keeper_toml ~config ~name ~sandbox_profile =
 
 let test_config_agent_projection_docker () =
   let config = make_config () in
-  write_keeper_toml ~config ~name:"sangsu" ~sandbox_profile:"docker";
-  let agent_name = "keeper-sangsu-agent" in
+  write_keeper_toml ~config ~name:"alpha" ~sandbox_profile:"docker";
+  let agent_name = "keeper-alpha-agent" in
   Alcotest.(check string)
     "config-backed backend"
     "docker"
@@ -94,7 +94,7 @@ let test_config_agent_projection_docker () =
      |> Keeper_sandbox.backend_to_string);
   Alcotest.(check string)
     "config-backed host root rel"
-    ".masc/playground/docker/sangsu/"
+    ".masc/playground/docker/alpha/"
     (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name);
   let visible =
     Filename.concat
@@ -104,7 +104,7 @@ let test_config_agent_projection_docker () =
   let expected =
     Filename.concat
       config.Workspace.base_path
-      ".masc/playground/docker/sangsu/repos/masc/lib/foo.ml"
+      ".masc/playground/docker/alpha/repos/masc/lib/foo.ml"
   in
   Alcotest.(check string)
     "sandbox-visible path maps to backend-scoped host path"
@@ -113,7 +113,7 @@ let test_config_agent_projection_docker () =
 
 let test_config_agent_projection_local () =
   let config = make_config () in
-  let agent_name = "keeper-sangsu-agent" in
+  let agent_name = "keeper-alpha-agent" in
   Alcotest.(check string)
     "missing config defaults to local backend"
     "local"
@@ -121,7 +121,7 @@ let test_config_agent_projection_local () =
      |> Keeper_sandbox.backend_to_string);
   Alcotest.(check string)
     "local host root rel"
-    ".masc/playground/sangsu/"
+    ".masc/playground/alpha/"
     (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name)
 
 (* ── Invariant: one projection, and it is fail-closed ─────────────────
@@ -149,7 +149,7 @@ let docker_sandbox ~config ~name =
 
 let test_projection_docker_maps_root_and_subpath () =
   let config = make_config () in
-  let sandbox, meta = docker_sandbox ~config ~name:"sangsu" in
+  let sandbox, meta = docker_sandbox ~config ~name:"alpha" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let container_root = Keeper_sandbox.container_root meta.name in
   Alcotest.(check string)
@@ -170,7 +170,7 @@ let test_projection_docker_maps_root_and_subpath () =
 
 let test_projection_docker_rejects_outside_root () =
   let config = make_config () in
-  let sandbox, _meta = docker_sandbox ~config ~name:"sangsu" in
+  let sandbox, _meta = docker_sandbox ~config ~name:"alpha" in
   let outside = "/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper" in
   match
     Keeper_sandbox.visible_path_of_host
@@ -194,7 +194,7 @@ let test_projection_docker_rejects_outside_root () =
    must not be treated as being inside it. *)
 let test_projection_docker_requires_segment_boundary () =
   let config = make_config () in
-  let sandbox, meta = docker_sandbox ~config ~name:"sangsu" in
+  let sandbox, meta = docker_sandbox ~config ~name:"alpha" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let sibling =
     Env_config_core.strip_trailing_slashes host_root ^ "-scratch/notes.md"
@@ -215,7 +215,7 @@ let test_projection_docker_requires_segment_boundary () =
    Keeper_alerting_path, and must not be smuggled in here. *)
 let test_projection_local_is_identity () =
   let config = make_config () in
-  let meta = make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Local in
+  let meta = make_meta ~name:"alpha" ~sandbox:Keeper_types_profile_sandbox.Local in
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
   let outside = "/tmp/anywhere/at/all.ml" in
   Alcotest.(check string)
@@ -231,7 +231,7 @@ let test_projection_local_is_identity () =
    land on the same visible answer. *)
 let test_raw_accepts_either_coordinate_system () =
   let config = make_config () in
-  let sandbox, meta = docker_sandbox ~config ~name:"sangsu" in
+  let sandbox, meta = docker_sandbox ~config ~name:"alpha" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let container_root = Keeper_sandbox.container_root meta.name in
   let expected = Filename.concat container_root "repos/masc" in
@@ -263,10 +263,10 @@ let test_projection_docker_resolves_symlinked_spelling () =
   let link_parent = temp_dir () in
   let linked_base = Filename.concat link_parent "workspace-link" in
   Unix.symlink real_base linked_base;
-  let playground_rel = ".masc/playground/docker/sangsu" in
+  let playground_rel = ".masc/playground/docker/alpha" in
   let check_projection ~msg ~base_spelling ~cwd_spelling =
     let config = Workspace.default_config base_spelling in
-    let sandbox, meta = docker_sandbox ~config ~name:"sangsu" in
+    let sandbox, meta = docker_sandbox ~config ~name:"alpha" in
     let container_root = Keeper_sandbox.container_root meta.name in
     let host_cwd =
       Filename.concat (Filename.concat cwd_spelling playground_rel) "repos/masc"
@@ -290,7 +290,7 @@ let test_projection_docker_resolves_symlinked_spelling () =
 
 let test_config_agent_projection_rejects_legacy_alias () =
   let config = make_config () in
-  write_keeper_toml ~config ~name:"sangsu" ~sandbox_profile:"docker_hardened";
+  write_keeper_toml ~config ~name:"alpha" ~sandbox_profile:"docker_hardened";
   Alcotest.check_raises
     "legacy sandbox_profile aliases are rejected"
     (Keeper_sandbox_config.Invalid_keeper_sandbox_config
@@ -298,13 +298,13 @@ let test_config_agent_projection_rejects_legacy_alias () =
           "%s: invalid sandbox_profile %S (allowed: local, docker)"
           (Keeper_sandbox_config.keeper_toml_path
              ~base_path:config.Workspace.base_path
-             ~agent_name:"keeper-sangsu-agent")
+             ~agent_name:"keeper-alpha-agent")
           "docker_hardened"))
     (fun () ->
        ignore
          (Keeper_sandbox_config.sandbox_profile_of_agent
             ~base_path:config.Workspace.base_path
-            ~agent_name:"keeper-sangsu-agent"))
+            ~agent_name:"keeper-alpha-agent"))
 
 let () =
   Alcotest.run "Keeper Path SSOT" [

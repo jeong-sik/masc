@@ -51,7 +51,7 @@ let make_test_annotation () =
   ; file_path = "lib/test.ml"
   ; line_start = 10
   ; line_end = 15
-  ; keeper_id = "rondo"
+  ; keeper_id = "beta"
   ; kind = Ide_annotation_types.Comment
   ; content = "test annotation"
   ; goal_id = Some "goal-1"
@@ -154,7 +154,7 @@ let test_region_json_round_trip_tool_call () =
     { Ide_annotation_types.file_path = "lib/server.ml"
     ; line_start = 7
     ; line_end = 9
-    ; keeper_id = "rondo"
+    ; keeper_id = "beta"
     ; source = Ide_annotation_types.Tool_call { tool_name = "masc_status"; turn = 42 }
     ; timestamp_ms = 1700000000123L
     }

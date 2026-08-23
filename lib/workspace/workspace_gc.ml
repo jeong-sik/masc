@@ -32,7 +32,7 @@ let heartbeat config ~agent_name =
   let agent_file = Filename.concat (agents_dir config) filename in
   if path_exists config agent_file then begin
     with_file_lock config agent_file (fun () ->
-      match read_agent_with_repair config agent_file with
+      match read_agent config agent_file with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);

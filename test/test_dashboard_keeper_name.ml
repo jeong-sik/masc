@@ -15,15 +15,15 @@ module Codec = Keeper_name_codec
 open Alcotest
 
 let spellings =
-  [ "keeper-sangsu-agent"; "keeper_sangsu_agent"; "keeper-sangsu_agent"
-  ; "keeper_sangsu-agent"
+  [ "keeper-alpha-agent"; "keeper_alpha_agent"; "keeper-alpha_agent"
+  ; "keeper_alpha-agent"
   ]
 ;;
 
 let test_every_spelling_reaches_the_same_keeper () =
   List.iter
     (fun agent_name ->
-      check string agent_name "sangsu" (Helpers.extract_keeper_name agent_name))
+      check string agent_name "alpha" (Helpers.extract_keeper_name agent_name))
     spellings
 ;;
 
@@ -47,7 +47,7 @@ let test_mixed_spellings_are_not_left_with_affixes () =
 let test_non_alias_passes_through () =
   List.iter
     (fun name -> check string name name (Helpers.extract_keeper_name name))
-    [ "claude-agent-abc"; "claude-swift-fox"; "sangsu"; "" ]
+    [ "claude-agent-abc"; "claude-swift-fox"; "alpha"; "" ]
 ;;
 
 let test_agrees_with_the_canonical_parser () =
@@ -68,9 +68,9 @@ let test_codec_normalizes_all_spellings_round_trip () =
       match Codec.keeper_name_of_agent_alias alias with
       | None -> failf "codec rejected accepted alias %S" alias
       | Some keeper_name ->
-        check string (alias ^ ": parsed keeper") "sangsu" keeper_name;
+        check string (alias ^ ": parsed keeper") "alpha" keeper_name;
         let canonical_alias = Codec.keeper_agent_name keeper_name in
-        check string (alias ^ ": canonical render") "keeper-sangsu-agent" canonical_alias;
+        check string (alias ^ ": canonical render") "keeper-alpha-agent" canonical_alias;
         check
           (option string)
           (alias ^ ": render parses to the same keeper")

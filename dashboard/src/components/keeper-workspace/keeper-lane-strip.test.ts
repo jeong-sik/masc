@@ -17,6 +17,7 @@ function eventRow(detail: Record<string, unknown> = {}): DashboardKeeperWaitingR
     keeper_name: 'sangsu',
     source: 'event_queue_pending',
     waiting_on: 'workspace_message',
+    what: 'nick0cave가 보낸 메시지 (즉시)',
     wake_producer: 'keeper_workspace_message',
     since_iso: '2026-07-07T08:57:00Z',
     next_action: 'keeper_drain_event_queue',
@@ -50,6 +51,7 @@ function eventInventory(row: DashboardKeeperWaitingRow = eventRow()): DashboardK
           keeper_name: 'sangsu',
           source: 'chat_operation_queued',
           waiting_on: 'owner_fifo',
+          what: '운영자 채팅 1건 대기',
           wake_producer: 'keeper_owner_actor',
           since_iso: '2026-07-07T08:59:00Z',
           next_action: 'keeper_owner_start_fifo_head',
@@ -98,6 +100,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
             keeper_name: 'sangsu',
             source: 'chat_operation_queued',
             waiting_on: 'owner_fifo',
+            what: '운영자 채팅 1건 대기',
             wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-07T08:59:00Z',
             next_action: 'keeper_owner_start_fifo_head',
@@ -106,6 +109,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
             keeper_name: 'sangsu',
             source: 'chat_operation_running',
             waiting_on: 'keeper_turn',
+            what: '운영자와 진행 중인 대화',
             wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-07T08:58:00Z',
             next_action: 'keeper_finish_in_flight_turn',
@@ -133,6 +137,7 @@ function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
     keeper_name: 'sangsu',
     source: 'external_attention',
     waiting_on: 'external_attention',
+    what: 'external_attention 멘션',
     wake_producer: 'keeper_process_external_attention',
     since_iso: '2026-06-12T03:20:00Z',
     next_action: 'keeper_process_external_attention',
@@ -142,6 +147,7 @@ function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
     keeper_name: 'sangsu',
     source: 'chat_operation_queued',
     waiting_on: 'owner_fifo',
+    what: '운영자 채팅 1건 대기',
     wake_producer: 'keeper_owner_actor',
     since_iso: '2026-07-21T07:30:00Z',
     next_action: 'keeper_owner_start_fifo_head',
@@ -205,13 +211,23 @@ describe('KeeperLaneStrip', () => {
     const text = el.textContent ?? ''
     expect(text).toContain('작업 대기열')
     expect(text).toContain('외부 응답 대기')
-    expect(text).toContain('owner_fifo')
-    expect(text).toContain('keeper_turn')
-    expect(text).toContain('keeper finish in flight turn')
+    // The operator sentence is the default reading; the wire vocabulary stays
+    // behind the 기술 상세 toggle.
+    expect(text).toContain('운영자 채팅 1건 대기')
+    expect(text).toContain('운영자와 진행 중인 대화')
+    expect(text).not.toContain('owner_fifo')
+    expect(text).not.toContain('keeper_finish_in_flight_turn')
     expect(el.querySelector('[data-missing="keeper-lane"]')).toBeNull()
+
+    fireEvent.click(el.querySelector('[data-testid="keeper-lane-dev-toggle"]')!)
+    const devText = el.textContent ?? ''
+    expect(devText).toContain('owner_fifo')
+    expect(devText).toContain('keeper_turn')
+    expect(devText).toContain('keeper_finish_in_flight_turn')
+    expect(devText).toContain('keeper_owner_actor')
   })
 
-  it('renders a git-log style timeline newest first without claiming processing priority', () => {
+  it('renders the queue oldest first on an age axis without claiming processing priority', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-09T00:00:00Z'))
     const inventory = inventoryFixture()
@@ -220,6 +236,7 @@ describe('KeeperLaneStrip', () => {
         keeper_name: 'sangsu',
         source: 'external_attention',
         waiting_on: 'discord-old',
+        what: 'discord-old 멘션',
         wake_producer: 'external_attention_store',
         since_iso: '2026-08-06T03:59:42Z',
         next_action: 'keeper_process_external_attention',
@@ -229,6 +246,7 @@ describe('KeeperLaneStrip', () => {
         keeper_name: 'sangsu',
         source: 'external_attention',
         waiting_on: 'discord-new',
+        what: 'discord-new 멘션',
         wake_producer: 'external_attention_store',
         since_iso: '2026-08-08T10:12:03Z',
         next_action: 'keeper_process_external_attention',
@@ -238,6 +256,7 @@ describe('KeeperLaneStrip', () => {
         keeper_name: 'sangsu',
         source: 'schedule_waiting',
         waiting_on: 'masc.keeper_wake',
+        what: '예약 실행 · masc.keeper_wake',
         wake_producer: 'schedule_runner',
         since_iso: '2026-08-08T06:39:09Z',
         due_at_iso: '2026-08-09T07:29:34Z',
@@ -258,24 +277,117 @@ describe('KeeperLaneStrip', () => {
     `)
     const rows = Array.from(el.querySelectorAll('[data-testid="keeper-lane-waiting-row"]'))
     expect(rows.map(row => row.getAttribute('data-waiting-on'))).toEqual([
-      'discord-new',
-      'masc.keeper_wake',
       'discord-old',
+      'masc.keeper_wake',
+      'discord-new',
     ])
     expect(el.querySelector('[data-testid="keeper-lane-graph"]')).not.toBeNull()
     const renderedTimes = Array.from(el.querySelectorAll('[data-testid="keeper-lane-waiting-time"] time'))
     expect(renderedTimes.map(time => time.getAttribute('datetime'))).toEqual([
-      '2026-08-08T10:12:03Z',
-      '2026-08-08T06:39:09Z',
       '2026-08-06T03:59:42Z',
+      '2026-08-08T06:39:09Z',
+      '2026-08-09T07:29:34Z',
+      '2026-08-08T10:12:03Z',
     ])
-    expect(el.textContent ?? '').toContain('최신 → 오래된')
-    // The lane legend stays a compact time-order marker; the old prose
-    // disclaimer ("처리 우선순위를 뜻하지 않습니다") was removed for layout room.
+    // Bar width is the waited age on a log axis: the 3-day row fills the
+    // strip, the 14-hour row sits below it, and the 1일 tick lands at the
+    // position of a one-day wait rather than at the right edge.
+    const widths = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="keeper-lane-waiting-bar"]'))
+      .map(bar => Number.parseFloat(bar.style.width))
+    expect(widths[0]).toBe(100)
+    expect(widths[1]!).toBeLessThan(widths[0]!)
+    expect(widths[2]!).toBeLessThan(widths[1]!)
+    const dayTick = el.querySelector<HTMLElement>('[data-axis-tick="1일"]')!
+    expect(Number.parseFloat(dayTick.style.left)).toBeLessThan(100)
+    // 2026-08-06T03:59 → 2026-08-09T00:00 is 2.83 days: the axis end reads 3일.
+    expect(el.querySelector('[data-axis-tick="3일"]')).not.toBeNull()
+    expect(el.textContent ?? '').toContain('오래 기다린 순서')
+    expect(el.textContent ?? '').not.toContain('HEAD')
     expect(el.textContent ?? '').not.toContain('처리 우선순위')
+    expect(el.textContent ?? '').toContain('3일 전')
     expect(el.textContent ?? '').toContain('실행 예정')
     expect(el.textContent ?? '').toContain('7시간 후')
     expect(el.textContent ?? '').not.toContain('실행 예정 · 지금')
+  })
+
+  it('keeps the 1일 tick at the right edge while nothing has waited a day', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-07T09:00:00Z'))
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const dayTick = el.querySelector<HTMLElement>('[data-axis-tick="1일"]')!
+    expect(Number.parseFloat(dayTick.style.left)).toBe(100)
+    const hourTick = el.querySelector<HTMLElement>('[data-axis-tick="1시간"]')!
+    expect(Number.parseFloat(hourTick.style.left)).toBeGreaterThan(50)
+    expect(Number.parseFloat(hourTick.style.left)).toBeLessThan(60)
+    // Two rows, two and one minutes old: the older one is wider, and both
+    // sit near the left of a day-long axis.
+    const widths = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="keeper-lane-waiting-bar"]'))
+      .map(bar => Number.parseFloat(bar.style.width))
+    expect(widths.length).toBe(2)
+    expect(widths[0]!).toBeGreaterThan(widths[1]!)
+    expect(widths[1]!).toBeGreaterThanOrEqual(6)
+    expect(widths[0]!).toBeLessThan(20)
+  })
+
+  it('groups the server source counts into the stage pipeline', () => {
+    const inventory = inventoryFixture()
+    inventory.keepers[0]!.sources = {
+      external_attention: 2,
+      schedule_waiting: 1,
+      chat_operation_queued: 1,
+      chat_operation_running: 1,
+    }
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventory}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const stages = Array.from(el.querySelectorAll('[data-testid="keeper-lane-pipeline"] [data-stage]'))
+    expect(stages.map(stage => `${stage.getAttribute('data-stage')}:${stage.getAttribute('data-active')}`)).toEqual([
+      'external:true',
+      'schedule:true',
+      'queue:true',
+      'operator:false',
+      'keeper:true',
+    ])
+    const queueStage = el.querySelector('[data-stage="queue"]')!
+    expect(queueStage.textContent).toContain('채팅 대기')
+    expect(queueStage.textContent).toContain('1')
+    expect(queueStage.textContent).not.toContain('keeper_event_queue')
+    fireEvent.click(el.querySelector('[data-testid="keeper-lane-dev-toggle"]')!)
+    expect(el.querySelector('[data-stage="queue"]')!.textContent).toContain('keeper_event_queue')
+    expect(el.querySelector('[data-stage="queue"]')!.textContent).toContain('chat_operation_queued')
+  })
+
+  it('keeps a source key outside the closed vocabulary visible instead of filing it into a stage', () => {
+    const inventory = inventoryFixture()
+    inventory.keepers[0]!.sources = { chat_operation_queued: 1, not_a_source: 3 }
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventory}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const unknown = el.querySelector('[data-stage="unknown"]')!
+    expect(unknown.textContent).toContain('미분류 source')
+    expect(unknown.textContent).toContain('not_a_source')
+    expect(unknown.textContent).toContain('3')
+    expect(el.querySelector('[data-stage="queue"]')!.textContent).not.toContain('not_a_source')
   })
 
   it('discloses the typed evidence carried by one queue node', () => {
@@ -288,12 +400,17 @@ describe('KeeperLaneStrip', () => {
         error=${null}
       />
     `)
-    const disclosure = el.querySelector<HTMLDetailsElement>('[data-testid="keeper-lane-waiting-row"] details')
+    const disclosure = el.querySelector<HTMLDetailsElement>('[data-testid="keeper-lane-waiting-row"]')
     expect(disclosure).not.toBeNull()
+    expect(disclosure!.tagName).toBe('DETAILS')
+    expect(disclosure!.textContent ?? '').not.toContain('wake ·')
+    fireEvent.click(el.querySelector('[data-testid="keeper-lane-dev-toggle"]')!)
     disclosure!.open = true
     disclosure!.dispatchEvent(new Event('toggle'))
-    expect(disclosure!.textContent ?? '').toContain('wake producer')
+    expect(disclosure!.textContent ?? '').toContain('wake ·')
     expect(disclosure!.textContent ?? '').toContain('keeper_owner_actor')
+    expect(disclosure!.textContent ?? '').toContain('다음 동작 ·')
+    expect(disclosure!.querySelector('[data-testid="keeper-lane-waiting-time"] time')).not.toBeNull()
   })
 
   it('marks a server-capped count as a lower bound instead of a total', () => {
@@ -339,11 +456,10 @@ describe('KeeperLaneStrip', () => {
         error=${null}
       />
     `)
-    const sources = el.querySelector('[data-testid="keeper-lane-sources"]')?.textContent ?? ''
-    expect(sources).toContain('외부 알림 ≥64')
+    const pipeline = el.querySelector('[data-testid="keeper-lane-pipeline"]')!
+    expect(pipeline.querySelector('[title="external_attention"]')?.textContent).toBe('외부 알림≥64')
     // chat_operation_queued was not capped, so it is an exact count
-    expect(sources).toContain('채팅 대기 5')
-    expect(sources).not.toContain('채팅 대기 ≥5')
+    expect(pipeline.querySelector('[title="chat_operation_queued"]')?.textContent).toBe('채팅 대기5')
   })
 
   it('renders an exact count and no truncation note when nothing was capped', () => {

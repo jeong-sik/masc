@@ -271,7 +271,7 @@ let runtime_config_messages_http =
 default = "kimi.kimi-for-coding"
 
 [runtime.assignments]
-ramarama = "kimi.kimi-for-coding"
+nu = "kimi.kimi-for-coding"
 
 [providers.kimi]
 display-name = "Kimi Code Plan"
@@ -389,9 +389,9 @@ let test_messages_http_runtime_loads_and_assignment_resolves () =
          Alcotest.failf "messages-http runtime init_default failed: %s" msg
        | Ok () ->
          Alcotest.(check string)
-           "ramarama assignment resolves to kimi.kimi-for-coding"
+           "nu assignment resolves to kimi.kimi-for-coding"
            "kimi.kimi-for-coding"
-           (KMC.runtime_id_of_meta (make_meta "ramarama"));
+           (KMC.runtime_id_of_meta (make_meta "nu"));
          Alcotest.(check bool)
            "messages-http runtime is materialized"
            true
@@ -1759,7 +1759,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
    Regression guard for messages-http boot diagnostics (2026-07-03): an
    unregistered [messages-http] provider binding cannot be materialized into a
    provider_config, so it is dropped from the runtime list. An assignment
-   targeting it used to report the misleading "[runtime.assignments].ramarama =
+   targeting it used to report the misleading "[runtime.assignments].nu =
    ... not found among N runtimes" — pointing the operator at a typo that does
    not exist — when the real cause is that the binding was defined but failed to
    materialize. Behavior is unchanged (the binding is still excluded,
@@ -1768,7 +1768,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
    "not found among N runtimes". Registered providers such as Kimi keep using
    the provider registry SSOT to materialize their messages-compatible kind. *)
 
-(* [ramarama] is assigned [local.kimi-for-coding], a defined binding whose
+(* [nu] is assigned [local.kimi-for-coding], a defined binding whose
    provider uses protocol messages-http but has no provider-registry entry. The
    default [openai.gpt] materializes so validation reaches the assignment. *)
 let runtime_config_messages_http_assignment =
@@ -1777,7 +1777,7 @@ let runtime_config_messages_http_assignment =
 default = "openai.gpt"
 
 [runtime.assignments]
-ramarama = "local.kimi-for-coding"
+nu = "local.kimi-for-coding"
 
 [providers.openai]
 display-name = "OpenAI"
@@ -1810,7 +1810,7 @@ max-concurrent = 1
 |}
 ;;
 
-(* [ramarama] is assigned [bogus.binding], which names no declared binding at
+(* [nu] is assigned [bogus.binding], which names no declared binding at
    all — the genuine operator-typo case whose "not found among N runtimes"
    message must be preserved. *)
 let runtime_config_typo_assignment =
@@ -1819,7 +1819,7 @@ let runtime_config_typo_assignment =
 default = "openai.gpt"
 
 [runtime.assignments]
-ramarama = "bogus.binding"
+nu = "bogus.binding"
 
 [providers.openai]
 display-name = "OpenAI"

@@ -349,6 +349,11 @@ export interface DashboardKeeperWaitingRow {
   keeper_name?: string | null
   source: DashboardKeeperWaitingSource
   waiting_on: string
+  /** Operator sentence the server derives from the row's typed fields
+   *  (`server_keeper_waiting_inventory.ml`); the default reading of a row.
+   *  `waiting_on` / `wake_producer` / `next_action` / `detail` are the raw
+   *  vocabulary behind the technical disclosure. */
+  what: string
   wake_producer?: string | null
   since?: number | null
   since_iso?: string | null

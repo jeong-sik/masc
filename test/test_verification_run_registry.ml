@@ -47,7 +47,7 @@ let register t ~verification_id ~started_at =
     t
     ~verification_id
     ~task_id:"task-136"
-    ~producer:"keeper-kidsnote-agent"
+    ~producer:"keeper-gamma-agent"
     ~authority_kind:"system_llm_agent"
     ~authority_actor:("system-llm-agent-" ^ verification_id)
     ~started_at
@@ -77,7 +77,7 @@ let test_running_before_completion () =
   | Some run ->
     check string "status" "running" (R.status_label run.status);
     check string "task" "task-136" run.task_id;
-    check string "producer" "keeper-kidsnote-agent" run.producer;
+    check string "producer" "keeper-gamma-agent" run.producer;
     (* A running review carries no elapsed time — a surface must not read one. *)
     check
       (option string)
@@ -262,7 +262,7 @@ let test_retry_replaces_the_prior_attempt () =
     t
     ~verification_id:"vrf-retry"
     ~task_id:"task-136"
-    ~producer:"keeper-kidsnote-agent"
+    ~producer:"keeper-gamma-agent"
     ~authority_actor:"system-llm-agent-second"
     ~authority_kind:"system_llm_agent"
     ~started_at:20.0;

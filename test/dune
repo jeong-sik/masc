@@ -2556,7 +2556,8 @@
  (libraries alcotest ast_grep)
  (deps
   (source_tree ../lib)
-  (source_tree ../bin)))
+  (source_tree ../bin)
+  %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
 
 (test
  (name test_tui_operator_projection)
@@ -2602,6 +2603,42 @@
  (libraries alcotest masc_tui_context_state masc))
 
 (test
+ (name test_tui_frame_presenter)
+ (modules test_tui_frame_presenter)
+ (libraries alcotest masc_tui_frame_presenter))
+
+(test
+ (name test_tui_board_selection)
+ (modules test_tui_board_selection)
+ (libraries alcotest masc_tui_board_selection))
+
+(test
+ (name test_tui_planning_selection)
+ (modules test_tui_planning_selection)
+ (libraries alcotest masc_tui_planning_selection))
+
+(test
+ (name test_tui_keeper_selection)
+ (modules test_tui_keeper_selection)
+ (libraries alcotest masc_tui_keeper_selection))
+
+(test
+ (name test_tui_board_detail)
+ (modules test_tui_board_detail)
+ (libraries alcotest masc_tui_board_detail))
+
+(rule
+ (alias runtest-test_tui_keyboard_input)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe})))
+
+(test
  (name test_tui_metrics_tail)
  (modules test_tui_metrics_tail)
  (libraries
@@ -2618,6 +2655,16 @@
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))
+
+(test
+ (name test_tui_terminal_write_repair)
+ (modules test_tui_terminal_write_repair)
+ (libraries
+  alcotest
+  masc.masc_log
+  masc_tui_render_schedule
+  masc_tui_terminal_write_repair
+  unix))
 
 (test
  (name test_fs_compat_capability_exact_read)

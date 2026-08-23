@@ -18,6 +18,14 @@ val start : unit -> unit
     {!start}; synchronous before. *)
 val write : string -> unit
 
+(** Replace the single process-wide callback invoked after every console writer
+    attempt, including failed or partially completed writes. The callback may
+    run on the sink's OS writer thread, so it must be fast, non-blocking, and
+    must not perform I/O or re-enter logging. Observer exceptions are ignored.
+    They never change the writer's original result or exception. Pass [None]
+    when the interactive terminal owner exits. *)
+val set_after_write_observer : (unit -> unit) option -> unit
+
 (** Total mirror lines dropped due to a blocked console writer. *)
 val dropped_count : unit -> int
 
@@ -39,6 +47,12 @@ module For_testing : sig
       number of lines written. *)
   val drain_now : unit -> int
 
-  (** Clear queue/counters, restore synchronous mode and stderr writer. *)
+  (** Drain using the supplied prior drop-report count; returns the number of
+      queued lines and the updated count. This deterministically exercises the
+      production drop-marker path without starting its infinite writer thread. *)
+  val drain_now_since : int -> int * int
+
+  (** Clear queue/counters and restore synchronous mode, stderr writer, and no
+      after-write observer. *)
   val reset : unit -> unit
 end

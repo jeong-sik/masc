@@ -154,6 +154,7 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
             keeper_name: 'sangsu',
             source: 'schedule_waiting',
             waiting_on: 'masc.board_post',
+            what: '예약 실행 · masc.board_post',
             since_iso: '2026-07-04T00:00:00Z',
             next_action: 'schedule_runner_dispatch',
           },
@@ -164,6 +165,7 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
       {
         source: 'schedule_waiting',
         waiting_on: 'masc.board_post',
+        what: '예약 실행 · masc.board_post',
         due_at_iso: '2026-07-04T01:00:00Z',
         next_action: 'schedule_runner_dispatch',
       },

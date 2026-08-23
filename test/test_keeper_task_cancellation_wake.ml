@@ -39,8 +39,8 @@ let with_workspace f =
 ;;
 
 (* [agent_name] is deliberately distinct from [name]: the production data has
-   authors recorded as "sangsu" and cancellers arriving as
-   "keeper-sangsu-agent", and the identity binding is what closes that gap. *)
+   authors recorded as "alpha" and cancellers arriving as
+   "keeper-alpha-agent", and the identity binding is what closes that gap. *)
 let ensure_keeper config ~keeper_name ~agent_name =
   match
     Result.bind
@@ -110,27 +110,27 @@ let queued_cancellations ~base_path ~keeper_name =
 
 let test_cross_keeper_cancellation_is_delivered () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
-    ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
+    ensure_keeper config ~keeper_name:"alpha" ~agent_name:"keeper-alpha-agent";
+    ensure_keeper config ~keeper_name:"beta" ~agent_name:"keeper-beta-agent";
     seed_task
       config
       ~task_id:"task-161"
-      ~created_by:(Some "sangsu")
+      ~created_by:(Some "alpha")
       ~status:
         (cancelled
-           ~by:"keeper-rondo-agent"
+           ~by:"keeper-beta-agent"
            ~reason:(Some "BLOCKED: service absent from sandbox"));
     let outcome =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"keeper-rondo-agent"
+        ~cancelling_agent_name:"keeper-beta-agent"
         ~task_id:"task-161"
     in
     check string "delivered to the author's lane" "delivered" (Wake.outcome_label outcome);
-    match queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu" with
+    match queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha" with
     | [ cancellation ] ->
       check string "task id" "task-161" cancellation.Event_queue.tc_task_id;
-      check string "canceller" "keeper-rondo-agent" cancellation.tc_cancelled_by;
+      check string "canceller" "keeper-beta-agent" cancellation.tc_cancelled_by;
       check
         (option string)
         "the reason travels with the wake"
@@ -145,22 +145,22 @@ let test_cross_keeper_cancellation_is_delivered () =
    wakes a Keeper about a decision it just made itself. *)
 let test_self_cancellation_across_naming_forms_is_silent () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
+    ensure_keeper config ~keeper_name:"alpha" ~agent_name:"keeper-alpha-agent";
     seed_task
       config
       ~task_id:"task-155"
-      ~created_by:(Some "sangsu")
-      ~status:(cancelled ~by:"keeper-sangsu-agent" ~reason:(Some "focus change"));
+      ~created_by:(Some "alpha")
+      ~status:(cancelled ~by:"keeper-alpha-agent" ~reason:(Some "focus change"));
     let outcome =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"keeper-sangsu-agent"
+        ~cancelling_agent_name:"keeper-alpha-agent"
         ~task_id:"task-155"
     in
     check string "recognised as self-cancellation" "self_cancelled"
       (Wake.outcome_label outcome);
     check int "nothing queued" 0
-      (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu")))
+      (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha")))
 ;;
 
 (* A [masc_transition] cancel with no top-level reason but a persisted handoff
@@ -170,12 +170,12 @@ let test_self_cancellation_across_naming_forms_is_silent () =
    losing exactly the context it exists to carry. *)
 let test_handoff_reason_reaches_the_author_when_the_status_carries_none () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
-    ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
+    ensure_keeper config ~keeper_name:"alpha" ~agent_name:"keeper-alpha-agent";
+    ensure_keeper config ~keeper_name:"beta" ~agent_name:"keeper-beta-agent";
     seed_task
       config
       ~task_id:"task-171"
-      ~created_by:(Some "sangsu")
+      ~created_by:(Some "alpha")
       ~handoff_context:
         { D.summary = "sandbox lacks the request-menu service"
         ; D.reason = Some "cannot verify without the service"
@@ -186,15 +186,15 @@ let test_handoff_reason_reaches_the_author_when_the_status_carries_none () =
         ; updated_at = None
         ; updated_by = None
         }
-      ~status:(cancelled ~by:"keeper-rondo-agent" ~reason:None);
+      ~status:(cancelled ~by:"keeper-beta-agent" ~reason:None);
     let outcome =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"keeper-rondo-agent"
+        ~cancelling_agent_name:"keeper-beta-agent"
         ~task_id:"task-171"
     in
     check string "delivered" "delivered" (Wake.outcome_label outcome);
-    match queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu" with
+    match queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha" with
     | [ cancellation ] ->
       check
         (option string)
@@ -234,109 +234,109 @@ let test_ambiguous_canceller_suppresses_delivery () =
 
 (* [cancelled_by] holds the acting agent name verbatim, so a non-Keeper actor
    lands here under its own id. When that id happens to equal a Keeper lane —
-   an operator called "sangsu" against lane "sangsu", whose agent is
-   "keeper-sangsu-agent" — resolving it as a lane, or comparing the raw string
+   an operator called "alpha" against lane "alpha", whose agent is
+   "keeper-alpha-agent" — resolving it as a lane, or comparing the raw string
    against [created_by], read as a self-cancellation and swallowed the wake the
    author was owed. A canceller with no lane is not the author, who has one. *)
 let test_operator_sharing_the_author_lane_name_still_delivers () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
+    ensure_keeper config ~keeper_name:"alpha" ~agent_name:"keeper-alpha-agent";
     seed_task
       config
       ~task_id:"task-177"
-      ~created_by:(Some "sangsu")
-      ~status:(cancelled ~by:"sangsu" ~reason:(Some "operator stood the work down"));
+      ~created_by:(Some "alpha")
+      ~status:(cancelled ~by:"alpha" ~reason:(Some "operator stood the work down"));
     let outcome =
-      Wake.notify_author ~config ~cancelling_agent_name:"sangsu" ~task_id:"task-177"
+      Wake.notify_author ~config ~cancelling_agent_name:"alpha" ~task_id:"task-177"
     in
     check string "an operator cancellation still reaches the author" "delivered"
       (Wake.outcome_label outcome);
-    match queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu" with
+    match queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha" with
     | [ cancellation ] ->
-      check string "canceller recorded as written" "sangsu"
+      check string "canceller recorded as written" "alpha"
         cancellation.Event_queue.tc_cancelled_by
     | queued -> failf "expected one queued cancellation, got %d" (List.length queued))
 ;;
 
 let test_author_without_a_keeper_lane_is_not_an_error () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
+    ensure_keeper config ~keeper_name:"beta" ~agent_name:"keeper-beta-agent";
     seed_task
       config
       ~task_id:"task-007"
       ~created_by:(Some "dashboard")
-      ~status:(cancelled ~by:"keeper-rondo-agent" ~reason:None);
+      ~status:(cancelled ~by:"keeper-beta-agent" ~reason:None);
     check string "no lane to wake" "author_not_a_keeper"
       (Wake.outcome_label
          (Wake.notify_author
             ~config
-            ~cancelling_agent_name:"keeper-rondo-agent"
+            ~cancelling_agent_name:"keeper-beta-agent"
             ~task_id:"task-007")))
 ;;
 
 let test_task_without_author_has_no_addressee () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
+    ensure_keeper config ~keeper_name:"beta" ~agent_name:"keeper-beta-agent";
     seed_task
       config
       ~task_id:"task-008"
       ~created_by:None
-      ~status:(cancelled ~by:"keeper-rondo-agent" ~reason:None);
+      ~status:(cancelled ~by:"keeper-beta-agent" ~reason:None);
     check string "no author recorded" "no_author"
       (Wake.outcome_label
          (Wake.notify_author
             ~config
-            ~cancelling_agent_name:"keeper-rondo-agent"
+            ~cancelling_agent_name:"keeper-beta-agent"
             ~task_id:"task-008")))
 ;;
 
 (* Completion posts a verdict to Board, so it must not also travel this path. *)
 let test_completion_is_not_a_cancellation () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
-    ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
+    ensure_keeper config ~keeper_name:"alpha" ~agent_name:"keeper-alpha-agent";
+    ensure_keeper config ~keeper_name:"beta" ~agent_name:"keeper-beta-agent";
     seed_task
       config
       ~task_id:"task-009"
-      ~created_by:(Some "sangsu")
+      ~created_by:(Some "alpha")
       ~status:
-        (D.Done { assignee = "keeper-rondo-agent"; completed_at = now; notes = None });
+        (D.Done { assignee = "keeper-beta-agent"; completed_at = now; notes = None });
     check string "other terminal outcomes are declined" "not_cancelled"
       (Wake.outcome_label
          (Wake.notify_author
             ~config
-            ~cancelling_agent_name:"keeper-rondo-agent"
+            ~cancelling_agent_name:"keeper-beta-agent"
             ~task_id:"task-009"));
     check int "nothing queued" 0
-      (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu")))
+      (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha")))
 ;;
 
 let test_repeat_delivery_dedups_on_task_identity () =
   with_workspace (fun config ->
-    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
-    ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
+    ensure_keeper config ~keeper_name:"alpha" ~agent_name:"keeper-alpha-agent";
+    ensure_keeper config ~keeper_name:"beta" ~agent_name:"keeper-beta-agent";
     seed_task
       config
       ~task_id:"task-160"
-      ~created_by:(Some "sangsu")
-      ~status:(cancelled ~by:"keeper-rondo-agent" ~reason:(Some "blocked"));
+      ~created_by:(Some "alpha")
+      ~status:(cancelled ~by:"keeper-beta-agent" ~reason:(Some "blocked"));
     let first =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"keeper-rondo-agent"
+        ~cancelling_agent_name:"keeper-beta-agent"
         ~task_id:"task-160"
     in
     let second =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"keeper-rondo-agent"
+        ~cancelling_agent_name:"keeper-beta-agent"
         ~task_id:"task-160"
     in
     check string "first delivers" "delivered" (Wake.outcome_label first);
     check string "second is recognised as the same event" "already_present"
       (Wake.outcome_label second);
     check int "one queue entry, not two" 1
-      (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu")))
+      (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha")))
 ;;
 
 (* Durability: the wake survives a restart, and "no reason given" must not come
@@ -366,12 +366,12 @@ let test_stimulus_round_trips_including_absent_reason () =
   in
   assert_round_trip
     { Event_queue.tc_task_id = "task-1"
-    ; tc_cancelled_by = "keeper-rondo-agent"
+    ; tc_cancelled_by = "keeper-beta-agent"
     ; tc_reason = Some "blocked on sandbox"
     };
   assert_round_trip
     { Event_queue.tc_task_id = "task-2"
-    ; tc_cancelled_by = "keeper-rondo-agent"
+    ; tc_cancelled_by = "keeper-beta-agent"
     ; tc_reason = None
     }
 ;;

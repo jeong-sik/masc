@@ -298,6 +298,15 @@ let sanitize_terminal_text text =
     then (
       let byte = Char.code text.[index] in
       if
+        byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
+      then (
+        Buffer.add_string output (escaped_byte byte);
+        append (index + 1))
+      else if byte < 0x80
+      then (
+        Buffer.add_char output text.[index];
+        append (index + 1))
+      else if
         byte = 0xC2
         && index + 1 < String.length text
         && let next = Char.code text.[index + 1] in
@@ -305,25 +314,29 @@ let sanitize_terminal_text text =
       then (
         Buffer.add_string output (escaped_codepoint (Char.code text.[index + 1]));
         append (index + 2))
-      else if byte >= 0xC2
-      then (
+      else
         match valid_utf8_length index with
         | Some length ->
           Buffer.add_substring output text index length;
           append (index + length)
         | None ->
-          Buffer.add_char output text.[index];
+          Buffer.add_string output (escaped_byte byte);
           append (index + 1))
-      else if byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
-      then (
-        Buffer.add_string output (escaped_byte byte);
-        append (index + 1))
-      else (
-        Buffer.add_char output text.[index];
-        append (index + 1)))
   in
   append 0;
   Buffer.contents output
+;;
+
+let short_timestamp_for_terminal text =
+  sanitize_terminal_text
+    (if String.length text > 19 then String.sub text 0 19
+     else if String.length text = 0 then "(never)"
+     else text)
+;;
+
+let clock_timestamp_for_terminal text =
+  sanitize_terminal_text
+    (if String.length text >= 19 then String.sub text 11 8 else text)
 ;;
 
 let keeper_blocker_for_terminal keeper =

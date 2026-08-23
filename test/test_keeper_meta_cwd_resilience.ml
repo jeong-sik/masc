@@ -32,12 +32,12 @@ let test_meta_of_json_survives_deleted_cwd () =
       let json =
         `Assoc
           [
-            ("name", `String "sangsu");
-            ("trace_id", `String "trace-sangsu-live");
+            ("name", `String "alpha");
+            ("trace_id", `String "trace-alpha-live");
           ]
       in
       match Masc_test_deps.meta_of_json_fixture json with
-      | Ok meta -> check string "keeper name" "sangsu" meta.name
+      | Ok meta -> check string "keeper name" "alpha" meta.name
       | Error err -> fail ("meta_of_json failed under deleted cwd: " ^ err))
 
 let () =

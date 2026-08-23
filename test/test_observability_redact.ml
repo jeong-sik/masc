@@ -263,11 +263,11 @@ let test_no_false_positive_on_keeper_identities () =
   let inputs =
     [ "task-claim-bot"; "heartbeat-keeper"; "diagnostic-judge"
       (* 20+ char identities: these were redacted to [REDACTED] by the former
-         generic "20+ alphanumeric run" matcher (keeper-issue_king-agent=23,
-         keeper-ramarama-agent=21 chars) and are preserved now that the length
+         generic "20+ alphanumeric run" matcher (keeper-kappa_keeper-agent=23,
+         keeper-nu-agent=21 chars) and are preserved now that the length
          heuristic is removed. This is the regression the generic-matcher
          removal targets. *)
-    ; "keeper-issue_king-agent"; "keeper-ramarama-agent"
+    ; "keeper-kappa_keeper-agent"; "keeper-nu-agent"
     ; "task-claim-bot-9a8b7c6d"; "heartbeat-keeper-2f4a1b" ]
   in
   List.iter

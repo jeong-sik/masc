@@ -376,6 +376,19 @@ let tool_post_get : Masc_domain.tool_schema =
   }
 ;;
 
+(* One description, two schemas. [masc_board_comment] and [masc_board_vote]
+   name the same post id, so the text lives once; a copy per schema is a
+   description slot that can drift from its twin. *)
+let post_id_description =
+  "Required exact board post ID (format: p-xxxx). Get it from \
+   masc_board_list, masc_board_search, masc_board_post_get, or visible board \
+   context."
+;;
+
+(* Same text in [masc_board_vote] and [masc_board_comment_vote]. *)
+let vote_direction_description = "Required vote direction: up or down"
+;;
+
 let tool_comment_add : Masc_domain.tool_schema =
   { name = Tool_name.Board_name.(to_string Board_comment)
   ; description =
@@ -393,9 +406,7 @@ let tool_comment_add : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; ( "description"
                       , `String
-                          "Required exact board post ID (format: p-xxxx). Get it from \
-                           masc_board_list, masc_board_search, masc_board_post_get, or visible \
-                           board context." )
+                          post_id_description )
                     ] )
               ; ( "content"
                 , `Assoc
@@ -411,10 +422,8 @@ let tool_comment_add : Masc_domain.tool_schema =
                     ; "pattern", `String Board.Comment_id.json_schema_pattern
                     ; ( "description"
                       , `String
-                          (Printf.sprintf
-                             "Parent comment ID for replies (optional; format: %s, as \
-                              returned by masc_board_post_get or masc_board_comment)"
-                             Board.Comment_id.accepted_format) )
+                          "Parent comment ID for replies (optional; from \
+                           masc_board_post_get or masc_board_comment)" )
                     ] )
               ; ( "ttl_hours"
                 , `Assoc
@@ -443,9 +452,7 @@ let tool_vote : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; ( "description"
                       , `String
-                          "Required exact board post ID (format: p-xxxx). Get it from \
-                           masc_board_list, masc_board_search, masc_board_post_get, or visible \
-                           board context." )
+                          post_id_description )
                     ] )
               ; ( "voter"
                 , `Assoc [ "type", `String "string"; "description", `String "Voter name" ]
@@ -454,7 +461,7 @@ let tool_vote : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "string"
                     ; "enum", `List [ `String "up"; `String "down" ]
-                    ; "description", `String "Required vote direction: up or down"
+                    ; "description", `String vote_direction_description
                     ] )
               ] )
         ; "required", `List [ `String "post_id"; `String "direction" ]
@@ -525,11 +532,8 @@ let tool_comment_vote : Masc_domain.tool_schema =
                     ; "pattern", `String Board.Comment_id.json_schema_pattern
                     ; ( "description"
                       , `String
-                          (Printf.sprintf
-                             "Required exact comment ID (format: %s). Get it from \
-                              masc_board_post_get or the masc_board_comment result; \
-                              invented ids are rejected."
-                             Board.Comment_id.accepted_format) )
+                          "Required exact comment ID from masc_board_post_get or the \
+                           masc_board_comment result; invented ids are rejected." )
                     ] )
               ; ( "voter"
                 , `Assoc [ "type", `String "string"; "description", `String "Voter name" ]
@@ -538,7 +542,7 @@ let tool_comment_vote : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "string"
                     ; "enum", `List [ `String "up"; `String "down" ]
-                    ; "description", `String "Required vote direction: up or down"
+                    ; "description", `String vote_direction_description
                     ] )
               ] )
         ; "required", `List [ `String "comment_id"; `String "direction" ]

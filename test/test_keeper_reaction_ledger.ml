@@ -825,7 +825,7 @@ let test_reaction_kind_string_roundtrip () =
 let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
   with_temp_base
   @@ fun base_path ->
-  let keeper_name = "sangsu" in
+  let keeper_name = "alpha" in
   let stimulus = board_stimulus () in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   Keeper_reaction_ledger.record_event_queue_stimulus

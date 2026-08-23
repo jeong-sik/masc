@@ -369,11 +369,11 @@ let () = test "dispatch_add_task" (fun () ->
 )
 
 let () = test "keeper dispatch keeps task author distinct from actor identity" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster-agent" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper-agent" in
   let args = `Assoc [ ("title", `String "Keeper-authored task") ] in
   let result =
     Task.Tool.dispatch_for_keeper
-      ~created_by:"taskmaster"
+      ~created_by:"fixture-keeper"
       ctx
       ~name:"masc_add_task"
       ~args
@@ -382,7 +382,7 @@ let () = test "keeper dispatch keeps task author distinct from actor identity" (
    | Some result -> assert (Tool_result.is_success result)
    | None -> failwith "Keeper add-task dispatch returned None");
   match (Workspace.read_backlog ctx.config).tasks with
-  | [ task ] -> assert (task.created_by = Some "taskmaster")
+  | [ task ] -> assert (task.created_by = Some "fixture-keeper")
   | tasks ->
     failwith
       (Printf.sprintf "expected exactly one task, got %d" (List.length tasks)))
@@ -464,25 +464,25 @@ let claimed_title = function
 ;;
 
 let () = test "auto_claim_takes_self_authored_task_without_filter" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper" in
   let _ =
     Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
       ~description:""
   in
-  let result = Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster" () in
+  let result = Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper" () in
   assert (claimed_title result = Some "self routing task"))
 
 let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper" in
   let _ =
     Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
       ~description:""
   in
-  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "taskmaster" in
+  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "fixture-keeper" in
   let result =
-    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster"
+    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
       ~hard_filter:self_excluding ()
   in
   assert (claimed_title result = None))
@@ -496,15 +496,15 @@ let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun (
    moved to [hard_filter] the widening still respects it, so the own-task is NOT
    claimed. Reverting the exclusion back into [task_filter] turns this RED. *)
 let () = test "auto_claim_hard_filter_survives_scope_fallback" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper" in
   let _ =
     Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
       ~description:""
   in
-  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "taskmaster" in
+  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "fixture-keeper" in
   let result =
-    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster"
+    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
       ~task_filter:(fun _ -> false)
       ~hard_filter:self_excluding
       ~allow_scope_fallback:true ()
@@ -1102,12 +1102,12 @@ let () = test "handle_transition_submit_does_not_have_a_disable_bypass"
 let () = test "handle_transition_submit_rejects_registered_keeper_alias"
     (fun () ->
   (
-    let ctx = make_test_ctx_with_agent "keeper-executor-agent" in
+    let ctx = make_test_ctx_with_agent "keeper-omega-agent" in
     ignore
-      (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+      (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
          ~capabilities:[] ());
-    register_test_keeper ctx ~keeper_name:"executor"
-      ~agent_name:"keeper-executor-agent";
+    register_test_keeper ctx ~keeper_name:"omega"
+      ~agent_name:"keeper-omega-agent";
     let _ =
       Task.Tool.handle_add_task
         ~tool_name:"test_tool"
@@ -1116,13 +1116,13 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
         (`Assoc [ ("title", `String "Canonical submit identity") ])
     in
     (match
-       Workspace.claim_task_r ctx.config ~agent_name:"keeper-executor-agent"
+       Workspace.claim_task_r ctx.config ~agent_name:"keeper-omega-agent"
          ~task_id:"task-001" ()
      with
      | Ok _ -> ()
      | Error err -> failwith (Masc_domain.masc_error_to_string err));
     let alias_ctx =
-      { ctx with Task.Tool.agent_name = "keeper-executor" }
+      { ctx with Task.Tool.agent_name = "keeper-omega" }
     in
     let result =
       Task.Tool.handle_transition
@@ -1145,15 +1145,15 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
        an incidental FSM one. The old assertion pinned the literal "requires
        owning the task", which the message stopped using while still rejecting
        for exactly this reason. *)
-    assert (str_contains (Tool_result.message result) "keeper-executor-agent");
-    assert_task_claimed_by ctx "keeper-executor-agent"))
+    assert (str_contains (Tool_result.message result) "keeper-omega-agent");
+    assert_task_claimed_by ctx "keeper-omega-agent"))
 
 let () = test "keeper_reconciliation_ignores_prefix_matched_agent"
     (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in
-  let keeper_name = "executor" in
-  let keeper_agent_name = "keeper-executor-agent" in
-  let foreign_agent_name = "keeper-executor-agent-shadow" in
+  let keeper_name = "omega" in
+  let keeper_agent_name = "keeper-omega-agent" in
+  let foreign_agent_name = "keeper-omega-agent-shadow" in
   ignore
     (Workspace.bind_session
        ctx.config
@@ -1307,7 +1307,7 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
   | _ -> failwith "expected exactly one task"
 )
 
-(* Regression: 2026-05-17 nick0cave production case. masc_transition with
+(* Regression: 2026-05-17 theta0 production case. masc_transition with
    action=claim/start does not require [handoff_context.summary]; the LLM
    has nothing to summarize at work entry. Previously the parser rejected
    any empty summary regardless of action, which broke entry-class
@@ -1912,12 +1912,12 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"executor"
-    ~agent_name:"keeper-executor-agent";
+  register_test_keeper ctx ~keeper_name:"omega"
+    ~agent_name:"keeper-omega-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-executor-agent" }
+    { ctx with Task.Tool.agent_name = "keeper-omega-agent" }
   in
   let result =
     Task.Tool.handle_claim
@@ -1949,12 +1949,12 @@ let () = test "keeper_alias_claim_updates_planning_as_exact_agent" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"executor"
-    ~agent_name:"keeper-executor-agent";
+  register_test_keeper ctx ~keeper_name:"omega"
+    ~agent_name:"keeper-omega-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-executor" }
+    { ctx with Task.Tool.agent_name = "keeper-omega" }
   in
   let result =
     Task.Tool.handle_claim
@@ -1986,15 +1986,15 @@ let () = test "keeper_generated_alias_claim_updates_planning_as_exact_agent" (fu
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
        ~capabilities:[] ());
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-warm-raven-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-warm-raven-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"executor"
-    ~agent_name:"keeper-executor-agent";
+  register_test_keeper ctx ~keeper_name:"omega"
+    ~agent_name:"keeper-omega-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-executor-warm-raven-agent" }
+    { ctx with Task.Tool.agent_name = "keeper-omega-warm-raven-agent" }
   in
   let result =
     Task.Tool.handle_claim
@@ -2026,15 +2026,15 @@ let () = test "keeper_separator_alias_claim_updates_planning_as_exact_agent" (fu
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-tech-glutton-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-pi-glutton-agent"
        ~capabilities:[] ());
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-tech_glutton-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-pi_glutton-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"tech-glutton"
-    ~agent_name:"keeper-tech-glutton-agent";
+  register_test_keeper ctx ~keeper_name:"pi-glutton"
+    ~agent_name:"keeper-pi-glutton-agent";
   let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-tech_glutton-agent" }
+    { ctx with Task.Tool.agent_name = "keeper-pi_glutton-agent" }
   in
   let result =
     Task.Tool.handle_claim

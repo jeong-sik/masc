@@ -10,9 +10,13 @@ const mocks = vi.hoisted(() => ({
   unregisterPush: vi.fn(),
 }))
 
-vi.mock('../../api', () => ({
-  fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
-}))
+vi.mock('../../api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../api')>()
+  return {
+    ...actual,
+    fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
+  }
+})
 vi.mock('../../sse-store', () => ({
   registerKeeperWaitingInventoryRefresh: vi.fn((refresh: (keeperName: string) => void) => {
     mocks.refresh = refresh
@@ -43,6 +47,7 @@ function inventory(): DashboardKeeperWaitingInventory {
         keeper_name: 'kidsnote',
         source: 'event_queue_pending',
         waiting_on: 'schedule_due',
+        what: '예약 실행 시각 도래 · daily-news',
         next_action: 'keeper_consume_event',
       }],
     }],

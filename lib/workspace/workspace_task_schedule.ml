@@ -111,7 +111,7 @@ let reconcile_agent_current_task_with_assignments
   if path_exists config agent_file
   then
     with_file_lock config agent_file (fun () ->
-      match read_agent_with_repair config agent_file with
+      match read_agent config agent_file with
       | Ok agent ->
         reconcile_agent_current_task_record
           config
@@ -155,7 +155,7 @@ let reconcile_all_agent_current_tasks_with_backlog
         Workspace_query.safe_yield ();
         let path = Filename.concat agents_path name in
         with_file_lock config path (fun () ->
-          match read_agent_with_repair config path with
+          match read_agent config path with
           | Ok (agent : Masc_domain.agent) ->
             reconcile_agent_current_task_record
               config

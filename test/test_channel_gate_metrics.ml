@@ -57,7 +57,7 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       Metrics.record_internal_error_exn
         ~channel
         ~workspace_id:"workspace-z"
-        ~keeper:"  sangsu  "
+        ~keeper:"  alpha  "
         ~duration_ms:42
         (Failure "boom");
       let stats =
@@ -68,7 +68,7 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       check int "message_count" 1 stats.message_count;
       check int "error_count" 1 stats.error_count;
       check int "internal_error_count" 1 stats.internal_error_count;
-      check string "last_keeper trimmed" "sangsu" stats.last_keeper;
+      check string "last_keeper trimmed" "alpha" stats.last_keeper;
       check string "last_error redacted" "internal error" stats.last_error;
       check_error_kind "last_error_kind" "internal" stats.last_error_kind;
       check string "last_outcome" "internal_error" stats.last_outcome)
@@ -124,9 +124,9 @@ let test_record_validation_error_metric_falls_back_for_invalid_json () =
 let test_snapshot_json_reports_health_and_latency () =
   with_eio (fun () ->
       let channel = unique_channel "discord-json" in
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"alpha"
         ~duration_ms:10_500 Metrics.Success;
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"alpha"
         ~duration_ms:11_500
         (Metrics.Keeper_error "upstream timeout");
       let json = Metrics.snapshot_json () in
@@ -151,7 +151,7 @@ let test_snapshot_json_includes_workspace_bindings () =
       let channel = unique_channel "discord-bindings" in
       Metrics.record_attempt ~channel ~workspace_id:"workspace-alpha" ~keeper:"luna"
         ~duration_ms:120 Metrics.Success;
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-beta" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-beta" ~keeper:"alpha"
         ~duration_ms:0
         (Metrics.Keeper_error "keeper offline");
       let json = Metrics.snapshot_json () in
@@ -187,7 +187,7 @@ let test_events_json_filters_newest_first () =
       Metrics.record_attempt ~channel ~workspace_id:"workspace-a" ~keeper:"luna"
         ~duration_ms:0
         (Metrics.Keeper_error "upstream timeout");
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"alpha"
         ~duration_ms:0
         (Metrics.Validation_error "content is required");
       let json = Metrics.events_json ~channel ~keeper:"luna" ~limit:5 () in

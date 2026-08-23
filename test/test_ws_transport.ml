@@ -350,7 +350,7 @@ let test_dashboard_event_composite_change_maps_to_composite () =
     dashboard_event
       (`Assoc
         [ ("type", `String "keeper_composite_changed")
-        ; ("name", `String "qa-king")
+        ; ("name", `String "mu-king")
         ; ("ts_unix", `Float 1_774_000_000.0)
         ])
   with

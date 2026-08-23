@@ -619,7 +619,7 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
    official-client session into Recovery_required and made every later turn for
    that keeper fail closed on `official_client_session.claim` until an operator
    resolved it by hand. Three such chunks accounted for 3,236 rejected turns
-   across sangsu, kidsnote and taskmaster in one retained log window (#27967). *)
+   across three Keepers in one retained log window (#27967). *)
 let item_delta_notification ~method_ ~thread_id ~turn_id params =
   let* fields = assoc_at method_ params in
   let* notification_thread_id = required_string method_ "threadId" fields in

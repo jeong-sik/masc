@@ -478,11 +478,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                         SSOT extractor. *)
                      let content = Keeper_context_core.text_of_history_jsonl_json j in
                      let source = Safe_ops.json_string ~default:"unknown" "source" j in
-                     let ts_unix =
-                       let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-                       if ts0 > 0.0 then ts0
-                       else Safe_ops.json_float ~default:0.0 "timestamp" j
-                     in
+                     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
                      let age_s =
                        if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix))
                        else None

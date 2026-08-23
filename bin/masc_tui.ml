@@ -4,10 +4,15 @@ open Masc_tui_render
 open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
+module Board_detail = Masc_tui_board_detail
+module Board_selection = Masc_tui_board_selection
+module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Metrics_tail = Masc_tui_metrics_tail
+module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
+module Terminal_write_repair = Masc_tui_terminal_write_repair
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
@@ -17,6 +22,31 @@ exception Break
 let frame_interval_ns = 16_000_000L
 let maximum_input_wait_seconds = 0.016
 let nanoseconds_per_second = 1_000_000_000.0
+
+let synchronized_output_enabled () =
+  match Sys.getenv_opt "MASC_TUI_SYNC" with
+  | Some value ->
+      (match String.lowercase_ascii (String.trim value) with
+       | "0" | "false" | "no" | "off" -> false
+       | "" | "1" | "true" | "yes" | "on" | _ -> true)
+  | None -> true
+
+let require_interactive_terminal () =
+  let term =
+    Sys.getenv_opt "TERM"
+    |> Option.value ~default:""
+    |> String.lowercase_ascii
+    |> String.trim
+  in
+  if
+    (not (Unix.isatty Unix.stdin))
+    || not (Unix.isatty Unix.stdout)
+    || String.equal term "dumb"
+  then begin
+    prerr_endline
+      "masc-tui requires interactive TTY stdin/stdout and TERM other than dumb";
+    exit 2
+  end
 
 let keeper_log_content_height (state : state) =
   let rows, _columns = get_terminal_size () in
@@ -191,8 +221,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   match key with
   | "esc" ->
     save_message_draft state;
-    state.view <- Keepers Keeper_detail;
+    let target_registered =
+      match state.msg_target_keeper_name with
+      | Some keeper_name ->
+          keeper_available_for_new_message state keeper_name
+      | None -> false
+    in
+    state.view <-
+      Keepers (if target_registered then Keeper_detail else Keeper_list);
     state.detail_scroll <- 0;
+    if not target_registered then state.log_scroll <- 0;
     true
   | "\r" | "\n" ->
     let text = Buffer.contents state.msg_input in
@@ -254,8 +292,9 @@ type http_surface_results = {
 type async_msg =
   | Http_refresh_done of http_surface_results
   | Http_refresh_failed of string * Approval.Flow.generation option
-  | Board_post_refresh_done of string * (board_post * board_comment list, string) result
-  | Board_post_refresh_failed of string * string
+  | Board_post_refresh_done of
+      Board_detail.request * (board_post * board_comment list, string) result
+  | Board_post_refresh_failed of Board_detail.request * string
   | Approval_decision_done of
       approval_item
       * approval_decision
@@ -378,6 +417,14 @@ let launch_keeper_request state ~base_path ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
+let persist_keeper_message_fence ~base_path request =
+  (* [Fs_compat.save_file_atomic_strict] can report a close failure directly to
+     stderr. This action already owns an input-triggered frame, so marking the
+     cached frame before the persistence attempt is sufficient to make that
+     presentation a full redraw without adding another wake-up. *)
+  Terminal_write_repair.note ();
+  Keeper_chat_recovery.persist_pending ~base_path request
+
 let rec start_keeper_message state ~base_path ~mailbox text =
   match state.msg_prepared with
   | Some request ->
@@ -414,12 +461,11 @@ let rec start_keeper_message state ~base_path ~mailbox text =
       | None ->
       match state.msg_target_keeper_name with
       | None -> add_event state "error" "Cannot send: no Keeper is selected"
+      | Some _ when Option.is_some state.keepers_error ->
+          add_event state "error"
+            "Cannot send while the Keeper roster is unavailable"
       | Some keeper_name
-        when not
-               (List.exists
-                  (fun (keeper : keeper) ->
-                    String.equal keeper.k_name keeper_name)
-                  state.keepers) ->
+        when not (keeper_available_for_new_message state keeper_name) ->
           add_event state "error"
             (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
                (Keeper_chat.terminal_safe_text keeper_name))
@@ -427,7 +473,7 @@ let rec start_keeper_message state ~base_path ~mailbox text =
           let request =
             Keeper_chat.create_request ~keeper_name ~message:text
           in
-          (match Keeper_chat_recovery.persist_pending ~base_path request with
+          (match persist_keeper_message_fence ~base_path request with
            | Error detail ->
                state.msg_recovery_error <- Some (Recovery_blocked detail);
                add_event state "error"
@@ -991,31 +1037,81 @@ let apply_approval_observation state observation =
   if Approval.Flow.is_current state.approval_flow observation.ao_generation then
     apply_approvals_load state observation.ao_result
 
+let replace_board_posts state posts =
+  let source =
+    match state.board_mode with
+    | Board_list -> Board_selection.List_cursor
+    | Board_read post_id -> Board_selection.Detail_post post_id
+  in
+  let post_ids posts = List.map (fun post -> post.bp_id) posts in
+  let cursor =
+    Board_selection.reconcile_cursor
+      ~current_ids:(post_ids state.board_posts)
+      ~cursor:state.board_cursor ~source ~next_ids:(post_ids posts)
+  in
+  state.board_posts <- posts;
+  state.board_cursor <- cursor
+
+let leave_board_detail state =
+  state.board_mode <- Board_list;
+  state.board_scroll <- 0;
+  state.board_detail <- Board_detail.clear state.board_detail
+
+let leave_missing_board_detail state =
+  match state.board_mode with
+  | Board_read post_id
+    when not (List.exists (fun post -> String.equal post.bp_id post_id) state.board_posts) ->
+      leave_board_detail state
+  | Board_list | Board_read _ -> ()
+
 let apply_board_list_load state = function
   | Ok posts ->
-      state.board_posts <- posts;
-      state.board_error <- None;
-      if state.board_cursor >= List.length posts then
-        state.board_cursor <- max 0 (List.length posts - 1)
+      replace_board_posts state posts;
+      state.board_list_error <- None;
+      leave_missing_board_detail state
   | Error err ->
-      state.board_posts <- [];
-      state.board_comments <- [];
-      state.board_mode <- Board_list;
-      remember_surface_error state ~surface:"board"
-        ~current_error:state.board_error
-        ~set_error:(fun value -> state.board_error <- value)
+      remember_surface_error state ~surface:"board list"
+        ~current_error:state.board_list_error
+        ~set_error:(fun value -> state.board_list_error <- value)
         err
 
 let apply_planning_load state = function
   | Ok planning ->
+      let goal_ids planning =
+        planning_visible_goals planning.pl_goals
+        |> List.map (fun goal -> goal.pg_id)
+      in
+      let current =
+        match state.planning_mode with
+        | Planning_list ->
+            Planning_selection.List_cursor state.planning_cursor
+        | Planning_detail goal_id ->
+            Planning_selection.Detail_goal
+              { goal_id; cursor = state.planning_cursor }
+      in
+      let current_ids =
+        match state.planning with
+        | None -> []
+        | Some current_planning -> goal_ids current_planning
+      in
+      let navigation =
+        Planning_selection.reconcile ~current_ids
+          ~next_ids:(goal_ids planning) ~current
+      in
       state.planning <- Some planning;
       state.planning_error <- None;
-      let goals = planning_visible_goals planning.pl_goals in
-      if state.planning_cursor >= List.length goals then
-        state.planning_cursor <- max 0 (List.length goals - 1)
+      (match navigation with
+       | Planning_selection.List_cursor cursor ->
+           state.planning_cursor <- cursor;
+           state.planning_mode <- Planning_list;
+           state.planning_scroll <- 0
+       | Planning_selection.Detail_goal { goal_id; cursor } ->
+           state.planning_cursor <- cursor;
+           state.planning_mode <- Planning_detail goal_id)
   | Error err ->
       state.planning <- None;
       state.planning_mode <- Planning_list;
+      state.planning_scroll <- 0;
       remember_surface_error state ~surface:"planning"
         ~current_error:state.planning_error
         ~set_error:(fun value -> state.planning_error <- value)
@@ -1106,58 +1202,67 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
                (load_http_surfaces ~host ~port ~approval_generation))
   end
 
-let board_detail_still_current state post_id =
-  match state.view, state.board_mode with
-  | Board, Board_read current -> String.equal current post_id
-  | _ -> false
+let board_detail_request_still_current state request =
+  Board_detail.is_current state.board_detail request
+  &&
+  match state.board_mode with
+  | Board_read post_id ->
+      String.equal post_id (Board_detail.request_post_id request)
+  | Board_list -> false
 
-let apply_board_post_load state ~post_id = function
-  | Ok (post, comments) when board_detail_still_current state post_id ->
-      state.board_error <- None;
-      state.board_comments <- comments;
-      state.board_posts <-
-        post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
-  | Ok _ -> ()
-  | Error err ->
-      if board_detail_still_current state post_id then
-        remember_surface_error state ~surface:"board"
-          ~current_error:state.board_error
-          ~set_error:(fun value -> state.board_error <- value)
-          err
-
-let same_inflight_post inflight post_id =
-  match inflight with
-  | Some current -> String.equal current post_id
-  | None -> false
-
-let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight
-    ~mailbox =
-  if not (same_inflight_post !refresh_inflight post_id) then begin
-    refresh_inflight := Some post_id;
-    let clear_inflight () =
-      if same_inflight_post !refresh_inflight post_id then refresh_inflight := None
+let apply_board_post_load state request result =
+  if board_detail_request_still_current state request then
+    let post_id = Board_detail.request_post_id request in
+    let fail err =
+      state.board_detail <-
+        Board_detail.complete state.board_detail request (Error err);
+      if state.view <> Board then
+        add_event state "error" (Printf.sprintf "Board detail unavailable: %s" err)
     in
+    match result with
+    | Ok (post, comments) when String.equal post.bp_id post_id ->
+        state.board_detail <-
+          Board_detail.complete state.board_detail request (Ok (post, comments));
+        replace_board_posts state
+          (post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts)
+    | Ok (post, _) ->
+        fail
+          (Printf.sprintf
+             "Board detail response ID mismatch: expected %s, received %s"
+             post_id post.bp_id)
+    | Error err -> fail err
+
+let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
+  match Board_detail.start state.board_detail ~post_id with
+  | Board_detail.Already_loading -> ()
+  | Board_detail.Started (detail, request) ->
+    state.board_detail <- detail;
     let run_refresh () =
       try
         enqueue_async mailbox
           (Board_post_refresh_done
-             (post_id, load_board_post ~host ~port ~post_id))
+             (request, load_board_post ~host ~port ~post_id))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         enqueue_async mailbox
           (Board_post_refresh_failed
-             ( post_id,
+             ( request,
                Printf.sprintf "board post refresh failed: %s"
                  (Printexc.to_string exn) ))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
     | None ->
-        Fun.protect ~finally:clear_inflight (fun () ->
-            apply_board_post_load state ~post_id
-              (load_board_post ~host ~port ~post_id))
-  end
+        let result =
+          try load_board_post ~host ~port ~post_id with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              Error
+                (Printf.sprintf "board post refresh failed: %s"
+                   (Printexc.to_string exn))
+        in
+        apply_board_post_load state request result
 
 let apply_approval_decision_result state approval decision approvals result =
   (match result with
@@ -1251,8 +1356,8 @@ let handle_approval_decision state approval decision ~mailbox =
            (approval_decision_key decision)
            approval.ap_summary)
 
-let apply_async_message state ~base_path ~http_refresh_inflight
-    ~board_post_refresh_inflight ~mailbox = function
+let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
+  function
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results
@@ -1265,18 +1370,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         approval_generation;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err
-  | Board_post_refresh_done (post_id, result) ->
-      if same_inflight_post !board_post_refresh_inflight post_id then
-        board_post_refresh_inflight := None;
-      apply_board_post_load state ~post_id result
-  | Board_post_refresh_failed (post_id, err) ->
-      if same_inflight_post !board_post_refresh_inflight post_id then
-        board_post_refresh_inflight := None;
-      if board_detail_still_current state post_id then
-        remember_surface_error state ~surface:"board"
-          ~current_error:state.board_error
-          ~set_error:(fun value -> state.board_error <- value)
-          err
+  | Board_post_refresh_done (request, result) ->
+      apply_board_post_load state request result
+  | Board_post_refresh_failed (request, err) ->
+      apply_board_post_load state request (Error err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -1419,52 +1516,96 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if apply_keeper_chat_reconciliation state ~base_path request result then
         load_from_masc_dir state base_path
 
-let drain_async_messages state ~base_path ~http_refresh_inflight
-    ~board_post_refresh_inflight mailbox =
+let drain_async_messages state ~base_path ~http_refresh_inflight mailbox =
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
     | Some msg ->
-        apply_async_message state ~base_path ~http_refresh_inflight
-          ~board_post_refresh_inflight ~mailbox msg;
+        apply_async_message state ~base_path ~http_refresh_inflight ~mailbox
+          msg;
         loop true
   in
   loop false
 
+let invalidate_frame_for_resize frame_presenter render_schedule =
+  invalidate_terminal_size ();
+  Frame_presenter.invalidate frame_presenter;
+  Render_schedule.request render_schedule Render_schedule.Force
+
+let request_console_write_repair render_schedule =
+  Terminal_write_repair.request_repaint render_schedule
+
+let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
+    ~new_term =
+  at_exit cleanup;
+  Sys.set_signal Sys.sigint (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sighup (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sigquit (Sys.Signal_handle terminate);
+  Sys.set_signal Sys.sigwinch (Sys.Signal_handle request_full_repaint);
+  Sys.set_signal Sys.sigcont (Sys.Signal_handle request_full_repaint);
+  Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
+  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term
+
 (** Main loop *)
 let main () =
   let (base_path, workspace, port, refresh) = parse_args () in
+  require_interactive_terminal ();
   let state = create_state ~workspace ~port ~refresh_interval:refresh in
   state.view <- Overview;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
   let new_term = { old_term with Unix.c_icanon = false; c_echo = false } in
-  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+
+  let frame_presenter =
+    Frame_presenter.create
+      ~synchronized_output:(synchronized_output_enabled ()) ()
+  in
+  let resize_requested = Atomic.make false in
+
+  let restore_terminal () =
+    Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout);
+    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
+  in
 
   (* Cleanup on exit *)
+  let cleanup_started = Atomic.make false in
   let cleanup () =
-    print_string Ansi.show_cursor;
-    print_string Ansi.clear;
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
-    print_endline "Goodbye!"
+    if Atomic.compare_and_set cleanup_started false true then begin
+      Console_sink.set_after_write_observer None;
+      restore_terminal ();
+      print_endline "Goodbye!"
+    end
   in
-  at_exit cleanup;
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> exit 0));
 
-  let resize_requested = Atomic.make false in
-  Sys.set_signal Sys.sigwinch
-    (Sys.Signal_handle (fun _ -> Atomic.set resize_requested true));
+  let request_full_repaint _ = Atomic.set resize_requested true in
+  let terminate _ = exit 0 in
+  let rec suspend _ =
+    restore_terminal ();
+    Sys.set_signal Sys.sigtstp Sys.Signal_default;
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
+        Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+        request_full_repaint 0)
+      (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
+  in
+  enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
+    ~new_term;
   let render_schedule =
     Render_schedule.create ~min_interval_ns:frame_interval_ns ()
   in
+  if Terminal_write_repair.console_sink_writes_to_terminal () then
+    Console_sink.set_after_write_observer
+      (Some (fun () -> Terminal_write_repair.note ()));
 
   (* Initial load *)
   load_from_masc_dir state base_path;
   let host = Env_config_core.masc_host () in
   let port = state.port in
   let http_refresh_inflight = ref false in
-  let board_post_refresh_inflight = ref None in
   let async_messages = Eio.Stream.create 32 in
   (match Keeper_chat_recovery.load_pending ~base_path with
    | Ok None -> ()
@@ -1531,15 +1672,15 @@ let main () =
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let input_reader = create_input_reader () in
-  try
+  let run_loop () =
     while true do
+      request_console_write_repair render_schedule;
       if Atomic.exchange resize_requested false then begin
-        invalidate_terminal_size ();
-        Render_schedule.request render_schedule Render_schedule.Force
+        invalidate_frame_for_resize frame_presenter render_schedule
       end;
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          ~board_post_refresh_inflight async_messages
+          async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       (* Check for input *)
       let input_timeout =
@@ -1550,12 +1691,23 @@ let main () =
       let key = read_key ~timeout:input_timeout input_reader () in
       if Option.is_some key then
         Render_schedule.request render_schedule Render_schedule.Input;
+      let terminal_rows, _terminal_columns = get_terminal_size () in
+      let compact_viewport =
+        Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
+      in
+      let message_mode =
+        (not compact_viewport) && state.view = Keepers Keeper_message
+      in
       (match state.view, key with
+       | _ when compact_viewport -> ()
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None
        | _ -> ());
       (match key with
-       | Some k when state.view = Keepers Keeper_message ->
+       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
+           raise Break
+       | Some _ when compact_viewport -> ()
+       | Some k when message_mode ->
            let recovery_key =
              String.length k = 1 && Char.code k.[0] = 18
            in
@@ -1575,7 +1727,8 @@ let main () =
                  k
              in
              ()
-       | Some "q" | Some "Q" -> raise Break
+       | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
+           state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
            (match state.view with
             | Approvals ->
@@ -1602,7 +1755,7 @@ let main () =
            start_http_refresh state ~host ~port
              ~refresh_inflight:http_refresh_inflight
              ~mailbox:async_messages;
-           (* Also reload logs / board / planning detail if viewing them *)
+           (* Also reload logs / Board detail if viewing them. *)
            (match state.view with
             | Keepers Keeper_logs ->
                 load_selected_keeper_logs state base_path 200
@@ -1611,21 +1764,10 @@ let main () =
                 (match state.board_mode with
                  | Board_read post_id ->
                      start_board_post_refresh state ~host ~port ~post_id
-                       ~refresh_inflight:board_post_refresh_inflight
                        ~mailbox:async_messages
                  | Board_list -> ())
-            | Planning ->
-                (match state.planning_mode with
-                 | Planning_detail goal_id ->
-                     (match state.planning with
-                      | Some p ->
-                          (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
-                           | Some _ -> ()
-                           | None -> state.planning_mode <- Planning_list)
-                      | None -> state.planning_mode <- Planning_list)
-                 | Planning_list -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-            | Approvals -> ());
+            | Approvals | Planning -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab cycles through primary surfaces *)
@@ -1653,8 +1795,7 @@ let main () =
             | Board ->
                 (match state.board_mode with
                  | Board_read _ ->
-                     state.board_mode <- Board_list;
-                     state.board_scroll <- 0
+                     leave_board_detail state
                  | Board_list -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -1705,7 +1846,16 @@ let main () =
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
-            | Overview | Keepers Keeper_message -> ())
+            | Overview ->
+                let _, _, row_budget =
+                  overview_layout state ~terminal_rows
+                in
+                state.overview_event_scroll <-
+                  Render_schedule.scroll_overview_events_older
+                    ~event_count:(List.length state.events)
+                    ~visible_rows:row_budget.attention_rows
+                    state.overview_event_scroll
+            | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -1745,7 +1895,16 @@ let main () =
                  | Planning_detail _ ->
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
-            | Overview | Keepers Keeper_message -> ())
+            | Overview ->
+                let _, _, row_budget =
+                  overview_layout state ~terminal_rows
+                in
+                state.overview_event_scroll <-
+                  Render_schedule.scroll_overview_events_newer
+                    ~event_count:(List.length state.events)
+                    ~visible_rows:row_budget.attention_rows
+                    state.overview_event_scroll
+            | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
@@ -1767,7 +1926,6 @@ let main () =
                           state.board_scroll <- 0;
                           start_board_post_refresh state ~host ~port
                             ~post_id:p.bp_id
-                            ~refresh_inflight:board_post_refresh_inflight
                             ~mailbox:async_messages
                       | None -> ())
                  | Board_read _ -> ())
@@ -1808,7 +1966,9 @@ let main () =
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
            (match state.view with
-            | Keepers Keeper_detail when state.keeper_cursor < List.length state.keepers ->
+            | Keepers Keeper_detail
+              when Option.is_none state.keepers_error
+                   && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper state keeper.k_name;
                 state.view <- Keepers Keeper_message
@@ -1819,7 +1979,7 @@ let main () =
       Eio.Fiber.yield ();
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          ~board_post_refresh_inflight async_messages
+          async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
 
       (* Periodic refresh *)
@@ -1834,7 +1994,7 @@ let main () =
         start_http_refresh state ~host ~port
           ~refresh_inflight:http_refresh_inflight
           ~mailbox:async_messages;
-        (* Also refresh logs / board / planning detail if viewing them *)
+        (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Keepers Keeper_logs ->
              load_selected_keeper_logs state base_path 200
@@ -1843,21 +2003,10 @@ let main () =
              (match state.board_mode with
               | Board_read post_id ->
                   start_board_post_refresh state ~host ~port ~post_id
-                    ~refresh_inflight:board_post_refresh_inflight
                     ~mailbox:async_messages
               | Board_list -> ())
-         | Planning ->
-             (match state.planning_mode with
-              | Planning_detail goal_id ->
-                  (match state.planning with
-                   | Some p ->
-                       (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
-                        | Some _ -> ()
-                        | None -> state.planning_mode <- Planning_list)
-                   | None -> state.planning_mode <- Planning_list)
-              | Planning_list -> ())
          | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-         | Approvals -> ());
+         | Approvals | Planning -> ());
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background
       end;
@@ -1866,22 +2015,30 @@ let main () =
          Render_schedule.take render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
-       | Render_schedule.Render -> render state
+       | Render_schedule.Render ->
+           let frame = render state in
+           Frame_presenter.present frame_presenter
+             ~invalidate_before:(Terminal_write_repair.consume_damage ())
+             ~write:(output_string stdout)
+             ~flush:(fun () -> flush stdout) frame
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
-  with Break -> ()
+  in
+  run_loop ()
 
 let run_with_eio_context f =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  Eio_guard.enable ();
-  Eio.Switch.on_release sw Eio_guard.disable;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_context.set_env env;
-  Eio_context.set_switch sw;
-  Eio_context.set_net (Eio.Stdenv.net env);
-  Eio_context.set_clock (Eio.Stdenv.clock env);
-  Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-  f ()
+  try
+    Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+            Eio_guard.enable ();
+            Eio.Switch.on_release sw Eio_guard.disable;
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            Eio_context.set_env env;
+            Eio_context.set_switch sw;
+            Eio_context.set_net (Eio.Stdenv.net env);
+            Eio_context.set_clock (Eio.Stdenv.clock env);
+            Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
+            f ()))
+  with Break -> ()
 
 let () = run_with_eio_context main

@@ -3,15 +3,20 @@
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_selection = Masc_tui_keeper_selection
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
+module Render_schedule = Masc_tui_render_schedule
 
 open Masc_tui_types
 open Tui_decode
 open Masc_tui_http
 
 let report path err =
-  Printf.eprintf "[masc-tui] decode failed for %s: %s\n%!" path err
+  Console_sink.write
+    (Printf.sprintf "[masc-tui] decode failed for %s: %s"
+       (Masc_tui_ansi.Terminal_text.single_line path)
+       (Masc_tui_ansi.Terminal_text.single_line err))
 
 let summarize_errors label errors =
   match List.rev errors with
@@ -143,29 +148,86 @@ let load_from_masc_dir (state : state) (base_path : string) =
   state.tasks <- tasks;
   state.tasks_error <- tasks_error;
 
-  (* Preserve the selected Keeper by identity across sorted roster refreshes. *)
+  (* Capture navigation before replacing the roster. Detail and logs are bound
+     to the selected row; message mode is bound to its explicit target. *)
+  let current_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
   let selected_keeper_name =
-    List.nth_opt state.keepers state.keeper_cursor
-    |> Option.map (fun keeper -> keeper.k_name)
+    if state.keeper_cursor < 0 then None
+    else
+      List.nth_opt state.keepers state.keeper_cursor
+      |> Option.map (fun keeper -> keeper.k_name)
+  in
+  let current_keeper_mode =
+    match state.view with
+    | Keepers mode -> Some mode
+    | Overview | Board | Approvals | Planning -> None
+  in
+  let current_navigation =
+    match current_keeper_mode with
+    | Some Keeper_detail ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Detail_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_logs ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Logs_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_message ->
+        (match state.msg_target_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Message_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_list | None ->
+        Keeper_selection.List_cursor state.keeper_cursor
   in
 
   (* Load keepers *)
-  let keepers, keepers_error = load_keepers base_path in
+  let loaded_keepers, keepers_error = load_keepers base_path in
+  let keepers =
+    match keepers_error, current_keeper_mode with
+    | Some _, Some (Keeper_detail | Keeper_logs) ->
+        (* A partial or failed read cannot prove that the focused Keeper was
+           deleted. Keep the last complete roster until a reliable refresh can
+           reconcile that identity. Message mode instead uses its explicit
+           target and can render the unavailable state safely. *)
+        state.keepers
+    | Some _, Some (Keeper_list | Keeper_message) | Some _, None | None, _ ->
+        loaded_keepers
+  in
   state.keepers <- keepers;
   state.keepers_error <- keepers_error;
 
-  (* Re-find the same identity, or clamp only when that Keeper disappeared. *)
-  state.keeper_cursor <-
-    (match selected_keeper_name with
-     | Some keeper_name ->
-         (match
-            List.find_index
-              (fun keeper -> String.equal keeper.k_name keeper_name)
-              state.keepers
-          with
-          | Some index -> index
-          | None -> min state.keeper_cursor (max 0 (List.length state.keepers - 1)))
-     | None -> min state.keeper_cursor (max 0 (List.length state.keepers - 1)));
+  let next_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
+  (match
+     Keeper_selection.reconcile ~current_ids:current_keeper_ids
+       ~next_ids:next_keeper_ids ~current:current_navigation
+   with
+   | Keeper_selection.List_cursor cursor ->
+       state.keeper_cursor <- cursor;
+       (match current_keeper_mode with
+        | Some (Keeper_detail | Keeper_logs | Keeper_message) ->
+            state.view <- Keepers Keeper_list;
+            state.detail_scroll <- 0;
+            state.log_scroll <- 0
+        | Some Keeper_list | None -> ())
+   | Keeper_selection.Detail_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_detail
+   | Keeper_selection.Logs_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_logs
+   | Keeper_selection.Message_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_message);
 
   let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
 
@@ -191,7 +253,12 @@ let add_event (state : state) event_type content =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let ev = { timestamp; event_type; content } in
-  state.events <- ev :: (List.filteri (fun i _ -> i < 10) state.events)
+  let events = ev :: (List.filteri (fun i _ -> i < 10) state.events) in
+  state.overview_event_scroll <-
+    Render_schedule.overview_event_offset_after_prepend
+      ~retained_count:(List.length events)
+      state.overview_event_scroll;
+  state.events <- events
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty

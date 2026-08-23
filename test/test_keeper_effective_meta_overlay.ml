@@ -295,7 +295,7 @@ let test_keeper_surface_resolves_alias_names () =
 
 let test_toml_overlay_reaches_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "analyst" in
+  let name = "delta" in
   write_keeper_agent ~keepers_dir ~name "Analyze carefully.";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
@@ -419,7 +419,7 @@ multimodal_policy = "delegate"
 
 let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "masc-improver" in
+  let name = "omicron-improver" in
   let agent_dir = Filename.concat keepers_dir name in
   mkdir_p agent_dir;
   write_file
@@ -600,7 +600,7 @@ sandbox_profile = "docker"
 
 let test_keepalive_meta_selection_overlays_disk_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "taskmaster" in
+  let name = "fixture-keeper" in
   write_keeper_agent ~keepers_dir ~name "Coordinate the work.";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))

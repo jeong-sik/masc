@@ -113,13 +113,6 @@ val get_protocol_version_for_session :
 val current_server_state_opt :
   unit -> Mcp_server.server_state option
 
-val state_switch_opt :
-  Mcp_server.server_state option -> Eio.Switch.t option
-
-val state_clock_opt :
-  Mcp_server.server_state option ->
-  float Eio.Time.clock_ty Eio.Resource.t option
-
 (** {1 Origin / Accept negotiation} *)
 
 val is_mcp_transport_request : Httpun.Request.t -> bool

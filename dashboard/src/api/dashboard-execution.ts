@@ -72,6 +72,7 @@ export type ToolQualityResponse = TelemetryFreshnessMetadata & {
   success: number
   failure: number
   deferred?: number
+  malformed?: number
   success_rate: number
   by_tool: ToolQualityToolStat[]
   by_keeper: ToolQualityKeeperStat[]

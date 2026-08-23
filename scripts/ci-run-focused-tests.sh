@@ -403,10 +403,18 @@ operator_targets=(
 )
 
 # Suites that test/dune declared and CI never ran. Each one here was built
-# and run at 1a539bd0c7 before being listed, so wiring them adds coverage
-# without adding a known-red target. The 159 declared suites still unwired
-# after this failed that check and need triage one at a time; the ratchet in
-# scripts/audit-ci-test-targets.sh now holds the line at 159.
+# and run before being listed, alone and then all together in one dune
+# invocation, so wiring them adds coverage without adding a known-red target.
+# The list is the alphabetical head of the declared-but-unrun set: it ends at
+# test_safe_ops because that is where the sweep stopped, not because the
+# suites after it fail. Of the 160 still unwired, the 125 sorting after
+# test_safe_ops were measured at 121 passing and 4 failing
+# (test_server_mcp_session_persist, test_telemetry_task_transition_10358,
+# test_tools_coverage, test_voice_runtime_overlay); the 121 are follow-up
+# wiring, not triage. The 35 sorting before it are 17 failing, 5 that are not
+# runnable tests (4 e2e stanzas gated on MASC_E2E_TESTS, 1 plain executable),
+# test_fusion_wake (case 12 times out in CI, #29064), and the rest unmeasured.
+# The ratchet in scripts/audit-ci-test-targets.sh holds the line at 160.
 newly_wired_targets=(
   @test/runtest-test_board_explicit_writes
   @test/runtest-test_board_metrics_labels
@@ -488,7 +496,6 @@ newly_wired_targets=(
   @test/runtest-test_fs_compat_fd_cache
   @test/runtest-test_fs_compat_mkdir_memo
   @test/runtest-test_fs_compat_publication_reconciliation
-  @test/runtest-test_fusion_wake
   @test/runtest-test_gate_hitl_runtime_info
   @test/runtest-test_gate_keeper_backend
   @test/runtest-test_gate_protocol

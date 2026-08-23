@@ -42,6 +42,8 @@
   time_compat
   fs_compat
   yojson
+  ; Tool_definition_toml parses config/tools/<name>.toml declarations.
+  otoml
   eio
   unix)
  (preprocess

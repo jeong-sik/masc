@@ -163,7 +163,8 @@ B·C·D 의 산문 전부가 키가 된다. 반복 행(`key=value` 직렬화)은
 
 ### 2.2 도구 — `config/tools/<name>.toml`
 
-`bin/gen_tool_descriptors.ml` 의 spec 형식(`p_name/p_type/p_description/p_required`)을 그대로 승격한다.
+로더는 `lib/tool_surface/tool_definition_toml.ml`. 파일 하나가 도구 하나를 선언하고, 파일 이름(확장자
+제외)과 `name` 키가 다르면 기동 오류다.
 
 ```toml
 name = "masc_board_vote"
@@ -172,7 +173,7 @@ description = "Vote a board post up or down."
 group = "board"                     # keeper_tool_group wire 이름 (RFC-0389)
 permission = "can_vote"
 visibility = "model"                # model | hidden | operator
-keeper_projection = "board"         # 있으면 keeper 표면용 설명/스키마 테이블
+additional_properties = false       # 있으면 JSON additionalProperties 로
 
 [policy]
 readonly = false
@@ -181,8 +182,9 @@ execution = "serial"                # serial | concurrent | terminal
 
 [[params]]
 name = "post_id"
-type = "string"
+type = "string"                     # string|integer|number|boolean|object|array
 required = true
+pattern = "^p-[0-9a-f]+$"           # string 전용. max_length 도 (→ maxLength)
 description = "Exact board post ID (p-xxxx) from masc_board_list or masc_board_search."
 
 [[params]]
@@ -192,16 +194,45 @@ enum = ["up", "down"]
 required = true
 description = "Vote direction."
 
+[[params]]
+name = "limit"
+type = "integer"
+default = 20                        # 선언한 type 과 같은 스칼라만 (integer/boolean)
+minimum = 1                         # integer 전용. maximum 도
+maximum = 100
+description = "Max results."
+
+# keeper 표면이 따로 좁힌 설명/스키마를 갖는 도구는 같은 파일의 테이블로.
+[keeper_projection]
+description = "Vote on one existing board post by exact post_id."
+additional_properties = false
+# [[keeper_projection.params]] — 형식은 [[params]] 와 동일
+
 [help]
 when_to_use = "..."
 constraints = "..."
 ```
 
-중첩 스키마(Board `sources[]` 등, 전체의 약 10%)는 `schema = "<name>.schema.json"` 사이드카로 둔다.
-부팅 시 한 번 파싱해 기존 닫힌 타입으로 디코드한다 — `Tool_name.of_string`, `runtime_handler_of_string`,
-`tool_kind_of_string`(RFC-0386) 의 exhaustive match. 모르는 이름·누락 축은 기동 오류. OCaml 에는
-handler 바인딩(`runtime_handler` → 함수)과 `readonly_of_input`·`input_translation` 같은 코드 값만 남는다.
-`<config-root>/tool_policy.toml` 은 삭제한다(reader 0).
+중첩 스키마(Board `sources[]` 등)는 사이드카 없이 같은 파일에서 표현한다: array param 의
+`items = { type = "string" }` 인라인 테이블, 또는 `[params.items]` 테이블에 `type = "object"` 와
+`[[params.items.params]]`(name/type/description) 를 둔다.
+
+디코드 규칙:
+
+- **모르는 키/값 = 기동 오류.** 로더는 소비자가 있는 키만 받는다. 위 예시 중 `title`/`group`/
+  `permission`/`visibility`/`[policy]`/`[help]` 는 그 키를 읽는 마이그레이션 단계(§3 항목 3+)가
+  로더 디코드를 같이 열기 전까지는 거부된다 — 조용히 무시되는 키는 소비자 없는 config 이기 때문.
+- 발행 JSON 은 TOML 의 키 순서를 그대로 보존한다(`name`/`required` 메타 키 제외 — 이 둘은
+  `properties`/`required` 집계로 들어간다). 마이그레이션 PR 은 이 성질로 이주 전 리터럴과
+  바이트 동일함을 증명한다.
+- 부팅 시 한 번 파싱하고(`Server_runtime_bootstrap.validate_embedded_tool_definitions`),
+  이름은 기존 닫힌 타입으로 디코드한다 — `Tool_name.of_string`, `runtime_handler_of_string`,
+  `tool_kind_of_string`(RFC-0386) 의 exhaustive match. OCaml 에는 handler 바인딩
+  (`runtime_handler` → 함수)과 `readonly_of_input`·`input_translation` 같은 코드 값만 남는다.
+- 코드가 SSOT 인 값(variant 파생 enum 목록, `Board.Limits` 류 한계값, id pattern)은 TOML 에
+  리터럴로 적고, 발행된 스키마를 owner 와 대조하는 기존 동기화 테스트(`test_enum_mirror_sync`
+  패턴)가 drift 를 잡는다. Printf 로 값을 끼워 넣던 description 은 리터럴 문장이 된다.
+- `<config-root>/tool_policy.toml` 은 삭제한다(reader 0).
 
 ### 2.3 대시보드 — 화면 하나, 소스 둘
 

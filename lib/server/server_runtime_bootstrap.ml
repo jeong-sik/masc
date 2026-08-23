@@ -1066,47 +1066,72 @@ let initialize_owner_state_blocking
 
 (* Cap the per-boot file list in the sync log line; full counts are always
    logged, names are illustrative. *)
-let max_logged_prompt_sync_entries = 10
+let max_logged_asset_sync_entries = 10
 
-let sync_prompt_assets_from_binary () =
+let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
   let sync =
-    Prompt_defaults.sync_prompt_assets
+    Managed_asset_sync.sync
+      ~domain
       ~read:Embedded_config.read
       ~files:Embedded_config.file_list
-      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ~dest_dir
       ()
   in
   (match
-     sync.Prompt_defaults.copied,
-     sync.Prompt_defaults.overwritten,
-     sync.Prompt_defaults.removed
+     sync.Managed_asset_sync.copied,
+     sync.Managed_asset_sync.overwritten,
+     sync.Managed_asset_sync.removed
    with
    | [], [], [] -> ()
    | copied, overwritten, removed ->
        let names = copied @ overwritten @ removed in
        let shown =
-         List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
+         List.filteri (fun i _ -> i < max_logged_asset_sync_entries) names
        in
        Log.Misc.info
-         "prompt assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
+         "%s assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
+         label
          (List.length copied)
          (List.length overwritten)
          (List.length removed)
          (String.concat ", " shown)
-         (if List.length names > max_logged_prompt_sync_entries then ", …"
+         (if List.length names > max_logged_asset_sync_entries then ", …"
           else ""));
   List.iter
-    (fun (rel, msg) -> Log.Misc.warn "prompt asset sync failed: %s: %s" rel msg)
-    sync.Prompt_defaults.failed
+    (fun (rel, msg) -> Log.Misc.warn "%s asset sync failed: %s: %s" label rel msg)
+    sync.Managed_asset_sync.failed
+
+(* Tool definitions ship embedded in the binary and are read once at boot
+   (RFC prompts-and-tool-definitions-outside-ocaml §6). A definition that
+   does not decode refuses the boot here, before readiness, instead of
+   publishing a partial tool surface. *)
+let validate_embedded_tool_definitions () =
+  match
+    Tool_definition_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message -> failwith (Printf.sprintf "embedded tool definition: %s" message)
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
-  (* Converge runtime prompt markdown onto the binary-embedded assets
-     before the registry scans the directory (#20929: merged prompt edits
-     never reached the runtime dir otherwise). *)
-  sync_prompt_assets_from_binary ();
+  (* Converge the runtime prompt markdown and tool definition dirs onto the
+     binary-embedded assets before anything scans them (#20929: merged
+     prompt edits never reached the runtime dir otherwise). *)
+  sync_managed_assets_from_binary
+    ~label:"prompt"
+    ~domain:Managed_asset_sync.Prompts
+    ~dest_dir:(Config_dir_resolver.prompts_dir ())
+    ();
+  sync_managed_assets_from_binary
+    ~label:"tool"
+    ~domain:Managed_asset_sync.Tools
+    ~dest_dir:(Config_dir_resolver.tools_dir ())
+    ();
+  validate_embedded_tool_definitions ();
   (* Load the registry and replay operator overrides. The resolved directory is
      not inspected afterwards: three checks used to stand here and none of them
      gated. One compared a value against the call that produced it. One

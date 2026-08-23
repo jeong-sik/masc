@@ -37,7 +37,20 @@ type save_result =
   | Existing of t
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.paused-work-disposition.v6"
+(* The receipt shape and the store that holds it move together. [of_yojson] is
+   an exhaustive match over the sorted field list, so a field removed from the
+   shape makes every stored receipt unreadable, and [save_if_absent] reads
+   before it writes — the operation id then neither replays its receipt nor
+   records a new one. #29590 removed [expected_generation] without moving
+   either name and wedged 97 of 98 live receipts that way.
+
+   One constant, so a bump cannot land in the schema string and miss the
+   directory. [test_keeper_paused_work_disposition_receipt] pins a full
+   current-shape receipt against it: change the shape without changing this,
+   and the test fails. *)
+let store_version = "v7"
+let schema = "masc.keeper.paused-work-disposition." ^ store_version
+let store_dirname = "paused-work-dispositions-" ^ store_version
 
 let equal left right =
   String.equal left.keeper_name right.keeper_name
@@ -107,7 +120,7 @@ let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
 let keeper_dir config keeper_name =
   let root = Workspace.masc_root_dir config in
   Filename.concat
-    (Filename.concat root "paused-work-dispositions-v6")
+    (Filename.concat root store_dirname)
     ("keeper-" ^ sha256 keeper_name)
 ;;
 

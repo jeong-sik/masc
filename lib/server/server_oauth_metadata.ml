@@ -60,17 +60,9 @@ let loopback_authority authority =
   match Server_request_authority.trust_class authority with
   | Explicit_trusted_host -> false
   | Configured_bind ->
-    let host = Server_request_authority.host authority |> String.lowercase_ascii in
-    if String.equal host "localhost"
-    then true
-    else
-      match Ipaddr.of_string host with
-      | Ok (Ipaddr.V4 address) ->
-        let octets = Ipaddr.V4.to_octets address in
-        String.length octets = 4 && Char.code octets.[0] = 127
-      | Ok (Ipaddr.V6 address) ->
-        Ipaddr.V6.compare address Ipaddr.V6.localhost = 0
-      | Error _ -> false
+    (* One answer to "is this loopback" (#27576). *)
+    Masc_network_defaults.is_loopback_host
+      (Server_request_authority.host authority)
 ;;
 
 let challenge_for_authority authority =

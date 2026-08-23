@@ -116,7 +116,17 @@ let masc_http_default_max_connections_s = string_of_int masc_http_default_max_co
     IPv4/IPv6 loopback address (via {!Ipaddr}).  Treats the literal
     "localhost" (after trim + lowercase) as loopback.  Malformed
     addresses return [false] — unlike a plain string prefix match,
-    which would wrongly accept garbage like "127.invalid". *)
+    which would wrongly accept garbage like "127.invalid".
+
+    "Any" means the whole of 127.0.0.0/8, which is what RFC 1122 §3.2.1.3
+    reserves. This used to compare against 127.0.0.1 alone while saying
+    otherwise, so 127.0.0.2 and systemd-resolved's 127.0.0.53 read as remote
+    on the one implementation three others already treated as loopback
+    (#27576). Traffic addressed anywhere in 127/8 cannot leave the host,
+    which is what the callers are asking about.
+
+    An IPv4-mapped IPv6 address (::ffff:127.0.0.1) is the same address
+    arriving over a dual-stack socket; every implementation missed it. *)
 let is_loopback_host host =
   let normalized = String.trim host |> String.lowercase_ascii in
   match normalized with
@@ -125,8 +135,11 @@ let is_loopback_host host =
       match Ipaddr.of_string normalized with
       | Ok ip -> (
           match ip with
-          | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.localhost = 0
-          | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0)
+          | Ipaddr.V4 addr -> Ipaddr.V4.Prefix.(mem addr loopback)
+          | Ipaddr.V6 addr -> (
+              match Ipaddr.v4_of_v6 addr with
+              | Some mapped -> Ipaddr.V4.Prefix.(mem mapped loopback)
+              | None -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0))
       | Error _ -> false)
 
 (** Convenience wrapper for [Uri.host]-style inputs.  Returns [false]

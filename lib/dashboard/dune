@@ -7,6 +7,7 @@
  (flags :standard -open Masc -w +33)
  (libraries
   masc
+  masc.tool_schemas_specs
   yojson
   otoml
   base64

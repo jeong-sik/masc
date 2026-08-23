@@ -246,6 +246,16 @@ let test_cut_refuses_a_store_with_an_unterminated_tail () =
   Fs_compat.save_file path (content ^ "{\"event\":\"reg");
   let cut : Run_registry_core.cut_report = R.cut_replay_log ~execute:true path in
   check bool "the cut left the store alone" false cut.rewritten;
+  (* A caller that only reads [rewritten] cannot tell "nothing needed cutting"
+     from "the cut declined". [reached_end] is what separates them, and the
+     dry run reports it too — otherwise a deploy step would call this a
+     success. *)
+  check bool "and says why" false cut.reached_end;
+  check
+    bool
+    "the dry run predicts the refusal"
+    false
+    (R.cut_replay_log ~execute:false path).reached_end;
   check
     string
     "the bytes are untouched"

@@ -97,6 +97,7 @@ type cut_report =
   { lines_read : int
   ; malformed_lines : int
   ; retained_entries : int
+  ; reached_end : bool
   ; rewritten : bool
   }
 
@@ -529,6 +530,7 @@ module Make (Payload : Payload) = struct
     { lines_read
     ; malformed_lines = List.length malformed
     ; retained_entries = List.length entries
+    ; reached_end
     ; rewritten
     }
   ;;

@@ -595,36 +595,97 @@ let run_registry_cuts =
   ]
 ;;
 
-let cut_run_registries base_path ~execute =
+let scan_run_registries base_path ~execute =
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
-  let dropped_total =
+  List.map
+    (fun (filename, cut) ->
+       let report = cut ~execute (Filename.concat masc_dir filename) in
+       Printf.printf
+         "%s lines=%d unreadable=%d retained=%d whole_file=%b rewritten=%b\n%!"
+         filename
+         report.Run_registry_core.lines_read
+         report.malformed_lines
+         report.retained_entries
+         report.reached_end
+         report.rewritten;
+       filename, report)
+    run_registry_cuts
+;;
+
+let cut_run_registries_report ~execute reports =
+  let dropped =
     List.fold_left
-      (fun dropped_total (filename, cut) ->
-         let path = Filename.concat masc_dir filename in
-         let report = cut ~execute path in
-         Printf.printf
-           "%s lines=%d unreadable=%d retained=%d rewritten=%b\n%!"
-           filename
-           report.Run_registry_core.lines_read
-           report.malformed_lines
-           report.retained_entries
-           report.rewritten;
-         dropped_total + report.malformed_lines)
+      (fun total (_, r) -> total + r.Run_registry_core.malformed_lines)
       0
-      run_registry_cuts
+      reports
   in
-  if execute
-  then Ok ()
-  else if dropped_total = 0
-  then Ok ()
-  else
-    (* Reporting a store that needs cutting is not a preflight failure; the
-       operator decides. The distinct exit code lets the deploy script tell
-       "nothing to cut" from "rows are being dropped" without parsing stdout. *)
+  (* A store whose last line is unterminated is left alone, which is what a
+     crashed server leaves behind — exactly the state a deployment runs into.
+     Reporting that as success would tell the deploy script the store was
+     cleaned when it was not. *)
+  let unfinished =
+    List.filter (fun (_, r) -> not r.Run_registry_core.reached_end) reports
+    |> List.map fst
+  in
+  if unfinished <> []
+  then
     errorf
-      "%d unreadable row(s) across the run registries; re-run with --execute to \
-       cut them"
-      dropped_total
+      "store(s) end in an unterminated line and were left alone: %s"
+      (String.concat ", " unfinished)
+  else if not execute
+  then
+    if dropped = 0
+    then Ok ()
+    else
+      errorf
+        "%d unreadable row(s) across the run registries; re-run with --execute \
+         to cut them"
+        dropped
+  else (
+    let uncut =
+      List.filter
+        (fun (_, r) ->
+           r.Run_registry_core.malformed_lines > 0 && not r.rewritten)
+        reports
+      |> List.map fst
+    in
+    if uncut = []
+    then Ok ()
+    else
+      errorf
+        "store(s) still hold unreadable rows after the cut: %s"
+        (String.concat ", " uncut))
+;;
+
+(* The rewrite replaces the inode and drops rows that are Running on disk, so
+   it must not run under a live server. The lease is the same one
+   [tool-blob-maintenance] takes for its own destructive pass. *)
+let cut_run_registries base_path ~execute =
+  if not execute
+  then cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
+  else (
+    let run_dir = (Host_config.host ()).run_dir in
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned { pid } ->
+      errorf
+        "workspace writer lease is already owned base_path=%s pid=%s"
+        base_path
+        (match pid with
+         | Some value -> string_of_int value
+         | None -> "unknown")
+    | Server_startup_takeover.Base_path_rejected rejection ->
+      errorf
+        "workspace writer lease rejected base_path=%s: %s"
+        base_path
+        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Fun.protect
+        ~finally:(fun () ->
+          Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+           cut_run_registries_report
+             ~execute
+             (scan_run_registries base_path ~execute)))
 ;;
 
 let execute_cut =

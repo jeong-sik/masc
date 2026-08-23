@@ -64,16 +64,16 @@ val completion_error_to_string : completion_error -> string
 val storage_filename : string
 
 val max_completed_retained : int
-
-val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
-(** Deployment-time store cut for {!storage_filename}. See
-    {!Run_registry_core.Make.cut_replay_log}. *)
 (** How many completed runs survive a replay. Running entries are kept
     regardless, so this bounds finished work only.
 
     Derived from the page size of the surface that reads this store rather than
     copied from the sibling registries, which retain 64 and have no paging UI.
     A test pins that relation. *)
+
+val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
+(** Deployment-time store cut for {!storage_filename}. See
+    {!Run_registry_core.Make.cut_replay_log}. *)
 
 val create : ?path:string -> unit -> t
 val replay : string -> t

@@ -103,7 +103,7 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Keepers _ | Board | Approvals | Planning
-            | System_logs ->
+            | Verification | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -2521,6 +2521,117 @@ let render_system_logs (state : state) =
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
+(* What is waiting on a verdict.
+
+   The columns answer the questions an operator opens this for: which task,
+   who submitted it, and what would move it forward. Evidence counts rather
+   than paths -- a row is a queue entry, and the paths belong to whoever opens
+   the task. *)
+let render_verification (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let requests =
+    match state.verification with None -> [] | Some s -> s.Masc.Tui_decode.vs_requests
+  in
+  let shown = List.length requests in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.verification with
+    | None ->
+        Printf.sprintf " MASC Verification  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        (* Both numbers, for the same reason the log surface shows both: "12"
+           beside a list of 12 would read as "that is all of them". *)
+        Printf.sprintf " MASC Verification (%d of %d)  %s  %s" shown
+          snapshot.Masc.Tui_decode.vs_total timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-14s %-16s %-9s %s" "Task" "Submitted by" "Evidence"
+      "What it asks for"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.verification_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.verification_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.verification_scroll max_scroll) in
+  state.verification_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.verification_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (nothing waiting on a verdict)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt requests idx with
+      | None -> box_empty buf cols
+      | Some r ->
+          let open Masc.Tui_decode in
+          (* Submitted against required. A request that owes three artifacts
+             and has one is the row an operator acts on first, and the pair
+             says that where a single count would not. *)
+          let evidence =
+            match r.vr_evidence_error with
+            | Some _ -> "unreadable"
+            | None ->
+                Printf.sprintf "%d/%d"
+                  (List.length r.vr_submitted_evidence)
+                  (List.length r.vr_required_artifacts)
+          in
+          let asks =
+            match r.vr_next_action with
+            | Some action -> action
+            | None -> r.vr_summary
+          in
+          let line =
+            Printf.sprintf "  %-14s %-16s %-9s %s"
+              (Terminal_text.single_line r.vr_task_id)
+              (Terminal_text.single_line r.vr_submitted_by)
+              evidence
+              (Terminal_text.single_line asks)
+          in
+          let style =
+            (* Evidence that cannot be read is the one row that cannot be
+               judged as it stands, so it reads as a problem rather than as a
+               queue entry. *)
+            match r.vr_evidence_error with
+            | Some _ -> Ansi.red
+            | None -> Ansi.reset
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -2560,6 +2671,7 @@ let render_surface (state : state) =
                  ~armed:(goal_action_armed_for state goal_id) goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
+  | Verification -> render_verification state
   | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =

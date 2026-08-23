@@ -1062,6 +1062,74 @@ let decode_system_log_entry json =
     ; sl_message
     }
 
+type verification_request = {
+  vr_request_id : string;
+  vr_task_id : string;
+  vr_task_title : string;
+  vr_kind : string;
+  vr_summary : string;
+  vr_next_action : string option;
+  vr_submitted_by : string;
+  vr_created_at : string;
+  vr_required_artifacts : string list;
+  vr_submitted_evidence : string list;
+  vr_evidence_error : string option;
+}
+
+type verification_snapshot = {
+  vs_requests : verification_request list;
+  vs_total : int;
+}
+
+let decode_string_name_list json key =
+  let* items = optional_list_field json key in
+  decode_list key
+    (fun item ->
+       match item with
+       | `String value -> Ok value
+       | bad -> field_type_error key "a string" bad)
+    items
+
+let decode_verification_request json =
+  let* vr_request_id = required_string_field json "request_id" in
+  let* vr_task_id = required_string_field json "task_id" in
+  let* vr_task_title = required_string_field json "task_title" in
+  let* vr_kind = required_string_field json "request_kind" in
+  let* vr_summary = required_string_field json "request_summary" in
+  let* vr_submitted_by = required_string_field json "submitted_by" in
+  let* vr_created_at = required_string_field json "created_at" in
+  let* vr_required_artifacts =
+    decode_string_name_list json "required_artifacts"
+  in
+  let* vr_submitted_evidence =
+    decode_string_name_list json "submitted_evidence"
+  in
+  let* vr_next_action = optional_string_field json "next_action" in
+  let* vr_evidence_error =
+    optional_string_field json "evidence_projection_error"
+  in
+  Ok
+    { vr_request_id
+    ; vr_task_id
+    ; vr_task_title
+    ; vr_kind
+    ; vr_summary
+    ; vr_next_action
+    ; vr_submitted_by
+    ; vr_created_at
+    ; vr_required_artifacts
+    ; vr_submitted_evidence
+    ; vr_evidence_error
+    }
+
+let decode_verification_snapshot json =
+  let* requests_json = required_list_field json "requests" in
+  let* vs_requests =
+    decode_list "requests" decode_verification_request requests_json
+  in
+  let* vs_total = required_int_field json "total" in
+  Ok { vs_requests; vs_total }
+
 let decode_system_log_snapshot json =
   let* entries_json = required_list_field json "entries" in
   let* sys_entries = decode_list "entries" decode_system_log_entry entries_json in
@@ -1078,15 +1146,6 @@ let decode_planning_snapshot json =
   let* pl_backlog = decode_planning_backlog backlog_json in
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
-
-let decode_string_name_list json key =
-  let* items = optional_list_field json key in
-  decode_list key
-    (fun item ->
-       match item with
-       | `String value -> Ok value
-       | bad -> field_type_error key "a string" bad)
-    items
 
 let required_bool_field json key =
   match member key json with

@@ -166,7 +166,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Board | Approvals | Planning | System_logs -> None
+    | Overview | Board | Approvals | Planning | Verification | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -455,6 +455,13 @@ let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
   match fetch_dashboard_logs ~host ~port ~limit with
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json -> Tui_decode.decode_system_log_snapshot json
+
+(** Load the verification queue from /api/v1/verification/requests *)
+let load_verification ~(host : string) ~(port : int) ~(limit : int) :
+    (Tui_decode.verification_snapshot, string) result =
+  match fetch_verification_requests ~host ~port ~limit with
+  | Error err -> Error ("verification load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_verification_snapshot json
 
 (** Load planning snapshot from /api/v1/dashboard/planning *)
 let load_planning ~(host : string) ~(port : int) :

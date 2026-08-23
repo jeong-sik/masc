@@ -439,6 +439,13 @@ let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
   get_json ~host ~port
     ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
 
+(** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
+    lists what is waiting rather than the whole history. *)
+let fetch_verification_requests ~(host : string) ~(port : int) ~(limit : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(Printf.sprintf "/api/v1/verification/requests?limit=%d" (max 1 limit))
+
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/planning"

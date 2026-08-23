@@ -117,7 +117,7 @@ export interface DashboardSectionNavItem {
 // parity probes measure; the older 2026-07 standalone export predates its
 // 명령/Lab group. Settings stays pinned in the rail footer, so it renders
 // outside the main list even though it closes this set.
-const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
+export const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
   'keepers',
   'registry',

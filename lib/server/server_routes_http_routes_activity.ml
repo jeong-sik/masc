@@ -1249,6 +1249,46 @@ let add_routes ~sw ~clock router =
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
+  (* Schedule cancel from the terminal (#29684). The workspace tool owns the
+     argument contract ([Tool_schedule.handle_cancel]: schedule_id,
+     cancelled_by_*, reason) and the store transition; the route pipes HTTP
+     straight into that handler, so validation and error text stay identical
+     to the MCP tool. Cancel takes only the config -- no creation hooks, no
+     agent identity to inject -- because its arguments already carry the
+     canceller. *)
+  |> Http.Router.post "/api/v1/tools/masc_schedule_cancel" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_schedule_cancel"
+         (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let start_time = Unix.gettimeofday () in
+             let result =
+               Tool_schedule.handle_cancel
+                 ~tool_name:"masc_schedule_cancel" ~start_time config args
+             in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          let karma_list = Board_dispatch.get_all_karma () in

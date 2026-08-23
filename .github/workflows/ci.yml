@@ -1128,6 +1128,7 @@ jobs:
             @test/runtest-test_guarded_dispatch_telemetry \
             @test/runtest-test_owned_read_cwd \
             @test/runtest-test_keeper_capability_probe \
+            @test/runtest-test_runtime_input_byte_ceiling \
             @test/runtest-test_keeper_checkpoint_stale_guard \
             @test/runtest-test_keeper_contract_classifier_pure \
             @test/runtest-test_keeper_conditions_wire_parity \

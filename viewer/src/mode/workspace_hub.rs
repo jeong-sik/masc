@@ -941,55 +941,7 @@ pub(super) async fn refresh_workspaces_from_server(
     Ok(snapshots)
 }
 
-fn merge_workspace_snapshot(existing: &mut WorkspaceSnapshot, incoming: WorkspaceSnapshot) {
-    if existing.status.trim().is_empty()
-        || existing.status.eq_ignore_ascii_case("idle")
-        || existing.status.eq_ignore_ascii_case("unknown")
-    {
-        if !incoming.status.trim().is_empty() {
-            existing.status = incoming.status.clone();
-        }
-    }
-    if incoming.turn >= existing.turn {
-        existing.turn = incoming.turn;
-        if !incoming.phase.trim().is_empty() {
-            existing.phase = incoming.phase.clone();
-        }
-    } else if (existing.phase.trim().is_empty() || existing.phase.trim() == "-")
-        && !incoming.phase.trim().is_empty()
-    {
-        existing.phase = incoming.phase.clone();
-    }
-    existing.agent_count = existing.agent_count.max(incoming.agent_count);
-    existing.task_count = existing.task_count.max(incoming.task_count);
-}
 
-fn dedup_workspace_snapshots(rows: Vec<WorkspaceSnapshot>) -> Vec<WorkspaceSnapshot> {
-    use std::collections::HashMap;
-
-    let mut out: Vec<WorkspaceSnapshot> = Vec::new();
-    let mut index_by_id: HashMap<String, usize> = HashMap::new();
-
-    for mut row in rows {
-        row.id = crate::config::sanitize_workspace_id(&row.id)
-            .unwrap_or_else(|| row.id.trim().to_string());
-        if row.id.is_empty() {
-            continue;
-        }
-        let key = row.id.to_ascii_lowercase();
-        if let Some(idx) = index_by_id.get(&key).copied() {
-            if let Some(existing) = out.get_mut(idx) {
-                merge_workspace_snapshot(existing, row);
-            }
-            continue;
-        }
-        let idx = out.len();
-        index_by_id.insert(key, idx);
-        out.push(row);
-    }
-
-    out
-}
 
 pub(super) fn bind_workspace_controls(doc: &web_sys::Document) {
     let Some(select_el) = doc.get_element_by_id("workspace-selector-inline") else {

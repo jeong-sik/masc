@@ -2,22 +2,6 @@
 //!
 //! Pure-Rust logic with no WASM dependencies, enabling native `cargo test`.
 
-/// A single row in the preflight checklist.
-#[derive(Debug, Clone)]
-pub(super) struct PreflightRow {
-    pub ok: bool,
-    pub label: String,
-    pub detail: String,
-    pub hint: Option<String>,
-}
-
-impl PreflightRow {
-    /// Convenience constructor for the common case where `hint` is `None`.
-    pub(super) fn new(ok: bool, label: &str, detail: impl Into<String>) -> Self {
-        Self { ok, label: label.to_string(), detail: detail.into(), hint: None }
-    }
-}
-
 /// Returns `true` when the body looks like an HTML error page (proxy, CDN, etc.).
 pub(super) fn is_html_body(body: &str) -> bool {
     let lower = body.to_ascii_lowercase();
@@ -107,27 +91,4 @@ mod tests {
         assert!(!is_html_body(r#"{"error":"bad"}"#));
     }
 
-    #[test]
-    fn preflight_row_debug_and_clone() {
-        let row = PreflightRow::new(true, "test", "detail");
-        let cloned = row.clone();
-        assert!(cloned.ok);
-        assert_eq!(row.label, "test");
-        assert!(row.hint.is_none());
-        assert_eq!(format!("{:?}", row), format!("{:?}", cloned));
-    }
-
-    #[test]
-    fn preflight_row_with_hint() {
-        let row = PreflightRow {
-            ok: false,
-            label: "서버 연결".to_string(),
-            detail: "HTTP 502 응답".to_string(),
-            hint: Some("프록시 확인".to_string()),
-        };
-        assert!(!row.ok);
-        assert_eq!(row.hint.as_deref(), Some("프록시 확인"));
-        let cloned = row.clone();
-        assert_eq!(cloned.hint, row.hint);
-    }
 }

@@ -60,6 +60,10 @@ type config = {
       (** Exact caller/model sampling declaration. [None] omits temperature and
           leaves the selected provider's default intact. *)
   hooks : Agent_core.Hooks.hooks option;
+  (* Settles a [pre_tool_use] hook that answers [ElicitToolApproval]. Absent
+     means such a decision is rejected rather than admitted, so a turn with
+     nobody watching does not run the call on its own. *)
+  tool_approval : Agent_core.Hooks.tool_approval_callback option;
   event_bus : Agent_core.Event_bus.t option;
   session_id : string option;
   description : string option;

@@ -537,6 +537,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -612,6 +616,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count

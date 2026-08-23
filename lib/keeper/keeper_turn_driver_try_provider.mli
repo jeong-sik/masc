@@ -42,6 +42,10 @@ type try_provider_ctx =
   ; temperature : float option
   ; accept : Agent_core.Types.api_response -> bool
   ; hooks : Agent_core.Hooks.hooks option
+  ; approval_gate : Keeper_tool_approval_gate.t option
+        (** Holds a tool call for an operator before it runs. Absent means no
+            call is held, which is what an autonomous turn wants: nobody is
+            watching it to answer. *)
   ; raw_trace : Agent_core.Raw_trace.t option
   ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t

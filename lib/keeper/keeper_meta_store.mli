@@ -23,6 +23,15 @@ val read_meta_file_path :
   string ->
   (Keeper_meta_contract.keeper_meta option, string) result
 
+(** Deploy-gate twin of [read_meta_file_path]: the same decode-and-repair
+    decision without the fail-open. [Ok ()] when the runtime keeps the
+    persisted snapshot (directly or after the in-place enum repair);
+    [Error] exactly when the runtime would discard the meta as unreadable
+    and re-materialise the Keeper from its declaration, losing the
+    accumulated counters and the persisted task binding. The deployment
+    preflight calls this before the runtime swap. *)
+val validate_current_meta_file_result : string -> (unit, string) result
+
 (** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)

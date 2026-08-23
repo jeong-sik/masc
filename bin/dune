@@ -184,6 +184,7 @@
  (public_name masc-deployment-preflight-helper)
  (package masc)
  (libraries
+  masc
   masc.server
   masc.host_config
   masc.keeper_runtime

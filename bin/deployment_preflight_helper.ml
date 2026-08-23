@@ -83,6 +83,18 @@ let validate_current_wal ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+let validate_current_meta path =
+  Masc.Keeper_meta_store.validate_current_meta_file_result path
+  |> Result.map_error (fun detail ->
+    `Msg
+      (Printf.sprintf
+         "current keeper meta production validation rejected path=%s (on boot \
+          the runtime discards this meta and re-materialises the keeper from \
+          its declaration, losing accumulated counters): %s"
+         path
+         detail))
+;;
+
 let validate_schedule_ledger path =
   try
     let json = Yojson.Safe.from_file path in
@@ -515,6 +527,21 @@ let validate_current_wal_cmd =
          $ current_queue_keeper_name))
 ;;
 
+let current_meta_file =
+  let doc = "Validate one persisted Keeper meta against the current closed schema." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"KEEPER_META" ~doc)
+;;
+
+let validate_current_meta_cmd =
+  let doc = "validate one keeper meta with the production decoder" in
+  Cmd.v
+    (Cmd.info "validate-current-meta" ~doc)
+    Term.(
+      ret
+        (const (fun path -> cmdliner_result (validate_current_meta path))
+           $ current_meta_file))
+;;
+
 let schedule_ledger_file =
   let doc = "Validate one current schedule ledger." in
   Arg.(required & pos 0 (some file) None & info [] ~docv:"SCHEDULE_LEDGER" ~doc)
@@ -646,6 +673,7 @@ let () =
           ; verify_lease_owner_cmd
           ; validate_current_queue_cmd
           ; validate_current_wal_cmd
+          ; validate_current_meta_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ]))

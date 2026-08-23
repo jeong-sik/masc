@@ -207,6 +207,37 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
           | None -> fail_open e)))
 ;;
 
+let validate_current_meta_file_result path : (unit, string) result =
+  (* Deploy-gate twin of [read_meta_file_path]: the same decode-and-repair
+     decision, without the fail-open. [Error] fires exactly when the runtime
+     would discard the persisted snapshot as unreadable and re-materialise
+     the Keeper from its declaration (2026-08-23: three fleet-down incidents
+     before #29610 made the read fail open, losing the accumulated counters
+     and the persisted task binding). The deployment preflight surfaces this
+     while the previous runtime is still serving, so the operator can strip
+     retired fields losslessly before the swap takes downtime. *)
+  if not (Fs_compat.file_exists path)
+  then Ok ()
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Error detail -> Error detail
+    | Ok json ->
+      (match meta_of_json json with
+       | Ok _meta -> Ok ()
+       | Error detail ->
+         (match repair_non_canonical_enum_fields json with
+          | Some (repaired_json, _repairs) ->
+            (match meta_of_json repaired_json with
+             | Ok _meta -> Ok ()
+             | Error redecode_detail ->
+               Error
+                 (Printf.sprintf
+                    "%s; auto-repair did not decode: %s"
+                    detail
+                    redecode_detail))
+          | None -> Error detail))
+;;
+
 let persisted_keeper_names_result config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with

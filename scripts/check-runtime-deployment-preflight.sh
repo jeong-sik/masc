@@ -95,6 +95,7 @@ run_gate() {
   local signal_path
   local rows_in_file
   local current_owner_count=0
+  local keeper_meta_count=0
   local queue_path
   local keeper_name
   local in_progress_count_total=0
@@ -120,6 +121,19 @@ run_gate() {
     [[ -d "$keepers_root" && ! -L "$keepers_root" ]] \
       || fail "Keeper runtime root is not an exact directory: $keepers_root"
     reject_symlinks_below "$keepers_root" "Keeper runtime root"
+    # Keeper meta is a closed current schema. A field the incoming binary
+    # stopped writing (2026-08-23 hard cuts) reads as garbage on boot: the
+    # runtime fails open, drops the accumulated counters, and re-materialises
+    # the keeper from its declaration (#29610). Catch it while the previous
+    # runtime is still serving, while stripping retired fields is lossless.
+    while IFS= read -r -d '' meta_path; do
+      [[ -f "$meta_path" && ! -L "$meta_path" ]] \
+        || fail "keeper meta is not an exact regular file: $meta_path"
+      "$PREFLIGHT_HELPER" validate-current-meta "$meta_path" \
+        || fail "current keeper meta is invalid (on boot the runtime discards it and the keeper loses its accumulated counters; strip retired fields or reset before restart): $meta_path"
+      keeper_meta_count=$((keeper_meta_count + 1))
+    done < <(find "$keepers_root" -mindepth 1 -maxdepth 1 -name '*.json' -print0)
+
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
         || fail "current queue snapshot is not an exact regular file: $queue_path"
@@ -210,9 +224,10 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
-  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d in_progress=%d\n' \
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
-    "$signal_row_count" "$current_owner_count" "$in_progress_count_total"
+    "$signal_row_count" "$current_owner_count" "$keeper_meta_count" \
+    "$in_progress_count_total"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -267,6 +282,54 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     ' >"$queue_dir/event-queue-v16.json"
   }
 
+  # The full closed current keeper-meta field set. The retired-field variant
+  # reproduces the 2026-08-23 incident shape: a hard cut removed fields the
+  # on-disk snapshot still carried.
+  keeper_meta_fixture='{
+    schema: "masc.keeper_meta.v1", name: "fixture",
+    agent_name: "keeper-fixture-agent",
+    instructions: "self-test fixture", autonomous_instructions: null,
+    trace_id: "trace-fixture", multimodal_policy: "inherit",
+    trace_history: [], last_handoff_ts: 0.0,
+    created_at: "2026-08-23T00:00:00Z", updated_at: "2026-08-23T00:00:00Z",
+    total_turns: 0, total_input_tokens: 0, total_output_tokens: 0,
+    total_tokens: 0, total_cost_usd: 0.0, last_turn_ts: 0.0,
+    last_input_tokens: 0, last_output_tokens: 0, last_total_tokens: 0,
+    last_latency_ms: 0, compaction_count: 0, last_compaction_ts: 0.0,
+    last_compaction_before_tokens: 0, last_compaction_after_tokens: 0,
+    proactive_count_total: 0, last_proactive_ts: 0.0,
+    proactive_visible_count_total: 0, last_visible_proactive_ts: 0.0,
+    last_proactive_outcome: "never_started", last_proactive_reason: "",
+    last_proactive_preview: "", consecutive_noop_count: 0,
+    last_autonomous_action_at: "", autonomous_action_count: 0,
+    autonomous_turn_count: 0, autonomous_text_turn_count: 0,
+    autonomous_tool_turn_count: 0, board_reactive_turn_count: 0,
+    mention_reactive_turn_count: 0, noop_turn_count: 0,
+    message_scope_ack_id: null, last_runtime_attempt: null, paused: false,
+    latched_reason: null, current_task_id: null, keeper_id: null,
+    agent_core_env: {}
+  }'
+
+  write_keeper_meta() {
+    local target_root="$1"
+    local variant="$2"
+    mkdir -p "$target_root/.masc/keepers"
+    case "$variant" in
+      current)
+        jq -n "$keeper_meta_fixture" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+      retired-field)
+        jq -n "$keeper_meta_fixture + {generation: 1}" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+      missing-field)
+        jq -n "$keeper_meta_fixture | del(.paused)" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+    esac
+  }
+
   expect_failure() {
     local case_name="$1"
     local target_root="$2"
@@ -293,6 +356,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   cp "$safe_root/.masc/schedules.json" \
     "$safe_root/.masc/schedules.json.last-good"
   write_current_queue "$safe_root"
+  write_keeper_meta "$safe_root" current
   "$0" --base-path "$safe_root" >/dev/null
 
   # Expansion belongs to the nested shell.
@@ -386,6 +450,26 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' \
     >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   expect_failure malformed_current_wal "$malformed_current_wal_root"
+
+  # The expected details are single tokens: cmdliner wraps the helper's
+  # error text, so a multi-word phrase can be split across lines.
+  retired_meta_field_root="$fixture_root/retired-meta-field"
+  write_schedules "$retired_meta_field_root" running
+  write_current_queue "$retired_meta_field_root"
+  write_keeper_meta "$retired_meta_field_root" retired-field
+  expect_failure_contains \
+    retired_keeper_meta_field \
+    "$retired_meta_field_root" \
+    "generation"
+
+  missing_meta_field_root="$fixture_root/missing-meta-field"
+  write_schedules "$missing_meta_field_root" running
+  write_current_queue "$missing_meta_field_root"
+  write_keeper_meta "$missing_meta_field_root" missing-field
+  expect_failure_contains \
+    missing_keeper_meta_field \
+    "$missing_meta_field_root" \
+    "paused"
 
   wal_only_root="$fixture_root/wal-only"
   write_schedules "$wal_only_root" running

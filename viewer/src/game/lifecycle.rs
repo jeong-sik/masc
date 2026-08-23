@@ -159,18 +159,6 @@ impl TrpgUiState {
         }
     }
 
-    pub fn from_code(raw: &str) -> Self {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "config_ready" => Self::ConfigReady,
-            "session_starting" => Self::SessionStarting,
-            "session_running" => Self::SessionRunning,
-            "round_running" => Self::RoundRunning,
-            "paused" => Self::Paused,
-            "ended" => Self::Ended,
-            "error" => Self::Error,
-            _ => Self::Idle,
-        }
-    }
 
     pub fn label_ko(self) -> &'static str {
         match self {
@@ -212,25 +200,6 @@ impl TrpgUiState {
 #[cfg(test)]
 mod tests {
     use super::{TrpgLifecycleState, TrpgUiState};
-
-    #[test]
-    fn trpg_ui_state_code_roundtrip() {
-        let cases = [
-            TrpgUiState::Idle,
-            TrpgUiState::ConfigReady,
-            TrpgUiState::SessionStarting,
-            TrpgUiState::SessionRunning,
-            TrpgUiState::RoundRunning,
-            TrpgUiState::Paused,
-            TrpgUiState::Ended,
-            TrpgUiState::Error,
-        ];
-
-        for state in cases {
-            assert_eq!(TrpgUiState::from_code(state.code()), state);
-        }
-        assert_eq!(TrpgUiState::from_code("unknown-state"), TrpgUiState::Idle);
-    }
 
     #[test]
     fn trpg_ui_state_labels_and_classes_are_defined() {

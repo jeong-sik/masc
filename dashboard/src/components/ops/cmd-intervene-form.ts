@@ -107,7 +107,7 @@ export function CmdInterveneForm() {
           onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}
         ></textarea>
         <div class="cmd-actions">
-          <button class="lab-run" disabled=${!message.trim() || busy} onClick=${send}>실행</button>
+          <button class="lab-run" disabled=${!message.trim() || busy} onClick=${send}>실행하기</button>
           <span class="mono dim">되돌릴 수 없는 행동 지시는 Gate 로 라우팅됩니다</span>
         </div>
       </div>

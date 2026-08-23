@@ -545,6 +545,12 @@ jobs:
       - name: Check CI test targets
         run: bash scripts/audit-ci-test-targets.sh
 
+      # Phase 4 of the TLA audit chain called for this wire-up and it never
+      # landed, so the ratchet ran nowhere and its baseline drifted to 98
+      # against a 47-file inventory — a floor no tree could meet (#27578).
+      - name: Check TLA bug-model ratchet
+        run: bash scripts/tla-bug-model-ratchet.sh
+
       # A route that authorizes against a tool name the catalog never registered
       # is closed to every credential, admin included, and the denial reads as a
       # role problem. POST /api/v1/prompts shipped that way with a working

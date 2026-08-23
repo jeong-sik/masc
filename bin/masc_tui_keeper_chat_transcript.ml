@@ -96,6 +96,16 @@ let subject_of ~tool_name ~args =
   if String.equal (String.trim args) "" then None
   else Masc.Keeper_chat_tool_trail.tool_subject ~name:tool_name ~args
 
+(* Which reasoning lines the pane shows, kept here rather than in the drawing
+   because it is a question about the content. The whole trail, minus the runs
+   of blank lines models emit: reasoning is the only part of a live turn the
+   durable transcript does not keep, so one line out of it would say what the
+   keeper concluded without saying how it got there. *)
+let thinking_lines t =
+  Buffer.contents t.thinking_buffer
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+
 let finished_marker = "✓"
 
 let marker_of call =

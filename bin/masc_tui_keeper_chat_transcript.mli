@@ -73,6 +73,13 @@ val phase : t -> phase
 val interrupt : t -> interrupt
 val text : t -> string
 val thinking : t -> string
+
+val thinking_lines : t -> string list
+(** The reasoning trail the pane draws: every non-blank line, in order.
+    Blank lines are dropped because models emit runs of them. Not the
+    last line alone -- reasoning is the only part of a live turn the
+    durable transcript does not keep, so the pane is the one place it can
+    be read. *)
 val tool_calls : t -> tool_call list  (** In the order the stream opened them. *)
 val unreadable : t -> unreadable option
 

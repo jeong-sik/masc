@@ -280,6 +280,24 @@ let test_the_arguments_reach_the_call_row () =
   check bool "the row names the file" true
     (List.exists (contains ~needle:"lib/a.ml") (Transcript.tool_rows t))
 
+let test_the_whole_reasoning_trail_is_kept () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Thinking "weighing the first option\n"
+    ; Live.Thinking "\n\n"
+    ; Live.Thinking "the second one costs less\n"
+    ; Live.Thinking "so: the second"
+    ];
+  (* Not the last line alone. The durable transcript does not keep reasoning,
+     so a pane that shows only the conclusion loses how the keeper got there. *)
+  check (list string) "every non-blank reasoning line survives, in order"
+    [ "weighing the first option"; "the second one costs less"; "so: the second" ]
+    (Transcript.thinking_lines t);
+  let empty = fresh () in
+  check (list string) "a turn that has not reasoned yet has no lines" []
+    (Transcript.thinking_lines empty)
+
 let kind_to_string : Transcript.status_kind -> string = function
   | Transcript.Progress -> "progress"
   | Transcript.Attention -> "attention"
@@ -382,6 +400,8 @@ let () =
     [ ( "content"
       , [ test_case "text and reasoning accumulate separately" `Quick
             test_text_and_thinking_accumulate
+        ; test_case "the whole reasoning trail is kept" `Quick
+            test_the_whole_reasoning_trail_is_kept
         ] )
     ; ( "tool calls"
       , [ test_case "named as the other surfaces name it" `Quick

@@ -240,7 +240,13 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   latest_ts_unix: number | null
   latest_ts_iso: string | null
   latest_age_s: number | null
-  health: 'empty' | 'incompatible' | 'stale' | 'ok'
+  // 'live' and 'ok' are different answers. A running turn has not written its
+  // record yet, so the newest finished record's age says nothing about whether
+  // the store is keeping up; 'ok' additionally asserts that age is inside the
+  // SLO. The server used to send 'ok' for both, and the age check below read a
+  // live keeper's over-SLO age as a contract violation and dropped the whole
+  // payload (masc#28720).
+  health: 'empty' | 'incompatible' | 'stale' | 'ok' | 'live'
   stale_reason: 'no_entries' | 'incompatible_rows' | 'freshness_slo_exceeded' | null
   keeper: string
   count: number
@@ -839,6 +845,7 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || raw.health === 'incompatible'
     || raw.health === 'stale'
     || raw.health === 'ok'
+    || raw.health === 'live'
       ? raw.health
       : null
   const stale_reason =
@@ -882,7 +889,11 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || entries === null
     || count !== entries.length
     || entries.some(row => row.record.keeper !== keeper)
-    || (entries.length === 0) !== (health === 'empty' || health === 'incompatible')
+    // 'live' says nothing about the row count: a keeper's first turn reports it
+    // with no entries yet, and a long-running turn reports it with the previous
+    // turns' rows present.
+    || (health !== 'live'
+      && (entries.length === 0) !== (health === 'empty' || health === 'incompatible'))
     || latest_ts_unix !== latestRecordTs
     || latest_ts_iso !== expectedLatestTsIso
     || (health === 'empty'
@@ -909,6 +920,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
         || latest_age_s === null
         || latest_age_s > freshness_slo_s
         || stale_reason !== null))
+    // No age constraint: that is what 'live' means. It does require that a turn
+    // really is running, and carries no stale reason.
+    || (health === 'live' && (!live_turn_in_progress || stale_reason !== null))
   ) return null
   return {
     source,

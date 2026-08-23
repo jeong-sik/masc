@@ -84,7 +84,10 @@ let test_live_turn_keeps_turn_record_source_healthy () =
       ~latest_age_s:(Some 900.0)
       ~freshness_slo_s:420.0
   in
-  check string "live producer is healthy" "ok" health;
+  (* Not "ok": that additionally claims the newest finished record is inside
+     the SLO, and here it is 900s against 420s. The running turn has not
+     written its record yet, so there is nothing to judge (#28720). *)
+  check string "a running turn reports live, not ok" "live" health;
   check string "live producer has no stale reason" "" stale_reason;
   let health, stale_reason =
     Masc.Keeper_status_runtime.keeper_turn_record_source_health

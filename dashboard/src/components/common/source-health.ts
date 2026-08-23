@@ -4,7 +4,7 @@
 //   keeper-tool-call-inspector, tools/tools-main, keeper-tool-telemetry,
 //   tool-quality-panel.
 //
-// The mapping is stable across the dashboard: ok → success tone,
+// The mapping is stable across the dashboard: ok/live → success tone,
 // stale/coverage_gap/empty/incompatible → warning tone, missing → bad tone,
 // everything else → disabled neutral tone.
 
@@ -15,6 +15,9 @@ import type { TelemetryCoverageGap, TelemetryFreshnessMetadata } from '../../api
 export function sourceHealthClass(health?: string | null): string {
   switch ((health ?? '').toLowerCase()) {
     case 'ok':
+    // A turn is running and its record is not written yet. Nothing is wrong,
+    // so it reads like ok rather than falling to the neutral default.
+    case 'live':
       return 'text-[var(--color-status-ok)]'
     case 'stale':
     case 'coverage_gap':

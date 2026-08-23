@@ -106,6 +106,14 @@ let test_frontmatter_absent_returns_whole_content () =
   check (list (pair string string)) "no fields" [] parsed.Frontmatter.fields;
   check string "body is the input" content parsed.Frontmatter.body
 
+let test_frontmatter_body_keeps_the_trailing_newline () =
+  (* The readers this replaced disagreed here: prompt_registry kept the body
+     verbatim, mcp_server_eio_resource trimmed it. parse follows the verbatim
+     reading, and the resource surface trims at its own call site. Pinned so
+     a later "tidy up" in the parser does not silently change both. *)
+  let parsed = Frontmatter.parse "---\ntitle: T\n---\nAlpha body\n" in
+  check string "body" "Alpha body\n" parsed.Frontmatter.body
+
 let test_frontmatter_body_excludes_the_block () =
   let parsed = Frontmatter.parse "---\ntitle: T\n---\nline one\nline two" in
   check string "body" "line one\nline two" parsed.Frontmatter.body
@@ -135,6 +143,7 @@ let () =
       test_case "folds case" `Quick test_safe_filename_folds_case;
     ];
     "frontmatter", [
+    test_case "body keeps the trailing newline" `Quick test_frontmatter_body_keeps_the_trailing_newline;
       test_case "CRLF delimiter is seen" `Quick test_frontmatter_crlf_delimiter_is_seen;
       test_case "absent returns whole content" `Quick
         test_frontmatter_absent_returns_whole_content;

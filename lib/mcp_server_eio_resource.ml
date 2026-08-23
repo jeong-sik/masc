@@ -267,7 +267,16 @@ let handle_read_resource_eio state id params =
                   with
                   | Sys_error _ -> fallback_name, "", "", "", []
                 in
-                let strip_frontmatter content = (Frontmatter.parse content).Frontmatter.body in
+                (* Trimmed here, not in the parser. The three readers this
+                   replaced disagreed: prompt_registry kept the body verbatim
+                   and this one trimmed it. Frontmatter.parse follows the
+                   verbatim reading -- it returns what the file says -- so the
+                   surface that wants a tidy body asks for it. Without the
+                   trim, a file ending in a newline renders as "Alpha body\n"
+                   in the JSON resource. *)
+                let strip_frontmatter content =
+                  String.trim (Frontmatter.parse content).Frontmatter.body
+                in
                 let is_json, topic =
                   if s = library_index_json_id then (true, "")
                   else if s = library_index_id then (false, "")

@@ -19,8 +19,8 @@ import { KeeperTurnInspectorPanel } from './keeper-turn-inspector-panel'
 import { ApiRequestError } from '../api/core'
 import { registerInternalAgentRefresh } from '../sse-store'
 import { Btn } from './btn'
-import { EmptyState, ErrorState } from './common/feedback-state'
-import { StatusBadge, type StatusBadgeTone } from './common/status-badge'
+import { ErrorState } from './common/feedback-state'
+import type { StatusBadgeTone } from './common/status-badge'
 import { JsonViewerCard } from './common/json-viewer'
 import { formatDateTimeKo, relativeTime } from '../lib/format-time'
 import { hashForRoute } from '../router'
@@ -314,15 +314,15 @@ function ExactRunDetail({ runId }: { runId: string }) {
 
   if (error !== null) {
     return html`
-      <div class="grid gap-2 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">
-        <p class="text-[var(--color-danger)]">이 실행의 typed 값을 읽지 못했습니다: ${error}</p>
+      <div class="ia-detail">
+        <p class="ia-err">이 실행의 typed 값을 읽지 못했습니다: ${error}</p>
       </div>
     `
   }
   if (run === null) {
     return html`
-      <div class="grid gap-2 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">
-        <p class="text-[var(--color-fg-muted)]">typed 입출력을 불러오는 중…</p>
+      <div class="ia-detail">
+        <p class="ia-note">typed 입출력을 불러오는 중…</p>
       </div>
     `
   }
@@ -331,35 +331,37 @@ function ExactRunDetail({ runId }: { runId: string }) {
       ? librarianMemoryEvidence(run.output)
       : null
     return html`
-      <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
-        <div class="flex flex-wrap items-center gap-2 text-xs">
-          <${EvidenceBadge} kind="typed" />
-          <strong>Exact-output registry metadata</strong>
-          <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음</span>
-          ${run.selectedSlot === undefined
-            ? null
-            : html`<span class="text-[var(--color-fg-muted)]">선택 slot <code>${run.selectedSlot ?? '미기록'}</code></span>`}
-          <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>
+      <div class="ia-detail">
+        <div class="ia-evi">
+          <div class="ia-k"><${EvidenceBadge} kind="typed" /> Exact-output registry metadata</div>
+          <p class="ia-note">
+            Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음
+            ${run.selectedSlot === undefined
+              ? null
+              : html` · 선택 slot <code>${run.selectedSlot ?? '미기록'}</code>`}
+             · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>
+          </p>
         </div>
-        <div class="grid gap-3 lg:grid-cols-2">
+        <div class="ia-tool-io">
           <${JsonViewerCard} title="실제 입력 · typed" data=${run.input.payload} expandAll=${true} />
           <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
         </div>
         ${run.persistenceError === undefined
           ? null
-          : html`<p class="text-xs text-[var(--color-danger)]">완료 의도 <code>${run.intendedStatus}</code> · persistence <code>${run.persistenceState}</code>: ${run.persistenceError}${run.intendedCode ? ` · ${run.intendedCode}: ${run.intendedDetail}` : ''}</p>`}
-        <p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.</p>
+          : html`<p class="ia-err">완료 의도 <code>${run.intendedStatus}</code> · persistence <code>${run.persistenceState}</code>: ${run.persistenceError}${run.intendedCode ? ` · ${run.intendedCode}: ${run.intendedDetail}` : ''}</p>`}
+        <p class="ia-note"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.</p>
         ${memoryEvidence === null
           ? null
-          : html`<div class="grid gap-2 border-t border-[var(--color-border-default)] pt-3">
-              <div class="flex items-center gap-2 text-xs"><${EvidenceBadge} kind="typed" /><strong>Memory before → after</strong><span class="text-[var(--color-fg-muted)]">registry에는 count/revision만, 실제 추가·제거는 아래 journal</span></div>
-              <div class="grid gap-3 lg:grid-cols-2">
+          : html`<div class="ia-evi">
+              <div class="ia-k"><${EvidenceBadge} kind="typed" /> Memory before → after</div>
+              <p class="ia-note">registry에는 count/revision만, 실제 추가·제거는 아래 journal</p>
+              <div class="ia-tool-io">
                 <${JsonViewerCard} title="Before memory · typed" data=${memoryEvidence.before} expandAll=${true} />
                 <${JsonViewerCard} title="After memory + change · typed" data=${memoryEvidence.after} expandAll=${true} />
               </div>
             </div>`}
         ${run.lane === 'librarian_exact'
-          ? html`<div class="border-t border-[var(--color-border-default)] pt-3">
+          ? html`<div class="ia-evi">
               <${LibrarianJournal}
                 keeper=${run.actor}
                 traceId=${run.subjectId}
@@ -375,41 +377,39 @@ function Details({ row }: { row: Row }) {
   if (row.source === 'verification') {
     const tools = row.run.tools ?? []
     return html`
-      <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
-        <div class="grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3">
-          <div class="flex flex-wrap items-center gap-2"><${EvidenceBadge} kind="typed" /><strong class="text-xs">Execution path</strong></div>
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <code>${row.run.producer}</code><span aria-hidden="true">→</span>
-            <code>${row.run.authorityKind}</code><span aria-hidden="true">→</span>
-            <code>${row.run.authorityActor}</code><span aria-hidden="true">→</span>
-            <strong>${row.run.status}</strong>
-          </div>
-          <div class="flex flex-wrap gap-3 text-3xs text-[var(--color-fg-muted)]">
-            <span>시작 <time dateTime=${new Date(row.run.startedAt * 1000).toISOString()}>${formatDateTimeKo(row.run.startedAt)}</time></span>
-            ${finishedAt(row) == null ? null : html`<span>종료 <time dateTime=${new Date(finishedAt(row)! * 1000).toISOString()}>${formatDateTimeKo(finishedAt(row)!)}</time></span>`}
-            ${row.run.evaluatorRuntime ? html`<span>runtime <code>${row.run.evaluatorRuntime}</code></span>` : null}
-          </div>
-          ${row.run.cause ? html`<p class="text-xs text-[var(--color-danger)]">${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
-          <p class="text-3xs text-[var(--color-fg-muted)]">Review 원문은 저장되지 않음 · 출력은 1,024B excerpt</p>
+      <div class="ia-detail">
+        <div class="ia-evi">
+          <div class="ia-k"><${EvidenceBadge} kind="typed" /> Execution path</div>
+          <code class="mono">${row.run.producer} → ${row.run.authorityKind} → ${row.run.authorityActor} → ${row.run.status}</code>
+          <p class="ia-note">
+            시작 <time dateTime=${new Date(row.run.startedAt * 1000).toISOString()}>${formatDateTimeKo(row.run.startedAt)}</time>
+            ${finishedAt(row) == null ? null : html` · 종료 <time dateTime=${new Date(finishedAt(row)! * 1000).toISOString()}>${formatDateTimeKo(finishedAt(row)!)}</time>`}
+            ${row.run.evaluatorRuntime ? html` · runtime <code>${row.run.evaluatorRuntime}</code>` : null}
+          </p>
+          ${row.run.cause ? html`<p class="ia-err">${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
+          <p class="ia-note">Review 원문은 저장되지 않음 · 출력은 1,024B excerpt</p>
         </div>
-        <div>
-          <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)] mb-1">Internal tool agents (${tools.length})</div>
+        <div class="ia-evi">
+          <div class="ia-k">Internal tool agents (${tools.length})</div>
           ${tools.length === 0
-            ? html`<p class="text-xs text-[var(--color-fg-muted)]">No tools invoked in this verification run.</p>`
-            : html`<ol class="grid gap-2">
+            ? html`<p class="ia-note">No tools invoked in this verification run.</p>`
+            : html`<ol class="ia-tools">
                 ${tools.map((tool, index) => html`
-                  <li key=${`${row.id}-${index}`} class="rounded border border-[var(--color-border-default)] p-2">
-                    <div class="flex flex-wrap items-center gap-2 text-xs">
-                      <strong>${index + 1}. ${tool.toolName}</strong>
-                      <code>${tool.disposition}</code>
-                      <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(tool.finishedAt * 1000).toISOString()}>종료 ${formatDateTimeKo(tool.finishedAt)}</time>
-                      <span class="text-[var(--color-fg-muted)]">${tool.durationMs.toFixed(0)}ms</span>
+                  <li key=${`${row.id}-${index}`} class="ia-tool">
+                    <div class="ia-tool-h">
+                      <b>${index + 1}. ${tool.toolName}</b>
+                      <code class="mono">${tool.disposition}</code>
+                      <time class="ia-ms mono" dateTime=${new Date(tool.finishedAt * 1000).toISOString()}>종료 ${formatDateTimeKo(tool.finishedAt)}</time>
+                      <span class="ia-ms mono">${tool.durationMs.toFixed(0)}ms</span>
                     </div>
-                    <div class="grid gap-2 mt-2 md:grid-cols-2">
-                      <div class="grid gap-1"><div class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /><span class="text-3xs">입력 preview</span></div><${JsonViewerCard} data=${tool.input} /></div>
-                      <div class="grid gap-1">
-                        <div class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /><span class="text-3xs">출력 ${tool.outputTruncated ? '· truncated' : '· complete excerpt'}</span></div>
-                        <pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3 text-3xs">${tool.outputExcerpt}${tool.outputTruncated ? '\n… 1,024 byte 이후는 registry에 보존되지 않음' : ''}</pre>
+                    <div class="ia-tool-io">
+                      <div>
+                        <div class="ia-k"><${EvidenceBadge} kind="typed" /> 입력 preview</div>
+                        <${JsonViewerCard} data=${tool.input} />
+                      </div>
+                      <div>
+                        <div class="ia-k"><${EvidenceBadge} kind="excerpt" /> 출력 ${tool.outputTruncated ? '· truncated' : '· complete excerpt'}</div>
+                        <pre class="mono max-h-80">${tool.outputExcerpt}${tool.outputTruncated ? '\n… 1,024 byte 이후는 registry에 보존되지 않음' : ''}</pre>
                       </div>
                     </div>
                   </li>
@@ -423,12 +423,13 @@ function Details({ row }: { row: Row }) {
     return html`<${ExactRunDetail} runId=${row.run.runId} />`
   }
   return html`
-    <div class="grid gap-2 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">
-      <div class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /><strong>Fusion registry summary</strong></div>
-      <p>Preset <code>${row.run.preset}</code> · status <code>${row.run.status}</code></p>
-      ${row.run.error ? html`<p class="mt-1 text-[var(--color-danger)]">${row.run.failureCode}: ${row.run.error}</p>` : null}
-      <p class="text-[var(--color-fg-muted)]">input/output 미보존 — 상세는 Fusion 화면에서</p>
-      <a class="w-fit text-[var(--color-accent)] hover:underline" href=${fusionHref()}>Fusion evidence 열기 →</a>
+    <div class="ia-detail">
+      <div class="ia-evi">
+        <div class="ia-k"><${EvidenceBadge} kind="typed" /> Fusion registry summary</div>
+        <code class="mono">preset ${row.run.preset} · status ${row.run.status}</code>
+        ${row.run.error ? html`<div class="ia-err">${row.run.failureCode}: ${row.run.error}</div>` : null}
+        <p class="ia-note">input/output 미보존 — 상세는 Fusion 화면에서 · <a class="text-[var(--color-accent)] hover:underline" href=${fusionHref()}>Fusion evidence 열기 →</a></p>
+      </div>
     </div>
   `
 }
@@ -525,17 +526,16 @@ export function InternalAgentsMonitor() {
   })
 
   return html`
-    <section class="v2-monitoring-surface grid gap-5" data-testid="internal-agents-monitor">
-      <div class="flex flex-wrap items-start gap-3">
-        <div>
-          <h2 class="text-lg font-semibold text-[var(--color-fg-primary)]">Internal execution evidence</h2>
-          <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Run registry, Memory OS journal, Keeper retained trace를 출처별로 분리하고 producer가 보존한 typed identity만으로 읽습니다.</p>
-        </div>
-        <span class="rounded border border-[var(--color-border-default)] px-2 py-1 text-xs text-[var(--color-fg-muted)]">${rows.length} runs · ${keepers.length} owners</span>
-        <${Btn} class="v2-monitoring-action ml-auto" onClick=${() => void refresh()} disabled=${loading}>
+    <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
+      <div class="ia-head">
+        <h3>Internal execution evidence</h3>
+        <span class="ia-count mono">${rows.length} runs · ${keepers.length} owners</span>
+        <span class="ia-route mono">monitoring?section=internal-agents</span>
+        <${Btn} class="v2-monitoring-action" onClick=${() => void refresh()} disabled=${loading}>
           ${loading ? 'Loading…' : 'Refresh'}
         <//>
       </div>
+      <p class="ia-lede">Run registry, Memory OS journal, Keeper retained trace를 출처별로 분리하고 producer가 보존한 typed identity만으로 읽습니다.</p>
 
       <div class="v2-monitoring-card flex flex-wrap gap-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs">
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> Admin 전용 retained JSONL 실제 행 · 민감값 포함 가능</span>
@@ -548,18 +548,18 @@ export function InternalAgentsMonitor() {
           <h3 id="internal-agent-inventory-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Observed run inventory</h3>
           <span class="text-3xs text-[var(--color-fg-muted)]">0건인 lane도 숨기지 않습니다.</span>
         </div>
-        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+        <div class="ai-strip">
           ${inventory.map(item => html`
             <button
               key=${item.id}
               type="button"
-              class=${`v2-monitoring-card grid gap-1 rounded-[var(--r-1)] border p-3 text-left ${filter === item.id ? 'border-[var(--color-accent)] bg-[var(--color-bg-elevated)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
+              class=${`ai-stat cursor-pointer text-left ${filter === item.id ? 'border-[var(--volt-strong)]' : ''}`}
               aria-pressed=${filter === item.id}
               onClick=${() => setFilter(item.id)}
             >
-              <span class="text-xs font-semibold">${item.label}</span>
-              <strong class="text-xl tabular-nums">${item.count}</strong>
-              <span class="text-3xs text-[var(--color-fg-muted)]">${item.latest == null ? '관측 기록 없음' : `최근 ${formatDateTimeKo(item.latest)}`}</span>
+              <span class="k">${item.label}</span>
+              <span class="v mono">${item.count}</span>
+              <span class="cl-sub mono">${item.latest == null ? '관측 기록 없음' : `최근 ${formatDateTimeKo(item.latest)}`}</span>
             </button>
           `)}
         </div>
@@ -570,17 +570,20 @@ export function InternalAgentsMonitor() {
           <h3 id="internal-agent-owner-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Owner × execution kind</h3>
           <span class="text-3xs text-[var(--color-fg-muted)]">Keeper Fleet와 exact identity로 조인합니다.</span>
         </div>
-        <div class="v2-monitoring-card overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-          <table class="w-full min-w-[48rem] text-left text-xs">
-            <thead class="border-b border-[var(--color-border-default)] text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">
-              <tr><th class="px-3 py-2">Owner</th>${inventory.map(item => html`<th key=${item.id} class="px-2 py-2 text-right">${item.label}</th>`)}<th class="px-3 py-2 text-right">Last observed</th></tr>
+        <div class="ai-tablewrap">
+          <table class="ai-table">
+            <thead>
+              <tr><th>Owner</th>${inventory.map(item => html`<th key=${item.id} class="r">${item.label}</th>`)}<th class="r">Last observed</th></tr>
             </thead>
             <tbody>
               ${owners.map(owner => html`
-                <tr key=${owner.name} class="border-b border-[var(--color-border-subtle)] last:border-b-0">
-                  <th class="px-3 py-2 font-medium"><a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(owner.name)}>${owner.name}</a><span class="ml-2 text-3xs text-[var(--color-fg-muted)]">${owner.total}</span></th>
-                  ${inventory.map(item => html`<td key=${item.id} class=${`px-2 py-2 text-right tabular-nums ${owner.counts[item.id as Exclude<Filter, 'all'>] === 0 ? 'text-[var(--color-fg-disabled)]' : ''}`}>${owner.counts[item.id as Exclude<Filter, 'all'>]}</td>`)}
-                  <td class="px-3 py-2 text-right text-3xs text-[var(--color-fg-muted)]">${owner.latest == null ? '없음' : formatDateTimeKo(owner.latest)}</td>
+                <tr key=${owner.name}>
+                  <td><a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(owner.name)}>${owner.name}</a> <span class="dim mono">${owner.total}</span></td>
+                  ${inventory.map(item => {
+                    const count = owner.counts[item.id as Exclude<Filter, 'all'>]
+                    return html`<td key=${item.id} class=${`r mono ${count === 0 ? 'dim' : ''}`}>${count}</td>`
+                  })}
+                  <td class="r dim mono">${owner.latest == null ? '없음' : formatDateTimeKo(owner.latest)}</td>
                 </tr>
               `)}
             </tbody>
@@ -588,12 +591,12 @@ export function InternalAgentsMonitor() {
         </div>
       </section>
 
-      <div class="flex flex-wrap gap-1" role="group" aria-label="Internal agent filters">
+      <div class="ia-filters" role="group" aria-label="Internal agent filters">
         ${FILTERS.map(item => html`
           <button
             key=${item.id}
             type="button"
-            class=${`rounded px-2 py-1 text-xs border ${filter === item.id ? 'border-[var(--color-accent)] text-[var(--color-fg-primary)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+            class=${`ia-filter ${filter === item.id ? 'on' : ''}`}
             aria-pressed=${filter === item.id}
             onClick=${() => setFilter(item.id)}
           >${item.label} ${item.id === 'all' ? rows.length : inventory.find(entry => entry.id === item.id)?.count ?? 0}</button>
@@ -608,31 +611,31 @@ export function InternalAgentsMonitor() {
         <span class="text-3xs text-[var(--color-fg-muted)]">절대 시각 + 상대 시각 + elapsed</span>
       </div>
       ${!loading && visible.length === 0
-        ? html`<${EmptyState}>No internal agent runs for this filter.<//>`
-        : html`<div class="relative ml-2 grid gap-2 border-l border-[var(--color-border-default)] pl-5">
+        ? html`<div class="ia-empty">No internal agent runs for this filter.</div>`
+        : html`<div class="ia-list">
             ${visible.map(row => {
               const open = expanded === row.id
               const startIso = new Date(startedAt(row) * 1000).toISOString()
               return html`
-                <article key=${row.id} class="v2-monitoring-card relative rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden before:absolute before:-left-[1.55rem] before:top-5 before:h-2 before:w-2 before:rounded-full before:bg-[var(--color-accent)]">
+                <article key=${row.id} class=${`ia-card ${open ? 'on' : ''}`}>
                   <button
                     type="button"
-                    class="w-full grid grid-cols-[8.5rem_auto_1fr_auto] gap-3 items-center p-3 text-left"
+                    class="ia-row"
                     aria-expanded=${open}
                     onClick=${() => setExpanded(open ? null : row.id)}
                   >
-                    <span class="text-3xs text-[var(--color-fg-muted)]"><time dateTime=${startIso}>${formatDateTimeKo(startedAt(row))}</time><span class="block">${relativeTime(startIso)}</span></span>
-                    <${StatusBadge} tone=${tone(row)} label=${status(row)} />
-                    <span class="min-w-0">
-                      <strong class="block text-xs text-[var(--color-fg-primary)]">${laneLabel(row)}</strong>
-                      <code class="block truncate text-3xs text-[var(--color-fg-muted)]" title=${subject(row)}>${subject(row)}</code>
+                    <span class="ia-badge" data-tone=${tone(row)}><i></i>${status(row)}</span>
+                    <span class="ia-sub">
+                      <b>${laneLabel(row)}</b>
+                      <code class="mono" title=${subject(row)}>${subject(row)}</code>
                       ${row.source === 'exact' && row.run.lane === 'librarian_exact'
-                        ? html`<code translate="no" class="block truncate text-3xs text-[var(--color-fg-muted)]" title=${row.run.runId}>run_id · ${row.run.runId}</code>`
+                        ? html`<code translate="no" class="mono" title=${row.run.runId}>run_id · ${row.run.runId}</code>`
                         : null}
                     </span>
-                    <span class="text-right text-3xs text-[var(--color-fg-muted)]">
-                      <span class="block">${actor(row)}</span>
-                      <span class="block">elapsed ${formatElapsed(elapsed(row))}</span>
+                    <span class="ia-meta mono">
+                      <span>${actor(row)}</span>
+                      <span><time dateTime=${startIso}>${formatDateTimeKo(startedAt(row))}</time> · ${relativeTime(startIso)}</span>
+                      <span>elapsed ${formatElapsed(elapsed(row))}</span>
                     </span>
                   </button>
                   ${open ? html`<${Details} row=${row} />` : null}

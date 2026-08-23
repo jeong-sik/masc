@@ -950,7 +950,7 @@ function FusionRunRow({ run, startedAt, active }: { run: FusionRunView; startedA
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
       <span class="fus-row-f">
         <span class="fus-who static" title=${run.keeperName}>
-          <${AgentAvatar} name=${run.keeperName} size="sm" />
+          <${AgentAvatar} name=${run.keeperName} size="xs" />
           <span class="nm">${run.keeperName}</span>
         </span>
         <span class="spacer"></span>
@@ -987,7 +987,7 @@ function FusionRegistryRow({ record, active }: { record: FusionRunRecord; active
       </span>
       <span class="fus-row-f">
         <span class="fus-who static" title=${keeper}>
-          <${AgentAvatar} name=${keeper} size="sm" />
+          <${AgentAvatar} name=${keeper} size="xs" />
           <span class="nm">${keeper}</span>
         </span>
         <span class="spacer"></span>

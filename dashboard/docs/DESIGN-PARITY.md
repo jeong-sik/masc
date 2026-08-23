@@ -18,7 +18,7 @@ and it is also the number's boundary: a surface the dashboard rebuilt under
 different markup can never lower this score, because the parity page never
 renders the dashboard's markup. Every number in this file measures the skin.
 Whether the dashboard renders the design's components at all is a separate
-question with separate probes — `DESIGN-COMPONENT-PARITY.md`. It stands at 55.2%,
+question with separate probes — `DESIGN-COMPONENT-PARITY.md`. It stands at 57.4% (2026-08-23),
 against 0.9487 here, and `lanes.css` shows how far the two can drift apart: the
 Lane Queue sub-view scores 0.959 and not one `dl-` class exists in `src`.
 
@@ -171,19 +171,19 @@ prototype's `SURFACES` registry.
 
 `design-parity-views.mjs` is the recipe list — a view is a surface plus the
 clicks that open it — and the shot harness follows it. Twenty-two views,
-2026-08-22:
+2026-08-22 (parenthesised values re-measured 2026-08-23 after the re-sync):
 
 | View | SSIM | | View | SSIM |
 |---|---|---|---|---|
-| ide-cursor | 0.996 | | monitor-tools | 0.969 |
-| monitor-observatory | 0.995 | | settings ×12 | 0.967–0.972 |
-| monitor-journey | 0.993 | | **monitor-lanes** | **0.959** |
-| ide-annotations | 0.992 | | monitor-internal | 0.870 |
-| monitor-runtime | 0.984 | | schedule-list | 0.868 |
-| | | | approvals-history | 0.796 |
-| | | | **mean** | **0.957** |
+| ide-cursor | 0.996 (0.995) | | monitor-tools | 0.969 (0.969) |
+| monitor-observatory | 0.995 (0.995) | | settings ×12 | 0.967–0.972 (same band) |
+| monitor-journey | 0.993 (0.993) | | **monitor-lanes** | **0.959** (0.959) |
+| ide-annotations | 0.992 (0.991) | | monitor-internal | 0.870 (0.870 — harness boundary, see below) |
+| monitor-runtime | 0.984 (0.984) | | schedule-list | 0.868 (**0.953**) |
+| | | | approvals-history | 0.796 (**0.891**) |
+| | | | **mean** | **0.957** (**0.965**) |
 
-The sub-views score *higher* than the top-level surfaces (0.957 against 0.949).
+The sub-views score *higher* than the top-level surfaces (0.957 against 0.949; after the 2026-08-23 re-sync both sit at 0.965).
 Lane Queue at 0.959 and the prompt book at 0.971 say the `lanes.css` and
 `prompt-book.css` vendoring landed — which had never been verified, only
 assumed.
@@ -194,14 +194,15 @@ None is skin drift and none is fixable in CSS.
 
 | View | What the design draws | What the dashboard renders |
 |---|---|---|
-| `approvals-history` 0.796 | `.ap-hist-row` — a dense table, four-column grid, tone stripe down the left edge, inline stat line, pill filters | `.ap-history-*` — a different component under different names, with the stats as a four-card grid. Carries fields the design has no slot for (judging model, ALWAYS rules, source). |
-| `schedule-list` 0.868 | `.sch-act` approve/deny/ghost buttons | No consumer at all. This is one of the "36 v3-only selectors with zero DOM consumers" the earlier sync recorded and skipped; it is still true. |
-| `monitor-internal` 0.870 | `.ia-badge`, `.ia-count`, `.ai-table`, `.ai-strip` — a named component vocabulary | Tailwind utilities assembled inline (`flex`, `grid`, `px-2`, `max-h-80`). Swapping the skin cannot reach this surface, because there is nothing named to style. |
+| `approvals-history` 0.796 → **0.891** (re-measured 2026-08-23) | `.ap-hist-row` — a dense table, four-column grid, tone stripe down the left edge, inline stat line, pill filters | The dashboard now renders the design's `.ap-hist-*` vocabulary: decider pills backed by the live `decision_source` field, `.ap-hist-reason` fed by the audit record's `decision_reason`, Auto Judge in the summary stat line. Still carries fields the design has no slot for (judging model, ALWAYS rules). |
+| `schedule-list` 0.868 → **0.953** (re-measured 2026-08-23) | `.sch-act` approve/deny/ghost buttons | No consumer at all. This is one of the v3-only mock operator-action selectors the earlier sync recorded and skipped; it is still true. The 2026-08-23 gain came from the schedule.css re-sync (`.sch-decision` tone classes + 720px rules restored). |
+| `monitor-internal` 0.870 (re-measured 2026-08-23: 0.8704 — unchanged) | `.ia-badge`, `.ia-count`, `.ai-table`, `.ai-strip` — a named component vocabulary | Rebuilt onto that vocabulary 2026-08-23 — `internal-agents-monitor.ts` now emits `.ia-head`/`.ia-count`/`.ia-badge`/`.ai-strip`/`.ai-table` instead of inline Tailwind utilities. The SSIM number cannot move: this harness renders the design's DOM, never the dashboard's markup (see the top of this file). The rebuild is visible to `design-parity-components.mjs` instead — internal-agents reads 88.6% (31/35) there. |
 
-The last one is the most instructive. A vendored stylesheet only lands where the
+The last one was the most instructive. A vendored stylesheet only lands where the
 DOM speaks the same vocabulary; a surface assembled from utilities is opaque to
 it no matter how faithful the CSS is. That is a component-level decision, not a
-sync one.
+sync one — and it has since been made: the surface was rebuilt onto the design's
+vocabulary on 2026-08-23, so the 0.870 above is the pre-rebuild score.
 
 ## Route coverage — what has and has not been looked at
 
@@ -213,8 +214,8 @@ against the recipe file. Overall mean **0.965**; seven sit below 0.95.
 |---|---|---|
 | overview | 0.842 | surface width, decided |
 | work-kanban | 0.855 | `.wk-kcol-body` capped at 42rem with an inner scroll; the design lets the column grow and the page scroll |
-| monitor-internal | 0.870 | assembled from Tailwind utilities, nothing named to style |
-| approvals-history | 0.891 | component rewritten, remaining gap is `.ap-hist-kind`/`-reason`/`-lat` with no live field |
+| monitor-internal | 0.870 | harness boundary — rebuilt onto the design's `.ia-*`/`.ai-*` vocabulary 2026-08-23; SSIM cannot see dashboard markup, so it reads the pre-rebuild value by construction (component probe: 88.6%) |
+| approvals-history | 0.891 | component rewritten; `.ap-hist-reason` is now fed by the live `decision_reason` field (2026-08-23), so the no-live-field gap is down to `.ap-hist-kind`/`-lat`; re-measured 2026-08-23: 0.891 confirmed |
 | keepers | 0.913 | the prototype's missing CSS reset (buttons keep UA Arial) |
 | lab-performance | 0.935 | Korean line-breaking, below |
 | schedule | 0.945 | the prototype's missing CSS reset, as keepers |
@@ -369,6 +370,15 @@ accent-filled pill under `.wk-viewseg` — which has no consumer anywhere in src
 
 work went **0.891 → 0.975**.
 
+### Prompt book — `.pb-src-chip` takes its mono face from CSS, not markup
+
+The design's `prompt-book.jsx` emits `className: 'pb-src-chip mono'`, so the
+design's own stylesheet never sets a font on `.pb-src-chip`. The live
+`prompt-book-panel.ts` emits bare `pb-src-chip`, and rather than teach the
+component a second class the vendored `keeper-v2/prompt-book.css` compensates
+in place: `.pb-src-chip` carries `font-family: var(--font-mono)` where the
+prototype's rule does not. Deliberate one-line divergence from the verbatim
+copy, recorded 2026-08-23 so a future re-sync does not "fix" it back.
 
 ### Systemic: the dashboard breaks Korean text properly and the mock does not
 

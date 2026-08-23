@@ -75,20 +75,31 @@ async function flushUi(): Promise<void> {
 
 function cssMediaBlock(css: string, query: string): string {
   const marker = `@media ${query}`
-  const markerIndex = css.indexOf(marker)
-  if (markerIndex < 0) throw new Error(`Missing CSS media query: ${query}`)
+  const blocks: string[] = []
+  let searchFrom = 0
 
-  const openingBrace = css.indexOf('{', markerIndex + marker.length)
-  if (openingBrace < 0) throw new Error(`Missing opening brace for CSS media query: ${query}`)
+  while (true) {
+    const markerIndex = css.indexOf(marker, searchFrom)
+    if (markerIndex < 0) break
 
-  let depth = 0
-  for (let index = openingBrace; index < css.length; index += 1) {
-    if (css[index] === '{') depth += 1
-    if (css[index] === '}') depth -= 1
-    if (depth === 0) return css.slice(markerIndex, index + 1)
+    const openingBrace = css.indexOf('{', markerIndex + marker.length)
+    if (openingBrace < 0) throw new Error(`Missing opening brace for CSS media query: ${query}`)
+
+    let depth = 0
+    let index = openingBrace
+    for (; index < css.length; index += 1) {
+      if (css[index] === '{') depth += 1
+      if (css[index] === '}') depth -= 1
+      if (depth === 0) break
+    }
+    if (depth !== 0) throw new Error(`Missing closing brace for CSS media query: ${query}`)
+
+    blocks.push(css.slice(markerIndex, index + 1))
+    searchFrom = index + 1
   }
 
-  throw new Error(`Missing closing brace for CSS media query: ${query}`)
+  if (blocks.length === 0) throw new Error(`Missing CSS media query: ${query}`)
+  return blocks.join('\n')
 }
 
 describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
@@ -1879,7 +1890,12 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('keeps runtime provenance and actions in the 800px and 1024px layout', () => {
-    const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
+    // Live roster responsive tiers moved from keeper-v2/fleet.css to
+    // v2-monitoring.css (.v2-monitoring-surface scope) in the 2026-08-23
+    // design re-sync; fleet.css now carries only the design mock's tiers
+    // (planned split, docs/DESIGN-PARITY.md).
+    const css = readFileSync(resolve(__dirname, '../styles/v2-monitoring.css'), 'utf8')
+    const fleetCss = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
     const query = '(max-width: 1100px) and (min-width: 721px)'
     const responsiveBlock = cssMediaBlock(css, query)
     const tabletHeaderBlock = cssMediaBlock(css, '(max-width: 900px)')
@@ -1891,12 +1907,17 @@ describe('AgentRoster live-only cards', () => {
 
     expect(css).toContain('@media (max-width: 1500px) and (min-width: 1101px)')
     expect(responsiveBlock).toContain('--fl-cols: minmax(168px, 1.3fr) minmax(150px, 1fr) minmax(104px, 0.8fr) 160px')
-    expect(responsiveBlock).toContain('.fl-row .fl-ctx, .fl-row .fl-tool { display: none; }')
+    expect(responsiveBlock).toContain('.v2-monitoring-surface .fl-row .fl-ctx,')
+    expect(responsiveBlock).toContain('.v2-monitoring-surface .fl-row .fl-tool { display: none; }')
     expect(responsiveBlock).not.toContain('.fl-row .fl-runtime')
-    expect(tabletHeaderBlock).toContain('.fl-top { height: auto; flex-wrap: wrap;')
-    expect(tabletHeaderBlock).toContain('.fl-health { width: 100%; order: 3; }')
+    expect(tabletHeaderBlock).toContain('.v2-monitoring-surface .fl-top')
+    expect(tabletHeaderBlock).toContain('height: auto')
+    expect(tabletHeaderBlock).toContain('flex-wrap: wrap')
+    expect(tabletHeaderBlock).toContain('.v2-monitoring-surface .fl-health')
+    expect(tabletHeaderBlock).toContain('width: 100%')
+    expect(tabletHeaderBlock).toContain('order: 3')
     expect(css).toContain('@media (max-width: 720px)')
-    expect(css).toContain('.fl-attn-list')
-    expect(css).toContain('.fl-attn-item[data-sev="bad"]')
+    expect(fleetCss).toContain('.fl-attn-list')
+    expect(fleetCss).toContain('.fl-attn-item[data-sev="bad"]')
   })
 })

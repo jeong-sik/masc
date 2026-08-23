@@ -316,6 +316,13 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-feed-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 11px 18px; border-bottom: 1px solid var(--border-main); background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep)); }
 .bd-feed-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 15px; color: var(--text-bright); margin: 0; white-space: nowrap; }
 .bd-feed-head .ns { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
+/* faithful-copy rules restored 2026-08-23 (bd-stateblock precedent, docs/DESIGN-PARITY.md):
+   the kit stays diffable against the design even though the live producers were
+   purged in ce67d20558 (#29504). Removing them dropped board parity 0.996 → 0.813. */
+.bd-feed-head .spacer { flex: 1; }
+.bd-filter { font-family: var(--font-ui); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: transparent; color: var(--text-dim); cursor: pointer; transition: 0.14s; white-space: nowrap; }
+.bd-filter.on { color: var(--volt-ink); background: var(--volt); border-color: var(--volt); font-weight: 600; }
+.bd-filter:not(.on):hover { color: var(--text-mid); border-color: var(--border-highlight); }
 
 .bd-list { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
 .bd-list::-webkit-scrollbar { width: 9px; }
@@ -336,6 +343,7 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-badge { font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 6px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); color: var(--text-dim); background: var(--bg-deep); white-space: nowrap; }
 .bd-badge.state { color: var(--info); border-color: color-mix(in oklab, var(--info) 35%, transparent); }
 .bd-badge.pin { color: var(--volt-strong); border-color: var(--volt-dim); }
+.bd-badge.mod { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 40%, transparent); }
 .bd-post-title { font-size: 13.5px; font-weight: 600; color: var(--text-bright); margin-top: 8px; line-height: 1.4; }
 .bd-post-body { font-size: 12.5px; color: var(--text-mid); line-height: 1.55; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bd-post-body code, .bd-th-body code { font-family: var(--font-mono); font-size: var(--fs-11); background: var(--bg-sunken); border: 1px solid var(--border-soft); padding: 0 4px; border-radius: var(--radius-xs); color: var(--volt-strong); }
@@ -347,10 +355,12 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-post-foot .replies { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
 .bd-post-foot .karma { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
 .bd-post-foot .karma b { color: var(--volt-strong); font-weight: 600; }
-.bd-stateblock .sv.hl { color: var(--info); }
-.bd-stateblock .sv { color: var(--text-mid); }
-.bd-stateblock .sk { color: var(--text-dim); }
+
+/* state-block post */
 .bd-stateblock { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin-top: 9px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--bg-sunken); border: 1px dashed var(--border-main); font-family: var(--font-mono); font-size: var(--fs-11); }
+.bd-stateblock .sk { color: var(--text-dim); }
+.bd-stateblock .sv { color: var(--text-mid); }
+.bd-stateblock .sv.hl { color: var(--info); }
 
 /* board composer */
 .bd-composer { flex: none; border-top: 1px solid var(--border-main); background: linear-gradient(0deg, var(--bg-panel), var(--bg-deep)); padding: 10px 18px 14px; }
@@ -532,6 +542,25 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .set-storerow .mono { font-size: 11.5px; color: var(--text-bright); }
 .set-storerow .d { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
 
+/* ── repositories section ── */
+.set-repo-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.set-repo { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid var(--border-main); border-radius: var(--radius-xs); background: var(--bg-well); }
+.set-repo-main { flex: 1; min-width: 0; }
+.set-repo-name { font-size: var(--fs-13); color: var(--text-bright); display: flex; align-items: center; gap: 8px; }
+.set-repo-branch { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: .04em; color: var(--text-mid); padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: var(--bg-panel); }
+.set-repo-url { font-size: var(--fs-11); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+.set-repo-meta { flex: none; display: flex; align-items: center; gap: 10px; }
+.set-repo-sync { font-family: var(--font-ui); font-size: 10.5px; letter-spacing: .03em; color: var(--text-dim); padding: 2px 9px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.set-repo-sync.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); }
+.set-repo-del { flex: none; width: 24px; height: 24px; border-radius: var(--radius-xs); border: 1px solid transparent; background: none; color: var(--text-dim); cursor: pointer; font-size: var(--fs-12); transition: all .16s ease; }
+.set-repo-del:hover { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
+.set-repo-form { margin-top: 10px; padding: 14px; border: 1px solid var(--border-main); border-radius: var(--radius-xs); background: var(--bg-well); }
+.set-repo-form-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.set-btn-ghost { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); background: var(--bg-panel); color: var(--text-mid); cursor: pointer; }
+.set-btn-ghost:hover { color: var(--text-bright); border-color: var(--brass); }
+.set-btn-primary { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--brass); background: color-mix(in oklab, var(--brass) 16%, var(--bg-panel)); color: var(--brass); cursor: pointer; }
+.set-btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--brass) 26%, var(--bg-panel)); }
+.set-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .set-link { background: none; border: 0; color: var(--volt); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
 .set-mcp-detail { margin: -4px 0 4px; padding: 8px 11px; background: var(--bg-well); border: 1px solid var(--border-soft); border-radius: var(--radius-xs); font-size: var(--fs-11); color: var(--text-dim); overflow-x: auto; white-space: nowrap; }
 .set-nav-note { margin: auto 12px 12px; font-size: var(--fs-10); line-height: 1.5; color: var(--text-dim); padding-top: 12px; border-top: 1px solid var(--border-soft); }
@@ -611,25 +640,6 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .set-policy-legend b { color: var(--text-mid); }
 .set-add { margin-top: 12px; width: 100%; padding: 9px; background: var(--bg-sunken); border: 1px dashed var(--border-highlight); border-radius: var(--radius-sm); color: var(--text-mid); cursor: pointer; font-family: var(--font-ui); font-size: var(--fs-12); transition: 0.14s; }
 .set-add:hover { border-color: var(--volt-dim); color: var(--volt); }
-
-.set-repo-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-.set-repo { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid var(--border-main); border-radius: var(--radius-xs); background: var(--bg-well); }
-.set-repo-main { flex: 1; min-width: 0; }
-.set-repo-name { font-size: var(--fs-13); color: var(--text-bright); display: flex; align-items: center; gap: 8px; }
-.set-repo-branch { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: .04em; color: var(--text-mid); padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: var(--bg-panel); }
-.set-repo-url { font-size: var(--fs-11); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
-.set-repo-meta { flex: none; display: flex; align-items: center; gap: 10px; }
-.set-repo-sync { font-family: var(--font-ui); font-size: 10.5px; letter-spacing: .03em; color: var(--text-dim); padding: 2px 9px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
-.set-repo-sync.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); }
-.set-repo-del { flex: none; width: 24px; height: 24px; border-radius: var(--radius-xs); border: 1px solid transparent; background: none; color: var(--text-dim); cursor: pointer; font-size: var(--fs-12); transition: all .16s ease; }
-.set-repo-del:hover { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
-.set-repo-form { margin-top: 10px; padding: 14px; border: 1px solid var(--border-main); border-radius: var(--radius-xs); background: var(--bg-well); }
-.set-repo-form-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-.set-btn-ghost { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); background: var(--bg-panel); color: var(--text-mid); cursor: pointer; }
-.set-btn-ghost:hover { color: var(--text-bright); border-color: var(--brass); }
-.set-btn-primary { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--brass); background: color-mix(in oklab, var(--brass) 16%, var(--bg-panel)); color: var(--brass); cursor: pointer; }
-.set-btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--brass) 26%, var(--bg-panel)); }
-.set-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── tool-group policy ─────────────────────────────────────── */
 .set-tg-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
@@ -957,14 +967,14 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .ap-spacer { flex: 1; }
 .ap-log-undo { font-family: var(--font-ui); font-size: 10.5px; color: var(--text-dim); background: none; border: 0; cursor: pointer; padding: 2px 4px; }
 .ap-log-undo:hover { color: var(--volt-strong); }
-.ap-viewbtn-n { font-size: 10.5px; color: var(--status-warn); }
-.ap-viewbtn.on { background: var(--volt-wash); color: var(--volt-strong); }
-.ap-viewbtn:hover { color: var(--text-mid); }
-.ap-viewbtn + .ap-viewbtn { border-left: 1px solid var(--border-main); }
-.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 15px; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; transition: 0.14s; }
-.ap-viewseg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-pill); overflow: hidden; flex: none; }
 
 /* ── 큐↔이력 뷰 전환 ── */
+.ap-viewseg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-pill); overflow: hidden; flex: none; }
+.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 15px; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; transition: 0.14s; }
+.ap-viewbtn + .ap-viewbtn { border-left: 1px solid var(--border-main); }
+.ap-viewbtn:hover { color: var(--text-mid); }
+.ap-viewbtn.on { background: var(--volt-wash); color: var(--volt-strong); }
+.ap-viewbtn-n { font-size: 10.5px; color: var(--status-warn); }
 
 /* ── HILT 이력 (감사 로그) ── */
 /* The earlier sync kept this section's header and its @media tail but dropped
@@ -992,7 +1002,7 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .ap-hist-row:last-child { border-bottom: 0; }
 .ap-hist-at { font-size: var(--fs-11); color: var(--text-dim); padding-top: 2px; }
 .ap-hist-dec { font-family: var(--font-mono); font-size: var(--fs-11); white-space: nowrap; padding-top: 1px; }
-.ap-hist-dec.ok { color: var(--status-ok); } .ap-hist-dec.bad { color: var(--status-bad); }
+.ap-hist-dec.ok { color: var(--status-ok); } .ap-hist-dec.bad { color: var(--status-bad); } .ap-hist-dec.warn { color: var(--status-warn); }
 .ap-hist-body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .ap-hist-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ap-hist-kind { font-size: 11.5px; color: var(--text-bright); }
@@ -1058,4 +1068,3 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .kc-tool-risk.write { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 38%, transparent); }
 .kc-tool-risk.lifecycle { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 42%, transparent); }
 .kc-tool-desc { font-size: 10.5px; color: var(--text-dim); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ap-hist-dec.warn { color: var(--status-warn); }

@@ -220,7 +220,6 @@ function CharacterPlate({ name }: { name: string }) {
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper?.generation
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
-  const signalTruth = brief?.signal_truth
   const isKeeper = keeper != null
   const workerState = worker?.state
   const workerFocus = worker?.focus
@@ -236,9 +235,6 @@ function CharacterPlate({ name }: { name: string }) {
           name=${name}
           status=${headerStatus}
           size="xl"
-          currentWork=${currentWork}
-          activityAge=${lastActivity}
-          signalTruth=${signalTruth}
         />
         ${isKeeper ? html`<div class="text-3xs font-bold tracking-[1.5px] text-[var(--ff-gold)] uppercase text-center">KEEPER</div>` : null}
       </div>

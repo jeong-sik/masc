@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
-// jest-axe coverage for AgentAvatar — pixel-art avatar with name +
-// status + activity ring. Tests pin renderings across size variants,
-// activity-age states, blocker indicator, and the showName toggle.
+// jest-axe coverage for AgentAvatar — keeper-v2 `.sigil` monogram avatar.
+// Tests pin renderings across size variants, heartbeat status, and the
+// interactive (onClick) path.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -25,12 +25,11 @@ describe('AgentAvatar a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('avatar with name and status passes axe', async () => {
+  it('avatar with heartbeat status passes axe', async () => {
     render(
       html`<${AgentAvatar}
         name="alpha"
         status="working"
-        showName=${true}
       />`,
       container,
     )
@@ -49,28 +48,11 @@ describe('AgentAvatar a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('avatar with operational overlays (work + activityAge + blocker + ring) passes axe', async () => {
-    render(
-      html`<${AgentAvatar}
-        name="theta"
-        size="xl"
-        showName=${true}
-        currentWork="processing telemetry batch"
-        activityAge=${30}
-        hasBlocker=${true}
-        signalTruth="live"
-        alwaysShowBubble=${true}
-      />`,
-      container,
-    )
-    expect(await axe(container)).toHaveNoViolations()
-  })
-
-  it('stale + archived signal variants pass axe', async () => {
+  it('size variants pass axe', async () => {
     render(
       html`<div>
-        <${AgentAvatar} name="rho" signalTruth="stale" activityAge=${600} />
-        <${AgentAvatar} name="phi" signalTruth="archived" activityAge=${3600} />
+        <${AgentAvatar} name="rho" size="xs" />
+        <${AgentAvatar} name="phi" size="xl" status="running" />
       </div>`,
       container,
     )

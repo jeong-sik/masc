@@ -1,9 +1,13 @@
 // Keeper Workspace — context rail (right). Ported to the keeper-v2 prototype DOM
 // (rails.jsx ContextRail): `.ctx` → `.ctx-scroll` → `.ctx-sec` sections (주의 /
-// 런타임 `.rtc-card` / 처리량 `.tps-card` / 컨텍스트 `.ctx-card` / 소유 태스크
-// `.ctx-list`), styled by the vendored SSOT CSS. Live wiring (Keeper object +
-// tasks store + masc_keeper_compact) is unchanged; only the DOM/classes changed.
-// Data gaps (runtime capability flags, effort segments, memory inspector)
+// 런타임 `.rtc-card` / 컨텍스트 `.ctx-card` with `.ctx-usage` + `.ctx-notobs` /
+// 소유 태스크 `.ctx-list`), styled by the vendored SSOT CSS. Live wiring (Keeper
+// object + tasks store + masc_keeper_compact) is unchanged; only the DOM/classes
+// changed. Documented local divergences: the 처리량 `.tps-card` section was
+// removed as low-signal (#22681), the 컴팩션 스냅샷 button was purged because
+// the backend surface has no writer (#29503), and the last-turn meter stays
+// (design deleted the gauge; #22681 explicitly kept it). Data gaps (runtime
+// capability flags, effort segments, memory inspector, live ctx occupancy)
 // are MARKED, never faked.
 
 import { html } from 'htm/preact'
@@ -69,6 +73,13 @@ function contextMax(keeper: Keeper): number | null {
 function formatK(n: number | null | undefined): string | null {
   if (typeof n !== 'number') return null
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+}
+
+// Design formats the window size as a round k figure (`(ctxWindow / 1000).toFixed(0)k`,
+// rails.jsx ctx-usage) — 200k, not 200.0k.
+function formatWindowK(n: number | null | undefined): string | null {
+  if (typeof n !== 'number') return null
+  return `${(n / 1000).toFixed(0)}k`
 }
 
 function ownedTasks(keeper: Keeper): Task[] {
@@ -377,7 +388,7 @@ function ContextSection({
   const max = contextMax(keeper)
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
   const tokens = formatK(baseTokens)
-  const maxLabel = formatK(max)
+  const maxLabel = formatWindowK(max)
   const hasMeterData = pct !== null && (pct > 0 || max !== null)
   // The server projects these values from the newest completed TurnRecord.
   // Keep only turn identity and age here; serialized request bytes are
@@ -478,17 +489,24 @@ function ContextSection({
           : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미측정</strong><span>${ctxUnavailableReason
                 ? html`턴 레코드 기준 측정 불가: <span class="mono">${ctxUnavailableReason}</span>`
                 : '측정된 턴 레코드가 아직 없음'}</span></div>`}
-        <div class="ctx-tok">
-          <span class="mono">${tokens ?? '—'}</span>
+        <div class="ctx-usage">
+          <span class="ctx-usage-k">마지막 턴 input</span>
+          <span class="mono ctx-usage-v">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>
           <span class="mono ctx-tok-full">${maxLabel ?? '—'}</span>
-          <span class="ctx-tok-lbl">provider 입력 토큰 / 모델 윈도우</span>
+          <span class="ctx-tok-lbl">마지막 턴 · 창 크기</span>
         </div>
         ${ctxSource === 'turn_record'
           ? html`<div class="ctx-src" data-testid="ctx-provenance" title=${ctxTurnRef ?? undefined}>
               마지막 완료 요청: <span class="mono">T${ctxAbsoluteTurn ?? '—'}</span>
               ${ctxObservedAt ? html` · ${formatTimeAgo(ctxObservedAt)}` : null}
             </div>`
+          : null}
+        ${hasMeterData
+          // Design's typed not_observed line (rails.jsx): the meter above is
+          // the LAST turn's ratio; the live in-flight occupancy is never
+          // observed, and the design says so instead of implying it.
+          ? html`<div class="ctx-notobs mono">지금 쓰는 양 <b>알 수 없음</b><span class="ctx-notobs-g">마지막 턴 기준 · 재시작하면 초기화</span></div>`
           : null}
         <div class="cmp-actions">
           <button

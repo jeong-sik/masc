@@ -57,6 +57,68 @@ let test_clauses_compose () =
     ; ("the remedy", Credential.remedy)
     ]
 
+(* The environment wins so one run can be pointed at another credential, and
+   the workspace file is next because that is where masc login put it. *)
+let test_plan_prefers_the_environment () =
+  let chosen = function
+    | Credential.Use token -> token
+    | Credential.Mint -> "mint"
+    | Credential.Go_without -> "go-without"
+    | Credential.No_workspace -> "no-workspace"
+  in
+  let plan ?(env = None) ?(file = None) ?(requires = true) ?(here = true) () =
+    chosen
+      (Credential.plan ~env_token:env ~workspace_token:file
+         ~workspace_requires_token:requires ~workspace_initialized:here)
+  in
+  check string "the environment wins over the workspace" "env"
+    (plan ~env:(Some "env") ~file:(Some "file") ());
+  check string "the workspace file is used when the environment is empty" "file"
+    (plan ~file:(Some "file") ());
+  check string "an environment bearer is used even where none is demanded" "env"
+    (plan ~env:(Some "env") ~requires:false ())
+
+(* Minting is for a workspace that is already here and demands a bearer. The
+   two conditions are separate: a missing auth config reads as the default and
+   the default demands one, so an empty directory claims to require a bearer it
+   has nowhere to put. *)
+let test_plan_mints_only_into_a_workspace_that_demands_one () =
+  let plan ~requires ~here =
+    Credential.plan ~env_token:None ~workspace_token:None
+      ~workspace_requires_token:requires ~workspace_initialized:here
+  in
+  check bool "a demanding workspace that is here mints" true
+    (plan ~requires:true ~here:true = Credential.Mint);
+  check bool "a demanding path with no workspace does not mint" true
+    (plan ~requires:true ~here:false = Credential.No_workspace);
+  check bool "an open workspace does not mint" true
+    (plan ~requires:false ~here:true = Credential.Go_without);
+  check bool "an open path with no workspace needs nothing" true
+    (plan ~requires:false ~here:false = Credential.Go_without)
+
+(* Silence is right for the two ordinary outcomes; a mint and a failure both
+   change what the operator should expect from the next few reads. *)
+let test_only_the_notable_outcomes_speak () =
+  check bool "holding a bearer says nothing" true
+    (Credential.outcome_notice Credential.Held = None);
+  check bool "a workspace that demands nothing says nothing" true
+    (Credential.outcome_notice Credential.Not_required = None);
+  (match Credential.outcome_notice Credential.Minted with
+   | None -> fail "a fresh mint must be reported"
+   | Some notice ->
+       check bool "a mint says it made one" true (has "minted one" notice);
+       check bool "a mint warns the server may not see it yet" true
+         (has "credential index" notice));
+  match
+    Credential.outcome_notice
+      (Credential.Unavailable Credential.no_workspace_detail)
+  with
+  | None -> fail "a failed mint must be reported"
+  | Some notice ->
+      check bool "a failure carries its own detail" true
+        (has "no workspace to mint into" notice);
+      check bool "a failure still names the remedy" true (has "masc login" notice)
+
 let () =
   run "tui_credential"
     [ ( "refusal"
@@ -66,5 +128,11 @@ let () =
         ; test_case "a whole refusal is cause and remedy" `Quick
             test_refusal_is_cause_and_remedy
         ; test_case "the clauses compose" `Quick test_clauses_compose
+        ; test_case "the plan prefers the environment" `Quick
+            test_plan_prefers_the_environment
+        ; test_case "minting is only into a workspace that demands one" `Quick
+            test_plan_mints_only_into_a_workspace_that_demands_one
+        ; test_case "only the notable outcomes speak" `Quick
+            test_only_the_notable_outcomes_speak
         ] )
     ]

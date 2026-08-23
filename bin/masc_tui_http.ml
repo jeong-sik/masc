@@ -40,16 +40,68 @@ let default_agent_name = Masc_tui_credential.agent_name
    workspace other than the one on screen. *)
 let operator_token_cell = ref None
 
-(* [MASC_TOKEN] wins so a single run can be pointed at a different credential.
-   Its absence is no longer a failure: [masc login] already wrote this agent's
-   bearer under the workspace, and that file outlives the shell. *)
-let install_operator_token ~base_path =
-  operator_token_cell
-  := (match first_nonempty_env [ "MASC_TOKEN" ] with
-      | Some _ as token -> token
-      | None ->
-          Auth_login.read_persisted_token ~base_path
-            ~agent_name:default_agent_name)
+(* Carry out [Masc_tui_credential.plan]. The environment wins so a single run
+   can be pointed at a different credential; otherwise the bearer comes from the
+   workspace, and a workspace that demands one but holds none gets one minted.
+
+   Minting grants nothing this process did not already have: the credential
+   store is a directory under the workspace, so anything that can read the
+   bearer masc login wrote can equally write another. The trust boundary is
+   filesystem access to the workspace, not possession of the token. What it
+   does remove is the operator's obligation to carry a secret from shell to
+   shell, which is where every refusal in this file started.
+
+   Admin because that is the role [masc login] issues for this agent, and the
+   keeper lifecycle routes the TUI already offers require it -- minting a
+   narrower role would leave working surfaces failing. *)
+let install_operator_token ~base_path ~host ~port =
+  let cfg = Auth.load_auth_config base_path in
+  (* The auth directory, not the config file: a missing config reads as the
+     default, so its absence proves nothing about whether a workspace is here.
+     The directory holds the credential store, so a workspace a server has ever
+     served has one.
+
+     Read before anything else in startup can create it. Other startup steps do
+     make directories under .masc for a base path that names nothing -- a
+     mistyped flag gets an empty .masc/keepers -- and a check that ran after
+     one of those had made .masc/auth would read its own footprint as evidence
+     of a workspace. *)
+  let workspace_initialized = Sys.file_exists (Auth.auth_dir base_path) in
+  let outcome =
+    match
+      Masc_tui_credential.plan
+        ~env_token:(first_nonempty_env [ Masc_tui_credential.token_env_var ])
+        ~workspace_token:
+          (Auth_login.read_persisted_token ~base_path
+             ~agent_name:default_agent_name)
+        ~workspace_requires_token:(cfg.enabled && cfg.require_token)
+        ~workspace_initialized
+    with
+    | Masc_tui_credential.Use token ->
+        operator_token_cell := Some token;
+        Masc_tui_credential.Held
+    | Masc_tui_credential.Go_without ->
+        operator_token_cell := None;
+        Masc_tui_credential.Not_required
+    | Masc_tui_credential.No_workspace ->
+        operator_token_cell := None;
+        Masc_tui_credential.Unavailable Masc_tui_credential.no_workspace_detail
+    | Masc_tui_credential.Mint -> (
+        match
+          Auth_login.mint ~base_path ~host ~port
+            ~agent_name:default_agent_name ~role:Masc_domain.Admin
+            ~token_env_var:Masc_tui_credential.token_env_var
+            ~token_lifetime:Auth_login.Long_lived ()
+        with
+        | Ok report ->
+            operator_token_cell := Some report.bearer_token;
+            Masc_tui_credential.Minted
+        | Error err ->
+            operator_token_cell := None;
+            Masc_tui_credential.Unavailable
+              (Masc_domain.masc_error_to_string err))
+  in
+  outcome
 
 let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())

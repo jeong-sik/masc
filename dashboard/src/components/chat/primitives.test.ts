@@ -515,10 +515,10 @@ describe('ChatTranscript', () => {
     expect(surfaceLink?.getAttribute('title')).toContain('thread_id=thread-1')
   })
 
-  it('names the agent surface without claiming the row is the viewer own', () => {
-    // A keeper broadcast projected into another keeper's transcript carries the
-    // agent surface, so the badge must not assert authorship — the speaker
-    // label is what identifies who spoke.
+  it('badges the agent surface with the sender, never the viewer', () => {
+    // A row projected into another keeper's transcript carries the agent
+    // surface. The origin badge must name the keeper that actually spoke
+    // (speaker_name), never assert the row is the viewer's own (#28813).
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -543,14 +543,13 @@ describe('ChatTranscript', () => {
     const bubble = container.querySelector('[data-chat-entry-id="projected-1"]') as HTMLElement
     expect(bubble).not.toBeNull()
     expect(bubble.getAttribute('data-chat-surface-kind')).toBe('agent')
-    expect(bubble.textContent).toContain('keeper-code-reviewer-agent')
 
-    // The badge is a span (ChatMetaChip renders an anchor only when url is a
-    // real link), so pin it by the chip attribute rather than bubble text:
-    // this fails when the badge disappears and cannot be perturbed by message
-    // content that happens to contain the same words.
-    const badge = bubble.querySelector('[title="surface=agent"]')
-    expect(badge?.getAttribute('data-chat-meta-chip')).toBe('Agent')
+    // Pin the origin badge by class so the assertion fails when the badge
+    // disappears and cannot be perturbed by message content that happens to
+    // contain the same words.
+    const badge = bubble.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toBe('keeper-code-reviewer-agent')
   })
 
   it('renders connector speaker and route context for gate history rows', () => {
@@ -3437,6 +3436,135 @@ describe('ChatMessageBubble — workspace source badge (C2)', () => {
       container,
     )
     expect(container.querySelector('.kw-src-badge')).toBeNull()
+  })
+
+  it('badges a dashboard-surface row as the operator (사람)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'd',
+          text: 'from the dashboard',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'dashboard' },
+          speakerAuthority: 'owner',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-dashboard')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('사람')
+    expect(badge?.getAttribute('title')).toContain('surface=dashboard')
+    expect(badge?.getAttribute('title')).toContain('speaker_authority=owner')
+  })
+
+  it('badges a discord connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'dc',
+          text: 'from discord',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-discord')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('Discord')
+  })
+
+  it('badges a slack connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'sl',
+          text: 'from slack',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'slack', channel_id: 'C9' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.origin-slack')?.textContent).toContain('Slack')
+  })
+
+  it('badges a workspace fleet broadcast row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'b',
+          text: 'fleet announcement',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'broadcast' },
+          speakerName: 'keeper-taskmaster-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-broadcast')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('브로드캐스트')
+    expect(badge?.getAttribute('title')).toContain('speaker_name=keeper-taskmaster-agent')
+  })
+
+  it('badges an agent-surface row with the sending keeper name', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'a',
+          text: 'direct keeper message',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'agent' },
+          speakerName: 'keeper-lane-smith-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('keeper-lane-smith-agent')
+  })
+
+  it('keeps the semantic badge when a surface is also present', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'ws',
+          text: 'world snapshot',
+          role: 'system',
+          source: 'world_state_prompt',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.world')).not.toBeNull()
+    expect(container.querySelector('.kw-src-badge.origin-discord')).toBeNull()
   })
 
   it('renders no badge when the flag is off', () => {

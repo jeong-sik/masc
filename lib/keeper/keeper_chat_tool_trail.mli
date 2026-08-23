@@ -51,8 +51,12 @@ val append_to : ?max_rows:int -> t -> text:string -> string
     keeps whatever no-text outcome its adapter already has rather than being
     answered with a bare trail. *)
 
-module For_testing : sig
-  val tool_subject : name:string -> args:string -> string option
-  (** The one argument a reader identifies a call by, or [None] when the
-      argument shape carries none of the known keys. *)
-end
+val tool_subject : name:string -> args:string -> string option
+(** The one argument a reader identifies a call by, or [None] when the
+    argument shape carries none of the known keys.
+
+    Public because the terminal UI names the calls in its live turn view and
+    has to name them the same way. The key order this walks already exists
+    twice — here and in [SUBJECT_KEYS] in
+    [dashboard/src/components/tool-call-shared.ts] — and a third copy is how
+    the three surfaces would start naming the same call differently. *)

@@ -140,6 +140,20 @@ let get_sync ?clock ?timeout_sec ~url ~headers () =
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
 
+(** POST that hands each response body chunk to [on_chunk] as it arrives.
+
+    No [with_optional_timeout] wrapper: a wall-clock cap would cancel a stream
+    that is still delivering bytes, which is the case this exists to serve.
+    The bound is [idle_timeout_sec], enforced per chunk inside the pool.
+
+    [idle_timeout_sec] is required rather than defaulted. A tolerable silence
+    depends on the protocol being streamed — a keeper turn goes quiet for as
+    long as the tool it is running takes — and this module cannot know it. *)
+let post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
+  with_pool @@ fun pool ->
+  Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`POST ~url
+    ~headers ~body ~on_chunk ()
+
 module For_testing = struct
   let with_request_timeout ~clock ~timeout_sec f =
     with_optional_timeout ~clock ~timeout_sec f

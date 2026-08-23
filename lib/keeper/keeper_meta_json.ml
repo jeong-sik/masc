@@ -52,10 +52,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Last_proactive_reason, `String rt.proactive_rt.last_reason
     ; Last_proactive_preview, `String rt.proactive_rt.last_preview
     ; Consecutive_noop_count, `Int rt.proactive_rt.consecutive_noop_count
-    ; Last_compaction_check_ts, `Float rt.compaction_rt.last_check_ts
-    ; ( Last_compaction_decision
-      , `String (compaction_runtime_decision_to_string rt.compaction_rt.last_decision)
-      )
     ; Last_autonomous_action_at, `String rt.last_autonomous_action_at
     ; Autonomous_action_count, `Int rt.autonomous_action_count
     ; Autonomous_turn_count, `Int rt.autonomous_turn_count

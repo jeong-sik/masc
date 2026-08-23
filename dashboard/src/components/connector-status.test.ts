@@ -199,9 +199,17 @@ async function loadComponentWithApi(api: {
   showToast?: (message: string, type?: string) => void
 }) {
   vi.resetModules()
-  vi.doMock('../api/core', () => ({
-    post: api.post ?? vi.fn().mockResolvedValue({ ok: true }),
-  }))
+  // Spread the real module so the mock only intercepts `post`: the panel's
+  // import graph also reaches other ../api/core exports (bearer/token
+  // helpers), and a hand-listed stub breaks the whole suite whenever that
+  // graph grows (36/37 failed on main, 2026-08-23).
+  vi.doMock('../api/core', async () => {
+    const actual = await vi.importActual<typeof import('../api/core')>('../api/core')
+    return {
+      ...actual,
+      post: api.post ?? vi.fn().mockResolvedValue({ ok: true }),
+    }
+  })
   vi.doMock('../api/gate', () => ({
     fetchGateStatus: api.fetchGateStatus,
     fetchGateConnectors: api.fetchGateConnectors,

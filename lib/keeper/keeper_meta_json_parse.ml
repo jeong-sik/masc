@@ -373,8 +373,6 @@ let decode_current_meta fields =
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
-  let* last_compaction_check_ts = float_field fields "last_compaction_check_ts" in
-  let* last_compaction_decision_raw = string_field fields "last_compaction_decision" in
   let* last_autonomous_action_at = string_field fields "last_autonomous_action_at" in
   let* autonomous_action_count = int_field fields "autonomous_action_count" in
   let* autonomous_turn_count = int_field fields "autonomous_turn_count" in
@@ -390,6 +388,9 @@ let decode_current_meta fields =
   let* current_task_id = parse_current_task_id fields in
   let* keeper_id = parse_keeper_id fields in
   let* agent_core_env = parse_agent_core_env fields in
+  (* Kept now that the reader fails open: the exact-field check cannot see a
+     format whose field names stayed the same while their meaning changed, and
+     rejecting costs a reset rather than a dead keeper. *)
   if not (String.equal schema "masc.keeper_meta.v1")
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)
@@ -428,8 +429,6 @@ let decode_current_meta fields =
       ; last_ts = last_compaction_ts
       ; last_before_tokens = last_compaction_before_tokens
       ; last_after_tokens = last_compaction_after_tokens
-      ; last_check_ts = last_compaction_check_ts
-      ; last_decision = compaction_runtime_decision_of_string last_compaction_decision_raw
       }
     in
     let proactive_rt : proactive_runtime =

@@ -660,8 +660,7 @@ let apply_existing (state : state) meta command =
          cycle outcome now carries them this far instead of dropping them with
          the recovery. *)
       let compaction_rt =
-        { meta.runtime.compaction_rt with
-          count = max meta.runtime.compaction_rt.count commit_count
+        { Keeper_meta_contract.count = max meta.runtime.compaction_rt.count commit_count
         ; last_ts = at
         ; last_before_tokens = before_bytes
         ; last_after_tokens = after_bytes

@@ -186,6 +186,7 @@
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
+  test_tool_definition_toml
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -2573,6 +2574,20 @@
  (name test_tui_operator_projection)
  (modules test_tui_operator_projection)
  (libraries alcotest masc_tui_operator_projection yojson))
+
+(test
+ (name test_tui_keeper_chat_transcript)
+ (modules test_tui_keeper_chat_transcript)
+ (libraries
+  alcotest
+  fmt
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_keeper_chat_live)
+ (modules test_tui_keeper_chat_live)
+ (libraries alcotest fmt masc_tui_keeper_chat_live yojson))
 
 (test
  (name test_tui_keeper_chat_projection)

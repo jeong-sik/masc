@@ -261,26 +261,9 @@ let apply_post_turn_lifecycle
     ~(meta : keeper_meta)
     ~(checkpoint : Agent_core.Checkpoint.t option) : post_turn_lifecycle =
   let now_ts = Time_compat.now () in
-  let no_checkpoint_decision = Keeper_compact_policy.Skipped_no_checkpoint in
   let body = match checkpoint with
   | None ->
-      let updated_meta =
-        map_runtime
-          (fun rt ->
-            {
-              rt with
-              compaction_rt =
-                {
-                  rt.compaction_rt with
-                  last_check_ts = now_ts;
-                  last_decision =
-                    Keeper_compact_policy.compaction_decision_to_string
-                      no_checkpoint_decision
-                    |> compaction_runtime_decision_of_string;
-                };
-            })
-          meta
-      in
+      let updated_meta = meta in
       {
         updated_meta;
         checkpoint = None;
@@ -293,24 +276,7 @@ let apply_post_turn_lifecycle
   | Some cp ->
       let ctx = context_of_agent_core_checkpoint cp in
       let base_meta = meta in
-      let decision = Keeper_compact_policy.Not_requested in
-      let meta_after_context_check =
-        map_runtime
-          (fun rt ->
-            {
-              rt with
-              compaction_rt =
-                {
-                  rt.compaction_rt with
-                  last_check_ts = now_ts;
-                  last_decision =
-                    Keeper_compact_policy.compaction_decision_to_string
-                      decision
-                    |> compaction_runtime_decision_of_string;
-                };
-            })
-          base_meta
-      in
+      let meta_after_context_check = base_meta in
       {
         updated_meta = meta_after_context_check;
         checkpoint = Some cp;

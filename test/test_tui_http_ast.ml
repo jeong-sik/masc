@@ -59,6 +59,14 @@ let test_keeper_chat_uses_current_async_contract () =
        ~module_path:"bin/masc_tui_http.ml"
        ~callee:"Masc_http_client.post_sync" ~label:"timeout_sec"
      >= 1);
+  (* The streaming send deliberately has no wall-clock cap -- one would cancel
+     a turn that is still emitting. Its bound is silence, so that is the one to
+     pin: without it a quiet turn parks the dispatch fiber for good. *)
+  check bool "chat stream has a finite silence bound" true
+    (Ast_grep.count_calls_with_label
+       ~module_path:"bin/masc_tui_http.ml"
+       ~callee:"Masc_http_client.post_stream" ~label:"idle_timeout_sec"
+     >= 1);
   check int "chat send does not keep the root switch alive on exit" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork");

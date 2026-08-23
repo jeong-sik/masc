@@ -29,7 +29,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
-  let now_ts = Time_compat.now () in
   let autoboot_enabled =
     Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
@@ -190,8 +189,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_ts = 0.0;
             last_before_tokens = 0;
             last_after_tokens = 0;
-            last_check_ts = now_ts;
-            last_decision = compaction_runtime_decision_of_string "initialized";
           };
           proactive_rt = {
             count_total = 0;

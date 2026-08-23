@@ -5,7 +5,7 @@
 module Trail = Masc.Keeper_chat_tool_trail
 module Events = Masc.Keeper_chat_events
 
-let subject ~name ~args = Trail.For_testing.tool_subject ~name ~args
+let subject ~name ~args = Trail.tool_subject ~name ~args
 
 let check_subject description ~args expected =
   Alcotest.(check (option string)) description expected (subject ~name:"Tool" ~args)

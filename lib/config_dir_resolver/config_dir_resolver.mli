@@ -77,6 +77,11 @@ val reset : unit -> unit
 
 val prompts_dir : unit -> string
 val keepers_dir : unit -> string
+
+val tools_dir : unit -> string
+(** [<config-root>/tools] — runtime home of the managed tool definition
+    assets ([Managed_asset_sync.Tools]). Created on demand by the asset
+    sync; a fresh config root does not have it yet. *)
 val keeper_toml_path_opt : string -> string option
 (** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
 

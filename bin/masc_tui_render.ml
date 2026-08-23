@@ -102,7 +102,7 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Keepers _ | Board | Approvals | Planning
+            | Overview | Keepers _ | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools
             | Autonomy | System_logs ->
                 "  (2 then m to answer)"
@@ -1306,6 +1306,174 @@ let render_planning_detail (state : state)
   finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
       ~cols buf
 
+(* The store's status vocabulary, as colours. An unknown word keeps its own
+   text and no colour: the row is still a fact about the store, just one this
+   build does not rank. *)
+let schedule_status_color status =
+  match status with
+  | "scheduled" | "due" -> Ansi.yellow
+  | "running" -> Ansi.cyan
+  | "failed" -> Ansi.red
+  | "succeeded" | "cancelled" | "expired" -> Ansi.dim
+  | _ -> Ansi.reset
+
+(** Render the Schedules surface: the scheduled-automation list, with an
+    armed cancel. The server sorts active rows first by due time and caps the
+    list at its own limit; [scs_truncated] and [scs_request_count] say what
+    of the whole store this page is. *)
+let render_schedules (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface lays
+     out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let header = Printf.sprintf " MASC Schedules  %s  %s"
+    timestamp
+    (connection_badge state.connection_status) in
+
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+
+  (match state.schedules with
+   | None ->
+       (match Terminal_text.optional_single_line state.schedules_error with
+        | Some err ->
+            box_line buf cols
+              (Ansi.red ^ "  (data unreliable: "
+              ^ fit_width err (cols - 24)
+              ^ ")" ^ Ansi.reset)
+        | None ->
+            box_line buf cols (Ansi.dim ^ "  (no schedule data)" ^ Ansi.reset));
+       for _ = 1 to rows - 10 do
+         box_empty buf cols
+       done
+   | Some snapshot ->
+       if not (String.equal snapshot.scs_status "ok") then begin
+         (* The server's "unknown" is a failed store read, not an empty list;
+            the row says which, so a dead ledger cannot read as "nothing is
+            scheduled". *)
+         (match snapshot.scs_read_error with
+          | Some err ->
+              box_line buf cols
+                (Ansi.red ^ "  (data unreliable: "
+                ^ fit_width err (cols - 24)
+                ^ ")" ^ Ansi.reset)
+          | None ->
+              box_line buf cols
+                (Ansi.red ^ "  (schedule store unreadable)" ^ Ansi.reset));
+         for _ = 1 to rows - 10 do
+           box_empty buf cols
+         done
+       end else begin
+         let count_text =
+           match snapshot.scs_request_count with
+           | Some total when snapshot.scs_truncated ->
+               Printf.sprintf "  Requests: %d  (page shows first %d)" total
+                 (List.length snapshot.scs_rows)
+           | Some total ->
+               Printf.sprintf "  Requests: %d" total
+           | None -> "  Requests: ?"
+         in
+         let next_due_text =
+           match snapshot.scs_next_due_iso with
+           | Some iso ->
+               Printf.sprintf "  Next due: %s"
+                 (Tui_decode.short_timestamp_for_terminal iso)
+           | None -> ""
+         in
+         box_line buf cols (Ansi.bold ^ count_text ^ Ansi.reset);
+         box_line buf cols (Ansi.dim ^ next_due_text ^ Ansi.reset);
+         box_divider buf cols;
+
+         let count = List.length snapshot.scs_rows in
+         if count = 0 then begin
+           box_line buf cols (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset);
+           for _ = 1 to rows - 12 do
+             box_empty buf cols
+           done
+         end else begin
+           let content_height = rows - 12 in
+           let scroll_offset =
+             if state.schedule_cursor >= content_height then
+               state.schedule_cursor - content_height + 1
+             else 0
+           in
+           for i = 0 to content_height - 1 do
+             let idx = i + scroll_offset in
+             if idx < count then begin
+               let row = List.nth snapshot.scs_rows idx in
+               let is_selected = idx = state.schedule_cursor in
+               let due =
+                 match row.sch_due_at_iso with
+                 | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+                 | None -> "-"
+               in
+               (* The payload target names who the wake reaches (a keeper for
+                  keeper wakes); rows without one fall back to the summary,
+                  then the source, so every row names something. *)
+               let subject =
+                 match row.sch_payload_target with
+                 | Some target -> target
+                 | None ->
+                     (match row.sch_payload_summary with
+                      | Some summary -> summary
+                      | None -> row.sch_source)
+               in
+               let status_color = schedule_status_color row.sch_status in
+               let line =
+                 Printf.sprintf "%s[%s]%s %s  %s  %s"
+                   status_color
+                   (fit_width row.sch_status 10)
+                   Ansi.reset
+                   due
+                   (fit_width (Terminal_text.single_line subject)
+                      (max 8 (cols - 60)))
+                   (Ansi.dim ^ row.sch_recurrence_summary ^ Ansi.reset)
+               in
+               let content =
+                 if is_selected then
+                   Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+                 else
+                   "  " ^ line
+               in
+               box_line buf cols content
+             end
+             else box_empty buf cols
+           done
+         end;
+         (* The arm and the server's last refusal sit under the list, the
+            same rows the goal detail carries them on. *)
+         (match state.schedule_cancel_armed with
+          | Some schedule_id ->
+              box_line buf cols
+                (Ansi.yellow
+                ^ Printf.sprintf
+                    "  armed: cancel %s -- same key again to send"
+                    (fit_width schedule_id (cols - 44))
+                ^ Ansi.reset)
+          | None -> ());
+         (match state.schedule_cancel_error with
+          | Some err ->
+              box_line buf cols
+                (Ansi.red ^ "  "
+                ^ fit_width (Terminal_text.single_line err) (cols - 8)
+                ^ Ansi.reset)
+          | None -> ())
+       end);
+
+  box_bottom buf cols;
+
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  x:cancel  r:refresh  Tab:next  | Port: %d%s\n"
+    Ansi.dim state.port Ansi.reset);
+
+  finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
+      ~cols buf
+
 (** Render the keeper list view *)
 (* Status is shown as a glyph and a word. The glyph is the coarse reading an
    operator scans a column for -- a fiber running, a fiber sleeping, no fiber,
@@ -2072,7 +2240,11 @@ let render_keeper_message (state : state) =
             | Message_status -> Message_layout.Status, "status"
             | Message_error -> Message_layout.Error, "error"
             | Message_tool -> Message_layout.Tool, "tools"
+            | Message_thinking -> Message_layout.Thinking, "thinking"
           in
+          (* One column for every speaker so the [timestamp] speaker request
+             rows line up down the pane, whatever name each row carries. *)
+          let role_label = Message_layout.align_role_label role_label in
           ({ style;
              timestamp = message.me_timestamp;
              role_label;
@@ -2375,8 +2547,12 @@ let render_keeper_message (state : state) =
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
-           a wrapped thought reads as one message rather than several. *)
-        let prefix = if index = 0 then "  > " else "    " in
+           a wrapped thought reads as one message rather than several. The
+           prefix here is the one [Message_layout.input_cursor_column] measures
+           the caret from, so both say the same constant. *)
+        let prefix =
+          if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
+        in
         box_line_styled buf cols ~style:Ansi.cyan (prefix ^ line))
       composer;
 
@@ -2399,7 +2575,10 @@ let render_keeper_message (state : state) =
       | Some _, (Some Chat_post | None), _ | None, Some _, _ ->
           (match Masc_tui_keeper_chat_queue.length state.msg_queued with
            | 0 -> "Enter:queue for next turn"
-           | waiting -> Printf.sprintf "Enter:queue (%d waiting)" waiting)
+           | waiting ->
+             Printf.sprintf
+               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+               waiting)
       | None, None, _ ->
       match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
       with
@@ -3243,6 +3422,7 @@ let render_surface (state : state) =
   | Tools -> render_tools state
   | Autonomy -> render_autonomy state
   | System_logs -> render_system_logs state
+  | Schedules -> render_schedules state
 
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in

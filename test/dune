@@ -2589,6 +2589,11 @@
   masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_keeper_chat_history)
+ (modules test_tui_keeper_chat_history)
+ (libraries alcotest masc_tui_keeper_chat_history yojson))
+
+(test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
  (libraries alcotest fmt masc_tui_keeper_chat_live yojson))

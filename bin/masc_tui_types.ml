@@ -51,6 +51,12 @@ type msg_entry = {
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
+  (* Unix time, the key the pane orders by. The durable transcript and this
+     session's own notices are two sources of rows and neither knows the
+     other's positions, so they are merged on a shared clock rather than
+     concatenated. [me_timestamp] is a wall-clock string for display and
+     cannot serve: it has no date and does not sort across midnight. *)
+  me_at: float;
 }
 
 type msg_recovery_error = Recovery_blocked of string
@@ -310,6 +316,14 @@ type state = {
      history first. Never authoritative -- the recorded reply comes from the
      strict whole-body decode. *)
   mutable msg_live: Masc_tui_keeper_chat_transcript.t option;
+  (* The keeper's durable transcript as last loaded, for the keeper the pane is
+     showing. Replaced wholesale by a load rather than merged: the server holds
+     the record of what was said, and reconciling two copies of it row by row
+     needs an identity the two do not share. *)
+  mutable msg_loaded: msg_entry list;
+  mutable msg_loaded_keeper: string option;
+  mutable msg_loaded_error: string option;
+  mutable msg_loaded_dropped: int;
   mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
   mutable msg_inflight_kind: msg_inflight_kind option;
   mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
@@ -380,6 +394,10 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_drafts = [];
   msg_history = [];
   msg_live = None;
+  msg_loaded = [];
+  msg_loaded_keeper = None;
+  msg_loaded_error = None;
+  msg_loaded_dropped = 0;
   msg_inflight = None;
   msg_inflight_kind = None;
   msg_prepared = None;
@@ -396,6 +414,28 @@ let create_state ~workspace ~port ~refresh_interval = {
    predicate. A roster that failed to load leaves stale entries behind, so
    "registered" answers true while the send path is closed; counting on that
    answer hid the unavailable row and left the send hint reading Enter:send. *)
+(* The rows the chat pane draws for one keeper: the durable transcript as last
+   loaded, plus this session's own rows, ordered on a shared clock. Two sources
+   with no identity between them, so they are merged by time rather than
+   concatenated -- a notice the TUI wrote belongs where it happened, not after
+   everything the server knows about. Ties keep the loaded row first, which is
+   what [stable_sort] over [loaded @ session] gives. *)
+let chat_rows_for (state : state) keeper_name =
+  let loaded =
+    match state.msg_loaded_keeper with
+    | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
+        state.msg_loaded
+    | Some _ | None -> []
+  in
+  let session =
+    List.filter
+      (fun entry -> String.equal entry.me_keeper_name keeper_name)
+      state.msg_history
+  in
+  List.stable_sort
+    (fun left right -> Float.compare left.me_at right.me_at)
+    (loaded @ session)
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -415,6 +455,8 @@ let keeper_message_status_rows (state : state) =
      | None -> 0
      | Some live ->
          List.length (Masc_tui_keeper_chat_transcript.status_rows live))
+  + (if Option.is_some state.msg_loaded_error then 1 else 0)
+  + (if state.msg_loaded_dropped > 0 then 1 else 0)
 
 let approval_items (state : state) =
   match state.approval_snapshot with

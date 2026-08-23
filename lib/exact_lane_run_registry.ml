@@ -262,6 +262,7 @@ let storage_filename = "exact-lane-runs-v5.jsonl"
 (* Re-exported from the store rather than re-derived from [Payload], so the
    bound a test reads is the bound [prune] applies. *)
 let max_completed_retained = Store.max_completed_retained
+let cut_replay_log = Store.cut_replay_log
 
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
 

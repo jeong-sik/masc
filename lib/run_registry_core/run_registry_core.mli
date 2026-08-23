@@ -50,6 +50,15 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type cut_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; retained_entries : int
+  ; reached_end : bool
+  ; rewritten : bool
+  }
+(** What a deployment-time store cut read and what it kept. *)
+
 module Make (Payload : Payload) : sig
   type status =
     | Running
@@ -90,6 +99,29 @@ module Make (Payload : Payload) : sig
 
   val list_entries : t -> entry list
   val get : t -> id:string -> entry option
+  val cut_replay_log : execute:bool -> string -> cut_report
+  (** Rewrites [path] from the state a replay of it produces. A hard-cut field
+      leaves rows that can never decode again; [replay] declines to compact
+      while any of them is on disk, so without this the store keeps them and
+      its retention bound stops applying.
+
+      The rewrite is [replay]'s own compaction, so it keeps exactly what
+      [replay] keeps and nothing else. Beyond the rows no decoder reads, that
+      drops every entry still [Running] on disk (a fiber does not survive a
+      restart) and every completed entry past [completed_retention], and it
+      collapses the append history to one register — and one complete — per
+      surviving entry. On a store that has been compacting normally this is
+      what the next boot would write anyway; on a poisoned store it is not,
+      because that store has not compacted since the field was cut.
+
+      [execute:false] measures and reports without writing. A file whose last
+      line is unterminated is never rewritten, because a partial read must not
+      become a truncating rewrite — [reached_end] is [false], [rewritten] is
+      [false], and the counts still stand.
+
+      Run this only while no server holds the store. The rewrite replaces the
+      inode, and a running server keeps appending through the writer it opened
+      before — those appends land in the unlinked file. *)
 end
 
 (** Single-owner lifecycle for a process-wide registry. The first installation

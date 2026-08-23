@@ -30,22 +30,6 @@ let validate_file_path path =
 (* Sanitization helpers                         *)
 (* ============================================ *)
 
-let sanitize_html str =
-  let buf = Buffer.create (String.length str) in
-  String.iter (fun c ->
-    match c with
-    | '<' -> Buffer.add_string buf "&lt;"
-    | '>' -> Buffer.add_string buf "&gt;"
-    | '&' -> Buffer.add_string buf "&amp;"
-    | '"' -> Buffer.add_string buf "&quot;"
-    | '\'' -> Buffer.add_string buf "&#x27;"
-    | _ -> Buffer.add_char buf c
-  ) str;
-  Buffer.contents buf
-
-let sanitize_agent_name = sanitize_html
-let sanitize_message = sanitize_html
-
 let safe_filename = Common.safe_filename
 
 (* ============================================ *)

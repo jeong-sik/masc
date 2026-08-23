@@ -199,6 +199,7 @@ normal_targets=(
   @test/runtest-test_backend
   @test/runtest-test_backend_coverage
   @test/runtest-test_blocker_class_exhaustiveness
+  @test/runtest-test_blocker_class_mirror
   @test/runtest-test_board_author_identity_10297
   @test/runtest-test_board_collect_pause_gate
   @test/runtest-test_board_context_inference_resolution
@@ -408,6 +409,7 @@ sse_targets=(
   @test/runtest-test_tui_decode
   @test/runtest-test_tui_frame_presenter
   @test/runtest-test_tui_keeper_chat_history
+  @test/runtest-test_tui_chat_surface_mirror
   @test/runtest-test_tui_keeper_chat_live
   @test/runtest-test_tui_keeper_chat_transcript
   @test/runtest-test_tui_keeper_chat_projection

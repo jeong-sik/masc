@@ -1,11 +1,40 @@
 module Transcript = Masc_tui_keeper_chat_transcript
 
+(* The surface vocabulary, mirrored from [Surface_ref.t]. This library decodes
+   the chat history and nothing else — it carries no [masc] dependency, so it
+   cannot name that type. [test_tui_chat_surface_mirror] compares the kinds
+   decoded here against [Surface_ref]'s own JSON, so a variant added there
+   fails a test instead of quietly drawing rows with no origin. Only the parts
+   a label needs are kept: which surface, and the name a webhook or gate goes
+   by. *)
+module Surface = struct
+  type t =
+    | Dashboard
+    | Discord
+    | Slack
+    | Webhook of string
+    | Agent
+    | Broadcast
+    | Gate of string
+end
+
+type speaker =
+  | Operator
+  | Named of string
+
 type kind =
-  | Said_by_operator
+  | Addressed_to_keeper of
+      { speaker : speaker
+      ; surface : Surface.t option
+      }
   | Said_by_keeper
   | Delivery_failed
   | Tool_calls of string list
 
+(* The surface half of the label. An operator's own surfaces say nothing extra:
+   a dashboard row from a named person is that person, and the pane the
+   operator is looking at needs no badge to say so. Every other surface is
+   where the row came in from, which is the fact the label exists to carry. *)
 type row =
   { at : float
   ; kind : kind
@@ -28,6 +57,45 @@ let float_field fields name =
   | Some (`Int value) -> Some (float_of_int value)
   | Some _ | None -> None
 
+let surface_label : Surface.t -> string option = function
+  | Surface.Dashboard -> None
+  | Surface.Agent -> Some "agent"
+  | Surface.Broadcast -> Some "broadcast"
+  | Surface.Slack -> Some "slack"
+  | Surface.Discord -> Some "discord"
+  | Surface.Webhook source -> Some source
+  | Surface.Gate label -> Some label
+;;
+
+(* Unknown kinds decode to [None]: a build that meets a surface it was not
+   taught draws the row unlabelled rather than inventing a name for it. *)
+let surface_of_json : Yojson.Safe.t -> Surface.t option = function
+  | `Assoc fields ->
+      (match string_field fields "kind" with
+       | Some "dashboard" -> Some Surface.Dashboard
+       | Some "discord" -> Some Surface.Discord
+       | Some "slack" -> Some Surface.Slack
+       | Some "webhook" ->
+           Some
+             (Surface.Webhook
+                (Option.value ~default:"webhook" (string_field fields "source")))
+       | Some "agent" -> Some Surface.Agent
+       | Some "broadcast" -> Some Surface.Broadcast
+       | Some "gate" ->
+           Some
+             (Surface.Gate
+                (Option.value ~default:"gate" (string_field fields "label")))
+       | Some _ | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+;;
+
+let addressed_label speaker surface =
+  let name = match speaker with Operator -> "you" | Named name -> name in
+  match Option.bind surface surface_label with
+  | None -> name
+  | Some surface -> name ^ " \xc2\xb7 " ^ surface
+;;
+
 (* What one server row is, before consecutive tool rows are folded. Parsed once
    so the fold below matches on a closed sum rather than re-reading strings. *)
 type parsed =
@@ -47,7 +115,24 @@ let parse_row (entry : Yojson.Safe.t) =
       let at = Option.value ~default:0.0 (float_field fields "ts") in
       let content = Option.value ~default:"" (string_field fields "content") in
       match string_field fields "role" with
-      | Some "user" -> Some (Utterance { at; kind = Said_by_operator; text = content })
+      | Some "user" ->
+          (* [speaker_name] and [surface] are what the server already sends;
+             reading them is the whole difference between "you" and the 23
+             other authors that share this role. A surface this build cannot
+             decode is dropped to [None] rather than guessed at. *)
+          let speaker =
+            match string_field fields "speaker_name" with
+            | Some name when String.trim name <> "" -> Named name
+            | Some _ | None -> Operator
+          in
+          let surface =
+            match List.assoc_opt "surface" fields with
+            | None | Some `Null -> None
+            | Some json -> surface_of_json json
+          in
+          Some
+            (Utterance
+               { at; kind = Addressed_to_keeper { speaker; surface }; text = content })
       | Some "assistant" ->
           let kind =
             match string_field fields "kind" with

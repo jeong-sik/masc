@@ -344,14 +344,31 @@ let schedule_query_failure_message = function
   | exn -> Printexc.to_string exn
 ;;
 
+(* Two keepers can be involved in one schedule: the one that created it and
+   the one the payload wakes. Filtering on [scheduled_by] alone showed it to
+   the first and hid it from the second, so a wake an operator scheduled was
+   invisible to every keeper while still being delivered to one of them
+   (#25689). Show it to both — this only adds rows. *)
 let schedule_visible_to_keeper keeper_name (request : Schedule_domain.schedule_request)
   =
   match keeper_name with
   | None -> true
   | Some keeper_name ->
-    (match request.scheduled_by.kind with
-     | Schedule_domain.Automated_actor -> String.equal request.scheduled_by.id keeper_name
-     | Schedule_domain.Human_operator | Schedule_domain.System -> false)
+    let scheduled_by_this_keeper =
+      match request.scheduled_by.kind with
+      | Schedule_domain.Automated_actor ->
+        String.equal request.scheduled_by.id keeper_name
+      | Schedule_domain.Human_operator | Schedule_domain.System -> false
+    in
+    let wakes_this_keeper =
+      match
+        Schedule_payload_projection.creation_keeper_wake_target
+          ~payload:(Schedule_domain.payload_to_yojson request.payload)
+      with
+      | Ok (Some target) -> String.equal target keeper_name
+      | Ok None | Error _ -> false
+    in
+    scheduled_by_this_keeper || wakes_this_keeper
 ;;
 
 let read_scheduled_automation_observation

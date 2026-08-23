@@ -1,7 +1,7 @@
 (** Durable per-Keeper Event Layer state.
 
     Current writes use the [keeper.event_queue.state.v16]
-    [event-queue-v16.json] envelope: revision, pending stimuli, the latest
+    [event-queue-v17.json] envelope: revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the

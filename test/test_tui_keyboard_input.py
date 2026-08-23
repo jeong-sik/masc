@@ -384,6 +384,18 @@ def stable_termios(attributes: list[Any]) -> list[Any]:
     return stable
 
 
+def keeper_row_selected(name: bytes) -> bytes:
+    """Bytes that appear only while ``name`` is the selected keeper row.
+
+    The list marks selection twice: a reverse-video marker in the gutter, and
+    the keeper's name in bold. The two are not adjacent -- the status cell sits
+    between them -- so this anchors on the name. The reset immediately before
+    it closes the status cell and is the same for every status value, which
+    keeps the needle from depending on whether the live roster was read.
+    """
+    return b"\x1b[0m \x1b[1m" + name
+
+
 def keeper_metadata(name: str) -> dict[str, object]:
     metadata: dict[str, object] = {
         "schema": "masc.keeper_meta.v1",
@@ -1074,14 +1086,14 @@ def navigate_with_arrows_and_quit(
         master_fd,
         output,
         b"\x1b[B",
-        b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+        keeper_row_selected(b"beta"),
     )
     send_and_wait(
         process,
         master_fd,
         output,
         b"\x1b[A",
-        b"\x1b[7m>\x1b[0m  \x1b[1malpha",
+        keeper_row_selected(b"alpha"),
     )
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
     send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
@@ -1261,7 +1273,7 @@ def keeper_detail_overscroll_interaction(
                 master_fd,
                 output,
                 b"j",
-                b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+                keeper_row_selected(b"beta"),
             )
             beta = send_and_wait(
                 process,
@@ -1308,7 +1320,7 @@ def keeper_selection_identity_interaction(
         master_fd,
         output,
         b"j",
-        b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+        keeper_row_selected(b"beta"),
     )
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
 
@@ -1412,7 +1424,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             master_fd,
             output,
             b"j",
-            b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+            keeper_row_selected(b"beta"),
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
@@ -1516,7 +1528,7 @@ def keeper_message_unreliable_roster_interaction(
             master_fd,
             output,
             b"j",
-            b"\x1b[7m>\x1b[0m  \x1b[1mbeta",
+            keeper_row_selected(b"beta"),
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Message to: beta")

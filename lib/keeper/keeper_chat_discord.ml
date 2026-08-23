@@ -360,7 +360,13 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
           match msg_id with
           | None when !external_effect_completed -> Ok ()
           | None ->
-              if String.length acc_text = 0 then
+              (* Ask whether there is anything to send, which is
+                 [delivered_text] — the accumulated text plus the tool trail.
+                 Checking [acc_text] asked about a different value: a turn that
+                 only called tools has no assistant text but does have a trail,
+                 so it settled Error while the turn layer had already settled
+                 Delivered (#26406). *)
+              if String.length delivered_text = 0 then
                 Error
                   (Discord_rest_client.Other
                      { request_id = "keeper_chat_discord.final_reply"

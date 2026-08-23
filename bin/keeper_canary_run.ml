@@ -446,11 +446,7 @@ let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
     else Error (Printf.sprintf "shutdown returned HTTP %d: %s" status body)
   in
   let* () = wait_until_stopped ~host ~port ~keeper_name in
-  (* The nonce is re-read after shutdown: that is the durable owner state
-     the resume directive must name. *)
-  let* _trace_id_paused, _owner_nonce =
-    trajectory_identity ~host ~port ~keeper_name
-  in
+  let* _trace_id_paused, _ = trajectory_identity ~host ~port ~keeper_name in
   let boot () = lifecycle_post ~host ~port ~keeper_name ~action:"boot" ~body:"{}" () in
   let* status, body = boot () in
   let* () =

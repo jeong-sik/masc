@@ -525,6 +525,22 @@ let current_queue_keeper_name =
   Arg.(required & opt (some string) None & info [ "keeper-name" ] ~docv:"KEEPER" ~doc)
 ;;
 
+let durable_filenames_cmd =
+  let doc = "print the durable event-queue filenames this binary reads and writes" in
+  Cmd.v
+    (Cmd.info "durable-filenames" ~doc)
+    Term.(
+      const (fun () ->
+        (* The preflight script builds fixtures at these exact names. It used
+           to spell them out, so bumping the snapshot filename in OCaml left
+           the fixtures one version behind and the self-test failed. *)
+        Printf.printf
+          "snapshot=%s\nwal=%s\n"
+          Keeper_event_queue_persistence.snapshot_filename
+          Keeper_event_queue_persistence.transition_wal_filename)
+      $ const ())
+;;
+
 let validate_current_queue_cmd =
   let doc = "validate a current event-queue through production decode and replay" in
   Cmd.v
@@ -635,6 +651,135 @@ let tool_blob_maintenance_cmd =
          $ delete_previous_candidates))
 ;;
 
+(* A hard-cut field leaves rows no current decoder can read. [replay] refuses
+   to compact while such a row is on disk and the row only leaves through
+   compaction, so the store keeps it and its retention bound stops applying —
+   #29277. Cutting the store is a deployment step because it drops rows, and
+   the operator has to see how many before authorising it. *)
+let run_registry_cuts =
+  [ ( Masc.Exact_lane_run_registry.storage_filename
+    , Masc.Exact_lane_run_registry.cut_replay_log )
+  ; Fusion_run_registry.storage_filename, Fusion_run_registry.cut_replay_log
+  ; ( Masc.Verification_run_registry.storage_filename
+    , Masc.Verification_run_registry.cut_replay_log )
+  ; ( Masc.Goal_verification_run_registry.storage_filename
+    , Masc.Goal_verification_run_registry.cut_replay_log )
+  ]
+;;
+
+let scan_run_registries base_path ~execute =
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  List.map
+    (fun (filename, cut) ->
+       let report = cut ~execute (Filename.concat masc_dir filename) in
+       Printf.printf
+         "%s lines=%d unreadable=%d retained=%d whole_file=%b rewritten=%b\n%!"
+         filename
+         report.Run_registry_core.lines_read
+         report.malformed_lines
+         report.retained_entries
+         report.reached_end
+         report.rewritten;
+       filename, report)
+    run_registry_cuts
+;;
+
+let cut_run_registries_report ~execute reports =
+  let dropped =
+    List.fold_left
+      (fun total (_, r) -> total + r.Run_registry_core.malformed_lines)
+      0
+      reports
+  in
+  (* A store whose last line is unterminated is left alone, which is what a
+     crashed server leaves behind — exactly the state a deployment runs into.
+     Reporting that as success would tell the deploy script the store was
+     cleaned when it was not. *)
+  let unfinished =
+    List.filter (fun (_, r) -> not r.Run_registry_core.reached_end) reports
+    |> List.map fst
+  in
+  if unfinished <> []
+  then
+    errorf
+      "store(s) end in an unterminated line and were left alone: %s"
+      (String.concat ", " unfinished)
+  else if not execute
+  then
+    if dropped = 0
+    then Ok ()
+    else
+      errorf
+        "%d unreadable row(s) across the run registries; re-run with --execute \
+         to cut them"
+        dropped
+  else (
+    let uncut =
+      List.filter
+        (fun (_, r) ->
+           r.Run_registry_core.malformed_lines > 0 && not r.rewritten)
+        reports
+      |> List.map fst
+    in
+    if uncut = []
+    then Ok ()
+    else
+      errorf
+        "store(s) still hold unreadable rows after the cut: %s"
+        (String.concat ", " uncut))
+;;
+
+(* The rewrite replaces the inode and drops rows that are Running on disk, so
+   it must not run under a live server. The lease is the same one
+   [tool-blob-maintenance] takes for its own destructive pass. *)
+let cut_run_registries base_path ~execute =
+  if not execute
+  then cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
+  else (
+    let run_dir = (Host_config.host ()).run_dir in
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned { pid } ->
+      errorf
+        "workspace writer lease is already owned base_path=%s pid=%s"
+        base_path
+        (match pid with
+         | Some value -> string_of_int value
+         | None -> "unknown")
+    | Server_startup_takeover.Base_path_rejected rejection ->
+      errorf
+        "workspace writer lease rejected base_path=%s: %s"
+        base_path
+        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Fun.protect
+        ~finally:(fun () ->
+          Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+           cut_run_registries_report
+             ~execute
+             (scan_run_registries base_path ~execute)))
+;;
+
+let execute_cut =
+  let doc = "Rewrite each store, dropping the rows no current decoder reads." in
+  Arg.(value & flag & info [ "execute" ] ~doc)
+;;
+
+let cut_run_registries_cmd =
+  let doc =
+    "report run-registry rows the current decoders refuse; --execute rewrites \
+     the stores without them (run with the server stopped)"
+  in
+  Cmd.v
+    (Cmd.info "cut-run-registries" ~doc)
+    Term.(
+      ret
+        (const (fun base_path execute ->
+           cmdliner_result (cut_run_registries base_path ~execute))
+         $ base_path
+         $ execute_cut))
+;;
+
 let owner_pid =
   let doc = "Expected process ID of the current BasePath lease owner." in
   Arg.(required & opt (some int) None & info [ "owner-pid" ] ~docv:"PID" ~doc)
@@ -696,7 +841,8 @@ let () =
     (Cmd.eval
        (Cmd.group
           (Cmd.info "masc-deployment-preflight-helper" ~doc)
-          [ lease_run_cmd
+          [ durable_filenames_cmd
+          ; lease_run_cmd
           ; lease_handoff_cmd
           ; tool_blob_maintenance_cmd
           ; verify_lease_owner_cmd
@@ -706,5 +852,6 @@ let () =
           ; build_commit_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
+          ; cut_run_registries_cmd
           ]))
 ;;

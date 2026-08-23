@@ -261,6 +261,13 @@ let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request
              | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts) )
          ; ( "requested_at_iso"
            , `String (Masc_domain.iso8601_of_unix_seconds request.requested_at) )
+           (* The dashboard projection emits the structured form through the
+              same serialiser. Sending only the two flattened strings here left
+              the client reconstructing recurrence from them, with an
+              unknown-shape fallback at the end of that chain. Both surfaces
+              now carry the structure, and the flattened pair stays for the
+              readers that already use it. *)
+         ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
          ; ( "recurrence_kind"
            , `String (Schedule_domain.recurrence_kind_to_string request.recurrence) )
          ; ( "recurrence_summary"

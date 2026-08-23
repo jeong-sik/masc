@@ -66,7 +66,7 @@ let parse_row ~file_path line : (string * string) option =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error detail ->
     report_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
       ~path:file_path
       ~detail;
     None

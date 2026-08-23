@@ -269,9 +269,11 @@ module Store = Run_registry_core.Make (Payload)
 
 type t = Store.t
 
+let storage_filename = "verification-runs.jsonl"
 let create = Store.create
 let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
+let cut_replay_log = Store.cut_replay_log
 
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
 

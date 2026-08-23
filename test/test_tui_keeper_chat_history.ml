@@ -2,6 +2,19 @@ open Alcotest
 
 module History = Masc_tui_keeper_chat_history
 
+let addressed ?(ts = 1.0) ?speaker_name ?surface content =
+  `Assoc
+    ([ "id", `String "row"
+     ; "role", `String "user"
+     ; "content", `String content
+     ; "ts", `Float ts
+     ]
+     @ (match speaker_name with
+        | None -> []
+        | Some name -> [ "speaker_name", `String name ])
+     @ (match surface with None -> [] | Some json -> [ "surface", json ]))
+;;
+
 let row ?(ts = 1.0) ~role ?kind ?tool_call_name content =
   `Assoc
     ([ "id", `String "row"
@@ -15,7 +28,8 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_name content =
         | Some name -> [ "tool_call_name", `String name ]))
 
 let kind_to_string : History.kind -> string = function
-  | History.Said_by_operator -> "operator"
+  | History.Addressed_to_keeper { speaker; surface } ->
+      Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
   | History.Said_by_keeper -> "keeper"
   | History.Delivery_failed -> "delivery_failed"
   | History.Tool_calls rows ->
@@ -37,11 +51,57 @@ let test_roles_map_to_what_the_pane_draws () =
   in
   check int "nothing was dropped" 0 decoded.History.dropped;
   check (list string) "each role lands where it belongs"
-    [ "operator"; "keeper"; "delivery_failed" ]
+    [ "addressed(you)"; "keeper"; "delivery_failed" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows);
   check (list string) "and the text comes through"
     [ "고쳐줘"; "고쳤어요"; "slack 5xx" ]
     (List.map (fun r -> r.History.text) decoded.History.rows)
+
+(* A [role: "user"] row is whatever was put in front of the keeper, and most of
+   them are not the operator. One live keeper carried 92 such rows from 23
+   distinct speakers — taskmaster, an MCP client, the exact-lane verifier, a
+   dozen canaries — and the pane drew every one as "you", which told the
+   operator they had said things they had never seen. *)
+let test_an_addressed_row_is_labelled_by_who_sent_it () =
+  let label json =
+    match (List.hd (decode (`List [ json ])).History.rows).History.kind with
+    | History.Addressed_to_keeper { speaker; surface } ->
+        History.addressed_label speaker surface
+    | History.Said_by_keeper | History.Delivery_failed | History.Tool_calls _ ->
+        failf "expected an addressed row"
+  in
+  let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
+  check string "an unnamed row is still the operator" "you"
+    (label (addressed "hello"));
+  check string "the dashboard is an operator surface, so it adds nothing"
+    "vincent"
+    (label (addressed ~speaker_name:"vincent" ~surface:(surface "dashboard" []) "hi"));
+  check string "an agent is named and marked" "taskmaster \xc2\xb7 agent"
+    (label
+       (addressed ~speaker_name:"taskmaster" ~surface:(surface "agent" []) "routed"));
+  check string "a fleet broadcast does not read like a direct message"
+    "codex \xc2\xb7 broadcast"
+    (label
+       (addressed ~speaker_name:"codex" ~surface:(surface "broadcast" []) "main red"));
+  check string "a connector says which one"
+    "vincent \xc2\xb7 slack"
+    (label
+       (addressed
+          ~speaker_name:"vincent"
+          ~surface:(surface "slack" [ "channel_id", `String "C1" ])
+          "from slack"));
+  check string "a gate goes by its channel label" "hookbot \xc2\xb7 ops-room"
+    (label
+       (addressed
+          ~speaker_name:"hookbot"
+          ~surface:(surface "gate" [ "label", `String "ops-room" ])
+          "gated"));
+  (* A kind this build was not taught draws the name alone. Inventing a badge
+     for it would say something the row does not. *)
+  check string "an unknown surface is unlabelled, not guessed" "someone"
+    (label
+       (addressed ~speaker_name:"someone" ~surface:(surface "telepathy" []) "?"))
+;;
 
 let test_consecutive_tool_rows_become_one_block () =
   let decoded =
@@ -57,7 +117,7 @@ let test_consecutive_tool_rows_become_one_block () =
   in
   match decoded.History.rows with
   | [ operator; tools; keeper ] ->
-      check string "the operator's line is first" "operator"
+      check string "the operator's line is first" "addressed(you)"
         (kind_to_string operator.History.kind);
       check string "the keeper's line is last" "keeper"
         (kind_to_string keeper.History.kind);
@@ -72,7 +132,7 @@ let test_consecutive_tool_rows_become_one_block () =
                 rows);
            check bool "the rows carry the finished marker" true
              (List.for_all (fun r -> String.length r > 0) rows)
-       | History.Said_by_operator | History.Said_by_keeper
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Delivery_failed ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
@@ -150,6 +210,8 @@ let () =
     [ ( "rows"
       , [ test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
+        ; test_case "an addressed row is labelled by who sent it" `Quick
+            test_an_addressed_row_is_labelled_by_who_sent_it
         ; test_case "consecutive tool rows become one block" `Quick
             test_consecutive_tool_rows_become_one_block
         ; test_case "speech splits tool blocks" `Quick

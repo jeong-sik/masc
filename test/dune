@@ -2597,6 +2597,11 @@
  (libraries alcotest masc_tui_keeper_chat_history yojson))
 
 (test
+ (name test_tui_chat_surface_mirror)
+ (modules test_tui_chat_surface_mirror)
+ (libraries alcotest masc masc_tui_keeper_chat_history yojson))
+
+(test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
  (libraries alcotest fmt masc_tui_keeper_chat_live yojson))

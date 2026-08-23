@@ -1537,7 +1537,7 @@ let render_keeper_message (state : state) =
         (fun message ->
           let style, role_label =
             match message.me_role with
-            | Message_user -> Message_layout.User, "you"
+            | Message_user speaker -> Message_layout.User, speaker
             | Message_keeper ->
                 ( Message_layout.Keeper
                 , Keeper_chat.terminal_safe_text message.me_keeper_name )

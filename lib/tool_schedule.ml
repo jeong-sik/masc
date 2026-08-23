@@ -479,7 +479,11 @@ let handle_get ~tool_name ~start_time ctx args =
        ok ~tool_name ~start_time (schedule_request_json ?last_wake request))
 ;;
 
-let handle_cancel ~tool_name ~start_time ctx args =
+(* Takes the config alone, not the full [context]: cancel touches nothing but
+   the schedule store, so requiring the creation-path hooks (or an agent name
+   the arguments already carry) would be a dependency this action does not
+   have. *)
+let handle_cancel ~tool_name ~start_time (config : Workspace.config) args =
   let result =
     let* schedule_id = required_string args "schedule_id" in
     let* cancelled_by_id = required_string args "cancelled_by_id" in
@@ -488,7 +492,7 @@ let handle_cancel ~tool_name ~start_time ctx args =
     in
     let* reason = required_string args "reason" in
     let* request =
-      Schedule_service.cancel ctx.config ~schedule_id
+      Schedule_service.cancel config ~schedule_id
       |> Result.map_error Schedule_service.service_error_to_string
     in
     Ok (request, cancelled_by_id, cancelled_by_kind, reason)
@@ -524,7 +528,9 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Create_request; _ } -> handle handle_create
   | Some { action = List_requests; _ } -> handle handle_list
   | Some { action = Get_request; _ } -> handle handle_get
-  | Some { action = Cancel_request; _ } -> handle handle_cancel
+  | Some { action = Cancel_request; _ } ->
+      handle (fun ~tool_name ~start_time ctx ->
+          handle_cancel ~tool_name ~start_time ctx.config)
   | _ -> None
 ;;
 

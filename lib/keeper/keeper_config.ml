@@ -85,6 +85,23 @@ let keeper_own_recent_turns_max_rp =
 let keeper_own_recent_turns_max () : int =
   Runtime_params.get keeper_own_recent_turns_max_rp
 
+(* The briefing is pinned: the conversation window cannot take back whatever
+   it occupies. A keeper whose briefing outgrew its runtime's whole request cap
+   could not assemble a turn at all, and no cut of the history helped, because
+   the bytes were never in the history (masc#29676: 141,937 pinned bytes
+   against a 131,072 cap, 86 turns refused across eight hours).
+
+   Half keeps the guarantee symmetric — the turn being briefed always has at
+   least as much room as the briefing about it. It is a ceiling, not a target:
+   a briefing that already fits takes what it needs and this never applies. *)
+let keeper_context_briefing_share_percent_rp =
+  _rp_int ~key:"keeper.context.briefing.share_percent"
+    ~default:(fun () -> 50)
+    ~min_v:1 ~max_v:100
+    ~description:"Share of the runtime's declared request-body cap the world-state briefing may occupy" ()
+let keeper_context_briefing_share_percent () : int =
+  Runtime_params.get keeper_context_briefing_share_percent_rp
+
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"

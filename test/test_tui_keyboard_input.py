@@ -1867,15 +1867,16 @@ def assert_overview_event_rows(
     send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
     tab_until(process, master_fd, output, b"MASC Overview")
 
-    # The smallest viewport that still fits the whole Overview budget. It grew
-    # by one row when the composer took the terminal's last line, so this is
-    # 23 rather than 22; the assertions below are the same budget, not a
-    # larger one.
+    # The smallest viewport that still fits the whole Overview budget. It grows
+    # by a row whenever the chrome does: 22 -> 23 when the composer took the
+    # terminal's last line, 23 -> 24 when a tokenless start began reporting it
+    # as an event (#29802) and the taller event panel pushed the last task off.
+    # The assertions below are the same budget, not a larger one.
     overview = resize_and_wait(
         process,
         master_fd,
         output,
-        rows=23,
+        rows=24,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -1884,8 +1885,12 @@ def assert_overview_event_rows(
     for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
-    if b"Recent Events 1-6/6" not in overview:
-        raise AssertionError(f"23-row Overview omitted its event range: {overview!r}")
+    # What this size is meant to prove is that nothing is paged away, so the
+    # range is read as "first through last of all of them" rather than pinned
+    # to a count. Pinning it meant every event added at startup failed here,
+    # which is how #29802 arrived without anyone noticing this line.
+    if re.search(rb"Recent Events 1-(\d+)/\1\b", CSI_RE.sub(b"", overview)) is None:
+        raise AssertionError(f"24-row Overview paged its events away: {overview!r}")
     if overview.count(b"Manual refresh") != 5:
         raise AssertionError(
             f"22-row Overview did not show all five refresh events: {overview!r}"

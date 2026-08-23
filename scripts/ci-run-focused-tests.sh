@@ -78,6 +78,7 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
 fi
 
 paused_targets=(
+  @test/runtest-test_process_file_redirects
   @test/runtest-test_keeper_turn_outcome
   @test/runtest-test_keeper_shutdown_blocked_purge_release
   @test/runtest-test_keeper_paused_work_transfer_transaction

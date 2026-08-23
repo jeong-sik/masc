@@ -958,6 +958,148 @@ let run_argv_with_stdin_and_status
   in
   (status, output_for_status ~status ~stdout ~stderr)
 
+type output_destination =
+  | Captured
+  | Written_to of {
+      path : string;
+      append : bool;
+    }
+
+type input_origin =
+  | Inherited
+  | From_string of string
+  | Read_from of { path : string }
+
+(* A file redirect is opened before the spawn, the way a shell does it, so a
+   path that cannot be opened stops the command instead of letting it run with
+   the stream attached somewhere else. *)
+let open_sink ~sw ~fs ~path ~append =
+  try
+    Ok
+      (if append
+       then Eio.Path.open_out ~sw ~append:true ~create:(`If_missing 0o644) Eio.Path.(fs / path)
+       else Eio.Path.open_out ~sw ~create:(`Or_truncate 0o644) Eio.Path.(fs / path))
+  with
+  | Eio.Io _ as exn -> Error (Printf.sprintf "cannot open %s for writing: %s" path (Printexc.to_string exn))
+  | Sys_error message -> Error (Printf.sprintf "cannot open %s for writing: %s" path message)
+;;
+
+let open_source ~sw ~fs path =
+  try Ok (Eio.Path.open_in ~sw Eio.Path.(fs / path)) with
+  | Eio.Io _ as exn -> Error (Printf.sprintf "cannot open %s for reading: %s" path (Printexc.to_string exn))
+  | Sys_error message -> Error (Printf.sprintf "cannot open %s for reading: %s" path message)
+;;
+
+(* One output stream's plumbing: either a pipe this process drains, or the
+   file the child writes into directly. The read end is [None] in the second
+   case, which is what tells the caller there is nothing to drain. *)
+type closable_sink = [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Resource.t
+type closable_source = [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Resource.t
+
+type output_plumbing = {
+  child_flow : closable_sink;
+  drain : (closable_source * Exec_buffer.t) option;
+}
+
+let output_plumbing ~sw ~fs pm destination =
+  match destination with
+  | Captured ->
+    let reader, writer = Eio.Process.pipe ~sw pm in
+    Ok
+      { child_flow = (writer :> closable_sink)
+      ; drain = Some ((reader :> closable_source), create_capture ())
+      }
+  | Written_to { path; append } ->
+    Result.map
+      (fun sink -> { child_flow = (sink :> closable_sink); drain = None })
+      (open_sink ~sw ~fs ~path ~append)
+;;
+
+let rendered_output { drain; _ } =
+  match drain with
+  | None -> ""
+  | Some (_, buf) -> Exec_buffer.render buf
+;;
+
+let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
+      (argv : string list) : (Unix.process_status * string * string, string) result =
+  let timeout_sec = validate_timeout_sec timeout_sec in
+  Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
+  with_spawn_guard (fun () ->
+    match get_proc_mgr (), get_clock (), get_cwd_default () with
+    | Error message, _, _ | _, Error message, _ | _, _, Error message -> Error message
+    | Ok pm, Ok clk, Ok fs ->
+      let effective_cwd =
+        match cwd with
+        | None -> fs
+        | Some dir -> Eio.Path.(fs / dir)
+      in
+      let label = String.concat " " (List.map Filename.quote argv) in
+      let phase_ref = ref Timeout_origin.Spawn in
+      (try
+         Eio.Switch.run (fun sw ->
+           let ( let* ) = Result.bind in
+           let* stdin_source =
+             match stdin with
+             | Inherited -> Ok None
+             | From_string content ->
+               Ok (Some (Eio.Flow.string_source content :> Eio.Flow.source_ty Eio.Resource.t))
+             | Read_from { path } ->
+               Result.map
+                 (fun source -> Some (source :> Eio.Flow.source_ty Eio.Resource.t))
+                 (open_source ~sw ~fs path)
+           in
+           let* out = output_plumbing ~sw ~fs pm stdout in
+           let* err = output_plumbing ~sw ~fs pm stderr in
+           let run () =
+             let proc =
+               Eio.Process.spawn ~sw pm ~cwd:effective_cwd ?env
+                 ?stdin:stdin_source
+                 ~stdout:out.child_flow
+                 ~stderr:err.child_flow
+                 argv
+             in
+             phase_ref := Timeout_origin.Command;
+             (* The child owns its ends now; keeping them open here would hold
+                a pipe from ever reaching EOF. *)
+             Eio.Flow.close out.child_flow;
+             Eio.Flow.close err.child_flow;
+             let status = ref None in
+             Fun.protect
+               ~finally:(fun () ->
+                 finalize_spawned_proc ~clock:clk proc status
+                   (List.filter_map
+                      (fun (name, plumbing) ->
+                         Option.map (fun (reader, _) -> name, reader) plumbing.drain)
+                      [ "stdout", out; "stderr", err ]))
+               (fun () ->
+                  Eio.Fiber.both
+                    (fun () ->
+                       Option.iter
+                         (fun (reader, buf) -> drain_to_eof reader buf ~on_chunk:ignore_chunk)
+                         out.drain)
+                    (fun () ->
+                       Option.iter
+                         (fun (reader, buf) -> drain_to_eof reader buf ~on_chunk:ignore_chunk)
+                         err.drain);
+                  let s = Eio.Process.await proc in
+                  status := Some s;
+                  s)
+             |> unix_status_of_eio_status
+           in
+           let unix_status = with_explicit_timeout_exn clk timeout_sec run in
+           Ok (unix_status, rendered_output out, rendered_output err))
+       with
+       | Explicit_process_timeout timeout_sec ->
+         Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s" timeout_sec
+           (Timeout_origin.to_label !phase_ref) label;
+         observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+         Ok (Unix.WEXITED 124, "", process_error_output ~label
+               ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ())
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Error (Printf.sprintf "%s: %s" label (Printexc.to_string exn))))
+;;
+
 let run_argv_with_status_split ?timeout_sec ?env ?cwd
     (argv : string list) : Unix.process_status * string * string =
   let timeout_sec = validate_timeout_sec timeout_sec in

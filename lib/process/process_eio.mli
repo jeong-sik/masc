@@ -135,6 +135,45 @@ val run_argv_with_status_split :
 (** Like [run_argv_with_status], but returns
     [(status, stdout, stderr)] without combining stderr into stdout. *)
 
+type output_destination =
+  | Captured
+      (** today's behaviour: the child writes into a pipe this process drains
+          into the returned string *)
+  | Written_to of {
+      path : string;
+      append : bool;
+    }
+      (** the child writes into the file itself. The bytes never pass through
+          this process, so the returned string for that stream is empty and
+          the output is not bounded by any capture cap. *)
+
+type input_origin =
+  | Inherited  (** the child keeps this process's stdin *)
+  | From_string of string  (** feed the child a string this process holds *)
+  | Read_from of { path : string }  (** the child reads the file itself *)
+
+val run_argv_with_redirects :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  stdin:input_origin ->
+  stdout:output_destination ->
+  stderr:output_destination ->
+  string list ->
+  (Unix.process_status * string * string, string) result
+(** Run [argv] with each standard stream attached to a file or to a capture
+    pipe, chosen per stream.
+
+    A file is opened before the spawn, so a path that cannot be opened is
+    reported as [Error] and no process runs — the same order a shell uses, and
+    the reason the failure is a distinct value rather than an exit status this
+    function invented.
+
+    Streams set to [Captured] behave exactly as in
+    {!run_argv_with_status_split}. Streams attached to a file return [""].
+
+    @since 2.62.0 *)
+
 val run_argv_with_status_split_streaming :
   ?timeout_sec:float ->
   ?env:string array ->

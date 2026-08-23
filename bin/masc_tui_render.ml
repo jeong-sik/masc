@@ -1420,7 +1420,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints ?(offers_chat = true) state reading =
+let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -1468,7 +1468,7 @@ let keeper_action_hints ?(offers_chat = true) state reading =
                between surfaces reads as a key that does not exist. *)
           ; (if offers_chat then Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
              else Ansi.dim ^ "c chat" ^ Ansi.reset)
-          ; (if offers_chat then Ansi.dim ^ "esc back" ^ Ansi.reset
+          ; (if offers_back then Ansi.dim ^ "esc back" ^ Ansi.reset
              else Ansi.cyan ^ "enter" ^ Ansi.reset ^ " detail")
           ; Ansi.dim ^ "r refresh" ^ Ansi.reset
           ; Ansi.dim ^ "q quit" ^ Ansi.reset
@@ -1683,7 +1683,7 @@ let render_keeper_list (state : state) =
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
   Buffer.add_string buf
-    (keeper_action_hints ~offers_chat:false state selected_reading ^ "\n");
+    (keeper_action_hints ~offers_back:false state selected_reading ^ "\n");
 
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf

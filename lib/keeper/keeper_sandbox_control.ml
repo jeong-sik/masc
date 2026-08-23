@@ -21,7 +21,6 @@ let stop_scope_to_string = Contract.stop_scope_to_string
 let parse_stop_scope = Contract.parse_stop_scope
 let managed_kind = stop_scope_to_string Stop_managed
 let turn_kind = stop_scope_to_string Stop_turn
-let all_kind = stop_scope_to_string Stop_all
 
 let now_ms () =
   int_of_float (Unix.gettimeofday () *. 1000.0)

@@ -6,7 +6,6 @@ val managed_kind : string
 
 val turn_kind : string
 
-val all_kind : string
 
 type stop_scope = Keeper_sandbox_control_contract.stop_scope =
   | Stop_managed

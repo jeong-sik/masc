@@ -17,8 +17,3 @@ let check_read_target ~config ~meta ~target =
     ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
     ~target
 
-let check_write_target ~config ~meta ~target =
-  check_target
-    ~config
-    ~allowed_paths:(Keeper_alerting_path.effective_write_allowed_paths ~meta)
-    ~target

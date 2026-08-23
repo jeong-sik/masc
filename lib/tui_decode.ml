@@ -1027,3 +1027,54 @@ let parse_keeper_chat_response response =
                     | Some message -> Error message
                     | None -> Error "response JSON missing error.message")
                 | None -> Error "response JSON missing result"))
+
+type transport_health = {
+  th_primary_path : string;
+  th_queue_pressure : string;
+  th_sse_sessions : int;
+  th_websocket_sessions : int option;
+  th_grpc_port : int option;
+  th_events_dropped : int;
+}
+
+let require_object json key =
+  match member key json with
+  | `Assoc _ as obj -> Ok obj
+  | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be an object (received %s)" key
+           (Json_util.kind_name other))
+
+let decode_transport_health json =
+  let ( let* ) = Result.bind in
+  let* summary = require_object json "summary" in
+  let* th_primary_path = require_string_field summary "primary_path" in
+  let* th_queue_pressure = require_string_field summary "queue_pressure" in
+  let* sse = require_object json "sse" in
+  let* th_sse_sessions = require_int_field sse "sessions_total" in
+  let* websocket = require_object json "websocket" in
+  let* websocket_listening = require_bool websocket "listening" in
+  (* A path that is not listening has no sessions to report. Reporting zero
+     would read as "listening, nobody connected", which is a different fact. *)
+  let* th_websocket_sessions =
+    if websocket_listening then
+      Result.map Option.some (require_int_field websocket "sessions")
+    else Ok None
+  in
+  let* grpc = require_object json "grpc" in
+  let* grpc_listening = require_bool grpc "listening" in
+  let* th_grpc_port =
+    if grpc_listening then Result.map Option.some (require_int_field grpc "port")
+    else Ok None
+  in
+  let* th_events_dropped = require_int_field grpc "events_dropped" in
+  Ok
+    {
+      th_primary_path;
+      th_queue_pressure;
+      th_sse_sessions;
+      th_websocket_sessions;
+      th_grpc_port;
+      th_events_dropped;
+    }

@@ -51,6 +51,7 @@ decides whether launching one is worth it.
 | Keepers (list, detail, logs) | fully works | `.masc/keepers/`, turn records, metrics store |
 | Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
+| Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
@@ -78,7 +79,7 @@ list, Recent Events, and active tasks.
 ```
  MASC Overview  [me]  10:54:52  [connected]
    Health: bad  Agents: 2  Approvals: 0  Incidents: 4
-   Cluster: default          Project: me
+   Cluster: default          Project: me      websocket/steady  sse 3  ws 1  grpc :8936
  Attention                              | Recent Events 1-5/5
  [bad ] analyst needs operator atten~   | [10:54:52] TUI started
  [warn] sangsu has external attention   |
@@ -91,6 +92,15 @@ list, Recent Events, and active tasks.
 `j`/`k` scroll the events pane, not the task list. Events are windowed against
 both panel columns, so a long event wraps to the width actually available
 rather than the header width.
+
+The tail of the cluster row is what the server reports about its own delivery
+paths: the primary path, queue pressure, and per-path session counts. It rides
+that row rather than taking one of its own, so a short viewport does not trade
+an event line for it. A path that is not listening reads `off` rather than as
+zero sessions, because those are different facts, and a nonzero drop count is
+spelled out - a steady queue that drops is not a healthy transport.
+
+This tail is read only while Overview is the current surface.
 
 Tasks show terminal states in Planning rollups but not in this list.
 

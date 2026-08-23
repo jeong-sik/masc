@@ -150,12 +150,44 @@ let render_overview (state : state) =
   (match ov with
    | None -> ()
    | Some o ->
+         (* The transport summary rides this row rather than taking one of its
+            own: a narrow viewport must not trade an event line for it. A path
+            that is not listening reads "off" instead of zero sessions, and
+            dropped events are called out because a steady queue that drops is
+            not a healthy transport. *)
+         let transport_summary =
+           match state.transport with
+           | None -> ""
+           | Some t ->
+             let websocket =
+               match t.th_websocket_sessions with
+               | Some sessions -> Printf.sprintf "ws %d" sessions
+               | None -> "ws off"
+             in
+             let grpc =
+               match t.th_grpc_port with
+               | Some port -> Printf.sprintf "grpc :%d" port
+               | None -> "grpc off"
+             in
+             let dropped =
+               if t.th_events_dropped = 0 then ""
+               else Printf.sprintf "  dropped %d" t.th_events_dropped
+             in
+             (* No padding here: this rides the tail of the row, so a long
+                value trims itself against the border instead of pushing the
+                cluster and project columns around. *)
+             Printf.sprintf "  %s/%s  sse %d  %s  %s%s"
+               (Terminal_text.single_line t.th_primary_path)
+               (Terminal_text.single_line t.th_queue_pressure)
+               t.th_sse_sessions websocket grpc dropped
+         in
          let cluster_line =
-           Printf.sprintf "  Cluster: %s%s%s  Project: %s"
+           Printf.sprintf "  Cluster: %s%s%s  Project: %s%s"
              Ansi.dim
              (fit_width (Terminal_text.single_line o.ov_cluster) 24)
              Ansi.reset
-             (fit_width (Terminal_text.single_line o.ov_project) 32)
+             (fit_width (Terminal_text.single_line o.ov_project) 20)
+             transport_summary
        in
        box_line buf cols cluster_line);
 

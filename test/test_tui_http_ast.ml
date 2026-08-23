@@ -342,10 +342,13 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"
        ~callee:"Yojson.Safe.to_string");
-  (* Five: [state.workspace], each row's [ov_cluster] / [ov_project], the
-     agent [ai_summary], and the event content. Every one arrives from outside
-     the renderer. *)
-  check int "overview event text crosses the terminal boundary" 5
+  (* Seven: [state.workspace], each row's [ov_cluster] / [ov_project], the
+     agent [ai_summary], the event content, and the transport tail's
+     [th_primary_path] / [th_queue_pressure]. Every one arrives from outside
+     the renderer. A failed transport read needs no projection of its own; it
+     reaches the operator through the Recent Events row the surface error
+     already writes. *)
+  check int "overview event text crosses the terminal boundary" 7
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_overview"
@@ -1093,6 +1096,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ov_project"
     ; "ai_summary"
     ; "content"
+    ; "th_primary_path"
+    ; "th_queue_pressure"
     ];
   check_fields "overview_layout" [ "tasks_error" ];
   check_fields "render_approvals"

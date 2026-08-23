@@ -378,6 +378,13 @@ let load_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("approvals load failed: " ^ err)
   | Ok json -> Masc_tui_operator_projection.decode_snapshot json
 
+(** Load the delivery-path summary from /api/v1/dashboard/transport-health. *)
+let load_transport_health ~(host : string) ~(port : int) :
+    (Tui_decode.transport_health, string) result =
+  match fetch_transport_health ~host ~port with
+  | Error err -> Error ("transport health load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_transport_health json
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =

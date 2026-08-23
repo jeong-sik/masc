@@ -491,6 +491,24 @@ def seed_row_budget_workspace(base_path: str) -> None:
     )
 
 
+def transport_health_fixture() -> HttpFixture:
+    """A quiet transport: sse carries the stream, the other paths are down.
+
+    The TUI reads this surface on every refresh, so a fixture set without it
+    would add a load-failure event and push the oldest event out of a short
+    viewport.
+    """
+    return (
+        200,
+        {
+            "summary": {"primary_path": "sse", "queue_pressure": "steady"},
+            "sse": {"sessions_total": 1},
+            "websocket": {"listening": False},
+            "grpc": {"listening": False, "events_dropped": 0},
+        },
+    )
+
+
 def row_budget_http_fixtures() -> HttpFixtures:
     attention_items = [
         {
@@ -521,6 +539,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
         for index in range(1, 6)
     ]
     return {
+        "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (
             200,
             {
@@ -565,6 +584,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
 
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
+        "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
         "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
             200,

@@ -132,6 +132,21 @@ val active_tasks_of_domain : Masc_domain.task list -> task list
 val decode_task : Yojson.Safe.t -> (task, string) result
 val keeper_of_meta : Keeper_meta_contract.keeper_meta -> keeper
 val decode_keeper : Yojson.Safe.t -> (keeper, string) result
+(** Transport summary the server reports for its own delivery paths. A path
+    that is not listening carries no session or port, so those stay [None]
+    rather than collapsing to zero. *)
+type transport_health = {
+  th_primary_path : string;
+  th_queue_pressure : string;
+  th_sse_sessions : int;
+  th_websocket_sessions : int option;
+  th_grpc_port : int option;
+  th_events_dropped : int;
+}
+
+val decode_transport_health :
+  Yojson.Safe.t -> (transport_health, string) result
+
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result
 val parse_log_entry : string -> (log_entry, string) result

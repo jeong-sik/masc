@@ -1202,7 +1202,8 @@ let render_planning_list (state : state) =
       ~cols buf
 
 (** Render the Planning surface (detail view). *)
-let render_planning_detail (state : state) (goal : planning_goal) =
+let render_planning_detail (state : state)
+    ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -1242,15 +1243,36 @@ let render_planning_detail (state : state) (goal : planning_goal) =
          (Printf.sprintf "  Metric: %s%s" m target)
    | None -> box_empty buf cols);
   box_empty buf cols;
+  (* A lifecycle request is the one state the detail carries between frames,
+     so it gets a row rather than an event log: the arm says what the next
+     press of the same key would do, and the error says what the server said
+     when the last one was refused. *)
+  (match armed with
+   | Some armed_action ->
+       box_line buf cols
+         (Ansi.yellow ^ Printf.sprintf "  armed: %s -- same key again to send"
+            (match armed_action with
+             | Goal_phase.Public_action.Request_complete -> "request completion"
+             | Goal_phase.Public_action.Drop -> "drop"
+             | Goal_phase.Public_action.Reopen -> "reopen")
+         ^ Ansi.reset)
+   | None -> ());
+  (match state.goal_action_error with
+   | Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  "
+         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ^ Ansi.reset)
+   | None -> ());
   box_divider buf cols;
 
-  for _ = 1 to rows - 14 do
+  for _ = 1 to rows - 16 do
     box_empty buf cols
   done;
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
   finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
@@ -2533,7 +2555,9 @@ let render_surface (state : state) =
        | Planning_detail goal_id ->
            let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
            match List.find_opt (fun g -> g.pg_id = goal_id) goals with
-           | Some goal -> render_planning_detail state goal
+           | Some goal ->
+               render_planning_detail state
+                 ~armed:(goal_action_armed_for state goal_id) goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
   | System_logs -> render_system_logs state

@@ -308,13 +308,17 @@ let test_run_argv_pipeline_streaming_timeout_preserves_stderr () =
   Process_eio.init ~cwd_default ~proc_mgr ~clock;
   let stderr_chunks = ref [] in
   let status, stdout, stderr =
-    Process_eio.run_argv_pipeline_with_status_split
+    Result.get_ok
+    @@ Process_eio.run_argv_pipeline_with_status_split
       ~timeout_sec:0.5
       ~on_stdout_chunk:(fun _ -> ())
       ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
       [
         {
-          Process_eio.argv =
+          Process_eio.stdin = Process_eio.Inherited;
+          stdout = Process_eio.Captured;
+          stderr = Process_eio.Captured;
+          argv =
             [ "/bin/sh"; "-c"; "printf 'pipeline-timeout-stderr\\n' >&2; sleep 5" ];
           env = None;
           cwd = None;
@@ -553,15 +557,19 @@ let test_run_argv_pipeline_timeout_reaps_all_stages () =
   let cwd_default = Eio.Stdenv.fs env in
   Process_eio.init ~cwd_default ~proc_mgr ~clock;
   let status, _stdout, _stderr =
-    Process_eio.run_argv_pipeline_with_status_split
-      ~timeout_sec:0.5
+    Result.get_ok
+    @@ Process_eio.run_argv_pipeline_with_status_split
+         ~timeout_sec:0.5
       [
         {
-          Process_eio.argv = [ "/bin/sh"; "-c"; "echo stage1-output; sleep 5" ];
+          Process_eio.stdin = Process_eio.Inherited;
+          stdout = Process_eio.Captured;
+          stderr = Process_eio.Captured;
+          argv = [ "/bin/sh"; "-c"; "echo stage1-output; sleep 5" ];
           env = None;
           cwd = None;
         };
-        { Process_eio.argv = [ "/bin/cat" ]; env = None; cwd = None };
+        Process_eio.plumbed_stage ~argv:[ "/bin/cat" ] ~env:None ~cwd:None;
       ]
   in
   let code = match status with Unix.WEXITED c -> c | _ -> 1 in

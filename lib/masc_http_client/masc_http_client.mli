@@ -90,6 +90,29 @@ val get_sync :
     discarded — returns [Ok (status_code, body_string)] for callers
     that only care about status + body. *)
 
+val post_stream :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  body:string ->
+  on_chunk:(string -> unit) ->
+  unit ->
+  (Pool.stream_outcome, string) result
+(** [post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk ()]
+    POSTs and calls [on_chunk] with each response body chunk as it arrives,
+    for callers rendering a live view of a server-sent event stream.
+
+    On the [Streamed] branch the complete body is returned as well, so a
+    caller can render from the chunks and still run an authoritative
+    whole-body decode at the end. On a non-success status the body comes back
+    as [Buffered] and [on_chunk] is never called — see {!Pool.stream_outcome}.
+
+    There is no wall-clock cap: one would cancel a stream that is still
+    delivering bytes. [idle_timeout_sec] bounds silence instead, and is
+    required because a tolerable silence depends on the protocol — a keeper
+    turn goes quiet for as long as the tool it is running takes. *)
+
 (** {1 Typed pool surface}
 
     Re-exports [Pool] (lib/masc_http_client/pool.mli) so callers and

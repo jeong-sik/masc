@@ -5,6 +5,12 @@ let default_timeout_sec = 10.0
 let request_timeout_sec () = default_timeout_sec
 let keeper_chat_timeout_sec = 180.0
 
+(* One name for the send target. The buffered send and the streaming send are
+   two ways of reading the same turn, not two endpoints, and a contract test
+   pins that this literal appears once so they cannot drift apart. *)
+let keeper_chat_stream_path = "/api/v1/keepers/chat/stream"
+let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
+
 let trim_nonempty value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
@@ -89,7 +95,7 @@ let post_keeper_chat ~(host : string) ~(port : int)
     ( Masc_tui_keeper_chat_projection.response
     , Masc_tui_keeper_chat_projection.error )
     result =
-  let url = url_of ~host ~port ~path:"/api/v1/keepers/chat/stream" in
+  let url = url_of ~host ~port ~path:keeper_chat_stream_path in
   let headers =
     json_headers
       (("Accept", "text/event-stream") :: auth_headers ())
@@ -111,6 +117,93 @@ let post_keeper_chat ~(host : string) ~(port : int)
         response_body
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
+
+(** Send a keeper chat turn and hand each response chunk to [on_chunk] as it
+    arrives, so the caller can draw the turn while it runs.
+
+    The turn's outcome still comes from the strict decode over the complete
+    body, which the streaming read returns as well. So this returns exactly
+    what {!post_keeper_chat} would have returned for the same stream, and a
+    defect in whatever [on_chunk] drives cannot change it.
+
+    [keeper_chat_timeout_sec] is the silence bound here rather than a total
+    cap. That is strictly more room than the buffered send had: a turn that
+    keeps emitting is no longer cut off at all, and one that goes quiet is
+    still bounded by the same number. *)
+let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
+    ~(on_chunk : string -> unit)
+    (request : Masc_tui_keeper_chat_projection.request) :
+    ( Masc_tui_keeper_chat_projection.response
+    , Masc_tui_keeper_chat_projection.error )
+    result =
+  let url = url_of ~host ~port ~path:keeper_chat_stream_path in
+  let headers =
+    json_headers (("Accept", "text/event-stream") :: auth_headers ())
+  in
+  let body = Masc_tui_keeper_chat_projection.request_body request in
+  match
+    Masc_http_client.post_stream ~clock
+      ~idle_timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ~on_chunk ()
+  with
+  | Error detail ->
+      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      Error (Masc_tui_keeper_chat_projection.Http_error { status; body })
+  | Ok (Masc_http_client.Pool.Streamed { response; _ }) ->
+      Masc_tui_keeper_chat_projection.decode_response_with_provenance ~request
+        response.Masc_http_client.Pool.body
+      |> Result.map_error (fun error ->
+             Masc_tui_keeper_chat_projection.Protocol_error error)
+
+(** What the server did with a request to interrupt a keeper's current turn.
+
+    [Signalled] reports that the signal reached the turn switch, and nothing
+    more. Whether the fiber then stops is a later event: a turn parked in an
+    uncancellable section keeps running, and reading this as the outcome is
+    what hid a 63-minute hang (masc #29229). *)
+type interrupt_signal =
+  | Signalled of { turn_id : int option }
+  | Not_signalled of
+      { reason : string
+      ; detail : string option
+      }
+
+let decode_interrupt_signal json =
+  let field name =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let string_of name =
+    match field name with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  let turn_id =
+    match field "turn_id" with
+    | Some (`Int value) -> Some value
+    | Some _ | None -> None
+  in
+  match field "signalled" with
+  | Some (`Bool true) -> Ok (Signalled { turn_id })
+  | Some (`Bool false) ->
+      Ok
+        (Not_signalled
+           { reason = Option.value ~default:"unstated" (string_of "reason")
+           ; detail = string_of "detail"
+           })
+  | Some _ | None -> Error "interrupt response has no signalled flag"
+
+let post_keeper_turn_interrupt ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (interrupt_signal, string) result =
+  let body =
+    Yojson.Safe.to_string (`Assoc [ ("name", `String keeper_name) ])
+  in
+  match
+    post_json ~host ~port ~path:keeper_turn_interrupt_path ~body
+  with
+  | Error detail -> Error detail
+  | Ok json -> decode_interrupt_signal json
 
 let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :

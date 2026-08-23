@@ -93,6 +93,17 @@ type error_certainty =
   | Verified_failed
   | Outcome_unverified
 
+(** How one line of the server-sent event stream reads. Exposed so the
+    incremental decoder that drives the live view frames the stream exactly
+    as the strict whole-body decode below does; the two differ in what they
+    extract from an event, not in what counts as one. *)
+type sse_line =
+  | Sse_ignored
+  | Sse_data of string
+  | Sse_noncanonical_data
+
+val classify_sse_line : string -> sse_line
+
 val create_request : keeper_name:string -> message:string -> request
 val request_to_yojson : request -> Yojson.Safe.t
 val request_body : request -> string

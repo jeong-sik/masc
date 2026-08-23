@@ -2575,6 +2575,20 @@
  (libraries alcotest masc_tui_operator_projection yojson))
 
 (test
+ (name test_tui_keeper_chat_transcript)
+ (modules test_tui_keeper_chat_transcript)
+ (libraries
+  alcotest
+  fmt
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_keeper_chat_live)
+ (modules test_tui_keeper_chat_live)
+ (libraries alcotest fmt masc_tui_keeper_chat_live yojson))
+
+(test
  (name test_tui_keeper_chat_projection)
  (modules test_tui_keeper_chat_projection)
  (libraries

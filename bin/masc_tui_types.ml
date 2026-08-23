@@ -38,6 +38,11 @@ type msg_role =
   | Message_keeper
   | Message_status
   | Message_error
+  | Message_tool
+      (** The tool calls of one finished turn, as the row block the live pane
+          drew while it ran. The strict stream decode carries no tool
+          information, so without this a turn that read six files and edited
+          two scrolls back looking like one answered from memory. *)
 
 (** Request-correlated message history entry. *)
 type msg_entry = {
@@ -300,6 +305,11 @@ type state = {
   mutable msg_target_keeper_name: string option;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
+  (* The turn currently streaming, if any. Drawn below the history and
+     discarded when the turn settles; its tool rows are committed to the
+     history first. Never authoritative -- the recorded reply comes from the
+     strict whole-body decode. *)
+  mutable msg_live: Masc_tui_keeper_chat_transcript.t option;
   mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
   mutable msg_inflight_kind: msg_inflight_kind option;
   mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
@@ -369,6 +379,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_target_keeper_name = None;
   msg_drafts = [];
   msg_history = [];
+  msg_live = None;
   msg_inflight = None;
   msg_inflight_kind = None;
   msg_prepared = None;
@@ -400,6 +411,10 @@ let keeper_message_status_rows (state : state) =
   + (if Option.is_some state.msg_cleanup_pending then 1 else 0)
   + (if Option.is_some state.msg_recovery_error then 1 else 0)
   + unavailable_target
+  + (match state.msg_live with
+     | None -> 0
+     | Some live ->
+         List.length (Masc_tui_keeper_chat_transcript.status_rows live))
 
 let approval_items (state : state) =
   match state.approval_snapshot with

@@ -2170,8 +2170,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 state.acting_scroll <- state.acting_scroll + 1;
                 state.acting_unseen <- state.acting_unseen + 1
               end
-          | Masc_tui_observer.Undecodable _ ->
-              state.acting_undecodable <- state.acting_undecodable + 1)
+          | Masc_tui_observer.Undecodable reason ->
+              state.acting_undecodable <- state.acting_undecodable + 1;
+              state.acting_undecodable_last <- Some reason)
         decoded;
       let kept = List.length state.acting in
       if kept > Masc_tui_types.acting_retained_entries then begin
@@ -3328,7 +3329,7 @@ let main () =
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
-            | Overview | Keepers Keeper_logs | Keepers Keeper_calls
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs

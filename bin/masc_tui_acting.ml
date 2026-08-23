@@ -17,8 +17,8 @@ let visible filter (event : Observer.event) =
       | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
       | Observer.Snapshot _ ->
           false
-      | Observer.Keeper_turn_complete _ | Observer.Keeper_chat_appended _
-      | Observer.Other _ ->
+      | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+      | Observer.Keeper_chat_appended _ | Observer.Other _ ->
           true)
 
 type glyph =
@@ -97,7 +97,34 @@ let agent_core_row ~duration_ms (e : Observer.agent_core) =
     | Some task -> detail ^ " \xc2\xb7 " ^ task
     | None -> detail
   in
-  { at = e.Observer.at; keeper = e.Observer.agent; glyph; label; detail }
+  { at = e.Observer.at
+  ; keeper = Option.value ~default:"-" e.Observer.agent
+  ; glyph
+  ; label
+  ; detail
+  }
+
+let keeper_of_event ~traces (event : Observer.event) =
+  match event with
+  | Observer.Agent_core e -> (
+      let by_agent = Option.value ~default:"-" e.Observer.agent in
+      match e.Observer.correlation with
+      | None -> by_agent
+      | Some correlation -> (
+          match
+            List.find_opt
+              (fun (_, trace) -> String.equal trace correlation)
+              traces
+          with
+          | Some (keeper, _) -> keeper
+          | None -> by_agent))
+  | Observer.Keeper_heartbeat h -> h.Observer.hb_keeper
+  | Observer.Keeper_tool_call c -> c.Observer.kt_keeper
+  | Observer.Keeper_turn_complete t -> t.Observer.tc_keeper
+  | Observer.Keeper_composite_changed { keeper; _ }
+  | Observer.Keeper_chat_appended { keeper; _ } ->
+      keeper
+  | Observer.Snapshot _ | Observer.Other _ -> "server"
 
 let row_of_event ~duration_ms (event : Observer.event) =
   match event with
@@ -108,11 +135,24 @@ let row_of_event ~duration_ms (event : Observer.event) =
       ; glyph = Quiet
       ; label = "heartbeat"
       ; detail =
-          (match h.Observer.hb_in_flight_ms with
-           | Some ms when h.Observer.hb_in_turn ->
-               Printf.sprintf "%s \xc2\xb7 in turn for %s" h.Observer.hb_phase
-                 (elapsed_text ms)
-           | Some _ | None -> h.Observer.hb_phase)
+          (let phase = Option.value ~default:"" h.Observer.hb_phase in
+           match (h.Observer.hb_in_turn, h.Observer.hb_in_flight_ms) with
+           | Some true, Some ms ->
+               Printf.sprintf "%s \xc2\xb7 in turn for %s" phase (elapsed_text ms)
+           | (Some true | Some false | None), (Some _ | None) -> phase)
+      }
+  | Observer.Keeper_tool_call c ->
+      { at = c.Observer.kt_at
+      ; keeper = c.Observer.kt_keeper
+      ; glyph = Call_returned
+      ; label =
+          (match c.Observer.kt_disposition with
+           | Some disposition -> disposition
+           | None -> "tool call")
+      ; detail =
+          (match c.Observer.kt_duration_ms with
+           | Some ms -> c.Observer.kt_tool ^ " \xc2\xb7 " ^ elapsed_text ms
+           | None -> c.Observer.kt_tool)
       }
   | Observer.Keeper_turn_complete t ->
       let tokens =
@@ -167,11 +207,11 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
               ; _
               }
             when String.equal started_id id
-                 && String.equal agent completed.Observer.agent ->
+                 && Option.equal String.equal agent completed.Observer.agent ->
               Some ((completed.Observer.at -. at) *. 1000.)
           | Observer.Agent_core _ | Observer.Keeper_heartbeat _
-          | Observer.Keeper_turn_complete _ | Observer.Keeper_composite_changed _
-          | Observer.Keeper_chat_appended _ | Observer.Snapshot _ | Observer.Other _
-            ->
+          | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+          | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+          | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before

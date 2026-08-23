@@ -102,7 +102,7 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Keepers _ | Board | Approvals | Planning | Schedules
+            | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools
             | Autonomy | System_logs ->
                 "  (2 then m to answer)"
@@ -3502,6 +3502,11 @@ let render_acting (state : state) =
       now.Unix.tm_sec
   in
   let held = List.length state.acting in
+  (* The agent_core family names its runtime lane, not the keeper; the
+     keeper is the one whose trace the event's correlation id carries. *)
+  let traces =
+    List.map (fun keeper -> (keeper.k_name, keeper.k_trace_id)) state.keepers
+  in
   (* Visible rows, newest first. The duration lookup walks the events older
      than the completion, which in a newest-first list is the tail after it. *)
   let visible =
@@ -3520,13 +3525,18 @@ let render_acting (state : state) =
                     completed
               | Masc_tui_observer.Agent_core _
               | Masc_tui_observer.Keeper_heartbeat _
+              | Masc_tui_observer.Keeper_tool_call _
               | Masc_tui_observer.Keeper_turn_complete _
               | Masc_tui_observer.Keeper_composite_changed _
               | Masc_tui_observer.Keeper_chat_appended _
               | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                   None
             in
-            walk (Acting.row_of_event ~duration_ms event :: acc) older
+            let row = Acting.row_of_event ~duration_ms event in
+            walk
+              ({ row with Acting.keeper = Acting.keeper_of_event ~traces event }
+               :: acc)
+              older
           else walk acc older
     in
     walk [] state.acting
@@ -3554,8 +3564,11 @@ let render_acting (state : state) =
     else Printf.sprintf "  dropped %d" state.acting_dropped
   in
   let undecodable =
-    if state.acting_undecodable = 0 then ""
-    else Printf.sprintf "  undecodable %d" state.acting_undecodable
+    match state.acting_undecodable_last with
+    | None -> ""
+    | Some reason ->
+        Printf.sprintf "  undecodable %d (last: %s)" state.acting_undecodable
+          (Terminal_text.single_line reason)
   in
   let unseen =
     if state.acting_unseen = 0 then ""

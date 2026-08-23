@@ -48,6 +48,14 @@ type row = {
   detail : string;  (** what it happened to: the tool, the turn, the cost *)
 }
 
+val keeper_of_event :
+  traces:(string * string) list -> Observer.event -> string
+(** Who acted. The agent_core family names its runtime lane as the agent
+    ([agent_core-glm-coding.glm-5-turbo] on the live runtime), not the
+    keeper; the keeper is the one whose trace id the event's correlation id
+    carries. [traces] is (keeper name, trace id) for every keeper the TUI
+    knows. An event whose correlation matches none keeps its agent name. *)
+
 val row_of_event : duration_ms:float option -> Observer.event -> row
 (** One row per event. [duration_ms] is drawn on a completed call when the
     caller could pair it with its start; see {!duration_of_completion}. *)

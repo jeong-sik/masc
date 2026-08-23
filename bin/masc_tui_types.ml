@@ -515,6 +515,7 @@ type state = {
   mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
+  mutable acting_undecodable_last: string option;  (** why, for the most recent one *)
   mutable acting_scroll: int;  (** rows from the newest, 0 = pinned to the newest *)
   mutable acting_unseen: int;  (** events that arrived while scrolled away from the newest *)
   mutable acting_filter: Masc_tui_acting.filter;
@@ -726,6 +727,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
+  acting_undecodable_last = None;
   acting_scroll = 0;
   acting_unseen = 0;
   acting_filter = Masc_tui_acting.Actions;

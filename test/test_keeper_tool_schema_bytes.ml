@@ -22,8 +22,14 @@ open Alcotest
 (* Raise only with the PR that grows the surface, and say what it bought.
    2026-08-07: 72,485 bytes across 98 model-visible tools — 7.9x the assembled
    system prompt (9,167 bytes, pinned next door). The headroom is deliberate
-   slack for one ordinary tool, not room to grow into. *)
-let ceiling_bytes = 80_000
+   slack for one ordinary tool, not room to grow into.
+   2026-08-23: 88,138 bytes across 95 tools. #29576 grew the Execute typed
+   input (pipeline stages with redirects) by about 9.1 KB and crossed the
+   ceiling without arguing for it here; a later description edit added 497
+   bytes. Raised after the fact to the measured size plus the same one-tool
+   slack. The reduction is owed by the per-Keeper tool surface (RFC-0389) and
+   the tool-definition TOML move, both of which report this number. *)
+let ceiling_bytes = 90_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

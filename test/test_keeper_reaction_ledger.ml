@@ -82,6 +82,12 @@ let manual_compaction_stimulus () : Keeper_event_queue.stimulus =
   }
 ;;
 
+let contains haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
@@ -591,12 +597,21 @@ let test_fleet_summary_surfaces_durable_event_queue_read_error () =
   check_member_string "durable queue read error path" path "path" read_error
 ;;
 
-let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
+(* #29610: an event-queue snapshot this binary cannot decode is read as an
+   empty queue (one WARN names the loss), not as a read error. The fleet
+   summary therefore reports the keeper as empty and asks nothing of the
+   operator; the WARN and the MetaReadFailures-style counter are the record. *)
+let test_fleet_summary_reads_unreadable_durable_event_queue_as_empty () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "parse-broken-durable-queue-keeper" in
   let path = event_queue_snapshot_path ~base_path ~keeper_name in
   mkdir_p (Filename.dirname path);
   write_file path {|{"schema":"unexpected.event.queue.schema","items":{}}|};
+  let base_seq =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> 0
+  in
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path
@@ -604,37 +619,22 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
       ~limit_per_keeper:10
   in
   check_member_string
-    "durable queue parse error makes fleet status unknown"
-    "unknown"
+    "an unreadable durable queue reads as empty"
+    "empty"
     "status"
     fleet;
-  check_list_has_string
-    "durable queue parse error reason is explicit"
-    "durable_event_queue_read_error"
-    (fleet |> member "status_reasons");
-  check bool "durable queue parse error requires operator action" true
+  check bool "an unreadable durable queue asks nothing of the operator" false
     (fleet |> member "operator_action_required" |> to_bool);
-  check int "durable queue parse error counted" 1
+  check int "no durable queue read error is counted" 0
     (fleet |> member "durable_event_queue_read_error_count" |> to_int);
-  let keeper_error =
-    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
+  let warned =
+    Log.Ring.recent ~limit:200 ~since_seq:base_seq ~module_filter:"Keeper" ~order:`Oldest_first ()
+    |> List.exists (fun (entry : Log.Ring.entry) ->
+         entry.level = Log.Warn
+         && contains entry.message "starting from an empty queue"
+         && contains entry.message path)
   in
-  check_member_string
-    "durable queue parse error keeper name"
-    keeper_name
-    "keeper_name"
-    keeper_error;
-  check int "keeper durable queue parse error counted" 1
-    (keeper_error |> member "read_error_count" |> to_int);
-  let read_error =
-    keeper_error |> member "read_errors" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue parse error kind"
-    "parse_failed"
-    "kind"
-    read_error;
-  check_member_string "durable queue parse error path" path "path" read_error
+  check bool "the loss is named once in a WARN that carries the path" true warned
 ;;
 
 let test_lock_free_observation_rejects_generation_change () =
@@ -1200,7 +1200,7 @@ let () =
         ; test_case
             "fleet summary surfaces durable event queue parse errors"
             `Quick
-            test_fleet_summary_surfaces_durable_event_queue_parse_error
+            test_fleet_summary_reads_unreadable_durable_event_queue_as_empty
         ; test_case
             "lock-free observation rejects generation change"
             `Quick

@@ -35,6 +35,7 @@
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries
+  masc.build_version
   yojson
   unix
   eio

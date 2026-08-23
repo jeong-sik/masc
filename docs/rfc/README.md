@@ -154,7 +154,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0235 | Stale-base revert guard: block PRs that silently revert recently-merged work (`RFC-0235-stale-base-revert-guard.md`)<br>Voice output transport: browser-addressed audio delivery with device-routed p... (`RFC-0235-voice-output-browser-transport-device-routing.md`) | Draft<br>Draft | - |
 | 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | - |
 | 0239 | Concurrency ownership model (per-site mutex/atomic → protection by construction) | Draft | - |
-| 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | - |
+| 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Implemented | - |
 | 0247 | Memory OS as a brain: typed associative graph, spreading-activation recall, s... | Draft | - |
 | 0251 | Memory OS: record well, do not value — remove the scoring layer | Draft | - |
 | 0252 | Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장) | Draft | - |

@@ -20,7 +20,6 @@ include Keeper_unified_turn_phase_plan
 
 type source_disposition =
   | Follow_failure_route
-  | Pause_after_transcript_corruption of { detail : string }
 
 type turn_failure =
   { error : Agent_core.Error.t
@@ -73,10 +72,16 @@ let turn_failure_of_error
     }
 ;;
 
-let transcript_corruption error =
+let execution_boundary_of_turn_failure error =
   match Keeper_internal_error.classify_masc_internal_error error with
-  | Some (Keeper_internal_error.Incomplete_tool_transcript { detail; _ }) ->
-    Some detail
+  | Some
+      ( Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Gate_replay_repair_required _ ) ->
+    (* Both failures are produced by MASC — the first over the transcript MASC
+       persisted, the second after host replay and before provider dispatch.
+       The shared [Agent_core.Error.Internal] carrier must not misattribute
+       either local boundary to AGENT_CORE. *)
+    Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
       | Keeper_internal_error.Capacity_backpressure _
@@ -88,39 +93,8 @@ let transcript_corruption error =
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
-      | Keeper_internal_error.Receipt_persistence_failed _
-      | Keeper_internal_error.Gate_replay_repair_required _ )
-  | None ->
-    None
-;;
-
-let execution_boundary_of_turn_failure ~transcript_corruption error =
-  match
-    transcript_corruption,
-    Keeper_internal_error.classify_masc_internal_error error
-  with
-  | Some _, (Some _ | None) ->
-    Keeper_runtime_failure_route.Masc_execution
-  | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
-    (* This failure is produced by MASC after host replay and before provider
-       dispatch. The shared [Agent_core.Error.Internal] carrier must not
-       misattribute that local replay boundary to AGENT_CORE. *)
-    Keeper_runtime_failure_route.Masc_execution
-  | None,
-    Some
-      ( Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
-      | Keeper_internal_error.Resumable_cli_session _
-      | Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Internal_unhandled_exception _
-      | Keeper_internal_error.Internal_bridge_exception _
-      | Keeper_internal_error.Internal_contract_rejected _
-      | Keeper_internal_error.Incomplete_tool_transcript _
-      | Keeper_internal_error.Terminal_effect_failed _
-      | Keeper_internal_error.Provider_attempt_effect_fenced _
-      | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Receipt_persistence_failed _ )
-  | None, None ->
+  | None ->
     Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
@@ -1163,30 +1137,23 @@ let run_keeper_cycle
                      final execution identity, and record typed failure plus
                      telemetry here. Exhausted failures remain visible without
                      dispatching a second LLM call. *)
-                  let transcript_corruption = transcript_corruption err in
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
-                      ~boundary:
-                        (execution_boundary_of_turn_failure
-                           ~transcript_corruption
-                           err)
+                      ~boundary:(execution_boundary_of_turn_failure err)
                       err
                   in
-                  let source_disposition, turn_state =
-                    match transcript_corruption with
-                    | Some detail ->
-                      Pause_after_transcript_corruption { detail }, turn_state
-                    | None ->
-                      (* Capacity failures (context overflow, request-body
-                         caps, serving-input rejection) follow the ordinary
-                         typed failure route. The automatic overflow-compaction
-                         recovery that used to branch here was removed
-                         (#26546) because it never produced a committed
-                         compaction on record. #26545 bounds conversation
-                         history only; whole-request provider fit is tracked
-                         separately in #26551. *)
-                      Follow_failure_route, turn_state
-                  in
+                  (* Every failure follows the ordinary typed route, including
+                     an incomplete tool transcript: a past structural defect is
+                     evidence, not a scheduling gate. Boot-time
+                     [Keeper_transcript_tail_recovery] closes the open cycles a
+                     process death leaves behind. Capacity failures (context
+                     overflow, request-body caps, serving-input rejection) also
+                     route here; the automatic overflow-compaction recovery
+                     that used to branch was removed (#26546) because it never
+                     produced a committed compaction on record. #26545 bounds
+                     conversation history only; whole-request provider fit is
+                     tracked separately in #26551. *)
+                  let source_disposition = Follow_failure_route in
                   exact_failure_execution :=
                     Some
                       ( final_execution.runtime_id

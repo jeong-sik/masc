@@ -8,8 +8,6 @@ type state =
 
 let state ~paused ~latched_reason =
   match latched_reason with
-  | Some (Keeper_latched_reason.Transcript_corruption_reset_required as reason) ->
-    Paused (Classified reason)
   | Some reason when paused -> Paused (Classified reason)
   | None when paused -> Paused Unclassified
   | Some _ | None -> Active
@@ -18,13 +16,9 @@ let state ~paused ~latched_reason =
 type manual_one_shot_admission =
   | Manual_admitted_active
   | Manual_admitted_paused_recovery of paused_latch
-  | Manual_denied_transcript_reset_required
 
 let admit_manual_one_shot = function
   | Active -> Manual_admitted_active
-  | Paused
-      (Classified Keeper_latched_reason.Transcript_corruption_reset_required) ->
-    Manual_denied_transcript_reset_required
   | Paused latch -> Manual_admitted_paused_recovery latch
 ;;
 

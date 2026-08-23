@@ -313,9 +313,6 @@ type keeper_meta = {
     generic resume cannot replay a poisoned checkpoint. *)
 val mark_resumed : keeper_meta -> keeper_meta
 
-(** Reject [paused = false] paired with a terminal or reset-required latch. *)
-val terminal_latch_pause_violation : keeper_meta -> string option
-
 (** Overlay Keeper configuration defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
     TOML-owned fields such as [sandbox_profile] and [network_mode]. *)

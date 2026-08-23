@@ -73,20 +73,6 @@ let apply_owner_meta (entry : Keeper_registry.registry_entry) command =
   | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 ;;
 
-let transcript_corruption_reset_required (meta : keeper_meta) =
-  match
-    Keeper_lifecycle_admission.state
-      ~paused:meta.paused
-      ~latched_reason:meta.latched_reason
-  with
-  | Keeper_lifecycle_admission.Paused
-      (Keeper_lifecycle_admission.Classified
-        Keeper_latched_reason.Transcript_corruption_reset_required) ->
-    true
-  | Keeper_lifecycle_admission.Active | Keeper_lifecycle_admission.Paused _ ->
-    false
-;;
-
 (* Unknown-keeper directives can repeat while boot/crash truth is still
    elsewhere. Keep WARN output low-cardinality; the caller-side
    [DirectiveFailures] counter still records every miss. *)
@@ -242,17 +228,6 @@ let set_keeper_paused_state ~agent_name paused =
              ~base_path:entry.base_path
              entry.name
              Keeper_state_machine.Operator_pause)
-       else if (not paused) && transcript_corruption_reset_required entry.meta
-       then (
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string DirectiveFailures)
-            ~labels:
-              [ "keeper", entry.name; "site", "resume_reset_required" ]
-            ();
-         Log.Keeper.error
-            "directive resume denied for %s: transcript corruption requires \
-             checkpoint reset"
-            entry.name)
        else (
          let previous_failure_reason = entry.last_failure_reason in
          let command =

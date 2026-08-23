@@ -449,41 +449,14 @@ type keeper_meta =
   ; agent_core_env : (string * string) list
   }
 
-(* Sanctioned generic unpause transform. A reset-required transcript latch is
-   deliberately immutable here and must cross the explicit reset boundary. *)
+(* Sanctioned generic unpause transform. Every latch this type can carry is an
+   explicit operator pause, so resume clears it. *)
 let mark_resumed (m : keeper_meta) : keeper_meta =
-  match m.latched_reason with
-  | Some Keeper_latched_reason.Transcript_corruption_reset_required ->
-    m
-  | Some (Keeper_latched_reason.Operator_paused _)
-  | None ->
-    { m with
-      paused = false
-    ; latched_reason = None
-    ; runtime = { m.runtime with last_blocker = None }
-    }
-;;
-
-(* Write-boundary invariant: reset-required latches must co-occur
-   with [paused = true]. Admission denies them by latch identity even if a
-   stale writer cleared [paused], so reject that split instead of repairing it
-   silently. *)
-let terminal_latch_pause_violation (m : keeper_meta) : string option =
-  (* Exhaustive on [latched_reason] for the [paused = false] rows (no [_]
-     catch-all): a future terminal latch variant must force a decision here
-     rather than silently escaping the write-boundary guard. A non-terminal
-     latch with [paused = false] is admission-[Active] (recoverable), so it is
-     not a violation. [paused = true] is always consistent with any latch. *)
-  match m.paused, m.latched_reason with
-  | false,
-    Some (Keeper_latched_reason.Transcript_corruption_reset_required as reason) ->
-    Some
-      (Printf.sprintf
-         "keeper %s: paused=false with terminal/reset-required latch %s"
-         m.name
-         (Keeper_latched_reason.to_wire reason))
-  | false, (Some (Keeper_latched_reason.Operator_paused _) | None) -> None
-  | true, _ -> None
+  { m with
+    paused = false
+  ; latched_reason = None
+  ; runtime = { m.runtime with last_blocker = None }
+  }
 ;;
 
 let apply_profile_default opt current =

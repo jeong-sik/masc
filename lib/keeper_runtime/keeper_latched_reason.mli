@@ -1,13 +1,10 @@
 (** Typed SSOT for a durable Keeper lifecycle latch.
 
-    Ordinary failure observations never inhabit this type. Structural
-    transcript corruption is a reset-required lifecycle latch because replaying
-    the same checkpoint is unsafe. Retired or unknown latches are rejected
+    Ordinary failure observations never inhabit this type: a past failure is
+    evidence, not a scheduling gate. Retired or unknown latches are rejected
     explicitly. *)
 
-type t =
-  | Operator_paused of { operator_actor : operator_actor }
-  | Transcript_corruption_reset_required
+type t = Operator_paused of { operator_actor : operator_actor }
 
 and operator_actor =
   | Grpc_directive

@@ -95,11 +95,6 @@ type meta_command =
       { latch : shutdown_latch
       ; updated_at : string
       }
-  | Latch_transcript_corruption of
-      { trace_id : Keeper_id.Trace_id.t
-      ; generation : int
-      ; updated_at : string
-      }
   | Set_autoboot of
       { enabled : bool
       ; updated_at : string

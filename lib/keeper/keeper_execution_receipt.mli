@@ -180,7 +180,6 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
-  | Disp_operator_reset_required
   | Disp_unknown
 
 val operator_disposition_kind_to_string : operator_disposition_kind -> string

@@ -89,11 +89,6 @@ type meta_command =
       { latch : shutdown_latch
       ; updated_at : string
       }
-  | Latch_transcript_corruption of
-      { trace_id : Keeper_id.Trace_id.t
-      ; generation : int
-      ; updated_at : string
-      }
   | Set_autoboot of
       { enabled : bool
       ; updated_at : string
@@ -597,28 +592,6 @@ let apply_existing (state : state) meta command =
          ; updated_at
          ; runtime
          })
-  | Latch_transcript_corruption { trace_id; generation; updated_at } ->
-    if
-      not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
-      || not (Int.equal meta.runtime.nonce generation)
-    then Error Identity_generation_mismatch
-    else
-    (match
-       Keeper_lifecycle_admission.state
-         ~paused:meta.paused
-         ~latched_reason:meta.latched_reason
-     with
-     | Keeper_lifecycle_admission.Active
-     | Keeper_lifecycle_admission.Paused _ ->
-       Ok
-         (with_meta
-            state
-            { meta with
-              paused = true
-            ; latched_reason =
-                Some Keeper_latched_reason.Transcript_corruption_reset_required
-            ; updated_at
-            }))
   | Set_autoboot { enabled; updated_at } ->
     Ok (with_meta state { meta with autoboot_enabled = enabled; updated_at })
   | Update_profile update ->

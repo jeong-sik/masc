@@ -467,8 +467,7 @@ let test_active_admission () =
   check bool "manual one-shot admitted" true
     (match Admission.admit_manual_one_shot state with
      | Admission.Manual_admitted_active -> true
-     | Admission.Manual_admitted_paused_recovery _
-     | Admission.Manual_denied_transcript_reset_required -> false);
+     | Admission.Manual_admitted_paused_recovery _ -> false);
   check bool "autonomous admitted" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_admitted -> true
@@ -490,7 +489,7 @@ let test_classified_pause_admission () =
        Keeper_latched_reason.equal reason operator_pause
      | Admission.Manual_admitted_active
      | Admission.Manual_admitted_paused_recovery Admission.Unclassified
-     | Admission.Manual_denied_transcript_reset_required -> false);
+     -> false);
   check bool "autonomous execution is denied" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_denied
@@ -516,41 +515,6 @@ let test_unclassified_pause_fails_closed () =
          (Admission.Autonomous_paused (Admission.Classified _)) -> false)
 ;;
 
-
-
-let test_transcript_corruption_requires_reset () =
-  without_overrides @@ fun () ->
-  let reason = Keeper_latched_reason.Transcript_corruption_reset_required in
-  let state =
-    lifecycle_state ~paused:false ~latched_reason:(Some reason)
-  in
-  check bool "reset-required latch dominates stale pause bit" true
-    (match state with
-     | Admission.Paused (Admission.Classified actual) ->
-       Keeper_latched_reason.equal actual reason
-     | Admission.Active
-     | Admission.Paused Admission.Unclassified ->
-       false);
-  check bool "generic manual resume is denied" true
-    (match Admission.admit_manual_one_shot state with
-     | Admission.Manual_denied_transcript_reset_required -> true
-     | Admission.Manual_admitted_active
-     | Admission.Manual_admitted_paused_recovery _ ->
-       false);
-  let meta =
-    { (ready_meta ()) with paused = false; latched_reason = Some reason }
-  in
-  let readiness = Readiness.of_meta meta in
-  check bool "reset-required Keeper is not ready" false
-    readiness.autonomous_activation.ok;
-  check bool "health projects reset-required identity" true
-    (match Readiness.pause_kind meta with
-     | Readiness.Transcript_corruption_reset_required -> true
-     | Readiness.Active
-     | Readiness.Operator_paused
-     | Readiness.Unclassified_paused ->
-       false)
-;;
 
 
 let () = init_runtime_default_for_tests ()
@@ -589,8 +553,7 @@ let () =
         ; test_case "classified pause" `Quick test_classified_pause_admission
         ; test_case "unclassified pause fails closed" `Quick
             test_unclassified_pause_fails_closed
-        ; test_case "transcript corruption requires reset" `Quick
-            test_transcript_corruption_requires_reset
+
         ] )
     ]
 ;;

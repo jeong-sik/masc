@@ -1,10 +1,7 @@
 (** Pure lifecycle admission for keeper execution boundaries.
 
-    The persisted [paused] bit remains the pause authority.
-    [Transcript_corruption_reset_required] refines it into a pause that generic
-    resume cannot clear, and stays fail-closed even if a racing/stale writer
-    cleared [paused]. Missing latch detail while [paused = true] is fail-closed
-    as an unclassified pause. *)
+    The persisted [paused] bit is the pause authority. Missing latch detail
+    while [paused = true] is fail-closed as an unclassified pause. *)
 
 type paused_latch = private
   | Classified of Keeper_latched_reason.t
@@ -22,7 +19,6 @@ val state :
 type manual_one_shot_admission =
   | Manual_admitted_active
   | Manual_admitted_paused_recovery of paused_latch
-  | Manual_denied_transcript_reset_required
 
 val admit_manual_one_shot : state -> manual_one_shot_admission
 

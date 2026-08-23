@@ -1,23 +1,44 @@
 ---
 rfc: "0240"
 title: "Tool-pair invariant enforced at write-time (eliminate repair-on-read)"
-status: Draft
+status: Implemented
 created: 2026-06-15
-updated: 2026-07-28
+updated: 2026-08-23
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0110", "0233"]
-implementation_prs: []
+implementation_prs: [24482, 24856, 25046, 25977, 29582]
 ---
 
 # RFC-0240: Tool-pair invariant enforced at write-time
 
-Status: Draft · The ToolUse/ToolResult pairing invariant is checked and
-repaired when a checkpoint is *read* or a prompt is *assembled*. This RFC
-moves the check to the *write/append* boundary, rejects malformed
-pairings there, and removes the read-time repair so a malformed pairing
-can no longer be silently persisted and re-repaired every load.
+> **종결 2026-08-23.** 이 RFC 가 없애려던 repair-on-read 는 사라졌고, write 경계
+> 강제는 배선돼 있다. 아래 §1 문제 서술은 2026-06-15 당시의 기록이며 현재 코드가
+> 아니다.
+>
+> | 항목 | 결과 |
+> |---|---|
+> | §2.1 타입 파서 | `Keeper_compaction_unit.partition` |
+> | §2.2 저장 경계 | `keeper_context_core.ml:71` — `validate` 로 거부 (#25046) |
+> | §2.2 read-time 수리 삭제 | 완료 (#24482, #24856, #25046) |
+> | §2.4 부팅 tail recovery | `Keeper_transcript_tail_recovery` (#25977) |
+> | §2.2 append 경계 | **기각** — 소비자 2중 검사로 이미 성립, §2.2 참조 |
+>
+> 처단한 것: §4 Migration(옛 drop 로직을 한 릴리즈 들고 가는 레거시 컨버터 지시,
+> `projects.md` 금지 조항), §4.1(존재하지 않는 §4.2 참조), §5.1(심볼이 사라진
+> `repair_broken_tool_call_pairs_with_stats` 를 앵커로 삼음), §5.2(지킬 심볼이
+> 없음), §5.3(기각된 append 게이트를 정당화하는 TLA+ 모델), §5.4 R3·R5(제거된
+> `Transcript_corruption_reset_required` 래치의 유지를 요구).
+>
+> 남은 검증은 코드 쪽에 있다 — R1 은 `test_keeper_compaction_persist_gate.ml:156`,
+> R2 는 `test_keeper_compaction_unit.ml` 의 `close_open_tail` 5건, R4 는
+> 같은 persist gate `:86`.
+
+Status: Implemented · 2026-06-15 당시 ToolUse/ToolResult 짝 불변식은 체크포인트를
+*읽을* 때와 프롬프트를 *조립할* 때 검사·수리됐다. 이 RFC 는 그 검사를
+*쓰기* 경계로 옮기고, 거기서 깨진 짝을 거부하고, read-time 수리를 없앤다. 그래야
+깨진 짝이 조용히 저장됐다가 매 로드마다 다시 수리되는 일이 사라진다.
 Drafted by: Claude (Opus 4.8), from a repair-on-read audit on
 2026-06-15.
 
@@ -27,7 +48,7 @@ Drafted by: Claude (Opus 4.8), from a repair-on-read audit on
 > this RFC.
 
 > **Amendment 2026-07-28** (§1.5, §1.6, §2.1a, §2.2 correction, §2.4,
-> §5.4, §6.1). The original draft treats every unmatched `ToolUse` as one
+> §6.1; the §5.4 half was purged on 2026-08-23). The original draft treats every unmatched `ToolUse` as one
 > violation shape. It is two: a `ToolUse` unmatched *in tail position* is
 > an in-flight tool call that checkpoint persistence stores on purpose,
 > and a `ToolUse` unmatched *mid-history* is the producer bug this RFC
@@ -423,13 +444,18 @@ Two consequences for §2.1:
 
 Two write boundaries, both currently unchecked:
 
-1. **In-memory append.** `Keeper_context_core.append`
-   (`lib/keeper/keeper_context_core_accessors.ml:176` **(verified)**)
-   gains a checked sibling that returns `(working_context, violation
-   list) result`. Callers that append assistant turns and tool results
-   (the `append`/`append_many` users) consume the `Result`. A malformed
-   append is the producer bug surfacing at the exact site that created
-   it, not three loads later.
+1. **In-memory append — rejected, not built (2026-08-23).** The premise
+   was that a malformed pairing is dropped on read and surfaces "three
+   loads later". That premise is gone: read-time repair no longer exists,
+   and both consumers reject in the same turn — provider dispatch through
+   `provider_transcript_admission`
+   (`lib/keeper/keeper_agent_run.ml:271-280`) and checkpoint persistence
+   through `checkpoint_for_persistence`
+   (`lib/keeper/keeper_context_core.ml:71`). A third check at the
+   producer would be a Gate added where the feature already behaves
+   correctly, which `projects.md` forbids. The only benefit left is
+   attributing the violation to the exact append call, and that does not
+   meet the bar of durable truth being lost.
 
 2. **Checkpoint persistence.** `save_oas`
    (`lib/keeper/keeper_checkpoint_store.ml:362` **(verified)**) already
@@ -472,23 +498,18 @@ drop. The repair functions and their read-time call sites are deleted.
 
 ### §2.3 Caller handling of rejection
 
-The append boundary is reached after a turn produces blocks. The keeper
-already has a turn-failure path (it records receipts, can retry, can
-abort the turn). A `Dangling_tool_use`/`Orphan_tool_result` violation at
-append maps to a turn-level failure with the violation as the typed
-reason — the same severity as a provider-rejected malformed request,
-which is what the dropped data would have caused downstream anyway. The
-violation list is logged with the existing keeper warn channel and
-emitted on the existing `ToolPairRepair` counter relabeled to a
-*rejection* counter (drops become rejections; the metric name keeps its
-`_total` series so dashboards do not lose history, with a `kind`
-label of `rejected_*`).
+*Rewritten 2026-08-23. The append half described a boundary that was
+rejected (§2.2 item 1) and a `ToolPairRepair` counter that no longer
+exists.*
 
-The save boundary maps a violation to `Error`, which save callers
-already handle (they log and continue without persisting that
-checkpoint, preserving the last good checkpoint). This is strictly safer
-than today, where a malformed checkpoint is persisted in repaired
-(lossy) form.
+The save boundary maps a structural violation to `Error`, which save
+callers already handle: they log and continue without persisting that
+checkpoint, preserving the last good one. That is what shipped.
+
+Provider dispatch maps its own rejection to a typed
+`Keeper_internal_error` — `Structurally_invalid` or
+`Unresolved_tool_results` with the open ids — and the turn follows the
+ordinary typed failure route.
 
 ### §2.4 The missing move: close the open tail at recovery
 
@@ -606,132 +627,6 @@ narrowing is the point: today both collapse into one terminal latch.
   already *preserves* pairs rather than repairing, and stays.
 - This RFC does not migrate to a new on-disk checkpoint format; existing
   checkpoints are handled by §4.
-
-## §4 Migration
-
-The risk is existing on-disk checkpoints that already carry a broken
-pairing (written under the current repair-then-save paths). After this
-change they would fail to parse on load.
-
-1. **One-time forward repair.** A migration step parses each stored
-   checkpoint; on violation it applies the *old* repair once, rewrites
-   the checkpoint, and emits a one-shot migration counter
-   (`kind=migration_repair`). This is the only place the old drop logic
-   survives, behind an explicit migration flag, removed after the fleet
-   has rolled over (`removal target: one release after merge`).
-2. **Grace window.** For one release, a load-time parse failure on a
-   pre-migration checkpoint falls back to the migration repair (logged at
-   WARN) rather than discarding the checkpoint, so a keeper mid-flight is
-   not stranded. After the grace window the fallback is deleted and a
-   parse failure is a hard `CheckpointFailures` error.
-3. **No new format.** Migration rewrites in the same format; only the
-   message list is re-paired.
-
-### §4.1 Trade-offs
-
-- **Cost: rejection at append can surface a producer bug that today is
-  invisible.** This is the intended effect — but if a producer emits
-  malformed pairs frequently, turns will fail until that producer is
-  fixed. Mitigation: the grace window (§4.2) plus a dashboard on the
-  rejection counter lets operators see the producer rate before the hard
-  cutover. The producer fix is in scope as follow-up work, not deferred
-  indefinitely — the rejection telemetry names the exact append site.
-- **Cost: the migration carries the old drop logic for one release.**
-  This is a bounded, flagged exception to the no-repair rule, justified
-  by not stranding live checkpoints, with an explicit removal target.
-- **Cost: re-parse on append is O(window) per message.** The classifier
-  already runs over the full list on every read; checking the touched
-  pairing window on append is strictly less work than the per-read full
-  walk it replaces.
-- **Benefit: data loss stops.** Today a dropped block is gone and the
-  producer is unobserved. After this change the block is never silently
-  dropped; it is either well-formed (kept) or the producer fails loudly.
-
-## §5 Verification harness
-
-### §5.1 Property tests (parser side)
-
-`test/test_pbt_context_overflow.ml` already exercises
-`repair_broken_tool_call_pairs_with_stats` across generated message lists
-(`:417-765` **(verified)**). These convert to parser properties:
-
-- **P1 well-paired round-trip.** For any well-paired generated list,
-  `of_messages l` is `Ok t` and `to_messages t = l` (identity — no
-  silent transform).
-- **P2 violation completeness.** For any list with k injected dangling
-  uses and m injected orphan results, `of_messages` returns
-  `Error vs` with exactly k `Dangling_tool_use` and m `Orphan_tool_result`
-  violations (no over- or under-reporting).
-- **P3 append monotonicity.** `append t msg` is `Ok` iff appending `msg`
-  to `to_messages t` is well-paired; the two construction paths agree.
-
-### §5.2 No-read-repair grep gate (boundary side)
-
-A drift-guard test asserts the read-time repair sites are gone:
-`repair_broken_tool_call_pairs` has zero references under `lib/keeper/`
-except inside the flagged migration module. This is a structural
-assertion (the symbol is deleted), not a substring classifier on data —
-it guards the *absence* of the workaround, which is the property this RFC
-establishes. It fails the build if a future PR reintroduces read-time
-repair.
-
-### §5.3 TLA+ bug model (clean + buggy pair)
-
-Per CLAUDE.md §TLA+ Bug Model and the `specs/bug-models/` convention
-(clean `.cfg` "no error", `-buggy.cfg` "invariant violated"), add
-`specs/bug-models/ToolPairWriteEnforce.tla`:
-
-| Element | Role |
-|---|---|
-| `bank` | sequence of blocks: `[kind \|-> "use"\|"result", id \|-> Nat, matched \|-> BOOLEAN]` |
-| `Append(block)` (clean) | appends only if the result keeps `PairInvariant` (write-time enforce); otherwise the transition is disabled (reject) |
-| `AppendUnchecked(block)` (bug) | appends any block; models today's `append` with no pairing check |
-| `PairInvariant` | no dangling `use` and no orphan `result` in `bank` |
-| `Next` (clean) | `Append` only |
-| `NextBuggy` | `Next \/ AppendUnchecked` |
-
-- `ToolPairWriteEnforce.cfg`: `SPECIFICATION Spec`, `INVARIANT
-  PairInvariant` → TLC reports no error (write-time enforce holds the
-  invariant).
-- `ToolPairWriteEnforce-buggy.cfg`: `SPECIFICATION SpecBuggy`,
-  `INVARIANT PairInvariant` → TLC reports the invariant violated (an
-  `AppendUnchecked` of a dangling use reaches a bad state). This is the
-  exact state today's read-repair must compensate for.
-
-Both `.cfg` must hold: clean passes, buggy fails. A clean that does not
-fail under `NextBuggy` would mean the invariant is too weak.
-
-### §5.4 Incident regression: restart must not strand a lane
-
-*Added 2026-07-28. The 2026-07-27 incident (§1.5) has no covering test —
-that is why it reached production.*
-
-- **R1 open tail survives save.** A checkpoint whose messages end in an
-  unmatched `ToolUse` is accepted by the save boundary and round-trips
-  byte-identically. Guards the §2.2 correction: an implementation that
-  rejects the in-flight checkpoint fails here.
-- **R2 recovery closes the tail.** Given a persisted checkpoint with k
-  unresolved `tool_use_id`s, `Recovering_requests` produces a checkpoint
-  with exactly k appended `ToolResult` blocks, one per id, each
-  `is_error: true`, and `validate_provider_transcript` then returns `Ok`.
-- **R3 no latch on the interrupted path.** Driving a keeper through
-  interrupt → restart → recovery leaves `paused = false` and
-  `latched_reason = None` in durable meta. Fails against today's code,
-  where `commit_transcript_corruption`
-  (`lib/keeper/keeper_heartbeat_loop.ml:780` **(verified 07-28)**) writes
-  the latch.
-- **R4 mid-history dangling still rejects.** A `ToolUse` left unmatched
-  with a closed cycle after it is rejected at the write boundary. Guards
-  against §2.1a's tail allowance being over-applied into a blanket
-  "unmatched is fine".
-- **R5 unparseable still latches.** `partition` returning `Error`
-  (`Invalid_transcript_structure`) still produces
-  `Transcript_corruption_reset_required`. Guards the §2.4 narrowing —
-  the terminal latch must not be deleted, only stop catching the
-  in-flight case.
-
-R1–R3 fail on `97e5ffeca8` and must pass after implementation; R4–R5
-must pass both before and after.
 
 ## §6 Evidence trail
 

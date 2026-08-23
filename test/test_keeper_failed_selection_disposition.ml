@@ -6,7 +6,7 @@
     selection: a frozen successor preserves it, transient failure rotates it
     behind independent work, deterministic failure quarantines only the source,
     an effect-fenced provider failure quarantines that source even if a stale
-    successor exists, and transcript corruption alone pauses the Keeper. *)
+    successor exists. *)
 
 open Alcotest
 
@@ -52,8 +52,7 @@ let test_overflow_without_successor_terminalizes () =
   | Loop.Quarantine_source { detail } ->
     check bool "detail is non-empty" true (String.length detail > 0)
   | Loop.Preserve_for_deferred_runtime
-  | Loop.Defer_to_queue_tail
-  | Loop.Pause_keeper_for_integrity _ ->
+  | Loop.Defer_to_queue_tail ->
     fail
       "context overflow with no recovery successor must terminalize the \
        selection: retrying re-dispatches the same bounded payload every \
@@ -68,9 +67,7 @@ let test_overflow_with_deferred_lane_preserves () =
      with
      | Loop.Preserve_for_deferred_runtime -> true
      | Loop.Defer_to_queue_tail
-     | Loop.Quarantine_source _
-     | Loop.Pause_keeper_for_integrity _ ->
-       false)
+     | Loop.Quarantine_source _ -> false)
 ;;
 
 let test_effect_fenced_failure_terminalizes_exact_source () =
@@ -97,8 +94,7 @@ let test_effect_fenced_failure_terminalizes_exact_source () =
   | Loop.Quarantine_source { detail } ->
     check bool "detail is non-empty" true (String.length detail > 0)
   | Loop.Preserve_for_deferred_runtime
-  | Loop.Defer_to_queue_tail
-  | Loop.Pause_keeper_for_integrity _ ->
+  | Loop.Defer_to_queue_tail ->
     fail
       "effect-fenced failure must terminalize the exact failed source instead \
        of replaying it on the next heartbeat"
@@ -134,9 +130,7 @@ let test_other_terminal_classes_quarantine_source () =
           with
           | Loop.Quarantine_source { detail } -> String.length detail > 0
           | Loop.Preserve_for_deferred_runtime
-          | Loop.Defer_to_queue_tail
-          | Loop.Pause_keeper_for_integrity _ ->
-            false))
+          | Loop.Defer_to_queue_tail -> false))
     preserving_terminal_classes
 ;;
 
@@ -166,9 +160,7 @@ let test_exhausted_configuration_classes_quarantine_source () =
           with
           | Loop.Quarantine_source _ -> true
           | Loop.Preserve_for_deferred_runtime
-          | Loop.Defer_to_queue_tail
-          | Loop.Pause_keeper_for_integrity _ ->
-            false))
+          | Loop.Defer_to_queue_tail -> false))
     exhausted_configuration_classes
 ;;
 
@@ -187,30 +179,7 @@ let test_retryable_route_defers_to_queue_tail () =
      with
      | Loop.Defer_to_queue_tail -> true
      | Loop.Preserve_for_deferred_runtime
-     | Loop.Quarantine_source _
-     | Loop.Pause_keeper_for_integrity _ ->
-       false)
-;;
-
-let test_transcript_corruption_pauses_keeper () =
-  check bool "transcript corruption is the explicit Keeper pause path" true
-    (match
-       Loop.failed_source_disposition
-         (failure
-            ~route:
-              (KFR.route_of_error
-                 ~boundary:KFR.Agent_core_execution
-                 overflow_error)
-            ~source_disposition:
-              (Turn.Pause_after_transcript_corruption { detail = "corrupt" })
-            overflow_error)
-     with
-     | Loop.Pause_keeper_for_integrity { detail } ->
-       String.equal detail "corrupt"
-     | Loop.Preserve_for_deferred_runtime
-     | Loop.Defer_to_queue_tail
-     | Loop.Quarantine_source _ ->
-       false)
+     | Loop.Quarantine_source _ -> false)
 ;;
 
 let test_defer_pending_rotates_within_urgency_lane () =
@@ -278,10 +247,6 @@ let () =
             "retryable route defers to queue tail"
             `Quick
             test_retryable_route_defers_to_queue_tail
-        ; test_case
-            "transcript corruption pauses Keeper"
-            `Quick
-            test_transcript_corruption_pauses_keeper
         ; test_case
             "defer rotates within urgency lane"
             `Quick

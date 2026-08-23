@@ -313,8 +313,7 @@ let rec compaction_outcomes_of_cycle_outcome = function
   | Cycle.Manual_compaction_failed _ -> [ `Failed ]
   | Cycle.Failed { failure; _ } ->
     (match failure.Keeper_unified_turn.source_disposition with
-     | Keeper_unified_turn.Follow_failure_route
-     | Keeper_unified_turn.Pause_after_transcript_corruption _ -> [])
+     | Keeper_unified_turn.Follow_failure_route -> [])
   | Cycle.Completed _
   | Cycle.Checkpointed _
   | Cycle.Input_required _
@@ -348,14 +347,11 @@ type failed_source_disposition =
   | Preserve_for_deferred_runtime
   | Defer_to_queue_tail
   | Quarantine_source of { detail : string }
-  | Pause_keeper_for_integrity of { detail : string }
 
 let failed_source_disposition
       (failure : Keeper_unified_turn.turn_failure)
   =
   match failure.Keeper_unified_turn.source_disposition with
-  | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
-    Pause_keeper_for_integrity { detail }
   | Keeper_unified_turn.Follow_failure_route ->
     (match failure.Keeper_unified_turn.route with
      | Keeper_runtime_failure_route.Exhausted_visible_alive
@@ -410,8 +406,7 @@ let batch_disposition_of_cycle_outcome
     (match failed_source_disposition failure with
      | Quarantine_source { detail } -> Batch_quarantine { detail }
      | Defer_to_queue_tail -> Batch_defer { reason = "transient_turn_failure" }
-     | Preserve_for_deferred_runtime | Pause_keeper_for_integrity _ ->
-       Batch_no_action)
+     | Preserve_for_deferred_runtime -> Batch_no_action)
   | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
     Batch_quarantine { detail = Keeper_manual_compaction.failure_to_string failure }
   | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
@@ -937,59 +932,8 @@ let run_keepalive_unified_turn
                reason
                detail)
       in
-      let persist_transcript_corruption_pause ~detail =
-        let pause_result =
-          try
-            Keeper_owner_registry.apply_meta
-              ~base_path:ctx.config.base_path
-              ~keeper_name:meta_after_triage.name
-              (Keeper_owner_reducer.Latch_transcript_corruption
-                 { trace_id = meta_after_triage.runtime.trace_id
-                 ; generation = meta_after_triage.runtime.nonce
-                 ; updated_at = Masc_domain.now_iso ()
-                 })
-            |> Result.map_error Keeper_owner_registry.command_error_to_string
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Error
-              ("transcript corruption pause raised: "
-               ^ Printexc.to_string exn)
-        in
-        match pause_result with
-        | Ok (Some _) -> true
-        | Ok None ->
-          record_event_queue_failure "transcript corruption owner metadata disappeared";
-          false
-        | Error pause_detail ->
-          record_event_queue_failure
-            ("transcript corruption pause failed: " ^ pause_detail);
-          Log.Keeper.error
-            ~keeper_name:meta_after_triage.name
-            "transcript corruption retained its exact pending source because \
-             the durable pause failed: %s; pause_error=%s"
-            detail
-            pause_detail;
-          false
-      in
-      let commit_transcript_corruption ~detail =
-        Eio.Cancel.protect (fun () ->
-          Atomic.set stop true;
-          if persist_transcript_corruption_pause ~detail
-          then
-            Option.iter
-              (fun selection ->
-                 terminalize_failed_selection
-                   ~selection
-                   ~detail)
-              !pending_selection)
-      in
       (match !cycle_outcome_ref with
-       | Some (Cycle.Failed { failure; _ }) ->
-         (match failure.Keeper_unified_turn.source_disposition with
-          | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
-            commit_transcript_corruption ~detail
-          | Keeper_unified_turn.Follow_failure_route -> ())
+       | Some (Cycle.Failed _)
        | Some
            ( Cycle.Completed _
            | Cycle.Checkpointed _

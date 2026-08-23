@@ -53,9 +53,7 @@ let resume_operator_pause
            | Ok { meta = Some resumed; _ } when resumed.paused ->
              Error "explicit keeper up committed but pause remained set"
            | Ok { meta = Some resumed; _ } -> Ok resumed)))
-  | false, _
-  | true, Some Keeper_latched_reason.Transcript_corruption_reset_required ->
-    Ok old
+  | false, _ -> Ok old
 ;;
 
 let turn_in_flight_rejection ~keeper_name

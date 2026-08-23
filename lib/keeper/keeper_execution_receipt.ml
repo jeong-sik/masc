@@ -57,7 +57,6 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
-  | Disp_operator_reset_required
   | Disp_unknown
 
 let operator_disposition_kind_to_string = function
@@ -66,7 +65,6 @@ let operator_disposition_kind_to_string = function
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
-  | Disp_operator_reset_required -> "operator_reset_required"
   | Disp_unknown -> "unknown"
 ;;
 
@@ -76,7 +74,6 @@ let operator_disposition_kind_of_string = function
   | "pass_next_model" -> Some Disp_pass_next_model
   | "user_cancelled" -> Some Disp_user_cancelled
   | "skipped" -> Some Disp_skipped
-  | "operator_reset_required" -> Some Disp_operator_reset_required
   | "unknown" -> Some Disp_unknown
   | _ -> None
 ;;
@@ -160,7 +157,12 @@ let operator_disposition (receipt : t)
   match terminal_reason with
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Transcript_corruption _ ->
-    Disp_operator_reset_required, Reason_transcript_corruption
+    (* An incomplete tool transcript no longer parks the Keeper: boot-time
+       tail recovery closes the open cycles a process death leaves, and the
+       turn otherwise follows the ordinary typed route. Keep the operator
+       alert with the typed reason rather than claiming a pause that no
+       longer happens. *)
+    Disp_unknown, Reason_transcript_corruption
   | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
     (* Same-turn replay stays forbidden, and the runtime lifecycle remains
        responsible for selecting a later turn. Keep the operator alert, but
@@ -428,7 +430,6 @@ let to_json receipt =
    receipt evidence; it makes no watchdog or liveness claim for a keeper that
    did not produce a receipt. *)
 let needs_operator_broadcast = function
-  | Disp_operator_reset_required
   | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime

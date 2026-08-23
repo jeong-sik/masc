@@ -2083,6 +2083,15 @@ let render_keeper_message (state : state) =
                (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
                   (Keeper_chat.terminal_safe_text body)))
            queued);
+    (if state.msg_older_loading then
+       box_line_styled buf cols ~style:Ansi.dim
+         "  loading older messages…"
+     else
+       match state.msg_older_error with
+       | Some detail ->
+           box_line_styled buf cols ~style:Ansi.yellow
+             ("  older messages could not be loaded; up retries: " ^ detail)
+       | None -> ());
     (if scroll > 0 then
        box_line_styled buf cols ~style:Ansi.yellow
          (Printf.sprintf
@@ -2246,7 +2255,13 @@ let render_keeper_message (state : state) =
            | None, true -> "Enter:send")
     in
     let scroll_hint =
-      if scroll > 0 then "up/down:scroll  Ctrl-E:newest" else "up:scroll back"
+      if scroll > 0 then
+        (* At the oldest row with nothing more to fetch, say so: an operator
+           pressing up against a pane that will not move should know it is the
+           start of the conversation rather than a stuck key. *)
+        if state.msg_older_exist then "up/down:scroll  Ctrl-E:newest"
+        else "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+      else "up:scroll back"
     in
     let escape_hint =
       match state.msg_live with

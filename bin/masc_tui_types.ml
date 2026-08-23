@@ -360,6 +360,14 @@ type state = {
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
+  (* Where the next older page starts, and whether one exists. Both come from
+     the server rather than being derived here: it owns the rule for what
+     "older than this" means across rows that share a timestamp. None with
+     [msg_older_exist] true means the pane has not learned a cursor yet. *)
+  mutable msg_older_cursor: float option;
+  mutable msg_older_exist: bool;
+  mutable msg_older_loading: bool;
+  mutable msg_older_error: string option;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
      request, so a second Enter used to be answered with "already in progress"
@@ -471,6 +479,10 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
   msg_scroll = 0;
+  msg_older_cursor = None;
+  msg_older_exist = false;
+  msg_older_loading = false;
+  msg_older_error = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = None;
   msg_inflight_kind = None;
@@ -544,6 +556,8 @@ let keeper_message_status_rows (state : state) =
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_scroll > 0 then 1 else 0)
+  + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
+     else 0)
   + composer_extra_rows state
 
 let approval_items (state : state) =

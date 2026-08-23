@@ -205,6 +205,79 @@ let test_a_missing_ts_reads_as_zero_not_a_failure () =
   | [ r ] -> check (float 0.0) "and sorts as the oldest" 0.0 r.History.at
   | rows -> failf "expected one row, got %d" (List.length rows)
 
+(* Paging. The envelope is new; the rows inside are the transcript's, so what
+   matters here is the cursor and the "is there more" flag -- getting either
+   wrong either stops the pane short of the conversation's start or has it ask
+   forever for a page that does not exist. *)
+
+let page json =
+  match History.page_of_json json with
+  | Ok page -> page
+  | Error detail -> failf "expected a page, got %s" detail
+
+let page_envelope ?(has_more = true) ?next_before rows =
+  `Assoc
+    ([ "schema", `String "masc.keeper_chat_history.page.v1"
+     ; "messages", `List rows
+     ; "has_more", `Bool has_more
+     ]
+     @ (match next_before with
+        | None -> [ "next_before", `Null ]
+        | Some ts -> [ "next_before", `Float ts ]))
+
+let test_a_page_decodes_its_rows_and_cursor () =
+  let p =
+    page
+      (page_envelope ~has_more:true ~next_before:12.5
+         [ row ~ts:20.0 ~role:"user" "older question"
+         ; row ~ts:21.0 ~role:"assistant" "older answer"
+         ])
+  in
+  check (list string) "the rows read like any other transcript rows"
+    [ "older question"; "older answer" ]
+    (List.map (fun r -> r.History.text) p.History.decoded.History.rows);
+  check bool "more remain" true p.History.has_more;
+  check (option (float 0.0)) "and the cursor for them" (Some 12.5)
+    p.History.next_before
+
+let test_the_top_of_the_conversation_says_so () =
+  let p = page (page_envelope ~has_more:false [ row ~role:"user" "first ever" ]) in
+  check bool "nothing older" false p.History.has_more;
+  check (option (float 0.0)) "and no cursor to ask with" None
+    p.History.next_before
+
+let test_a_missing_has_more_reads_as_no_more () =
+  (* Guessing true would leave the pane offering a page the server never
+     promised, and every request for it would come back empty. *)
+  let p =
+    page (`Assoc [ "messages", `List [ row ~role:"user" "only row" ] ])
+  in
+  check bool "absence is not a promise of more" false p.History.has_more
+
+let test_tool_rows_fold_in_a_page_as_they_do_in_the_transcript () =
+  let p =
+    page
+      (page_envelope ~has_more:false
+         [ row ~ts:1.0 ~role:"tool" ~tool_call_name:"read_file" "{}"
+         ; row ~ts:2.0 ~role:"tool" ~tool_call_name:"edit_file" "{}"
+         ])
+  in
+  match p.History.decoded.History.rows with
+  | [ { History.kind = History.Tool_calls rows; _ } ] ->
+      check int "consecutive calls are one block here too" 2
+        (List.length rows)
+  | rows -> failf "expected one folded block, got %d rows" (List.length rows)
+
+let test_a_page_that_is_not_an_object_is_an_error () =
+  match History.page_of_json (`List []) with
+  | Ok _ -> fail "an array is not a page envelope"
+  | Error detail -> check bool "and says so" true (String.length detail > 0)
+
+let test_a_page_without_messages_is_an_error () =
+  match History.page_of_json (`Assoc [ "has_more", `Bool true ]) with
+  | Ok _ -> fail "a page with no rows array should not decode"
+  | Error detail -> check bool "and says so" true (String.length detail > 0)
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -217,6 +290,20 @@ let () =
         ; test_case "speech splits tool blocks" `Quick
             test_tool_blocks_separated_by_speech_stay_separate
         ; test_case "the server's order is kept" `Quick test_server_order_is_kept
+        ] )
+    ; ( "paging"
+      , [ test_case "a page decodes its rows and cursor" `Quick
+            test_a_page_decodes_its_rows_and_cursor
+        ; test_case "the top of the conversation says so" `Quick
+            test_the_top_of_the_conversation_says_so
+        ; test_case "a missing has_more reads as no more" `Quick
+            test_a_missing_has_more_reads_as_no_more
+        ; test_case "tool rows fold in a page too" `Quick
+            test_tool_rows_fold_in_a_page_as_they_do_in_the_transcript
+        ; test_case "a non-object page is an error" `Quick
+            test_a_page_that_is_not_an_object_is_an_error
+        ; test_case "a page without messages is an error" `Quick
+            test_a_page_without_messages_is_an_error
         ] )
     ; ( "tolerance"
       , [ test_case "one unreadable row does not cost the transcript" `Quick

@@ -2,6 +2,28 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+type keeper_quiet_reason =
+  | Proactive_disabled
+  | Keepalive_not_running
+  | Starting_up
+  | Never_started
+
+val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
+(** Wire form of the keeper diagnostic's [quiet_reason]. The dashboard's
+    [KeeperQuietReason] union must list exactly these strings; an unlisted one
+    is dropped when the diagnostic is normalised. *)
+
+type keeper_next_action_path =
+  | Auto_restart
+  | Recover
+  | Probe
+  | Direct_message
+
+val keeper_next_action_path_to_string : keeper_next_action_path -> string
+(** Wire form of the keeper diagnostic's [next_action_path]. The dashboard's
+    [KeeperNextActionPath] union must list exactly these strings; an unlisted
+    one makes it reject the whole diagnostic. *)
+
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
 val string_of_fiber_health : fiber_health -> string

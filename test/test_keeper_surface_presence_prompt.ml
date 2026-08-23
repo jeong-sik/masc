@@ -217,8 +217,14 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
   in
   check bool "section header states the depth" true
     (contains ~needle:"### Your Recent Actions (1 turns)" user);
+  (* #29701 stopped replaying a successful call's arguments. Measured there:
+     they were 98% of the section's bytes and pushed it to 92% of the model
+     input. That it landed is the fact -- the same reason this module already
+     leaves the returned body out. *)
   check bool "the work it already did is stated" true
-    (contains ~needle:{|- [turn 27486] keeper_board_post {"title":"status"} -> ok|} user);
+    (contains ~needle:{|- [turn 27486] keeper_board_post -> ok|} user);
+  check bool "a successful call does not replay its arguments" false
+    (contains ~needle:{|keeper_board_post {"title":"status"}|} user);
   check bool "the rejected call is stated with its arguments" true
     (contains ~needle:{|keeper_broadcast {} -> REJECTED: "message": MISSING|} user);
   check bool "rows are marked as context" true

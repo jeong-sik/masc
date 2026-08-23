@@ -87,7 +87,11 @@ MASC_DEPLOYMENT_PREFLIGHT_HELPER=<repo>/_build/default/bin/deployment_preflight_
   <repo>/scripts/check-runtime-deployment-preflight.sh --base-path <base>
 ```
 
-성공 신호는 `[runtime-deployment-preflight] OK`. keeper meta 현재 스키마 검사, keeper 이벤트 큐/WAL 파싱, schedule ledger 계약, board attention candidate ledger `schema_version` 검사를 포함한다.
+성공 신호는 `[runtime-deployment-preflight] OK`. keeper meta 현재 스키마 검사, keeper 이벤트 큐/WAL 파싱, schedule ledger 계약, board attention candidate ledger `schema_version` 검사를 포함한다. OK/FAIL 줄 끝의 `helper=<경로> helper_commit=<SHA>`가 방금 빌드한 helper(2단계에서 확증한 SHA)인지 본다 — 다른 SHA면 옛 helper가 판정한 것이다.
+
+meta 검사 범위는 keeper meta(`<base>/.masc/keepers/*.json`)뿐이다. `goals.json`(`lib/goal/goal_store.ml`의 닫힌 스키마)과 run registry 파일은 이 게이트가 검사하지 않는다.
+
+이 단계는 5단계(정지)와 7단계(기동) 사이에서 돈다. 거부되면 서버는 내려간 채로 멈추고, 지적된 파일을 고친 뒤 이 단계를 다시 돌려 OK를 본 다음 7단계로 간다. 그 다운타임이 카운터를 지키는 값이다 — 기동 시 fail-open(#29610)은 meta를 버린다. keeper meta 거부는 helper 판정의 `class=` 토큰이 둘로 나뉜다: `not_current_schema`는 필드 불일치라 유령 필드 삭제/빠진 필드 주입으로 고치고, `unreadable_json`은 JSON 자체가 깨진 것이라 백업에서 복원한다(이 경우 런타임은 meta를 버리지 않고 그 keeper 부팅을 거부한다).
 
 스토어 버전이 올라간 바이너리(이벤트 큐 v16 → v17, exact-lane run registry v4 → v5 등)를 올릴 때는 이전 버전 파일을 이 단계에서 지운다. 새 바이너리는 옛 파일을 열지 않으므로 남겨 두면 아무 도구도 다시 보지 않는 고아 파일이 된다. 지우기 전에 크기와 행 수를 기록한다 (`wc -lc <base>/.masc/exact-lane-runs-v4.jsonl`).
 
@@ -119,7 +123,7 @@ curl -s 'http://127.0.0.1:8935/health?full=1' \
 - `binary_commit` == 배포 의도 SHA, `binary_commit_source` == `embedded`
 - `dashboard_surface.status` == `ok`
 - `keeper_fibers`/`bootable_keeper_count`가 1단계 기준선으로 회복
-- 기동 로그에 keeper meta parse 실패가 없다 (`rg "meta parse" <로그>`)
+- 기동 로그에 keeper meta fail-open WARN이 없다 (`rg "keeper meta unreadable at" <로그>` — `lib/keeper/keeper_meta_store.ml`의 `keeper meta unreadable at %s, treating as absent` 리터럴)
 
 대시보드 TopBar는 같은 `/health` 필드를 읽는다. 브라우저 스크린샷은 보조 증거로 남긴다.
 

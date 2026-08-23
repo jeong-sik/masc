@@ -17,6 +17,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PREFLIGHT_HELPER="${MASC_DEPLOYMENT_PREFLIGHT_HELPER:-}"
 # Build commit the resolved helper reports for itself; empty until resolved.
 PREFLIGHT_HELPER_COMMIT=""
+# The gate's own keeper-meta verdict prefix. The self-test asserts this exact
+# literal, so the gate and its test cannot drift apart.
+KEEPER_META_REJECTED='current keeper meta is invalid'
 
 usage() {
   sed -n '2,/^$/p' "$0"
@@ -136,15 +139,21 @@ run_gate() {
       || fail "Keeper runtime root is not an exact directory: $keepers_root"
     reject_symlinks_below "$keepers_root" "Keeper runtime root"
     # Keeper meta is a closed current schema. A field the incoming binary
-    # stopped writing (2026-08-23 hard cuts) reads as garbage on boot: the
-    # runtime fails open, drops the accumulated counters, and re-materialises
-    # the keeper from its declaration (#29610). Catch it while the previous
-    # runtime is still serving, while stripping retired fields is lossless.
+    # stopped writing (2026-08-23 hard cuts) makes the file undecodable on
+    # boot: the runtime reads it as absent and re-materialises the keeper from
+    # its declaration, and the accumulated counters and the task binding are
+    # gone (#29610). This gate runs between the stop of the previous runtime
+    # and the start of the next one (scripts/deploy.sh stops prod in step 3
+    # and runs this under the deployment lease in step 4; the runbook needs
+    # the writer lease free), so a rejection here leaves the plane down until
+    # the operator repairs the file and redeploys. That downtime is the price
+    # of keeping the counters the boot-time fail-open would lose. The helper
+    # verdict printed above the FAIL line names the class and the fix.
     while IFS= read -r -d '' meta_path; do
       [[ -f "$meta_path" && ! -L "$meta_path" ]] \
         || fail "keeper meta is not an exact regular file: $meta_path"
       "$PREFLIGHT_HELPER" validate-current-meta "$meta_path" \
-        || fail "current keeper meta is invalid (on boot the runtime discards it and the keeper loses its accumulated counters; strip retired fields or reset before restart): $meta_path"
+        || fail "$KEEPER_META_REJECTED (the helper verdict above names the class and the fix): $meta_path"
       keeper_meta_count=$((keeper_meta_count + 1))
     done < <(find "$keepers_root" -mindepth 1 -maxdepth 1 -name '*.json' -print0)
 
@@ -341,6 +350,21 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
         jq -n "$keeper_meta_fixture | del(.paused)" \
           >"$target_root/.masc/keepers/fixture.json"
         ;;
+      non-canonical-enum)
+        # The issue #28844 shape: an enumerated field with a canonical
+        # default holds a value no variant spells. The runtime repairs it in
+        # place on read, so the gate passes it.
+        jq -n "$keeper_meta_fixture + {last_proactive_outcome: \"not-an-outcome\"}" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+      truncated-json)
+        # Cut without a pipe: under pipefail, jq dying of SIGPIPE behind a
+        # head would abort the self-test instead of producing the fixture.
+        local full_meta
+        full_meta="$(jq -n "$keeper_meta_fixture")"
+        printf '%s' "${full_meta:0:64}" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
     esac
   }
 
@@ -355,13 +379,16 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   expect_failure_contains() {
     local case_name="$1"
     local target_root="$2"
-    local expected_text="$3"
+    shift 2
+    local expected_text
     local output
     if output="$("$0" --base-path "$target_root" 2>&1)"; then
       fail "self-test expected failure: $case_name"
     fi
-    [[ "$output" == *"$expected_text"* ]] \
-      || fail "self-test failure omitted expected detail for $case_name: $expected_text"
+    for expected_text in "$@"; do
+      [[ "$output" == *"$expected_text"* ]] \
+        || fail "self-test failure omitted expected detail for $case_name: $expected_text"
+    done
   }
 
   safe_root="$fixture_root/safe"
@@ -465,8 +492,10 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   expect_failure malformed_current_wal "$malformed_current_wal_root"
 
-  # The expected details are single tokens: cmdliner wraps the helper's
-  # error text, so a multi-word phrase can be split across lines.
+  # Each keeper-meta rejection asserts the gate's own verdict prefix (printed
+  # by this script, never re-wrapped) plus single tokens from the helper's
+  # verdict: cmdliner wraps the helper's error text at the terminal margin, so
+  # a multi-word phrase from it can be split across lines.
   retired_meta_field_root="$fixture_root/retired-meta-field"
   write_schedules "$retired_meta_field_root" running
   write_current_queue "$retired_meta_field_root"
@@ -474,6 +503,8 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   expect_failure_contains \
     retired_keeper_meta_field \
     "$retired_meta_field_root" \
+    "$KEEPER_META_REJECTED" \
+    "class=not_current_schema" \
     "generation"
 
   missing_meta_field_root="$fixture_root/missing-meta-field"
@@ -483,7 +514,36 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   expect_failure_contains \
     missing_keeper_meta_field \
     "$missing_meta_field_root" \
+    "$KEEPER_META_REJECTED" \
+    "class=not_current_schema" \
     "paused"
+
+  # Not JSON at all: the boot path refuses the keeper rather than reading the
+  # file as absent, so the helper names the other class.
+  truncated_meta_root="$fixture_root/truncated-meta"
+  write_schedules "$truncated_meta_root" running
+  write_current_queue "$truncated_meta_root"
+  write_keeper_meta "$truncated_meta_root" truncated-json
+  expect_failure_contains \
+    truncated_keeper_meta \
+    "$truncated_meta_root" \
+    "$KEEPER_META_REJECTED" \
+    "class=unreadable_json"
+
+  # A non-canonical enumerated value is what the runtime repairs in place on
+  # read, so the gate passes it — and, being read-only, leaves the file
+  # byte-identical for the runtime to repair.
+  repairable_meta_root="$fixture_root/repairable-meta"
+  write_schedules "$repairable_meta_root" running
+  write_current_queue "$repairable_meta_root"
+  write_keeper_meta "$repairable_meta_root" non-canonical-enum
+  cp "$repairable_meta_root/.masc/keepers/fixture.json" \
+    "$repairable_meta_root/fixture.json.before"
+  "$0" --base-path "$repairable_meta_root" >/dev/null \
+    || fail "self-test expected success: repairable_keeper_meta_enum"
+  cmp -s "$repairable_meta_root/fixture.json.before" \
+    "$repairable_meta_root/.masc/keepers/fixture.json" \
+    || fail "self-test gate rewrote a keeper meta it only had to read: repairable_keeper_meta_enum"
 
   wal_only_root="$fixture_root/wal-only"
   write_schedules "$wal_only_root" running

@@ -35,8 +35,6 @@ type lifecycle =
 type stats = {
   total_beats   : int;
   total_nudges  : int;
-  uptime_s      : float;
-  avg_interval  : float;
 }
 
 module type Consumer = sig
@@ -68,7 +66,6 @@ type t = {
      the flag correct if the engine ever runs off the main domain. *)
   alive       : bool Atomic.t;
   mutable total_nudges: int;
-  mutable start_ts    : float;
 }
 
 (* ── Defaults ────────────────────────────────────────────────── *)
@@ -245,12 +242,10 @@ let create ~clock ~rhythm ~lifecycle ~consumers =
     last_beat_v = None;
     alive       = Atomic.make false;
     total_nudges= 0;
-    start_ts    = now ac;
   }
 
 let run ~sw t =
   Atomic.set t.alive true;
-  t.start_ts <- now t.clock;
   match t.lifecycle with
   | Always_on ->
     Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -289,16 +284,9 @@ let set_rhythm t rhythm =
 let get_rhythm t = t.rhythm
 
 let stats t =
-  let uptime = (now t.clock) -. t.start_ts in
-  let avg =
-    if t.seq > 0 then uptime /. (Float.of_int t.seq)
-    else 0.0
-  in
   {
     total_beats  = t.seq;
     total_nudges = t.total_nudges;
-    uptime_s     = uptime;
-    avg_interval = avg;
   }
 
 let last_beat t = t.last_beat_v

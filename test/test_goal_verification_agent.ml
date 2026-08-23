@@ -283,6 +283,77 @@ let test_proof_pending_drains_to_completed () =
   | _ -> fail "ledger must hold the proven verdict"
 ;;
 
+(* The judge holds a read surface rooted at the shared playground, and it is
+   built from the workspace alone. This goal has no linked Task and no
+   producer of its own: the measurement is simply a file somebody wrote under
+   the playground, and the judge reaches it by path. *)
+let test_goal_proof_reads_the_workspace_playground () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Measured goal" in
+  let playground = ensure_producer_playground config "some-keeper" in
+  let artifact = Filename.concat playground "measurement.txt" in
+  Out_channel.with_open_text artifact (fun channel ->
+    output_string channel "pass rate: 100%\n");
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let reads = ref 0 in
+  let reviewer =
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_
+        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
+      match lookup with
+      | AR.No_lookup_surface ->
+        fail "the Goal proof judge was handed no lookup surface"
+      | AR.Lookup_tools { schemas; dispatch; root_layout } ->
+        check bool "the read tool is advertised" true
+          (List.exists
+             (fun (schema : Masc_domain.tool_schema) ->
+                String.equal schema.name "tool_read_file")
+             schemas);
+        check bool "the web tool is advertised" true
+          (List.exists
+             (fun (schema : Masc_domain.tool_schema) ->
+                String.equal schema.name "masc_web_fetch")
+             schemas);
+        check bool "the prompt names the tools the judge holds" true
+          (String_util.contains_substring prompt "tool_read_file");
+        check bool "the prompt lists the root the tools resolve against" true
+          (List.exists
+             (fun entry -> String_util.contains_substring prompt entry)
+             root_layout);
+        let path = Filename.concat "some-keeper" "measurement.txt" in
+        let read =
+          dispatch
+            ~name:"tool_read_file"
+            ~args:(`Assoc [ "file_path", `String path ])
+        in
+        (match read with
+         | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
+         | Ok output ->
+           reads := !reads + 1;
+           check bool "the judge read the measurement itself" true
+             (String_util.contains_substring output "pass rate: 100%"));
+        let input =
+          `Assoc
+            [ "verdict", `String "APPROVE"
+            ; "reason", `String "measured pass rate 100% reaches the target"
+            ]
+        in
+        on_tool_result
+          ~input
+          (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
+             "recorded");
+        Ok (Some AR.Approve)
+  in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer
+    (fun () -> drain config);
+  check int "the judge performed one read" 1 !reads;
+  check string "the measured goal completed" "completed" (stored_phase config goal_id)
+;;
+
 (* (b) A refuted proof returns the goal to Executing; the reason is preserved
    in the ledger and in goal_events.jsonl. *)
 let test_refuted_proof_returns_to_executing () =
@@ -549,6 +620,8 @@ let () =
     [ ( "drain"
       , [ test_case "proof pending drains to completed" `Quick
             test_proof_pending_drains_to_completed
+        ; test_case "goal proof reads the workspace playground" `Quick
+            test_goal_proof_reads_the_workspace_playground
         ; test_case "refuted proof returns to executing with reason" `Quick
             test_refuted_proof_returns_to_executing
         ] )

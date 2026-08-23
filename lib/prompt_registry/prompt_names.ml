@@ -9,6 +9,7 @@ let judge_board = "judge.board"
 let judge_effect = "judge.effect"
 let verification = "verification"
 let goal_verification_proof = "goal_verification.proof"
+let goal_verification_lookup = "goal_verification.lookup"
 
 (* Review sections rendered as their own templates and injected into the review
    prompt. They live as files so the prose is editable and overridable through

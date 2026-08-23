@@ -25,10 +25,11 @@ keeper is blocked, so monitor read 52.8% on one run and 27.5% on the next, and
 the *design* side moved too. Source is the same every time, and it reaches the
 surfaces behind tabs and drawers that no click recipe covers.
 
-## Where it stands (2026-08-23, second re-measure)
+## Where it stands (2026-08-24 re-measure)
 
-**2006 of 2435 design components implemented — 82.4%** (baselines: 55.2% / 1344
-on 2026-08-22, 57.4% / 1398 on the first 2026-08-23 re-measure). The vendored kit
+**2019 of 2433 design components implemented — 83.0%** (baselines: 55.2% / 1344
+on 2026-08-22, 57.4% / 1398 on the first 2026-08-23 re-measure, 82.4% / 2006 on
+the second). The vendored kit
 is the mirror image: at the 57.4% mark, 42% of its 2870 selectors (1216) styled
 nothing in the app; each component build below activates rules that were already
 vendored.
@@ -41,7 +42,7 @@ deliberate rename the design itself superseded).
 
 | Design file | Implemented | |
 |---|---|---|
-| palette | 0.0% | 0/16 — `cmdk-*`; the dashboard's palette is `ninja-keys`, none of the 16 can apply |
+| palette | 100.0% | 16/16 — rebuilt on the design's `cmdk-*` markup 2026-08-24 (ninja-keys removed) |
 | data-surfaces | 11.1% | 1/9 |
 | toast | 12.5% | 1/8 |
 | organisms-5 | 37.0% | 10/27 — `kc-*` drawer; superseded by the design's own fullscreen keeper-config |
@@ -118,7 +119,7 @@ Do not rename these. The reason is written in each stylesheet's header.
 
 | Surface | What the design draws | What the dashboard has |
 |---|---|---|
-| Command palette | its own `cmdk-*` markup, 16 components | `ninja-keys`, a third-party web component. None of the 16 can ever apply. |
+| Command palette | its own `cmdk-*` markup, 16 components | Rebuilt onto that markup 2026-08-24 (`common/command-palette.ts`, replacing `ninja-keys`), 16/16 with the design's deep search — goals, tasks, Gate approvals, fusion runs, board posts, connectors — over live signals. |
 | Lane Queue | 72 `dl-*` components | built 2026-08-23 (`components/lanes/`), 100% |
 | Journey | 53 `ev-*` components | rebuilt 2026-08-23 (`components/v2/journey-v2.ts`), 50/53 — `jw-stim*` has no live signal |
 | monitor-internal | `.ia-badge`, `.ai-table`, `.ai-strip` — a named vocabulary | Rebuilt onto that vocabulary 2026-08-23 (`internal-agents-monitor.ts`); 94.3% (33/35) |

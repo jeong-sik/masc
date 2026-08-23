@@ -6,23 +6,18 @@ type t = {
   prev_hash : string option;
 }
 
-(* Audit IDs intentionally use independent per-domain entropy;
-   NDT-OK: nondeterminism is confined to envelope ID generation. *)
-let random_state =
-  Domain.DLS.new_key Random.State.make_self_init
+(* ULID-lite: 16 hex chars of timestamp-ms, "-", 20 hex chars of entropy. The
+   shape is unchanged; the entropy used to come from a per-domain
+   [Random.State.make_self_init] this module kept for itself, which is neither
+   the OS CSPRNG the rest of the tree draws from nor the same generator any
+   other ID uses (#26718). *)
+let random_hex_bytes = 10
 
-(* ULID-lite: 16 hex chars timestamp-ms + "-" + 26 hex chars random. *)
+(* NDT-OK: opaque identifier entropy, never a branch input. *)
 let generate_id () =
-  let random = Domain.DLS.get random_state in
   let now_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0) in
-  let ts_hex = Printf.sprintf "%016Lx" now_ms in
-  (* NDT-OK: these values are opaque identifier entropy, never branch inputs. *)
-  let r1 = Random.State.int64 random 0x100000000L in
-  let r2 = Random.State.int64 random 0x100000000L in
-  (* NDT-OK: same entropy boundary as the preceding random components. *)
-  let r3 = Random.State.int64 random 0x10000L in
-  let r_hex = Printf.sprintf "%08Lx%08Lx%04Lx" r1 r2 r3 in
-  ts_hex ^ "-" ^ r_hex
+  Printf.sprintf "%016Lx-%s" now_ms (Random_id.hex ~bytes:random_hex_bytes)
+;;
 
 let make ~category ~payload ~prev_hash =
   { id = generate_id ();

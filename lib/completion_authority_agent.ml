@@ -715,7 +715,18 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
         verification_id
         runtime.retry_interval_sec;
       schedule_retry runtime key
-    | Committed | Deferred -> ())
+    | Committed -> ()
+    | Deferred ->
+      (* Nothing schedules another look at this key: the scope rule admits it
+         again only through a fresh submission, or through the sweep, which is
+         armed at boot and after a failed backlog read rather than on a timer.
+         So the Task sits in [AwaitingVerification] until a producer or operator
+         acts, and this is the one line that says so — at the level its
+         retryable sibling above already uses. *)
+      Log.Misc.info
+        "system LLM completion authority settled without retry; producer or operator owns the next move task_id=%s verification_id=%s"
+        task.id
+        verification_id)
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"

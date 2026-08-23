@@ -21,12 +21,11 @@ set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Measured, not computed: 14 is what the widened scan reports on main. The
-# previous 9 came from a narrower pattern that skipped scripts/ci/ entirely
-# and did not match lint-* names, so three self-declared gates
-# (check-logging-consistency, lint-cancel-guard, tla-mutation-lint-ratchet)
-# were invisible to it. See #27626.
-UNWIRED_BASELINE=13
+# Measured, not computed. The widened scan (which reaches scripts/ci/ and
+# matches lint-* names — see #27626) reports 11 on main. The constant sat at 13
+# while the comment above said the ratchet freezes 11: two scripts' worth of
+# room that a later change could spend without the check noticing.
+UNWIRED_BASELINE=11
 
 all="$(mktemp)"
 called="$(mktemp)"

@@ -2009,6 +2009,12 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
          handle_keeper_turn_interrupt state request reqd) request reqd)
 
+  (* Answers a tool call the keeper is holding. Same authority as interrupting
+     a turn: both decide what a running turn is allowed to do next. *)
+  |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+         handle_keeper_tool_approval state request reqd) request reqd)
+
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        match Keeper_chat_operations.mutation_route (Http.Request.path request) with

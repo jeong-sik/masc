@@ -19,6 +19,11 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "tool_args_snapshot(%s,%s)" call_id snapshot
   | Live.Tool_ended { call_id } -> Printf.sprintf "tool_ended(%s)" call_id
   | Live.Tool_result { call_id } -> Printf.sprintf "tool_result(%s)" call_id
+  | Live.Approval_requested { call_id; tool_name; args; question } ->
+      Printf.sprintf "approval_requested(%s,%s,%s,%s)" call_id tool_name args
+        question
+  | Live.Approval_settled { call_id; outcome } ->
+      Printf.sprintf "approval_settled(%s,%s)" call_id outcome
   | Live.Checkpoint -> "checkpoint"
   | Live.External_effect_completed -> "external_effect_completed"
   | Live.Run_failed { message } -> Printf.sprintf "run_failed(%s)" message
@@ -220,6 +225,75 @@ let test_checkpoint_and_external_effect_are_drawn () =
     [ Live.Checkpoint; Live.External_effect_completed ]
     (feed_whole body)
 
+let test_an_approval_request_is_read_whole () =
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"
+            ; "tool_call_name", `String "Edit"
+            ; "args", `String "{\"file_path\":\"a.ml\"}"
+            ; "question", `String "Run Edit on a.ml?"
+            ]))
+  in
+  check (list delta) "every field the prompt needs comes through"
+    [ Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Edit"
+        ; args = "{\"file_path\":\"a.ml\"}"
+        ; question = "Run Edit on a.ml?"
+        }
+    ]
+    (feed_whole body)
+
+let test_a_request_missing_its_question_is_reported () =
+  (* Without a question there is nothing to ask, so this is reported rather
+     than drawn as a prompt with a blank line. *)
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"; "tool_call_name", `String "Edit" ]))
+  in
+  match feed_whole body with
+  | [ Live.Undecodable detail ] ->
+      check bool "the report names what was missing" true
+        (String.length detail > 0)
+  | other ->
+      failf "expected one report, got [%s]"
+        (String.concat "; " (List.map delta_to_string other))
+
+let test_a_request_with_no_arguments_is_still_a_prompt () =
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"
+            ; "tool_call_name", `String "Execute"
+            ; "question", `String "Run Execute?"
+            ]))
+  in
+  check (list delta) "a reader still has to answer it"
+    [ Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Execute"
+        ; args = ""
+        ; question = "Run Execute?"
+        }
+    ]
+    (feed_whole body)
+
+let test_the_settled_event_carries_its_outcome () =
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_SETTLED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"; "outcome", `String "timed_out" ]))
+  in
+  check (list delta) "including the paths where nobody answered"
+    [ Live.Approval_settled { call_id = "c1"; outcome = "timed_out" } ]
+    (feed_whole body)
+
 let () =
   run "tui_keeper_chat_live"
     [ ( "deltas"
@@ -232,6 +306,16 @@ let () =
             test_args_snapshot_replaces_rather_than_appends
         ; test_case "checkpoint and external effect are drawn" `Quick
             test_checkpoint_and_external_effect_are_drawn
+        ] )
+    ; ( "held calls"
+      , [ test_case "an approval request is read whole" `Quick
+            test_an_approval_request_is_read_whole
+        ; test_case "a request with no arguments is still a prompt" `Quick
+            test_a_request_with_no_arguments_is_still_a_prompt
+        ; test_case "the settled event carries its outcome" `Quick
+            test_the_settled_event_carries_its_outcome
+        ; test_case "a request missing its question is reported" `Quick
+            test_a_request_missing_its_question_is_reported
         ] )
     ; ( "reporting"
       , [ test_case "an unreadable line is reported, the stream continues"

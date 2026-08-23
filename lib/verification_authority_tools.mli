@@ -31,6 +31,13 @@ val root_layout : t -> (string list, string) result
     Unavailable or partial discovery is [Error], so a caller must defer the
     review instead of turning an incomplete list into absence evidence. *)
 
+val goal_proof_root_layout : t -> (string list, string) result
+(** {!root_layout} for a {!create_goal_proof} surface: the producer entries
+    under the shared root, without the per-producer checkout scan. That scan
+    stops on its reported-checkout budget when walked across every producer at
+    once, and the stop is an [Error] — running it here deferred every Goal
+    review instead of listing anything. *)
+
 val schemas : t -> Types_core.tool_schema list
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result

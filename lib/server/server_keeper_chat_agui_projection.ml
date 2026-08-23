@@ -19,6 +19,8 @@ type custom_event_name =
   | Continuation_checkpoint
   | External_effect_completed
   | Reply_details
+  | Tool_approval_requested
+  | Tool_approval_settled
   | Tool_result_ready
 
 let initial =
@@ -52,6 +54,8 @@ let custom_event_name_to_string = function
   | Continuation_checkpoint -> "KEEPER_CONTINUATION_CHECKPOINT"
   | External_effect_completed -> "KEEPER_EXTERNAL_EFFECT_COMPLETED"
   | Reply_details -> "KEEPER_REPLY_DETAILS"
+  | Tool_approval_requested -> "KEEPER_TOOL_APPROVAL_REQUESTED"
+  | Tool_approval_settled -> "KEEPER_TOOL_APPROVAL_SETTLED"
   | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
 
 let custom ~timestamp ~redact_json state name value =
@@ -204,6 +208,24 @@ let project ~timestamp ~redact_text ~redact_json state event =
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~tool_call_id:(Some tool_call_id)
              Ag_ui.Tool_call_end) )
+  | Tool_approval_requested { tool_call_id; tool_call_name; args; question } ->
+      ( state
+      , Some
+          (custom ~timestamp ~redact_json state Tool_approval_requested
+             (`Assoc
+                [ "tool_call_id", `String tool_call_id
+                ; "tool_call_name", `String tool_call_name
+                ; "args", `String args
+                ; "question", `String question
+                ])) )
+  | Tool_approval_settled { tool_call_id; outcome } ->
+      ( state
+      , Some
+          (custom ~timestamp ~redact_json state Tool_approval_settled
+             (`Assoc
+                [ "tool_call_id", `String tool_call_id
+                ; "outcome", `String outcome
+                ])) )
   | Tool_result_ready { tool_call_id } ->
       ( state
       , Some

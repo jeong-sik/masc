@@ -138,6 +138,12 @@ let create_goal_proof ~(config : Workspace.config) =
    valid, and a fourth hardcoded scan here would miss it. *)
 let root_entry_cap = 32
 
+(* The Goal proof root lists producers rather than one producer's contents, so
+   its cap is the number of producers a workspace is expected to carry, not the
+   number of entries in one tree. A truncated producer list costs the judge a
+   place it may not look; the live workspace carries 38. *)
+let goal_root_entry_cap = 128
+
 let children path =
   try Ok (Fs_compat.read_dir path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -164,23 +170,46 @@ let checkout_lines root =
     Ok (List.map describe checkouts)
 ;;
 
-let root_layout t =
+let entry_lines_of root ~cap =
   let open Result.Syntax in
   let* entries =
-    children t.ownership_root
+    children root
     |> Result.map_error (fun detail ->
       Printf.sprintf "verification root unreadable: %s" detail)
   in
+  let entries = List.sort String.compare entries in
+  let shown = List.filteri (fun index _ -> index < cap) entries in
+  let omitted = List.length entries - List.length shown in
+  let lines = List.map (fun entry -> "  " ^ entry) shown in
+  Ok
+    (if omitted <= 0
+     then lines
+     else lines @ [ Printf.sprintf "  ... and %d more" omitted ])
+;;
+
+let root_layout t =
+  let open Result.Syntax in
+  let* entry_lines = entry_lines_of t.ownership_root ~cap:root_entry_cap in
   let* checkout_lines = checkout_lines t.ownership_root in
-    let shown = List.filteri (fun index _ -> index < root_entry_cap) entries in
-    let omitted = List.length entries - List.length shown in
-    let entry_lines = List.map (fun entry -> "  " ^ entry) shown in
-    let entry_lines =
-      if omitted <= 0
-      then entry_lines
-      else entry_lines @ [ Printf.sprintf "  ... and %d more" omitted ]
-    in
-    Ok (entry_lines @ checkout_lines)
+  Ok (entry_lines @ checkout_lines)
+;;
+
+(* The Goal proof root holds every producer, so the checkout scan that maps one
+   producer's tree does not apply: it walks all of them at once and stops on
+   the reported-checkout budget long before it is done. That stop is an
+   [Error], so running it here deferred every Goal review and the lane
+   committed no verdict at all (observed live 2026-08-23 on a workspace with
+   38 producers: "checkout budget exhausted (budget 32)", 0.85s, evaluator
+   never reached).
+
+   The scan is an [Error] once it finds more than [max_reported_checkouts]
+   checkouts (32; the live workspace had 41), so it completes only on small
+   workspaces. Leaving it out removes nothing the judge could use: the lookup
+   surface is [Read_file] and [Web_fetch], neither lists a directory, and the
+   path the judge opens comes from the Goal's metric, not from this listing.
+   The listing tells the judge which producer directories exist under the
+   root. The cap is per-producer-entry and states its own omissions. *)
+let goal_proof_root_layout t = entry_lines_of t.ownership_root ~cap:goal_root_entry_cap
 ;;
 
 (* ================================================================ *)

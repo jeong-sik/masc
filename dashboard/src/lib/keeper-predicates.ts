@@ -5,7 +5,7 @@
 //   - keeper-action-panel.ts:113   (paused | status | phase)
 //   - dashboard-shell.ts:168       (paused | phase | stage | status)
 //   - monitoring-runtime.ts:182    (paused | phaseKey | lifecycleKey)
-//   - keeper-reactivity-monitor.ts (paused | phase | pipeline_stage)
+//   - tool-monitor/tool-monitor-reactivity.ts (paused | phase | pipeline_stage)
 //
 // Each chain looked at a *different subset of axes*, so two surfaces
 // could disagree on whether the same keeper was paused. RFC-0135
@@ -59,7 +59,7 @@ export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
  *  distinct from operator-pinned shutdown (`Offline` / `Stopped`) — a
  *  crashed/dead keeper went down *involuntarily*.
  *
- *  Audit finding A1 (2026-05-19): keeper-reactivity-monitor.ts:227
+ *  Audit finding A1 (2026-05-19): tool-monitor/tool-monitor-reactivity.ts:227
  *  inlined this 3-literal OR chain on the same line that already
  *  called `isKeeperPaused`, so the surface had one typed predicate and
  *  one raw literal chain — a self-documented inconsistency. Adding a

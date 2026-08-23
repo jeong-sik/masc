@@ -763,6 +763,39 @@ let test_request_rejects_opaque_reference () =
   | Ok _ -> fail "opaque output reference was accepted"
 ;;
 
+(* An off-surface name is spelled correctly and owned by a real descriptor, so
+   it must not be reported as unknown: the author needs to be told the operator
+   entrypoint or the projecting descriptor, not sent hunting for a typo.
+   masc_tool_help is Operator_only since #29681. *)
+let test_request_rejects_off_surface_tool () =
+  let json = request_of_string {|{"nodes":[{"id":"help","tool":"masc_tool_help"}]}|} in
+  match parse_request json with
+  | Error
+      (Request.Plan_rejected
+         (Plan.Tool_off_keeper_surface
+            { tool_name = "masc_tool_help"; reason = Plan.Operator_only_tool; _ })) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "off-surface tool was accepted"
+;;
+
+(* A transport alias names the descriptor that projects it, so the rejection can
+   point at the tool the model actually has. *)
+let test_request_names_the_projecting_tool_for_an_alias () =
+  let json =
+    request_of_string {|{"nodes":[{"id":"move","tool":"masc_transition"}]}|}
+  in
+  match parse_request json with
+  | Error
+      (Request.Plan_rejected
+         (Plan.Tool_off_keeper_surface
+            { tool_name = "masc_transition"
+            ; reason = Plan.Aliased_by { projected_by = "keeper_task_claim" }
+            ; _
+            })) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "transport alias was accepted"
+;;
+
 let test_request_rejects_dependency_cycle () =
   let json =
     request_of_string
@@ -840,6 +873,11 @@ let () =
             test_request_defaults_missing_input_to_empty_object
         ; test_case "unknown tool" `Quick test_request_rejects_unknown_tool
         ; test_case "opaque reference" `Quick test_request_rejects_opaque_reference
+        ; test_case "off-surface tool" `Quick test_request_rejects_off_surface_tool
+        ; test_case
+            "off-surface alias names its projector"
+            `Quick
+            test_request_names_the_projecting_tool_for_an_alias
         ; test_case "dependency cycle" `Quick test_request_rejects_dependency_cycle
         ; test_case "missing dependency" `Quick test_request_rejects_missing_dependency
         ; test_case "malformed template" `Quick test_request_rejects_malformed_template

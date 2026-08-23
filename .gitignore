@@ -59,6 +59,14 @@ figma-mcp-linux-x64
 config/keeper.env
 logs/
 
+# Campaign and deploy run outputs under reports/.
+# Hand-written audit reports live as single files directly in reports/ and stay
+# tracked; these subdirectories hold per-run captures (raw/, browser/, health
+# snapshots) and reached 126MB across nine runs.
+reports/e0-campaign-*/
+reports/deploy-*/
+artifacts/
+
 # Trunk linter lock files
 .trunk-lock/
 

@@ -707,17 +707,17 @@ function ApAside({
               Gate 모드
               <b>${GATE_MODES.find(option => option.mode === gateMode?.mode)?.label ?? '확인 필요'}</b>
             </span>
-            <div class="ap-viewseg" role="radiogroup" aria-label="Gate 모드" data-testid="gate-mode-selector">
+            <div class="wka-mode wka-mode-3" role="radiogroup" aria-label="Gate 모드" data-testid="gate-mode-selector">
               ${GATE_MODES.map(option => html`
                 <button
                   key=${option.mode}
                   type="button"
-                  class=${`ap-viewbtn ${gateMode?.mode === option.mode ? 'on' : ''}`}
+                  class=${`wka-mode-b ${gateMode?.mode === option.mode ? 'on' : ''}`}
                   role="radio"
                   aria-checked=${gateMode?.mode === option.mode}
                   onClick=${() => void setKeeperGateMode(option.mode)}
                   disabled=${modeDisabled}
-                >${option.label}</button>
+                ><b>${option.label}</b></button>
               `)}
             </div>
           </div>
@@ -751,6 +751,9 @@ function ApAside({
           <h3>Always Rules</h3>
           <span class="mono">${rules.length}</span>
         </div>
+        ${rulesState.state === 'ready'
+          ? html`<div class="wka-hint mono">정확일치 규칙 — keeper · tool · request fingerprint</div>`
+          : null}
         ${rulesState.state === 'unavailable'
           ? html`<div class="ap-env-warn" role="alert" data-testid="approval-rules-unavailable">${rulesState.error}</div>`
           : rules.length > 0
@@ -834,7 +837,7 @@ export function ApprovalsSurface() {
   }, [items])
 
   return html`
-    <main class="ov ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="Gate HITL 큐" data-testid="approvals-surface">
+    <main class="ov ov-flush ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="Gate HITL 큐" data-testid="approvals-surface">
       <div class="ov-scroll">
         <header class="ov-head">
           <div>

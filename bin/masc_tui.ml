@@ -2891,14 +2891,17 @@ let main () =
   let port = state.port in
   let http_refresh_inflight = ref false in
   let async_messages = Eio.Stream.create 32 in
-  (* Reported before the recovery load so the operator sees the cause ahead of
-     the symptom: a tokenless process cannot dispatch, and cannot reconcile a
-     dispatch an authenticated predecessor left behind. *)
+  (* Bind the bearer to the workspace actually opened, before any request is
+     built. Reported before the recovery load as well, so when neither source
+     holds one the operator sees the cause ahead of the symptom: a tokenless
+     process cannot dispatch, and cannot reconcile a dispatch an authenticated
+     predecessor left behind. *)
+  Masc_tui_http.install_operator_token ~base_path;
   if not (Masc_tui_http.operator_token_present ()) then
     add_event state "error"
-      "No operator token in this environment: sends and approvals are refused, \
-       and a recovered dispatch cannot be reconciled. Export MASC_TOKEN and \
-       restart masc-tui.";
+      "No operator token: neither MASC_TOKEN nor this workspace holds one, so \
+       sends and approvals are refused and a recovered dispatch cannot be \
+       reconciled. Run: masc login --agent masc-tui --client-env MASC_TOKEN";
   (match Keeper_chat_recovery.load_pending ~base_path with
    | Ok None -> ()
    | Error detail ->

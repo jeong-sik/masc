@@ -426,9 +426,13 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
   Out_channel.with_open_text artifact (fun channel ->
     output_string channel "pass rate: 100%\n");
 
-  (* Second round: the same request, now measurable. *)
+  (* Second round: the same request, now measurable. The new request must
+     supersede the refutation in the ledger before any judge runs. *)
   ignore
     (must_succeed "request_complete again" (transition ctx goal_id "request_complete"));
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "the second request must leave the ledger pending, not refuted");
   review ();
   check (list string) "the same judge answered twice, differently"
     [ "reject"; "approve" ] !verdicts;

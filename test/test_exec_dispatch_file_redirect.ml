@@ -239,6 +239,63 @@ let test_pipeline_still_pipes_without_a_redirect () =
     Alcotest.(check string) "the pipe still carries bytes" "a\nb\n" result.stdout)
 ;;
 
+let sequence head tail = E.Exec_dispatch.dispatch (E.Shell_ir.Sequence { head; tail })
+
+let ok argv = E.Shell_ir.Simple (simple "true" argv)
+let fails = E.Shell_ir.Simple (simple "false" [])
+let says text = E.Shell_ir.Simple (simple "printf" [ text ])
+
+(* `a && b` runs b only when a exited zero. Keepers write this today as a
+   literal argv token, where no shell reads it and the second command never
+   runs at all. *)
+let test_and_runs_the_next_command_after_success () =
+  with_runtime (fun () ->
+    let result = sequence (ok []) [ E.Shell_ir.And_if, says "ran" ] in
+    Alcotest.(check string) "the guarded command ran" "ran" result.stdout)
+;;
+
+let test_and_skips_the_next_command_after_failure () =
+  with_runtime (fun () ->
+    let result = sequence fails [ E.Shell_ir.And_if, says "ran" ] in
+    Alcotest.(check string) "the guarded command did not run" "" result.stdout;
+    Alcotest.(check bool) "and the failure is the outcome" false (exited_zero result))
+;;
+
+let test_or_runs_the_next_command_after_failure () =
+  with_runtime (fun () ->
+    let result = sequence fails [ E.Shell_ir.Or_if, says "recovered" ] in
+    Alcotest.(check string) "the fallback ran" "recovered" result.stdout;
+    Alcotest.(check bool) "and its success is the outcome" true (exited_zero result))
+;;
+
+(* Each guard reads whatever ran last, so a run of them goes left to right
+   with no precedence of its own: `false || printf a && printf b` runs both. *)
+let test_guards_read_whatever_ran_last () =
+  with_runtime (fun () ->
+    let result =
+      sequence fails [ E.Shell_ir.Or_if, says "a"; E.Shell_ir.And_if, says "b" ]
+    in
+    Alcotest.(check string) "both continuations ran, in order" "ab" result.stdout)
+;;
+
+(* The fd merge joins two capture buffers after the run, so it groups by
+   stream instead of by time. A real dup2 would give "err\nout\n" here. This
+   pins the behaviour the schema now states, so a later move to real
+   descriptors has to update both together. *)
+let test_fd_merge_groups_by_stream_not_by_time () =
+  with_runtime (fun () ->
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.Fd_to_fd { src = 2; dst = 1 } ]
+        "sh"
+        [ "-c"; "echo err >&2; sleep 0.2; echo out" ]
+    in
+    let result = dispatch s in
+    Alcotest.(check string) "grouped by stream" "out\nerr\n" result.stdout;
+    Alcotest.(check string) "and nothing is left on stderr" "" result.stderr)
+;;
+
 let () =
   (try Sys.mkdir temp_dir 0o700 with Sys_error _ -> ());
   Alcotest.run
@@ -255,6 +312,26 @@ let () =
             "discard_still_drops_without_touching_a_file"
             `Quick
             test_discard_still_drops_without_touching_a_file
+        ; Alcotest.test_case
+            "fd_merge_groups_by_stream_not_by_time"
+            `Quick
+            test_fd_merge_groups_by_stream_not_by_time
+        ; Alcotest.test_case
+            "and_runs_the_next_command_after_success"
+            `Quick
+            test_and_runs_the_next_command_after_success
+        ; Alcotest.test_case
+            "and_skips_the_next_command_after_failure"
+            `Quick
+            test_and_skips_the_next_command_after_failure
+        ; Alcotest.test_case
+            "or_runs_the_next_command_after_failure"
+            `Quick
+            test_or_runs_the_next_command_after_failure
+        ; Alcotest.test_case
+            "guards_read_whatever_ran_last"
+            `Quick
+            test_guards_read_whatever_ran_last
         ; Alcotest.test_case
             "a_stage_redirect_keeps_real_pipes"
             `Quick

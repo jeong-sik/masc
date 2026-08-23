@@ -20,6 +20,11 @@ let flat_stage_words (ir : Shell_ir.t) : string list =
        | Some words -> words :: acc
        | None -> acc)
     | Shell_ir.Pipeline stages -> List.fold_left collect acc stages
+    | Shell_ir.Sequence { head; tail } ->
+      List.fold_left
+        (fun acc (_connector, part) -> collect acc part)
+        (collect acc head)
+        tail
   in
   List.rev (collect [] ir) |> List.concat
 ;;

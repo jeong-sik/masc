@@ -23,7 +23,7 @@ let mk_stage ?(stdin = Execute_input.Inherit_input)
 let mk_program ?cwd ?(env = []) ?timeout_sec head tail
   : Execute_input.execute_input
   =
-  { program = { head; tail }; cwd; env; timeout_sec }
+  { program = { head; tail }; next = []; cwd; env; timeout_sec }
 ;;
 
 let mk_exec executable argv = mk_program (mk_stage (executable :: argv)) []
@@ -210,7 +210,7 @@ let test_program_whitespace_is_preserved () =
       "program is opaque caller-authored data"
       " ls "
       (Masc_exec.Exec_program.to_string simple.bin)
-  | Ok (Masc_exec.Shell_ir.Pipeline _) -> Alcotest.fail "expected simple process"
+  | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) -> Alcotest.fail "expected simple process"
   | Error error ->
     Alcotest.failf
       "opaque whitespace program was rejected: %a"
@@ -619,7 +619,7 @@ let test_repeated_first_argument_preserved () =
       "lowered IR preserves repeated first argument"
       ("git", [ "git"; "status"; "--short" ])
       (shell_simple_tuple simple)
-  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+  | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
     Alcotest.fail "single Exec must not lower to Pipeline"
   | Error err ->
     Alcotest.failf
@@ -665,7 +665,7 @@ let test_exec_lowering_preserves_repeated_argument () =
       "lowered IR preserves caller-authored argv"
       ("git", [ "git"; "status" ])
       (shell_simple_tuple simple)
-  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+  | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
     Alcotest.fail "single Exec must not lower to Pipeline"
   | Error error ->
     Alcotest.failf
@@ -684,7 +684,7 @@ let test_exec_lowering_preserves_argument_equal_to_program () =
       "single argv equal to executable remains an argument"
       ("echo", [ "echo" ])
       (shell_simple_tuple simple)
-  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+  | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
     Alcotest.fail "single Exec must not lower to Pipeline"
   | Error error ->
     Alcotest.failf
@@ -790,7 +790,7 @@ let test_pipe_character_in_exec_argv_is_literal () =
       "pipe char remains argv data"
       ("echo", [ "foo|bar" ])
       (shell_simple_tuple simple)
-  | Masc_exec.Shell_ir.Pipeline _ ->
+  | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ ->
     Alcotest.fail "literal pipe argv token must not create Shell_ir.Pipeline"
 ;;
 
@@ -805,7 +805,7 @@ let test_standalone_pipe_operator_in_exec_argv_is_literal () =
         name
         ("tail", argv)
         (shell_simple_tuple simple)
-    | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+    | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
       Alcotest.failf "%s: literal argv must not create a pipeline" name
     | Error other ->
       Alcotest.failf
@@ -845,7 +845,7 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
       "gh argv preserved"
       [ "pr"; "create"; "--body"; body ]
       argv
-  | Masc_exec.Shell_ir.Pipeline _ ->
+  | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ ->
     Alcotest.fail "multiline gh body must not create Shell_ir.Pipeline"
 ;;
 
@@ -881,7 +881,7 @@ let test_shell_redirection_looking_tokens_are_literal () =
           ("literal token " ^ token)
           ("find", argv)
           (shell_simple_tuple simple)
-      | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+      | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
         Alcotest.fail "literal argv must not create a pipeline"
       | Error error ->
         Alcotest.failf
@@ -965,10 +965,11 @@ let stage_redirects ir n =
   | Masc_exec.Shell_ir.Pipeline stages ->
     (match List.nth_opt stages n with
      | Some (Masc_exec.Shell_ir.Simple simple) -> simple.redirects
-     | Some (Masc_exec.Shell_ir.Pipeline _) ->
+     | Some (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
        Alcotest.fail "a pipeline stage must lower to Simple"
      | None -> Alcotest.failf "pipeline has no stage %d" n)
-  | Masc_exec.Shell_ir.Simple _ -> Alcotest.fail "expected a pipeline"
+  | Masc_exec.Shell_ir.Simple _ | Masc_exec.Shell_ir.Sequence _ ->
+    Alcotest.fail "expected a pipeline"
 ;;
 
 let test_pipeline_stage_keeps_its_own_redirect () =
@@ -1010,7 +1011,7 @@ let test_append_reaches_the_ir () =
      | [ Masc_exec.Redirect_scope.File { mode = Masc_exec.Redirect_scope.Append; _ } ] ->
        ()
      | _ -> Alcotest.fail "expected a single Append redirect")
-  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+  | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
     Alcotest.fail "a one-stage program must not lower to Pipeline"
   | Error e ->
     Alcotest.failf "append must lower: %a" Execute_input.pp_validation_error e
@@ -1024,7 +1025,7 @@ let test_fd_duplication_reaches_the_ir () =
      | [ Masc_exec.Redirect_scope.Fd_to_fd { src; dst } ] ->
        Alcotest.(check (pair int int)) "2>&1" (2, 1) (src, dst)
      | _ -> Alcotest.fail "expected a single Fd_to_fd redirect")
-  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+  | Ok (Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _) ->
     Alcotest.fail "a one-stage program must not lower to Pipeline"
   | Error e ->
     Alcotest.failf "fd duplication must lower: %a" Execute_input.pp_validation_error e
@@ -1065,7 +1066,7 @@ let test_json_pipeline_with_stage_redirect_parses () =
 let count_redirects ir =
   match ir with
   | Masc_exec.Shell_ir.Simple simple -> List.length simple.redirects
-  | Masc_exec.Shell_ir.Pipeline _ ->
+  | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ ->
     Alcotest.fail "a one-stage program must not lower to Pipeline"
 ;;
 
@@ -1313,12 +1314,150 @@ let test_of_json_rejects_discard_false () =
   | Error _ -> ()
 ;;
 
+(* Keepers write `a && b` as a literal argv token today, where nothing reads
+   it. This is the shape that does run. *)
+let test_of_json_parses_a_conditional_continuation () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "test"; `String "-w"; `String "/tmp" ]
+      ; ( "then"
+        , `List
+            [ `Assoc
+                [ "on", `String "success"
+                ; "argv", `List [ `String "echo"; `String "writable" ]
+                ]
+            ] )
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok { program = { head = { argv = first; _ }; tail = [] }
+       ; next = [ (Execute_input.And_then, { head = { argv = second; _ }; tail = [] }) ]
+       ; _
+       } ->
+    Alcotest.(check (list string)) "the first program" [ "test"; "-w"; "/tmp" ] first;
+    Alcotest.(check (list string)) "the guarded one" [ "echo"; "writable" ] second
+  | Ok _ -> Alcotest.fail "expected one program guarded on success"
+  | Error msg -> Alcotest.failf "a conditional continuation must parse: %s" msg
+;;
+
+let test_of_json_rejects_an_unknown_guard () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "true" ]
+      ; "then", `List [ `Assoc [ "on", `String "maybe"; "argv", `List [ `String "true" ] ] ]
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "a guard must be success or failure"
+  | Error _ -> ()
+;;
+
+let test_of_json_requires_a_guard_on_every_continuation () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "true" ]
+      ; "then", `List [ `Assoc [ "argv", `List [ `String "true" ] ] ]
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "a continuation without a guard must be rejected"
+  | Error _ -> ()
+;;
+
+let test_a_continuation_lowers_to_a_sequence () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "true" ]
+      ; ( "then"
+        , `List
+            [ `Assoc [ "on", `String "failure"; "argv", `List [ `String "echo" ] ] ] )
+      ]
+  in
+  match Execute_input.of_json json with
+  | Error msg -> Alcotest.failf "must parse: %s" msg
+  | Ok input ->
+    (match Execute_input.to_shell_ir input with
+     | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (Masc_exec.Shell_ir.Or_if, _) ]; _ }) ->
+       ()
+     | Ok _ -> Alcotest.fail "expected a sequence guarded on failure"
+     | Error err ->
+       Alcotest.failf "lowering failed: %a" Execute_input.pp_validation_error err)
+;;
+
+(* Measured on the live log: 60 calls ran cd as a program and 56 came back
+   successful with empty output. The keeper had asked for a git log, a git
+   status, a build; it got an empty answer that reads like a real one. *)
+let test_cd_as_a_program_is_refused () =
+  let input =
+    mk_program (mk_stage [ "cd"; "/tmp"; "&&"; "git"; "log" ]) []
+  in
+  match Execute_input.validate input with
+  | Ok () -> Alcotest.fail "cd runs and exits before the real command"
+  | Error (Execute_input.Directory_change_is_not_a_program { requested }) ->
+    Alcotest.(check bool)
+      "the message quotes what was asked for"
+      true
+      (String.length requested > 0)
+  | Error err ->
+    Alcotest.failf
+      "expected Directory_change_is_not_a_program, got %a"
+      Execute_input.pp_validation_error
+      err
+;;
+
+(* An absolute path to it is the same program. *)
+let test_cd_by_absolute_path_is_refused () =
+  let input = mk_program (mk_stage [ "/usr/bin/cd"; "/tmp" ]) [] in
+  match Execute_input.validate input with
+  | Ok () -> Alcotest.fail "the path does not change what cd does"
+  | Error (Execute_input.Directory_change_is_not_a_program _) -> ()
+  | Error err ->
+    Alcotest.failf "expected the cd rejection, got %a" Execute_input.pp_validation_error err
+;;
+
+(* A program whose name merely contains those letters is untouched. *)
+let test_a_program_named_like_cd_still_runs () =
+  let input = mk_program (mk_stage [ "cdparanoia"; "--version" ]) [] in
+  match Execute_input.validate input with
+  | Ok () -> ()
+  | Error err ->
+    Alcotest.failf "cdparanoia is a program: %a" Execute_input.pp_validation_error err
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
     cases
     @ [ Alcotest.test_case
+          "cd_as_a_program_is_refused"
+          `Quick
+          test_cd_as_a_program_is_refused
+      ; Alcotest.test_case
+          "cd_by_absolute_path_is_refused"
+          `Quick
+          test_cd_by_absolute_path_is_refused
+      ; Alcotest.test_case
+          "a_program_named_like_cd_still_runs"
+          `Quick
+          test_a_program_named_like_cd_still_runs
+      ; Alcotest.test_case
+          "conditional_continuation_parses"
+          `Quick
+          test_of_json_parses_a_conditional_continuation
+      ; Alcotest.test_case
+          "unknown_guard_is_rejected"
+          `Quick
+          test_of_json_rejects_an_unknown_guard
+      ; Alcotest.test_case
+          "continuation_requires_a_guard"
+          `Quick
+          test_of_json_requires_a_guard_on_every_continuation
+      ; Alcotest.test_case
+          "continuation_lowers_to_a_sequence"
+          `Quick
+          test_a_continuation_lowers_to_a_sequence
+      ; Alcotest.test_case
           "fd_zero_is_not_a_duplication_target"
           `Quick
           test_fd_zero_is_not_a_duplication_target

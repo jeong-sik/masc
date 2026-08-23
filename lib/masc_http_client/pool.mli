@@ -132,6 +132,24 @@ val request_with_idle_timeout :
   ?body:string ->
   unit ->
   (response * body_progress, string * body_progress) result
+
+val request_stream :
+  t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  on_chunk:(string -> unit) ->
+  method_:http_method ->
+  url:string ->
+  ?headers:(string * string) list ->
+  ?body:string ->
+  unit ->
+  (response * body_progress, string * body_progress) result
+(** Issue a request whose response body is delivered chunk-by-chunk to
+    [on_chunk] as it arrives, instead of being buffered whole. The returned
+    [response.body] is empty; content flows through [on_chunk]. Chunk
+    delivery resets the idle timer; absence of bytes for [idle_timeout_sec]
+    cancels the fiber. Progress is returned on both branches. This is the
+    transport seam the TUI's incremental SSE decoder feeds on. *)
 (** Issue a request with body-idle cancellation. Chunk delivery resets
     the idle timer; absence of bytes for [idle_timeout_sec] cancels the
     fiber. [total_timeout_sec] is an optional hard cap that bounds the

@@ -118,3 +118,37 @@ let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojso
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/planning"
+
+(** The streaming POST needs a mandatory clock (unlike the buffered
+    [post_sync]/[get_sync] which take an optional one). Resolve it here so the
+    caller gets a clean error when the Eio context is not initialized. *)
+let stream_clock () =
+  match request_clock () with
+  | Some clock -> Ok clock
+  | None -> Error "Eio clock not initialized"
+
+(** POST a body to a streaming endpoint and hand each SSE chunk to [on_chunk]
+    as it arrives. Returns [Ok status] on success; the content flows through
+    [on_chunk]. This is the transport seam the TUI's incremental chat decoder
+    feeds on. *)
+let post_stream ~(host : string) ~(port : int) ~(path : string)
+    ~(body : string) ~on_chunk : (int, string) result =
+  let url = url_of ~host ~port ~path in
+  match stream_clock () with
+  | Error e -> Error e
+  | Ok clock ->
+      match
+        Masc_http_client.post_stream_sync ~clock
+          ~idle_timeout_sec:(request_timeout_sec ())
+          ~on_chunk ~url ~headers:(json_headers (auth_headers ())) ~body ()
+      with
+      | Ok (status, _progress) -> Ok status
+      | Error e -> Error (report_err "STREAM failed" e)
+
+(** POST /api/v1/keepers/turn/interrupt to abort an in-flight keeper turn. *)
+let post_turn_interrupt ~(host : string) ~(port : int) ~(keeper_name : string) :
+    (Yojson.Safe.t, string) result =
+  let body =
+    Yojson.Safe.to_string (`Assoc [ ("name", `String keeper_name) ])
+  in
+  post_json ~host ~port ~path:"/api/v1/keepers/turn/interrupt" ~body

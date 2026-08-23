@@ -48,6 +48,7 @@ let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String
   `Assoc
     ([
        ("goal", `String "keep the system healthy");
+       ("active_goal_ids", `List [ `String "goal-1" ]);
        ("soul_profile", `String "balanced");
        ("generation", `Int 2);
        ("models", models);
@@ -279,6 +280,55 @@ let test_bounded_parent_depth_stops_on_cycle () =
   in
   Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
+let test_feed_chat_text_delta () =
+  let state = Tui_decode.feed_init () in
+  let _, events =
+    Tui_decode.feed_chat state
+      "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hello\"}"
+  in
+  match events with
+  | [ Ok (Tui_decode.Delta "hello") ] -> ()
+  | _ -> Alcotest.fail "expected single Delta hello"
+
+let test_feed_chat_tool_call_events () =
+  let state = Tui_decode.feed_init () in
+  let _, start_ev =
+    Tui_decode.feed_chat state
+      "data: {\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"t1\",\"toolCallName\":\"masc_task_list\"}"
+  in
+  (match start_ev with
+   | [ Ok (Tui_decode.Tool_call_start ("t1", "masc_task_list")) ] -> ()
+   | _ -> Alcotest.fail "expected Tool_call_start t1 masc_task_list");
+  let _, args_ev =
+    Tui_decode.feed_chat state
+      "data: {\"type\":\"TOOL_CALL_ARGS\",\"toolCallId\":\"t1\",\"delta\":\"{}\"}"
+  in
+  (match args_ev with
+   | [ Ok (Tui_decode.Tool_call_args ("t1", "{}")) ] -> ()
+   | _ -> Alcotest.fail "expected Tool_call_args t1 {}");
+  let _, end_ev =
+    Tui_decode.feed_chat state
+      "data: {\"type\":\"TOOL_CALL_END\",\"toolCallId\":\"t1\"}"
+  in
+  (match end_ev with
+   | [ Ok (Tui_decode.Tool_call_end "t1") ] -> ()
+   | _ -> Alcotest.fail "expected Tool_call_end t1")
+
+let test_feed_chat_thinking_delta () =
+  let state = Tui_decode.feed_init () in
+  let _, events =
+    Tui_decode.feed_chat state
+      "data: {\"type\":\"CUSTOM\",\"name\":\"KEEPER_THINKING_DELTA\",\"value\":{\"index\":0,\"delta\":\"hmm\"}}"
+  in
+  match events with
+  | [ Ok (Tui_decode.Thinking_delta "hmm") ] -> ()
+  | _ -> Alcotest.fail "expected Thinking_delta hmm"
+
+let test_feed_chat_ignores_non_data_line () =
+  let state = Tui_decode.feed_init () in
+  let _, events = Tui_decode.feed_chat state "HTTP/1.1 200 OK" in
+  Alcotest.(check int) "no events" 0 (List.length events)
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_agent",
@@ -343,5 +393,15 @@ let () =
       [
         Alcotest.test_case "stops on cycle" `Quick
           test_bounded_parent_depth_stops_on_cycle;
+      ] );
+    ( "feed_chat",
+      [
+        Alcotest.test_case "text delta" `Quick test_feed_chat_text_delta;
+        Alcotest.test_case "tool call events" `Quick
+          test_feed_chat_tool_call_events;
+        Alcotest.test_case "thinking delta" `Quick
+          test_feed_chat_thinking_delta;
+        Alcotest.test_case "ignores non-data line" `Quick
+          test_feed_chat_ignores_non_data_line;
       ] );
   ]

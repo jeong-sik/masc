@@ -485,9 +485,23 @@ let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
   in
   loop (StringSet.singleton (id_of item)) 0 item
 
+(* Incremental chat decoder.
+
+   The server streams AG-UI events over SSE (TEXT_MESSAGE_CONTENT deltas,
+   TOOL_CALL_START/ARGS/END, KEEPER_THINKING_DELTA custom events, and
+   RUN_FINISHED/RUN_ERROR terminals). The TUI feeds each decoded event into
+   [feed_chat] as it arrives so text, tool calls, and thinking render live
+   instead of waiting for the whole body. [parse_keeper_chat_response] is
+   kept as the fold of [feed_chat] over a fully-buffered response so the
+   existing callers and tests stay intact. *)
+
 type chat_event =
   | Delta of string
   | Complete of string
+  | Tool_call_start of string * string   (* tool_call_id, tool_call_name *)
+  | Tool_call_args of string * string     (* tool_call_id, args delta *)
+  | Tool_call_end of string               (* tool_call_id *)
+  | Thinking_delta of string              (* thinking text delta *)
   | Ignore
 
 let decode_chat_event json =
@@ -511,6 +525,30 @@ let decode_chat_event json =
               | Some message -> Error message
               | None -> Error "RUN_ERROR payload missing string 'message'")
           | None -> Error "RUN_ERROR payload missing string 'message'"))
+  | Some "TOOL_CALL_START" -> (
+      match get_string json "toolCallId", get_string json "toolCallName" with
+      | Some id, Some name -> Ok (Tool_call_start (id, name))
+      | _ -> Error "TOOL_CALL_START missing toolCallId/toolCallName")
+  | Some "TOOL_CALL_ARGS" -> (
+      match get_string json "toolCallId", get_string json "delta" with
+      | Some id, Some delta -> Ok (Tool_call_args (id, delta))
+      | _ -> Error "TOOL_CALL_ARGS missing toolCallId/delta")
+  | Some "TOOL_CALL_END" -> (
+      match get_string json "toolCallId" with
+      | Some id -> Ok (Tool_call_end id)
+      | None -> Error "TOOL_CALL_END missing toolCallId")
+  | Some "CUSTOM" -> (
+      (* MASC custom events ride the AG-UI CUSTOM envelope with a [name] and
+         [value]. KEEPER_THINKING_DELTA carries {index, delta}. *)
+      match get_string json "name" with
+      | Some "KEEPER_THINKING_DELTA" -> (
+          match get_object json "value" with
+          | Some value_json -> (
+              match get_string value_json "delta" with
+              | Some delta -> Ok (Thinking_delta delta)
+              | None -> Ok Ignore)
+          | None -> Ok Ignore)
+      | _ -> Ok Ignore)
   | _ -> (
       match get_object json "error" with
       | Some err_json -> (
@@ -519,49 +557,73 @@ let decode_chat_event json =
           | None -> Error "error payload missing string 'message'")
       | None -> Ok Ignore)
 
+(* Incremental SSE feed. The TUI feeds each raw line into [feed_chat] as it
+   arrives; the decoder returns the (possibly updated) state plus any chat
+   events decoded from that line, so text/tool/thinking render live. Each
+   AG-UI event rides a single "data: <json>" line, so one line yields at most
+   one event; [DONE] and blank payloads are dropped. The state is reserved
+   for future multi-line data fields. *)
+type feed_state = unit
+
+let feed_init () = ()
+
+let feed_chat state line =
+  let line = trim line in
+  if String.length line > 6 && String.starts_with line ~prefix:"data: " then (
+    let payload = String.sub line 6 (String.length line - 6) |> trim in
+    if payload = "[DONE]" || payload = "" then (state, [])
+    else
+      let decoded =
+        try decode_chat_event (Yojson.Safe.from_string payload)
+        with Yojson.Json_error msg ->
+          Error ("invalid SSE JSON payload: " ^ msg)
+      in
+      (state, [ decoded ])
+  ) else
+    (state, [])
+
+(* Fold [feed_chat] over a fully-buffered response to reconstruct the final
+   assistant text. Kept for the existing callers and tests; the TUI uses
+   [feed_chat] directly for live rendering. *)
 let parse_keeper_chat_response response =
   let lines = String.split_on_char '\n' response in
   let result = Buffer.create 256 in
   let completion_text = ref None in
   let saw_terminal = ref false in
-  let rec consume_sse = function
-    | [] -> Ok ()
-    | raw_line :: rest ->
-        let line = trim raw_line in
-        if String.length line > 6 && String.starts_with line ~prefix:"data: " then (
-          let payload = String.sub line 6 (String.length line - 6) |> trim in
-          if payload = "[DONE]" || payload = "" then consume_sse rest
-          else
-            let* json =
-              try Ok (Yojson.Safe.from_string payload)
-              with Yojson.Json_error msg ->
-                Error ("invalid SSE JSON payload: " ^ msg)
-            in
-            let* chunk = decode_chat_event json in
-            (match chunk with
-             | Delta text -> Buffer.add_string result text
-             | Complete text when Buffer.length result = 0 ->
-                 saw_terminal := true;
-                 if text <> "" then completion_text := Some text
-             | Complete _ -> saw_terminal := true
-             | Ignore -> ());
-            consume_sse rest
-        ) else
-          consume_sse rest
+  let first_error = ref None in
+  let state = ref (feed_init ()) in
+  let apply_event = function
+    | Ok (Delta text) -> Buffer.add_string result text
+    | Ok (Complete text) when Buffer.length result = 0 ->
+        saw_terminal := true;
+        if text <> "" then completion_text := Some text
+    | Ok (Complete _) -> saw_terminal := true
+    | Ok (Tool_call_start _ | Tool_call_args _ | Tool_call_end _ | Thinking_delta _)
+    | Ok Ignore -> ()
+    | Error msg ->
+        if !first_error = None then first_error := Some msg
   in
-  let* () = consume_sse lines in
-  if Buffer.length result > 0 then
-    Ok (Buffer.contents result)
-  else
-    match !completion_text with
-    | Some text when text <> "" -> Ok text
-    | _ when !saw_terminal -> Ok ""
-    | _ -> (
-        let body =
-          match split_headers_body response with
-          | Some body -> body
-          | None -> response
-        in
+  List.iter
+    (fun line ->
+       let new_state, events = feed_chat !state line in
+       state := new_state;
+       List.iter apply_event events)
+    lines;
+  match !first_error with
+  | Some msg -> Error msg
+  | None ->
+      if Buffer.length result > 0 then
+        Ok (Buffer.contents result)
+      else
+        match !completion_text with
+        | Some text when text <> "" -> Ok text
+        | _ when !saw_terminal -> Ok ""
+        | _ -> (
+            let body =
+              match split_headers_body response with
+              | Some body -> body
+              | None -> response
+            in
             let* json =
               try Ok (Yojson.Safe.from_string (trim body))
               with Yojson.Json_error msg ->

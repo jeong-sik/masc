@@ -89,4 +89,17 @@ val bounded_parent_depth :
   'a list ->
   'a ->
   int
+type chat_event =
+  | Delta of string
+  | Complete of string
+  | Tool_call_start of string * string
+  | Tool_call_args of string * string
+  | Tool_call_end of string
+  | Thinking_delta of string
+  | Ignore
+
+type feed_state
+
+val feed_init : unit -> feed_state
+val feed_chat : feed_state -> string -> feed_state * (chat_event, string) result list
 val parse_keeper_chat_response : string -> (string, string) result

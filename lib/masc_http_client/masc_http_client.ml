@@ -115,6 +115,20 @@ let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
   | Ok { Pool.status; body; _ } -> Ok (status, body)
   | Error e -> Error e
 
+(** POST whose response body is delivered chunk-by-chunk to [on_chunk] as it
+    arrives, instead of being buffered whole. [idle_timeout_sec] cancels the
+    stream if no chunk arrives within the window. Returns [Ok (status, progress)]
+    on success; the content flows through [on_chunk]. This is the transport
+    seam the TUI's incremental SSE decoder feeds on. *)
+let post_stream_sync ~clock ~idle_timeout_sec ~on_chunk ~url ~headers ~body () =
+  with_pool @@ fun pool ->
+  match
+    Pool.request_stream pool ~clock ~idle_timeout_sec ~on_chunk
+      ~method_:`POST ~url ~headers ~body ()
+  with
+  | Ok (resp, progress) -> Ok (resp.Pool.status, progress)
+  | Error (msg, _progress) -> Error msg
+
 (** PATCH with structured error handling. *)
 let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->

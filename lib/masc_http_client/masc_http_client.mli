@@ -56,6 +56,23 @@ val post_sync :
     Connection-level errors (DNS, TLS, I/O) are caught and surfaced
     as [Error _] rather than propagating as exceptions. *)
 
+val post_stream_sync :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  on_chunk:(string -> unit) ->
+  url:string ->
+  headers:(string * string) list ->
+  body:string ->
+  unit ->
+  ((int * Pool.body_progress), string) result
+(** [post_stream_sync ?clock ~idle_timeout_sec ~on_chunk ~url ~headers ~body ()]
+    performs a [POST url] whose response body is delivered chunk-by-chunk to
+    [on_chunk] as it arrives, instead of being buffered whole. Chunk delivery
+    resets the idle timer; absence of bytes for [idle_timeout_sec] cancels the
+    stream. Returns [Ok (status_code, progress)] on success; the content flows
+    through [on_chunk]. This is the transport seam the TUI's incremental SSE
+    decoder feeds on. *)
+
 val patch_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->

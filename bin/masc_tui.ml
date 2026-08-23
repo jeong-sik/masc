@@ -6,35 +6,6 @@ open Masc_tui_loader
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
-(** Send a message through the Keeper chat streaming endpoint. *)
-let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
-  try
-    let host = Env_config_core.masc_host () in
-    let port = state.port in
-    let body =
-      Yojson.Safe.to_string
-        (`Assoc
-          [
-            ("name", `String keeper_name);
-            ("message", `String message);
-          ])
-    in
-    match
-      Masc_tui_http.post_raw_json ~host ~port
-        ~path:"/api/v1/keepers/chat/stream" ~body
-    with
-    | Ok response -> (
-        match Tui_decode.parse_keeper_chat_response response with
-        | Ok reply -> reply
-        | Error err -> "(response parsing failed: " ^ err ^ ")")
-    | Error err -> err
-  with
-  | Unix.Unix_error (err, _, _) ->
-    Printf.sprintf "(connection failed: %s -- is MASC server running on port %d?)"
-      (Unix.error_message err) state.port
-  | exn ->
-    Printf.sprintf "(error: %s)" (Printexc.to_string exn)
-
 (** Read a single byte from stdin, returning Some char or None. *)
 let read_byte_unix ?(timeout = 0.1) () : char option =
   let ready, _, _ = Unix.select [Unix.stdin] [] [] timeout in
@@ -49,6 +20,106 @@ let read_byte_unix ?(timeout = 0.1) () : char option =
 (** Read a single byte from stdin, returning Some char or None. *)
 let read_byte () : char option =
   Eio_guard.run_in_systhread (fun () -> read_byte_unix ())
+
+(** Send a message through the Keeper chat streaming endpoint, rendering
+    text/tool/thinking deltas live as they arrive. Pressing Esc while the
+    stream is in flight POSTs /api/v1/keepers/turn/interrupt to abort the
+    turn. Returns the final assistant text (or an error string). *)
+let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
+  try
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("message", `String message);
+          ])
+    in
+    let feed = ref (Tui_decode.feed_init ()) in
+    let line_buf = Buffer.create 256 in
+    let final_text = Buffer.create 256 in
+    let ts () =
+      let now = Unix.localtime (Unix.gettimeofday ()) in
+      Printf.sprintf "%02d:%02d:%02d"
+        now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+    in
+    (* Append a fresh entry of [role], or append [text] to the last entry when
+       it already has that role (streaming accumulation). *)
+    let upsert_entry role ?tool_name text =
+      let entry =
+        { me_role = role; me_text = text; me_timestamp = ts (); me_tool_name = tool_name }
+      in
+      let n = List.length state.msg_history in
+      if n > 0 then begin
+        let last = List.nth state.msg_history (n - 1) in
+        if last.me_role = role then begin
+          let updated = { last with me_text = last.me_text ^ text } in
+          state.msg_history <-
+            List.mapi (fun i e -> if i = n - 1 then updated else e) state.msg_history
+        end else
+          state.msg_history <- state.msg_history @ [ entry ]
+      end else
+        state.msg_history <- [ entry ]
+    in
+    let handle_event ev =
+      match ev with
+      | Ok (Tui_decode.Delta text) ->
+          upsert_entry "assistant" text;
+          Buffer.add_string final_text text
+      | Ok (Tui_decode.Tool_call_start (_id, name)) ->
+          upsert_entry "tool" ?tool_name:(Some name) ""
+      | Ok (Tui_decode.Tool_call_args (_id, delta)) ->
+          upsert_entry "tool" delta
+      | Ok (Tui_decode.Tool_call_end _id) -> ()
+      | Ok (Tui_decode.Thinking_delta delta) ->
+          upsert_entry "thinking" delta
+      | Ok (Tui_decode.Complete text) ->
+          if text <> "" then begin
+            upsert_entry "assistant" text;
+            Buffer.add_string final_text text
+          end
+      | Ok Tui_decode.Ignore -> ()
+      | Error err ->
+          upsert_entry "assistant" ("(stream error: " ^ err ^ ")")
+    in
+    let on_chunk chunk =
+      Buffer.add_string line_buf chunk;
+      let s = Buffer.contents line_buf in
+      Buffer.clear line_buf;
+      let lines = String.split_on_char '\n' s in
+      let rec process = function
+        | [] -> ()
+        | [partial] -> Buffer.add_string line_buf partial
+        | line :: rest ->
+            let feed', events = Tui_decode.feed_chat !feed line in
+            feed := feed';
+            List.iter handle_event events;
+            process rest
+      in
+      process lines;
+      (* Poll for Esc while the turn is in flight. *)
+      (match read_byte_unix ~timeout:0.0 () with
+       | Some '\027' ->
+           (match Masc_tui_http.post_turn_interrupt ~host ~port ~keeper_name with
+            | Ok _ -> upsert_entry "assistant" "\n[interrupted]"
+            | Error _ -> ())
+       | _ -> ());
+      render state
+    in
+    match
+      Masc_tui_http.post_stream ~path:"/api/v1/keepers/chat/stream"
+        ~body ~on_chunk ~host ~port
+    with
+    | Ok _status -> Buffer.contents final_text
+    | Error err -> err
+  with
+  | Unix.Unix_error (err, _, _) ->
+    Printf.sprintf "(connection failed: %s -- is MASC server running on port %d?)"
+      (Unix.error_message err) state.port
+  | exn ->
+    Printf.sprintf "(error: %s)" (Printexc.to_string exn)
 
 (** Try to read an escape sequence. Returns a key description. *)
 let read_key () : string option =
@@ -131,6 +202,7 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
         me_role = "user";
         me_text = text;
         me_timestamp = ts;
+        me_tool_name = None;
       }];
       Buffer.clear state.msg_input;
 
@@ -149,6 +221,7 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
         me_role = "assistant";
         me_text = reply;
         me_timestamp = ts2;
+        me_tool_name = None;
       }];
       state.msg_sending <- false;
       add_event state "message" (Printf.sprintf "Sent to %s" keeper_name);

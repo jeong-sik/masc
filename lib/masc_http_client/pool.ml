@@ -634,6 +634,137 @@ let request_with_idle_timeout t
 	          !progress_ref))
   | Some _ -> run ()
 
+(* ── Streaming request (chunk callback) ───────────────────────── *)
+
+(* Read [body] chunk-by-chunk, invoking [on_chunk] for each chunk, with the
+   same idle watchdog as [read_body_with_idle]. Unlike that function we do
+   NOT accumulate into a buffer — the caller consumes each chunk as it
+   arrives (e.g. feeding an incremental SSE decoder). Progress is tracked
+   and returned so the caller can observe liveness. *)
+let read_body_stream
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~(start_sec : float)
+    ~(idle_timeout_sec : float)
+    ~on_chunk
+    (body : Piaf.Body.t)
+  : (body_progress, string * body_progress) result =
+  let progress = ref empty_body_progress in
+  let now () = Eio.Time.now clock in
+  let handle_chunk chunk =
+    on_chunk chunk;
+    let elapsed = now () -. start_sec in
+    let first =
+      match !progress.first_byte_at_sec with
+      | None -> Some elapsed
+      | s -> s
+    in
+    progress := {
+      first_byte_at_sec = first;
+      last_chunk_at_sec = Some elapsed;
+      bytes_received = !progress.bytes_received + String.length chunk;
+    }
+  in
+  Eio.Fiber.first
+    (fun () ->
+       match Piaf.Body.iter_string ~f:handle_chunk body with
+       | Ok () -> Ok !progress
+       | Error err ->
+         Error (Piaf.Error.to_string (err :> Piaf.Error.t), !progress))
+    (fun () ->
+       let rec watch () =
+         let last_known = !progress.last_chunk_at_sec in
+         Eio.Time.sleep clock idle_timeout_sec;
+         if !progress.last_chunk_at_sec = last_known then
+           Error
+             (Printf.sprintf "idle timeout after %.1fs" idle_timeout_sec,
+              !progress)
+         else watch ()
+       in
+       watch ())
+
+(* Variant of [do_request_with_idle_timeout] that hands each response body
+   chunk to [on_chunk] instead of buffering the whole body. Mirrors the
+   acquire/release and error-on-suspect-connection policy. The returned
+   [response.body] is empty; the caller receives content via [on_chunk]. *)
+let do_request_stream t
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~(idle_timeout_sec : float)
+    ~on_chunk
+    ?headers ?body ~method_ uri
+  : (response * body_progress, string * body_progress) result =
+  let key = Host_key.of_uri uri in
+  let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
+  let acquired =
+    match try_acquire_idle t key with
+    | Some c -> Ok c
+    | None ->
+      (match create_fresh t host_origin with
+       | Ok c -> Ok c
+       | Error e -> Error e)
+  in
+  match acquired with
+  | Error e -> Error (e, empty_body_progress)
+  | Ok client ->
+    let released = ref false in
+    let release_once ~close_only =
+      if not !released then begin
+        released := true;
+        release t key client ~close_only
+      end
+    in
+    let path = path_and_query uri in
+    let body_piaf = Option.map Piaf.Body.of_string body in
+    let start_sec = Eio.Time.now clock in
+    Fun.protect
+      ~finally:(fun () ->
+        close_unreleased_client released release_once)
+      (fun () ->
+         t.counters.inflight <- t.counters.inflight + 1;
+         let result =
+           Fun.protect
+             ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
+             (fun () ->
+                try
+                  Piaf.Client.request client
+                    ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
+                    ~meth:(method_to_piaf method_) path
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn -> Error (`Msg (Printexc.to_string exn)))
+         in
+         match result with
+         | Error err ->
+           release_once ~close_only:true;
+           Error (Piaf.Error.to_string (err :> Piaf.Error.t), empty_body_progress)
+         | Ok resp ->
+           let status = Piaf.Status.to_code (Piaf.Response.status resp) in
+           let headers_list =
+             Piaf.Response.headers resp |> Piaf.Headers.to_list
+           in
+           (match
+              read_body_stream ~clock ~start_sec ~idle_timeout_sec ~on_chunk
+                (Piaf.Response.body resp)
+            with
+            | Error (err, p) ->
+              (* Idle-cancelled or piaf error: connection is suspect. *)
+              release_once ~close_only:true;
+              Error (err, p)
+            | Ok p ->
+              release_once ~close_only:false;
+              Ok ({ status; headers = headers_list; body = "" }, p)))
+
+(** Issue a request whose response body is delivered chunk-by-chunk to
+    [on_chunk]. [idle_timeout_sec] cancels the stream if no chunk arrives
+    within the window. Returns the response (with empty body) and progress
+    on success. *)
+let request_stream t
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~idle_timeout_sec
+    ~on_chunk
+    ~method_ ~url ?headers ?body () =
+  let uri = Uri.of_string url in
+  do_request_stream t ~clock ~idle_timeout_sec ~on_chunk ?headers ?body ~method_ uri
+
 (* ── Stats ─────────────────────────────────────────────────────── *)
 
 type stats = {

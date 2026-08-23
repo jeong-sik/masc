@@ -32,11 +32,14 @@ type keeper = Tui_decode.keeper
 (** A single metrics/log entry (from Tui_decode) *)
 type log_entry = Tui_decode.log_entry
 
-(** Message history entry *)
+(** Message history entry. [me_role] is "user", "assistant", "tool", or
+    "thinking". Tool calls carry [me_tool_name] (and accumulate their args in
+    [me_text]); thinking deltas accumulate in [me_text]. *)
 type msg_entry = {
   me_role: string;
   me_text: string;
   me_timestamp: string;
+  me_tool_name: string option;
 }
 
 (** Attention item for the Overview surface *)

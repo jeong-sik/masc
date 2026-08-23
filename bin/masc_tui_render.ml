@@ -1121,11 +1121,18 @@ let render_keeper_message (state : state) =
           let role_color = match m.me_role with
             | "user" -> Ansi.cyan
             | "assistant" -> Ansi.green
+            | "tool" -> Ansi.magenta
+            | "thinking" -> Ansi.yellow
             | _ -> Ansi.white
           in
           let role_label = match m.me_role with
             | "user" -> "you"
             | "assistant" -> k.k_name
+            | "tool" ->
+                (match m.me_tool_name with
+                 | Some name -> name
+                 | None -> "tool")
+            | "thinking" -> "thinking"
             | s -> s
           in
           let prefix = Printf.sprintf "  %s[%s] %s:%s "

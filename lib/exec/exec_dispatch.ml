@@ -12,6 +12,11 @@ type dispatch_result = {
 
 let ( let* ) = Result.bind
 
+(* Naming the descriptors keeps their numbers out of the redirect fold. *)
+let stdin_fd = 0
+let stdout_fd = 1
+let stderr_fd = 2
+
 type redirect_target =
   | Capture_stdout
   | Capture_stderr
@@ -36,32 +41,101 @@ let set_redirect_target plan fd target =
   | 2 -> Ok { plan with stderr_target = target }
   | fd -> Error (Printf.sprintf "unsupported redirect fd: %d" fd)
 
-let redirect_plan_of_redirects redirects =
-  let step plan = function
+(* Streams the child holds a file for. [Captured] / [Inherited] mean the
+   stream stays on the capture path, so a command with no file redirect
+   produces exactly the plumbing it did before. *)
+type attachments = {
+  stdin_from : Process_eio.input_origin;
+  stdout_to : Process_eio.output_destination;
+  stderr_to : Process_eio.output_destination;
+}
+
+let no_attachments =
+  { stdin_from = Process_eio.Inherited
+  ; stdout_to = Process_eio.Captured
+  ; stderr_to = Process_eio.Captured
+  }
+
+let holds_a_source = function
+  | Process_eio.Inherited | Process_eio.From_string _ -> false
+  | Process_eio.Read_from _ -> true
+
+let holds_a_sink = function
+  | Process_eio.Captured -> false
+  | Process_eio.Written_to _ -> true
+
+let attaches_a_file { stdin_from; stdout_to; stderr_to } =
+  holds_a_source stdin_from || holds_a_sink stdout_to || holds_a_sink stderr_to
+
+(* A redirect target is written as the command sees it, so a relative one is
+   resolved against the command's own cwd. This process's cwd is not that
+   directory -- a command without one runs at the filesystem root -- so a
+   relative target with no cwd names two different files depending on who
+   resolves it, and is refused rather than resolved against a guess. *)
+let redirect_path ~cwd target =
+  let raw = Path_scope.raw target in
+  if not (Filename.is_relative raw)
+  then Ok raw
+  else
+    match cwd with
+    | Some base -> Ok (Filename.concat base raw)
+    | None ->
+        Error
+          (Printf.sprintf
+             "relative redirect target %s needs the command to declare a cwd"
+             raw)
+
+(* A stream owns one direction, so each (descriptor, mode) pair is named
+   rather than collapsed: a new mode has to be decided here, not absorbed. *)
+let sink_of_mode ~path = function
+  | Redirect_scope.Write -> Ok (Process_eio.Written_to { path; append = false })
+  | Redirect_scope.Append -> Ok (Process_eio.Written_to { path; append = true })
+  | Redirect_scope.Read ->
+      Error (Printf.sprintf "an output stream cannot be opened for reading: %s" path)
+
+let attach_file ~cwd attach ~fd ~target ~mode =
+  let* path = redirect_path ~cwd target in
+  if fd = stdin_fd
+  then
+    match mode with
+    | Redirect_scope.Read -> Ok { attach with stdin_from = Process_eio.Read_from { path } }
+    | Redirect_scope.Write | Redirect_scope.Append ->
+        Error (Printf.sprintf "stdin cannot be opened for writing: %s" path)
+  else if fd = stdout_fd
+  then Result.map (fun sink -> { attach with stdout_to = sink }) (sink_of_mode ~path mode)
+  else if fd = stderr_fd
+  then Result.map (fun sink -> { attach with stderr_to = sink }) (sink_of_mode ~path mode)
+  else
+    Error
+      (Printf.sprintf
+         "unsupported redirect fd: %d (a command owns only %d, %d and %d)"
+         fd
+         stdin_fd
+         stdout_fd
+         stderr_fd)
+
+let redirect_plan_of_redirects ~cwd redirects =
+  let step (plan, attach) = function
     | Redirect_scope.Fd_to_fd { src; dst } ->
         let* target = redirect_target_of_fd plan dst in
-        set_redirect_target plan src target
-    | Redirect_scope.File
-        { fd; target; mode = (Redirect_scope.Write | Redirect_scope.Append) }
-      when Path_scope.is_discard_sink target ->
-        set_redirect_target plan fd Drop
-    | Redirect_scope.File { fd; target; mode = Redirect_scope.Read } ->
-        Error
-          (Printf.sprintf
-             "unsupported redirect in native dispatch: fd %d read from %s"
-             fd
-             (Path_scope.raw target))
-    | Redirect_scope.File
-        { fd; target; mode = (Redirect_scope.Write | Redirect_scope.Append) } ->
-        Error
-          (Printf.sprintf
-             "unsupported redirect in native dispatch: fd %d write to %s"
-             fd
-             (Path_scope.raw target))
+        let* plan = set_redirect_target plan src target in
+        Ok (plan, attach)
+    | Redirect_scope.File { fd; target; mode } ->
+      (* Discarding output needs no file: the capture model already has a
+         value for "throw these bytes away". Discarding input does not, so
+         it goes down the attachment path and opens the device. *)
+      (match mode with
+       | Redirect_scope.Write | Redirect_scope.Append
+         when Path_scope.is_discard_sink target ->
+         let* plan = set_redirect_target plan fd Drop in
+         Ok (plan, attach)
+       | Redirect_scope.Write | Redirect_scope.Append | Redirect_scope.Read ->
+         let* attach = attach_file ~cwd attach ~fd ~target ~mode in
+         Ok (plan, attach))
   in
   List.fold_left
-    (fun acc redirect -> Result.bind acc (fun plan -> step plan redirect))
-    (Ok default_redirect_plan)
+    (fun acc redirect -> Result.bind acc (fun state -> step state redirect))
+    (Ok (default_redirect_plan, no_attachments))
     redirects
 
 let add_redirected_output target text (stdout, stderr) =
@@ -202,9 +276,49 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
   let result =
-    match redirect_plan_of_redirects s.redirects with
+    match redirect_plan_of_redirects ~cwd s.redirects with
     | Error message -> unsupported_redirect_result message
-    | Ok redirect_plan -> (
+    | Ok (redirect_plan, attachments) when attaches_a_file attachments -> (
+      (* A file redirect is carried out where the file is, and for a Docker
+         stage that is the container: the path the command names exists on
+         this host only where the bind mount makes the two coincide, and
+         nothing here can tell those cases apart. *)
+      match s.sandbox with
+      | Docker _ ->
+        unsupported_redirect_result
+          "a file redirect is not carried out for a Docker stage: the path \
+           names a file in the container and would be opened on the host"
+      | Host ->
+        let host_env = resolve_host_env ?base_host_env s.env in
+        let stdin_from =
+          (* A declared redirect wins over the caller's piped-in bytes: a
+             pipeline stage that names its own input is not reading the
+             previous stage. *)
+          match attachments.stdin_from with
+          | Process_eio.Read_from _ as declared -> declared
+          | Process_eio.From_string _ as declared -> declared
+          | Process_eio.Inherited ->
+            (match stdin_content with
+             | Some content -> Process_eio.From_string content
+             | None -> Process_eio.Inherited)
+        in
+        (match
+           Process_eio.run_argv_with_redirects
+             ?timeout_sec
+             ?env:host_env
+             ?cwd
+             ~stdin:stdin_from
+             ~stdout:attachments.stdout_to
+             ~stderr:attachments.stderr_to
+             argv
+         with
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+           { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+         | Error message -> unsupported_redirect_result message
+         | Ok (status, stdout, stderr) ->
+           apply_redirect_plan redirect_plan { status; stdout; stderr }))
+    | Ok (redirect_plan, _) -> (
       let child_on_output_chunk =
         if s.redirects = [] then on_output_chunk else None
       in

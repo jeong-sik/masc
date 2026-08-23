@@ -677,6 +677,16 @@
  (libraries alcotest astring masc_test_deps))
 
 (test
+ (name test_exec_dispatch_file_redirect)
+ (modules test_exec_dispatch_file_redirect)
+ (libraries alcotest astring masc_test_deps eio_main))
+
+(test
+ (name test_process_file_redirects)
+ (modules test_process_file_redirects)
+ (libraries alcotest astring masc_test_deps eio_main))
+
+(test
  (name test_keeper_paused_work_cancellation_transaction)
  (modules test_keeper_paused_work_cancellation_transaction)
  (libraries alcotest masc_test_deps eio_main))

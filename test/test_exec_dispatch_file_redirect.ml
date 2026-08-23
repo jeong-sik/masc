@@ -1,0 +1,230 @@
+(* Dispatch is where a redirect stops being a description and becomes bytes on
+   disk. Every case here runs a real command through the real IR and then reads
+   the file back. *)
+
+module E = Masc_exec
+
+let temp_dir =
+  Filename.concat (Filename.get_temp_dir_name ()) "masc-dispatch-file-redirect"
+;;
+
+let path name = Filename.concat temp_dir name
+
+let read_file p =
+  let ic = open_in_bin p in
+  Fun.protect
+    ~finally:(fun () -> close_in ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+let write_file p contents =
+  let oc = open_out_bin p in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
+;;
+
+let remove_if_present p = if Sys.file_exists p then Sys.remove p
+
+let lit s = E.Shell_ir.Lit (s, E.Shell_ir.default_meta)
+
+let bin name =
+  match E.Exec_program.of_string name with
+  | Ok bin -> bin
+  | Error (`Unknown raw) -> Alcotest.failf "unknown exec program: %s" raw
+;;
+
+let target p = E.Path_scope.classify ~raw:p ~cwd:temp_dir
+
+let simple ?(redirects = []) ?sandbox executable args =
+  { E.Shell_ir.bin = bin executable
+  ; args = List.map lit args
+  ; env = []
+  ; cwd = None
+  ; redirects
+  ; sandbox = Option.value sandbox ~default:(E.Sandbox_target.host ())
+  }
+;;
+
+let with_runtime f =
+  Eio_main.run @@ fun env ->
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  f ()
+;;
+
+let dispatch s = E.Exec_dispatch.dispatch (E.Shell_ir.Simple s)
+
+let exited_zero (r : E.Exec_dispatch.dispatch_result) =
+  match r.status with
+  | Unix.WEXITED 0 -> true
+  | _ -> false
+;;
+
+let test_stdout_lands_on_disk () =
+  with_runtime (fun () ->
+    let out = path "dispatch-out.txt" in
+    remove_if_present out;
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1; target = target out; mode = E.Redirect_scope.Write }
+          ]
+        "printf"
+        [ "hello" ]
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "the command ran" true (exited_zero result);
+    Alcotest.(check string) "the bytes did not come back" "" result.stdout;
+    Alcotest.(check string) "the bytes are on disk" "hello" (read_file out))
+;;
+
+let test_append_adds_to_the_file () =
+  with_runtime (fun () ->
+    let out = path "dispatch-append.txt" in
+    write_file out "kept ";
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1; target = target out; mode = E.Redirect_scope.Append }
+          ]
+        "printf"
+        [ "added" ]
+    in
+    let _ = dispatch s in
+    Alcotest.(check string) "append kept what was there" "kept added" (read_file out))
+;;
+
+(* Reading nothing is the most innocuous redirect there is, and it used to be
+   refused because the discard shortcut was wired only to the write side. *)
+let test_stdin_from_dev_null_runs () =
+  with_runtime (fun () ->
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 0
+              ; target = E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir
+              ; mode = E.Redirect_scope.Read
+              }
+          ]
+        "cat"
+        []
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "cat ran" true (exited_zero result);
+    Alcotest.(check string) "and read nothing" "" result.stdout)
+;;
+
+let test_stdin_reads_a_real_file () =
+  with_runtime (fun () ->
+    let input = path "dispatch-in.txt" in
+    write_file input "from disk\n";
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 0; target = target input; mode = E.Redirect_scope.Read }
+          ]
+        "cat"
+        []
+    in
+    let result = dispatch s in
+    Alcotest.(check string) "cat read the file" "from disk\n" result.stdout)
+;;
+
+(* Commands with no file redirect must take exactly the plumbing they took
+   before, so this pins the unchanged path rather than trusting it. *)
+let test_discard_still_drops_without_touching_a_file () =
+  with_runtime (fun () ->
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1
+              ; target = E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir
+              ; mode = E.Redirect_scope.Write
+              }
+          ]
+        "printf"
+        [ "dropped" ]
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "the command ran" true (exited_zero result);
+    Alcotest.(check string) "and its output went nowhere" "" result.stdout)
+;;
+
+let test_unopenable_target_does_not_claim_the_command_ran () =
+  with_runtime (fun () ->
+    let out = Filename.concat (path "no-such-directory") "out.txt" in
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1; target = target out; mode = E.Redirect_scope.Write }
+          ]
+        "printf"
+        [ "hello" ]
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "it did not report success" false (exited_zero result);
+    Alcotest.(check bool)
+      "and it says which path"
+      true
+      (Astring.String.is_infix ~affix:"out.txt" result.stderr))
+;;
+
+(* A relative target resolves against the command's cwd. Without one, the
+   child runs at the filesystem root while this process sits somewhere else,
+   so the same string names two different files. *)
+let test_relative_target_without_a_cwd_is_refused () =
+  with_runtime (fun () ->
+    let s =
+      simple
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1
+              ; target = E.Path_scope.classify ~raw:"relative-out.txt" ~cwd:temp_dir
+              ; mode = E.Redirect_scope.Write
+              }
+          ]
+        "printf"
+        [ "hello" ]
+    in
+    let result = dispatch { s with cwd = None } in
+    Alcotest.(check bool) "it did not report success" false (exited_zero result);
+    Alcotest.(check bool)
+      "and it says a cwd is missing"
+      true
+      (Astring.String.is_infix ~affix:"cwd" result.stderr))
+;;
+
+let () =
+  (try Sys.mkdir temp_dir 0o700 with Sys_error _ -> ());
+  Alcotest.run
+    "exec dispatch file redirect"
+    [ ( "dispatch"
+      , [ Alcotest.test_case "stdout_lands_on_disk" `Quick test_stdout_lands_on_disk
+        ; Alcotest.test_case "append_adds_to_the_file" `Quick test_append_adds_to_the_file
+        ; Alcotest.test_case
+            "stdin_from_dev_null_runs"
+            `Quick
+            test_stdin_from_dev_null_runs
+        ; Alcotest.test_case "stdin_reads_a_real_file" `Quick test_stdin_reads_a_real_file
+        ; Alcotest.test_case
+            "discard_still_drops_without_touching_a_file"
+            `Quick
+            test_discard_still_drops_without_touching_a_file
+        ; Alcotest.test_case
+            "relative_target_without_a_cwd_is_refused"
+            `Quick
+            test_relative_target_without_a_cwd_is_refused
+        ; Alcotest.test_case
+            "unopenable_target_does_not_claim_the_command_ran"
+            `Quick
+            test_unopenable_target_does_not_claim_the_command_ran
+        ] )
+    ]
+;;

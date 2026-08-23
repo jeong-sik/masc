@@ -109,19 +109,27 @@ module Problem_report_state = struct
 end
 
 let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta option, string) result =
-  let fail_parse detail =
+  (* Fail open. A meta this binary cannot read is an absent meta, not a dead
+     keeper: the TOML declaration carries the whole setup, so the boot path
+     re-materialises one. Refusing instead took the fleet down three times on
+     2026-08-23 (#29490, #29601, and the generation/last_blocker removal),
+     every time on a field this binary had itself stopped writing. What is
+     lost is the accumulated counters in the unreadable file, and the WARN
+     below is the record of that loss. *)
+  let fail_open detail =
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetaReadFailures)
       ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
       ();
     if Problem_report_state.should_report ~site:Meta_read ~path ~detail
-    then Log.Keeper.warn "keeper meta parse failed for %s: %s" path detail;
-    Error
-      (Printf.sprintf
-         "keeper meta invalid current schema at %s; runtime reset \
-          required: %s"
-         path
-         detail)
+    then
+      Log.Keeper.warn
+        "keeper meta unreadable at %s, treating as absent (accumulated \
+         counters in it are lost; the declaration re-materialises the \
+         keeper): %s"
+        path
+        detail;
+    Ok None
   in
   if not (Fs_compat.file_exists path)
   then (
@@ -177,7 +185,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
                       repair_detail;
                   Ok (Some repaired_meta)
                 | Error write_detail ->
-                  fail_parse
+                  fail_open
                     (Printf.sprintf
                        "%s; auto-repair of %s failed to persist: %s"
                        e
@@ -187,7 +195,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
                (* Resetting the enumerated fields did not make the file
                   decodable; the original failure stands, with the new
                   decode error attached when it differs. *)
-               fail_parse
+               fail_open
                  (if String.equal redecode_detail e
                   then e
                   else
@@ -196,7 +204,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
                       e
                       repair_detail
                       redecode_detail))
-          | None -> fail_parse e)))
+          | None -> fail_open e)))
 ;;
 
 let persisted_keeper_names_result config =

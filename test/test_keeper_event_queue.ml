@@ -1533,25 +1533,27 @@ let () =
           |> Yojson.Safe.to_string
         in
         write_file path malformed;
+        (* The reader fails open: a snapshot this binary cannot decode starts
+           an empty queue instead of stopping the keeper. What it must never do
+           is present the malformed rows as state, and it must leave the file
+           alone so the evidence survives for the operator. *)
+        ignore expected_detail;
         (match
            Keeper_event_queue_persistence.load_state_result
              ~base_path
              ~keeper_name
          with
-         | Ok _ ->
-           Alcotest.failf "persisted malformed payload loaded: %s" label
          | Error detail ->
-           Alcotest.(check bool)
-             (label ^ " error requires reset")
-             true
-             (String_util.string_contains_substring ~needle:"reset required" detail);
-           (match expected_detail with
-            | None -> ()
-            | Some expected ->
-              Alcotest.(check bool)
-                (label ^ " error preserves decoder detail")
-                true
-                (String_util.string_contains_substring ~needle:expected detail)));
+           Alcotest.failf
+             "malformed payload must fail open, got an error: %s (%s)"
+             label
+             detail
+         | Ok state ->
+           Alcotest.(check int)
+             (label ^ " starts from an empty queue")
+             0
+             (Keeper_event_queue.length
+                (Keeper_event_queue_state.pending state)));
         Alcotest.(check string)
           (label ^ " evidence is not rewritten")
           malformed

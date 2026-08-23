@@ -390,6 +390,9 @@ let decode_current_meta fields =
   let* current_task_id = parse_current_task_id fields in
   let* keeper_id = parse_keeper_id fields in
   let* agent_core_env = parse_agent_core_env fields in
+  (* Kept now that the reader fails open: the exact-field check cannot see a
+     format whose field names stayed the same while their meaning changed, and
+     rejecting costs a reset rather than a dead keeper. *)
   if not (String.equal schema "masc.keeper_meta.v1")
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)

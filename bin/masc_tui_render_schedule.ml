@@ -246,6 +246,80 @@ let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
   in
   { normalized_scroll; body_offset; comment_offset }
 
+(* Keeper roster columns.
+
+   Cell widths, not text. Every width here is a plain-text budget the renderer
+   fits its cells to, so a long keeper name or model id cannot push the columns
+   to its right out of the frame.
+
+   Columns drop from the right as the terminal narrows, and the two that never
+   drop are what the surface exists to answer: which keeper, and what state it
+   is in. Above the minimum, slack goes to the columns that hold identifiers
+   worth reading whole -- the keeper's name first, then the runtime it is on --
+   before it goes to the task id, which is short by construction. *)
+
+let keeper_marker_width = 3
+let keeper_status_width = 10
+let keeper_flags_width = 3
+let keeper_turns_width = 6
+let keeper_minimum_name_width = 16
+let keeper_maximum_name_width = 32
+let keeper_minimum_runtime_width = 20
+let keeper_maximum_runtime_width = 34
+let keeper_minimum_task_width = 10
+let keeper_flags_minimum_inner_width = 96
+let keeper_runtime_minimum_inner_width = 118
+
+type keeper_columns = {
+  kcol_show_flags : bool;
+  kcol_show_runtime : bool;
+  kcol_name : int;
+  kcol_runtime : int;
+  kcol_task : int;
+}
+
+let keeper_columns_used_width columns =
+  keeper_marker_width + keeper_status_width + 1 + columns.kcol_name
+  + (if columns.kcol_show_flags then 1 + keeper_flags_width else 0)
+  + 1 + keeper_turns_width
+  + (if columns.kcol_show_runtime then 1 + columns.kcol_runtime else 0)
+  + 1 + columns.kcol_task
+
+let allocate_keeper_columns ~inner_width =
+  let inner_width = max 0 inner_width in
+  let show_flags = inner_width >= keeper_flags_minimum_inner_width in
+  let show_runtime = inner_width >= keeper_runtime_minimum_inner_width in
+  let base =
+    { kcol_show_flags = show_flags
+    ; kcol_show_runtime = show_runtime
+    ; kcol_name = keeper_minimum_name_width
+    ; kcol_runtime = (if show_runtime then keeper_minimum_runtime_width else 0)
+    ; kcol_task = keeper_minimum_task_width
+    }
+  in
+  let slack = inner_width - keeper_columns_used_width base in
+  if slack <= 0 then base
+  else
+    let take budget available = (min budget available, available - budget) in
+    let name_growth, slack =
+      take
+        (min (keeper_maximum_name_width - keeper_minimum_name_width) slack)
+        slack
+    in
+    let runtime_growth, slack =
+      if show_runtime then
+        take
+          (min (keeper_maximum_runtime_width - keeper_minimum_runtime_width)
+             slack)
+          slack
+      else (0, slack)
+    in
+    { base with
+      kcol_name = base.kcol_name + name_growth
+    ; kcol_runtime = base.kcol_runtime + runtime_growth
+    ; kcol_task = base.kcol_task + slack
+    }
+
 module Terminal_size_cache = struct
   type t = {
     fallback : int * int;

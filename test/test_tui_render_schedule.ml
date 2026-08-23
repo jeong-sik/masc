@@ -429,6 +429,79 @@ let test_overview_event_window_follows_and_preserves_anchor () =
   check int "negative retained count cannot overflow" 0
     (Schedule.overview_event_offset_after_prepend ~retained_count:min_int 1)
 
+(* Below the narrowest row the allocation cannot shrink further; the frame
+   shows a resize gate at those sizes rather than a roster. *)
+let keeper_minimum_row_width =
+  Schedule.keeper_columns_used_width
+    (Schedule.allocate_keeper_columns ~inner_width:0)
+
+(* The row must never be wider than the box that holds it: the renderer fits
+   each cell to these budgets, so a total over [inner_width] pushes the right
+   border off the frame and the border column moves from row to row. *)
+let test_keeper_columns_never_exceed_their_width () =
+  for inner_width = 0 to 400 do
+    let columns = Schedule.allocate_keeper_columns ~inner_width in
+    let used = Schedule.keeper_columns_used_width columns in
+    check bool
+      (Printf.sprintf "inner %d fits (used %d)" inner_width used)
+      true
+      (used <= max inner_width keeper_minimum_row_width)
+  done
+
+(* Every cell of slack has to land in exactly one column. A total short of the
+   width leaves a ragged gap before the border; a total over it overflows. *)
+let test_keeper_columns_consume_the_whole_width () =
+  for inner_width = keeper_minimum_row_width to 400 do
+    let columns = Schedule.allocate_keeper_columns ~inner_width in
+    check int
+      (Printf.sprintf "inner %d is fully allocated" inner_width)
+      inner_width
+      (Schedule.keeper_columns_used_width columns)
+  done
+
+(* Columns drop from the right, and identity never drops. *)
+let test_keeper_columns_drop_from_the_right () =
+  let narrow = Schedule.allocate_keeper_columns ~inner_width:70 in
+  check bool "no flags when narrow" false narrow.kcol_show_flags;
+  check bool "no runtime when narrow" false narrow.kcol_show_runtime;
+  check bool "the name still has cells" true (narrow.kcol_name > 0);
+  let medium = Schedule.allocate_keeper_columns ~inner_width:100 in
+  check bool "flags return first" true medium.kcol_show_flags;
+  check bool "runtime is still out" false medium.kcol_show_runtime;
+  let wide = Schedule.allocate_keeper_columns ~inner_width:150 in
+  check bool "runtime returns when wide" true wide.kcol_show_runtime;
+  check bool "a dropped column costs no cells" true (medium.kcol_runtime = 0)
+
+(* The name column never shrinks as the terminal widens. A width that added a
+   column while narrowing the name would make the same keeper unreadable on the
+   larger terminal. *)
+let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
+  let previous = ref 0 in
+  for inner_width = keeper_minimum_row_width to 400 do
+    let name = (Schedule.allocate_keeper_columns ~inner_width).kcol_name in
+    check bool
+      (Printf.sprintf "inner %d keeps the name at least as wide" inner_width)
+      true (name >= !previous);
+    previous := name
+  done
+
+(* Slack reaches the name and the runtime before the task id, and both stop at
+   a cap so one very wide terminal does not spend eighty cells on a model
+   name. *)
+let test_keeper_columns_grow_identifiers_first () =
+  let at width = Schedule.allocate_keeper_columns ~inner_width:width in
+  let three_hundred = at 300 and four_hundred = at 400 in
+  check int "the name stops growing" three_hundred.kcol_name
+    four_hundred.kcol_name;
+  check int "the runtime stops growing" three_hundred.kcol_runtime
+    four_hundred.kcol_runtime;
+  check bool "the task absorbs what is left" true
+    (four_hundred.kcol_task > three_hundred.kcol_task);
+  let one_twenty = at 120 in
+  check bool "the name is served before the task" true
+    (one_twenty.kcol_name > (at 118).kcol_name
+    || one_twenty.kcol_task > (at 118).kcol_task)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -464,5 +537,15 @@ let () =
             test_keeper_detail_scroll_normalizes_across_bounds
         ; test_case "overview events follow and preserve manual anchor" `Quick
             test_overview_event_window_follows_and_preserves_anchor
+        ; test_case "keeper columns never exceed their width" `Quick
+            test_keeper_columns_never_exceed_their_width
+        ; test_case "keeper columns consume the whole width" `Quick
+            test_keeper_columns_consume_the_whole_width
+        ; test_case "keeper columns drop from the right" `Quick
+            test_keeper_columns_drop_from_the_right
+        ; test_case "keeper name width never shrinks" `Quick
+            test_keeper_name_width_never_shrinks_as_the_terminal_grows
+        ; test_case "keeper columns grow identifiers first" `Quick
+            test_keeper_columns_grow_identifiers_first
         ] )
     ]

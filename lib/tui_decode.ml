@@ -35,6 +35,22 @@ type keeper = {
   k_updated_at : string;
 }
 
+(* One row of GET /api/v1/gate/keepers. That route is [masc_keeper_list], which
+   renders [status] through [Keeper_status_runtime.keeper_surface_status] — the
+   six-member surface vocabulary, with no "paused" member. Operator pause is
+   durable metadata and arrives on the [keeper] record instead, so a reader
+   that wants the published control-plane status composes the two. Parsing the
+   status into the closed variant here means a producer that grows a seventh
+   label is a rejected row, not a row that silently reads as something else. *)
+type keeper_runtime = {
+  kr_name : string;
+  kr_status : Keeper_status_runtime.surface_status;
+  kr_keepalive_running : bool;
+  kr_autoboot_enabled : bool;
+  kr_proactive_enabled : bool;
+  kr_runtime_id : string;
+}
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -80,6 +96,7 @@ type fleet_safety = {
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
   fs_bootable_names : string list;
+  fs_running_names : string list;
   fs_executable_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
@@ -992,6 +1009,51 @@ let decode_string_name_list json key =
        | bad -> field_type_error key "a string" bad)
     items
 
+let required_bool_field json key =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> missing_field key
+  | bad -> field_type_error key "a bool" bad
+
+let decode_keeper_runtime json =
+  let* kr_name = required_string_field json "name" in
+  let* raw_status = required_string_field json "status" in
+  let* kr_status =
+    match Keeper_status_runtime.surface_status_of_string_opt raw_status with
+    | Some status -> Ok status
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown runtime status %S" kr_name
+             raw_status)
+  in
+  let* kr_keepalive_running = required_bool_field json "keepalive_running" in
+  let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
+  let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
+  let* kr_runtime_id = required_string_field json "runtime_id" in
+  Ok
+    { kr_name
+    ; kr_status
+    ; kr_keepalive_running
+    ; kr_autoboot_enabled
+    ; kr_proactive_enabled
+    ; kr_runtime_id
+    }
+
+(* [truncated] is carried out rather than dropped: the route clamps its own
+   limit, so a workspace with more keepers than one response holds would
+   otherwise present a short list as the whole fleet. *)
+let decode_keeper_runtime_list json =
+  let* items = required_list_field json "keepers" in
+  let* rows = decode_list "keepers" decode_keeper_runtime items in
+  let* truncated =
+    match member "truncated" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "truncated" "a bool or null" bad
+  in
+  let* total = int_field_or json "total" ~default:(List.length rows) in
+  Ok (rows, truncated, total)
+
 (* The counts are read with a default rather than required: the server adds
    fields to this section over time, and a TUI that refuses the whole reading
    because one counter is new would hide the fleet exactly when it changed.
@@ -1025,6 +1087,7 @@ let decode_fleet_safety json =
     int_field_or section "reaction_capacity_shortfall_count" ~default:0
   in
   let* fs_bootable_names = decode_string_name_list section "bootable_keeper_names" in
+  let* fs_running_names = decode_string_name_list section "running_keeper_names" in
   let* fs_executable_names =
     decode_string_name_list section "executable_keeper_names"
   in
@@ -1047,6 +1110,7 @@ let decode_fleet_safety json =
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall
     ; fs_bootable_names
+    ; fs_running_names
     ; fs_executable_names
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count

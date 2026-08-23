@@ -13,6 +13,8 @@ module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
+module Keeper_control = Masc_tui_keeper_control
+module Status = Masc.Keeper_status_runtime
 
 let frame_lines buf =
   match List.rev (String.split_on_char '\n' (Buffer.contents buf)) with
@@ -794,41 +796,262 @@ let render_planning_detail (state : state) (goal : planning_goal) =
     ~rows ~cols buf
 
 (** Render the keeper list view *)
+(* Status is shown as a glyph and a word. The glyph is the coarse reading an
+   operator scans a column for -- a fiber running, a fiber sleeping, no fiber,
+   nothing observed -- and the word next to it is the exact published status,
+   so the column stays legible at four shapes instead of needing a distinct
+   glyph per label. *)
+let keeper_status_glyph (status : Status.control_plane_status option) =
+  match status with
+  | None -> (Ansi.dim, "?")
+  | Some Status.Cp_paused -> (Ansi.yellow, "\xe2\x97\x8b")
+  | Some (Status.Cp_surface surface) -> (
+      match surface with
+      | Status.Surface_active -> (Ansi.green, "\xe2\x97\x8f")
+      | Status.Surface_busy -> (Ansi.cyan, "\xe2\x97\x8f")
+      | Status.Surface_listening -> (Ansi.blue, "\xe2\x97\x8f")
+      | Status.Surface_idle -> (Ansi.gray, "\xe2\x97\x8f")
+      | Status.Surface_inactive -> (Ansi.yellow, "\xe2\x97\x90")
+      | Status.Surface_offline -> (Ansi.gray, "\xc3\x97"))
+
+let keeper_status_word (status : Status.control_plane_status option) =
+  match status with
+  | None -> "unknown"
+  | Some value -> Status.control_plane_status_to_string value
+
+(* The runtime id is [provider.model], and the provider half repeats inside the
+   model half often enough that printing both costs the column its width. *)
+let keeper_runtime_label (runtime : keeper_runtime option) =
+  match runtime with
+  | None -> "\xe2\x80\x94"
+  | Some row -> (
+      let raw = Terminal_text.single_line row.kr_runtime_id in
+      match String.index_opt raw '.' with
+      | Some idx when idx + 1 < String.length raw ->
+          String.sub raw (idx + 1) (String.length raw - idx - 1)
+      | Some _ | None -> raw)
+
+(* Two dispositions an operator needs before stopping anything: whether the
+   keeper comes back by itself, and whether it takes turns without being
+   asked. Both are on the roster row. *)
+let keeper_flag_cell (runtime : keeper_runtime option) =
+  match runtime with
+  | None -> Ansi.dim ^ "- -" ^ Ansi.reset
+  | Some row ->
+      let flag enabled letter =
+        if enabled then Ansi.cyan ^ letter ^ Ansi.reset
+        else Ansi.dim ^ "-" ^ Ansi.reset
+      in
+      flag row.kr_autoboot_enabled "A" ^ " " ^ flag row.kr_proactive_enabled "P"
+
+(* Column header labels line up with the cell budgets
+   [Render_schedule.allocate_keeper_columns] hands out, so the arithmetic lives
+   in one tested place instead of once here and once in the row. *)
+let keeper_column_header (columns : Render_schedule.keeper_columns) =
+  String.concat ""
+    [ String.make Render_schedule.keeper_marker_width ' '
+    ; Printf.sprintf "%-*s" Render_schedule.keeper_status_width "STATUS"
+    ; " "
+    ; Printf.sprintf "%-*s" columns.kcol_name "KEEPER"
+    ; (if columns.kcol_show_flags then
+         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "A P"
+       else "")
+    ; Printf.sprintf " %*s" Render_schedule.keeper_turns_width "TURNS"
+    ; (if columns.kcol_show_runtime then
+         " " ^ Printf.sprintf "%-*s" columns.kcol_runtime "RUNTIME"
+       else "")
+    ; " "
+    ; "TASK"
+    ]
+
+(* Each cell is fitted as plain text and styled afterwards, so a long keeper
+   name cannot push the columns to its right out of the frame and the style
+   bytes never count toward the width. *)
+let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
+    ~status ~keeper ~runtime =
+  let status_color, glyph = keeper_status_glyph status in
+  let marker =
+    if selected then Ansi.cyan ^ "\xe2\x96\xb8" ^ Ansi.reset else " "
+  in
+  let name =
+    fit_width (Terminal_text.single_line keeper.k_name) columns.kcol_name
+  in
+  let task =
+    fit_width
+      (Terminal_text.single_line_or ~default:"\xe2\x80\x93"
+         keeper.k_current_task_id)
+      columns.kcol_task
+  in
+  String.concat ""
+    [ " "
+    ; marker
+    ; " "
+    ; status_color ^ glyph ^ " "
+      ^ fit_width (keeper_status_word status)
+          (Render_schedule.keeper_status_width - 2)
+      ^ Ansi.reset
+    ; " "
+    ; (if selected then Ansi.bold ^ name ^ Ansi.reset else name)
+    ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
+    ; Printf.sprintf " %s%*d%s" Ansi.dim Render_schedule.keeper_turns_width
+        keeper.k_total_turns Ansi.reset
+    ; (if columns.kcol_show_runtime then
+         " " ^ Ansi.gray
+         ^ fit_width (keeper_runtime_label runtime) columns.kcol_runtime
+         ^ Ansi.reset
+       else "")
+    ; " "
+    ; Ansi.dim ^ task ^ Ansi.reset
+    ]
+
+(* The footer names the action behind each key for the keeper under the cursor,
+   because which action the toggle sends depends on that keeper's state. A key
+   with nothing behind it is dimmed rather than dropped, so the row of keys
+   does not shift as the cursor travels. *)
+let keeper_action_hints state reading =
+  let available =
+    match reading with None -> [] | Some r -> Keeper_control.available r
+  in
+  (* An action that ends a fiber is toned apart from the reversible ones, so the
+     key that needs two presses does not read like the keys that need one. *)
+  let hint action label =
+    let key_color =
+      if Keeper_control.requires_confirmation action then Ansi.red else Ansi.cyan
+    in
+    if List.mem action available then
+      Printf.sprintf "%s%s%s %s" key_color (Keeper_control.action_key action)
+        Ansi.reset label
+    else
+      Printf.sprintf "%s%s %s%s" Ansi.dim (Keeper_control.action_key action)
+        label Ansi.reset
+  in
+  let toggle =
+    match Option.bind reading Keeper_control.primary with
+    | Some action -> hint action (Keeper_control.action_label action)
+    | None -> Printf.sprintf "%sp pause%s" Ansi.dim Ansi.reset
+  in
+  match (state.keeper_action_inflight, state.keeper_action_pending) with
+  | Some (keeper_name, action), _ ->
+      Printf.sprintf "  %s%s %s\xe2\x80\xa6%s" Ansi.cyan
+        (Keeper_control.action_gerund action)
+        (Terminal_text.single_line keeper_name)
+        Ansi.reset
+  | None, Some pending ->
+      Printf.sprintf "  %s%spress %s again to %s %s%s" Ansi.bold Ansi.yellow
+        (Keeper_control.action_key pending.Keeper_control.pending_action)
+        (Keeper_control.action_label pending.Keeper_control.pending_action)
+        (Terminal_text.single_line pending.Keeper_control.pending_keeper)
+        Ansi.reset
+  | None, None ->
+      "  "
+      ^ String.concat
+          (Ansi.dim ^ " \xc2\xb7 " ^ Ansi.reset)
+          [ Ansi.dim ^ "j/k move" ^ Ansi.reset
+          ; toggle
+          ; hint Keeper_control.Wakeup "wake"
+          ; hint Keeper_control.Shutdown "shutdown"
+          ; Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
+          ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
+          ; Ansi.dim ^ "enter detail" ^ Ansi.reset
+          ; Ansi.dim ^ "r refresh" ^ Ansi.reset
+          ; Ansi.dim ^ "q quit" ^ Ansi.reset
+          ]
+
+(* Counted from the same readings the rows are drawn from, so the heading
+   cannot disagree with the list under it. *)
+let keeper_roster_summary readings =
+  let tally (live, paused, offline, unknown) reading =
+    match Keeper_control.display_status reading with
+    | None -> (live, paused, offline, unknown + 1)
+    | Some Status.Cp_paused -> (live, paused + 1, offline, unknown)
+    | Some (Status.Cp_surface Status.Surface_offline) ->
+        (live, paused, offline + 1, unknown)
+    | Some
+        (Status.Cp_surface
+           ( Status.Surface_active | Status.Surface_busy
+           | Status.Surface_listening | Status.Surface_idle
+           | Status.Surface_inactive )) ->
+        (live + 1, paused, offline, unknown)
+  in
+  let live, paused, offline, unknown =
+    List.fold_left tally (0, 0, 0, 0) readings
+  in
+  [ (live, "running", Ansi.green)
+  ; (paused, "paused", Ansi.yellow)
+  ; (offline, "offline", Ansi.gray)
+  ; (unknown, "unread", Ansi.dim)
+  ]
+  |> List.filter (fun (count, _, _) -> count > 0)
+  |> List.map (fun (count, label, color) ->
+         Printf.sprintf "%s%d %s%s" color count label Ansi.reset)
+
+(* The two subtractions over the fleet's name lists. They answer different
+   questions and only one of them is about being stopped: a keeper the fleet
+   wanted and never started is bootable minus running, while a keeper whose
+   fiber is alive but whose durable demand is not admissible is running minus
+   executable. Reporting the second as "not running" sent an operator to boot
+   ten keepers that were already up. *)
+let keeper_fleet_gap_lines (fleet : fleet_safety) =
+  let subtract from_names remove_names =
+    List.filter (fun name -> not (List.mem name remove_names)) from_names
+  in
+  let never_started = subtract fleet.fs_bootable_names fleet.fs_running_names in
+  let running_without_turn =
+    subtract fleet.fs_running_names fleet.fs_executable_names
+  in
+  List.filter_map
+    (fun (names, label, color) ->
+       match names with
+       | [] -> None
+       | _ -> Some (color, label, String.concat ", " names))
+    [ (never_started, "not running", Ansi.red)
+    ; (running_without_turn, "running, cannot take a turn", Ansi.yellow)
+    ]
+
 let render_keeper_list (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
+  let inner = max 1 (cols - 4) in
+  let readings = List.map (keeper_reading state) state.keepers in
+  let selected_reading =
+    Option.map (keeper_reading state) (selected_keeper state)
+  in
 
-  (* Header *)
+  Buffer.add_string buf
+    (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_tl
+       (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset);
+
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let keeper_count = List.length state.keepers in
-  let header = Printf.sprintf " MASC Keepers (%d)  %s" keeper_count timestamp in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let heading =
+    Printf.sprintf "%s%sMASC Keepers%s %s%d%s" " " Ansi.bold Ansi.reset
+      Ansi.white (List.length state.keepers) Ansi.reset
+    ^ (match keeper_roster_summary readings with
+       | [] -> ""
+       | parts ->
+           Ansi.dim ^ "   " ^ Ansi.reset
+           ^ String.concat (Ansi.dim ^ " \xc2\xb7 " ^ Ansi.reset) parts)
+  in
+  (* Style bytes are zero-width to [display_width], so the gap is measured on
+     the styled string rather than on a plain copy that could drift from it. *)
+  let gap =
+    max 1
+      (inner - Message_layout.display_width heading - String.length timestamp)
+  in
+  box_line buf cols
+    (heading ^ String.make gap ' ' ^ Ansi.dim ^ timestamp ^ Ansi.reset);
 
-  (* Top border *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset);
+  Buffer.add_string buf
+    (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_l (draw_hline (cols - 2))
+       Ansi.box_r Ansi.reset);
 
-  (* Header line *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    Ansi.bold header Ansi.reset
-    (String.make (max 0 (cols - String.length header - 6)) ' ')
-    (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
-
-  (* Divider *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
-
-  (* Fleet reading — what the roster below cannot say.
-
-     The rows are one per running keeper, so a keeper the fleet wanted and
-     could not start is simply absent from them. These lines carry the
-     server's own count of that gap and name the keepers behind it. *)
-  (match state.fleet_safety, state.fleet_safety_error with
+  (match (state.fleet_safety, state.fleet_safety_error) with
    | _, Some err ->
        box_line buf cols
-         (Ansi.red ^ "  fleet: " ^ fit_width err (cols - 12) ^ Ansi.reset)
+         (Ansi.red ^ "  fleet: " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None, None -> ()
    | Some fleet, None ->
        let tone =
@@ -837,19 +1060,22 @@ let render_keeper_list (state : state) =
          else Ansi.yellow
        in
        let blocker =
-         match fleet.fs_blocker with None -> "" | Some b -> "  blocker: " ^ b
+         match fleet.fs_blocker with None -> "" | Some b -> "   blocker: " ^ b
        in
        box_line buf cols
-         (Printf.sprintf "%s  fleet %s   running %d/%d   capacity %d/%d%s%s"
-            tone fleet.fs_status
-            fleet.fs_running_count fleet.fs_bootable_count
-            (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
-            fleet.fs_target_reaction_capacity blocker Ansi.reset);
+         (Printf.sprintf
+            "%s  fleet %s%s   running %d/%d   turn capacity %d/%d%s%s%s" tone
+            fleet.fs_status Ansi.reset fleet.fs_running_count
+            fleet.fs_bootable_count
+            (fleet.fs_target_reaction_capacity
+            - fleet.fs_reaction_capacity_shortfall)
+            fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
        let counts =
          [ ("paused", fleet.fs_paused_count)
          ; ("failing", fleet.fs_failing_count)
          ; ("recovering", fleet.fs_recovering_count)
-         ; ("task owner without fiber", fleet.fs_active_task_owner_without_fiber_count)
+         ; ( "task owner without fiber"
+           , fleet.fs_active_task_owner_without_fiber_count )
          ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
          ]
          |> List.filter (fun (_, n) -> n > 0)
@@ -858,126 +1084,85 @@ let render_keeper_list (state : state) =
        if counts <> [] then
          box_line buf cols
            (Ansi.dim ^ "  " ^ String.concat "   " counts ^ Ansi.reset);
-       (* Which keepers are missing is the subtraction, done here rather than
-          read from a field: the server reports what should run and what does,
-          and the difference is this reader's to take. *)
-       let missing =
-         List.filter
-           (fun name -> not (List.mem name fleet.fs_executable_names))
-           fleet.fs_bootable_names
-       in
-       if missing <> [] then
-         box_line buf cols
-           (Printf.sprintf "%s  not running: %s%s" Ansi.red
-              (String.concat ", " missing) Ansi.reset));
+       List.iter
+         (fun (color, label, names) ->
+            box_line buf cols
+              (Printf.sprintf "%s  %s: %s%s" color label
+                 (Terminal_text.single_line names) Ansi.reset))
+         (keeper_fleet_gap_lines fleet));
 
-  (* Column headers *)
-  let col_header = Printf.sprintf "  %s  %-20s  %-8s %10s  %s"
-    " " "Name" "Paused" "Turns" "Current Task" in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    Ansi.dim (fit_width col_header (cols - 4)) Ansi.reset
-    Ansi.gray Ansi.box_v Ansi.reset);
+  (* The roster's own failure. The rows below still come from disk so they stay
+     on screen; this says the live half of every one of them is missing, which
+     is why the lifecycle keys stop offering anything. *)
+  (match state.keeper_roster_error with
+   | Some err ->
+       box_line buf cols
+         (Ansi.yellow ^ "  " ^ Terminal_text.single_line err ^ Ansi.reset)
+   | None -> ());
+  (match state.keeper_roster with
+   | Keeper_control.Roster_partial { observed; total } ->
+       box_line buf cols
+         (Printf.sprintf
+            "%s  live status covers %d of %d keepers; the rest read as unknown%s"
+            Ansi.yellow (List.length observed) total Ansi.reset)
+   | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
-  (* Divider *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
+  let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
+  box_line_styled buf cols ~style:Ansi.dim (keeper_column_header columns);
+  Buffer.add_string buf
+    (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_l (draw_hline (cols - 2))
+       Ansi.box_r Ansi.reset);
 
-  (* Keeper rows *)
-  let content_height = max 0 (rows - 8) in
-  let keepers_error =
-    Terminal_text.optional_single_line state.keepers_error
-  in
-  let keeper_rows =
-    match keepers_error with
-    | None -> content_height
-    | Some err ->
-        box_line buf cols
-          (Ansi.red ^ "  "
-          ^ fit_width err (cols - 8)
-          ^ Ansi.reset);
-        max 0 (content_height - 1)
-  in
-  let visible_count = min keeper_rows (List.length state.keepers) in
-  (* Scroll offset: keep cursor visible *)
+  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
+  (match keepers_error with
+   | Some err -> box_line buf cols (Ansi.red ^ "  " ^ err ^ Ansi.reset)
+   | None -> ());
+
+  (* Counted rather than recomputed: the chrome above varies with the fleet
+     reading, the roster's health and the metadata error, so a second
+     arithmetic copy of its height would drift from what was just emitted and
+     scroll the frame. *)
+  let chrome_rows = List.length (frame_lines buf) in
+  let footer_rows = 2 in
+  let keeper_rows = max 0 (rows - chrome_rows - footer_rows) in
+  let keeper_count = List.length state.keepers in
   let scroll_offset =
     if keeper_rows > 0 && state.keeper_cursor >= keeper_rows then
       state.keeper_cursor - keeper_rows + 1
     else 0
   in
-
-  if visible_count = 0 then begin
-    let empty_rows =
-      match keepers_error with
-      | Some _ -> keeper_rows
-      | None ->
-          Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no keepers found in .masc/keepers/)%s %s%s%s%s\n"
-            Ansi.gray Ansi.box_v Ansi.reset
-            Ansi.dim Ansi.reset
-            (String.make (max 0 (cols - 50)) ' ')
-            Ansi.gray Ansi.box_v Ansi.reset);
-          max 0 (keeper_rows - 1)
-    in
-    for _ = 1 to empty_rows do
-      Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-        Ansi.gray Ansi.box_v Ansi.reset
-        (String.make (cols - 4) ' ')
-        Ansi.gray Ansi.box_v Ansi.reset)
+  if keeper_count = 0 then begin
+    if keeper_rows > 0 && Option.is_none keepers_error then
+      box_line buf cols
+        (Ansi.dim ^ "   no keeper metadata under .masc/keepers/" ^ Ansi.reset);
+    let filled = if Option.is_none keepers_error then 1 else 0 in
+    for _ = 1 to max 0 (keeper_rows - filled) do
+      box_empty buf cols
     done
-  end else begin
-    for i = 0 to keeper_rows - 1 do
-      let idx = i + scroll_offset in
-      if idx < List.length state.keepers then begin
-        let k = List.nth state.keepers idx in
-        let is_selected = idx = state.keeper_cursor in
-        let paused_str = if k.k_paused then
-          Ansi.yellow ^ "yes" ^ Ansi.reset
-        else
-          Ansi.dim ^ "no" ^ Ansi.reset
-        in
-        let task_width = max 8 (cols - 58) in
-        let current_task =
-          fit_width
-            (Terminal_text.single_line_or ~default:"-" k.k_current_task_id)
-            task_width
-        in
-        let name_col =
-          Printf.sprintf "%-20s" (Terminal_text.single_line k.k_name)
-        in
-        let turns_col = Printf.sprintf "%10d" k.k_total_turns in
-        let line_content =
-          if is_selected then
-            Ansi.reverse ^ ">" ^ Ansi.reset
-            ^ "  " ^ Ansi.bold ^ name_col ^ Ansi.reset
-            ^ "  " ^ paused_str
-            ^ " " ^ turns_col
-            ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
-          else
-            " "
-            ^ "  " ^ name_col
-            ^ "  " ^ paused_str
-            ^ " " ^ turns_col
-            ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
-        in
-        Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-          Ansi.gray Ansi.box_v Ansi.reset
-          (fit_width line_content (cols - 4))
-          Ansi.gray Ansi.box_v Ansi.reset)
-      end else
-        Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-          Ansi.gray Ansi.box_v Ansi.reset
-          (String.make (cols - 4) ' ')
-          Ansi.gray Ansi.box_v Ansi.reset)
-    done
-  end;
+  end
+  else
+    for index = 0 to keeper_rows - 1 do
+      let position = index + scroll_offset in
+      match
+        (List.nth_opt state.keepers position, List.nth_opt readings position)
+      with
+      | Some keeper, Some reading ->
+          let runtime =
+            match reading.Keeper_control.liveness with
+            | Keeper_control.Present row -> Some row
+            | Keeper_control.Absent | Keeper_control.Unobserved -> None
+          in
+          box_line buf cols
+            (keeper_row_content ~columns
+               ~selected:(position = state.keeper_cursor)
+               ~status:(Keeper_control.display_status reading) ~keeper ~runtime)
+      | Some _, None | None, Some _ | None, None -> box_empty buf cols
+    done;
 
-  (* Bottom border *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset);
-
-  (* Footer *)
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  Tab:next  q:quit  r:refresh%s\n"
-    Ansi.dim Ansi.reset);
+  Buffer.add_string buf
+    (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
+       Ansi.box_br Ansi.reset);
+  Buffer.add_string buf (keeper_action_hints state selected_reading ^ "\n");
 
   finish_frame ~surface_key:"keeper-list" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
@@ -1182,9 +1367,12 @@ let render_keeper_detail (state : state) =
     (* Bottom border *)
     box_bottom buf cols;
 
-    (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:next  q:quit  r:refresh%s\n"
-      Ansi.dim Ansi.reset);
+    (* Footer. The lifecycle keys work here as well as on the roster, so the
+       footer names the same actions with the same keys; a detail view that
+       listed a different set would read as a different set of powers. *)
+    Buffer.add_string buf
+      (keeper_action_hints state (Some (keeper_reading state k))
+      ^ Ansi.dim ^ " \xc2\xb7 esc back" ^ Ansi.reset ^ "\n");
 
     finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf

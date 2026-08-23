@@ -110,6 +110,29 @@ type system_log_snapshot = {
   sys_latest_seq : int;
 }
 
+type keeper_runtime = {
+  kr_name : string;
+  kr_status : Keeper_status_runtime.surface_status;
+  kr_keepalive_running : bool;
+  kr_autoboot_enabled : bool;
+  kr_proactive_enabled : bool;
+  kr_runtime_id : string;
+}
+(** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
+    keeper, as [masc_keeper_list] renders it.
+
+    [kr_status] is the six-member surface vocabulary. It carries no "paused"
+    member: operator pause is durable metadata and reaches the TUI on
+    {!keeper} instead. A reader that wants the published control-plane status
+    composes the two the way the operator snapshot does. *)
+
+val decode_keeper_runtime_list :
+  Yojson.Safe.t -> (keeper_runtime list * bool * int, string) result
+(** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
+    [(rows, truncated, total)]. A row whose [status] is outside the surface
+    vocabulary fails the whole reading rather than defaulting, so producer
+    drift surfaces as an error instead of a wrong status glyph. *)
+
 type fleet_safety = {
   fs_status : string;
   fs_blocker : string option;
@@ -123,6 +146,7 @@ type fleet_safety = {
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
   fs_bootable_names : string list;
+  fs_running_names : string list;
   fs_executable_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
@@ -134,9 +158,12 @@ type fleet_safety = {
     holds one row per running keeper, so a keeper that failed to start is
     absent rather than shown as failed.
 
-    The two name lists are carried raw. Which keepers are missing is
-    [bootable] minus [executable] — a subtraction the reader does, not a
-    field the server precomputes. *)
+    The three name lists are carried raw, and they answer three different
+    questions, so a reader that wants one has to name which. Keepers that
+    never started are [bootable] minus [running]. Keepers that are running
+    but cannot take a turn are [running] minus [executable] — a fiber is
+    alive, its durable demand is not admissible. Collapsing the two reads a
+    live fleet as a stopped one. *)
 
 type log_kind =
   | Log_turn

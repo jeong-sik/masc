@@ -12,6 +12,7 @@ module Keeper_chat_history = Masc_tui_keeper_chat_history
 module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
+module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
@@ -293,6 +294,11 @@ type http_surface_results = {
   http_planning: (planning_snapshot, string) result;
   http_system_logs: (system_log_snapshot, string) result;
   http_fleet_safety: (Tui_decode.fleet_safety, string) result;
+  (* [None] on surfaces that do not show it: the roster costs a request and
+     only the Keepers surface reads it, so leaving it out keeps whatever the
+     last Keepers refresh observed rather than dropping it. *)
+  http_keeper_roster:
+    (Keeper_control.roster, Keeper_control.roster_failure) result option;
 }
 
 type async_msg =
@@ -325,6 +331,10 @@ type async_msg =
   | Keeper_chat_reconciled of
       Keeper_chat.request
       * (Keeper_chat.operation_reconciliation, Keeper_chat.error) result
+  | Keeper_action_done of
+      string
+      * Keeper_control.action
+      * (Keeper_control.outcome, string) result
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -1267,6 +1277,22 @@ let apply_fleet_safety_load state = function
         ~set_error:(fun value -> state.fleet_safety_error <- value)
         err
 
+let apply_keeper_roster_load state = function
+  | Ok roster ->
+      state.keeper_roster <- roster;
+      state.keeper_roster_error <- None
+  | Error failure ->
+      (* The last good roster is dropped rather than kept: a stale one reports
+         fibers as running after the reading that said so stopped arriving,
+         and every lifecycle action on this surface is chosen from it. Going
+         back to unobserved withdraws the actions instead of offering the
+         wrong one. *)
+      state.keeper_roster <- Keeper_control.Roster_unobserved;
+      remember_surface_error state ~surface:"keeper roster"
+        ~current_error:state.keeper_roster_error
+        ~set_error:(fun value -> state.keeper_roster_error <- value)
+        (Keeper_control.roster_failure_message failure)
+
 let apply_planning_load state = function
   | Ok planning ->
       let goal_ids planning =
@@ -1322,7 +1348,8 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation ~wants_transport =
+let load_http_surfaces ~host ~port ~approval_generation ~wants_transport
+    ~wants_keeper_roster =
   let http_overview = load_overview ~host ~port in
   (* Only the Overview row shows this, so a refresh on another surface does not
      spend a request on it. [None] leaves whatever the last read observed. *)
@@ -1339,6 +1366,9 @@ let load_http_surfaces ~host ~port ~approval_generation ~wants_transport =
   let http_planning = load_planning ~host ~port in
   let http_system_logs = load_system_logs ~host ~port ~limit:system_log_page in
   let http_fleet_safety = load_fleet_safety ~host ~port in
+  let http_keeper_roster =
+    if wants_keeper_roster then Some (load_keeper_roster ~host ~port) else None
+  in
   { http_overview
   ; http_transport
   ; http_approvals
@@ -1346,6 +1376,7 @@ let load_http_surfaces ~host ~port ~approval_generation ~wants_transport =
   ; http_planning
   ; http_system_logs
   ; http_fleet_safety
+  ; http_keeper_roster
   }
 
 let apply_http_surfaces state results =
@@ -1356,6 +1387,7 @@ let apply_http_surfaces state results =
   apply_planning_load state results.http_planning;
   apply_system_logs_load state results.http_system_logs;
   apply_fleet_safety_load state results.http_fleet_safety;
+  Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   let approval_status =
     Option.map
       (fun observation ->
@@ -1392,11 +1424,17 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       | Overview -> true
       | Keepers _ | Board | Approvals | Planning | System_logs -> false
     in
+    let wants_keeper_roster =
+      match state.view with
+      | Keepers _ -> true
+      | Overview | Board | Approvals | Planning | System_logs -> false
+    in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation ~wants_transport))
+             (load_http_surfaces ~host ~port ~approval_generation ~wants_transport
+                ~wants_keeper_roster))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -1413,7 +1451,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation ~wants_transport))
+               (load_http_surfaces ~host ~port ~approval_generation ~wants_transport
+                ~wants_keeper_roster))
   end
 
 let board_detail_request_still_current state request =
@@ -1570,6 +1609,153 @@ let handle_approval_decision state approval decision ~mailbox =
            (approval_decision_key decision)
            approval.ap_summary)
 
+(* Run one lifecycle action's steps against the server.
+
+   The steps come from [Keeper_control.plan]; this only performs them and
+   reports the first answer that ends the sequence. The 409 branch is the one
+   piece of routing here: /boot refuses a keeper whose owner is durably
+   paused, and the pause only clears through the directive endpoint, so a
+   conflict on an action that names a recovery continues into it instead of
+   surfacing as a failure. Recovery runs once — a conflict raised by the
+   recovery itself is the operator's to read. *)
+let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
+    action =
+  let perform = function
+    | Keeper_control.Lifecycle lifecycle_action ->
+        Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
+          ~action:lifecycle_action
+    | Keeper_control.Directive directive_action ->
+        Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
+          ~action:directive_action ~operator_operation_id
+  in
+  let rec walk ~recovery_available last_outcome steps =
+    match steps with
+    | [] -> (
+        match last_outcome with
+        | Some outcome -> Ok outcome
+        | None ->
+            (* [plan] never returns an empty step list; if it ever did, an
+               empty walk must not read as success. *)
+            Error
+              (Printf.sprintf "%s has no request to send"
+                 (Keeper_control.action_label action)))
+    | step :: rest -> (
+        match perform step with
+        | Error transport -> Error transport
+        | Ok (status, body) -> (
+            match Keeper_control.classify_response ~status ~body with
+            | Keeper_control.Accepted _ as outcome ->
+                walk ~recovery_available (Some outcome) rest
+            | Keeper_control.Paused_owner_conflict detail -> (
+                match
+                  ( recovery_available
+                  , Keeper_control.recovers_from_conflict action )
+                with
+                | true, Some recovery_steps ->
+                    walk ~recovery_available:false last_outcome recovery_steps
+                | true, None | false, _ -> Error detail)
+            | Keeper_control.Rejected { status; detail } ->
+                Error (Printf.sprintf "HTTP %d: %s" status detail)))
+  in
+  walk ~recovery_available:true None (Keeper_control.plan action)
+
+let apply_keeper_action_result state ~base_path keeper_name action result =
+  state.keeper_action_inflight <- None;
+  (match result with
+   | Ok (Keeper_control.Accepted { already_live = true }) ->
+       add_event state "system"
+         (Printf.sprintf "%s was already running; woke it instead of starting a second fiber"
+            keeper_name)
+   | Ok (Keeper_control.Accepted { already_live = false }) ->
+       add_event state "system"
+         (Printf.sprintf "%s %s accepted" keeper_name
+            (Keeper_control.action_label action))
+   | Ok (Keeper_control.Paused_owner_conflict detail)
+   | Ok (Keeper_control.Rejected { detail; _ }) ->
+       (* [run_keeper_action_steps] returns these as [Error]; keeping the
+          branch exhaustive rather than wildcarded means a future outcome
+          member has to be answered here too. *)
+       add_event state "error"
+         (Printf.sprintf "%s %s refused: %s" keeper_name
+            (Keeper_control.action_label action) detail)
+   | Error detail ->
+       add_event state "error"
+         (Printf.sprintf "%s %s failed: %s" keeper_name
+            (Keeper_control.action_label action) detail));
+  (* Both readings the row is built from moved: pause is durable metadata on
+     disk, the fiber is in the roster. Reloading the local half here shows the
+     change without waiting a refresh interval; the roster arrives with the
+     HTTP refresh the caller starts. *)
+  load_from_masc_dir state base_path
+
+let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
+  let serial = state.keeper_action_serial + 1 in
+  state.keeper_action_serial <- serial;
+  state.keeper_action_inflight <- Some (keeper_name, action);
+  state.keeper_action_pending <- None;
+  add_event state "system"
+    (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let operator_operation_id =
+    Keeper_control.mint_operation_id ~keeper:keeper_name ~serial
+  in
+  let run_action () =
+    let result =
+      try
+        run_keeper_action_steps ~host ~port ~keeper_name
+          ~operator_operation_id action
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_action_done (keeper_name, action, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_action
+  | None ->
+      let result =
+        try
+          run_keeper_action_steps ~host ~port ~keeper_name
+            ~operator_operation_id action
+        with exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_action_done (keeper_name, action, result))
+
+(* The keypress path. The reading decides which actions exist at all, so a key
+   that names an action the reading does not offer says why instead of sending
+   a request the server would refuse. *)
+let handle_keeper_action state ~base_path ~mailbox action =
+  match selected_keeper state with
+  | None -> ()
+  | Some keeper ->
+      let reading = keeper_reading state keeper in
+      if not (List.mem action (Keeper_control.available reading)) then
+        add_event state "system"
+          (Printf.sprintf "%s cannot %s right now (%s)" keeper.k_name
+             (Keeper_control.action_label action)
+             (match reading.Keeper_control.liveness with
+              | Keeper_control.Unobserved ->
+                  "the live roster has not been read"
+              | Keeper_control.Absent | Keeper_control.Present _ ->
+                  Keeper_control.status_label reading ^ " keeper"))
+      else
+        match
+          Keeper_control.gate_transition
+            ~inflight:(Option.is_some state.keeper_action_inflight)
+            ~pending:state.keeper_action_pending ~keeper:keeper.k_name action
+        with
+        | Keeper_control.Gate_blocked_inflight ->
+            add_event state "system" "A keeper action is already in progress"
+        | Keeper_control.Gate_arm pending ->
+            state.keeper_action_pending <- Some pending;
+            add_event state "system"
+              (Printf.sprintf "Press %s again to %s %s"
+                 (Keeper_control.action_key action)
+                 (Keeper_control.action_label action) keeper.k_name)
+        | Keeper_control.Gate_submit ->
+            start_keeper_action state ~base_path ~mailbox keeper.k_name action
+
 let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   function
   | Http_refresh_done results ->
@@ -1588,6 +1774,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       apply_board_post_load state request result
   | Board_post_refresh_failed (request, err) ->
       apply_board_post_load state request (Error err)
+  | Keeper_action_done (keeper_name, action, result) ->
+      apply_keeper_action_result state ~base_path keeper_name action result;
+      (* The roster is the half of the row this refresh cannot read from disk,
+         and it is what decides which action the row offers next. Asking for it
+         now means the row stops offering the action that just ran without
+         waiting out the refresh interval. *)
+      start_http_refresh state ~host:(Env_config_core.masc_host ())
+        ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -1977,6 +2171,12 @@ let main () =
        | _ when compact_viewport -> ()
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None
+       (* An armed shutdown expires on the next unrelated key. Otherwise it
+          waits indefinitely and a later press of the same key -- after the
+          cursor has moved, after a refresh -- submits work the operator armed
+          minutes ago for something else. *)
+       | Keepers _, Some ("s" | "S") -> ()
+       | Keepers _, Some _ -> state.keeper_action_pending <- None
        | _ -> ());
       (match key with
        | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
@@ -2253,12 +2453,12 @@ let main () =
             | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
             | Approvals | System_logs -> ())
        | Some "l" | Some "L" ->
-           (* L opens log view from detail *)
+           (* Logs, from the roster as well as from detail, for the same reason
+              chat is reachable from both: the keeper an operator wants the
+              logs of is the one under the cursor. *)
            (match state.view with
-            | Keepers Keeper_detail ->
-                let keeper =
-                  List.nth_opt state.keepers state.keeper_cursor
-                in
+            | Keepers (Keeper_list | Keeper_detail) ->
+                let keeper = selected_keeper state in
                 load_selected_keeper_logs state base_path 200 keeper;
                 (match keeper with
                  | Some _ ->
@@ -2268,12 +2468,15 @@ let main () =
                          ~content_height:(keeper_log_content_height state);
                      state.view <- Keepers Keeper_logs
                  | None -> ())
-            | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
+            | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | System_logs -> ())
-       | Some "m" | Some "M" ->
-           (* M opens message view from detail *)
+       | Some "m" | Some "M" | Some "c" | Some "C" ->
+           (* Chat. Reachable from the roster as well as from detail: the
+              keeper an operator wants to talk to is the one under the cursor,
+              and requiring a detour through detail first hid the surface
+              behind a key nothing named. *)
            (match state.view with
-            | Keepers Keeper_detail
+            | Keepers (Keeper_list | Keeper_detail)
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
@@ -2281,7 +2484,42 @@ let main () =
                 launch_keeper_history_load state ~mailbox:async_messages
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
-            | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
+            | Keepers (Keeper_list | Keeper_detail)
+            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Board | Approvals | Planning | System_logs -> ())
+       | Some "p" | Some "P" ->
+           (* The toggle: whichever of pause / resume / boot this reading
+              offers first. One key for "stop" and "play" because which one
+              applies is a fact about the keeper, not a choice the operator
+              should have to make. *)
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) -> (
+                match
+                  Option.map (keeper_reading state) (selected_keeper state)
+                  |> Option.map Keeper_control.primary
+                with
+                | Some (Some action) ->
+                    handle_keeper_action state ~base_path
+                      ~mailbox:async_messages action
+                | Some None ->
+                    add_event state "system"
+                      "No lifecycle action applies to this keeper yet"
+                | None -> ())
+            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Board | Approvals | Planning | System_logs -> ())
+       | Some "s" | Some "S" ->
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) ->
+                handle_keeper_action state ~base_path ~mailbox:async_messages
+                  Keeper_control.Shutdown
+            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Board | Approvals | Planning | System_logs -> ())
+       | Some "w" | Some "W" ->
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) ->
+                handle_keeper_action state ~base_path ~mailbox:async_messages
+                  Keeper_control.Wakeup
+            | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | System_logs -> ())
       | _ -> ());
 

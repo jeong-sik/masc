@@ -30,7 +30,13 @@ let keeper_turn_record_source_health
   =
   match latest_age_s, live_turn_in_progress with
   | None, _ when skipped_rows > 0 -> "incompatible", "incompatible_rows"
-  | _, true -> "ok", ""
+  (* A turn is running, so the age of the newest finished record says nothing
+     about whether this store is keeping up — the record for the running turn
+     has not been written yet. This used to report "ok", which also means "the
+     newest record is inside the SLO", and the dashboard could not tell the two
+     apart: it recomputed the age, found it over the SLO, read the response as
+     a contract violation and dropped the whole payload (#28720). *)
+  | _, true -> "live", ""
   | None, false -> "empty", "no_entries"
   | Some age, false when age > freshness_slo_s ->
     "stale", "freshness_slo_exceeded"

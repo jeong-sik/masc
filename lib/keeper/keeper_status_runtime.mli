@@ -22,10 +22,18 @@ val keeper_turn_record_source_health :
   latest_age_s:float option ->
   freshness_slo_s:float ->
   string * string
-(** Classify the turn-record source. A live turn keeps the producer healthy
-    even when its previous completed record is old; live-turn progress/stall
-    diagnosis remains on the dedicated turn observation surface. Incompatible
-    stored rows remain fail-visible. *)
+(** Classify the turn-record source as one of ["ok"], ["live"], ["stale"],
+    ["empty"] or ["incompatible"], with the reason string that goes on the wire
+    ([""] for the two healthy ones).
+
+    ["live"] and ["ok"] are separate answers on purpose. A running turn has not
+    written its record yet, so the age of the newest finished one says nothing
+    about whether the store is keeping up; ["ok"] additionally asserts that age
+    is inside the SLO. Both used to report ["ok"], and the dashboard, which
+    recomputes the age to check the response against its contract, read a live
+    keeper's over-SLO age as a violation and dropped the whole payload
+    (#28720). Live-turn progress and stall diagnosis stay on the turn
+    observation surface. Incompatible stored rows remain fail-visible. *)
 val keeper_metric_producer_active : base_path:string -> bool
 (** [true] while a registered Keeper is inside a live turn, or while a failed
     turn's lane is in its legitimate inter-cycle cadence sleep. These are the

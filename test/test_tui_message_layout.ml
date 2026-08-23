@@ -187,18 +187,37 @@ let test_input_cursor_uses_visible_terminal_cells () =
   let column terminal_cols input =
     Layout.input_cursor_column ~terminal_cols ~input
   in
-  check int "empty input starts after the prompt" 7 (column 80 "");
-  check int "mixed UTF-8 input advances by cells" 13
+  (* The caret is measured from the prefix the pane renders ("  > "), so what
+     the operator typed and what the screen shows end at the same column. *)
+  check int "empty input starts after the prompt" 4 (column 80 "");
+  check int "prompt constant matches the pane prefix" 4
+    Layout.chat_input_prompt_cells;
+  check int "mixed UTF-8 input advances by cells" 10
     (column 80 "Aé한🙂");
-  check int "emoji modifier follows xterm scalar cells" 12
+  check int "emoji modifier follows xterm scalar cells" 9
     (column 80 "A👍🏽");
-  check int "flag cluster advances by two cells" 9 (column 80 "🇰🇷");
-  check int "VS16 cluster follows xterm's one cell" 8 (column 80 "❤️");
+  check int "hangul syllables take two cells each" 8
+    (column 80 "한글");
+  check int "flag cluster advances by two cells" 6 (column 80 "🇰🇷");
+  check int "VS16 cluster follows xterm's one cell" 5 (column 80 "❤️");
   check int "exact boundary reaches the pre-border spacer" 79
-    (column 80 (String.make 72 'a'));
+    (column 80 (String.make 75 'a'));
   check int "visible overflow remains in the pre-border spacer" 79
-    (column 80 (Layout.input_viewport ~max_cells:72 (String.make 100 'a')));
+    (column 80 (Layout.input_viewport ~max_cells:75 (String.make 100 'a')));
   check int "tiny terminal cursor stays positive" 3 (column 4 "");
+  (* Metadata rows align because every role label renders at one cell width. *)
+  check int "short role label pads to the column"
+    16 (Layout.display_width (Layout.align_role_label "you"));
+  check int "wide-char role label pads by cells not bytes"
+    16 (Layout.display_width (Layout.align_role_label "한글"));
+  check string "long role label truncates with an ellipsis" "0123456789abcde…"
+    (Layout.align_role_label "0123456789abcdefg");
+  check string "column-width role label only pads"
+    ("0123456789abcde" ^ String.make 1 ' ')
+    (Layout.align_role_label "0123456789abcde");
+  check string "short role label pads with spaces"
+    ("you" ^ String.make 13 ' ')
+    (Layout.align_role_label "you");
   let row terminal_rows history_height status_rows =
     Layout.input_cursor_row ~terminal_rows ~history_height ~status_rows
   in

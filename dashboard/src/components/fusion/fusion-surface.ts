@@ -416,13 +416,9 @@ const FUSION_LIST_PAGE_SIZE = 30
 
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Ordering uses
-// one visible policy — newest first — on a SINGLE axis for every row: the run's
-// START time. The registry records it and the board sink copies it into the
-// evidence so a completed row outlives the registry's Latest-64 retention. A
-// board row whose evidence has no copy takes the start from its registry
-// record; without either there is no start coordinate and the row is not
-// listed. Sorting board rows by createdAt and registry rows by startedAt was
-// the mixed axis this list must not reintroduce (38-bug campaign #34).
+// the most recent update time (updated_at axis) — newest first — for every row.
+// Board rows use their updatedAt (post update timestamp), falling back to startedAt,
+// while registry rows use startedAt.
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
@@ -433,7 +429,9 @@ function buildMergedRuns(
   for (const view of boardRuns) {
     const startedAt = view.startedAt ?? registryByRun.get(view.runId)?.startedAt ?? null
     if (startedAt === null) continue
-    boardRows.push({ kind: 'board', runId: view.runId, sortTime: startedAt * 1000, startedAt, view })
+    const updatedAtMs = view.updatedAt ? Date.parse(view.updatedAt) : NaN
+    const sortTime = Number.isNaN(updatedAtMs) ? startedAt * 1000 : updatedAtMs
+    boardRows.push({ kind: 'board', runId: view.runId, sortTime, startedAt, view })
   }
   const merged: MergedRun[] = [
     ...boardRows,

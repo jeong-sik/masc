@@ -1132,9 +1132,9 @@ describe('FusionSurface', () => {
       },
     })
 
-  it('orders the master list by durable start time, not board update time (#34)', () => {
-    // fus-old STARTED first but its board post was touched later;
-    // fus-new must still render above it.
+  it('orders the master list by most recent update time on updated_at axis (task-465)', () => {
+    // fus-old was touched later (09:00:00Z) than fus-new (05:01:00Z);
+    // fus-old must render above fus-new on updated_at axis.
     fusionBoardPosts.value = [
       minimalFusionPost('fus-old', '2026-06-19T01:00:00Z', '2026-06-19T09:00:00Z'),
       minimalFusionPost('fus-new', '2026-06-19T05:00:00Z', '2026-06-19T05:01:00Z'),
@@ -1145,10 +1145,10 @@ describe('FusionSurface', () => {
     const ids = Array.from(container.querySelectorAll('.fus-run-row .fus-run-id')).map(
       el => el.textContent,
     )
-    expect(ids).toEqual(['fus-new', 'fus-old'])
+    expect(ids).toEqual(['fus-old', 'fus-new'])
   })
 
-  it('uses persisted board start after the bounded registry evicts a completed run', () => {
+  it('uses updated_at timestamp when registry is empty (task-465)', () => {
     fusionBoardPosts.value = [
       minimalFusionPost(
         'fus-created-late-started-old',
@@ -1170,7 +1170,7 @@ describe('FusionSurface', () => {
     const ids = Array.from(container.querySelectorAll('.fus-run-id')).map(
       element => element.textContent,
     )
-    expect(ids).toEqual(['fus-created-early-started-new', 'fus-created-late-started-old'])
+    expect(ids).toEqual(['fus-created-late-started-old', 'fus-created-early-started-new'])
   })
 
   // Live 2026-08-22: 13 fusion posts written before the sink copied

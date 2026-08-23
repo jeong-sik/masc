@@ -32,6 +32,7 @@ let workspace_id_of_surface = function
   | Keeper_external_attention.Dashboard _
   | Keeper_external_attention.Webhook _
   | Keeper_external_attention.Agent
+  | Keeper_external_attention.Broadcast
   | Keeper_external_attention.Gate _ -> None
 ;;
 
@@ -60,6 +61,7 @@ let surface_coordinates = function
      | Surface_ref.Slack { team_id; _ } -> "slack", team_id
      | Surface_ref.Webhook { source; _ } -> source, None
      | Surface_ref.Agent -> "agent", None
+     | Surface_ref.Broadcast -> "broadcast", None
      | Surface_ref.Gate { label; _ } -> label, None)
 ;;
 

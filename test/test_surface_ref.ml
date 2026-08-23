@@ -32,6 +32,7 @@ let all_variants =
   ; S.Slack { team_id = Some "T1"; channel_id = "C9"; thread_ts = None }
   ; S.Webhook { source = "ci"; event_id = "evt-7" }
   ; S.Agent
+  ; S.Broadcast
   ; S.Gate { label = "discord"; address = [ ("workspace_id", "w1") ] }
   ; S.Gate { label = "custom-connector"; address = [] }
   ]
@@ -57,6 +58,7 @@ let test_lane_label_goldens () =
        (S.Discord
           { guild_id = None; channel_id = "c"; parent_channel_id = None; thread_id = None }));
   check string "agent" "agent" (S.lane_label S.Agent);
+  check string "broadcast" "broadcast" (S.lane_label S.Broadcast);
   check string "gate label verbatim" "my-connector"
     (S.lane_label (S.Gate { label = "my-connector"; address = [] }))
 

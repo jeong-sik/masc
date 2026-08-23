@@ -18,6 +18,7 @@ type t =
     }
   | Webhook of { source : string; event_id : string }
   | Agent
+  | Broadcast
   | Gate of { label : string; address : (string * string) list }
 
 let equal (a : t) (b : t) = a = b
@@ -29,6 +30,7 @@ let lane_label = function
   | Slack _ -> "slack"
   | Webhook _ -> "webhook"
   | Agent -> "agent"
+  | Broadcast -> "broadcast"
   | Gate { label; _ } -> label
 
 (* ── JSON codec ── *)
@@ -59,6 +61,7 @@ let to_json = function
           ("event_id", `String event_id);
         ]
   | Agent -> `Assoc [ ("kind", `String "agent") ]
+  | Broadcast -> `Assoc [ ("kind", `String "broadcast") ]
   | Gate { label; address } ->
       `Assoc
         [
@@ -96,6 +99,7 @@ let of_json json =
       let* event_id = Json_util.require_string json "event_id" in
       Ok (Webhook { source; event_id })
   | "agent" -> Ok Agent
+  | "broadcast" -> Ok Broadcast
   | "gate" ->
       let* label = Json_util.require_string json "label" in
       let address =

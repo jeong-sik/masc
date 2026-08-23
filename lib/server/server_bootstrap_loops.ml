@@ -440,7 +440,7 @@ let project_workspace_message_to_fleet
             ~keeper_name
             ~delivery_key
             ~content:delivery.content
-            ~surface:Surface_ref.Agent
+            ~surface:Surface_ref.Broadcast
             ~external_message_id:delivery.request_id
             ~speaker
             ()

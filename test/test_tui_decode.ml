@@ -283,6 +283,162 @@ let planning_goal_json id phase priority =
     ; "priority", `Int priority
     ]
 
+(* The ledger rows as the server actually joins them, taken from a live
+   workspace: an approval leaves [reason] null and carries its text in
+   [evidence]; a refusal fills both with the same string. *)
+let verification_json ?verdict state =
+  `Assoc
+    [ "goal_id", `String "goal-x"
+    ; ( "completion"
+      , `Assoc
+          (("state", `String state)
+           :: (match verdict with None -> [] | Some v -> [ "verdict", v ])) )
+    ; "updated_at", `String "2026-08-23T13:15:16Z"
+    ]
+;;
+
+let proven_verdict evidence =
+  `Assoc
+    [ "outcome", `String "proven"
+    ; "reason", `Null
+    ; "verification_run_id", `String "01a02ec2"
+    ; "evidence", `String evidence
+    ; "recorded_at", `String "2026-08-23T13:15:16Z"
+    ]
+;;
+
+let refuted_verdict reason =
+  `Assoc
+    [ "outcome", `String "refuted"
+    ; "reason", `String reason
+    ; "verification_run_id", `String "01a028ce"
+    ; "evidence", `String reason
+    ; "recorded_at", `String "2026-08-22T09:30:53Z"
+    ]
+;;
+
+let decoded_proof ?verification ?last_review_note () =
+  let fields =
+    [ "id", `String "goal-x"
+    ; "title", `String "Goal x"
+    ; "phase", `String "executing"
+    ; "priority", `Int 1
+    ]
+    @ (match verification with None -> [] | Some v -> [ "verification", v ])
+    @ (match last_review_note with
+       | None -> []
+       | Some note -> [ "last_review_note", `String note ])
+  in
+  match Tui_decode.decode_planning_snapshot
+          (`Assoc
+            [ "goals", `List [ `Assoc fields ]
+            ; ( "rollup"
+              , `Assoc
+                  [ "active_count", `Int 1
+                  ; "verifying_count", `Int 0
+                  ; "done_count", `Int 0
+                  ; "dropped_count", `Int 0
+                  ] )
+            ; ( "task_backlog"
+              , `Assoc
+                  [ "todo", `Int 0
+                  ; "claimed", `Int 0
+                  ; "in_progress", `Int 0
+                  ; "done", `Int 0
+                  ; "cancelled", `Int 0
+                  ] )
+            ; "generated_at", `String "2026-08-23T13:25:01Z"
+            ])
+  with
+  | Error detail -> Alcotest.fail ("planning snapshot did not decode: " ^ detail)
+  | Ok snapshot ->
+    (match snapshot.Tui_decode.pl_goals with
+     | [ goal ] -> goal
+     | goals ->
+       Alcotest.fail
+         (Printf.sprintf "expected one goal, got %d" (List.length goals)))
+;;
+
+(* The phase says "executing" for a goal nobody asked about and for one the
+   judge refused with a reason. Before this the pane could not tell them apart,
+   and the reason — the whole product of the verification lane — stopped at the
+   wire. *)
+let test_planning_goal_carries_the_judge_verdict () =
+  let proof goal = goal.Tui_decode.pg_proof in
+  Alcotest.check Alcotest.bool "an approval carries what was measured" true
+    (match
+       proof
+         (decoded_proof
+            ~verification:
+              (verification_json "proof_proven"
+                 ~verdict:
+                   (proven_verdict
+                      "The file smoke-goal-tools/measurement.txt records \
+                       smoke_tools_measured = 42, which matches the declared \
+                       target value of 42."))
+            ())
+     with
+     | Tui_decode.Proof_proven (Some evidence) ->
+       Astring.String.is_infix ~affix:"smoke_tools_measured = 42" evidence
+     | _ -> false);
+  Alcotest.check Alcotest.bool "a refusal carries why" true
+    (match
+       proof
+         (decoded_proof
+            ~verification:
+              (verification_json "proof_refuted"
+                 ~verdict:(refuted_verdict "the rollup does not attempt the work"))
+            ())
+     with
+     | Tui_decode.Proof_refuted (Some reason) ->
+       Astring.String.is_infix ~affix:"does not attempt" reason
+     | _ -> false);
+  Alcotest.check Alcotest.bool "a pending request is neither" true
+    (match proof (decoded_proof ~verification:(verification_json "proof_pending") ()) with
+     | Tui_decode.Proof_pending -> true
+     | _ -> false);
+  Alcotest.check Alcotest.bool "an idle ledger is idle" true
+    (match proof (decoded_proof ~verification:(verification_json "idle") ()) with
+     | Tui_decode.Proof_idle -> true
+     | _ -> false)
+;;
+
+(* An unreadable ledger is not an unreviewed goal. Rendering it as idle would
+   disguise corruption as quiet, which is what the server's own projection note
+   refuses to do. *)
+let test_planning_goal_separates_unreadable_from_unreviewed () =
+  Alcotest.check Alcotest.bool "a ledger error says so" true
+    (match
+       (decoded_proof
+          ~verification:
+            (`Assoc [ "state", `String "ledger_error"; "detail", `String "bad json" ])
+          ())
+         .Tui_decode.pg_proof
+     with
+     | Tui_decode.Proof_unreadable (Some detail) ->
+       Astring.String.is_infix ~affix:"bad json" detail
+     | _ -> false);
+  Alcotest.check Alcotest.bool "a state this build does not know is not silently idle" true
+    (match
+       (decoded_proof ~verification:(verification_json "proof_teleported") ())
+         .Tui_decode.pg_proof
+     with
+     | Tui_decode.Proof_unreadable _ -> true
+     | _ -> false);
+  Alcotest.check Alcotest.bool "no verification at all is idle" true
+    (match (decoded_proof ()).Tui_decode.pg_proof with
+     | Tui_decode.Proof_idle -> true
+     | _ -> false)
+;;
+
+(* With no verdict the keeper's own note is what the row has to say. *)
+let test_planning_goal_keeps_the_last_review_note () =
+  Alcotest.check (Alcotest.option Alcotest.string) "the note is decoded"
+    (Some "blocked on the platform gap")
+    (decoded_proof ~last_review_note:"blocked on the platform gap" ())
+      .Tui_decode.pg_last_review_note
+;;
+
 let planning_snapshot_json ?(running_key = "in_progress") () =
   `Assoc
     [ ( "goals"
@@ -1142,6 +1298,12 @@ let () =
           test_decode_planning_snapshot_current_contract;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
+        Alcotest.test_case "goal carries the judge verdict" `Quick
+          test_planning_goal_carries_the_judge_verdict;
+        Alcotest.test_case "unreadable is not unreviewed" `Quick
+          test_planning_goal_separates_unreadable_from_unreviewed;
+        Alcotest.test_case "keeps the last review note" `Quick
+          test_planning_goal_keeps_the_last_review_note;
       ] );
     ( "decode_fleet_safety",
       [

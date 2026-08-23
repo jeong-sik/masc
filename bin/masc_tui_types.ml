@@ -194,6 +194,8 @@ type planning_goal = Tui_decode.planning_goal
   pg_due_date: string option;
   pg_metric: string option;
   pg_target_value: string option;
+  pg_proof: Tui_decode.goal_proof;
+  pg_last_review_note: string option;
 }
 
 type planning_rollup = Tui_decode.planning_rollup

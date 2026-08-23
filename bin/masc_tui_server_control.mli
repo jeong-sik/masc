@@ -10,6 +10,14 @@ type outcome =
   | Script_missing of string list  (** every path that was searched *)
   | Spawn_failed of string
 
+val candidate_paths : unit -> string list
+(** Where the script is looked for, in order. *)
+
+val resolve : string list -> (string, string list) result
+(** First executable candidate, or every path that was tried. Separated from
+    {!val:start} so it can be checked against a list the caller owns; deciding
+    it from the ambient tree makes the answer depend on where the binary sits. *)
+
 val start : base_path:string -> port:int -> outcome
 (** Run the start script for [base_path] on [port]. Returns as soon as the
     script is spawned; the connection badge reports when the server answers. *)

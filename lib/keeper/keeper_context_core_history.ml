@@ -53,4 +53,8 @@ let persist_message ?source session msg =
       | j -> j
     in
     let line = Yojson.Safe.to_string payload ^ "\n" in
+    (* The session directory appears when something is stored in it, so the
+       first append is what opens it. [save_atomic] does its own; this is the
+       one writer that appends. *)
+    ignore (Keeper_fs.ensure_dir (Filename.dirname path));
     Fs_compat.append_file path line

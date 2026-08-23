@@ -449,6 +449,28 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
           detail
       | Ok _ -> Alcotest.fail "invalid checkpoint created a durable file")
 
+let test_naming_a_session_does_not_open_one () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-session-name-only-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session = C.create_session ~session_id:"never-written" ~base_dir in
+      Alcotest.(check bool)
+        "naming a session leaves no directory"
+        false
+        (Sys.file_exists session.session_dir);
+      let _session, ctx =
+        C.load_context_from_checkpoint ~trace_id:"never-written" ~base_dir
+      in
+      Alcotest.(check bool) "no checkpoint to load" true (Option.is_none ctx);
+      Alcotest.(check bool)
+        "reading a checkpoint leaves no directory"
+        false
+        (Sys.file_exists session.session_dir))
+;;
+
 let () =
   Alcotest.run "keeper_context_core_dedup"
     [
@@ -485,6 +507,11 @@ let () =
         [
           Alcotest.test_case "writes ts_unix only" `Quick
             test_persist_message_writes_single_ts_unix_key;
+        ] );
+      ( "session_dir",
+        [
+          Alcotest.test_case "naming a session does not open one" `Quick
+            test_naming_a_session_does_not_open_one;
         ] );
       ( "checkpoint_projection",
         [

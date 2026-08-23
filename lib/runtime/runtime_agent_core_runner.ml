@@ -160,3 +160,7 @@ let resolve_runtime_providers_for_turn ~runtime_id () =
        (apply_inference_seed ~seed:(Runtime_inference.for_runtime ~name:seed_runtime_id)))
     (resolve_runtime_providers ~runtime_id ())
 ;;
+
+module For_testing = struct
+  let resolve_runtime_providers = resolve_runtime_providers
+end

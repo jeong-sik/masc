@@ -397,19 +397,36 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
 
 let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
 
+(* A stage's own redirections travel with it, so a pipeline that names a file
+   still runs on real process pipes. Dropping to the buffered chain instead
+   would run each stage to completion in turn, which has no backpressure: a
+   producer that only stops when its reader closes -- `yes | head -1` -- never
+   stops at all. *)
 let host_pipeline_specs ?base_host_env stages =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
     | Shell_ir.Simple simple :: rest ->
         (match simple.sandbox with
-         | Host when simple.redirects = [] ->
+         | Host ->
              let argv, _env, cwd = process_spec_of_simple simple in
-             let stage : Process_eio.pipeline_stage =
-               { argv; env = resolve_host_env ?base_host_env simple.env; cwd }
-             in
-             loop (stage :: acc) rest
-         | _unsupported -> None)
-        [@warning "-4"]
+             (match redirect_plan_of_redirects ~cwd simple.redirects with
+              | Error _ -> None
+              | Ok (plan, attach) when plan = default_redirect_plan ->
+                  let stage : Process_eio.pipeline_stage =
+                    { argv
+                    ; env = resolve_host_env ?base_host_env simple.env
+                    ; cwd
+                    ; stdin = attach.stdin_from
+                    ; stdout = attach.stdout_to
+                    ; stderr = attach.stderr_to
+                    }
+                  in
+                  loop (stage :: acc) rest
+              (* A capture-side plan -- a merge or a discard -- is applied to
+                 captured text after the run, which a per-stage pipeline has no
+                 place to do. Those stay on the existing path. *)
+              | Ok _ -> None)
+         | Docker _ -> None)
     | Shell_ir.Pipeline _ :: _ -> None
   in
   loop [] stages
@@ -465,20 +482,21 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
     | _ ->
         (match host_pipeline_specs ?base_host_env stages with
          | Some specs ->
-             let status, stdout, stderr =
-               match on_output_chunk with
-               | None ->
-                   Process_eio.run_argv_pipeline_with_status_split
-                     ?timeout_sec
-                     specs
-               | Some on_chunk ->
-                   Process_eio.run_argv_pipeline_with_status_split
-                     ?timeout_sec
-                     ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
-                     ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
-                     specs
-               in
-             { status; stdout; stderr }
+             (match
+                match on_output_chunk with
+                | None ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec
+                      specs
+                | Some on_chunk ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec
+                      ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                      ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                      specs
+              with
+              | Ok (status, stdout, stderr) -> { status; stdout; stderr }
+              | Error message -> unsupported_redirect_result message)
          | None -> (
              match docker_pipeline_specs stages with
              | Some (runner, specs) ->

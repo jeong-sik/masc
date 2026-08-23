@@ -875,18 +875,19 @@ let run_exec_pipeline_with_status_once
           let cwd = Option.value stage_cwd ~default:cwd in
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
-          { Process_eio.argv
-          ; env = Some (sandbox_environment ())
-          ; cwd = Some (Config_dir_resolver.current_working_dir ())
-          })
+          Process_eio.plumbed_stage
+            ~argv
+            ~env:(Some (sandbox_environment ()))
+            ~cwd:(Some (Config_dir_resolver.current_working_dir ())))
         stages
     in
-    Ok
-      (run_argv_pipeline_with_status_split
-         ?timeout_sec
-         ?on_stdout_chunk
-         ?on_stderr_chunk
-         process_stages)
+    (* These stages carry no file redirect, so the runner's redirect error is
+       out of reach here; it is passed on rather than folded into a status. *)
+    run_argv_pipeline_with_status_split
+      ?timeout_sec
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      process_stages
 ;;
 
 let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec

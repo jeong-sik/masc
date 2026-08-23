@@ -1,0 +1,17 @@
+name = "masc_board_sub_board_delete"
+description = """
+Delete a SubBoard by slug or ID. Existing posts inside the SubBoard keep \
+their content but lose their hearth binding (orphan policy)."""
+
+[[params]]
+name = "sub_board_id"
+type = "string"
+required = true
+description = "SubBoard slug or ID to delete"
+
+[[params]]
+name = "owner"
+type = "string"
+description = """
+Owner identity. Auto-filled from the caller's agent identity \
+when omitted by MCP runtime clients."""

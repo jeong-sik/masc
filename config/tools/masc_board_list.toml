@@ -1,0 +1,168 @@
+name = "masc_board_list"
+description = """
+List MASC internal board posts and return post_id values for follow-up \
+masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when \
+you need recent board state or a post_id and do not already have one."""
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Max posts to return"
+default = 20
+minimum = 1
+maximum = 100
+
+# The enum mirrors Board_core_classify.valid_visibility_strings (issue
+# #8392: hand-rolled enums drop constructors); test_enum_mirror_sync
+# compares the published values against the handler.
+[[params]]
+name = "visibility"
+type = "string"
+enum = ["public", "unlisted", "internal", "direct"]
+description = "Filter by visibility (public | unlisted | internal | direct)"
+
+[[params]]
+name = "hearth"
+type = "string"
+max_length = 100
+description = "Filter by SubBoard slug or hearth topic (e.g. ops, research)"
+
+[[params]]
+name = "random"
+type = "boolean"
+description = "Shuffle posts randomly (default: false)"
+
+[[params]]
+name = "offset"
+type = "integer"
+description = "Skip first N posts (default: 0)"
+minimum = 0
+maximum = 1000
+
+# The enum mirrors Board_dispatch.valid_sort_order_strings (issue #8449).
+[[params]]
+name = "sort_by"
+type = "string"
+enum = ["hot", "trending", "recent", "updated", "discussed"]
+description = "Sort order (default: hot)"
+
+[[params]]
+name = "exclude_system"
+type = "boolean"
+description = "Exclude system posts like Activity Reports (default: false)"
+
+[[params]]
+name = "exclude_automation"
+type = "boolean"
+description = "Exclude automation posts (heartbeat, probes, etc.) (default: false)"
+
+[[params]]
+name = "author"
+type = "string"
+max_length = 100
+description = "Filter posts by author name (case-insensitive substring match)"
+
+[[params]]
+name = "exclude_author"
+type = "string"
+max_length = 100
+description = """
+Exclude posts by author name (case-insensitive substring match). \
+Pass your own agent name to avoid self-referential loops."""
+
+[[params]]
+name = "since"
+type = "number"
+description = """
+Unix timestamp. Posts with activity after this time show an \
+activity indicator"""
+
+[[params]]
+name = "compact"
+type = "boolean"
+default = true
+description = """
+Compact one-line per post. Set false for full \
+body/TTL/visibility"""
+
+[keeper_projection]
+description = """
+List recent MASC Board posts and discover post_id values for follow-up \
+masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this \
+when you need board state, recent posts, or a post_id and do not already have \
+one. Filter by hearth (topic channel) to see specific topics. Returns post_id, \
+author, hearth, timestamp, vote_count, comment_count, and content preview for \
+each post."""
+additional_properties = false
+
+[[keeper_projection.params]]
+name = "hearth"
+type = "string"
+description = """
+Filter by SubBoard slug or topic channel (e.g. \
+code-review, research)"""
+
+# #18472 widening removed: a multi-type schema trips agent-core boundary
+# fail-closed and crashes the keeper cycle, so limit stays a single scalar
+# "integer". Tool_input_validation rejects a string limit against this
+# integer schema, so the description must ask for a bare integer, not a
+# numeric string (codex #25274 P2).
+[[keeper_projection.params]]
+name = "limit"
+type = "integer"
+default = 20
+minimum = 1
+maximum = 50
+description = """
+Max posts to return (default: 20, max: 50). Must \
+be a bare integer (e.g. 20); a quoted value is \
+rejected."""
+
+# Issue #8513: mirrors Board_dispatch.valid_sort_order_strings. The schema
+# used to expose only 3 of 5 sort orders.
+[[keeper_projection.params]]
+name = "sort_by"
+type = "string"
+enum = ["hot", "trending", "recent", "updated", "discussed"]
+description = "Sort order (default: recent)"
+
+# Mirror masc_board_list: the board_list backend (board_tool_post.ml
+# handle_post_list) already reads compact (default true), but the keeper
+# surface omitted it, so a keeper could never request full output and a
+# live Keeper's compact arg was rejected as an unsupported field.
+# additionalProperties stays false — unknown fields remain fail-closed.
+[[keeper_projection.params]]
+name = "compact"
+type = "boolean"
+default = true
+description = """
+Compact one-line per post. Set false for full \
+body/TTL/visibility"""
+
+[[keeper_projection.params]]
+name = "exclude_author"
+type = "string"
+max_length = 100
+description = """
+Exclude posts by author name (case-insensitive substring \
+match). Pass your own keeper name to avoid self-referential \
+loops when reading the board."""
+
+[[keeper_projection.params]]
+name = "exclude_system"
+type = "boolean"
+description = """
+Exclude system posts such as task verdict receipts and \
+Activity Reports (default: false)."""
+
+[[keeper_projection.params]]
+name = "exclude_automation"
+type = "boolean"
+description = """
+Exclude automation posts such as heartbeats and probes \
+(default: false)."""
+
+[[keeper_projection.params]]
+name = "if_revision"
+type = "string"
+description = "Optional producer revision from the previous masc_board_list snapshot; matching revisions return unchanged."

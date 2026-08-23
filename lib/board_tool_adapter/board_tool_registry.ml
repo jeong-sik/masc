@@ -1,10 +1,11 @@
 (** Board_tool_registry — tool schema list advertised to MCP clients.
 
-    Re-exports the per-tool schemas from {!Board_tool_schemas} and
-    defines the inline-only ones (delete, cleanup, curation_read,
-    curation_submit) for which a separate schemas module wasn't created
-    when the original board_tool.ml grew. Order in {!tools} matches the
-    original advertisement order from the pre-split board_tool.ml.
+    Re-exports the per-tool schemas from {!Board_tool_schemas} (read from
+    the embedded [config/tools/masc_board_*.toml] declarations, curation
+    pair included) and defines the two inline-only ones (delete, cleanup)
+    for which a separate schemas module wasn't created when the original
+    board_tool.ml grew. Order in {!tools} matches the original
+    advertisement order from the pre-split board_tool.ml.
 
     Stage 10 split of lib/board_tool.ml. *)
 
@@ -98,83 +99,12 @@ let board_tool_cleanup : Masc_domain.tool_schema =
   }
 ;;
 
-(** All board tools. *)
 let board_tool_curation_read : Masc_domain.tool_schema =
-  { name = Tool_name.Board_name.(to_string Board_curation_read)
-  ; description =
-      "Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, \
-       highlights, tag suggestions, answer matches, rationale, and operator-auditable \
-       provenance. Returns null when no snapshot has been submitted \
-       yet."
-  ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-  }
+  Board_tool_schemas.schema_of_board_name Tool_name.Board_name.Board_curation_read
 ;;
 
 let board_tool_curation_submit : Masc_domain.tool_schema =
-  { name = Tool_name.Board_name.(to_string Board_curation_submit)
-  ; description =
-      "Submit an AI curation snapshot for the board. This records summary, recommended \
-       ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
-       without mutating board posts/comments/votes."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; ( "properties"
-          , `Assoc
-              [ ( "submitted_by"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "description"
-                      , `String "Submitting agent identifier" )
-                    ] )
-              ; ( "summary"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "description"
-                      , `String "Short TL;DR summary of the current board window" )
-                    ] )
-              ; ( "ordering"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; "items", `Assoc [ "type", `String "string" ]
-                    ; "description", `String "Recommended post id reading order"
-                    ] )
-              ; ( "highlights"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; "items", `Assoc [ "type", `String "string" ]
-                    ; "description", `String "Important post ids to highlight"
-                    ] )
-              ; ( "tag_suggestions"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; "description", `String "Objects with post_id, tags[], rationale"
-                    ] )
-              ; ( "answer_matches"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; ( "description"
-                      , `String
-                          "Objects with question_post_id, answer_post_id, score, \
-                           rationale" )
-                    ] )
-              ; ( "rationale"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "description"
-                      , `String "Required explanation for the curation decision" )
-                    ] )
-              ; ( "provenance"
-                , `Assoc
-                    [ "type", `String "object"
-                    ; ( "description"
-                      , `String
-                          "Audit metadata such as source window and prompt/run id" )
-                    ] )
-              ] )
-        ; "required", `List [ `String "submitted_by"; `String "rationale" ]
-        ]
-  }
+  Board_tool_schemas.schema_of_board_name Tool_name.Board_name.Board_curation_submit
 ;;
 
 (** {1 Typed operation projection} *)

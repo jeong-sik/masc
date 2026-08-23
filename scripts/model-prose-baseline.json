@@ -56,12 +56,8 @@
       "count": 11
     },
     "lib/board_tool_adapter/board_tool_registry.ml": {
-      "bytes": 1561,
-      "count": 21
-    },
-    "lib/board_tool_adapter/board_tool_schemas.ml": {
-      "bytes": 7303,
-      "count": 86
+      "bytes": 790,
+      "count": 11
     },
     "lib/eval_calibration.ml": {
       "bytes": 490,
@@ -206,10 +202,6 @@
     "lib/tool_surface/tool_help_registry.ml": {
       "bytes": 3049,
       "count": 43
-    },
-    "lib/tool_surface/tool_shard_types_board_keeper_projection.ml": {
-      "bytes": 4464,
-      "count": 40
     },
     "lib/tool_surface/tool_shard_types_schemas_base.ml": {
       "bytes": 2125,

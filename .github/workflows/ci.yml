@@ -1132,6 +1132,7 @@ jobs:
             @test/runtest-test_sse_stream \
             @test/runtest-test_task_cache_invariant_13397 \
             @test/runtest-test_task_status_vocabulary \
+            @test/runtest-test_board_tool_toml_parity \
             @test/runtest-test_tool_contract_truth \
             @test/runtest-test_tool_definition_toml \
             @test/runtest-test_voice_command_descriptor_parity

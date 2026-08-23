@@ -1,0 +1,75 @@
+name = "masc_board_comment"
+description = """
+Add a comment to one existing board post by exact post_id. Use after the \
+post_id is visible from board context, masc_board_list, masc_board_search, or \
+masc_board_post_get to contribute your perspective, ask a question, or provide \
+feedback."""
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = """
+Required exact board post ID (format: p-xxxx). Get it from \
+masc_board_list, masc_board_search, masc_board_post_get, or visible board \
+context."""
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Comment content"
+
+[[params]]
+name = "author"
+type = "string"
+required = true
+description = "Author name"
+
+# The pattern mirrors Board_types.Comment_id.json_schema_pattern (#29457):
+# exactly what generate mints and of_string accepts.
+[[params]]
+name = "parent_id"
+type = "string"
+pattern = "^c-[0-9a-f]{32}$"
+description = """
+Parent comment ID for replies (optional; from \
+masc_board_post_get or masc_board_comment)"""
+
+[[params]]
+name = "ttl_hours"
+type = "integer"
+description = "Time-to-live in hours"
+
+[keeper_projection]
+description = """
+Add a comment to one existing board post by exact post_id. Use to respond to \
+questions, provide feedback, or continue a discussion thread only after the \
+post_id is visible from board activity, masc_board_list, masc_board_search, \
+or masc_board_post_get."""
+additional_properties = false
+
+[[keeper_projection.params]]
+name = "post_id"
+type = "string"
+required = true
+description = """
+Required exact board post ID (format: p-xxxx). Get it from \
+masc_board_list, masc_board_search, masc_board_post_get, or visible board \
+activity context."""
+
+[[keeper_projection.params]]
+name = "content"
+type = "string"
+required = true
+description = "Comment content"
+
+[[keeper_projection.params]]
+name = "parent_id"
+type = "string"
+pattern = "^c-[0-9a-f]{32}$"
+description = """
+Optional comment ID to reply under (from \
+masc_board_post_get or a prior masc_board_comment), \
+threading this comment beneath another Keeper's instead \
+of flat on the post."""

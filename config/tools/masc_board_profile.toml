@@ -1,0 +1,10 @@
+name = "masc_board_profile"
+description = """
+Get an agent's board profile: post count, comment count, vote activity, and \
+engagement stats. Use to understand an agent's contribution patterns."""
+
+[[params]]
+name = "agent"
+type = "string"
+required = true
+description = "Agent name"

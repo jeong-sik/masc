@@ -356,6 +356,72 @@ let params_of_value ~context value =
 
 (* ── Tool definition ──────────────────────────────────────────────────── *)
 
+type loaded =
+  { schema : Masc_domain.tool_schema
+  ; keeper_projection : Masc_domain.tool_schema option
+  }
+
+let assemble_input_schema ~params ~additional_properties : Yojson.Safe.t =
+  let properties = List.map (fun p -> p.param_name, p.param_json) params in
+  let required =
+    params
+    |> List.filter (fun p -> p.param_required)
+    |> List.map (fun p -> `String p.param_name)
+  in
+  `Assoc
+    ([ "type", `String "object"; "properties", `Assoc properties ]
+     @ (match required with
+        | [] -> []
+        | _ :: _ -> [ "required", `List required ])
+     @ (match additional_properties with
+        | None -> []
+        | Some flag -> [ "additionalProperties", `Bool flag ]))
+;;
+
+let keeper_projection_of_pairs ~name pairs =
+  let context = "keeper_projection" in
+  let* description =
+    match List.assoc_opt "description" pairs with
+    | None -> Error (sprintf "%s is missing the required key \"description\"" context)
+    | Some value ->
+      as_non_empty_string ~context:(sprintf "%s.description" context) value
+  in
+  let* additional_properties =
+    match List.assoc_opt "additional_properties" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* flag =
+        as_bool ~context:(sprintf "%s.additional_properties" context) value
+      in
+      Ok (Some flag)
+  in
+  let* params =
+    match List.assoc_opt "params" pairs with
+    | None -> Ok []
+    | Some value -> params_of_value ~context:(sprintf "%s.params" context) value
+  in
+  let* () =
+    let known key =
+      List.exists
+        (String.equal key)
+        [ "description"; "additional_properties"; "params" ]
+    in
+    let rec walk = function
+      | [] -> Ok ()
+      | (key, (_ : Otoml.t)) :: rest ->
+        if known key
+        then walk rest
+        else Error (sprintf "%s: unknown key %S" context key)
+    in
+    walk pairs
+  in
+  Ok
+    { Masc_domain.name
+    ; description
+    ; input_schema = assemble_input_schema ~params ~additional_properties
+    }
+;;
+
 let tool_of_pairs ~name pairs =
   let* declared_name =
     match List.assoc_opt "name" pairs with
@@ -386,11 +452,26 @@ let tool_of_pairs ~name pairs =
     | None -> Ok []
     | Some value -> params_of_value ~context:"params" value
   in
+  let* keeper_projection =
+    match List.assoc_opt "keeper_projection" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* projection_pairs = as_table_pairs ~context:"keeper_projection" value in
+      let* projection =
+        keeper_projection_of_pairs ~name:declared_name projection_pairs
+      in
+      Ok (Some projection)
+  in
   let* () =
     let known key =
       List.exists
         (String.equal key)
-        [ "name"; "description"; "additional_properties"; "params" ]
+        [ "name"
+        ; "description"
+        ; "additional_properties"
+        ; "params"
+        ; "keeper_projection"
+        ]
     in
     let rec walk = function
       | [] -> Ok ()
@@ -399,25 +480,13 @@ let tool_of_pairs ~name pairs =
     in
     walk pairs
   in
-  let properties = List.map (fun p -> p.param_name, p.param_json) params in
-  let required =
-    params
-    |> List.filter (fun p -> p.param_required)
-    |> List.map (fun p -> `String p.param_name)
-  in
-  let fields =
-    [ "type", `String "object"; "properties", `Assoc properties ]
-    @ (match required with
-       | [] -> []
-       | _ :: _ -> [ "required", `List required ])
-    @ (match additional_properties with
-       | None -> []
-       | Some flag -> [ "additionalProperties", `Bool flag ])
-  in
   Ok
-    { Masc_domain.name = declared_name
-    ; description
-    ; input_schema = `Assoc fields
+    { schema =
+        { Masc_domain.name = declared_name
+        ; description
+        ; input_schema = assemble_input_schema ~params ~additional_properties
+        }
+    ; keeper_projection
     }
 ;;
 
@@ -460,7 +529,7 @@ let validate_embedded ~read ~files =
       | None -> Error (sprintf "embedded tool definition unreadable: %s" rel)
       | Some contents ->
         (match load ~name ~contents with
-         | Ok (_ : Masc_domain.tool_schema) -> Ok ()
+         | Ok (_ : loaded) -> Ok ()
          | Error message -> Error message))
   in
   List.fold_left validate_one (Ok ()) files

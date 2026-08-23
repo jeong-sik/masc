@@ -397,10 +397,6 @@ let batch_add_tasks ?created_by config tasks =
        tasks)
 ;;
 
-let batch_add_tasks_with_contracts ?created_by config tasks =
-  batch_add_tasks_internal ?created_by config tasks
-;;
-
 let batch_add_tasks_with_contracts_result ?created_by config tasks =
   batch_add_tasks_internal_with_result ?created_by config tasks
 ;;

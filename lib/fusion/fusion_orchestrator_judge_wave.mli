@@ -15,10 +15,6 @@ type judge_run =
 
 type clock
 
-val make_clock
-  :  now_opt:(unit -> float option)
-  -> clock
-
 val make_runtime_clock : unit -> clock
 (** Build a clock from the current domain-local {!Masc_eio_env}. Missing
     runtime env never blocks execution and produces unavailable elapsed observations. *)

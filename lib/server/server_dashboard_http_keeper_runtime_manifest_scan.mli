@@ -56,15 +56,10 @@ val make_runtime_manifest_scan :
   scan_scope:string ->
   runtime_manifest_scan
 
-val push_bounded : 'a Queue.t -> int -> 'a -> unit
 val queue_to_list : 'a Queue.t -> 'a list
 val runtime_manifest_scan_diagnostics_json : runtime_manifest_scan -> Yojson.Safe.t
-val increment_event_count : runtime_manifest_scan -> Keeper_runtime_manifest.event_kind -> unit
-
 val runtime_manifest_scan_event_count :
   runtime_manifest_scan -> Keeper_runtime_manifest.event_kind -> int
-
-val max_int_opt : int option -> int -> int option
 
 (** Fold one manifest row into the scan. Returns the updated scan; the
     [Queue.t] and [Hashtbl.t] fields are shared with the argument and are

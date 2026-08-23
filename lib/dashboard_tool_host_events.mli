@@ -86,16 +86,3 @@ type assignment_snapshot = {
   assignment_id : string;
 }
 
-val record_assignment :
-  ?fs:'fs ->
-  Workspace_utils.config ->
-  assignment_snapshot ->
-  unit
-(** [record_assignment ?fs config snapshot] forwards to
-    {!Telemetry_eio.track_tool_assigned}.  No callers today, but the
-    surface is exposed because the dashboard tool-assignment card is a
-    documented adjacent feature (see the dashboard runbook entry on
-    "tool-assigned vs tool-host-failure correlation").  Hiding it
-    would force a future "wire up the assignment event" PR to either
-    re-implement the telemetry call or to first reopen the surface —
-    same calculus as cycle 82 (dashboard_tool_source_freshness). *)

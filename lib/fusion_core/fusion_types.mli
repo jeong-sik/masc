@@ -32,10 +32,6 @@ val add_usage : usage -> usage -> usage
     태운 토큰을 잃는 undercount를 막는다(적대 리뷰 #22093 all-fail). *)
 val sum_error_usage : ('id * ('ok, 'msg * usage) result) list -> usage
 
-(** [first_error_message results]는 results의 첫 [Error] 메시지를 추출한다(usage는 버림).
-    [Error]가 없으면 [None]. all-fail 분기의 대표 메시지 선정용. *)
-val first_error_message : ('id * ('ok, 'msg * usage) result) list -> 'msg option
-
 (** [all_fail_error ~fallback results]는 전원 실패 경로의 회계를 한 번에 계산한다:
     [sum_error_usage]로 실패 usage를 합산하고 첫 [Error] 메시지를 대표로 묶는다.
     [Error]가 없으면(도달 불가) [fallback]과 합산 usage(빈이면 zero)를 묶는다
@@ -127,9 +123,6 @@ type skip_reason =
       (** 응답은 있으나 런타임 quorum(min_answered) 미달 — N-of-M 정책.
           전멸([No_panel_answers])과 구분되는 사유다. *)
 [@@deriving yojson, show, eq]
-
-val render_skip_reason : skip_reason -> string
-(** Operator/log boundary renderer for {!skip_reason}. *)
 
 (** judge 실행 전 panel 입력 계약 검사 (런타임 quorum = preset.min_answered).
     응답 0이면 [Some (No_panel_answers _)], 0 < 응답 < [min_answered]면
@@ -312,9 +305,6 @@ type fusion_trigger =
   | Operator_requested
   | Harness_eval  (** eval 하네스가 결정론적으로 구동 *)
 [@@deriving yojson, show, eq]
-
-(** 안정적 짧은 라벨 (로깅·메트릭·board meta용). [show]의 장황한 출력 대신 사용. *)
-val trigger_label : fusion_trigger -> string
 
 (** {1 심의 요청} *)
 

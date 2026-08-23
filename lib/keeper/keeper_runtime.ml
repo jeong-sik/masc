@@ -580,18 +580,6 @@ let stop_supervisor_sweep base_path =
       Hashtbl.remove supervisor_sweeps base_path
     | None -> ())
 
-let update_supervisor_sweep_interval base_path interval_sec =
-  with_sweeps_ro (fun () ->
-    match Hashtbl.find_opt supervisor_sweeps base_path with
-    | Some pulse ->
-      let rhythm : Pulse.rhythm =
-        { base_s = interval_sec; min_s = interval_sec;
-          max_s = interval_sec; quiet = (0, 0) }
-      in
-      Pulse.set_rhythm pulse rhythm;
-      true
-    | None -> false)
-
 let start_supervisor_sweep ctx =
   let base_path = ctx.config.base_path in
   if supervisor_sweep_running base_path then ()

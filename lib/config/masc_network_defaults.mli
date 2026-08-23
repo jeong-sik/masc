@@ -51,9 +51,6 @@ val openai_chat_completions_path : string
     Agent Core's internal default in [api_openai.ml]. *)
 val chat_completions_path : string
 
-(** [/v1/models]. *)
-val openai_models_path : string
-
 (** {1 CLI transport discriminator} *)
 
 (** ["cli:"] — prefix marking a CLI-backed transport (e.g.
@@ -114,8 +111,6 @@ val vite_dev_default_port : int
 val vite_dev_default_origins : string list
 
 (** {1 SearXNG & OpenTelemetry} *)
-
-val searxng_default_port : int
 
 val searxng_default_url : string
 

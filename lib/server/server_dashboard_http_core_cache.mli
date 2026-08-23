@@ -11,10 +11,6 @@ val realtime_cache_ttl_s : float
 val feature_health_cache_ttl_s : float
 val dashboard_projection_cache_ttl_s : float
 
-val board_projection_cache_prefixes : string list
-(** Cache-key prefixes of every cached board projection
-    ([/api/v1/dashboard/board], [/api/v1/board/list], hearths). *)
-
 val invalidate_board_projections : unit -> unit
 (** Drop every cached board projection. Called on each board write so the
     next read, including the one the [notifications/board] SSE event

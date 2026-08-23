@@ -245,15 +245,3 @@ let mutate ?(timeout_sec = 10.0) ~mutation ?(variables = `Null) ()
   | Ok raw -> parse_response raw
 ;;
 
-(** Convenience: extract a mutation result (success/message). *)
-let extract_mutation_result field_name data : (bool * string option, string) result =
-  match Json_util.assoc_member_opt field_name data with
-  | None | Some `Null ->
-    Error ("Field " ^ field_name ^ " not found in response")
-  | Some field ->
-    let success =
-      Json_util.get_bool field "success" |> Option.value ~default:false
-    in
-    let message = Json_util.get_string field "message" in
-    Ok (success, message)
-;;

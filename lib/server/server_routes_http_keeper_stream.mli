@@ -177,8 +177,6 @@ type turn_submission =
       ; extra_mentions : Keeper_identity.Keeper_id.t list
       }
 
-val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
-
 val process_single_turn :
   user_row_origin:Keeper_chat_store.user_row_origin ->
   submission:turn_submission ->

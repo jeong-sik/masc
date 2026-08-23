@@ -17,7 +17,6 @@ type context_summary =
 
 val log_kind_label : Tui_decode.log_kind -> string
 val log_channel_label : Tui_decode.log_channel -> string
-val message_count_label : int option -> string
 val usage_label : input:int option -> output:int option -> string
 val latency_label : int option -> string
 val cost_label : float option -> string

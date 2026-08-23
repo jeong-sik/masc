@@ -25,26 +25,6 @@ val runtime_manifest_context :
   keeper_turn_id:int ->
   Keeper_runtime_manifest.turn_context
 
-val append_runtime_manifest :
-  config:Workspace.config ->
-  keeper_name:string ->
-  agent_name:string ->
-  trace_id:string ->
-  generation:int ->
-  runtime_id:string ->
-  ?status:string ->
-  ?decision:Yojson.Safe.t ->
-  ?keeper_turn_id:int ->
-  ?agent_core_turn_count:int ->
-  ?elapsed_ms:int ->
-  ?logical_seq:int ->
-  ?checkpoint_path:string ->
-  ?receipt_path:string ->
-  ?compaction_source:string ->
-  site:string ->
-  Keeper_runtime_manifest.event_kind ->
-  unit
-
 val cleanup_agent_setup :
   keeper_name:string -> Keeper_run_tools.agent_setup -> unit
 

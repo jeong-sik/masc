@@ -44,10 +44,6 @@ type tool_bundle =
 (** Per-keeper tool usage view from [Keeper_registry]. *)
 val tool_usage_for_keeper : string -> (string * Keeper_types.tool_call_entry) list
 
-(** Most-recently-used tool names for a keeper, capped to [limit]
-    (default 5). *)
-val recent_tools_for_keeper : ?limit:int -> string -> string list
-
 (** Record an internal keeper tool call in the telemetry registry. *)
 val record_keeper_internal_tool_call
   :  tool_name:string

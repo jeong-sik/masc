@@ -302,11 +302,6 @@ val collect_board_events_without_advancing_cursor :
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
-val board_signal_match :
-  meta:Keeper_meta_contract.keeper_meta ->
-  signal:Board_dispatch.board_signal ->
-  board_signal_match
-
 (** RFC-0266: build the actionable [pending_board_event] for a completed async
     [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
     event so the woken turn can inspect it as neutral Board context.
@@ -346,12 +341,6 @@ val pending_board_event_of_stimulus :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
   (pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
-
-val read_scheduled_automation_observation :
-  keeper_name:string option ->
-  config:Workspace.config ->
-  now:float ->
-  scheduled_automation_observation
 
 (** Build a world observation from workspace state and keeper metadata.
 
@@ -393,5 +382,3 @@ val keeper_cycle_decision :
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
-val should_run_keeper_cycle :
-  meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

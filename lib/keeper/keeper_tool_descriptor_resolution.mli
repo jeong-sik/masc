@@ -44,5 +44,3 @@ val runtime_decision : string -> runtime_decision_outcome
 val canonical_tool_name : string -> string
 (** Pure canonical internal-name projection. Unknown names are unchanged. *)
 
-val canonical_tool_name_observed : string -> string
-(** Canonical projection that records exactly one bounded routing observation. *)

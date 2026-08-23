@@ -79,16 +79,6 @@ val split_ws : string -> string list
 
 (** {1 Process introspection} *)
 
-val process_to_yojson : llama_process -> Yojson.Safe.t
-(** Renders the 10-field JSON object.  Field order matches the
-    record declaration; dashboards render in this order. *)
-
-val process_matches_runtime_ports :
-  int list -> llama_process -> bool
-(** [process_matches_runtime_ports ports process] returns [true]
-    iff [process.port] is in [ports].  Used to filter discovered
-    processes to those bound to MASC-managed ports. *)
-
 val discover_processes :
   unit -> (llama_process list, string) Result.t
 (** [discover_processes ()] runs [ps -ax -o pid=,command=]
@@ -125,20 +115,3 @@ val discover_processes :
 
 (** {1 Model discovery} *)
 
-val fetch_models_at :
-  string -> (string * string list, string) Result.t
-(** [fetch_models_at base_url] runs
-    [curl -sS --max-time 10 <base_url>/<openai_models_path>]
-    and parses the OpenAI-compatible response.
-
-    Returns [Ok (full_url, model_id_list)].  Errors:
-    - JSON parse failure: ["invalid llama models response: <e>"]
-    - subprocess failure: per [WEXITED]/[WSIGNALED]/[WSTOPPED]
-
-    The URL trailing-suffix is
-    {!Masc_network_defaults.openai_models_path} — pinning
-    centrally so all siblings hit the same path. *)
-
-val fetch_models : unit -> (string * string list, string) Result.t
-(** Convenience wrapper over {!fetch_models_at} using
-    {!Env_config.Local_runtime.server_url} as the base URL. *)

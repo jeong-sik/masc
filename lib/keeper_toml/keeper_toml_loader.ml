@@ -255,21 +255,6 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
     Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 ;;
 
-(** Update a field in a keeper TOML file on disk.
-    Uses atomic write (temp file + rename) to prevent corruption
-    from concurrent reads during the supervisor sweep.
-    Returns [Ok ()] or [Error reason]. *)
-let update_keeper_toml_field ~(path : string) ~(key : string) ~(value : string)
-  : (unit, string) result
-  =
-  match Safe_ops.read_file_safe path with
-  | Error e -> Error (Printf.sprintf "cannot read %s: %s" path e)
-  | Ok content ->
-    (match update_field_in_content ~table:"keeper" ~key ~value content with
-     | Error e -> Error e
-     | Ok updated -> atomic_write_file ~path updated)
-;;
-
 let update_keeper_toml_bool_fields ~(path : string) fields
   : (unit, string) result
   =

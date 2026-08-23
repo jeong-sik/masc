@@ -1,8 +1,6 @@
 type t
 
 val of_provider_config : Llm_provider.Provider_config.t -> t
-val of_provider_configs : Llm_provider.Provider_config.t list -> t list
-
 val provider_cfg : t -> Llm_provider.Provider_config.t
 
 val model_health_key : t -> string

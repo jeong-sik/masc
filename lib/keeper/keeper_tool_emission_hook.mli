@@ -75,8 +75,6 @@ val accumulator_size : accumulator -> int
 
     Tests and other call sites that need an isolated accumulator
     should use [create_accumulator] instead. *)
-val global_accumulator : accumulator
-
 (** Tier K4c — per-keeper accumulator registry.
 
     Look up (or lazily create) the accumulator owned by [keeper_name].

@@ -42,8 +42,6 @@ val tool_failure_class_of_yojson :
   Yojson.Safe.t -> (tool_failure_class, string) result
 
 val pp_tool_failure_class : Format.formatter -> tool_failure_class -> unit
-val show_tool_failure_class : tool_failure_class -> string
-
 val tool_failure_class_to_string : tool_failure_class -> string
 val tool_failure_class_of_string : string -> tool_failure_class option
 

@@ -31,8 +31,6 @@ val runtime_kind_of_binding : Runtime_binding.t -> string
 
 val local_runtime_label : string -> string
 
-val normalize_runtime_name_for_bucket : string -> string
-
 val label_matches_runtime_id : label:string -> runtime_id:string -> bool
 
 val provider_name_matches_default_local_openai_runtime : string -> bool

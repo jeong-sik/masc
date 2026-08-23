@@ -56,7 +56,6 @@ val mark_completed :
 
 val list_runs : t -> run list
 val get : t -> run_id:string -> run option
-val review_kind_label : review_kind -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
 

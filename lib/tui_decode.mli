@@ -191,7 +191,6 @@ val decode_context_observation :
   (context_observation, string) result
 val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
-val http_status_error : status_code:int -> body:string -> string
 val decode_json_response_body :
   allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
@@ -199,7 +198,6 @@ val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result
 val required_int_field : Yojson.Safe.t -> string -> (int, string) result
 val int_field_or : Yojson.Safe.t -> string -> default:int -> (int, string) result
-val required_display_field : Yojson.Safe.t -> string -> (string, string) result
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result

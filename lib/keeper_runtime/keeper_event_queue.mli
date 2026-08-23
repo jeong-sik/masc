@@ -291,12 +291,6 @@ val dequeue : t -> (stimulus * t) option
     empty. The Policy Layer must call this at the start of every
     [emit] turn to honour the KeeperEventQueue [TurnDequeue] action. *)
 
-val prepend_list : stimulus list -> t -> t
-(** [prepend_list stimuli q] puts [stimuli] back at the front of [q] while
-    preserving [stimuli]'s order. Used when a keepalive cycle crashes after
-    draining stimuli but before completing the turn, so restart/retry keeps an
-    at-least-once replay boundary. *)
-
 val remove_by_post_id : post_id -> t -> stimulus list * t
 (** Remove all stimuli whose [post_id] matches the argument, returning the
     removed stimuli in FIFO order plus the remaining queue. *)
@@ -308,13 +302,6 @@ val contains : t -> stimulus -> bool
 val uniq_stimuli : stimulus list -> stimulus list
 (** Remove duplicate stimuli by {!stimulus_identity_equal} while preserving the
     first occurrence order. *)
-
-val dedup_by_identity : t -> t
-(** Collapse duplicate durable-event identities in a queue. *)
-
-val remove_by_post_id_pair : post_id -> t -> t -> stimulus list * t * t
-(** Remove matching stimuli from two queues and return the de-duplicated
-    removed stimuli plus both remaining queues. *)
 
 val sort_by_urgency : t -> t
 (** Stable sort: [Immediate] < [Normal] < [Low]. Two stimuli of the

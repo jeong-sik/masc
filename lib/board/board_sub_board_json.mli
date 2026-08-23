@@ -9,8 +9,6 @@ val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 (** Accepts only the exact current persistence shape emitted for stored
     sub-boards. *)
 
-val dedupe_agent_ids : Agent_id.t list -> Agent_id.t list
-
 (** Parse a member-name list with owner injected, failing on the first
     invalid agent id. *)
 val parse_sub_board_members

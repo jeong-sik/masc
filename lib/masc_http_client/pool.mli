@@ -121,28 +121,6 @@ type body_progress = {
 
 val empty_body_progress : body_progress
 
-val request_with_idle_timeout :
-  t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  idle_timeout_sec:float ->
-  ?total_timeout_sec:float ->
-  method_:http_method ->
-  url:string ->
-  ?headers:(string * string) list ->
-  ?body:string ->
-  unit ->
-  (response * body_progress, string * body_progress) result
-(** Issue a request with body-idle cancellation. Chunk delivery resets
-    the idle timer; absence of bytes for [idle_timeout_sec] cancels the
-    fiber. [total_timeout_sec] is an optional hard cap that bounds the
-    request regardless of streaming activity (default: no hard cap;
-    keeper turn budget bounds the outer loop).
-
-    Progress is observed even on failure. Error string carries one of:
-    - ["idle timeout after %.1fs"]      (body silent past idle_timeout_sec)
-    - ["total timeout after %.1fs"]     (total_timeout_sec elapsed)
-    - any Piaf error message. *)
-
 (* ── Telemetry ─────────────────────────────────────────────────── *)
 
 (** Non-mutating pool snapshot for Otel_metric_store / dashboard. Phase D.4

@@ -17,8 +17,6 @@ val reset_for_testing : unit -> unit
 
 val get_proc_mgr : unit -> (Eio_unix.Process.mgr_ty Eio.Resource.t, string) result
 val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
-val get_cwd_default : unit -> (Eio.Fs.dir_ty Eio.Path.t, string) result
-
 (** Return true when an Eio process-spawn exception should retry via the Unix
     fallback path (e.g. bind-related subprocess transport errors on macOS). *)
 val should_retry_unix_fallback : exn -> bool

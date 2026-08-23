@@ -72,9 +72,6 @@ val read_limit_of_int : int -> read_limit
 
 val read_limit_to_int : read_limit -> int
 
-(** [default_read_entries] as a limit. *)
-val default_read_limit : read_limit
-
 val read_unified :
   base_path:string ->
   masc_root:string ->

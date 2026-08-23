@@ -57,8 +57,6 @@ type verdict =
   | Reject of string
 
 val verdict_constructor_name : verdict -> string
-val valid_verdict_strings : string list
-
 type gate =
   | Structured_tool
   | Invalid_verdict

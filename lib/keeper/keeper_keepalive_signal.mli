@@ -167,15 +167,7 @@ val stage_timing_to_json :
 
 val format_since_last_scheduled_autonomous : int option -> string
 
-val keepalive_entry_accepts_late_event :
-  ctx:'a context -> keeper_name:string -> bool
-
 val dispatch_keepalive_event :
   ctx:'a context -> keeper_name:string ->
   Keeper_state_machine.event -> unit
 
-val dispatch_keepalive_event_with_audit :
-  ctx:'a context -> keeper_name:string ->
-  events_fired:Keeper_state_machine.event list ->
-  selected_event:Keeper_state_machine.event ->
-  Keeper_state_machine.event -> unit

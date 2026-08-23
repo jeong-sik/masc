@@ -71,17 +71,6 @@ let canonical_keeper_name raw_name =
       if Keeper_config.validate_name trimmed then Some trimmed
       else canonical_keeper_name_from_agent_name trimmed
 
-let explicit_keeper_name raw_name =
-  let trimmed = String.trim raw_name in
-  if trimmed = "" then None
-  else
-    match strip_keeper_prefix trimmed with
-    | Some candidate when Keeper_config.validate_name candidate ->
-      Some candidate
-    | Some _ -> None
-    | None ->
-      if Keeper_config.validate_name trimmed then Some trimmed else None
-
 (* RFC-0232 §3.4 — structural keeper identity.  [of_string] is the single
    parse boundary: it folds case, then runs the same canonicalizers the
    legacy token-set expansion used, with [canonical_keeper_name_from_agent_name]
@@ -216,23 +205,3 @@ type parsed_identity = {
   trace_id : string option;
 }
 
-let parse_json_identity json =
-  let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-  let trace_id = Safe_ops.json_string_opt "trace_id" json in
-  let raw_keeper_name =
-    match Safe_ops.json_string_opt "keeper_name" json with
-    | Some v when String.trim v <> "" -> Some v
-    | _ -> Safe_ops.json_string_opt "name" json
-  in
-  let keeper_name =
-    match raw_keeper_name with
-    | Some value when String.trim value <> "" ->
-        (match explicit_keeper_name value with
-         | Some name -> name
-         | None -> String.trim value)
-    | _ ->
-        (match canonical_keeper_name_from_agent_name agent_name with
-         | Some name -> name
-         | None -> String.trim agent_name)
-  in
-  { keeper_name; agent_name; trace_id }

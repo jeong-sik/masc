@@ -164,11 +164,6 @@ let tail_order_of_fields fields =
   | Some _ ->
       Error "keeper_status argument \"tail_order\" must be a string"
 
-let tail_order_of_args args =
-  match status_argument_fields args with
-  | Error _ as error -> error
-  | Ok fields -> tail_order_of_fields fields
-
 let tail_order_to_string = Keeper_status_options_defaults.tail_order_to_string
 let all_tail_orders = Keeper_status_options_defaults.all_tail_orders
 let valid_tail_order_strings = Keeper_status_options_defaults.valid_tail_order_strings

@@ -17,8 +17,6 @@ type node_status =
   (* Generic / fallback *)
   | Observed | Workspace | Unset
 
-val node_status_to_string : node_status -> string
-
 (** {1 Span status}
 
     Separate lifecycle from {!node_status}.
@@ -105,10 +103,6 @@ val default_meta : Yojson.Safe.t
 
     [_to_yojson] always succeeds; [_of_yojson] returns [None] on any
     missing required field. *)
-
-val entity_to_yojson : entity_ref -> Yojson.Safe.t
-
-val entity_of_yojson : Yojson.Safe.t -> entity_ref option
 
 val event_to_yojson : event -> Yojson.Safe.t
 

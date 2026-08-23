@@ -116,10 +116,6 @@ let docker_info_security_options_optional ?timeout_sec () =
   | Error classified -> Error classified.message
 ;;
 
-let docker_info_security_options ~timeout_sec =
-  docker_info_security_options_optional ~timeout_sec ()
-;;
-
 type docker_preflight =
   { ok : bool
   ; image : string

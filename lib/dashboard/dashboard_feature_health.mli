@@ -48,9 +48,6 @@ val feature_health_item_to_json :
 
 val overview_json : feature_health_item list -> Yojson.Safe.t
 
-val features_by_category_json :
-  feature_health_item list -> Yojson.Safe.t
-
 (** Full dashboard payload: [generated_at], [overview],
     [features_by_category], [all_features]. *)
 val json : unit -> Yojson.Safe.t

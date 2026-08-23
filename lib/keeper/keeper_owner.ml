@@ -999,10 +999,6 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
   request t (Succeed_running_operation { operation_id; outcome_ref })
 ;;
 
-let fail_running_operation t ~operation_id ~kind ~detail ~outcome_ref =
-  request t (Fail_running_operation { operation_id; kind; detail; outcome_ref })
-;;
-
 let run_if_idle t lane run =
   match request t (Run_if_idle { lane; run }) with
   | Error _ as error -> error

@@ -30,10 +30,6 @@ let is_self_author ~self_ids (author : string) : bool =
     List.exists (Keeper_identity.Keeper_id.equal author_id) self_ids
 ;;
 
-let is_keeper_authored_message author =
-  Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
-;;
-
 type pending_kind =
   | Mention
   | Scope

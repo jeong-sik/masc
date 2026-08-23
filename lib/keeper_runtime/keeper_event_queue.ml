@@ -286,15 +286,6 @@ let dequeue (queue : t) : (stimulus * t) option =
      | [] -> None
      | s :: rest -> Some (s, { front = rest; back_rev = []; length = queue.length - 1 }))
 
-let prepend_list stimuli queue =
-  match stimuli with
-  | [] -> queue
-  | _ ->
-    { front = stimuli @ to_list queue
-    ; back_rev = []
-    ; length = queue.length + List.length stimuli
-    }
-
 let remove_by_post_id post_id queue =
   let removed, kept =
     queue
@@ -318,13 +309,6 @@ let uniq_stimuli stimuli =
     []
     stimuli
   |> List.rev
-
-let dedup_by_identity queue = queue |> to_list |> uniq_stimuli |> of_list
-
-let remove_by_post_id_pair post_id left right =
-  let left_removed, left' = remove_by_post_id post_id left in
-  let right_removed, right' = remove_by_post_id post_id right in
-  uniq_stimuli (left_removed @ right_removed), left', right'
 
 let sort_by_urgency (queue : t) : t =
   queue

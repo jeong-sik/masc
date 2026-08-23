@@ -212,8 +212,6 @@ type invariant_error =
 val schema_version : int
 val requires_admission_fence : t -> bool
 val cleanup_reason_label : cleanup_reason -> string
-val meta_disposition_to_string : meta_disposition -> string
-val meta_disposition_of_string : string -> (meta_disposition, string) result
 val meta_disposition_of_cleanup_reason : cleanup_reason -> meta_disposition
 val completion_action_to_string : completion_action -> string
 val completion_action_of_string : string -> (completion_action, string) result

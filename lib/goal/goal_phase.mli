@@ -58,8 +58,6 @@ type action =
 
 val action_to_string : action -> string
 val action_of_string : string -> action option
-val parse_action : string -> action option
-
 val all_actions : action list
 (** Every internal action in declaration order. Includes verifier-only ledger
     commits and is the SSOT for the exhaustive transition matrix. *)

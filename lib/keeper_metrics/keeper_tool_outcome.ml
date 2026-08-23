@@ -94,8 +94,3 @@ let of_json (json : Yojson.Safe.t) : t option =
   | _ -> None
 ;;
 
-let strip_from_json (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields -> `Assoc (List.filter (fun (k, _) -> not (String.equal k "typed_outcome")) fields)
-  | json -> json
-;;

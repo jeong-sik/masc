@@ -10,13 +10,6 @@
     candidate visit ("slot=... call_id=..."; "advance=a->b kind=..."). *)
 val flow_evidence_detail : Agent_core.Exact_output.flow_evidence -> string
 
-(** Typed reason a candidate slot was refused before dispatch, including the
-    token arithmetic of capacity refusals. Matched exhaustively so a new AGENT_CORE
-    disposition is a compile error here. *)
-val rejection_disposition_detail
-  :  Agent_core.Exact_output.candidate_rejection_disposition
-  -> string
-
 (** "slot=<id> <disposition>" for one rejected candidate. *)
 val candidate_rejection_detail
   :  Agent_core.Exact_output.candidate_rejection_receipt
@@ -34,9 +27,6 @@ val execution_cause_detail
 val raw_response_excerpt
   :  Agent_core.Exact_output.raw_response option
   -> string
-
-(** call_id + typed cause + raw-response excerpt for one execution error. *)
-val execution_error_detail : Agent_core.Exact_output.execution_error -> string
 
 (** Full rendering for [Flow_exact_execution_failed]: failing slot, execution
     error detail and the flow journey. *)

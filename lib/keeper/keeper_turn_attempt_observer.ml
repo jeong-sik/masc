@@ -79,12 +79,6 @@ let record_turn_start ~base_path ~keeper ~turn_id =
   record_metrics ~keeper observation
 ;;
 
-let current_state ~base_path ~keeper =
-  with_registered_entry ~base_path ~keeper (fun entry ->
-    Atomic.get entry.turn_attempt_state)
-  |> Option.join
-;;
-
 let reset_keeper ~base_path ~keeper =
   match Keeper_registry.get ~base_path keeper with
   | Some entry -> Atomic.set entry.turn_attempt_state None

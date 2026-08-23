@@ -14,8 +14,6 @@ type t = Llm_provider.Provider_config.t
 
 let of_provider_config (cfg : Llm_provider.Provider_config.t) : t = cfg
 
-let of_provider_configs (cfgs : Llm_provider.Provider_config.t list) : t list = cfgs
-
 let provider_cfg (t : t) : Llm_provider.Provider_config.t = t
 
 (* Provider-scoped health key retained for provider_attempt's single-provider

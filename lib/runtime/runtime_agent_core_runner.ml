@@ -8,8 +8,6 @@
 
 (* Runtime profile defaults (moved from Runtime module) *)
 
-let default_config_path = Runtime.config_path
-
 (* Named model execution *)
 
 let require_eio ?sw ?net () =

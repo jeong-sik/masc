@@ -105,18 +105,6 @@ let is_within_root_norm ~(root_norm : string) (path : string) : bool =
   | None, _ | _, None -> false
 ;;
 
-let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list) : bool =
-  match absolute_path_components target_norm with
-  | None -> false
-  | Some target ->
-    List.exists
-      (fun allowed_norm ->
-         match absolute_path_components allowed_norm with
-         | None -> false
-         | Some root -> Option.is_some (relative_components_under ~root ~target))
-      allowed_norms
-;;
-
 type confined_path =
   { root : string
   ; root_identity : resource_identity option
@@ -212,10 +200,6 @@ let confined_relative_path (target : confined_path) =
 let confined_host_path (target : confined_path) = target.host_path
 let confined_containment_path (target : confined_path) = target.containment_path
 let confined_endpoint_components (target : confined_path) = target.endpoint_components
-let confined_endpoint_relative_path (target : confined_path) =
-  relative_path_of_components target.endpoint_components
-;;
-
 let path_effect_projection_error_to_string = function
   | Allowed_root_identity_unavailable { root } ->
     Printf.sprintf

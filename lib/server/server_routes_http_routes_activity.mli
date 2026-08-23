@@ -14,9 +14,6 @@ type board_context_inference_target_source =
   | Explicit_target
   | Post_author
 
-val board_context_inference_target_source_to_string :
-  board_context_inference_target_source -> string
-
 type board_context_inference_request = {
   post_id : string;
   target_keeper : string option;

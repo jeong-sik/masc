@@ -222,9 +222,6 @@ type worker_cancel_source =
   | Operator_request
   | Runtime_cancellation
 
-val worker_cancel_source_to_string : worker_cancel_source -> string
-(** Stable wire label for cancellation provenance. *)
-
 type worker_abort_reason =
   | Worker_cancelled of
       { cancelled_by : worker_cancel_source

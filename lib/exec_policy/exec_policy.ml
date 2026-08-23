@@ -42,10 +42,6 @@ let block_reason_to_string = function
 ;;
 
 
-let strict_syntax_policy : Exec_shell_gate.syntax_policy =
-  { allow_pipes = false; redirect_allowed = false }
-;;
-
 let tool_execute_syntax_policy ?(allow_pipes = true) ()
   : Exec_shell_gate.syntax_policy =
   { allow_pipes; redirect_allowed = false }
@@ -122,28 +118,6 @@ let parse_string_to_ir ~mode cmd =
     | Masc_exec.Parsed.Too_complex reason ->
       Error (block_reason_of_exec_too_complex (Unsupported_construct reason))
     | Masc_exec.Parsed.Parsed ir -> Ok ir)
-;;
-
-let command_context ir =
-  let verdict =
-    Exec_shell_gate.gate_typed
-      ~ir
-      ~syntax_policy:strict_syntax_policy
-      ~sandbox:Exec_shell_gate.host_sandbox
-      ()
-  in
-  match verdict with
-  | Allow context ->
-    (match validate_no_unquoted_glob context.Exec_shell_gate.ast with
-     | Error _ as err -> err
-     | Ok () -> Ok context)
-  | Reject { reason; _ } -> Error (block_reason_of_exec_reject reason)
-  | Cannot_parse _ -> Error Chain_or_redirect
-  | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
-;;
-
-let validate_command ir =
-  command_context ir |> Result.map (fun _ -> ())
 ;;
 
 let command_context_tool_execute

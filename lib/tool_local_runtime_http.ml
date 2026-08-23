@@ -212,14 +212,6 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
 let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
   http_post_json_text_with_status_with_headers ~timeout_sec ~url ~body_json ()
 
-let http_post_json_with_status ~timeout_sec ~url ~body_json =
-  match http_post_json_text_with_status ~timeout_sec ~url ~body_json with
-  | Error _ as err -> err
-  | Ok (http_status, payload) -> (
-      try Ok (http_status, Yojson.Safe.from_string payload)
-      with Yojson.Json_error msg ->
-        Error (Printf.sprintf "invalid json from %s: %s" url msg))
-
 let int_member json key =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> None

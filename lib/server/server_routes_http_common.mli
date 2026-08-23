@@ -130,8 +130,6 @@ val force_json_response : bool
 (** {1 Header builders} *)
 
 val mcp_headers : string -> string -> (string * string) list
-val mcp_transport_json_headers :
-  string -> string -> string -> (string * string) list
 val json_headers : string -> string -> string -> (string * string) list
 
 (** {1 SSE session control} *)

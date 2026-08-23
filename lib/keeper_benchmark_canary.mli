@@ -20,5 +20,4 @@ val build_manifest :
   -> Tool_call_quality_benchmark.benchmark_summary
   -> manifest
 
-val recommendation_to_yojson : recommendation -> Yojson.Safe.t
 val manifest_to_yojson : manifest -> Yojson.Safe.t

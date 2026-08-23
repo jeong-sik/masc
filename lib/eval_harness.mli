@@ -58,8 +58,6 @@ type ownership =
   | Self_owned
   | Foreign
 
-val ownership_to_string : ownership -> string
-
 type scenario = {
   id : string;
   name : string;

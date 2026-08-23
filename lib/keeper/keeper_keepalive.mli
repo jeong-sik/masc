@@ -33,8 +33,6 @@ val wakeup_keeper :
   string -> unit
 
 val not_in_registry_warn_cooldown_s : float
-val not_in_registry_warn_max_entries : int
-
 type not_in_registry_warn_decision =
   | Warn_unknown_keeper
   | Debug_throttled_unknown_keeper
@@ -145,4 +143,3 @@ val request_entry_stop : Keeper_registry.registry_entry -> unit
 val stop_keepalive_and_await :
   base_path:string -> string -> joined_stop_result
 
-val stop_all_keepalives : unit -> unit

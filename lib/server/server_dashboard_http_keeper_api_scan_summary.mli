@@ -44,10 +44,6 @@ val event_bus_summary_json
   :  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan
   -> Yojson.Safe.t
 
-(** [max_int_list_opt values] returns the maximum element of [values],
-    or [None] when [values] is empty. *)
-val max_int_list_opt : int list -> int option
-
 (** [selected_keeper_turn_id ?turn_id scan] returns [Some n] when
     [turn_id = Some n], otherwise the maximum [keeper_turn_ids] in
     [scan] (or [None] when the list is empty). *)

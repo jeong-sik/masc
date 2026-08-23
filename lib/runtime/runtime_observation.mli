@@ -94,25 +94,6 @@ type runtime_metrics_capture
     a {!runtime_observation} via
     {!runtime_observation_with_metrics}. *)
 
-val runtime_attempt_terminal_event_json :
-  ?slot_release_at_phase:string ->
-  ?productive_phase_elapsed_ms:int ->
-  ?retry_phase_elapsed_ms:int ->
-  model_id:string ->
-  model_label:string option ->
-  latency_ms:int option ->
-  error:string option ->
-  unit ->
-  Yojson.Safe.t
-(** Builds the structured JSON payload emitted to system_log for one
-    runtime candidate's terminal state. Exposed for tests so the shape
-    contract (`event`, `model_id`, `model_label`, `latency_ms`, `outcome`,
-    `error_message`, `slot_release_at_phase`,
-    `productive_phase_elapsed_ms`, `retry_phase_elapsed_ms`) is locked
-    against silent drift; downstream operators grep on these field names
-    when tracing why a runtime exhausted or why a keeper released its turn
-    slot instead of scheduling another degraded retry. *)
-
 val record_attempt_terminal :
   runtime_metrics_capture ->
   model_id:string ->
@@ -181,9 +162,3 @@ val runtime_metrics_json : unit -> Yojson.Safe.t
     [Runtime_agent] re-exposes it via the
     [include Runtime_observation] module. *)
 
-val runtime_observation_to_json :
-  runtime_observation -> Yojson.Safe.t
-(** Wire encoder for {!runtime_observation} — flattens
-    [attempts] / outcome metadata into a single [`Assoc].
-    Pinned because the runtime-include consumer
-    ([Runtime_agent]) re-exposes it. *)

@@ -126,14 +126,6 @@ module For_testing : sig
     generation:int -> Yojson.Safe.t -> bool
 end
 
-val invalidate_execution_cache_with_hooks_for_testing :
-  invalidate_execution_surface:(unit -> unit) ->
-  invalidate_light_cache:(unit -> unit) ->
-  unit ->
-  unit
-(** Test seam for the best-effort invalidation failure path. Production
-    callers should use {!invalidate_execution_cache}. *)
-
 val patch_keeper_dependent_caches :
   keeper_name:string ->
   event:Keeper_lifecycle_events.lifecycle_event ->

@@ -45,8 +45,6 @@ val default_agent_voices : unit -> (string * string) list
 val default_session_url : path:string -> string
 val session_endpoint_result : Voice_config.t -> (Voice_config.endpoint, string) result
 val session_mcp_url_of_endpoint : Voice_config.endpoint -> (string, string) result
-val session_health_url_of_endpoint : Voice_config.endpoint -> (string, string) result
-
 val http_request_for_tts
   :  Voice_config.endpoint
   -> api_key:string

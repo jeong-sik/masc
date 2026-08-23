@@ -16,10 +16,6 @@
     RFC-0029 candidate, tracked in #10710.  *)
 
 
-let normalize_model_name s =
-  let s = String.trim s in
-  Runtime_provider_binding.normalize_runtime_name_for_bucket s
-
 type keeper_gen_window_stats = {
   turns: int;
   usage_points: int;

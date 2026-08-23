@@ -55,13 +55,6 @@ exception
     ; violation : compaction_transition_spec_violation
     }
 
-val compaction_transition_violation_message
-  :  where:string
-  -> from:packed_compaction_stage
-  -> to_:packed_compaction_stage
-  -> violation:compaction_transition_spec_violation
-  -> string
-
 val raise_compaction_transition_violation
   :  where:string
   -> from:packed_compaction_stage

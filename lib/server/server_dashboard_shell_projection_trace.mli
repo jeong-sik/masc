@@ -33,10 +33,6 @@ type shell_projection_trace_snapshot =
   }
 
 val status_string : shell_projection_trace_status -> string
-val timing_top : shell_projection_timing list -> shell_projection_timing list
-val timing_json : shell_projection_timing -> Yojson.Safe.t
-val timing_log : shell_projection_timing list -> string
-
 val start : cache_key:string -> light:bool -> shell_projection_trace
 val start_projection : shell_projection_trace -> string -> unit
 val finish_projection : shell_projection_trace -> string -> int -> unit

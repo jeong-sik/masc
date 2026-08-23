@@ -29,14 +29,6 @@ type parsed_args = {
   autonomous_instructions_opt : string option;
 }
 
-let json_non_null_member_present key (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some `Null | None -> false
-      | Some _ -> true)
-  | _ -> false
-
 let parse_present_string_list_opt args key =
   match Json_util.assoc_member_opt key args with
   | None -> Ok None

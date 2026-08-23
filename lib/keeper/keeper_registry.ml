@@ -328,12 +328,6 @@ let exact_update_succeeded entry ~site = function
     false
 ;;
 
-let set_grpc_close ~base_path name close_fn =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> Atomic.set entry.grpc_close close_fn
-  | None -> ()
-;;
-
 let started_at ~base_path name =
   match get ~base_path name with
   | Some entry -> Some entry.started_at

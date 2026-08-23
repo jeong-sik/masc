@@ -26,13 +26,6 @@ val start_managed_container :
   unit ->
   (Yojson.Safe.t, string) result
 
-val stop_managed_containers :
-  ?keeper_name:string ->
-  config:Workspace.config ->
-  timeout_sec:float ->
-  unit ->
-  Keeper_sandbox_runtime.stop_result
-
 val stop_containers :
   ?keeper_name:string ->
   scope:stop_scope ->
@@ -96,10 +89,3 @@ val live_status_json :
     [include_repository_checkouts=false] skips Git checkout inspection for
     dashboard hot paths. *)
 
-val preflight_status_json :
-  timeout_sec:float -> Yojson.Safe.t option
-(** Run the global Docker preflight once and return its JSON
-    representation, or [None] when no preflight result is available.
-    Exposed so fleet renderers can run it a single time and feed the
-    cached value into many [live_status_json] calls instead of
-    repeating the expensive Docker probe per keeper. *)

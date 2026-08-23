@@ -84,9 +84,6 @@ let action_of_string = function
   | "record_proof_refuted" -> Some Record_proof_refuted
   | _ -> None
 
-let parse_action s =
-  String.trim s |> String.lowercase_ascii |> action_of_string
-
 module Public_action = struct
   type t =
     | Request_complete

@@ -109,9 +109,6 @@ val assoc_int_opt : string -> Yojson.Safe.t -> int option
 val assoc_bool_opt : string -> Yojson.Safe.t -> bool option
 (** [assoc_bool_opt name json] extracts bool field *)
 
-val assoc_float_opt : string -> Yojson.Safe.t -> float option
-(** [assoc_float_opt name json] extracts float field, coerces int to float *)
-
 val assoc_object_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 (** [assoc_object_opt name json] extracts the [`Assoc] field [name],
     returning [None] when the field is missing, null, or not an object.

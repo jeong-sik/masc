@@ -56,4 +56,3 @@ let max_string left right = max (of_string left) (of_string right) |> to_string
 
 let requires_operator_action status = rank status >= 3
 
-let requires_operator_action_string raw = raw |> of_string |> requires_operator_action

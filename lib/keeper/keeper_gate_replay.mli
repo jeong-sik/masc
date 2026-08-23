@@ -64,8 +64,6 @@ type outcome =
           remains unacknowledged. If the raw effect result still exists in
           process, later attempts repair persistence without rerunning it. *)
 
-val repair_stage_to_string : repair_stage -> string
-
 val outcome_to_string : outcome -> string
 (** Render operation, journal state, exact evidence byte count, and SHA-256
     only. Full replay output is never copied into operational logs. *)

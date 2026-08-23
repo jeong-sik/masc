@@ -569,6 +569,7 @@ jobs:
             check-doc-code-refs.sh \
             check-keeper-turn-content-boundary.sh \
             check-tool-error-format.sh \
+            check-turn-records-envelope-parity.sh \
             check-variants.sh
           do
             echo "::group::$s"

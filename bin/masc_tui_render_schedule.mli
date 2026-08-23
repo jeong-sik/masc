@@ -96,6 +96,32 @@ val project_board_read_scroll :
   int ->
   board_read_scroll
 
+(** {1 Keeper roster columns} *)
+
+val keeper_marker_width : int
+val keeper_status_width : int
+val keeper_flags_width : int
+val keeper_turns_width : int
+
+type keeper_columns = {
+  kcol_show_flags : bool;
+  kcol_show_runtime : bool;
+  kcol_name : int;
+  kcol_runtime : int;
+  kcol_task : int;
+}
+(** Plain-text cell budgets for one roster row, in cells. *)
+
+val allocate_keeper_columns : inner_width:int -> keeper_columns
+(** Divide the box's inner width across the roster columns. Columns drop from
+    the right as the terminal narrows; the keeper's name and its status never
+    drop. Above the minimum, slack goes to name and runtime before task. *)
+
+val keeper_columns_used_width : keeper_columns -> int
+(** Total cells the allocation occupies, separators included. Never exceeds the
+    [inner_width] it was allocated for, and equals it once that width admits
+    the minimum row. *)
+
 module Terminal_size_cache : sig
   type t
 

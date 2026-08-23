@@ -258,6 +258,50 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
                    ("Keeper chat operation response is invalid JSON: "
                   ^ detail))))
 
+(** Fetch the live keeper roster from [GET /api/v1/gate/keepers].
+
+    The Keepers surface needs one fact the durable metadata on disk cannot
+    give it: whether a keepalive fiber is running each keeper. This route is
+    [masc_keeper_list], the same reading the channel connectors use, and it
+    answers in a few kilobytes — the operator snapshot carries the same fact
+    inside a payload 150 times larger.
+
+    The status is returned rather than folded into an error string: this route
+    requires an operator token, and "no token" is a different thing for the
+    surface to say than "the read failed". *)
+let fetch_keeper_runtimes ~(host : string) ~(port : int) :
+    (int * string, string) result =
+  http_get ~host ~port ~path:"/api/v1/gate/keepers?detailed=true"
+
+(** POST a keeper lifecycle action ([boot] / [shutdown]).
+
+    Returns the HTTP status alongside the body: a paused owner refuses [boot]
+    with 409, and the caller routes that into the resume-then-boot recovery
+    rather than reporting it as a failure. Collapsing the status into an error
+    string would make that decision a substring match. *)
+let post_keeper_lifecycle ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(action : string) : (int * string, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/%s"
+      (percent_encode_path_segment keeper_name)
+      (percent_encode_path_segment action)
+  in
+  http_post ~headers:(auth_headers ()) ~host ~port ~path
+    ~body:Masc_tui_keeper_control.lifecycle_body
+
+(** POST a keeper directive ([pause] / [resume] / [wakeup]). *)
+let post_keeper_directive ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(action : string)
+    ~(operator_operation_id : string) : (int * string, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/directive"
+      (percent_encode_path_segment keeper_name)
+  in
+  let body =
+    Masc_tui_keeper_control.directive_body ~operator_operation_id action
+  in
+  http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
+
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/briefing"

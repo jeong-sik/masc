@@ -467,3 +467,26 @@ let load_fleet_safety ~(host : string) ~(port : int) :
   match fetch_fleet_safety ~host ~port with
   | Error err -> Error ("fleet safety load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fleet_safety json
+
+(** Load the live keeper roster. Truncation is carried into the typed roster
+    rather than dropped: a clamped list cannot answer whether a keeper the TUI
+    knows from disk has a running fiber, and the lifecycle actions depend on
+    that answer. *)
+let load_keeper_roster ~(host : string) ~(port : int) :
+    (Masc_tui_keeper_control.roster, Masc_tui_keeper_control.roster_failure)
+    result =
+  match fetch_keeper_runtimes ~host ~port with
+  | Error transport ->
+      Error (Masc_tui_keeper_control.Roster_unreachable transport)
+  | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
+      Error (Masc_tui_keeper_control.roster_failure_of_status ~status ~body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error (Masc_tui_keeper_control.Roster_malformed detail)
+      | json -> (
+          match Tui_decode.decode_keeper_runtime_list json with
+          | Error detail ->
+              Error (Masc_tui_keeper_control.Roster_malformed detail)
+          | Ok (rows, truncated, total) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~rows ~truncated ~total)))

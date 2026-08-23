@@ -29,6 +29,7 @@ type event = {
 
 (** Keeper metadata (from Tui_decode) *)
 type keeper = Tui_decode.keeper
+type keeper_runtime = Tui_decode.keeper_runtime
 
 (** A single metrics/log entry (from Tui_decode) *)
 type log_entry = Tui_decode.log_entry
@@ -215,6 +216,7 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_target_reaction_capacity: int;
   fs_reaction_capacity_shortfall: int;
   fs_bootable_names: string list;
+  fs_running_names: string list;
   fs_executable_names: string list;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
@@ -269,6 +271,17 @@ type state = {
   mutable overview_event_scroll: int;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* The live roster reading, separate from the durable one above: it answers
+     whether a keepalive fiber is running each keeper, which metadata on disk
+     cannot. It is typed rather than a plain list because "the roster did not
+     arrive" and "the roster arrived without this keeper" license different
+     lifecycle actions. *)
+  mutable keeper_roster: Masc_tui_keeper_control.roster;
+  mutable keeper_roster_error: string option;
+  mutable keeper_action_inflight:
+    (string * Masc_tui_keeper_control.action) option;
+  mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
+  mutable keeper_action_serial: int;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing. *)
@@ -336,6 +349,20 @@ type state = {
   refresh_interval: float;
 }
 
+(** One keeper as the Keepers surface reads it: durable pause from the
+    metadata row, live runtime from the roster. *)
+let keeper_reading (state : state) (keeper : keeper) :
+    Masc_tui_keeper_control.reading =
+  { name = keeper.k_name
+  ; paused = keeper.k_paused
+  ; liveness =
+      Masc_tui_keeper_control.liveness_of_roster state.keeper_roster
+        keeper.k_name
+  }
+
+let selected_keeper (state : state) =
+  List.nth_opt state.keepers state.keeper_cursor
+
 (** New Keeper messages require a complete roster observation. [state.keepers]
     may intentionally retain the previous complete roster while a detail or log
     view survives a transient metadata read failure, so membership alone is not
@@ -355,6 +382,11 @@ let create_state ~workspace ~port ~refresh_interval = {
   overview_event_scroll = 0;
   keepers = [];
   keepers_error = None;
+  keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
+  keeper_roster_error = None;
+  keeper_action_inflight = None;
+  keeper_action_pending = None;
+  keeper_action_serial = 0;
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;

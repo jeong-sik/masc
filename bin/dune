@@ -230,6 +230,7 @@
  (modules masc_tui_keeper_chat_projection)
  (libraries
   masc
+  masc_tui_credential
   masc.keeper_chat_operations
   masc.masc_random_id
   masc.masc_core
@@ -344,7 +345,7 @@
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
- (libraries masc yojson))
+ (libraries masc masc_tui_credential yojson))
 
 (library
  (name masc_tui_keeper_selection)
@@ -362,6 +363,10 @@
  (modules masc_tui_terminal_write_repair)
  (libraries masc_tui_render_schedule unix))
 
+(library
+ (name masc_tui_credential)
+ (modules masc_tui_credential))
+
 (executable
  (name masc_tui)
  (modules
@@ -376,6 +381,7 @@
  (libraries
   masc
   masc.auth
+  masc_tui_credential
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity

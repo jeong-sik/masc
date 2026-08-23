@@ -28,7 +28,7 @@ let sanitize_header_value value =
        | c -> c)
   |> String.trim
 
-let default_agent_name = "masc-tui"
+let default_agent_name = Masc_tui_credential.agent_name
 
 (* One name for the bearer the write routes require, so the header builder and
    the surfaces that report its absence cannot disagree about whether this
@@ -99,21 +99,33 @@ let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "POST failed" e)
 
+(* A refusal is about this client's credential, not about the surface that
+   asked for the data. Every surface used to paste the server's auth JSON into
+   the terminal -- "HTTP 401: {\"error\":\"[AuthError] Invalid token..." -- which
+   names neither what is wrong nor what clears it. Answered here because this
+   is the one place that knows what was presented. Other statuses keep the
+   server's own words: those are about the request, and the surface is right to
+   show them. *)
+let decode_json ~allow_empty ~status_code ~body =
+  match status_code with
+  | 401 | 403 ->
+      Error
+        (Masc_tui_credential.refusal
+           ~credential_sent:(operator_token_present ()))
+  | _ ->
+      Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
+
 (** GET a JSON response from a dashboard endpoint. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
   match http_get ~host ~port ~path with
   | Error e -> Error e
-  | Ok (status_code, body) ->
-      Masc.Tui_decode.decode_json_response_body ~allow_empty:false ~status_code
-        ~body
+  | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
-  | Ok (status_code, body) ->
-      Masc.Tui_decode.decode_json_response_body ~allow_empty:true ~status_code
-        ~body
+  | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
 let post_keeper_chat ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :

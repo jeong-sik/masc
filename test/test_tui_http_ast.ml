@@ -1084,6 +1084,22 @@ let test_missing_operator_token_is_reported () =
        ~callee:"Keeper_control.roster_failure_message"
        ~label:"credential_sent"
        ~nested_callee:"Masc_tui_http.operator_token_present");
+  (* Every surface reads JSON through these two. Answering a refusal inside them
+     is what keeps the server's auth body out of six different panes; a surface
+     that decoded the status itself would print it again. *)
+  check int "the JSON reads share one refusal answer" 2
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json");
+  check int "no surface decodes a status on its own" 1
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_http.ml"
+       ~callee:"Masc.Tui_decode.decode_json_response_body");
+  (* Needled on the sentence rather than on "operator token": doc comments reach
+     the parsetree as string constants, so the looser needle counts prose that
+     is not a message. *)
+  check int "the refusal sentence has one owner" 0
+    (Ast_grep.count_string_literals_across_files
+       ~module_paths:[ "bin/masc_tui_http.ml"; "bin/masc_tui.ml" ]
+       ~needle:"holds no operator token");
   check int "the bearer env name is read in one place" 1
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_http.ml"

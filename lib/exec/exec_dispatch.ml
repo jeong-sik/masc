@@ -72,18 +72,24 @@ let attaches_a_file { stdin_from; stdout_to; stderr_to } =
    directory -- a command without one runs at the filesystem root -- so a
    relative target with no cwd names two different files depending on who
    resolves it, and is refused rather than resolved against a guess. *)
+(* A target already resolved for this host is opened as given. One still in
+   the command's namespace is only this filesystem when the command runs
+   here; the caller checks that before opening. *)
 let redirect_path ~cwd target =
-  let raw = Path_scope.raw target in
-  if not (Filename.is_relative raw)
-  then Ok raw
-  else
-    match cwd with
-    | Some base -> Ok (Filename.concat base raw)
-    | None ->
+  match target with
+  | Redirect_scope.On_this_host { path; _ } -> Ok path
+  | Redirect_scope.In_command_namespace scope ->
+    let raw = Path_scope.raw scope in
+    if not (Filename.is_relative raw)
+    then Ok raw
+    else (
+      match cwd with
+      | Some base -> Ok (Filename.concat base raw)
+      | None ->
         Error
           (Printf.sprintf
              "relative redirect target %s needs the command to declare a cwd"
-             raw)
+             raw))
 
 (* A stream owns one direction, so each (descriptor, mode) pair is named
    rather than collapsed: a new mode has to be decided here, not absorbed. *)
@@ -114,6 +120,41 @@ let attach_file ~cwd attach ~fd ~target ~mode =
          stdout_fd
          stderr_fd)
 
+(* A file redirect is carried out by this process, so the path has to name a
+   file on this filesystem. Running on the host, the command's namespace is
+   this one. Running in a container it is not, and only a layer that knows the
+   mounts can translate; until it has, the target says so. *)
+let target_is_openable_here ~(sandbox : Sandbox_target.t) target =
+  match sandbox, target with
+  | _, Redirect_scope.On_this_host _ -> true
+  | Sandbox_target.Host, Redirect_scope.In_command_namespace _ -> true
+  | Sandbox_target.Docker _, Redirect_scope.In_command_namespace _ -> false
+
+(* A sandbox runner hands back what the container wrote as a string: this
+   process never holds the container's pipe, so it cannot give the child a
+   descriptor. The capture happens either way, so writing it out here costs
+   nothing over returning it -- and the bytes stop travelling back to the
+   caller, which is the point of redirecting them. *)
+let deliver_capture destination text =
+  match destination with
+  | Process_eio.Captured -> Ok text
+  | Process_eio.Written_to { path; append } ->
+    (try
+       let flags =
+         [ Open_wronly; Open_creat; (if append then Open_append else Open_trunc) ]
+       in
+       let oc = open_out_gen flags 0o644 path in
+       Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc text);
+       Ok ""
+     with
+     | Sys_error message -> Error (Printf.sprintf "cannot write %s: %s" path message))
+
+let unresolved_target_message target =
+  Printf.sprintf
+    "a file redirect to %s is not carried out for a sandboxed stage: the path \
+     names a file inside the sandbox and would be opened on this host"
+    (Path_scope.raw (Redirect_scope.target_as_written target))
+
 let redirect_plan_of_redirects ~cwd redirects =
   let step (plan, attach) = function
     | Redirect_scope.Fd_to_fd { src; dst } ->
@@ -126,7 +167,7 @@ let redirect_plan_of_redirects ~cwd redirects =
          it goes down the attachment path and opens the device. *)
       (match mode with
        | Redirect_scope.Write | Redirect_scope.Append
-         when Path_scope.is_discard_sink target ->
+         when Path_scope.is_discard_sink (Redirect_scope.target_as_written target) ->
          let* plan = set_redirect_target plan fd Drop in
          Ok (plan, attach)
        | Redirect_scope.Write | Redirect_scope.Append | Redirect_scope.Read ->
@@ -279,16 +320,56 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
     match redirect_plan_of_redirects ~cwd s.redirects with
     | Error message -> unsupported_redirect_result message
     | Ok (redirect_plan, attachments) when attaches_a_file attachments -> (
-      (* A file redirect is carried out where the file is, and for a Docker
-         stage that is the container: the path the command names exists on
-         this host only where the bind mount makes the two coincide, and
-         nothing here can tell those cases apart. *)
-      match s.sandbox with
-      | Docker _ ->
-        unsupported_redirect_result
-          "a file redirect is not carried out for a Docker stage: the path \
-           names a file in the container and would be opened on the host"
-      | Host ->
+      match
+        List.find_opt
+          (function
+            | Redirect_scope.Fd_to_fd _ -> false
+            | Redirect_scope.File { target; _ } ->
+              not (target_is_openable_here ~sandbox:s.sandbox target))
+          s.redirects
+      with
+      | Some (Redirect_scope.File { target; _ }) ->
+        unsupported_redirect_result (unresolved_target_message target)
+      | Some (Redirect_scope.Fd_to_fd _) | None ->
+        (match s.sandbox with
+         | Docker { runner; _ } ->
+           (* stdin from a file is read here and handed to the runner as
+              bytes, for the same reason: the runner takes a string. *)
+           let stdin_for_runner =
+             match attachments.stdin_from with
+             | Process_eio.Read_from { path } ->
+               (try
+                  let ic = open_in_bin path in
+                  Some
+                    (Fun.protect
+                       ~finally:(fun () -> close_in ic)
+                       (fun () -> really_input_string ic (in_channel_length ic)))
+                with Sys_error _ -> None)
+             | Process_eio.From_string content -> Some content
+             | Process_eio.Inherited -> stdin_content
+           in
+           (match
+              runner
+                ~on_stdout_chunk:None
+                ~on_stderr_chunk:None
+                ~stdin_content:stdin_for_runner
+                ~argv
+                ~env
+                ~cwd
+            with
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+              { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+            | status, stdout, stderr ->
+              (match
+                 ( deliver_capture attachments.stdout_to stdout
+                 , deliver_capture attachments.stderr_to stderr )
+               with
+               | Error message, _ | _, Error message ->
+                 unsupported_redirect_result message
+               | Ok stdout, Ok stderr ->
+                 apply_redirect_plan redirect_plan { status; stdout; stderr }))
+         | Host ->
         let host_env = resolve_host_env ?base_host_env s.env in
         let stdin_from =
           (* A declared redirect wins over the caller's piped-in bytes: a
@@ -317,7 +398,7 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
            { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
          | Error message -> unsupported_redirect_result message
          | Ok (status, stdout, stderr) ->
-           apply_redirect_plan redirect_plan { status; stdout; stderr }))
+           apply_redirect_plan redirect_plan { status; stdout; stderr })))
     | Ok (redirect_plan, _) -> (
       let child_on_output_chunk =
         if s.redirects = [] then on_output_chunk else None

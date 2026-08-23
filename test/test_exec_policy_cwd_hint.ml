@@ -115,7 +115,10 @@ let test_explicit_redirect_outside_workdir_is_rejected () =
     let target = Masc_exec.Path_scope.classify ~raw:"/etc/passwd" ~cwd:workdir in
     let redirect =
       Masc_exec.Redirect_scope.File
-        { fd = 1; target; mode = Masc_exec.Redirect_scope.Write }
+        { fd = 1
+        ; target = Masc_exec.Redirect_scope.In_command_namespace target
+        ; mode = Masc_exec.Redirect_scope.Write
+        }
     in
     let ir = shell_ir ~redirects:[ redirect ] ~workdir [] in
     Alcotest.(check bool)

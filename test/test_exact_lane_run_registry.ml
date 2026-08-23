@@ -326,10 +326,16 @@ let v5_registration_row =
 let v4_registration_row =
   {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
 
+(* Replay drops a run that is still running (an exact-output fiber does not
+   survive a restart), so the row under test is followed by its completion
+   and the pinned status is the completed one. *)
+let v5_completion_row =
+  {|{"event":"complete","id":"exact-board-attention-pin","completion":{"outcome":"succeeded","elapsed_s":0.5,"output":null,"selected_slot":null}}|}
+
 let test_store_version_pins_the_registration_shape () =
   let replay_single row =
     let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
-    Fs_compat.save_file path (row ^ "\n");
+    Fs_compat.save_file path (String.concat "\n" [ row; v5_completion_row; "" ]);
     let replayed = R.replay path in
     let status =
       R.get replayed ~run_id:"exact-board-attention-pin"
@@ -340,8 +346,8 @@ let test_store_version_pins_the_registration_shape () =
   in
   check string "the row shape below belongs to this store version"
     "exact-lane-runs-v5.jsonl" R.storage_filename;
-  check (option string) "a v5 registration row replays as a running run"
-    (Some "running") (replay_single v5_registration_row);
+  check (option string) "a v5 registration row replays, completed by its row"
+    (Some "succeeded") (replay_single v5_registration_row);
   check (option string) "the field v4 carried and v5 removed is rejected, not ignored"
     None (replay_single v4_registration_row)
 ;;

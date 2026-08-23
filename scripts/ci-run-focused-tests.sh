@@ -516,6 +516,7 @@ newly_wired_targets=(
   @test/runtest-test_grpc_client
   @test/runtest-test_health
   @test/runtest-test_health_status
+  @test/runtest-test_heartbeat_integration
   @test/runtest-test_heartbeat_qw
   @test/runtest-test_host_config_resolution
   @test/runtest-test_http_negotiation

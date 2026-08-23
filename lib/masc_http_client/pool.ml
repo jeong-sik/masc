@@ -486,6 +486,7 @@ let empty_body_progress = {
    writes it (Eio is single-domain, no atomic needed). *)
 let read_body_with_idle
     ?progress_ref
+    ?on_chunk
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~(start_sec : float)
     ~(idle_timeout_sec : float)
@@ -498,8 +499,15 @@ let read_body_with_idle
     | None -> ref empty_body_progress
   in
   let now () = Eio.Time.now clock in
-  let on_chunk chunk =
+  let observe chunk =
+    (* The buffer is filled whether or not [on_chunk] is passed, so a
+       streaming caller still receives the whole body on the Ok branch and
+       can run its authoritative whole-body decode on it. A live view driven
+       off the chunks therefore cannot change what the caller finally reads. *)
     Buffer.add_string buf chunk;
+    (match on_chunk with
+     | None -> ()
+     | Some f -> f chunk);
     let elapsed = now () -. start_sec in
     let first =
       match !progress.first_byte_at_sec with
@@ -514,7 +522,7 @@ let read_body_with_idle
   in
   Eio.Fiber.first
     (fun () ->
-       match Piaf.Body.iter_string ~f:on_chunk body with
+       match Piaf.Body.iter_string ~f:observe body with
        | Ok () -> Ok (Buffer.contents buf, !progress)
        | Error err ->
          Error (Piaf.Error.to_string (err :> Piaf.Error.t), !progress))
@@ -534,6 +542,118 @@ let read_body_with_idle
            watch ()
        in
        watch ())
+
+(* ── Streaming request ────────────────────────────── *)
+
+(* What a streaming request produced. The two cases are separate because a
+   caller that streams a wire protocol (SSE) cannot interpret an error body
+   in that protocol: a 401 carries a JSON object, not events. Handing it to
+   the caller's chunk consumer would surface as a protocol error rather than
+   as the status it is. [Buffered] therefore reports a non-success response
+   whole and leaves [on_chunk] uncalled. *)
+type stream_outcome =
+  | Streamed of
+      { response : response
+            (** The complete body, same as a buffered read would return, so a
+                caller can run its authoritative whole-body decode after having
+                shown a live view built from the chunks. *)
+      ; progress : body_progress
+      }
+  | Buffered of response
+
+let status_is_success status = status >= 200 && status <= 299
+
+(* Mirrors [do_request]'s connection lifecycle exactly — the release rules and
+   the cancel-protected finalizer are the same; only the body read differs.
+   [clock] is mandatory here: the idle timer is the only bound on a stream
+   that stops producing bytes, and an unbounded one would park the caller's
+   fiber for the life of the process. *)
+let do_request_streaming
+    t
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~(idle_timeout_sec : float)
+    ?headers
+    ?body
+    ~method_
+    ~(on_chunk : string -> unit)
+    uri
+  : (stream_outcome, string) result =
+  let key = Host_key.of_uri uri in
+  let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
+  let acquired =
+    match try_acquire_idle t key with
+    | Some c -> Ok c
+    | None -> create_fresh t host_origin
+  in
+  match acquired with
+  | Error e -> Error e
+  | Ok client ->
+    let released = ref false in
+    let release_once ~close_only =
+      if not !released then begin
+        released := true;
+        release t key client ~close_only
+      end
+    in
+    let path = path_and_query uri in
+    let body_piaf = Option.map Piaf.Body.of_string body in
+    Fun.protect
+      ~finally:(fun () -> close_unreleased_client released release_once)
+      (fun () ->
+        t.counters.inflight <- t.counters.inflight + 1;
+        let result =
+          Fun.protect
+            ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
+            (fun () ->
+               try
+                 Piaf.Client.request client
+                   ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
+                   ~meth:(method_to_piaf method_) path
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn -> Error (`Msg (Printexc.to_string exn)))
+        in
+        match result with
+        | Error err ->
+          release_once ~close_only:true;
+          Error (Piaf.Error.to_string (err :> Piaf.Error.t))
+        | Ok resp ->
+          let status = Piaf.Status.to_code (Piaf.Response.status resp) in
+          let headers_list =
+            Piaf.Response.headers resp |> Piaf.Headers.to_list
+          in
+          let start_sec = Eio.Time.now clock in
+          let on_chunk =
+            if status_is_success status then Some on_chunk else None
+          in
+          (match
+             read_body_with_idle ?on_chunk ~clock ~start_sec ~idle_timeout_sec
+               (Piaf.Response.body resp)
+           with
+           | Error (detail, _progress) ->
+             release_once ~close_only:true;
+             Error detail
+           | Ok (body_str, progress) ->
+             release_once ~close_only:false;
+             let response =
+               { status; headers = headers_list; body = body_str }
+             in
+             if status_is_success status then Ok (Streamed { response; progress })
+             else Ok (Buffered response)))
+
+let request_streaming
+    t
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~idle_timeout_sec
+    ~method_
+    ~url
+    ?headers
+    ?body
+    ~on_chunk
+    () =
+  let uri = Uri.of_string url in
+  do_request_streaming t ~clock ~idle_timeout_sec ?headers ?body ~method_
+    ~on_chunk uri
 
 (* ── Stats ─────────────────────────────────────────────────────── *)
 

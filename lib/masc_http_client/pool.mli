@@ -121,6 +121,58 @@ type body_progress = {
 
 val empty_body_progress : body_progress
 
+(** {2 Streaming request}
+
+    [request] and [read_body_with_idle] together already read a response body
+    chunk by chunk, but every chunk lands in a buffer the caller only sees once
+    the body ends. A caller rendering a live view of a server-sent event stream
+    needs the chunks as they arrive. *)
+
+(** What a streaming request produced.
+
+    The cases are separate because a caller that streams a wire protocol
+    cannot interpret an error body in that protocol: a 401 carries a JSON
+    object, not events. Feeding it to the caller's chunk consumer would
+    surface as a protocol error rather than as the status it is. *)
+type stream_outcome =
+  | Streamed of
+      { response : response
+            (** The complete body, same as a buffered read returns, so the
+                caller can run an authoritative whole-body decode after
+                showing a live view built from the chunks. *)
+      ; progress : body_progress
+      }
+  | Buffered of response
+      (** Non-success status: the body was read whole and [on_chunk] was
+          never called. *)
+
+val request_streaming :
+  t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  method_:http_method ->
+  url:string ->
+  ?headers:(string * string) list ->
+  ?body:string ->
+  on_chunk:(string -> unit) ->
+  unit ->
+  (stream_outcome, string) result
+(** [request_streaming t ~clock ~idle_timeout_sec ~method_ ~url ~on_chunk ()]
+    issues one request and calls [on_chunk] with each body chunk as it arrives.
+
+    The connection lifecycle matches {!request}: parked on success, closed on
+    error, released under cancellation.
+
+    [clock] is mandatory rather than optional: the idle timer is the only
+    bound on a stream that stops producing bytes, and an unbounded one would
+    park the calling fiber for the life of the process. Chunk arrival resets
+    the timer, so a stream that keeps delivering bytes is never cancelled
+    regardless of total elapsed time.
+
+    [on_chunk] runs on the calling fiber between reads. Work done in it delays
+    the next read, so a caller should append to its own state and render
+    elsewhere rather than block here. *)
+
 (* ── Telemetry ─────────────────────────────────────────────────── *)
 
 (** Non-mutating pool snapshot for Otel_metric_store / dashboard. Phase D.4
@@ -169,6 +221,7 @@ module For_testing : sig
       standing up a real HTTP server. *)
   val read_body_with_idle :
     ?progress_ref:body_progress ref ->
+    ?on_chunk:(string -> unit) ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     start_sec:float ->
     idle_timeout_sec:float ->

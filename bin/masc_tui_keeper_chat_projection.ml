@@ -478,6 +478,12 @@ let validate_run_identity request ~surface state fields =
   validate_expected_string ~surface ~field:"runId"
     ~expected:(expected_run_id request) fields
 
+(* How one line of the server-sent event stream reads. *)
+type sse_line =
+  | Sse_ignored
+  | Sse_data of string
+  | Sse_noncanonical_data
+
 let current_custom_names =
   [ "KEEPER_CONNECTED"; "KEEPER_STREAM_MESSAGE_START"
   ; "KEEPER_STREAM_MESSAGE_DELTA"; "KEEPER_STREAM_MESSAGE_STOP"
@@ -762,40 +768,49 @@ let protocol_failure state stream_error =
       || stream_error_acceptance_observed stream_error
   }
 
+(* One framing implementation for both readers of this stream: the strict
+   whole-body decode below, and the incremental one in
+   {!Masc_tui_keeper_chat_live} that drives the live view. The event payloads
+   they extract differ on purpose — this decides what counts as an event line
+   at all, and that answer has to be the same for both. *)
+let classify_sse_line raw_line =
+  let line = String.trim raw_line in
+  if line = "" || String.starts_with ~prefix:"retry:" line
+     || String.starts_with ~prefix:"id:" line
+     || String.starts_with ~prefix:":" line
+  then Sse_ignored
+  else if String.starts_with ~prefix:"data: " line then
+    Sse_data (String.sub line 6 (String.length line - 6) |> String.trim)
+  else if String.starts_with ~prefix:"data:" line then Sse_noncanonical_data
+  else Sse_ignored
+
 let decode_sse_with_provenance ~request body =
   let rec loop line_no state = function
     | [] -> Ok state
-    | raw_line :: rest ->
-        let line = String.trim raw_line in
-        if line = "" || String.starts_with ~prefix:"retry:" line
-           || String.starts_with ~prefix:"id:" line
-           || String.starts_with ~prefix:":" line
-        then loop (line_no + 1) state rest
-        else if String.starts_with ~prefix:"data: " line then
-          let payload =
-            String.sub line 6 (String.length line - 6) |> String.trim
-          in
-          let* json =
-            try Ok (Yojson.Safe.from_string payload)
-            with Yojson.Json_error detail ->
-              Error
-                (protocol_failure state
-                   (Malformed_event
-                      (Printf.sprintf "line %d has invalid JSON: %s" line_no
-                         detail)))
-          in
-          let* state =
-            decode_data_event ~request state json
-            |> Result.map_error (protocol_failure state)
-          in
-          loop (line_no + 1) state rest
-        else if String.starts_with ~prefix:"data:" line then
-          Error
-            (protocol_failure state
-               (Malformed_event
-                  (Printf.sprintf "line %d has a non-canonical data field"
-                     line_no)))
-        else loop (line_no + 1) state rest
+    | raw_line :: rest -> (
+        match classify_sse_line raw_line with
+        | Sse_ignored -> loop (line_no + 1) state rest
+        | Sse_data payload ->
+            let* json =
+              try Ok (Yojson.Safe.from_string payload)
+              with Yojson.Json_error detail ->
+                Error
+                  (protocol_failure state
+                     (Malformed_event
+                        (Printf.sprintf "line %d has invalid JSON: %s" line_no
+                           detail)))
+            in
+            let* state =
+              decode_data_event ~request state json
+              |> Result.map_error (protocol_failure state)
+            in
+            loop (line_no + 1) state rest
+        | Sse_noncanonical_data ->
+            Error
+              (protocol_failure state
+                 (Malformed_event
+                    (Printf.sprintf "line %d has a non-canonical data field"
+                       line_no))))
   in
   loop 1 initial_decode_state (String.split_on_char '\n' body)
 

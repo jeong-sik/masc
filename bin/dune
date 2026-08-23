@@ -224,6 +224,12 @@
   yojson))
 
 (library
+ (name masc_tui_keeper_chat_live)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_live)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
  (name masc_tui_message_layout)
  (wrapped false)
  (modules masc_tui_message_layout)

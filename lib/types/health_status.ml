@@ -11,19 +11,33 @@ type t =
   | Error
   | Timeout
 
-let of_string raw =
+(* [failing] is what [Channel_gate_metrics.health_of_counts] emits when a
+   channel had no successes at all, or an error rate at or above half. Before
+   it was listed here it fell through to [Unknown], which ranks 2 — the same as
+   [Degraded] — so the producer's worst rung and its middle rung arrived at
+   operators as one severity. *)
+let of_string_opt raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "ok" | "good" | "healthy" -> Ok
-  | "warming" -> Warming
-  | "snapshot_not_ready" -> Snapshot_not_ready
-  | "degraded" | "interrupted" -> Degraded
-  | "stale" -> Stale
-  | "warning" | "warn" | "watch" | "risk" -> Warning
-  | "unavailable" -> Unavailable
-  | "blocked" -> Blocked
-  | "error" | "bad" | "critical" -> Error
-  | "timeout" -> Timeout
-  | "unknown" | _ -> Unknown
+  | "ok" | "good" | "healthy" -> Some Ok
+  | "warming" -> Some Warming
+  | "snapshot_not_ready" -> Some Snapshot_not_ready
+  | "degraded" | "interrupted" -> Some Degraded
+  | "stale" -> Some Stale
+  | "warning" | "warn" | "watch" | "risk" -> Some Warning
+  | "unavailable" -> Some Unavailable
+  | "blocked" -> Some Blocked
+  | "error" | "bad" | "critical" | "failing" -> Some Error
+  | "timeout" -> Some Timeout
+  | "unknown" -> Some Unknown
+  | _ -> None
+
+(* Kept total for callers that only need a status to render. It cannot tell an
+   explicit "unknown" from a word this vocabulary never had — use
+   {!of_string_opt} where that difference decides anything. *)
+let of_string raw =
+  match of_string_opt raw with
+  | Some status -> status
+  | None -> Unknown
 
 let to_string = function
   | Ok -> "ok"

@@ -1952,14 +1952,18 @@ let render_keeper_message (state : state) =
              }
               : Message_layout.entry)
           in
-          let thinking_tail =
-            Keeper_chat_transcript.thinking live
-            |> String.split_on_char '\n'
-            |> List.filter (fun line -> String.trim line <> "")
-            |> List.rev
-            |> function
+          (* The whole trail, not its last line. Reasoning is the only part of
+             a live turn the durable transcript does not keep, so the pane is
+             the one place it can be read, and one line out of it says what the
+             keeper concluded without saying how it got there. Blank lines are
+             dropped because models emit runs of them; the rest is one entry
+             the layout wraps like any other body. *)
+          let thinking_entry =
+            match Keeper_chat_transcript.thinking_lines live with
             | [] -> []
-            | last :: _ -> [ entry Message_layout.Thinking "thinking" last ]
+            | lines ->
+                [ entry Message_layout.Thinking "thinking"
+                    (String.concat "\n" lines) ]
           in
           let tool_entry =
             match Keeper_chat_transcript.tool_rows live with
@@ -1977,7 +1981,7 @@ let render_keeper_message (state : state) =
                     text
                 ]
           in
-          thinking_tail @ tool_entry @ text_entry
+          thinking_entry @ tool_entry @ text_entry
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in

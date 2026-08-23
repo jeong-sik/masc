@@ -1675,6 +1675,15 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-src-badge.internal { color: var(--color-fg-muted); }
 .kw-src-badge.tool     { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.4); }
 .kw-src-badge.system   { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.4); }
+/* Origin badges (#29461): where a row travelled — derived from the typed
+   surface each row already carries, one class per closed SurfaceRefKind. */
+.kw-src-badge.origin-broadcast { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); }
+.kw-src-badge.origin-agent     { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.4); }
+.kw-src-badge.origin-dashboard,
+.kw-src-badge.origin-discord,
+.kw-src-badge.origin-slack,
+.kw-src-badge.origin-webhook,
+.kw-src-badge.origin-gate      { color: var(--color-fg-secondary); }
 
 /* ════ C3 — rich chat blocks (chart / suggestions / issue / artifact) ═════
  * Keeper-v2 design-matched card styles for the new block types. Scoped to

@@ -897,8 +897,21 @@ export interface KeeperConversationStreamContract {
   reason?: string | null
 }
 
+// Mirrors the closed variant vocabulary in lib/keeper/surface_ref.ml —
+// same seven kinds, no open string escape. keeper-state.ts owns the one
+// closed parse (normalizeSurfaceRef); an unknown wire kind drops the
+// surface, never the row, matching keeper_chat_store.load's policy.
+export type SurfaceRefKind =
+  | 'dashboard'
+  | 'discord'
+  | 'slack'
+  | 'webhook'
+  | 'agent'
+  | 'broadcast'
+  | 'gate'
+
 export interface SurfaceRef {
-  kind: 'dashboard' | 'discord' | 'slack' | 'webhook' | 'agent' | 'gate' | string
+  kind: SurfaceRefKind
   session_id?: string
   guild_id?: string
   channel_id?: string

@@ -103,7 +103,8 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Keepers _ | Board | Approvals | Planning
-            | Verification | Harness | Repositories | Connectors | System_logs ->
+            | Verification | Harness | Repositories | Connectors | Tools
+            | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -2865,6 +2866,105 @@ let render_connectors (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
 
+(* The tools a keeper can reach.
+
+   Surfaces is the column that carries the reading: a tool registered and
+   projected nowhere is reachable by nothing, which the name and description
+   do not say. *)
+let render_tools (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let tools =
+    match state.tools_inventory with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.ts_tools
+  in
+  let shown = List.length tools in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let unprojected =
+    List.length
+      (List.filter
+         (fun (t : Masc.Tui_decode.tool_entry) ->
+           t.Masc.Tui_decode.tl_surfaces = [])
+         tools)
+  in
+  let header =
+    match state.tools_inventory with
+    | None ->
+        Printf.sprintf " MASC Tools  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some _ when unprojected > 0 ->
+        Printf.sprintf " MASC Tools (%d, %d on no surface)  %s  %s" shown
+          unprojected timestamp (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf " MASC Tools (%d)  %s  %s" shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-30s %-8s %s" "Tool" "Direct" "Surfaces"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.tools_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.tools_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.tools_scroll max_scroll) in
+  state.tools_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.tools_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no tools registered)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt tools idx with
+      | None -> box_empty buf cols
+      | Some t ->
+          let open Masc.Tui_decode in
+          let surfaces =
+            match t.tl_surfaces with
+            | [] -> "none"
+            | names -> String.concat ", " names
+          in
+          let line =
+            Printf.sprintf "  %-30s %-8s %s"
+              (Terminal_text.single_line t.tl_name)
+              (if t.tl_direct_call then "yes" else "no")
+              (Terminal_text.single_line surfaces)
+          in
+          let style = if t.tl_surfaces = [] then Ansi.yellow else Ansi.reset in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -2906,6 +3006,7 @@ let render_surface (state : state) =
   | Harness -> render_harness state
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
+  | Tools -> render_tools state
   | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =

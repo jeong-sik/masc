@@ -1042,6 +1042,83 @@ let verification_snapshot_json ?(total = 3) requests =
     ; ("requests", `List requests)
     ]
 
+(* Tool inventory. The envelope is /dashboard/tools; the rows are
+   [tool_inventory_json]. *)
+let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
+  `Assoc
+    [ ("name", `String "masc_board_post")
+    ; ("description", `String "Post to the board")
+    ; ("registered_schema", `Bool true)
+    ; ("direct_call_allowed", direct)
+    ; ("doc_refs", `List [])
+    ; ("prompt_hints", `List [])
+    ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
+    ]
+
+let tool_snapshot_json tools =
+  `Assoc
+    [ ("generated_at", `String "2026-08-23T09:00:00Z")
+    ; ("config_resolution", `Assoc [])
+    ; ("runtime_resolution", `Assoc [])
+    ; ( "tool_inventory"
+      , `Assoc
+          [ ("count", `Int (List.length tools))
+          ; ("tools", `List tools)
+          ; ("surface_summary", `Assoc [])
+          ] )
+    ; ("tool_usage", `Assoc [])
+    ]
+
+let test_decode_tool_snapshot_reads_the_live_shape () =
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "count" 1 snapshot.Tui_decode.ts_count;
+      (match snapshot.Tui_decode.ts_tools with
+       | [ t ] ->
+           Alcotest.(check string) "name" "masc_board_post"
+             t.Tui_decode.tl_name;
+           Alcotest.(check (list string)) "where it is visible"
+             [ "public_mcp" ] t.Tui_decode.tl_surfaces;
+           Alcotest.(check bool) "callable directly" true
+             t.Tui_decode.tl_direct_call
+       | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
+
+let test_decode_tool_projected_nowhere () =
+  (* A registered tool on no surface is reachable by nothing. Kept as an empty
+     list rather than dropped: that it exists and is projected nowhere is the
+     reading. *)
+  match
+    Tui_decode.decode_tool_snapshot
+      (tool_snapshot_json [ tool_entry_json ~surfaces:[] () ])
+  with
+  | Ok { Tui_decode.ts_tools = [ t ]; _ } ->
+      Alcotest.(check (list string)) "nowhere" [] t.Tui_decode.tl_surfaces
+  | Ok _ -> Alcotest.fail "expected one tool"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_tool_absent_direct_call_is_off () =
+  match
+    Tui_decode.decode_tool_snapshot
+      (tool_snapshot_json [ tool_entry_json ~direct:`Null () ])
+  with
+  | Ok { Tui_decode.ts_tools = [ t ]; _ } ->
+      Alcotest.(check bool) "absent means not callable" false
+        t.Tui_decode.tl_direct_call
+  | Ok _ -> Alcotest.fail "expected one tool"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_tool_snapshot_without_inventory_is_an_error () =
+  (* The envelope without its inventory is not an empty inventory; reading it
+     as one would draw a server that answered wrong as a server with no
+     tools. *)
+  match
+    Tui_decode.decode_tool_snapshot (`Assoc [ ("generated_at", `String "x") ])
+  with
+  | Ok _ -> Alcotest.fail "an envelope with no inventory should not decode"
+  | Error err -> Alcotest.(check bool) "says so" true (String.length err > 0)
+
 (* Connectors. Shape is each connector's own connector_json; the fields below
    are the ones every connector emits. *)
 let connector_json ?(available = `Bool true) ?(connected = `Bool true)
@@ -1381,6 +1458,17 @@ let test_decode_system_log_requires_the_message () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_tools",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_tool_snapshot_reads_the_live_shape;
+        Alcotest.test_case "a tool projected nowhere" `Quick
+          test_decode_tool_projected_nowhere;
+        Alcotest.test_case "absent direct-call is off" `Quick
+          test_decode_tool_absent_direct_call_is_off;
+        Alcotest.test_case "no inventory is an error" `Quick
+          test_decode_tool_snapshot_without_inventory_is_an_error;
+      ] );
     ( "decode_connectors",
       [
         Alcotest.test_case "reads the live shape" `Quick

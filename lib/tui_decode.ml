@@ -1007,6 +1007,18 @@ let decode_system_log_entry json =
     ; sl_message
     }
 
+type tool_entry = {
+  tl_name : string;
+  tl_description : string;
+  tl_surfaces : string list;
+  tl_direct_call : bool;
+}
+
+type tool_snapshot = {
+  ts_tools : tool_entry list;
+  ts_count : int;
+}
+
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -1082,6 +1094,25 @@ let decode_bool_field_or json key ~default =
   | `Bool value -> Ok value
   | `Null -> Ok default
   | bad -> field_type_error key "a bool or null" bad
+
+let decode_tool_entry json =
+  let* tl_name = required_string_field json "name" in
+  let* tl_description = required_string_field json "description" in
+  let* tl_surfaces = decode_string_name_list json "surfaces" in
+  let* tl_direct_call =
+    decode_bool_field_or json "direct_call_allowed" ~default:false
+  in
+  Ok { tl_name; tl_description; tl_surfaces; tl_direct_call }
+
+let decode_tool_snapshot json =
+  (* The tools envelope carries config and runtime resolution beside the
+     inventory; this reads the inventory and leaves the rest to the dashboard,
+     which has room to show it. *)
+  let* inventory = required_object_field json "tool_inventory" in
+  let* tools_json = required_list_field inventory "tools" in
+  let* ts_tools = decode_list "tools" decode_tool_entry tools_json in
+  let* ts_count = required_int_field inventory "count" in
+  Ok { ts_tools; ts_count }
 
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in

@@ -202,12 +202,13 @@ let root_layout t =
    38 producers: "checkout budget exhausted (budget 32)", 0.85s, evaluator
    never reached).
 
-   The entries under this root are the producers themselves, which is the map
-   the judge needs first: it picks one and reads into it, and that producer's
-   own checkouts are visible from the directory listing as it goes. Nothing is
-   hidden by omitting the scan — a cross-producer checkout list was never
-   completable here. The cap is per-producer-entry and states its own
-   omissions. *)
+   The scan is an [Error] once it finds more than [max_reported_checkouts]
+   checkouts (32; the live workspace had 41), so it completes only on small
+   workspaces. Leaving it out removes nothing the judge could use: the lookup
+   surface is [Read_file] and [Web_fetch], neither lists a directory, and the
+   path the judge opens comes from the Goal's metric, not from this listing.
+   The listing tells the judge which producer directories exist under the
+   root. The cap is per-producer-entry and states its own omissions. *)
 let goal_proof_root_layout t = entry_lines_of t.ownership_root ~cap:goal_root_entry_cap
 ;;
 

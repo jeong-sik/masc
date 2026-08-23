@@ -11,7 +11,8 @@ They are rooted at the workspace playground. A Goal belongs to no single
 producer, so the root is the shared one and every producer's tree sits under
 it. A path you give the file tool resolves against that root, which means a
 path inside a producer's tree starts with that producer's directory. These are
-the producers:
+the entries under that root, one directory per producer (`docker/` holds the
+trees of producers that run in a container):
 
 {{lookup_root_layout}}
 
@@ -22,9 +23,9 @@ directories and there is no pattern search, so you cannot explore your way to
 a file whose path you do not know. Guessing filenames under a producer will
 waste the review.
 
-Where the path comes from is the metric itself. A Goal that is measurable says
-what measures it — a file, a command's recorded output, a URL. Read the metric
-and the target above as your instruction for where to look, and open that.
+The path comes from the metric itself. A Goal that is measurable names what
+measures it — a file, a command's recorded output, a URL. Open what the metric
+and the target above name.
 
 The web tool reads the public internet. A metric recorded in a CI run, a pull
 request, a dashboard, or a release page is measurable through it, and a link

@@ -451,3 +451,12 @@ let load_planning ~(host : string) ~(port : int) :
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
   | Ok json -> Tui_decode.decode_planning_snapshot json
+
+(* The fleet reading answers what the keeper list cannot: a keeper that never
+   started has no row, so the roster shows nine keepers whether the tenth is
+   absent by design or blocked. *)
+let load_fleet_safety ~(host : string) ~(port : int) :
+    (Tui_decode.fleet_safety, string) result =
+  match fetch_fleet_safety ~host ~port with
+  | Error err -> Error ("fleet safety load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fleet_safety json

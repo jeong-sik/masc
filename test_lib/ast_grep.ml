@@ -980,6 +980,28 @@ let count_string_literals ~module_path ~needle =
   !count
 ;;
 
+(* Substring matching is right for a needle that names a fragment ("goal_" in
+   a family of keys) and wrong for one that names a whole key: "running" is a
+   substring of "running_keeper_fiber_count", so a guard forbidding the first
+   also refuses the second. This counts literals equal to the needle. *)
+let count_exact_string_literals ~module_path ~needle =
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_constant { pconst_desc = Pconst_string (s, _, _); _ } ->
+             if String.equal s needle then incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
 let count_string_literals_across_files ~module_paths ~needle =
   List.fold_left
     (fun acc module_path -> acc + count_string_literals ~module_path ~needle)

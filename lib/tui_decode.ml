@@ -69,6 +69,29 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
+type blocked_keeper = {
+  bk_name : string;
+  bk_reason : string;
+  bk_action : string option;
+}
+
+type fleet_safety = {
+  fs_status : string;
+  fs_blocker : string option;
+  fs_operator_action_required : bool;
+  fs_bootable_count : int;
+  fs_running_count : int;
+  fs_executable_count : int;
+  fs_failing_count : int;
+  fs_recovering_count : int;
+  fs_paused_count : int;
+  fs_target_reaction_capacity : int;
+  fs_reaction_capacity_shortfall : int;
+  fs_blocked_keepers : blocked_keeper list;
+  fs_active_task_owner_without_fiber_count : int;
+  fs_completion_authority_pending_count : int;
+}
+
 type log_kind =
   | Log_turn
   | Log_heartbeat
@@ -915,6 +938,71 @@ let decode_planning_snapshot json =
   let* pl_backlog = decode_planning_backlog backlog_json in
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
+
+let decode_blocked_keeper json =
+  let* bk_name = required_string_field json "keeper_name" in
+  let* bk_reason = required_string_field json "reason" in
+  let* bk_action = optional_string_field json "action" in
+  Ok { bk_name; bk_reason; bk_action }
+
+(* The counts are read with a default rather than required: the server adds
+   fields to this section over time, and a TUI that refuses the whole reading
+   because one counter is new would hide the fleet exactly when it changed.
+   The three that name the fleet's own verdict -- status, blocker, and whether
+   an operator has to act -- are required, because a reading without them says
+   nothing. *)
+let decode_fleet_safety json =
+  let* section = required_object_field json "keeper_fleet_safety" in
+  let* fs_status = required_string_field section "status" in
+  let* fs_blocker = optional_string_field section "blocker" in
+  let* fs_operator_action_required =
+    match member "operator_action_required" section with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "operator_action_required" "a bool or null" bad
+  in
+  let* fs_bootable_count = int_field_or section "bootable_keeper_count" ~default:0 in
+  let* fs_running_count = int_field_or section "running_keeper_fiber_count" ~default:0 in
+  let* fs_executable_count =
+    int_field_or section "executable_keeper_fiber_count" ~default:0
+  in
+  let* fs_failing_count = int_field_or section "failing_keeper_fiber_count" ~default:0 in
+  let* fs_recovering_count =
+    int_field_or section "recovering_keeper_fiber_count" ~default:0
+  in
+  let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
+  let* fs_target_reaction_capacity =
+    int_field_or section "target_reaction_capacity_count" ~default:0
+  in
+  let* fs_reaction_capacity_shortfall =
+    int_field_or section "reaction_capacity_shortfall_count" ~default:0
+  in
+  let* blocked_json = optional_list_field section "blocked_keepers" in
+  let* fs_blocked_keepers =
+    decode_list "blocked_keepers" decode_blocked_keeper blocked_json
+  in
+  let* fs_active_task_owner_without_fiber_count =
+    int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
+  in
+  let* fs_completion_authority_pending_count =
+    int_field_or section "completion_authority_pending_task_count" ~default:0
+  in
+  Ok
+    { fs_status
+    ; fs_blocker
+    ; fs_operator_action_required
+    ; fs_bootable_count
+    ; fs_running_count
+    ; fs_executable_count
+    ; fs_failing_count
+    ; fs_recovering_count
+    ; fs_paused_count
+    ; fs_target_reaction_capacity
+    ; fs_reaction_capacity_shortfall
+    ; fs_blocked_keepers
+    ; fs_active_task_owner_without_fiber_count
+    ; fs_completion_authority_pending_count
+    }
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =

@@ -844,12 +844,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-              (* Surface the reactive-overflow recovery reason the same way
-                 keeper_status.ml does, so keeper-store-normalize.ts reads a
-                 populated last_compaction_decision instead of null. *)
-              ( "last_compaction_decision",
-                Keeper_meta_contract.compaction_decision_json_or_null
-                  m.runtime.compaction_rt.last_decision );
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);

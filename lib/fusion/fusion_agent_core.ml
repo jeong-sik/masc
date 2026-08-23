@@ -170,7 +170,17 @@ let build_agent
      default=[model]은 외부 파싱된 unknown 입력의 편의적 추측이 아니라 byte-identity
      계약(label 없으면 정체성=model)인 total mapping이라 sound-partial. DET-OK *)
   let card_name = Option.value name ~default:model in
-  match Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:model () with
+  (* ..._for_turn, not the bare binding: a panel dispatches like a keeper turn,
+     so it needs the runtime's inference seed on top. Without it enable_thinking
+     stays None, Backend_ollama omits the wire [think] field, and the model's
+     chat template decides — thinking-on for reasoning models. The capability
+     probe made the same omission and scored ollama.agentworld-35b-a3b 0/12 on
+     tool calls it had made every time (#28529, #28473). *)
+  match
+    Runtime_agent_core_runner.resolve_runtime_providers_for_turn
+      ~runtime_id:model
+      ()
+  with
   | Error e ->
     Error ((Fusion_types.Provider_error e : Fusion_types.panel_failure))
   | Ok [] ->

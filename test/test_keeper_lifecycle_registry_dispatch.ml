@@ -79,14 +79,12 @@ let keepers_dir_of ~base_dir =
 let write_keeper_toml ~base_dir name lines =
   write_lines (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml")) lines
 
-(* Instructions come from [keepers/<name>/AGENT.md]; [keeper.instructions] is
+(* Instructions come from [keeper.instructions] in the TOML; it is
    an unknown TOML key and rejecting it leaves the profile unloaded. *)
 let write_keeper_instructions ~base_dir name body =
   write_lines
-    (Filename.concat
-       (Filename.concat (keepers_dir_of ~base_dir) name)
-       "AGENT.md")
-    [ body ]
+    (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml"))
+    [ "[keeper]"; Printf.sprintf "instructions = %S" body ]
 
 let write_keeper_meta_json config (meta : Keeper_meta_contract.keeper_meta) =
   write_json

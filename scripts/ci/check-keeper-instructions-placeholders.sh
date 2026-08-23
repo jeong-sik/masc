@@ -23,9 +23,9 @@ fi
 
 for keepers_dir in config/keepers presets/*/keepers; do
   if [ -d "$keepers_dir" ]; then
-    instruction_hits=$(rg -n --fixed-strings "$marker" "$keepers_dir" --glob '**/AGENT.md' 2>/dev/null || true)
+    instruction_hits=$(rg -n --fixed-strings "$marker" "$keepers_dir" --glob '*.toml' 2>/dev/null || true)
     if [ -n "$instruction_hits" ]; then
-      echo "::error::OPERATOR_TODO placeholder marker '$marker' must not be present in Keeper AGENT.md prompts"
+      echo "::error::OPERATOR_TODO placeholder marker '$marker' must not be present in Keeper TOML instructions"
       echo "$instruction_hits"
       exit 1
     fi

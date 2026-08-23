@@ -1,7 +1,7 @@
 # Keeper user manual
 
 Keeper is MASC's persistent autonomous agent unit. A Keeper has one canonical
-name, one complete `AGENT.md` prompt, and one operational TOML declaration.
+name and one TOML declaration that carries everything, prompt included.
 
 <!-- BEGIN GENERATED: agent-core-pin-manual -->
 The typed agent engine is built from `packages/agent_core` as the internal
@@ -15,7 +15,6 @@ For Keeper `reviewer`, create:
 
 ```text
 <base-path>/.masc/config/keepers/reviewer.toml
-<base-path>/.masc/config/keepers/reviewer/AGENT.md
 ```
 
 Example TOML:
@@ -29,14 +28,14 @@ allowed_paths = ["workspace/yousleepwhen/masc"]
 mention_targets = ["operator"]
 ```
 
-Example `AGENT.md`:
+Example declaration:
 
 ```markdown
 You are the review Keeper. Inspect the current change, identify concrete
 failures, and report evidence with exact file paths and commands.
 ```
 
-The entire `AGENT.md` file becomes the Keeper's individual instructions. Do
+`keeper.instructions` becomes the Keeper's individual instructions. Do
 not copy tool descriptions into it: agent core attaches the current tool schemas to
 the turn independently.
 
@@ -52,7 +51,7 @@ masc_keeper_up(
 ```
 
 On persistence, MASC writes operational fields to `reviewer.toml` and writes
-the full instructions to `reviewer/AGENT.md`.
+the full instructions to `reviewer.toml`.
 
 ## Start and stop
 
@@ -80,7 +79,7 @@ binding.
 
 ## Validation rules
 
-- A TOML-backed Keeper must have a non-empty `keepers/<name>/AGENT.md`.
+- A Keeper TOML must set a non-empty `keeper.instructions`.
 - Keeper TOML accepts only the current fields documented in
   `KEEPER-FILE-MODEL.md`; any other key fails closed.
 - `sandbox_profile` is required for a configured profile used by runtime
@@ -91,6 +90,6 @@ binding.
 
 ## Prompt assembly
 
-During an autonomous turn, MASC loads the complete Keeper `AGENT.md` into the
+During an autonomous turn, MASC loads the complete `keeper.instructions` into the
 Keeper instruction block. World observation, memory selection, and current
 tool schemas are separate inputs.

@@ -98,12 +98,6 @@ let item ~(config : Workspace.config) requested_name =
     | Ok _ -> None
   in
   let default_source_kind = default_source.source_kind in
-  let keeper_prompt_path =
-    Filename.concat
-      (Filename.concat (Filename.dirname keeper_toml_candidate) resolved_name)
-      "AGENT.md"
-  in
-  let keeper_prompt_exists = Fs_compat.file_exists keeper_prompt_path in
   let live_meta_path = keeper_meta_path config resolved_name in
   let live_meta_exists = Fs_compat.file_exists live_meta_path in
   let registry_entry =
@@ -135,7 +129,6 @@ let item ~(config : Workspace.config) requested_name =
     []
     |> add (not keeper_toml_exists) "missing_keeper_toml"
     |> add (Option.is_some config_error) "config_invalid"
-    |> add (keeper_toml_exists && not keeper_prompt_exists) "missing_keeper_prompt"
     |> add (not live_meta_exists) "missing_runtime_meta"
     |> add (Option.is_some runtime_meta_error) "runtime_meta_error"
     |> add
@@ -172,10 +165,6 @@ let item ~(config : Workspace.config) requested_name =
       ("default_manifest_path", Json_util.string_opt_to_json defaults.manifest_path);
       ( "config_error",
         Json_util.option_to_yojson keeper_toml_config_error_to_json config_error );
-      ( "keeper_prompt",
-        existing_path_json
-          ~candidates:[ keeper_prompt_path ]
-          (Some keeper_prompt_path) );
       ( "runtime_meta",
         `Assoc
           [

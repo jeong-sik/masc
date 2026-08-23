@@ -168,12 +168,13 @@ let strip_nickname_once name =
     | _ -> name
   else name
 
-let keeper_prompt_path_for ~base_path keeper_name =
+(* The TOML declaration is the whole keeper setup, so its presence is what
+   makes a keeper real. The external prompt file this probed was the Persona
+   loader's (#19978); Persona was hard cut in #27048. *)
+let keeper_declaration_path_for ~base_path keeper_name =
   Filename.concat
-    (Filename.concat
-       (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
-       keeper_name)
-    "AGENT.md"
+    (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    (keeper_name ^ ".toml")
 
 let normalize_all_names ~input_agent_name ?(base_path = "")
     ?(check_keeper = false) () :
@@ -188,7 +189,7 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
              {
                input = input_agent_name;
                resolved = trimmed;
-               searched = keeper_prompt_path_for ~base_path trimmed;
+               searched = keeper_declaration_path_for ~base_path trimmed;
              })
     | Some keeper_first_pass ->
         let keeper_name = strip_nickname_once keeper_first_pass in
@@ -201,7 +202,7 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
         let keeper_check () =
           if not check_keeper then Ok ()
           else
-            let path = keeper_prompt_path_for ~base_path keeper_name in
+            let path = keeper_declaration_path_for ~base_path keeper_name in
             if Sys.file_exists path then Ok ()
             else
               Error

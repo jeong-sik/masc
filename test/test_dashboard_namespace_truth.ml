@@ -61,17 +61,13 @@ let with_config_dir dir f =
       Config_dir_resolver.reset ();
       f ~config_dir ~keepers_dir)
 
-(* Instructions come from [keepers/<name>/AGENT.md]; [keeper.instructions] is
-   an unknown TOML key and rejecting it leaves the profile unloaded. *)
 let write_keeper_toml ~keepers_dir ~name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "local"
-|};
-  let dir = Filename.concat keepers_dir name in
-  mkdir_p dir;
-  write_file (Filename.concat dir "AGENT.md") "Dashboard keeper fixture\n"
+instructions = "Dashboard keeper fixture"
+|}
 
 let test_runtime_toml =
   {|

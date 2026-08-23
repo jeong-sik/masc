@@ -34,10 +34,6 @@ harness_seed_server_config "${ROOT_DIR}" "${BASE_PATH}"
 cp \
   "${ROOT_DIR}/scripts/fixtures/keeper-operation-real-e2e/keeper.toml" \
   "${BASE_PATH}/.masc/config/keepers/${KEEPER_NAME}.toml"
-mkdir -p "${BASE_PATH}/.masc/config/keepers/${KEEPER_NAME}"
-cp \
-  "${ROOT_DIR}/scripts/fixtures/keeper-operation-real-e2e/AGENT.md" \
-  "${BASE_PATH}/.masc/config/keepers/${KEEPER_NAME}/AGENT.md"
 mkdir -p "${BASE_PATH}/.masc/keepers"
 cp \
   "${ROOT_DIR}/scripts/fixtures/keeper-operation-real-e2e/meta.json" \

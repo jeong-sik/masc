@@ -41,7 +41,6 @@ type turn_runtime_delta =
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
   ; last_autonomous_action_at : string observed_change
-  ; last_blocker : Keeper_meta_contract.blocker_info option observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }
@@ -104,18 +103,13 @@ type meta_command =
       ; updated_at : string
       }
   | Turn_failed of
-      { blocker : Keeper_meta_contract.blocker_info
-      ; usage : usage_delta option
+      { usage : usage_delta option
       ; updated_at : string
       }
   | Commit_turn_runtime of turn_runtime_delta
   | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
-      ; updated_at : string
-      }
-  | Set_blocker of
-      { blocker : Keeper_meta_contract.blocker_info option
       ; updated_at : string
       }
   | Record_compaction_commit of
@@ -378,7 +372,6 @@ let turn_runtime_delta_of_snapshots
           observed_change
             before_rt.last_autonomous_action_at
             after_rt.last_autonomous_action_at
-      ; last_blocker = observed_change before_rt.last_blocker after_rt.last_blocker
       ; message_scope_ack_id =
           observed_change before_rt.message_scope_ack_id after_rt.message_scope_ack_id
       ; updated_at = after.updated_at
@@ -531,7 +524,6 @@ let apply_turn_runtime_delta
       ; board_reactive_turn_count
       ; mention_reactive_turn_count
       ; noop_turn_count
-      ; last_blocker = apply_observed_change runtime.last_blocker delta.last_blocker
       ; message_scope_ack_id =
           apply_observed_change runtime.message_scope_ack_id delta.message_scope_ack_id
       }
@@ -561,11 +553,10 @@ let apply_existing (state : state) meta command =
     let resumed = Keeper_meta_contract.mark_resumed meta in
     Ok (with_meta state { resumed with updated_at })
   | Reset_latch { updated_at } ->
-    let runtime = { meta.runtime with last_blocker = None } in
     Ok
       (with_meta
          state
-         { meta with paused = false; latched_reason = None; runtime; updated_at })
+         { meta with paused = false; latched_reason = None; updated_at })
   | Retain_shutdown_latch { latch; updated_at } ->
     let (Operator_stopped : shutdown_latch) = latch in
     let latched_reason =
@@ -635,15 +626,11 @@ let apply_existing (state : state) meta command =
   | Turn_succeeded { usage; updated_at } ->
     (match add_usage meta usage with
      | Error _ as error -> error
-     | Ok meta ->
-       let runtime = { meta.runtime with last_blocker = None } in
-       Ok (with_meta state { meta with runtime; updated_at }))
-  | Turn_failed { blocker; usage; updated_at } ->
+     | Ok meta -> Ok (with_meta state { meta with updated_at }))
+  | Turn_failed { usage; updated_at } ->
     (match update_usage meta usage with
      | Error _ as error -> error
-     | Ok meta ->
-       let runtime = { meta.runtime with last_blocker = Some blocker } in
-       Ok (with_meta state { meta with runtime; updated_at }))
+     | Ok meta -> Ok (with_meta state { meta with updated_at }))
   | Commit_turn_runtime delta ->
     (match apply_turn_runtime_delta meta delta with
      | Error _ as error -> error
@@ -654,9 +641,6 @@ let apply_existing (state : state) meta command =
      | Ok meta -> Ok (with_meta state meta))
   | Set_current_task { task_id; updated_at } ->
     Ok (with_meta state { meta with current_task_id = task_id; updated_at })
-  | Set_blocker { blocker; updated_at } ->
-    let runtime = { meta.runtime with last_blocker = blocker } in
-    Ok (with_meta state { meta with runtime; updated_at })
   | Record_compaction_commit
       { trace_id; commit_count; at; before_bytes; after_bytes; updated_at }
     ->

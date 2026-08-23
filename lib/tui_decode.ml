@@ -31,7 +31,6 @@ type keeper = {
   k_mention_reactive_turn_count : int;
   k_noop_turn_count : int;
   k_last_proactive_outcome : string;
-  k_last_blocker : string option;
   k_created_at : string;
   k_updated_at : string;
 }
@@ -255,12 +254,6 @@ let decode_task json =
   let* task = Masc_domain.task_of_yojson json in
   Ok (task_of_domain task)
 
-let blocker_summary (blocker : Keeper_meta_contract.blocker_info) =
-  let label = Keeper_meta_contract.blocker_class_to_string blocker.klass in
-  match String.trim blocker.detail with
-  | "" -> label
-  | detail -> label ^ ": " ^ detail
-
 let sanitize_terminal_text text =
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
@@ -356,12 +349,6 @@ let clock_timestamp_for_terminal text =
     (if String.length text >= 19 then String.sub text 11 8 else text)
 ;;
 
-let keeper_blocker_for_terminal keeper =
-  match keeper.k_last_blocker with
-  | None -> "-"
-  | Some blocker -> sanitize_terminal_text blocker
-;;
-
 let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   let runtime = meta.runtime in
   let usage = runtime.usage in
@@ -391,7 +378,6 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     k_last_proactive_outcome =
       Keeper_meta_contract.proactive_cycle_outcome_to_string
         proactive.last_outcome;
-    k_last_blocker = Option.map blocker_summary runtime.last_blocker;
     k_created_at = meta.created_at;
     k_updated_at = meta.updated_at;
   }

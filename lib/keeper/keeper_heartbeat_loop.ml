@@ -691,15 +691,6 @@ let run_keepalive_unified_turn
         let paused_info =
           if meta_after_triage.paused
           then (
-            let blocker_str =
-              match meta_after_triage.runtime.last_blocker with
-              | Some info ->
-                let trimmed = String.trim info.detail in
-                if String.equal trimmed ""
-                then Keeper_meta_contract.blocker_class_to_string info.klass
-                else trimmed
-              | None -> "unknown"
-            in
             let paused_since_sec =
               match
                 Workspace_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
@@ -707,7 +698,7 @@ let run_keepalive_unified_turn
               | Some ts -> int_of_float (max 0.0 (Time_compat.now () -. ts))
               | None -> -1
             in
-            Printf.sprintf " blocker=%s paused_since=%ds" blocker_str paused_since_sec)
+            Printf.sprintf " paused_since=%ds" paused_since_sec)
           else ""
         in
         let log_not_scheduled =

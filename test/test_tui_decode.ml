@@ -81,7 +81,7 @@ let test_active_tasks_of_domain_filters_and_sorts () =
     (List.map (fun (task : Tui_decode.task) -> task.id) active)
 
 let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
-    ?(current_task_id = None) ?(blocker_detail = "queue full") () =
+    ?(current_task_id = None) () =
   let optional_field key = function
     | Some value -> [ (key, value) ]
     | None -> []
@@ -102,10 +102,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
        ; ("mention_reactive_turn_count", `Int 1)
        ; ("noop_turn_count", `Int 4)
        ; ("last_proactive_outcome", `String "tool_use")
-       ; ( "last_blocker"
-         , Keeper_meta_contract.(
-             blocker_info_of_class ~detail:blocker_detail Capacity_backpressure
-             |> blocker_info_to_json) )
        ; ("created_at", `String "2026-08-20T01:02:03Z")
        ; ("updated_at", `String "2026-08-21T04:05:06Z")
        ]
@@ -146,9 +142,6 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check int) "no-op turns" 4 keeper.k_noop_turn_count;
       Alcotest.(check string) "last outcome" "tool_use"
         keeper.k_last_proactive_outcome;
-      Alcotest.(check (option string)) "last blocker"
-        (Some "capacity_backpressure: queue full")
-        keeper.k_last_blocker;
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"
         keeper.k_created_at;
       Alcotest.(check string) "updated at" "2026-08-21T04:05:06Z"
@@ -245,25 +238,6 @@ let test_timestamp_slices_are_sanitized_after_selection () =
     "0\\x1B]2;Xab"
     (Tui_decode.clock_timestamp_for_terminal
        "2026-08-22T0\027]2;Xabcd")
-
-let test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe () =
-  let detail = "queue\027]8;;https://attacker.invalid\007owned\027]8;;\007" in
-  match Tui_decode.decode_keeper (current_keeper_json ~blocker_detail:detail ()) with
-  | Error error -> Alcotest.fail error
-  | Ok keeper ->
-    Alcotest.(check bool)
-      "typed decode retains the raw diagnostic"
-      true
-      (Option.exists (fun raw -> String.contains raw '\027') keeper.k_last_blocker);
-    let rendered = Tui_decode.keeper_blocker_for_terminal keeper in
-    Alcotest.(check bool)
-      "terminal projection contains no ESC byte"
-      false
-      (String.contains rendered '\027');
-    Alcotest.(check bool)
-      "terminal projection exposes escaped control evidence"
-      true
-      (String_util.contains_substring rendered "\\x1B]8;;")
 
 let test_decode_keeper_rejects_retired_fields () =
   List.iter
@@ -1155,8 +1129,6 @@ let () =
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
-      ; Alcotest.test_case "keeper blocker keeps raw and renders safe" `Quick
-          test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe
       ] );
     ( "parse_log_entry",
       [

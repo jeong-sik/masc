@@ -21,7 +21,6 @@ let keeper =
       k_mention_reactive_turn_count = 0;
       k_noop_turn_count = 0;
       k_last_proactive_outcome = "never";
-      k_last_blocker = None;
       k_created_at = "2026-08-21T00:00:00Z";
       k_updated_at = "2026-08-21T00:00:00Z";
     }

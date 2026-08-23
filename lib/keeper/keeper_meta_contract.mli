@@ -243,7 +243,6 @@ type agent_runtime_state = {
   board_reactive_turn_count : int;
   mention_reactive_turn_count : int;
   noop_turn_count : int;
-  last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
@@ -299,7 +298,7 @@ type keeper_meta = {
 }
 
 (** Sanctioned generic unpause transform. Clears ordinary/operator/dead
-    latches with the pause bit and [runtime.last_blocker]. A
+    latches with the pause bit. A
     [Transcript_corruption_reset_required] latch is returned unchanged, so
     generic resume cannot replay a poisoned checkpoint. *)
 val mark_resumed : keeper_meta -> keeper_meta

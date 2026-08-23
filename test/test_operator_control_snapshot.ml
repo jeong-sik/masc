@@ -414,17 +414,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
           {
             meta with
             paused = true;
-            runtime =
-              {
-                meta.runtime with
-                last_blocker =
-                  Some
-                    (Keeper_meta_contract.blocker_info_of_class
-                      ~detail:
-                         "No configured provider runtime remained available"
-                       (Keeper_meta_contract.Runtime_exhausted
-                          Keeper_meta_contract.No_providers_available));
-              };
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
@@ -721,16 +710,6 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
         {
           meta with
           paused = true;
-          runtime =
-            {
-              meta.runtime with
-              last_blocker =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"No configured provider runtime remained available"
-                     (Keeper_meta_contract.Runtime_exhausted
-                        Keeper_meta_contract.No_providers_available));
-            };
         }
       in
       (match Keeper_meta_store.replace_snapshot config meta with

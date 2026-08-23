@@ -223,59 +223,6 @@ let repair_non_canonical_enum_fields json =
 ;;
 
 
-let parse_last_blocker fields =
-  let* value = required_field fields "last_blocker" in
-  match value with
-  | `Null -> Ok None
-  | `Assoc blocker_fields ->
-    let* () =
-      require_exact_fields
-        ~context:"last_blocker"
-        [ "klass"; "detail" ]
-        blocker_fields
-    in
-    let* detail = string_field blocker_fields "detail" in
-    let* klass_json = required_field blocker_fields "klass" in
-    let* klass =
-      match klass_json with
-      | `String label ->
-        (match blocker_class_of_serialized_string label with
-         | Some (Runtime_exhausted _) ->
-           invalidf "last_blocker.klass runtime_exhausted requires a reason object"
-         | Some klass -> Ok klass
-         | None -> invalidf "last_blocker.klass has unknown value %S" label)
-      | `Assoc klass_fields ->
-        let* () =
-          require_exact_fields
-            ~context:"last_blocker.klass"
-            [ "name"; "reason" ]
-            klass_fields
-        in
-        let* name = string_field klass_fields "name" in
-        if not (String.equal name "runtime_exhausted")
-        then invalidf "last_blocker.klass has unknown object name %S" name
-        else
-          let* reason_json = required_field klass_fields "reason" in
-          (match runtime_exhaustion_reason_of_json reason_json with
-           | Some reason
-             when Yojson.Safe.equal
-                    reason_json
-                    (runtime_exhaustion_reason_to_json reason) ->
-             Ok (Runtime_exhausted reason)
-           | Some _ | None ->
-             invalidf "last_blocker.klass.reason is not the current exact shape")
-      | other ->
-        invalidf
-          "last_blocker.klass must be a string or object, got %s"
-          (Json_util.kind_name other)
-    in
-    Ok (Some { klass; detail })
-  | other ->
-    invalidf
-      "field last_blocker must be an object or null, got %s"
-      (Json_util.kind_name other)
-;;
-
 let parse_runtime_attempt_outcome value =
   match value with
   | `Assoc fields ->
@@ -437,7 +384,6 @@ let decode_current_meta fields =
   let* mention_reactive_turn_count = int_field fields "mention_reactive_turn_count" in
   let* noop_turn_count = int_field fields "noop_turn_count" in
   let* message_scope_ack_id = nullable_string_field fields "message_scope_ack_id" in
-  let* last_blocker = parse_last_blocker fields in
   let* last_runtime_attempt = parse_last_runtime_attempt fields in
   let* paused = bool_field fields "paused" in
   let* latched_reason = parse_latched_reason fields in
@@ -513,7 +459,6 @@ let decode_current_meta fields =
       ; mention_reactive_turn_count
       ; noop_turn_count
       ; message_scope_ack_id
-      ; last_blocker
       ; last_runtime_attempt
       }
     in

@@ -47,7 +47,6 @@ type turn_runtime_delta =
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
   ; last_autonomous_action_at : string observed_change
-  ; last_blocker : Keeper_meta_contract.blocker_info option observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }
@@ -110,18 +109,13 @@ type meta_command =
       ; updated_at : string
       }
   | Turn_failed of
-      { blocker : Keeper_meta_contract.blocker_info
-      ; usage : usage_delta option
+      { usage : usage_delta option
       ; updated_at : string
       }
   | Commit_turn_runtime of turn_runtime_delta
   | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
-      ; updated_at : string
-      }
-  | Set_blocker of
-      { blocker : Keeper_meta_contract.blocker_info option
       ; updated_at : string
       }
   | Record_compaction_commit of

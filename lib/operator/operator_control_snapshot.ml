@@ -477,10 +477,6 @@ let keepers_json
                                     String.trim meta.runtime.proactive_rt.last_preview
                                   in
                                   if value = "" then None else Some value) )
-                           ; ( "last_blocker"
-                             , match meta.runtime.last_blocker with
-                               | Some info -> Keeper_meta_contract.blocker_info_to_json info
-                               | None -> `Null )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
                            ; ( "recent_activity"

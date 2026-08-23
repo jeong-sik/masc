@@ -313,7 +313,7 @@ let runtime_runner_execute_site = "runtime_runner.execute"
    payload that begins with the prefix up to
    [blocker_detail_structured_max_chars] and truncates plain narrative text
    to [blocker_detail_narrative_max_chars]. Idempotent. Applied where the
-   runtime builds last_blocker.detail
+   runtime builds a blocker detail string
    (keeper_unified_metrics_failure). *)
 let blocker_detail_narrative_max_chars = 200
 

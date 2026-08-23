@@ -1225,15 +1225,6 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
           base with
           paused = true;
           autoboot_enabled = true;
-          runtime =
-            {
-              base.runtime with
-              last_blocker =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"provider turn timed out"
-                     Keeper_meta_contract.Stale_turn_timeout);
-            };
         }
       in
       (match Keeper_meta_store.replace_snapshot config meta with
@@ -1274,9 +1265,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
         | Ok None -> fail "expected persisted keeper meta"
         | Error err -> fail err
       in
-      check bool "sweep does not reinterpret pause" true persisted_meta.paused;
-      check bool "blocker remains diagnostic evidence" true
-        (Option.is_some persisted_meta.runtime.last_blocker))
+      check bool "sweep does not reinterpret pause" true persisted_meta.paused)
 
 let test_sweep_reports_pending_hitl_approval () =
   Eio_main.run @@ fun env ->
@@ -2072,79 +2061,6 @@ let test_non_storm_crashed_restarts_normally () =
 
 (* Failure observations remain durable across lane unregister/restart without
    changing the Keeper's operator-controlled lifecycle state. *)
-let test_persisted_blocker_survives_unregister () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let name = "failure-blocker-keeper" in
-      let meta = make_meta name in
-      let meta =
-        {
-          meta with
-          runtime =
-            {
-              meta.runtime with
-              last_blocker = Some (Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Keeper_meta_contract.Stale_turn_timeout);
-            };
-        }
-      in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
-      resolve_done_for_test reg (`Crashed "observed failure");
-      Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
-      Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Stale_termination_storm { count = 5 }));
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      sweep_and_recover_no_materialize ctx;
-      
-      (* Check if blocker is persisted *)
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           (match m.runtime.last_blocker with
-            | Some b ->
-                check string "meta.runtime.last_blocker" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
-            | None -> fail "expected blocker after storm pause");
-       | Ok None -> fail "meta missing after storm pause"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      
-      (* Unregister the keeper *)
-      Reg.For_testing.unregister ~base_path:config.base_path name;
-      
-      (* Read again and verify *)
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           (match m.runtime.last_blocker with
-            | Some b ->
-                check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
-            | None -> fail "expected blocker after unregister")
-       | Ok None -> fail "meta missing after unregister"
-       | Error err -> fail ("read_meta failed: " ^ err)))
-
 let test_active_librarian_abort_defers_then_retries_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2831,9 +2747,5 @@ let () =
         test_idle_duration_never_stops_keeper;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
         test_non_storm_crashed_restarts_normally;
-    ];
-    "failure_observation", [
-      test_case "persisted blocker survives unregister" `Quick
-        test_persisted_blocker_survives_unregister;
     ];
   ]

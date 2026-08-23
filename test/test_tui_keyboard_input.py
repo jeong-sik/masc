@@ -403,7 +403,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "last_compaction_decision": "initialized",
         "last_autonomous_action_at": "",
         "message_scope_ack_id": None,
-        "last_blocker": None,
         "last_runtime_attempt": None,
         "paused": False,
         "latched_reason": None,

@@ -59,7 +59,6 @@ type field =
   | Mention_reactive_turn_count
   | Noop_turn_count
   | Message_scope_ack_id
-  | Last_blocker
   | Last_runtime_attempt
   | Paused
   | Latched_reason
@@ -112,7 +111,6 @@ let all_fields =
   ; Mention_reactive_turn_count
   ; Noop_turn_count
   ; Message_scope_ack_id
-  ; Last_blocker
   ; Last_runtime_attempt
   ; Paused
   ; Latched_reason
@@ -166,7 +164,6 @@ let field_name = function
   | Mention_reactive_turn_count -> "mention_reactive_turn_count"
   | Noop_turn_count -> "noop_turn_count"
   | Message_scope_ack_id -> "message_scope_ack_id"
-  | Last_blocker -> "last_blocker"
   | Last_runtime_attempt -> "last_runtime_attempt"
   | Paused -> "paused"
   | Latched_reason -> "latched_reason"

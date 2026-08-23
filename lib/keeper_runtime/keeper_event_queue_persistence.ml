@@ -1616,7 +1616,6 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; "counts_complete", `Bool counts_complete
     ; "oldest_arrived_at_unix", Json_util.float_opt_to_json oldest
     ; "oldest_age_seconds", age_seconds_json ~now oldest
-    ; "runnable_pending_count", `Int runnable.pending_count
     ; "runnable_backlog_count", `Int runnable.pending_count
     ; "runnable_oldest_arrived_at_unix", Json_util.float_opt_to_json runnable.oldest
     ; "runnable_oldest_age_seconds", age_seconds_json ~now runnable.oldest
@@ -1625,7 +1624,6 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (runnable.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "recoverable_pending_count", `Int recoverable.pending_count
     ; "recoverable_backlog_count", `Int recoverable.pending_count
     ; "recoverable_oldest_arrived_at_unix", Json_util.float_opt_to_json recoverable.oldest
     ; "recoverable_oldest_age_seconds", age_seconds_json ~now recoverable.oldest
@@ -1634,7 +1632,6 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (recoverable.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "retained_disabled_pending_count", `Int retained_disabled.pending_count
     ; "retained_disabled_backlog_count", `Int retained_disabled.pending_count
     ; ( "retained_disabled_oldest_arrived_at_unix"
       , Json_util.float_opt_to_json retained_disabled.oldest )
@@ -1645,7 +1642,6 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (retained_disabled.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "paused_dead_pending_count", `Int paused_dead.pending_count
     ; "paused_dead_backlog_count", `Int paused_dead.pending_count
     ; "paused_dead_oldest_arrived_at_unix", Json_util.float_opt_to_json paused_dead.oldest
     ; "paused_dead_oldest_age_seconds", age_seconds_json ~now paused_dead.oldest
@@ -1654,7 +1650,6 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (paused_dead.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "shutdown_fenced_pending_count", `Int shutdown_fenced.pending_count
     ; "shutdown_fenced_backlog_count", `Int shutdown_fenced.pending_count
     ; ( "shutdown_fenced_oldest_arrived_at_unix"
       , Json_util.float_opt_to_json shutdown_fenced.oldest )
@@ -1665,7 +1660,6 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (shutdown_fenced.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "unclassified_pending_count", `Int unclassified.pending_count
     ; "unclassified_count", `Int unclassified.pending_count
     ; "unclassified_oldest_arrived_at_unix", Json_util.float_opt_to_json unclassified.oldest
     ; "unclassified_oldest_age_seconds", age_seconds_json ~now unclassified.oldest

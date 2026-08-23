@@ -153,7 +153,6 @@ let agent_card_json ~request_authority request =
             ("task_backlog", `Bool true);
             ("keeper_runtime", `Bool true);
             ("dashboard", `Bool true);
-            ("graphql_readonly", `Bool true);
           ] );
     ]
 
@@ -506,7 +505,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
               ("configured_keeper_names", `List []);
               ("materializable_configured_keeper_count", `Int 0);
               ("materializable_configured_keeper_names", `List []);
-              ("persisted_meta_count", `Int 0);
               ("persisted_meta_names", `List []);
               ("configured_without_meta_count", `Int 0);
               ("configured_without_meta_names", `List []);
@@ -833,7 +831,6 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("configured_keeper_names", `List []);
           ("materializable_configured_keeper_count", `Int 0);
           ("materializable_configured_keeper_names", `List []);
-          ("persisted_meta_count", `Int 0);
           ("persisted_meta_names", `List []);
           ("configured_without_meta_count", `Int 0);
           ("configured_without_meta_names", `List []);
@@ -891,32 +888,26 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("total_count", `Int 0)
         ; ("oldest_arrived_at_unix", `Null)
         ; ("oldest_age_seconds", `Null)
-        ; ("runnable_pending_count", `Int 0)
         ; ("runnable_backlog_count", `Int 0)
         ; ("runnable_oldest_arrived_at_unix", `Null)
         ; ("runnable_oldest_age_seconds", `Null)
         ; ("runnable_by_keeper", `List [])
-        ; ("recoverable_pending_count", `Int 0)
         ; ("recoverable_backlog_count", `Int 0)
         ; ("recoverable_oldest_arrived_at_unix", `Null)
         ; ("recoverable_oldest_age_seconds", `Null)
         ; ("recoverable_by_keeper", `List [])
-        ; ("retained_disabled_pending_count", `Int 0)
         ; ("retained_disabled_backlog_count", `Int 0)
         ; ("retained_disabled_oldest_arrived_at_unix", `Null)
         ; ("retained_disabled_oldest_age_seconds", `Null)
         ; ("retained_disabled_by_keeper", `List [])
-        ; ("paused_dead_pending_count", `Int 0)
         ; ("paused_dead_backlog_count", `Int 0)
         ; ("paused_dead_oldest_arrived_at_unix", `Null)
         ; ("paused_dead_oldest_age_seconds", `Null)
         ; ("paused_dead_by_keeper", `List [])
-        ; ("shutdown_fenced_pending_count", `Int 0)
         ; ("shutdown_fenced_backlog_count", `Int 0)
         ; ("shutdown_fenced_oldest_arrived_at_unix", `Null)
         ; ("shutdown_fenced_oldest_age_seconds", `Null)
         ; ("shutdown_fenced_by_keeper", `List [])
-        ; ("unclassified_pending_count", `Int 0)
         ; ("unclassified_count", `Int 0)
         ; ("unclassified_oldest_arrived_at_unix", `Null)
         ; ("unclassified_oldest_age_seconds", `Null)

@@ -889,7 +889,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("conversation_raw_count", `Int conversation_raw_count);
               ("conversation_fragment_count", `Int conversation_fragment_count);
               ("conversation_fragment_filtered_count", `Int conversation_fragment_filtered_count);
-              ("conversation_fragment_filter_enabled", `Bool history_fragment_filter_enabled);
               ("k2k_count", `Int k2k_count);
               ("k2k_mentions", k2k_mentions);
               ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);
@@ -914,7 +913,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                     `Assoc [
                       ("coverage", `Float s.verdict.coverage);
                       ("all_passed", `Bool s.verdict.all_passed);
-                      ("layer_count", `Int (List.length s.verdict.layer_results));
                       ("passed_count",
                         `Int (List_util.count_if
                           (fun (lr : Dashboard_eval_feed.layer_result_json) -> lr.passed)

@@ -25,17 +25,12 @@ type t =
   ; exact_output_lanes : admitted_lane list
   ; rejected_slots : rejected_slot list
   ; required_lane_ids : string list
-  ; generation : int64
   }
 
 type publication_error =
   | Registry_not_published
   | Publication_busy
-  | Generation_exhausted
-  | Replacement_base_changed of
-      { expected_generation : int64 option
-      ; actual_generation : int64 option
-      }
+  | Replacement_base_changed
   | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
@@ -217,33 +212,22 @@ let with_publication_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
 ;;
 
-let next_generation = function
-  | None -> Ok 1L
-  | Some registry ->
-    if Int64.equal registry.generation Int64.max_int
-    then Error Generation_exhausted
-    else Ok (Int64.succ registry.generation)
-;;
-
 let publish ?(required_lane_ids = []) ~lanes resolver_snapshot =
   with_publication_lock
   @@ fun () ->
   match !active_reservation with
   | Some _ -> Error Publication_busy
   | None ->
-    let previous = Atomic.get published in
     let* exact_output_lanes, rejected_slots =
       admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
     in
     let* () = validate_required_lanes required_lane_ids exact_output_lanes in
-    let* generation = next_generation previous in
     let registry =
       { resolver_snapshot
       ; declared_lanes = lanes
       ; exact_output_lanes
       ; rejected_slots
       ; required_lane_ids
-      ; generation
       }
     in
     Atomic.set published (Some registry);
@@ -285,7 +269,6 @@ let prepare_replacement ~lanes =
       let* () =
         validate_required_lanes previous.required_lane_ids exact_output_lanes
       in
-      let* generation = next_generation (Some previous) in
       Ok
         { base
         ; candidate =
@@ -295,7 +278,6 @@ let prepare_replacement ~lanes =
               ; exact_output_lanes
               ; rejected_slots
               ; required_lane_ids = previous.required_lane_ids
-              ; generation
               }
         })
 ;;
@@ -307,7 +289,6 @@ let same_registry_identity left right =
   | None, Some _ | Some _, None -> false
 ;;
 
-let registry_generation = Option.map (fun registry -> registry.generation)
 
 let reserve_replacement prepared =
   with_publication_lock
@@ -319,11 +300,7 @@ let reserve_replacement prepared =
     if same_registry_identity prepared.base actual
     then reserve prepared.candidate
     else
-      Error
-        (Replacement_base_changed
-           { expected_generation = registry_generation prepared.base
-           ; actual_generation = registry_generation actual
-           })
+      Error Replacement_base_changed
 ;;
 
 let same_reservation left right = left.identity == right.identity
@@ -379,7 +356,6 @@ let abort_replacement reservation =
     Ok ()
   | Some _ | None -> Error Reservation_inactive
 ;;
-let generation registry = registry.generation
 let rejected_slots registry = registry.rejected_slots
 
 let resolve_lane registry ~lane_id =
@@ -407,16 +383,8 @@ let resolve_lane registry ~lane_id =
 let publication_error_to_string = function
   | Registry_not_published -> "exact-output registry has not been published"
   | Publication_busy -> "exact-output registry publication is reserved"
-  | Generation_exhausted -> "exact-output registry generation is exhausted"
-  | Replacement_base_changed { expected_generation; actual_generation } ->
-    let show_generation = function
-      | None -> "unpublished"
-      | Some generation -> Int64.to_string generation
-    in
-    Printf.sprintf
-      "exact-output replacement base changed (expected generation %s, actual generation %s)"
-      (show_generation expected_generation)
-      (show_generation actual_generation)
+  | Replacement_base_changed ->
+    "exact-output replacement base changed since it was prepared"
   | Blank_lane_id { position } ->
     Printf.sprintf "exact-output lane %d has a blank id" position
   | Duplicate_lane_id { position; lane_id } ->

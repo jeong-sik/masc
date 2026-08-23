@@ -148,7 +148,6 @@ let register_exact t ~run_id =
     t
     ~run_id
     ~lane:Ex.Board_attention
-    ~subject_id:("cand-" ^ run_id)
     ~actor:"keeper-beta-agent"
     ~started_at:100.0
     ~input:(Ex.Exact_input (`Assoc []))

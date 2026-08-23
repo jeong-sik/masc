@@ -197,7 +197,6 @@ let submitted_evidence_access_metadata_to_yojson = function
       ; "task_id", `String request.task_id
       ; "worker", `String request.worker
       ; "created_at", `Float request.created_at
-      ; "item_count", `Int (List.length items)
       ; ( "items"
         , `List (List.map submitted_evidence_item_metadata_to_yojson items) )
       ]

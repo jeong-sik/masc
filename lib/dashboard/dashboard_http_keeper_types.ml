@@ -135,7 +135,6 @@ let keeper_decisions_retention_json ~per_keeper_limit ~keeper_count =
     [
       ("scope", `String "per_keeper_jsonl_tail");
       ("durable_store", `String ".masc/keepers/:name.decisions.jsonl");
-      ("per_keeper_tail_lines", `Int per_keeper_limit);
       ("keeper_count", `Int keeper_count);
     ]
 

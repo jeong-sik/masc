@@ -272,21 +272,8 @@ let require_reservation_inactive label = function
   | Ok () -> Alcotest.failf "%s accepted an inactive reservation" label
 ;;
 
-let require_replacement_base_changed label ~expected_generation ~actual_generation =
-  function
-  | Error
-      (Registry.Replacement_base_changed
-         { expected_generation = actual_expected
-         ; actual_generation = actual_actual
-         }) ->
-    Alcotest.(check (option int64))
-      (label ^ " expected generation")
-      expected_generation
-      actual_expected;
-    Alcotest.(check (option int64))
-      (label ^ " actual generation")
-      actual_generation
-      actual_actual
+let require_replacement_base_changed label = function
+  | Error Registry.Replacement_base_changed -> ignore label
   | Error error ->
     Alcotest.failf
       "%s returned the wrong failure: %s"
@@ -388,10 +375,10 @@ let test_closed_registry_transaction () =
        "not-committed transaction failed: %s"
        (Registry.publication_error_to_string error));
   let unchanged = current_registry "transaction fence leaked after abort" in
-  Alcotest.(check int64)
-    "abort preserves generation"
-    (Registry.generation baseline)
-    (Registry.generation unchanged);
+  Alcotest.(check bool)
+    "abort preserves the published registry"
+    true
+    (baseline == unchanged);
   require_transaction_lane
     "abort preserves lane"
     ~lane_id:"transaction-a"
@@ -408,10 +395,10 @@ let test_closed_registry_transaction () =
        "committed transaction failed: %s"
        (Registry.publication_error_to_string error));
   let committed = current_registry "transaction fence leaked after commit" in
-  Alcotest.(check int64)
-    "commit advances generation once"
-    (Int64.succ (Registry.generation baseline))
-    (Registry.generation committed);
+  Alcotest.(check bool)
+    "commit replaces the published registry"
+    true
+    (not (baseline == committed));
   require_transaction_lane
     "commit publishes final lane"
     ~lane_id:"transaction-b"
@@ -570,10 +557,10 @@ let test_runtime_after_rename_converges_state () =
          "replacement_provider.alternate"
          (Runtime.get_default_runtime_id ());
        let converged = current_registry "after-rename transaction fence leaked" in
-       Alcotest.(check int64)
-         "after-rename registry advances generation once"
-         (Int64.succ (Registry.generation baseline))
-         (Registry.generation converged);
+       Alcotest.(check bool)
+         "after-rename registry replaces the published one"
+         true
+         (not (baseline == converged));
        require_transaction_lane
          "after-rename registry converges to B"
          ~lane_id:"transaction-b"

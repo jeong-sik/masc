@@ -487,7 +487,6 @@ let run_keeper_cycle
           [
             ( "channel",
               `String (Keeper_world_observation.channel_to_string channel) );
-            ("usage_total_turns", `Int meta.runtime.usage.total_turns);
           ])
       Keeper_runtime_manifest.Turn_started
   in

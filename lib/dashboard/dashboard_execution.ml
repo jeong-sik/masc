@@ -811,8 +811,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
             [ "surface", `String "execution"
             ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
-            ; "persistence_sanitized_count", `Int utf8_repair.repaired_reads
-            ; "persistence_sanitized_bytes", `Int utf8_repair.repaired_bytes
             ; ( "persistence_sanitized_paths_sample"
               , `List (List.map (fun path -> `String path) utf8_repair.path_samples) )
             ] )
@@ -855,7 +853,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       ; ( "task_counts"
         , `Assoc
             [ "active", `Int (List.length active_tasks)
-            ; "done_recent", `Int (List.length recent_done)
             ; "total", `Int (List.length tasks)
             ; "shown", `Int (List.length all_visible)
             ] )

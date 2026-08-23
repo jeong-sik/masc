@@ -21,7 +21,6 @@
 
 type t = private {
   generated_at : float;          (** Unix.gettimeofday at publish.  *)
-  generation : int;              (** Monotonic publish counter.    *)
   shell : Yojson.Safe.t;
   shell_light : Yojson.Safe.t;
   (** RFC-0204 section 8.3 ("A").  The [~light] projection of [shell],

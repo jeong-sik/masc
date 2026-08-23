@@ -378,7 +378,6 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     registry
     ~run_id
     ~lane:Exact_lane_run_registry.Board_attention
-    ~subject_id:prepared.candidate.candidate_id
     ~actor:prepared.candidate.keeper_name
     ~started_at
     ~input:(Exact_lane_run_registry.Exact_input prepared.candidate.judgment_request);

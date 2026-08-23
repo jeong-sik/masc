@@ -30,22 +30,17 @@ let make_attempt_record
       ?(connector_id = "telegram")
       ?(generation = 1)
       ?(attempt_number = 1)
-      ?attempt_id
       ?(last_result = Attempt_state.Start_dispatched)
       ?next_retry_at
       ?(operator_next_action = "none")
       ?(updated_at = "2026-01-01T00:00:00Z")
       ()
   =
-  let attempt_id =
-    Option.value attempt_id ~default:(Printf.sprintf "%d:%d" generation attempt_number)
-  in
   let next_retry_unix = Option.map unix_of_iso_exn next_retry_at in
   let updated_unix = unix_of_iso_exn updated_at in
   let attempt : Attempt_state.t =
     { generation
     ; attempt_number
-    ; attempt_id
     ; last_result
     ; next_retry_unix
     ; updated_unix
@@ -1063,7 +1058,6 @@ let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
     `Assoc
       [ "connector_id", `String "telegram"
       ; "generation", `Int 1
-      ; "attempt_id", `String "1:1"
       ; "attempt_number", `Int 1
       ; "last_attempt_result", `String "start_dispatched"
       ; "next_retry_at", `String "not-an-iso-stamp"
@@ -1166,7 +1160,7 @@ let test_read_attempt_record_result_reports_semantic_corruption () =
     let path = Routes.sidecar_attempt_path ~base_path "telegram" in
     write_file
       path
-      {|{"connector_id":"telegram","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+      {|{"connector_id":"telegram","generation":1,"attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
     match Routes.read_attempt_record_result ~base_path "telegram" with
     | Error msg ->
       check bool "mentions field" true (String_util.contains_substring msg "next_retry_at");
@@ -1180,7 +1174,7 @@ let test_status_json_surfaces_invalid_attempt_state () =
     let path = Routes.sidecar_attempt_path ~base_path "telegram" in
     write_file
       path
-      {|{"connector_id":"telegram","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+      {|{"connector_id":"telegram","generation":1,"attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
     let json = Routes.read_status_json ~base_path "telegram" in
     let open Yojson.Safe.Util in
     let lifecycle = json |> member "sidecar_lifecycle" in

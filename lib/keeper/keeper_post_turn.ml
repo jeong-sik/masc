@@ -231,7 +231,6 @@ let apply_multimodal_wirein
           let meta =
             `Assoc
               [
-                ("added_this_turn", `Int !added_count);
                 ("workspace_size", `Int workspace_size);
                 ( "last_artifact_id", Json_util.string_opt_to_json !last_id );
                 ("at", `Float now);

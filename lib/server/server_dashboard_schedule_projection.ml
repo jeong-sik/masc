@@ -873,7 +873,6 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "signal_source", `String "schedule_runner_signals"
     ; "signal_count", `Int (List.length signal_rows)
-    ; "signal_error_count", `Int (List.length signal_errors)
     ; "signal_limit", `Int schedule_signal_projection_limit
     ; "signals", `List (List.map schedule_signal_dashboard_json signal_rows)
     ; "signal_errors", `List signal_errors

@@ -535,7 +535,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               fragment_count,
               filtered_count )
          in
-         let allowed_tools = keeper_model_tool_names () in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
@@ -690,7 +689,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                else `String m.runtime.proactive_rt.last_preview);
            ]);
            ("policy", `Assoc [
-             ("voice_tools_available", `Bool (List.mem "keeper_voice_speak" allowed_tools));
              ("sandbox_profile",
                `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode",
@@ -698,15 +696,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
-           ("auto_execution_session_enabled", `Bool false);
            ("autonomy", `Assoc [
              ("turn_count", `Int m.runtime.autonomous_turn_count);
-             ("tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
-             ("text_turn_count", `Int m.runtime.autonomous_text_turn_count);
              ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
              ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
              ("noop_turn_count", `Int m.runtime.noop_turn_count);
-             ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
         ] @ runtime_blocker_fields @ attention_fields @ [
            ("status_options", `Assoc [

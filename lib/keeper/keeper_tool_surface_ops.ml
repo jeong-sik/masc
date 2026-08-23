@@ -199,7 +199,6 @@ let startup_not_ready_error_data elapsed =
           (Printf.sprintf
              "MASC server is still starting (%.0fs elapsed). Retry in a few seconds."
              elapsed) )
-    ; ("retry_after_ms", `Int 3000)
     ]
 let with_keeper_startup_gate f =
   if not (Server_startup_state.snapshot ()).state_ready then begin

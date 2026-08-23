@@ -42,7 +42,6 @@ type run_input = Exact_input of Yojson.Safe.t
 type run =
   { run_id : string
   ; lane : lane
-  ; subject_id : string
   ; actor : string
   ; started_at : float
   ; input : run_input
@@ -91,7 +90,6 @@ let input_of_yojson json =
 module Payload = struct
   type registration =
     { lane : lane
-    ; subject_id : string
     ; actor : string
     ; input : run_input
     }
@@ -132,7 +130,6 @@ module Payload = struct
   let registration_to_yojson registration =
     `Assoc
       [ "lane", `String (lane_key registration.lane)
-      ; "subject_id", `String registration.subject_id
       ; "actor", `String registration.actor
       ; "input", input_to_yojson registration.input
       ]
@@ -143,19 +140,18 @@ module Payload = struct
     let* fields = Run_registry_core.Json.object_fields json in
     let* () =
       Run_registry_core.Json.exact_fields
-        ~required:[ "lane"; "subject_id"; "actor"; "input" ]
+        ~required:[ "lane"; "actor"; "input" ]
         fields
     in
     let* lane_key = Run_registry_core.Json.string_field "lane" fields in
     let* lane = lane_of_key lane_key in
-    let* subject_id = Run_registry_core.Json.string_field "subject_id" fields in
     let* actor = Run_registry_core.Json.string_field "actor" fields in
     let* input =
       match List.assoc_opt "input" fields with
       | Some value -> input_of_yojson value
       | None -> Error "missing field input"
     in
-    Ok { lane; subject_id; actor; input }
+    Ok { lane; actor; input }
   ;;
 
   let completion_to_yojson completion =
@@ -296,7 +292,6 @@ let run_of_entry failed_completions (entry : Store.entry) =
   in
   { run_id = entry.id
   ; lane = entry.registration.lane
-  ; subject_id = entry.registration.subject_id
   ; actor = entry.registration.actor
   ; started_at = entry.started_at
   ; input = entry.registration.input
@@ -339,13 +334,13 @@ let replay path = make (Store.replay path)
    occurrences reached this lane through the board attention worker
    ("Board attention worker raised unexpectedly"), which swallows them, plus
    10 through the librarian lane. *)
-let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
+let register_running t ~run_id ~lane ~actor ~started_at ~input =
   Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
     Store.register
       t.store
       ~id:run_id
       ~started_at
-      ~registration:{ Payload.lane; subject_id; actor; input };
+      ~registration:{ Payload.lane; actor; input };
     remove_failed_completion t run_id;
     publish_projection t);
   notify_changed ()
@@ -460,7 +455,6 @@ let run_summary_fields run =
   let base =
     [ "run_id", `String run.run_id
     ; "lane", `String (lane_key run.lane)
-    ; "subject_id", `String run.subject_id
     ; "actor", `String run.actor
     ; "started_at", `Float run.started_at
     ; "status", `String (status_label run.status)

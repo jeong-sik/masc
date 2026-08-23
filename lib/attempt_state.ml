@@ -17,7 +17,6 @@ let result_of_string_opt = function
 type t = {
   generation : int;
   attempt_number : int;
-  attempt_id : string;
   last_result : result;
   next_retry_unix : float option;
   updated_unix : float;
@@ -32,7 +31,6 @@ let make_next ~now ~backoff_seconds ~generation ~last_result ~previous =
   {
     generation;
     attempt_number;
-    attempt_id = Printf.sprintf "%d:%d" generation attempt_number;
     last_result;
     next_retry_unix = Some (now +. backoff_seconds);
     updated_unix = now;
@@ -54,7 +52,6 @@ let to_json t =
     [
       ("generation", `Int t.generation);
       ("attempt_number", `Int t.attempt_number);
-      ("attempt_id", `String t.attempt_id);
       ("last_result", `String (result_to_string t.last_result));
       ("failure_reason", failure_reason);
       ("next_retry_unix", next_retry);
@@ -87,9 +84,6 @@ let of_json = function
       let* attempt_number =
         List.assoc_opt "attempt_number" fields |> Option.map int_of_json |> Option.join
       in
-      let* attempt_id =
-        List.assoc_opt "attempt_id" fields |> Option.map string_of_json |> Option.join
-      in
       let* last_result_token =
         List.assoc_opt "last_result" fields |> Option.map string_of_json |> Option.join
       in
@@ -117,7 +111,6 @@ let of_json = function
         {
           generation;
           attempt_number;
-          attempt_id;
           last_result;
           next_retry_unix;
           updated_unix;

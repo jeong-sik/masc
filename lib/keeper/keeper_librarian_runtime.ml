@@ -506,7 +506,6 @@ let run_best_effort
           registry
           ~run_id
           ~lane:Exact_lane_run_registry.Librarian
-          ~subject_id:trace_id
           ~actor:keeper_id
           ~started_at
           ~input:

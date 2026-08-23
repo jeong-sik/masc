@@ -756,7 +756,6 @@ let handle_keeper_task_tool_with_outcome
         (`Assoc
            ([
               ("result", `String message);
-              ("auto_started", `Bool !auto_started_ok);
             ]
              @ (match typed_outcome_field with
                 | Some field -> [ field ]

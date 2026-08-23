@@ -178,9 +178,6 @@ let append_decision_record
                 `Int observation.scheduled_automation.due_ready_count );
               ("running_keeper_fiber_count", `Int observation.running_keeper_fiber_count);
             ] );
-        ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
-        ("claim_matched_available", `Bool (claimable_task_count > 0));
-        ("claim_was_available", `Bool (claimable_task_count > 0));
         ( "response_preview", Json_util.string_opt_to_json response_preview );
         ( "response_preview_2000",
           match result with

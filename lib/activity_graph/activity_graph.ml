@@ -763,12 +763,10 @@ let graph_json config ?(kinds = []) ?(limit = 500)
         `Assoc
           [
             ("event_count", `Int (List.length events));
-            ("node_count", `Int (List.length nodes_json));
             ("edge_count", `Int (List.length edges_json));
             ("agent_count", `Int (count_kind "agent"));
             ("task_count", `Int (count_kind "task"));
             ("decision_count", `Int (count_kind "decision"));
-            ("operation_count", `Int (count_kind "operation"));
             ("active_agents", `Int active_agents);
           ] );
       ("stats_history", `List stats_history);

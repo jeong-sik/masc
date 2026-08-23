@@ -389,7 +389,6 @@ let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
     ("mean_score", `Float r.mean_score);
     ("consistency", `Float r.consistency);
     ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
-    ("num_runs", `Int (List.length r.runs));
     ("ci95_low", `Float r.ci95_low);
     ("ci95_high", `Float r.ci95_high);
     ("min_runs_met", `Bool r.min_runs_met);

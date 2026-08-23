@@ -317,7 +317,6 @@ let handle_read_file_with_outcome
              ~fields:
                [ "path", `String target
                ; "offset", `Int window.start_line
-               ; "scanned_bytes", `Int (String.length body)
                ]
              (Printf.sprintf
                 "offset %d is beyond the scanned window (%d bytes; the file \
@@ -490,7 +489,6 @@ let handle_owned_read_file_with_outcome
                ~fields:
                  [ "path", `String target
                  ; "offset", `Int window.start_line
-                 ; "scanned_bytes", `Int (String.length prefix.content)
                  ]
                (Printf.sprintf
                   "offset %d is beyond the scanned window (%d bytes)"
@@ -1868,8 +1866,6 @@ let append_write_outcome_payload ~target outcome =
       ; ( "filesystem_append_target_effect"
         , `String
             (append_target_effect_to_string (append_target_effect outcome)) )
-      ; "filesystem_append_requested_bytes", `Int outcome.requested_bytes
-      ; "filesystem_append_bytes_written", `Int outcome.bytes_written
       ; ( "filesystem_append_target_binding"
         , append_target_binding_json outcome.target_binding )
       ; ( "filesystem_append_failure"

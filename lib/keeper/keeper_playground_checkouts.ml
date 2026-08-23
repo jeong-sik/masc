@@ -315,7 +315,6 @@ let scan_json (result : (discovery, scan_error) result) : Yojson.Safe.t =
   | Ok (Complete _) ->
     `Assoc
       [ "state", `String "complete"
-      ; "root_relative", `Bool true
       ; "limit", `Null
       ; "detail", `Null
       ; "scanned_entries", `Null
@@ -323,7 +322,6 @@ let scan_json (result : (discovery, scan_error) result) : Yojson.Safe.t =
   | Ok (Partial { limit; _ }) ->
     `Assoc
       [ "state", `String "partial"
-      ; "root_relative", `Bool true
       ; "limit", `String (limit_code limit)
       ; "detail", `String (limit_to_string limit)
       ; ( "scanned_entries"
@@ -334,7 +332,6 @@ let scan_json (result : (discovery, scan_error) result) : Yojson.Safe.t =
   | Error error ->
     `Assoc
       [ "state", `String "unavailable"
-      ; "root_relative", `Bool true
       ; "limit", `Null
       ; "detail", `String (scan_error_to_string error)
       ; "scanned_entries", `Null

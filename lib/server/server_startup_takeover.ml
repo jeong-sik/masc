@@ -420,7 +420,6 @@ let write_takeover_breadcrumb ~lock_path ~port ~target_pid ~signal_name =
       ; "signal", `String signal_name
       ; "reason", `String "pid_alive_but_liveness_probe_failed"
       ; (* NDT-OK: forensic wall-clock evidence, never branched on. *)
-        "written_at_epoch", `Float (Unix.gettimeofday ())
       ]
   in
   match open_out path with

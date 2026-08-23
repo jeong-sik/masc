@@ -54,7 +54,6 @@ let recent_tool_host_failures ~now () =
                     evidence =
                       `Assoc
                         [
-                          ("log_seq", `Int entry.seq);
                           ("log_ts", `String entry.ts);
                           ( "failure_envelope",
                             Failure_envelope.to_yojson envelope );

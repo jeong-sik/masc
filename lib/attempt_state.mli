@@ -28,7 +28,6 @@ val result_of_string_opt : string -> result option
 type t = {
   generation : int;
   attempt_number : int;
-  attempt_id : string;  (** [Printf.sprintf "%d:%d" generation attempt_number]. *)
   last_result : result;
   next_retry_unix : float option;
   updated_unix : float;

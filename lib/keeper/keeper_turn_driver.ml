@@ -745,12 +745,6 @@ let run_named
            | None -> Missing_runtime runtime_id)
         lane_candidate_ids
   in
-  let assigned_runtime_context_window =
-    Runtime.max_context_of_runtime first_candidate
-  in
-  let first_runtime_context_window =
-    Runtime.max_context_of_runtime first_runtime
-  in
   (match reroute_decision with
    | Runtime_agent.Reroute { reason; _ } ->
      emit_runtime_manifest
@@ -764,8 +758,6 @@ let run_named
                 ("routing_reason", `String reason);
                 ("assigned_runtime_id", `String first_candidate_id);
                 ("rerouted_runtime_id", `String first_runtime_id);
-                ("assigned_context_window", `Int assigned_runtime_context_window);
-                ("rerouted_context_window", `Int first_runtime_context_window);
               ]))
        Keeper_runtime_manifest.Runtime_routed
    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ());

@@ -65,7 +65,6 @@ let turn_in_flight_rejection ~keeper_name
        ; ( "block"
          , Keeper_owner.autonomous_block_to_yojson
              (Keeper_owner.Turn_busy (Some info)) )
-       ; "metadata_committed", `Bool true
        ; ( "message"
          , `String
              "keeper metadata was updated but the keepalive lane was not \

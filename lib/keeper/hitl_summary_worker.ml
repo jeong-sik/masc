@@ -1209,7 +1209,6 @@ let spawn_with
       registry
       ~run_id
       ~lane:Exact_lane_run_registry.Hitl_auto_judge
-      ~subject_id:entry.id
       ~actor:entry.keeper_name
       ~started_at
       ~input:

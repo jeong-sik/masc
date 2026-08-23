@@ -205,7 +205,6 @@ let emit_context_overflow_shrink_manifest
     ~decision:
       (`Assoc
         [ "shrink_attempt", `Int shrink_attempt
-        ; "previous_model_input_capacity_bytes", `Int previous_capacity_bytes
         ; "model_input_capacity_bytes", `Int capacity_bytes
         ; "max_request_body_bytes", `Int ctx.max_request_body_bytes
         ])

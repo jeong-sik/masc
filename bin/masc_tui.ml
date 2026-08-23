@@ -1465,11 +1465,15 @@ let apply_keeper_chat_reconciliation state ~base_path request result =
                  | Keeper_chat.Succeeded | Keeper_chat.Failed
                  | Keeper_chat.Cancelled -> "in an unexpected terminal state"))
        | Error error ->
+           (* The request stays unverified for every failure here, including the
+              statuses [Keeper_chat.error_certainty] calls a verified rejection.
+              That classifier answers "did the dispatch POST create anything";
+              this branch is reading back an operation an authenticated
+              predecessor already created, so a refused read proves nothing
+              about it. Routing this through the certainty classifier would
+              clear the recovery fence for an operation that is still running. *)
            remember_unverified state request;
-           let detail =
-             Keeper_chat.error_to_string error
-             |> Keeper_chat.terminal_safe_text
-           in
+           let detail = Keeper_chat.reconciliation_failure_detail error in
            append_chat_history state request Message_error
              ("Operation reconciliation failed; outcome remains unverified. "
             ^ detail);
@@ -2748,6 +2752,14 @@ let main () =
   let port = state.port in
   let http_refresh_inflight = ref false in
   let async_messages = Eio.Stream.create 32 in
+  (* Reported before the recovery load so the operator sees the cause ahead of
+     the symptom: a tokenless process cannot dispatch, and cannot reconcile a
+     dispatch an authenticated predecessor left behind. *)
+  if not (Masc_tui_http.operator_token_present ()) then
+    add_event state "error"
+      "No operator token in this environment: sends and approvals are refused, \
+       and a recovered dispatch cannot be reconciled. Export MASC_TOKEN and \
+       restart masc-tui.";
   (match Keeper_chat_recovery.load_pending ~base_path with
    | Ok None -> ()
    | Error detail ->

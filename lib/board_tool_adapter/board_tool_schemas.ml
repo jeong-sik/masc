@@ -48,3 +48,11 @@ let tool_sub_board_update =
 let tool_sub_board_delete =
   schema_of_board_name Tool_name.Board_name.Board_sub_board_delete
 ;;
+
+let tool_curation_read =
+  schema_of_board_name Tool_name.Board_name.Board_curation_read
+;;
+
+let tool_curation_submit =
+  schema_of_board_name Tool_name.Board_name.Board_curation_submit
+;;

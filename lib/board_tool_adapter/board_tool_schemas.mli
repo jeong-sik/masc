@@ -30,3 +30,5 @@ val tool_sub_board_list : Masc_domain.tool_schema
 val tool_sub_board_get : Masc_domain.tool_schema
 val tool_sub_board_update : Masc_domain.tool_schema
 val tool_sub_board_delete : Masc_domain.tool_schema
+val tool_curation_read : Masc_domain.tool_schema
+val tool_curation_submit : Masc_domain.tool_schema

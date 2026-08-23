@@ -100,11 +100,11 @@ let board_tool_cleanup : Masc_domain.tool_schema =
 ;;
 
 let board_tool_curation_read : Masc_domain.tool_schema =
-  Board_tool_schemas.schema_of_board_name Tool_name.Board_name.Board_curation_read
+  Board_tool_schemas.tool_curation_read
 ;;
 
 let board_tool_curation_submit : Masc_domain.tool_schema =
-  Board_tool_schemas.schema_of_board_name Tool_name.Board_name.Board_curation_submit
+  Board_tool_schemas.tool_curation_submit
 ;;
 
 (** {1 Typed operation projection} *)

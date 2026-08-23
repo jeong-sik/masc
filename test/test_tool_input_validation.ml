@@ -1331,12 +1331,21 @@ let test_tool_execute_write_validation_stays_structural () =
 
 let tool_execute_exec_stage args =
   match Keeper_tool_execute_typed_input.of_json args with
-  | Ok { program = { head = { argv = program :: arguments; _ }; tail = [] }; _ } ->
+  | Ok
+      { source =
+          Staged
+            { program = { head = { argv = program :: arguments; _ }; tail = [] }
+            ; _
+            }
+      ; _
+      } ->
     program, arguments
-  | Ok { program = { head = { argv = []; _ }; _ }; _ } ->
+  | Ok { source = Staged { program = { head = { argv = []; _ }; _ }; _ }; _ } ->
     Alcotest.fail "expected non-empty argv"
-  | Ok { program = { tail = _ :: _; _ }; _ } ->
+  | Ok { source = Staged { program = { tail = _ :: _; _ }; _ }; _ } ->
     Alcotest.fail "expected a single-stage program"
+  | Ok { source = Script _; _ } ->
+    Alcotest.fail "expected the staged form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
 
@@ -1400,16 +1409,24 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
         ])
   with
   | Ok
-      { program =
-          { head = { Keeper_tool_execute_typed_input.argv; _ }; tail = _ :: _ }
+      { source =
+          Keeper_tool_execute_typed_input.Staged
+            { program =
+                { head = { Keeper_tool_execute_typed_input.argv; _ }
+                ; tail = _ :: _
+                }
+            ; _
+            }
       ; _
       } ->
     Alcotest.(check (list string))
       "pipeline find stage remains caller-authored"
       [ "find"; "-type"; "f" ]
       argv
-  | Ok { program = { tail = []; _ }; _ } ->
+  | Ok { source = Keeper_tool_execute_typed_input.Staged { program = { tail = []; _ }; _ }; _ } ->
     Alcotest.fail "expected a multi-stage program"
+  | Ok { source = Keeper_tool_execute_typed_input.Script _; _ } ->
+    Alcotest.fail "expected the staged form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 

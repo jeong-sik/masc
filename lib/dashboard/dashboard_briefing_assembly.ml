@@ -163,7 +163,6 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("name", `String name);
                       ("agent_name", member_assoc "agent_name" keeper);
                       ("status", `String status);
-                      ("generation", member_assoc "generation" keeper);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
                       ("context_metrics_unavailable", context_metrics_unavailable);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);

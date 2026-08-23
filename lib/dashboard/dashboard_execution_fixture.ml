@@ -243,7 +243,6 @@ let execution_smoke_fixture_json () =
                 ("focus", `String "masc-keeper-autonomy");
                 ("last_signal_at", `String generated_at);
                 ("last_autonomous_action_at", `String generated_at);
-                ("generation", `Int 2);
                 ("turn_count", `Int 84);
                 ("context_ratio", `Float 0.91);
                 ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
@@ -397,7 +396,6 @@ let execution_smoke_fixture_json () =
                 ("name", `String "dm-keeper");
                 ("agent_name", `String "dm-keeper");
                 ("status", `String "active");
-                ("generation", `Int 2);
                 ("turn_count", `Int 84);
                 ("context_ratio", `Float 0.91);
                 ("context_tokens", `Int 245000);

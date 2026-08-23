@@ -1464,7 +1464,6 @@ max-concurrent = 1
 let execution_trust_keeper_row_keys =
   [ "agent_name"
   ; "current_task_id"
-  ; "generation"
   ; "keeper_id"
   ; "name"
   ; "phase"
@@ -1528,7 +1527,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
          ; "pipeline_stage"
          ; "status"
          ; "trace_id"
-         ; "generation"
          ; "current_task_id"
          ; "trust"
          ])
@@ -1547,7 +1545,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     (row |> member "agent_name" |> to_string);
   check string "trace id" "execution-trust-narrow-trace"
     (row |> member "trace_id" |> to_string);
-  check int "generation" 17 (row |> member "generation" |> to_int);
   check bool "trust summary remains populated" true
     (match row |> member "trust" with `Assoc _ -> true | _ -> false)
 

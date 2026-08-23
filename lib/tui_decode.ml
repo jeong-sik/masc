@@ -1007,6 +1007,21 @@ let decode_system_log_entry json =
     ; sl_message
     }
 
+type connector = {
+  cn_id : string;
+  cn_display_name : string;
+  cn_available : bool;
+  cn_connected : bool;
+  cn_status : string;
+  cn_channel : string option;
+}
+
+type connector_snapshot = {
+  cs_connectors : connector list;
+  cs_total : int;
+  cs_active : int;
+}
+
 type repository = {
   rp_name : string;
   rp_local_path : string;
@@ -1061,6 +1076,33 @@ let decode_string_name_list json key =
        | `String value -> Ok value
        | bad -> field_type_error key "a string" bad)
     items
+
+let decode_bool_field_or json key ~default =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> Ok default
+  | bad -> field_type_error key "a bool or null" bad
+
+let decode_connector json =
+  let* cn_id = required_string_field json "connector_id" in
+  let* cn_display_name = required_string_field json "display_name" in
+  let* cn_status = required_string_field json "status" in
+  (* Both default to false: a connector that does not say it is available or
+     connected is not, and defaulting the other way would draw a dead
+     connector as a working one. *)
+  let* cn_available = decode_bool_field_or json "available" ~default:false in
+  let* cn_connected = decode_bool_field_or json "connected" ~default:false in
+  let* cn_channel = optional_string_field json "channel" in
+  Ok { cn_id; cn_display_name; cn_available; cn_connected; cn_status; cn_channel }
+
+let decode_connector_snapshot json =
+  let* connectors_json = required_list_field json "connectors" in
+  let* cs_connectors =
+    decode_list "connectors" decode_connector connectors_json
+  in
+  let* cs_total = required_int_field json "total" in
+  let* cs_active = required_int_field json "active_count" in
+  Ok { cs_connectors; cs_total; cs_active }
 
 let decode_repository json =
   let* rp_name = required_string_field json "name" in

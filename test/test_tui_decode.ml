@@ -1042,6 +1042,77 @@ let verification_snapshot_json ?(total = 3) requests =
     ; ("requests", `List requests)
     ]
 
+(* Connectors. Shape is each connector's own connector_json; the fields below
+   are the ones every connector emits. *)
+let connector_json ?(available = `Bool true) ?(connected = `Bool true)
+    ?(channel = `String "#release-deployment") () =
+  `Assoc
+    [ ("connector_id", `String "slack")
+    ; ("display_name", `String "Slack")
+    ; ("available", available)
+    ; ("connected", connected)
+    ; ("status", `String "ready")
+    ; ("channel", channel)
+    ; ("capabilities", `List [ `String "post" ])
+    ]
+
+let connector_snapshot_json ?(active = 1) connectors =
+  `Assoc
+    [ ("connectors", `List connectors)
+    ; ("total", `Int (List.length connectors))
+    ; ("active_count", `Int active)
+    ; ("generated_at", `String "2026-08-23T09:00:00Z")
+    ]
+
+let test_decode_connector_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json [ connector_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "total" 1 snapshot.Tui_decode.cs_total;
+      Alcotest.(check int) "active" 1 snapshot.Tui_decode.cs_active;
+      (match snapshot.Tui_decode.cs_connectors with
+       | [ c ] ->
+           Alcotest.(check string) "name" "Slack"
+             c.Tui_decode.cn_display_name;
+           Alcotest.(check bool) "available" true c.Tui_decode.cn_available;
+           Alcotest.(check bool) "connected" true c.Tui_decode.cn_connected;
+           Alcotest.(check (option string)) "channel"
+             (Some "#release-deployment") c.Tui_decode.cn_channel
+       | cs -> Alcotest.failf "expected one connector, got %d" (List.length cs))
+
+let test_decode_connector_configured_but_unreachable () =
+  (* Available and connected are different questions. A connector that is set
+     up but cannot be reached needs a different action than one that was never
+     configured, so the two are not folded. *)
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json ~active:1
+         [ connector_json ~connected:(`Bool false) () ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "configured" true c.Tui_decode.cn_available;
+      Alcotest.(check bool) "but not reachable" false c.Tui_decode.cn_connected
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_connector_absent_flags_are_off () =
+  (* Defaulting the other way would draw a dead connector as a working one. *)
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json ~active:0
+         [ connector_json ~available:`Null ~connected:`Null ~channel:`Null () ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "not available" false c.Tui_decode.cn_available;
+      Alcotest.(check bool) "not connected" false c.Tui_decode.cn_connected;
+      Alcotest.(check (option string)) "no channel" None
+        c.Tui_decode.cn_channel
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
 (* Repositories. Shape is [repository_json] in the repositories route. *)
 let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true) () =
   `Assoc
@@ -1310,6 +1381,15 @@ let test_decode_system_log_requires_the_message () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_connectors",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_connector_snapshot_reads_the_live_shape;
+        Alcotest.test_case "configured is not reachable" `Quick
+          test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "absent flags are off" `Quick
+          test_decode_connector_absent_flags_are_off;
+      ] );
     ( "decode_repositories",
       [
         Alcotest.test_case "reads the live shape" `Quick

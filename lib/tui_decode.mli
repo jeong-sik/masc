@@ -114,6 +114,25 @@ type system_log_snapshot = {
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
 (** A repository the workspace tracks. *)
+(** A connector the gate can deliver through. *)
+type connector = {
+  cn_id : string;
+  cn_display_name : string;
+  cn_available : bool;  (** Configured and usable. *)
+  cn_connected : bool;
+      (** Reachable right now. Kept apart from [cn_available]: a connector can
+          be configured and unreachable, and the two call for different
+          actions. *)
+  cn_status : string;
+  cn_channel : string option;
+}
+
+type connector_snapshot = {
+  cs_connectors : connector list;
+  cs_total : int;
+  cs_active : int;  (** How many the server counted as available. *)
+}
+
 type repository = {
   rp_name : string;
   rp_local_path : string;
@@ -283,6 +302,9 @@ type transport_health = {
 
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
+
+val decode_connector_snapshot :
+  Yojson.Safe.t -> (connector_snapshot, string) result
 
 val decode_repository_snapshot :
   Yojson.Safe.t -> (repository_snapshot, string) result

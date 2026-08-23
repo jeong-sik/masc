@@ -103,7 +103,7 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Keepers _ | Board | Approvals | Planning
-            | Verification | Harness | Repositories | System_logs ->
+            | Verification | Harness | Repositories | Connectors | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -2770,6 +2770,101 @@ let render_repositories (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
 
+(* Where the gate can deliver.
+
+   Configured and reachable are separate columns because they call for
+   different actions: one is a setup gap, the other is something that was
+   working and is not. A connector that is set up but unreachable is the row
+   an operator acts on. *)
+let render_connectors (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let connectors =
+    match state.connectors with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.cs_connectors
+  in
+  let shown = List.length connectors in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.connectors with
+    | None ->
+        Printf.sprintf " MASC Connectors  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        Printf.sprintf " MASC Connectors (%d of %d available)  %s  %s"
+          snapshot.Masc.Tui_decode.cs_active snapshot.Masc.Tui_decode.cs_total
+          timestamp (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector" "Configured"
+      "Reachable" "Status" "Channel"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.connectors_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.connectors_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.connectors_scroll max_scroll) in
+  state.connectors_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.connectors_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (no connectors registered)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt connectors idx with
+      | None -> box_empty buf cols
+      | Some c ->
+          let open Masc.Tui_decode in
+          let yes_no flag = if flag then "yes" else "no" in
+          let line =
+            Printf.sprintf "  %-16s %-11s %-11s %-10s %s"
+              (Terminal_text.single_line c.cn_display_name)
+              (yes_no c.cn_available) (yes_no c.cn_connected)
+              (Terminal_text.single_line c.cn_status)
+              (Terminal_text.single_line_or ~default:"-" c.cn_channel)
+          in
+          let style =
+            (* Set up and unreachable is the row to act on: it was working.
+               Never configured is dim -- it is a choice, not a fault. *)
+            if c.cn_available && not c.cn_connected then Ansi.red
+            else if not c.cn_available then Ansi.dim
+            else Ansi.reset
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d connectors, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -2810,6 +2905,7 @@ let render_surface (state : state) =
   | Verification -> render_verification state
   | Harness -> render_harness state
   | Repositories -> render_repositories state
+  | Connectors -> render_connectors state
   | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =

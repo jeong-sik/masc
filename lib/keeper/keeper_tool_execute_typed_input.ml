@@ -1,21 +1,26 @@
-(* Where one standard stream of a stage is attached. [Fd] duplicates another
-   descriptor of the same stage, which is how [2>&1] is expressed without a
-   shell. The IR carries all four shapes; every one of them is reachable from
-   this type. *)
-type redirect_target =
-  | Inherit
-  | Discard
-  | File of {
-      path : string;
-      append : bool;
-    }
-  | Fd of int
+(* Where a stage's standard streams attach. Reading and writing admit
+   different shapes -- a source cannot be truncated, a sink cannot be read --
+   so they are separate types. One shared type would have to carry a field
+   that one direction ignores, and an ignored field is a value the caller can
+   set and never see honoured. *)
+type input_source =
+  | Inherit_input
+  | Empty_input
+  | Read_file of { path : string }
+  | Input_from_fd of int
+
+type output_sink =
+  | Inherit_output
+  | Discard_output
+  | Truncate_file of { path : string }
+  | Append_file of { path : string }
+  | Output_to_fd of int
 
 type exec_stage = {
   argv : string list;
-  stdin : redirect_target;
-  stdout : redirect_target;
-  stderr : redirect_target;
+  stdin : input_source;
+  stdout : output_sink;
+  stderr : output_sink;
 }
 
 (* A command is one or more stages, each owning its own redirections. The
@@ -99,14 +104,6 @@ let optional_string ~path fields key =
       (json_type_name value)
 ;;
 
-let optional_bool ~path fields key =
-  match List.assoc_opt key fields with
-  | None | Some `Null -> Ok None
-  | Some (`Bool value) -> Ok (Some value)
-  | Some value ->
-    result_errorf "%s.%s must be boolean, got %s" path key (json_type_name value)
-;;
-
 let optional_positive_float ~path fields key =
   let validate value =
     if Float.is_finite value && Float.compare value 0.0 > 0
@@ -175,65 +172,87 @@ let optional_env ~path fields =
       (json_type_name value)
 ;;
 
-(* Parse a [stdin]/[stdout]/[stderr] field into a [redirect_target].
-   Accepted forms (all optional; absent or null
-   defaults to [Inherit]):
-
-   - [{"discard": true}]    → [Discard]
-   - [{"file": "/abs/path"}] → [File path]
-
-   Anything else is rejected at JSON boundary so absolute-path and
-   value-range validation can stay outside [validate]. *)
-let optional_redirect_target ~path fields key =
-  let ( let* ) = Result.bind in
+(* A redirection is an object naming exactly one shape. This reads the object
+   and hands the named properties to the direction's own decoder; which names
+   are legal is the direction's business, not this function's. Absent or null
+   means the stream is not redirected. *)
+let redirect_props ~path ~key fields =
   match member fields key with
-  | None | Some `Null -> Ok Inherit
-  | Some (`Assoc props) ->
-    (match List.assoc_opt "discard" props, List.assoc_opt "file" props with
-     | Some (`Bool true), None -> Ok Discard
-     | Some (`Bool false), None -> Ok Inherit
-     | None, Some (`String path_value) ->
-       let* append = optional_bool ~path:(path ^ "." ^ key) props "append" in
-       Ok (File { path = path_value; append = Option.value append ~default:false })
-     | Some _, Some _ ->
-       result_errorf
-         "%s.%s must specify exactly one of {discard:true}, {file:\"/abs/path\"} \
-          or {fd:N}; received more than one"
-         path
-         key
-     | None, None ->
-       (match List.assoc_opt "fd" props with
-        | Some (`Int target) -> Ok (Fd target)
-        | Some value ->
-          result_errorf
-            "%s.%s.fd must be integer, got %s"
-            path
-            key
-            (json_type_name value)
-        | None ->
-          result_errorf
-            "%s.%s must be {discard:true}, {file:\"/abs/path\"} or {fd:N}"
-            path
-            key)
-     | _ ->
-       result_errorf
-         "%s.%s must be {discard:true}, {file:\"/abs/path\"} or {fd:N}"
-         path
-         key)
+  | None | Some `Null -> Ok None
+  | Some (`Assoc props) -> Ok (Some props)
   | Some value ->
-    result_errorf
-      "%s.%s must be object, got %s"
-      path
-      key
-      (json_type_name value)
+    result_errorf "%s.%s must be object, got %s" path key (json_type_name value)
+;;
+
+(* [stdin] takes bytes from somewhere: inherit, nothing, a file, or another
+   descriptor of the same stage. There is no write mode to name, so naming one
+   is an error rather than a field this decoder drops on the floor. *)
+let optional_input_source ~path fields key =
+  let ( let* ) = Result.bind in
+  let* props = redirect_props ~path ~key fields in
+  match props with
+  | None -> Ok Inherit_input
+  | Some props ->
+    let reject () =
+      result_errorf
+        "%s.%s must name exactly one of {discard:true}, {file:\"/abs/path\"} or \
+         {fd:N}"
+        path
+        key
+    in
+    (match
+       ( List.assoc_opt "discard" props
+       , List.assoc_opt "file" props
+       , List.assoc_opt "fd" props
+       , List.length props )
+     with
+     | Some (`Bool true), None, None, 1 -> Ok Empty_input
+     | Some (`Bool false), None, None, 1 -> Ok Inherit_input
+     | None, Some (`String path_value), None, 1 -> Ok (Read_file { path = path_value })
+     | None, None, Some (`Int target), 1 -> Ok (Input_from_fd target)
+     | _ -> reject ())
+;;
+
+(* [stdout]/[stderr] give bytes to somewhere. A file sink must say which of the
+   two shell modes it is: [truncate] replaces the file, [append] adds to it.
+   Neither is a safe guess for the other, so the shape carries the answer and
+   there is no default to fall back on. *)
+let optional_output_sink ~path fields key =
+  let ( let* ) = Result.bind in
+  let* props = redirect_props ~path ~key fields in
+  match props with
+  | None -> Ok Inherit_output
+  | Some props ->
+    let reject () =
+      result_errorf
+        "%s.%s must name exactly one of {discard:true}, \
+         {truncate:\"/abs/path\"}, {append:\"/abs/path\"} or {fd:N}"
+        path
+        key
+    in
+    (match
+       ( List.assoc_opt "discard" props
+       , List.assoc_opt "truncate" props
+       , List.assoc_opt "append" props
+       , List.assoc_opt "fd" props
+       , List.length props )
+     with
+     | Some (`Bool true), None, None, None, 1 -> Ok Discard_output
+     | Some (`Bool false), None, None, None, 1 -> Ok Inherit_output
+     | None, Some (`String path_value), None, None, 1 ->
+       Ok (Truncate_file { path = path_value })
+     | None, None, Some (`String path_value), None, 1 ->
+       Ok (Append_file { path = path_value })
+     | None, None, None, Some (`Int target), 1 -> Ok (Output_to_fd target)
+     | _ -> reject ())
 ;;
 
 let stage_of_fields ~path fields =
   let ( let* ) = Result.bind in
   let* argv = required_string_list ~path fields "argv" in
-  let* stdin = optional_redirect_target ~path fields "stdin" in
-  let* stdout = optional_redirect_target ~path fields "stdout" in
-  let* stderr = optional_redirect_target ~path fields "stderr" in
+  let* stdin = optional_input_source ~path fields "stdin" in
+  let* stdout = optional_output_sink ~path fields "stdout" in
+  let* stderr = optional_output_sink ~path fields "stderr" in
   Ok { argv; stdin; stdout; stderr }
 ;;
 
@@ -325,11 +344,15 @@ let of_json (json : Yojson.Safe.t) =
        a shell puts them: stdin feeds the first stage and stdout/stderr come
        off the last. A stage that declared its own keeps it — the explicit
        one wins over the program-level default. *)
-    let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
-    let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
-    let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
-    let default_to fallback = function
-      | Inherit -> fallback
+    let* stdin = optional_input_source ~path:"$" fields "stdin" in
+    let* stdout = optional_output_sink ~path:"$" fields "stdout" in
+    let* stderr = optional_output_sink ~path:"$" fields "stderr" in
+    let default_input fallback = function
+      | Inherit_input -> fallback
+      | declared -> declared
+    in
+    let default_output fallback = function
+      | Inherit_output -> fallback
       | declared -> declared
     in
     (match stages with
@@ -337,19 +360,19 @@ let of_json (json : Yojson.Safe.t) =
      | [ only ] ->
        let only =
          { only with
-           stdin = default_to stdin only.stdin
-         ; stdout = default_to stdout only.stdout
-         ; stderr = default_to stderr only.stderr
+           stdin = default_input stdin only.stdin
+         ; stdout = default_output stdout only.stdout
+         ; stderr = default_output stderr only.stderr
          }
        in
        Ok { program = { head = only; tail = [] }; cwd; env; timeout_sec }
      | head :: second :: rest ->
-       let head = { head with stdin = default_to stdin head.stdin } in
+       let head = { head with stdin = default_input stdin head.stdin } in
        let last, middle = split_last second rest in
        let last =
          { last with
-           stdout = default_to stdout last.stdout
-         ; stderr = default_to stderr last.stderr
+           stdout = default_output stdout last.stdout
+         ; stderr = default_output stderr last.stderr
          }
        in
        Ok
@@ -403,22 +426,40 @@ let check_exec ~argv ~cwd ~env =
 ;;
 
 (* A stage owns exactly the three standard descriptors, so duplicating any
-   other number would name a descriptor the stage does not have. *)
-let standard_fds = [ 0; 1; 2 ]
+   other number would name a descriptor the stage does not have. Naming them
+   keeps the numbers out of the call sites that attach each stream. *)
+let stdin_fd = 0
+let stdout_fd = 1
+let stderr_fd = 2
+let standard_fds = [ stdin_fd; stdout_fd; stderr_fd ]
 
-let check_redirect_target ~fd = function
-  | Inherit | Discard -> Ok ()
-  | File { path; append = _ } when String.length path > 0 && path.[0] = '/' -> Ok ()
-  | File { path; append = _ } -> Error (Redirect_path_not_absolute { fd; path })
-  | Fd target when List.exists (Int.equal target) standard_fds -> Ok ()
-  | Fd target -> Error (Redirect_fd_unknown { fd; target })
+let check_path ~fd path =
+  if String.length path > 0 && path.[0] = '/' then Ok ()
+  else Error (Redirect_path_not_absolute { fd; path })
+;;
+
+let check_fd ~fd target =
+  if List.exists (Int.equal target) standard_fds then Ok ()
+  else Error (Redirect_fd_unknown { fd; target })
+;;
+
+let check_input_source ~fd = function
+  | Inherit_input | Empty_input -> Ok ()
+  | Read_file { path } -> check_path ~fd path
+  | Input_from_fd target -> check_fd ~fd target
+;;
+
+let check_output_sink ~fd = function
+  | Inherit_output | Discard_output -> Ok ()
+  | Truncate_file { path } | Append_file { path } -> check_path ~fd path
+  | Output_to_fd target -> check_fd ~fd target
 ;;
 
 let check_stage_redirects { argv = _; stdin; stdout; stderr } =
   let ( let* ) = Result.bind in
-  let* () = check_redirect_target ~fd:0 stdin in
-  let* () = check_redirect_target ~fd:1 stdout in
-  check_redirect_target ~fd:2 stderr
+  let* () = check_input_source ~fd:stdin_fd stdin in
+  let* () = check_output_sink ~fd:stdout_fd stdout in
+  check_output_sink ~fd:stderr_fd stderr
 ;;
 
 let stages_of { head; tail } = head :: tail
@@ -465,38 +506,37 @@ let shell_simple
        arguments)
 ;;
 
-(* Each standard stream carries the fd it attaches to and the direction that
-   fd flows, so neither is chosen by position at the call site. [Inherit]
-   yields no IR entry — the child keeps the parent's descriptor. *)
-type stream = {
-  fd : int;
-  reading : bool;
-}
+(* The device that supplies no bytes and swallows every byte written to it. *)
+let dev_null = "/dev/null"
 
-let stdin_stream = { fd = 0; reading = true }
-let stdout_stream = { fd = 1; reading = false }
-let stderr_stream = { fd = 2; reading = false }
+(* Each direction lowers to the IR without asking which way its fd flows: the
+   source always opens for reading and the sink knows its own write mode. An
+   inherited stream yields no IR entry — the child keeps the parent's
+   descriptor. *)
+let input_entry ~classify source =
+  let file path =
+    Some
+      (Masc_exec.Redirect_scope.File
+         { fd = stdin_fd; target = classify path; mode = Masc_exec.Redirect_scope.Read })
+  in
+  match source with
+  | Inherit_input -> None
+  | Empty_input -> file dev_null
+  | Read_file { path } -> file path
+  | Input_from_fd src ->
+    Some (Masc_exec.Redirect_scope.Fd_to_fd { src = stdin_fd; dst = src })
+;;
 
-let redirect_entry ~classify { fd; reading } target =
+let output_entry ~classify ~fd sink =
   let file ~path ~mode =
     Some (Masc_exec.Redirect_scope.File { fd; target = classify path; mode })
   in
-  match target with
-  | Inherit -> None
-  | Discard ->
-    file
-      ~path:"/dev/null"
-      ~mode:
-        (if reading then Masc_exec.Redirect_scope.Read
-         else Masc_exec.Redirect_scope.Write)
-  | File { path; append = true } -> file ~path ~mode:Masc_exec.Redirect_scope.Append
-  | File { path; append = false } ->
-    file
-      ~path
-      ~mode:
-        (if reading then Masc_exec.Redirect_scope.Read
-         else Masc_exec.Redirect_scope.Write)
-  | Fd src -> Some (Masc_exec.Redirect_scope.Fd_to_fd { src = fd; dst = src })
+  match sink with
+  | Inherit_output -> None
+  | Discard_output -> file ~path:dev_null ~mode:Masc_exec.Redirect_scope.Write
+  | Truncate_file { path } -> file ~path ~mode:Masc_exec.Redirect_scope.Write
+  | Append_file { path } -> file ~path ~mode:Masc_exec.Redirect_scope.Append
+  | Output_to_fd src -> Some (Masc_exec.Redirect_scope.Fd_to_fd { src = fd; dst = src })
 ;;
 
 let redirects_of_stage ~cwd { argv = _; stdin; stdout; stderr } =
@@ -504,9 +544,9 @@ let redirects_of_stage ~cwd { argv = _; stdin; stdout; stderr } =
   let classify path = Masc_exec.Path_scope.classify ~raw:path ~cwd:cwd_str in
   List.filter_map
     (fun x -> x)
-    [ redirect_entry ~classify stdin_stream stdin
-    ; redirect_entry ~classify stdout_stream stdout
-    ; redirect_entry ~classify stderr_stream stderr
+    [ input_entry ~classify stdin
+    ; output_entry ~classify ~fd:stdout_fd stdout
+    ; output_entry ~classify ~fd:stderr_fd stderr
     ]
 ;;
 

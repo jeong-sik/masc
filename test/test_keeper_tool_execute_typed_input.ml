@@ -12,8 +12,9 @@ let typed_ok input =
   | Error _ -> false
 ;;
 
-let mk_stage ?(stdin = Execute_input.Inherit) ?(stdout = Execute_input.Inherit)
-      ?(stderr = Execute_input.Inherit) argv
+let mk_stage ?(stdin = Execute_input.Inherit_input)
+      ?(stdout = Execute_input.Inherit_output)
+      ?(stderr = Execute_input.Inherit_output) argv
   : Execute_input.exec_stage
   =
   { argv; stdin; stdout; stderr }
@@ -531,16 +532,16 @@ let test_of_json_stage_redirect_beats_the_top_level_one () =
                 [ `Assoc [ "argv", `List [ `String "printf"; `String "x" ] ]
                 ; `Assoc
                     [ "argv", `List [ `String "wc" ]
-                    ; "stdout", `Assoc [ "file", `String "/tmp/stage.log" ]
+                    ; "stdout", `Assoc [ "truncate", `String "/tmp/stage.log" ]
                     ]
                 ] )
-          ; "stdout", `Assoc [ "file", `String "/tmp/program.log" ]
+          ; "stdout", `Assoc [ "truncate", `String "/tmp/program.log" ]
           ])
   in
   match input.Execute_input.program with
   | { head = _; tail = [ last ] } ->
     (match last.stdout with
-     | Execute_input.File { path; _ } ->
+     | Execute_input.Truncate_file { path } ->
        Alcotest.(check string)
          "an explicit stage redirect is not overwritten"
          "/tmp/stage.log"
@@ -558,7 +559,7 @@ let test_of_json_pipeline_carries_the_top_level_redirect () =
                 [ `Assoc [ "argv", `List [ `String "printf"; `String "x" ] ]
                 ; `Assoc [ "argv", `List [ `String "wc" ] ]
                 ] )
-          ; "stdout", `Assoc [ "file", `String "/tmp/out.log" ]
+          ; "stdout", `Assoc [ "truncate", `String "/tmp/out.log" ]
           ])
   in
   match input.Execute_input.program with
@@ -566,9 +567,9 @@ let test_of_json_pipeline_carries_the_top_level_redirect () =
     Alcotest.(check bool)
       "first stage keeps the pipe"
       true
-      (head.stdout = Execute_input.Inherit);
+      (head.stdout = Execute_input.Inherit_output);
     (match last.stdout with
-     | Execute_input.File { path; append = false } ->
+     | Execute_input.Truncate_file { path } ->
        Alcotest.(check string) "last stage takes the redirect" "/tmp/out.log" path
      | _ -> Alcotest.fail "expected the top-level redirect on the last stage")
   | _ -> Alcotest.fail "expected a two-stage program"
@@ -942,9 +943,9 @@ let mk_exec_with_redirects
       ?(cwd = Some "/tmp")
       ?(env = [])
       ?(timeout_sec = None)
-      ?(stdin = Execute_input.Inherit)
-      ?(stdout = Execute_input.Inherit)
-      ?(stderr = Execute_input.Inherit)
+      ?(stdin = Execute_input.Inherit_input)
+      ?(stdout = Execute_input.Inherit_output)
+      ?(stderr = Execute_input.Inherit_output)
       ()
   =
   mk_program
@@ -975,7 +976,7 @@ let test_pipeline_stage_keeps_its_own_redirect () =
     mk_program
       (mk_stage [ "rg"; "pattern" ])
       [ mk_stage
-          ~stdout:(Execute_input.File { path = "/tmp/out.log"; append = false })
+          ~stdout:(Execute_input.Truncate_file { path = "/tmp/out.log" })
           [ "head"; "-20" ]
       ]
   in
@@ -999,7 +1000,7 @@ let test_append_reaches_the_ir () =
   let input =
     mk_program
       (mk_stage
-         ~stdout:(Execute_input.File { path = "/tmp/run.log"; append = true })
+         ~stdout:(Execute_input.Append_file { path = "/tmp/run.log" })
          [ "echo"; "line" ])
       []
   in
@@ -1016,7 +1017,7 @@ let test_append_reaches_the_ir () =
 ;;
 
 let test_fd_duplication_reaches_the_ir () =
-  let input = mk_program (mk_stage ~stderr:(Execute_input.Fd 1) [ "make" ]) [] in
+  let input = mk_program (mk_stage ~stderr:(Execute_input.Output_to_fd 1) [ "make" ]) [] in
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
     (match simple.redirects with
@@ -1030,7 +1031,7 @@ let test_fd_duplication_reaches_the_ir () =
 ;;
 
 let test_fd_outside_the_stage_is_rejected () =
-  let input = mk_program (mk_stage ~stderr:(Execute_input.Fd 7) [ "make" ]) [] in
+  let input = mk_program (mk_stage ~stderr:(Execute_input.Output_to_fd 7) [ "make" ]) [] in
   Alcotest.(check bool)
     "a stage may only duplicate 0, 1 or 2"
     false
@@ -1046,7 +1047,7 @@ let test_json_pipeline_with_stage_redirect_parses () =
             ; `Assoc
                 [ "argv", `List [ `String "head"; `String "-20" ]
                 ; ( "stdout"
-                  , `Assoc [ "file", `String "/tmp/out.log"; "append", `Bool true ] )
+                  , `Assoc [ "append", `String "/tmp/out.log" ] )
                 ]
             ] )
       ]
@@ -1054,7 +1055,7 @@ let test_json_pipeline_with_stage_redirect_parses () =
   match Execute_input.of_json json with
   | Ok { program = { head = _; tail = [ tail_stage ] }; _ } ->
     (match tail_stage.stdout with
-     | Execute_input.File { path; append = true } ->
+     | Execute_input.Append_file { path } ->
        Alcotest.(check string) "append target" "/tmp/out.log" path
      | _ -> Alcotest.fail "expected an appending file redirect on the tail stage")
   | Ok _ -> Alcotest.fail "expected a two-stage program"
@@ -1093,11 +1094,15 @@ let test_redirect_defaults_inherit_emits_no_ir_entries () =
 
 let test_redirect_discard_combinations () =
   let cases =
-    [ "stderr_discard_only", Execute_input.Inherit, Execute_input.Inherit, Execute_input.Discard, 1
-    ; "stdout_discard_only", Execute_input.Inherit, Execute_input.Discard, Execute_input.Inherit, 1
-    ; "stdin_discard_only",  Execute_input.Discard, Execute_input.Inherit, Execute_input.Inherit, 1
-    ; "stdout_stderr_discard", Execute_input.Inherit, Execute_input.Discard, Execute_input.Discard, 2
-    ; "all_three_discard", Execute_input.Discard, Execute_input.Discard, Execute_input.Discard, 3
+    let inherit_in = Execute_input.Inherit_input in
+    let inherit_out = Execute_input.Inherit_output in
+    let empty_in = Execute_input.Empty_input in
+    let drop_out = Execute_input.Discard_output in
+    [ "stderr_discard_only", inherit_in, inherit_out, drop_out, 1
+    ; "stdout_discard_only", inherit_in, drop_out, inherit_out, 1
+    ; "stdin_discard_only", empty_in, inherit_out, inherit_out, 1
+    ; "stdout_stderr_discard", inherit_in, drop_out, drop_out, 2
+    ; "all_three_discard", empty_in, drop_out, drop_out, 3
     ]
   in
   List.iter
@@ -1121,7 +1126,7 @@ let test_redirect_discard_combinations () =
 let test_redirect_file_absolute_path_emits_ir () =
   let input =
     mk_exec_with_redirects
-      ~stdout:(Execute_input.File { path = "/tmp/out.log"; append = false })
+      ~stdout:(Execute_input.Truncate_file { path = "/tmp/out.log" })
       ()
   in
   match Execute_input.to_shell_ir  input with
@@ -1141,7 +1146,7 @@ let test_redirect_file_absolute_path_emits_ir () =
 let test_redirect_file_relative_path_rejected () =
   let input =
     mk_exec_with_redirects
-      ~stderr:(Execute_input.File { path = "relative/path.log"; append = false })
+      ~stderr:(Execute_input.Truncate_file { path = "relative/path.log" })
       ()
   in
   match Execute_input.validate  input with
@@ -1159,7 +1164,7 @@ let test_redirect_stderr_discard_equivalent_to_dev_null_redirect () =
   (* Equivalence with Bash.parse_string "rg pattern 2>/dev/null":
      both must produce a single redirect targeting /dev/null on fd=2
      with Write mode. *)
-  let input = mk_exec_with_redirects ~stderr:Execute_input.Discard () in
+  let input = mk_exec_with_redirects ~stderr:Execute_input.Discard_output () in
   match Execute_input.to_shell_ir  input with
   | Ok ir ->
     (match redirect_at ir 0 with
@@ -1183,7 +1188,8 @@ let test_of_json_parses_discard_stderr_shorthand () =
   in
   let input = parse_json_exn json in
   match input with
-  | { Execute_input.program = { head = { stderr = Execute_input.Discard; _ }; _ }; _ } -> ()
+  | { Execute_input.program = { head = { stderr = Execute_input.Discard_output; _ }; _ }; _ } ->
+    ()
   | _ -> Alcotest.fail "of_json must produce stderr=Discard"
 ;;
 
@@ -1194,12 +1200,79 @@ let test_of_json_rejects_redirect_with_both_discard_and_file () =
       ; "cwd", `String "/tmp"
       ; ( "stderr"
         , `Assoc
-            [ "discard", `Bool true; "file", `String "/tmp/out.log" ] )
+            [ "discard", `Bool true; "truncate", `String "/tmp/out.log" ] )
       ]
   in
   match Execute_input.of_json json with
-  | Ok _ -> Alcotest.fail "of_json must reject conflicting discard+file"
+  | Ok _ -> Alcotest.fail "of_json must reject conflicting discard+truncate"
   | Error _ -> ()
+;;
+
+(* A write mode is not a safe guess: a model that meant ">>" and got ">"
+   loses the file's contents with no error anywhere. So a file sink has to
+   name which one it is. *)
+let test_of_json_rejects_an_output_file_without_a_write_mode () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "rg"; `String "pattern" ]
+      ; "stdout", `Assoc [ "file", `String "/tmp/out.log" ]
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "an output file must say truncate or append"
+  | Error _ -> ()
+;;
+
+(* stdin has no write mode to honour, so naming one is an error rather than a
+   field that parses and is then dropped. *)
+let test_of_json_rejects_a_write_mode_on_stdin () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "rg"; `String "pattern" ]
+      ; "stdin", `Assoc [ "append", `String "/tmp/in.log" ]
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "stdin must reject a write mode"
+  | Error _ -> ()
+;;
+
+(* The same object with a second key is rejected outright: a redirect that
+   parses while one of its keys goes unread is the silent drop this shape
+   exists to remove. *)
+let test_of_json_rejects_a_redirect_carrying_an_extra_key () =
+  let json =
+    `Assoc
+      [ "argv", `List [ `String "rg"; `String "pattern" ]
+      ; "stdin", `Assoc [ "file", `String "/tmp/in.log"; "append", `Bool true ]
+      ]
+  in
+  match Execute_input.of_json json with
+  | Ok _ -> Alcotest.fail "a redirect must name exactly one shape"
+  | Error _ -> ()
+;;
+
+let test_truncate_and_append_reach_different_ir_modes () =
+  let mode_of sink =
+    let input = mk_exec_with_redirects ~stdout:sink () in
+    match Execute_input.to_shell_ir input with
+    | Ok ir ->
+      (match redirect_at ir 0 with
+       | Masc_exec.Redirect_scope.File { mode; _ } -> mode
+       | _ -> Alcotest.fail "expected a file redirect")
+    | Error err ->
+      Alcotest.failf "validation failed: %a" Execute_input.pp_validation_error err
+  in
+  Alcotest.(check bool)
+    "truncate lowers to Write"
+    true
+    (mode_of (Execute_input.Truncate_file { path = "/tmp/out.log" })
+     = Masc_exec.Redirect_scope.Write);
+  Alcotest.(check bool)
+    "append lowers to Append"
+    true
+    (mode_of (Execute_input.Append_file { path = "/tmp/out.log" })
+     = Masc_exec.Redirect_scope.Append)
 ;;
 
 let suite =
@@ -1208,6 +1281,22 @@ let suite =
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
     cases
     @ [ Alcotest.test_case
+          "output_file_without_a_write_mode_is_rejected"
+          `Quick
+          test_of_json_rejects_an_output_file_without_a_write_mode
+      ; Alcotest.test_case
+          "write_mode_on_stdin_is_rejected"
+          `Quick
+          test_of_json_rejects_a_write_mode_on_stdin
+      ; Alcotest.test_case
+          "redirect_with_an_extra_key_is_rejected"
+          `Quick
+          test_of_json_rejects_a_redirect_carrying_an_extra_key
+      ; Alcotest.test_case
+          "truncate_and_append_reach_different_ir_modes"
+          `Quick
+          test_truncate_and_append_reach_different_ir_modes
+      ; Alcotest.test_case
           "pipeline_stage_keeps_its_own_redirect"
           `Quick
           test_pipeline_stage_keeps_its_own_redirect

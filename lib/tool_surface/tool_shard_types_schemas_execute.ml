@@ -11,76 +11,93 @@
     stderr. This sentence is the contract line checked by
     scripts/check-execute-async-surface.sh — update both together. *)
 
-(* Each redirect is an optional object choosing exactly one of
-   [{discard: true}] (equivalent to
-   [/dev/null]) or [{file: "/abs/path"}].  Absent keeps the default
-   [inherit] behaviour. *)
-let redirect_target_properties =
-  [ "discard", `Assoc [ "type", `String "boolean" ]
-  ; ( "file"
-    , `Assoc
-        [ "type", `String "string"
-        ; "minLength", `Float 1.
-        ; ( "description"
-          , `String
-              "Absolute filesystem path for the redirect target. \
-               Relative paths are rejected." )
-        ] )
-  ; ( "append"
-    , `Assoc
-        [ "type", `String "boolean"
-        ; ( "description"
-          , `String
-              "Open the file for appending instead of truncating it, the \
-               typed form of '>>'. Only meaningful alongside file; stdin \
-               always reads." )
-        ] )
-  ; ( "fd"
-    , `Assoc
-        [ "type", `String "integer"
-        ; "enum", `List [ `Int 0; `Int 1; `Int 2 ]
-        ; ( "description"
-          , `String
-              "Duplicate another standard descriptor of this same stage, the \
-               typed form of '2>&1'. A stage owns only 0, 1 and 2." )
-        ] )
+(* A redirect is an optional object naming exactly one shape; absent keeps
+   the inherited descriptor. Reading and writing admit different names, so
+   each direction carries its own property set and a stream never accepts a
+   name it cannot honour. *)
+let discard_property = "discard", `Assoc [ "type", `String "boolean" ]
+
+let path_property ~name ~description =
+  ( name
+  , `Assoc
+      [ "type", `String "string"
+      ; "minLength", `Float 1.
+      ; "pattern", `String "^/"
+      ; "description", `String description
+      ] )
+;;
+
+let fd_property =
+  ( "fd"
+  , `Assoc
+      [ "type", `String "integer"
+      ; "enum", `List [ `Int 0; `Int 1; `Int 2 ]
+      ; ( "description"
+        , `String
+            "Duplicate another standard descriptor of this same stage, the \
+             typed form of '2>&1'. A stage owns only 0, 1 and 2." )
+      ] )
+;;
+
+let input_source_properties =
+  [ discard_property
+  ; path_property
+      ~name:"file"
+      ~description:"Absolute path to read from, the typed form of '<'."
+  ; fd_property
   ]
 ;;
 
-(* Exactly one of discard / file / fd selects the target. [append] qualifies
-   [file] and is not a target of its own, so it is absent from every branch's
-   exclusion list. *)
-let redirect_target_one_of : Yojson.Safe.t =
-  let branch chosen others =
+let output_sink_properties =
+  [ discard_property
+  ; path_property
+      ~name:"truncate"
+      ~description:"Absolute path to replace, the typed form of '>'."
+  ; path_property
+      ~name:"append"
+      ~description:"Absolute path to add to, the typed form of '>>'."
+  ; fd_property
+  ]
+;;
+
+(* Each branch requires one name and forbids the rest. Branches are selected
+   by position so the generator never compares the names themselves. *)
+let exactly_one_of names : Yojson.Safe.t =
+  let indexed = List.mapi (fun index name -> index, name) names in
+  let branch (index, chosen) =
     `Assoc
       [ "required", `List [ `String chosen ]
       ; ( "allOf"
         , `List
-            (List.map
-               (fun other ->
-                  `Assoc [ "not", `Assoc [ "required", `List [ `String other ] ] ])
-               others) )
+            (List.filter_map
+               (fun (other_index, other) ->
+                  if Int.equal index other_index
+                  then None
+                  else
+                    Some
+                      (`Assoc
+                          [ "not", `Assoc [ "required", `List [ `String other ] ] ]))
+               indexed) )
       ]
   in
-  `List
-    [ branch "discard" [ "file"; "fd" ]
-    ; branch "file" [ "discard"; "fd" ]
-    ; branch "fd" [ "discard"; "file"; "append" ]
-    ]
+  `List (List.map branch indexed)
 ;;
 
 (* The object's own keys carry their meaning, so the wrapper adds no
-   description of its own: one more sentence per stream is three more copies
-   of what [redirect_target_properties] already says. *)
-let stage_redirect_field ~name =
+   description of its own. [oneOf] is derived from the properties, which is
+   why the two cannot drift apart. *)
+let redirect_field ~name ~properties =
   ( name
   , `Assoc
       [ "type", `String "object"
-      ; "properties", `Assoc redirect_target_properties
+      ; "properties", `Assoc properties
       ; "additionalProperties", `Bool false
-      ; "oneOf", redirect_target_one_of
+      ; "oneOf", exactly_one_of (List.map fst properties)
       ] )
 ;;
+
+let stdin_field ~name = redirect_field ~name ~properties:input_source_properties
+let stdout_field ~name = redirect_field ~name ~properties:output_sink_properties
 
 let tool_execute_exec_stage_schema =
   `Assoc
@@ -102,9 +119,9 @@ let tool_execute_exec_stage_schema =
                        matches a file literally named 'foo*.ml'. Pass exact paths, \
                        or discover exact paths before invoking the program." )
                 ] )
-          ; stage_redirect_field ~name:"stdin"
-          ; stage_redirect_field ~name:"stdout"
-          ; stage_redirect_field ~name:"stderr"
+          ; stdin_field ~name:"stdin"
+          ; stdout_field ~name:"stdout"
+          ; stdout_field ~name:"stderr"
           ] )
     ; "required", `List [ `String "argv" ]
     ; "additionalProperties", `Bool false
@@ -182,17 +199,9 @@ let tool_execute_timeout_sec_field =
       ] )
 ;;
 
-let tool_execute_stdin_field =
-  stage_redirect_field ~name:"stdin"
-;;
-
-let tool_execute_stdout_field =
-  stage_redirect_field ~name:"stdout"
-;;
-
-let tool_execute_stderr_field =
-  stage_redirect_field ~name:"stderr"
-;;
+let tool_execute_stdin_field = stdin_field ~name:"stdin"
+let tool_execute_stdout_field = stdout_field ~name:"stdout"
+let tool_execute_stderr_field = stdout_field ~name:"stderr"
 
 let tool_execute_description =
   "Execute a typed process invocation inside the Keeper sandbox. Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. Provide either \

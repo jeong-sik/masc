@@ -32,26 +32,27 @@
       which does not exist).  Absolute-path enforcement happens in
       {!validate}.  PR-3 may revisit when a path SSOT module lands. *)
 
-type redirect_target =
-  | Inherit
-      (** default; child inherits the parent's file descriptor *)
-  | Discard
-      (** discard output / read empty input — equivalent to [/dev/null] *)
-  | File of {
-      path : string;
-      append : bool;
-    }
-      (** absolute filesystem path. [append] opens for appending instead of
-          truncating; stdin ignores it and always opens for reading. *)
-  | Fd of int
+type input_source =
+  | Inherit_input  (** default; the child keeps the parent's stdin *)
+  | Empty_input  (** read nothing — [/dev/null] *)
+  | Read_file of { path : string }  (** absolute path opened for reading *)
+  | Input_from_fd of int
+      (** read from another standard descriptor of the same stage *)
+
+type output_sink =
+  | Inherit_output  (** default; the child keeps the parent's descriptor *)
+  | Discard_output  (** throw the bytes away — [/dev/null] *)
+  | Truncate_file of { path : string }  (** absolute path, shell [>] *)
+  | Append_file of { path : string }  (** absolute path, shell [>>] *)
+  | Output_to_fd of int
       (** duplicate another standard descriptor of the same stage, which is
           how [2>&1] is expressed without a shell. *)
 
 type exec_stage = {
   argv : string list;
-  stdin : redirect_target;
-  stdout : redirect_target;
-  stderr : redirect_target;
+  stdin : input_source;
+  stdout : output_sink;
+  stderr : output_sink;
 }
 (** One process and where its three standard streams attach. Every stage owns
     its own redirections, including stages inside a pipeline. *)

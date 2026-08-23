@@ -745,8 +745,12 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    # Focused group deadlines total 73 minutes when agent-core is selected;
-    # leave setup/build and timeout-diagnostic headroom outside those budgets.
+    # Focused group deadlines total 93 minutes when agent-core is selected
+    # (paused-work 10, board-attention-worker 3, normal 20, newly-wired 5,
+    # mcp-tool-matrix 15, agent-core 15, operator-control 10, sse 15), more
+    # than this job timeout: only a run where several groups use their full
+    # budget reaches it, and such a run is ended by GitHub before
+    # scripts/ci-run-tests.sh can print its timeout diagnostics.
     timeout-minutes: 90
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events

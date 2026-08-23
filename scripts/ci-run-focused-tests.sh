@@ -815,7 +815,9 @@ run_shell_group focused-failure-reporting \
 
 run_group board-attention-worker 180 "${board_attention_targets[@]}" || overall_status=1
 run_group normal 1200 "${normal_targets[@]}" || overall_status=1
-run_group newly-wired 2400 "${newly_wired_targets[@]}" || overall_status=1
+# 350 suites ran in 103s on the first CI pass (08:49:02 to 08:50:45, run
+# 32628548472); 300s is that measurement with headroom, not a guess.
+run_group newly-wired 300 "${newly_wired_targets[@]}" || overall_status=1
 
 # Own group, not part of [normal_targets]: the matrix's tools/call sweep is an
 # Alcotest `Slow case, so it must run without ALCOTEST_QUICK_TESTS, and it

@@ -78,6 +78,18 @@ jobs:
             --version-ref "$VERSION_REF" \
             --expected-head-sha "$PR_HEAD_SHA"
 
+      # Reports, never gates. A CI failure does not say whether the author
+      # caused it: on 2026-08-22 main was red for ~100 minutes and thirteen
+      # open PRs inherited the same five failures, with an adversarial review
+      # on one recording "causality is not established" (#29332).
+      - name: Report base health
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x scripts/report-base-health.sh
+          scripts/report-base-health.sh "$BASE_REF" "${{ github.repository }}"
+
   pr-live-gate:
     name: PR Live Gate
     runs-on: ubuntu-latest

@@ -1,15 +1,16 @@
-// Observatory — Unified Investigation Surface (RFC-MASC-006 Phase 2a skeleton)
+// Observatory — Unified Investigation Surface, re-skinned onto the keeper-v2
+// monitor-more design (ObservatoryPanel).
 //
-// v1 scope (this file):
-//   - Shared time axis for 1h / 24h / etc. ranges
-//   - 2 initial tracks: Events (telemetry markers), Metrics (success rate line)
-//   - Global filter integration (keeper / range from observatory-filter-store)
+// Design vocabulary: .ia-wrap/.ia-head/.ia-count/.ia-route/.ia-lede header,
+// .ob-ranges range switch (.ia-filter), one .ob-panel holding .ob-axis plus
+// three .ob-track lanes (events · tool calls · success %) and the shared
+// .ob-cursor line, then .ob-readout and .ob-detail strips.
 //
-// Out of scope for Phase 2a (deferred to 2b+):
-//   - Cross-signal hover cursor
-//   - Memory subsystems track (backend snapshot-only)
-//   - Tool calls track, drill-down detail pane
-//   - SSE live streaming (current: polling per filter change)
+// Live data (mark, don't fake):
+//   - events / tool-call tracks → fetchTelemetry (agent_event · tool_call_io …)
+//   - success-% track           → fetchToolQuality hourly_trend
+//   - shared hover cursor       → cursor-store, driven by .ob-panel mousemove
+//   - detail pane               → detail-selection-store (click a marker)
 
 import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
@@ -37,7 +38,8 @@ import { MetricTrack } from './metric-track'
 import { ToolCallTrack } from './tool-call-track'
 import { CrossSignalReadout } from './cross-signal-readout'
 import { DetailPane } from './detail-pane'
-import { cursorPosition } from './cursor-store'
+import { CursorLine } from './cursor-line'
+import { setCursorFromEvent, clearCursor } from './cursor-store'
 
 const DEFAULT_RANGE: TimeRangePreset = '1h'
 const observatoryRefreshVersion = signal(0)
@@ -69,7 +71,7 @@ function emptyData(): ObservatoryData {
   }
 }
 
-// --- Time axis header ---
+// --- Time axis header (.ob-axis) ---
 
 function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: number }) {
   const span = windowEnd - windowStart
@@ -90,16 +92,9 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
   }
 
   return html`
-    <div class="grid grid-cols-7 gap-1 border-b border-card-border px-1 pb-1 text-3xs text-text-dim font-mono">
+    <div class="ob-axis mono">
       ${ticks.map(tick => html`
-        <span
-          class="min-w-0 truncate ${
-            tick.index === 0 ? 'text-left'
-              : tick.index === tickCount ? 'text-right'
-              : 'text-center'
-          }"
-          title=${formatTick(tick.t)}
-        >
+        <span key=${tick.index} title=${formatTick(tick.t)}>
           ${formatTick(tick.t)}
         </span>
       `)}
@@ -107,20 +102,16 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
   `
 }
 
-// --- Range selector ---
+// --- Range selector (.ob-ranges) ---
 
 function RangeSelector() {
   const current = currentTimeRangeFilter() ?? DEFAULT_RANGE
   return html`
-    <div class="flex flex-wrap items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
+    <div class="ob-ranges">
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
-          class="v2-monitoring-action rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
-            current === preset
-              ? 'bg-[var(--accent-20)] text-accent-fg'
-              : 'text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'
-          }"
+          class="ia-filter ${current === preset ? 'on' : ''}"
           onClick=${() => setTimeRangeFilter(preset)}
           aria-pressed=${current === preset}
         >
@@ -141,6 +132,7 @@ export function Observatory() {
   const state = useSignal<ObservatoryData>(emptyData())
   const activeController = useRef<AbortController | null>(null)
   const latestRequestId = useRef(0)
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => registerActivityRefresh(() => {
     refreshObservatorySurface()
@@ -205,24 +197,24 @@ export function Observatory() {
   }, [currentKeeperFilter(), currentTimeRangeFilter(), observatoryRefreshVersion.value])
 
   const data = state.value
+  const range = currentTimeRangeFilter() ?? DEFAULT_RANGE
 
   return html`
-    <div class="v2-monitoring-surface flex flex-col gap-5">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div class="flex flex-col gap-0.5">
-          <h3 class="text-sm font-semibold text-text-strong">Observatory</h3>
-          <p class="text-2xs text-text-dim">
-            ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
-            · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
-            · ${data.totalMatchingEvents} events
-            ${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}
-            ${data.loading ? ' · loading' : ''}
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <${RangeSelector} />
-        </div>
+    <div class="v2-monitoring-surface ia-wrap">
+      <div class="ia-head">
+        <h3>Observatory</h3>
+        <span class="ia-count mono">
+          이벤트 ${data.totalMatchingEvents}건${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}${data.loading ? ' · loading' : ''}
+        </span>
+        <span class="ia-route mono">monitoring?section=observatory&range=${range}</span>
       </div>
+      <p class="ia-lede">
+        ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
+        · ${timeRangeLabel(range)}.
+        하나의 시간축 위에 텔레메트리 이벤트 · 도구 호출 · 성공률 지표를 겹쳐 봅니다.
+        갱신은 필터 변경 시 폴링이며, 라이브 스트리밍은 아직 없습니다.
+      </p>
+      <${RangeSelector} />
 
       ${data.error ? html`
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
@@ -230,7 +222,14 @@ export function Observatory() {
         </div>
       ` : null}
 
-      <div class="v2-monitoring-panel flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
+      <div
+        ref=${panelRef}
+        class="ob-panel"
+        onMouseMove=${(e: MouseEvent) => {
+          if (panelRef.current) setCursorFromEvent(e, panelRef.current, data.windowStart, data.windowEnd)
+        }}
+        onMouseLeave=${clearCursor}
+      >
         <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
         <${EventTrack}
           events=${data.events}
@@ -247,9 +246,7 @@ export function Observatory() {
           windowStart=${data.windowStart}
           windowEnd=${data.windowEnd}
         />
-        ${cursorPosition.value === null ? html`
-          <div class="mt-1 h-1" aria-hidden="true"></div>
-        ` : null}
+        <${CursorLine} />
       </div>
 
       <${CrossSignalReadout}

@@ -277,14 +277,10 @@
   font-family: var(--font-mono);
 }
 
-/* ── Job / Task list ──────────────────────────────────────────────────────── */
-.wk-jobs {
-  border-top: 1px solid var(--border-soft);
-  padding: 10px 16px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+/* ── Job / Task list ────────────────────────────────────────────────────────
+   The expanded goal body now uses the design's own class, .wk-tasks, which the
+   vendored keeper-v2/v2.css kit styles (border-top, padding, column gap). The
+   former .wk-jobs rule here duplicated that block under a drifted name. */
 
 /* ── Goal detail panel (expanded goal card body) ───────────────────────────
    Two-column label/value grid. The previous chip-row layout put every field —

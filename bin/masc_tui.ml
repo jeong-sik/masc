@@ -9,9 +9,11 @@ module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_history = Masc_tui_keeper_chat_history
+module Chat_queue = Masc_tui_keeper_chat_queue
 module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
+module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
@@ -123,15 +125,34 @@ let read_key ?(timeout = 0.1) reader () : string option =
       match take_input_byte reader ~timeout with
       | None -> None
       | Some '\027' -> (
-          (* Escape sequence: try to read [ and then the code. *)
+          (* CSI: parameter bytes, then one final byte in 0x40-0x7E. Reading to
+             the final byte is what keeps a parameterised key from leaving its
+             tail in the stream -- Page Up is ESC [ 5 ~, and stopping at the 5
+             left the ~ to be typed as text. *)
           match take_input_byte reader ~timeout:0.05 with
-          | Some '[' -> (
-              match take_input_byte reader ~timeout:0.05 with
-              | Some 'A' -> Some "up"
-              | Some 'B' -> Some "down"
-              | Some 'Z' -> Some "shift-tab"
-              | Some _ -> Some "unknown-esc"
-              | None -> Some "esc")
+          | Some '[' ->
+              let parameters = Buffer.create 4 in
+              let rec read_csi () =
+                match take_input_byte reader ~timeout:0.05 with
+                | None -> None
+                | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E
+                  -> Some (Buffer.contents parameters, byte)
+                | Some byte ->
+                    Buffer.add_char parameters byte;
+                    if Buffer.length parameters > 16 then None else read_csi ()
+              in
+              (match read_csi () with
+               | None -> Some "esc"
+               | Some ("", 'A') -> Some "up"
+               | Some ("", 'B') -> Some "down"
+               | Some ("", 'H') -> Some "home"
+               | Some ("", 'F') -> Some "end"
+               | Some ("", 'Z') -> Some "shift-tab"
+               | Some ("1", '~') -> Some "home"
+               | Some ("4", '~') -> Some "end"
+               | Some ("5", '~') -> Some "pageup"
+               | Some ("6", '~') -> Some "pagedown"
+               | Some (_, _) -> Some "unknown-esc")
           | Some _ | None -> Some "esc")
       | Some byte -> (
           match Masc_tui_message_layout.utf8_scalar_byte_length byte with
@@ -220,8 +241,31 @@ let consume_dispatched_message_draft state request =
 
 (** Handle local editing keys for message mode. Network submission is injected
     so the input path never owns a blocking HTTP effect. *)
+(* One page of the transcript. Measured from the terminal rather than fixed,
+   so the jump is a screenful on every window; a page smaller than the pane
+   would leave rows the reader has to catch with the arrow keys anyway. *)
+let keeper_message_page_rows state =
+  let rows, _cols = get_terminal_size () in
+  let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
+  max 1 (rows - chrome - keeper_message_status_rows state)
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
-    ~(retry_message : unit -> unit) (key : string) : bool =
+    ~(retry_message : unit -> unit)
+    ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
+    (key : string) : bool =
+  (* y and n answer a held call, and only while one is held -- otherwise they
+     are letters someone is typing. The prompt on screen is what makes them
+     mean anything, so it is also what decides whether they are taken. *)
+  match state.msg_live, key with
+  | Some live, ("y" | "Y" | "n" | "N")
+    when Option.is_some (Keeper_chat_transcript.awaiting_approval live) -> (
+      match Keeper_chat_transcript.awaiting_approval live with
+      | Some awaiting ->
+          answer_approval ~tool_call_id:awaiting.Keeper_chat_transcript.call_id
+            ~allow:(String.lowercase_ascii key = "y");
+          true
+      | None -> true)
+  | _ ->
   match key with
   | "esc" ->
     save_message_draft state;
@@ -256,6 +300,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | "down" ->
     state.msg_scroll <- max 0 (state.msg_scroll - 1);
+    true
+  | "pageup" ->
+    (* A keeper's turn is many rows, so one row per press walks back through a
+       single message. A page is the unit the reader actually moves in. *)
+    state.msg_scroll <- state.msg_scroll + keeper_message_page_rows state;
+    true
+  | "pagedown" ->
+    state.msg_scroll <-
+      max 0 (state.msg_scroll - keeper_message_page_rows state);
+    true
+  | "end" ->
+    state.msg_scroll <- 0;
     true
   | "\127" | "\b" ->
     let new_content =
@@ -347,6 +403,8 @@ type async_msg =
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
       string * (Keeper_chat_history.decoded, string) result
+  | Keeper_chat_approval_answered of
+      Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
   | Keeper_chat_cleanup_done of Keeper_chat.request * (unit, string) result
@@ -467,6 +525,35 @@ let settle_live_turn state (request : Keeper_chat.request) =
 (* Load the keeper's durable transcript. Runs on its own fiber: the pane stays
    responsive, and a slow or unreachable server costs the scrollback rather than
    the keypress that asked for it. *)
+(* Answer the call the keeper is held at. Runs on its own fiber: the pane stays
+   responsive, and a slow server costs the answer rather than the keypress. *)
+let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
+    ~tool_call_id ~allow =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let keeper_name = request.Keeper_chat.keeper_name in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+          ~tool_call_id ~allow
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Keeper_chat_approval_answered (request, tool_call_id, allow, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_chat_approval_answered
+           (request, tool_call_id, allow, Error "Eio switch is unavailable"))
+
 let launch_keeper_history_load state ~mailbox ~keeper_name =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -612,7 +699,15 @@ let persist_keeper_message_fence ~base_path request =
   Terminal_write_repair.note ();
   Keeper_chat_recovery.persist_pending ~base_path request
 
-let rec start_keeper_message state ~base_path ~mailbox text =
+let queue_keeper_message state ~keeper_name text =
+  match Chat_queue.push state.msg_queued ~keeper_name text with
+  | Error _ as error -> error
+  | Ok (queue, waiting) ->
+      state.msg_queued <- queue;
+      Ok waiting
+;;
+
+let rec start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   match state.msg_prepared with
   | Some request ->
       add_event state "error"
@@ -634,10 +729,27 @@ let rec start_keeper_message state ~base_path ~mailbox text =
        ^ detail)
   | None ->
   match state.msg_inflight with
-  | Some request ->
-      add_event state "system"
-        (Printf.sprintf "Keeper message already in progress: %s"
-           request.request_id)
+  | Some request -> (
+      (* A turn is running. Hold the line rather than refusing it: the operator
+         pressed Enter meaning "send this next", and the turn settling is what
+         "next" is. *)
+      match
+        match keeper_name with
+        | Some _ -> keeper_name
+        | None -> state.msg_target_keeper_name
+      with
+      | None -> add_event state "error" "Cannot queue: no Keeper is selected"
+      | Some target -> (
+          match queue_keeper_message state ~keeper_name:target text with
+          | Error detail -> add_event state "error" detail
+          | Ok waiting ->
+              clear_current_message_draft state;
+              add_event state "message"
+                (Printf.sprintf
+                   "Queued for %s behind %s (%d waiting)"
+                   (Keeper_chat.terminal_safe_text target)
+                   request.request_id
+                   waiting)))
   | None -> (
       match state.msg_unverified with
       | Some request ->
@@ -646,7 +758,9 @@ let rec start_keeper_message state ~base_path ~mailbox text =
                "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
                request.request_id)
       | None ->
-      match state.msg_target_keeper_name with
+      match
+        (match keeper_name with Some _ -> keeper_name | None -> state.msg_target_keeper_name)
+      with
       | None -> add_event state "error" "Cannot send: no Keeper is selected"
       | Some _ when Option.is_some state.keepers_error ->
           add_event state "error"
@@ -784,6 +898,57 @@ let launch_keeper_cleanup state ~base_path ~mailbox request =
       enqueue_async mailbox
         (Keeper_chat_cleanup_done
            (request, Error "Eio switch is unavailable"))
+
+(* Send the oldest waiting line, once. Only one at a time: dispatch is
+   serialized on a single in-flight request, and the next settle drains the
+   next. Nothing is sent while a prepared fence, an unverified outcome, or a
+   blocked recovery is standing — those want the operator's Ctrl-R, and
+   pushing a queued line into them would turn a wait into an error. The queue
+   keeps its place and drains when the block clears. *)
+let drain_queued_message state ~base_path ~mailbox =
+  (* One send per settle: dispatch is serialized on a single in-flight request
+     and the next settle drains the next. The loop is only for lines that
+     cannot be sent at all — it skips past them to reach one that can, rather
+     than stopping the whole queue behind a keeper that left.
+
+     Recursion stays inside so the exported name has no self-call: a wiring
+     test that counts calls to it would otherwise be satisfied by this
+     function calling itself, and pass with nothing else calling it at all. *)
+  let rec next () =
+    match Chat_queue.pop state.msg_queued with
+    | None -> ()
+    | Some ((keeper_name, text), rest) ->
+        (* Nothing is sent while a prepared fence, an unverified outcome, or a
+           blocked recovery is standing — those want the operator's Ctrl-R, and
+           pushing a queued line into them would turn a wait into an error. The
+           queue keeps its place and drains when the block clears. *)
+        if
+          Option.is_none state.msg_inflight
+          && Option.is_none state.msg_prepared
+          && Option.is_none state.msg_unverified
+          && Option.is_none state.msg_recovery_error
+        then
+          if keeper_available_for_new_message state keeper_name
+          then (
+            state.msg_queued <- rest;
+            start_keeper_message ~keeper_name state ~base_path ~mailbox text)
+          else (
+            (* The keeper this was written to is no longer registered. Sending
+               it would fail; holding it would leave a count reporting work that
+               never moves. Say what is being let go, and let it go. *)
+            let before = Chat_queue.length state.msg_queued in
+            state.msg_queued <-
+              Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
+            add_event state "error"
+              (Printf.sprintf
+                 "Keeper %s is no longer registered; %d queued message(s) for \
+                  it were not sent"
+                 (Keeper_chat.terminal_safe_text keeper_name)
+                 (before - Chat_queue.length state.msg_queued));
+            next ())
+  in
+  next ()
+;;
 
 let clear_keeper_chat_recovery state ~base_path request =
   match Keeper_chat_recovery.clear_pending ~base_path request with
@@ -1780,6 +1945,70 @@ let handle_keeper_action state ~base_path ~mailbox action =
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
+(* The composer as the key loop sees it. The renderer builds the same reading
+   for the row it draws, so the key that lands and the row the operator read
+   before pressing it agree on who the recipient is. *)
+let composer_state (state : state) : Composer.t =
+  let target =
+    match selected_keeper state with
+    | None -> Composer.No_target
+    | Some keeper ->
+        if keeper_available_for_new_message state keeper.k_name then
+          Composer.Ready keeper.k_name
+        else
+          Composer.Unreachable
+            { keeper = keeper.k_name
+            ; reason =
+                (match state.keepers_error with
+                 | Some _ -> "keeper list unread"
+                 | None -> "no longer in the roster")
+            }
+  in
+  { Composer.target
+  ; focus =
+      (if state.composer_focused then Composer.Focused else Composer.Unfocused)
+  ; draft = Buffer.contents state.msg_input
+  }
+
+(* Apply one keystroke the composer claimed. Sending routes through the same
+   chat surface the [c] key opens, so a message typed on the roster and one
+   typed in the chat view take the identical dispatch path. *)
+let handle_composer_key state ~base_path ~mailbox key =
+  let composer = composer_state state in
+  match Composer.classify_key composer key with
+  | Composer.Pass_to_surface -> false
+  | Composer.Take_focus ->
+      (match composer.Composer.target with
+       | Composer.Ready keeper_name ->
+           (* Taking focus is what names the recipient: the draft that follows
+              belongs to the keeper the row showed at that moment. *)
+           if
+             state.msg_target_keeper_name <> Some keeper_name
+           then open_message_for_keeper state keeper_name;
+           state.composer_focused <- true
+       | Composer.No_target | Composer.Unreachable _ -> ());
+      true
+  | Composer.Release_focus ->
+      save_message_draft state;
+      state.composer_focused <- false;
+      true
+  | Composer.Send ->
+      state.composer_focused <- false;
+      let text = Buffer.contents state.msg_input in
+      state.msg_scroll <- 0;
+      state.view <- Keepers Keeper_message;
+      start_keeper_message state ~base_path ~mailbox text;
+      true
+  | Composer.Edit ->
+      let _handled =
+        handle_message_key state
+          ~submit_message:(fun _ -> ())
+          ~retry_message:(fun () -> ())
+          ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
+          key
+      in
+      true
+
 let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   function
   | Http_refresh_done results ->
@@ -1851,7 +2080,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             apply_keeper_chat_result state ~base_path
               ~dispatch_was_replay:was_replay request result)
       in
-      if applied then load_from_masc_dir state base_path
+      if applied then load_from_masc_dir state base_path;
+      (* The turn settled, so "next" has arrived for whatever was waiting. *)
+      drain_queued_message state ~base_path ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
       (* Identity-guarded: a late chunk from a superseded turn must not draw
          into the one now running. *)
@@ -1864,6 +2095,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       append_chat_history state request Message_status detail
+  | Keeper_chat_approval_answered (request, tool_call_id, allow, result) ->
+      let text =
+        match result with
+        | Ok true ->
+            Printf.sprintf "%s %s"
+              (if allow then "allowed" else "denied")
+              (Keeper_chat.compact_request_id tool_call_id)
+        | Ok false ->
+            (* The wait was gone: it timed out, or something answered it
+               first. Said plainly rather than shown as taken, so an operator
+               is not told a call was allowed when nothing was listening. *)
+            Printf.sprintf
+              "too late for %s; the call was no longer waiting"
+              (Keeper_chat.compact_request_id tool_call_id)
+        | Error detail -> "could not answer the held call: " ^ detail
+      in
+      append_chat_history state request
+        (match result with Ok true -> Message_status | _ -> Message_error)
+        text
   | Keeper_chat_interrupt_done (request, result) ->
       (match state.msg_live with
        | Some live
@@ -2209,7 +2459,21 @@ let main () =
        | Keepers _, Some ("s" | "S") -> ()
        | Keepers _, Some _ -> state.keeper_action_pending <- None
        | _ -> ());
+      (* The composer sees the key first, and takes it only when it has one to
+         take: unfocused it claims a single key, and only with somewhere to
+         send. Everything it does not claim reaches the surface with its
+         meaning unchanged, so no existing binding moved when the row
+         appeared. The chat surface is excluded — it draws its own composer. *)
+      let composer_claimed =
+        (not compact_viewport)
+        && state.view <> Keepers Keeper_message
+        &&
+        match key with
+        | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
+        | None -> false
+      in
       (match key with
+       | Some _ when composer_claimed -> ()
        | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
            raise Break
        | Some _ when compact_viewport -> ()
@@ -2230,6 +2494,16 @@ let main () =
                  ~retry_message:(fun () ->
                    retry_keeper_message state ~base_path
                      ~mailbox:async_messages)
+                 ~answer_approval:(fun ~tool_call_id ~allow ->
+                   match state.msg_inflight with
+                   | Some request ->
+                       launch_keeper_approval state ~mailbox:async_messages
+                         request ~tool_call_id ~allow
+                   | None ->
+                       (* No request in flight means no turn to answer for.
+                          The prompt belongs to a turn, so this is
+                          unreachable while one is shown. *)
+                       ())
                  k
              in
              ()
@@ -2336,7 +2610,15 @@ let main () =
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
                  | Planning_list -> ())
-            | Overview | Keepers Keeper_list | Approvals | System_logs -> ())
+            | Overview ->
+                (* Back out one level: an open task detail closes to the panel,
+                   a focused task panel hands j/k back to the event log. *)
+                if Option.is_some state.task_detail_id then begin
+                  state.task_detail_id <- None;
+                  state.task_detail_scroll <- 0
+                end
+                else state.task_focus <- false
+            | Keepers Keeper_list | Approvals | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -2380,14 +2662,22 @@ let main () =
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
             | Overview ->
-                let _, _, row_budget =
-                  overview_layout state ~terminal_rows
-                in
-                state.overview_event_scroll <-
-                  Render_schedule.scroll_overview_events_older
-                    ~event_count:(List.length state.events)
-                    ~visible_rows:row_budget.attention_rows
-                    state.overview_event_scroll
+                if Option.is_some state.task_detail_id then
+                  state.task_detail_scroll <- state.task_detail_scroll + 1
+                else if state.task_focus then begin
+                  if state.task_cursor < List.length state.tasks - 1 then
+                    state.task_cursor <- state.task_cursor + 1
+                end
+                else begin
+                  let _, _, row_budget =
+                    overview_layout state ~terminal_rows
+                  in
+                  state.overview_event_scroll <-
+                    Render_schedule.scroll_overview_events_older
+                      ~event_count:(List.length state.events)
+                      ~visible_rows:row_budget.attention_rows
+                      state.overview_event_scroll
+                end
             | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
@@ -2430,14 +2720,24 @@ let main () =
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
             | Overview ->
-                let _, _, row_budget =
-                  overview_layout state ~terminal_rows
-                in
-                state.overview_event_scroll <-
-                  Render_schedule.scroll_overview_events_newer
-                    ~event_count:(List.length state.events)
-                    ~visible_rows:row_budget.attention_rows
-                    state.overview_event_scroll
+                if Option.is_some state.task_detail_id then begin
+                  if state.task_detail_scroll > 0 then
+                    state.task_detail_scroll <- state.task_detail_scroll - 1
+                end
+                else if state.task_focus then begin
+                  if state.task_cursor > 0 then
+                    state.task_cursor <- state.task_cursor - 1
+                end
+                else begin
+                  let _, _, row_budget =
+                    overview_layout state ~terminal_rows
+                  in
+                  state.overview_event_scroll <-
+                    Render_schedule.scroll_overview_events_newer
+                      ~event_count:(List.length state.events)
+                      ~visible_rows:row_budget.attention_rows
+                      state.overview_event_scroll
+                end
             | System_logs ->
                 if state.system_logs_scroll > 0 then
                   state.system_logs_scroll <- state.system_logs_scroll - 1
@@ -2445,6 +2745,15 @@ let main () =
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
+            | Overview ->
+                (* Only under task focus: Enter while the events own j/k would
+                   open whatever row the cursor happens to rest on. *)
+                if state.task_focus then
+                  (match List.nth_opt state.tasks state.task_cursor with
+                   | Some task ->
+                       state.task_detail_id <- Some task.id;
+                       state.task_detail_scroll <- 0
+                   | None -> ())
             | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some k ->
@@ -2481,8 +2790,17 @@ let main () =
                           state.planning_scroll <- 0
                       | None -> ())
                  | Planning_detail _ -> ())
-            | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
+            | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
             | Approvals | System_logs -> ())
+       | Some "t" | Some "T" ->
+           (* Focus the Overview task panel. The list is always on screen, but
+              j/k belong to the event log until the operator asks for tasks. *)
+           (match state.view with
+            | Overview when Option.is_none state.task_detail_id ->
+                state.task_focus <- not state.task_focus;
+                if not state.task_focus then state.task_cursor <- 0
+            | Overview | Keepers _ | Board | Approvals | Planning
+            | System_logs -> ())
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the

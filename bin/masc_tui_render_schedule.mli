@@ -60,6 +60,11 @@ type overview_allocation = {
   attention_rows : int;
   task_error_rows : int;
   task_rows : int;
+  filler_rows : int;
+      (** Blank rows the renderer draws between the task block and the bottom
+          border. Without them a surface whose content is shorter than the
+          terminal ends partway down the screen and leaves its own footer in
+          the middle of it. *)
 }
 
 val allocate_overview :

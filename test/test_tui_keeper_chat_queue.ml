@@ -1,0 +1,99 @@
+(** What happens to a line typed while a turn is running.
+
+    It used to be answered with "Keeper message already in progress" and lost.
+    These pin what replaced that: the line waits, in the order it was written,
+    addressed to the keeper it was written to. *)
+
+open Alcotest
+module Queue = Masc_tui_keeper_chat_queue
+
+let push_exn queue ~keeper_name text =
+  match Queue.push queue ~keeper_name text with
+  | Ok (queue, waiting) -> (queue, waiting)
+  | Error detail -> failf "expected the line to queue, got: %s" detail
+;;
+
+let test_lines_wait_in_the_order_they_were_written () =
+  let q, first = push_exn Queue.empty ~keeper_name:"kidsnote" "one" in
+  let q, second = push_exn q ~keeper_name:"kidsnote" "two" in
+  let q, third = push_exn q ~keeper_name:"kidsnote" "three" in
+  check (list int) "each push says how many are waiting" [ 1; 2; 3 ]
+    [ first; second; third ];
+  check (list string) "and they wait in submission order"
+    [ "one"; "two"; "three" ]
+    (List.map snd (Queue.waiting q))
+;;
+
+(* The operator can switch keepers while a turn runs. A queued line must reach
+   the keeper it was written to, not whoever is selected when it finally goes. *)
+let test_a_line_keeps_the_keeper_it_was_written_to () =
+  let q, _ = push_exn Queue.empty ~keeper_name:"kidsnote" "for kidsnote" in
+  let q, _ = push_exn q ~keeper_name:"taskmaster" "for taskmaster" in
+  match Queue.pop q with
+  | None -> fail "expected a waiting line"
+  | Some ((keeper_name, text), rest) ->
+      check string "the oldest goes first" "for kidsnote" text;
+      check string "to its own keeper" "kidsnote" keeper_name;
+      (match Queue.pop rest with
+       | None -> fail "expected the second line to still be waiting"
+       | Some ((keeper_name, text), rest) ->
+           check string "and the next keeps its own" "taskmaster" keeper_name;
+           check string "with its own text" "for taskmaster" text;
+           check bool "nothing left after both" true (Queue.is_empty rest))
+;;
+
+(* Refused and named at the cap rather than dropping the oldest: a line that
+   silently disappeared is the failure this whole queue exists to end. *)
+let test_the_cap_refuses_rather_than_forgetting () =
+  let rec fill queue = function
+    | 0 -> queue
+    | n ->
+        let queue, _ = push_exn queue ~keeper_name:"k" (string_of_int n) in
+        fill queue (n - 1)
+  in
+  let full = fill Queue.empty Queue.cap in
+  check int "the queue is at its cap" Queue.cap (Queue.length full);
+  match Queue.push full ~keeper_name:"k" "one too many" with
+  | Ok _ -> fail "the cap must refuse"
+  | Error detail ->
+      check bool "the refusal says the line was not taken" true
+        (Astring.String.is_infix ~affix:"not queued" detail);
+      check int "and nothing already waiting was dropped" Queue.cap
+        (Queue.length full)
+;;
+
+(* A keeper that is no longer registered cannot receive what was written to it.
+   Holding those lines would make the count report work that never moves. *)
+let test_lines_for_a_departed_keeper_are_forgotten () =
+  let q, _ = push_exn Queue.empty ~keeper_name:"leaving" "gone" in
+  let q, _ = push_exn q ~keeper_name:"staying" "kept" in
+  let q, _ = push_exn q ~keeper_name:"leaving" "gone too" in
+  let q = Queue.drop_for_keeper q ~keeper_name:"leaving" in
+  check (list string) "only the other keeper's line remains" [ "kept" ]
+    (List.map snd (Queue.waiting q));
+  check int "and the count follows" 1 (Queue.length q)
+;;
+
+let test_an_empty_queue_pops_nothing () =
+  check bool "empty is empty" true (Queue.is_empty Queue.empty);
+  check int "and has no length" 0 (Queue.length Queue.empty);
+  check bool "and pops nothing" true (Option.is_none (Queue.pop Queue.empty))
+;;
+
+let () =
+  run
+    "tui_keeper_chat_queue"
+    [ ( "queue"
+      , [ test_case "lines wait in the order they were written" `Quick
+            test_lines_wait_in_the_order_they_were_written
+        ; test_case "a line keeps the keeper it was written to" `Quick
+            test_a_line_keeps_the_keeper_it_was_written_to
+        ; test_case "the cap refuses rather than forgetting" `Quick
+            test_the_cap_refuses_rather_than_forgetting
+        ; test_case "lines for a departed keeper are forgotten" `Quick
+            test_lines_for_a_departed_keeper_are_forgotten
+        ; test_case "an empty queue pops nothing" `Quick
+            test_an_empty_queue_pops_nothing
+        ] )
+    ]
+;;

@@ -131,6 +131,7 @@ val handle_keeper_msg_admitted :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_tool_result_ready:(tool_call_id:string -> unit) ->
+  ?approval_gate:Keeper_tool_approval_gate.t ->
   ?event_bus:Agent_core.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ Keeper_types_profile.context ->

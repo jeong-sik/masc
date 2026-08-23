@@ -262,6 +262,13 @@ function WorkspaceCommandButtons({
           ${menuOpen
             ? html`
                 <div class="kw-chat-command-popover chat-ovf-menu v2-monitoring-surface" role="menu" onClick=${(event: Event) => event.stopPropagation()}>
+                  ${commands.some(isLifecycleWorkspaceCommand)
+                    ? null
+                    // shell.jsx kp-menu-note: the ovf menu explains why the row
+                    // is action-less. The live KeeperPhase enum has no Dead
+                    // state, so only the transient wording applies (mirrors the
+                    // desktop act-quiet note below).
+                    : html`<div class="kp-menu-note">전이 중 — 잠시 후 가능</div>`}
                   ${commands.map(renderMenuItem)}
                 </div>
               `
@@ -544,6 +551,13 @@ export function KeeperWorkspaceChat({
   const [searchOpen, setSearchOpen] = useState(false)
   const [composerBusyAction, setComposerBusyAction] = useState<WorkspaceCommandId | null>(null)
   const entries = keeperThreads.value[keeper.name] ?? []
+  // Design's in-thread pending-approval cue (keepers.jsx chat-pendcue): a slim
+  // strip above the transcript linking to the approvals queue — the sole
+  // act-point. Reads the same Gate approval_queue SSOT as the header badge;
+  // the queue row's tool_name fills the design's `pend.tool` slot. Kept in
+  // addition to the header pill because the design draws both signals (the
+  // cue is the one visible while reading the thread).
+  const pendingCueItem = keeperPendingApprovals(keeper.name)?.[0] ?? null
   const detailOpen = false
   const onToggleDetail = onOpenDetail ?? (() => {})
   const openTurnInspector = (entry?: KeeperConversationEntry) => {
@@ -605,6 +619,21 @@ export function KeeperWorkspaceChat({
         searchOpen=${searchOpen}
         onToggleSearch=${() => setSearchOpen(open => !open)}
       />
+      ${pendingCueItem
+        ? html`
+            <button
+              type="button"
+              class="chat-pendcue"
+              title="결재 큐에서 처리"
+              data-testid="keeper-chat-pendcue"
+              onClick=${() => navigate('approvals')}
+            >
+              <span class="chat-pendcue-dot"></span>
+              <span class="chat-pendcue-tx">이 keeper는 <b>승인 대기</b> 중 · <span class="mono">${pendingCueItem.tool_name}</span></span>
+              <span class="chat-pendcue-arr">결재 큐에서 처리 →</span>
+            </button>
+          `
+        : null}
       <div class="kw-chat-body">
         <${KeeperConversationPanel}
           keeperName=${keeper.name}

@@ -54,15 +54,18 @@ let load_keepers (base_path : string) : keeper list * string option =
       ( List.sort (fun a b -> String.compare a.k_name b.k_name) keepers
       , summarize_errors "keeper metadata read failed" errors )
 
-(** Load active tasks from the canonical workspace backlog. Terminal tasks
-    remain available in Planning rollups but do not occupy the Overview list. *)
-let load_active_tasks (base_path : string) : task list * string option =
+(** Load tasks from the canonical workspace backlog: the active rows for the
+    Overview list, plus the full domain rows the detail view reads. Terminal
+    tasks remain available in Planning rollups and the detail view but do not
+    occupy the Overview list. *)
+let load_active_tasks (base_path : string) :
+    task list * Masc_domain.task list * string option =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
       report path err;
-      [], Some ("task backlog unavailable: " ^ err)
+      [], [], Some ("task backlog unavailable: " ^ err)
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -72,6 +75,7 @@ let load_active_tasks (base_path : string) : task list * string option =
             Some ("task backlog recovered from backup: " ^ recovery.primary_error)
       in
       ( Tui_decode.active_tasks_of_domain observation.observed_backlog.tasks
+      , observation.observed_backlog.tasks
       , recovery_error )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)
@@ -140,8 +144,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
     else []
   );
 
-  (* Load tasks from their single durable source. *)
-  let tasks, tasks_error = load_active_tasks base_path in
+  (* Load tasks from their single durable source. The domain rows land first:
+     a detail view open across this refresh keeps its row even when the task
+     just turned terminal, because the projection below drops exactly those. *)
+  let tasks, tasks_domain, tasks_error = load_active_tasks base_path in
+  state.tasks_domain <- tasks_domain;
   state.tasks <- tasks;
   state.tasks_error <- tasks_error;
 

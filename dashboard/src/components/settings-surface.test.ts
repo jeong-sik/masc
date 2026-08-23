@@ -7,6 +7,7 @@ import { Effect } from 'effect'
 import {
   SettingsSurface,
   mcpExposedToolNames,
+  mcpExposedToolGroups,
   logEntryToSysRow,
   logRowStatus,
   normalizeSettingsSection,
@@ -787,6 +788,57 @@ describe('SettingsSurface', () => {
     })
   })
 
+  it('MCP server page groups exposed tools by the live registry category (set-tg rows)', async () => {
+    apiMock.fetchDashboardTools.mockResolvedValue({
+      tool_inventory: {
+        count: 3,
+        tools: [
+          makeToolItem({ name: 'masc_start', category: 'lifecycle', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'masc_handoff', category: 'lifecycle', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'masc_trace_window', category: 'observe', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'internal_only', category: 'ops', surfaces: ['internal'] }),
+        ],
+      },
+    })
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mcp-tools-list"]')).not.toBeNull()
+    })
+    // groups sorted by category; tools sorted inside each group
+    const groups = [...container.querySelectorAll('[data-testid="mcp-tools-list"] .set-tg-row')]
+    expect(groups.map(g => g.querySelector('.set-tg-id')?.textContent)).toEqual(['lifecycle', 'observe'])
+    expect(groups.every(g => g.querySelector('.set-tg-kind.masc')?.textContent === 'masc')).toBe(true)
+    expect([...groups[0]!.querySelectorAll('.set-tg-chip')].map(c => c.textContent))
+      .toEqual(['masc_handoff', 'masc_start'])
+    expect([...groups[1]!.querySelectorAll('.set-tg-chip')].map(c => c.textContent))
+      .toEqual(['masc_trace_window'])
+    expect(container.querySelector('[data-testid="mcp-tools-list"]')?.textContent).not.toContain('internal_only')
+    expect(container.textContent).toContain('Exposed public MCP tools (3)')
+    // transport detail mirrors the live endpoint with the bearer token masked
+    expect(container.querySelector('[data-testid="settings-mcp-transport-detail"]')?.textContent)
+      .toBe('POST http://127.0.0.1:8935/mcp · Content-Type: application/json · Authorization: Bearer ••••')
+  })
+
+  it('mcpExposedToolGroups keeps only public_mcp tools, grouped by category', () => {
+    const groups = mcpExposedToolGroups([
+      makeToolItem({ name: 'masc_start', category: 'lifecycle', surfaces: ['public_mcp'] }),
+      makeToolItem({ name: 'masc_handoff', category: 'lifecycle', surfaces: ['public_mcp'] }),
+      makeToolItem({ name: 'masc_status', category: ' observe ', surfaces: ['public_mcp', 'keeper'] }),
+      makeToolItem({ name: 'internal_only', category: 'ops', surfaces: ['internal'] }),
+      makeToolItem({ name: 'no_category', category: '  ', surfaces: ['public_mcp'] }),
+    ])
+    expect(groups).toEqual([
+      { category: 'general', names: ['no_category'] },
+      { category: 'lifecycle', names: ['masc_handoff', 'masc_start'] },
+      { category: 'observe', names: ['masc_status'] },
+    ])
+    expect(mcpExposedToolGroups([])).toEqual([])
+  })
+
   it('paths page shows resolved server paths instead of editable local previews', async () => {
     render(html`<${SettingsSurface} />`, container)
 
@@ -1346,6 +1398,49 @@ describe('SettingsSurface', () => {
         .toContain('provider 실패 자동 전환이 아니라')
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
     })
+  })
+
+  it('routing section renders resolved runtime lanes as read-only candidate chains', async () => {
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [
+        {
+          id: 'default',
+          runtime_ids: ['rt-a', 'rt-b'],
+          preferred_candidate: 'rt-b',
+          preferred_at_ts: 1750000000,
+        },
+        {
+          id: 'vision',
+          runtime_ids: ['rt-c'],
+          preferred_candidate: null,
+          preferred_at_ts: null,
+        },
+      ],
+    }))
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-lanes-section"]')).not.toBeNull()
+    })
+    const laneDefault = container.querySelector('[data-testid="runtime-lane-default"]') as HTMLElement
+    expect(laneDefault.classList.contains('rt-fo')).toBe(true)
+    expect(laneDefault.querySelector('.rt-fo-lane')?.textContent).toBe('default')
+    expect(laneDefault.querySelector('.rt-fo-lane-id')?.textContent).toBe('[runtime].default')
+    const cands = [...laneDefault.querySelectorAll('.rt-fo-chain .rt-fo-cand')]
+    expect(cands.map(c => c.querySelector('.rt-fo-id')?.textContent)).toEqual(['rt-a', 'rt-b'])
+    expect(cands.map(c => c.classList.contains('head'))).toEqual([true, false])
+    expect(cands[0]!.querySelector('.rt-fo-rank')?.textContent).toBe('1차')
+    expect(laneDefault.querySelector('[data-testid="runtime-lane-default-sticky"]')?.textContent)
+      .toContain('sticky → rt-b')
+
+    const laneVision = container.querySelector('[data-testid="runtime-lane-vision"]') as HTMLElement
+    expect(laneVision.querySelector('[data-testid="runtime-lane-vision-sticky"]')).toBeNull()
+    // read-only: no candidate edit controls (the routing PATCH writer covers
+    // default + media_failover only)
+    expect(container.querySelector('[data-testid="runtime-lanes-section"]')?.querySelector('button, select, input'))
+      .toBeNull()
   })
 
   it('routing section exposes a required default lane without an empty option and patches it', async () => {

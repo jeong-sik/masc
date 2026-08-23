@@ -30,6 +30,12 @@ type tool_call =
   ; result_ready : bool
   }
 
+type awaiting_approval =
+  { call_id : string
+  ; tool_name : string
+  ; question : string
+  }
+
 type unreadable =
   { count : int
   ; last_detail : string
@@ -50,6 +56,7 @@ type t =
   ; mutable checkpoints : int
   ; mutable unreadable_count : int
   ; mutable last_unreadable : string
+  ; mutable awaiting : awaiting_approval option
   }
 
 let create ~keeper_name ~request_id =
@@ -63,6 +70,7 @@ let create ~keeper_name ~request_id =
   ; checkpoints = 0
   ; unreadable_count = 0
   ; last_unreadable = ""
+  ; awaiting = None
   }
 
 let keeper_name t = t.keeper_name
@@ -73,6 +81,8 @@ let note_interrupt t interrupt = t.interrupt <- interrupt
 let text t = safe_block (Buffer.contents t.text_buffer)
 let thinking t = safe_block (Buffer.contents t.thinking_buffer)
 let tool_calls t = List.rev t.reversed_tool_calls
+
+let awaiting_approval t = t.awaiting
 
 let unreadable t =
   if t.unreadable_count = 0 then None
@@ -134,6 +144,10 @@ type status_kind =
 let phase_text t =
   match t.phase with
   | Waiting -> "waiting for the run to start"
+  | Working when Option.is_some t.awaiting ->
+      (* The turn is not working, it is waiting on a person. Saying "working"
+         here would read as a slow tool rather than a question on screen. *)
+      "held at a tool call, waiting for your answer"
   | Working ->
       let calls = List.length t.reversed_tool_calls in
       let work =
@@ -176,8 +190,18 @@ let unreadable_text t =
           the recorded outcome is unaffected"
          t.unreadable_count t.last_unreadable)
 
+(* The question, as an Attention row. It is the one row an operator has to act
+   on, so it is styled like the others that need them rather than like
+   progress. *)
+let awaiting_text t =
+  Option.map
+    (fun (awaiting : awaiting_approval) ->
+      Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question)
+    t.awaiting
+
 let status_rows t =
   [ Some (Progress, phase_text t)
+  ; Option.map (fun text -> (Attention, text)) (awaiting_text t)
   ; Option.map (fun text -> (Attention, text)) (interrupt_text t)
   ; Option.map (fun text -> (Attention, text)) (unreadable_text t)
   ]
@@ -191,7 +215,7 @@ let update_call t call_id f =
   let found = ref false in
   let updated =
     List.map
-      (fun call ->
+      (fun (call : tool_call) ->
         if (not !found) && String.equal call.call_id call_id then begin
           found := true;
           f call
@@ -237,6 +261,24 @@ let apply t (delta : Live.delta) =
       update_call t call_id (fun call -> { call with ended = true })
   | Live.Tool_result { call_id } ->
       update_call t call_id (fun call -> { call with result_ready = true })
+  | Live.Approval_requested { call_id; tool_name; args; question } ->
+      (* The arguments go on the call's own row, which the pane already draws;
+         the prompt carries the question. *)
+      (match args with
+       | "" -> ()
+       | args ->
+           update_call t call_id (fun call ->
+               { call with args; subject = subject_of ~tool_name ~args }));
+      t.awaiting <- Some { call_id; tool_name; question }
+  | Live.Approval_settled { call_id; outcome = _ } ->
+      (* Cleared whatever the answer was, including none: the prompt is over
+         either way, and leaving it up would ask again for a call that has
+         already been decided. Guarded by id so a late settle for a superseded
+         call cannot clear a prompt now waiting on a different one. *)
+      (match t.awaiting with
+       | Some awaiting when String.equal awaiting.call_id call_id ->
+           t.awaiting <- None
+       | Some _ | None -> ())
   | Live.Checkpoint -> t.checkpoints <- t.checkpoints + 1
   | Live.External_effect_completed ->
       (* The turn handed work to something outside it and that work finished.

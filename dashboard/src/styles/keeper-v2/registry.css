@@ -96,6 +96,12 @@
 .reg-kgroup.run .rg-dot { background: var(--status-ok); box-shadow: 0 0 6px color-mix(in oklab, var(--status-ok) 60%, transparent); }
 .reg-kgroup.pause .rg-dot { background: var(--status-warn); }
 .reg-kgroup.off .rg-dot { background: var(--text-faint); }
+/* LIVE-ONLY ADDITION (not in the prototype): the design groups keepers
+   run/pause/off; the dashboard's canonical operational state adds `stuck`
+   (KEEPER_STATUS_LABEL_KO). Its header dot takes the bad tone to match the
+   monitoring band and keeper-workspace roster. Recorded 2026-08-23 so a
+   future re-sync does not drop it. */
+.reg-kgroup.stuck .rg-dot { background: var(--status-bad); box-shadow: 0 0 6px color-mix(in oklab, var(--status-bad) 60%, transparent); }
 .reg-kgroup .rg-n { font-family: var(--font-mono); color: var(--text-faint); }
 .reg-kgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px; margin-bottom: 14px; }
 

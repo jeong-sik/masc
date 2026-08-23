@@ -388,6 +388,38 @@ let test_repeated_exact_tool_call_boundary () =
        [ tool_call ~input:None "keeper_tasks_list"
        ; tool_call ~input:None "keeper_tasks_list"
        ; tool_call ~input:None "keeper_tasks_list"
+       ]);
+  (* The shape the old counter missed. sangsu ran the same git status 48 times
+     in one dispatch, always with another call in between, so a counter that
+     stopped at the first different call never left 1 and the dispatch ran 279
+     calls over 31 minutes with no answer. The list is newest-first. *)
+  check (option (pair string int)) "repeats separated by other calls still yield"
+    (Some ("Execute", 3))
+    (detect
+       [ tool_call "Execute"
+       ; tool_call "Read"
+       ; tool_call "Execute"
+       ; tool_call "Grep"
+       ; tool_call "Execute"
+       ]);
+  (* Interleaving does not make a different call look repeated. *)
+  check (option (pair string int)) "a call below threshold stays silent" None
+    (detect
+       [ tool_call "Execute"
+       ; tool_call "Read"
+       ; tool_call "Execute"
+       ; tool_call "Grep"
+       ]);
+  (* Output identity still gates it: an interleaved repeat whose result moved
+     is progress, not a loop. *)
+  check (option (pair string int)) "interleaved repeats with moving output are progress"
+    None
+    (detect
+       [ tool_call ~output:(Some "c") "Execute"
+       ; tool_call "Read"
+       ; tool_call ~output:(Some "b") "Execute"
+       ; tool_call "Grep"
+       ; tool_call ~output:(Some "a") "Execute"
        ])
 
 let test_autonomous_yield_boundary_contract () =

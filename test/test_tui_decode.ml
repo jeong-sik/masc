@@ -913,8 +913,122 @@ let test_bounded_parent_depth_stops_on_cycle () =
   in
   Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
+let system_log_entry_json ?(level = "INFO") ?(keeper = `String "system") () =
+  `Assoc
+    [ ("seq", `Int 774272)
+    ; ("ts", `String "2026-08-23T03:09:21Z")
+    ; ("level", `String level)
+    ; ("source", `String "structured")
+    ; ("module", `String "Discord")
+    ; ("keeper_name", keeper)
+    ; ("turn_id", `Null)
+    ; ("message", `String "presence update: idle")
+    ; ("details", `Null)
+    ; ("category", `Null)
+    ]
+
+let system_log_snapshot_json entries =
+  `Assoc
+    [ ("entries", `List entries)
+    ; ("total", `Int 774273)
+    ; ("latest_seq", `Int 774272)
+    ; ("returned", `Int (List.length entries))
+    ]
+
+let test_decode_system_log_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ system_log_entry_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "total is the ring count, not the page" 774273
+        snapshot.Tui_decode.sys_total;
+      Alcotest.(check int) "latest seq" 774272 snapshot.Tui_decode.sys_latest_seq;
+      (match snapshot.Tui_decode.sys_entries with
+       | [ entry ] ->
+           Alcotest.(check string) "module" "Discord"
+             entry.Tui_decode.sl_module;
+           Alcotest.(check (option string)) "keeper" (Some "system")
+             entry.Tui_decode.sl_keeper;
+           Alcotest.(check string) "level label" "INFO "
+             (Tui_decode.system_log_level_label entry.Tui_decode.sl_level)
+       | entries ->
+           Alcotest.failf "expected one entry, got %d" (List.length entries))
+
+let test_decode_system_log_accepts_both_warn_spellings () =
+  let label spelling =
+    match
+      Tui_decode.decode_system_log_snapshot
+        (system_log_snapshot_json [ system_log_entry_json ~level:spelling () ])
+    with
+    | Error err -> Alcotest.failf "decode failed for %s: %s" spelling err
+    | Ok { Tui_decode.sys_entries = [ e ]; _ } ->
+        Tui_decode.system_log_level_label e.Tui_decode.sl_level
+    | Ok _ -> Alcotest.fail "expected one entry"
+  in
+  Alcotest.(check string) "warn" "WARN " (label "WARN");
+  Alcotest.(check string) "warning" "WARN " (label "warning")
+
+let test_decode_system_log_keeps_an_unnamed_level_as_itself () =
+  (* Folding an unknown level into Info would render a level this build does
+     not know as an ordinary line. *)
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ system_log_entry_json ~level:"TRACE" () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok { Tui_decode.sys_entries = [ e ]; _ } -> (
+      match e.Tui_decode.sl_level with
+      | Tui_decode.System_level_unknown raw ->
+          Alcotest.(check string) "raw level survives" "TRACE" raw;
+          Alcotest.(check string) "label is padded to the column width" "TRACE"
+            (Tui_decode.system_log_level_label e.Tui_decode.sl_level)
+      | _ -> Alcotest.fail "TRACE was folded into a named level")
+  | Ok _ -> Alcotest.fail "expected one entry"
+
+let test_decode_system_log_null_keeper_is_absent_not_empty () =
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ system_log_entry_json ~keeper:`Null () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok { Tui_decode.sys_entries = [ e ]; _ } ->
+      Alcotest.(check (option string)) "absent keeper" None
+        e.Tui_decode.sl_keeper
+  | Ok _ -> Alcotest.fail "expected one entry"
+
+let test_decode_system_log_requires_the_message () =
+  let without_message =
+    `Assoc
+      [ ("seq", `Int 1)
+      ; ("ts", `String "2026-08-23T03:09:21Z")
+      ; ("level", `String "INFO")
+      ; ("module", `String "Discord")
+      ]
+  in
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ without_message ])
+  with
+  | Ok _ -> Alcotest.fail "a line with no message decoded"
+  | Error _ -> ()
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_system_logs",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_system_log_snapshot_reads_the_live_shape;
+        Alcotest.test_case "warn and warning are one level" `Quick
+          test_decode_system_log_accepts_both_warn_spellings;
+        Alcotest.test_case "an unnamed level stays itself" `Quick
+          test_decode_system_log_keeps_an_unnamed_level_as_itself;
+        Alcotest.test_case "null keeper is absent" `Quick
+          test_decode_system_log_null_keeper_is_absent_not_empty;
+        Alcotest.test_case "message is required" `Quick
+          test_decode_system_log_requires_the_message;
+      ] );
     ( "decode_agent",
       [
         Alcotest.test_case "success" `Quick test_decode_agent_success;

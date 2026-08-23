@@ -87,6 +87,34 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
+(** One line of the server's system log, as {!val:decode_system_log_snapshot}
+    reads it from [GET /api/v1/dashboard/logs]. *)
+
+type system_log_level =
+  | System_debug
+  | System_info
+  | System_warn
+  | System_error
+  | System_level_unknown of string
+      (** A level the server emits that this vocabulary does not name. Kept as
+          written rather than folded into an existing level, so a new level is
+          visible instead of silently rendering as one of these. *)
+
+type system_log_entry = {
+  sl_seq : int;
+  sl_ts : string;
+  sl_level : system_log_level;
+  sl_module : string;
+  sl_keeper : string option;
+  sl_message : string;
+}
+
+type system_log_snapshot = {
+  sys_entries : system_log_entry list;  (** newest last, as the server returns *)
+  sys_total : int;  (** lines the ring has seen, not lines returned *)
+  sys_latest_seq : int;
+}
+
 type log_kind =
   | Log_turn
   | Log_heartbeat
@@ -146,6 +174,12 @@ type transport_health = {
 
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
+
+val decode_system_log_snapshot :
+  Yojson.Safe.t -> (system_log_snapshot, string) result
+
+val system_log_level_label : system_log_level -> string
+(** Fixed-width label for the level column. *)
 
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result

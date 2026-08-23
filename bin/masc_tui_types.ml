@@ -159,6 +159,9 @@ type overview_snapshot = {
 
 (** Planning projections from [Tui_decode], which owns the current wire
     contract and its behavioral decoder tests. *)
+type system_log_snapshot = Tui_decode.system_log_snapshot
+type system_log_entry = Tui_decode.system_log_entry
+
 type planning_goal = Tui_decode.planning_goal
   = {
   pg_id: string;
@@ -225,6 +228,7 @@ type surface =
   | Board
   | Approvals
   | Planning
+  | System_logs
 
 (** Dashboard state *)
 type state = {
@@ -265,6 +269,9 @@ type state = {
   mutable planning_cursor: int;
   mutable planning_scroll: int;
   mutable planning_mode: planning_mode;
+  mutable system_logs: system_log_snapshot option;
+  mutable system_logs_error: string option;
+  mutable system_logs_scroll: int;
   mutable msg_input: Buffer.t;
   mutable msg_target_keeper_name: string option;
   mutable msg_drafts: (string * string) list;
@@ -329,6 +336,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   planning_cursor = 0;
   planning_scroll = 0;
   planning_mode = Planning_list;
+  system_logs = None;
+  system_logs_error = None;
+  system_logs_scroll = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;
   msg_drafts = [];

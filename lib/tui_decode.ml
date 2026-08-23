@@ -906,6 +906,72 @@ let decode_planning_backlog json =
   let* pb_cancelled = required_int_field json "cancelled" in
   Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
 
+type system_log_level =
+  | System_debug
+  | System_info
+  | System_warn
+  | System_error
+  | System_level_unknown of string
+
+type system_log_entry = {
+  sl_seq : int;
+  sl_ts : string;
+  sl_level : system_log_level;
+  sl_module : string;
+  sl_keeper : string option;
+  sl_message : string;
+}
+
+type system_log_snapshot = {
+  sys_entries : system_log_entry list;
+  sys_total : int;
+  sys_latest_seq : int;
+}
+
+(* The server accepts "warn" and "warning" for one level and writes levels in
+   upper case. An unrecognised spelling keeps its text instead of becoming
+   Info, so a level added on the server shows up here as itself. *)
+let system_log_level_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "debug" -> System_debug
+  | "info" -> System_info
+  | "warn" | "warning" -> System_warn
+  | "error" -> System_error
+  | _ -> System_level_unknown raw
+
+let system_log_level_label = function
+  | System_debug -> "DEBUG"
+  | System_info -> "INFO "
+  | System_warn -> "WARN "
+  | System_error -> "ERROR"
+  | System_level_unknown raw ->
+      let raw = String.trim raw in
+      if String.length raw >= 5 then String.sub raw 0 5
+      else raw ^ String.make (5 - String.length raw) ' '
+
+let decode_system_log_entry json =
+  let* sl_seq = required_int_field json "seq" in
+  let* sl_ts = required_string_field json "ts" in
+  let* level_raw = required_string_field json "level" in
+  let* sl_module = required_string_field json "module" in
+  let* sl_message = required_string_field json "message" in
+  let* sl_keeper = optional_string_field json "keeper_name" in
+  Ok
+    { sl_seq
+    ; sl_ts
+    ; sl_level = system_log_level_of_string level_raw
+    ; sl_module
+    ; sl_keeper
+    ; sl_message
+    }
+
+let decode_system_log_snapshot json =
+  let* entries_json = required_list_field json "entries" in
+  let* sys_entries = decode_list "entries" decode_system_log_entry entries_json in
+  let* sys_total = required_int_field json "total" in
+  let* sys_latest_seq = required_int_field json "latest_seq" in
+  Ok { sys_entries; sys_total; sys_latest_seq }
+
 let decode_planning_snapshot json =
   let* goals_json = required_list_field json "goals" in
   let* pl_goals = decode_list "goals" decode_planning_goal goals_json in

@@ -288,6 +288,7 @@ type http_surface_results = {
   http_approvals: approval_observation option;
   http_board: (board_post list, string) result;
   http_planning: (planning_snapshot, string) result;
+  http_system_logs: (system_log_snapshot, string) result;
 }
 
 type async_msg =
@@ -1087,6 +1088,20 @@ let apply_board_list_load state = function
         ~set_error:(fun value -> state.board_list_error <- value)
         err
 
+(* One request per refresh returns this many lines. The server caps the
+   parameter at 3000; a screenful of scrollback is what the surface can show
+   without holding the whole ring in memory. *)
+let system_log_page = 300
+
+let apply_system_logs_load state = function
+  | Ok snapshot ->
+      state.system_logs <- Some snapshot;
+      state.system_logs_error <- None
+  | Error detail ->
+      (* The previous page stays on screen; the error line says the count above
+         it is stale rather than letting it read as a fresh zero. *)
+      state.system_logs_error <- Some detail
+
 let apply_planning_load state = function
   | Ok planning ->
       let goal_ids planning =
@@ -1157,7 +1172,14 @@ let load_http_surfaces ~host ~port ~approval_generation ~wants_transport =
   in
   let http_board = load_board_list ~host ~port in
   let http_planning = load_planning ~host ~port in
-  { http_overview; http_transport; http_approvals; http_board; http_planning }
+  let http_system_logs = load_system_logs ~host ~port ~limit:system_log_page in
+  { http_overview
+  ; http_transport
+  ; http_approvals
+  ; http_board
+  ; http_planning
+  ; http_system_logs
+  }
 
 let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
@@ -1165,6 +1187,7 @@ let apply_http_surfaces state results =
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_board_list_load state results.http_board;
   apply_planning_load state results.http_planning;
+  apply_system_logs_load state results.http_system_logs;
   let approval_status =
     Option.map
       (fun observation ->
@@ -1199,7 +1222,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
     let wants_transport =
       match state.view with
       | Overview -> true
-      | Keepers _ | Board | Approvals | Planning -> false
+      | Keepers _ | Board | Approvals | Planning | System_logs -> false
     in
     let run_refresh () =
       try
@@ -1790,7 +1813,7 @@ let main () =
                        ~mailbox:async_messages
                  | Board_list -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-            | Approvals | Planning -> ());
+            | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab cycles through primary surfaces *)
@@ -1801,7 +1824,8 @@ let main () =
                 state.pending_approval_action <- None;
                 state.view <- Board
             | Board -> state.view <- Planning
-            | Planning -> state.view <- Overview)
+            | Planning -> state.view <- System_logs
+            | System_logs -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
@@ -1826,7 +1850,7 @@ let main () =
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
                  | Planning_list -> ())
-            | Overview | Keepers Keeper_list | Approvals -> ())
+            | Overview | Keepers Keeper_list | Approvals | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -1878,6 +1902,7 @@ let main () =
                     ~event_count:(List.length state.events)
                     ~visible_rows:row_budget.attention_rows
                     state.overview_event_scroll
+            | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
@@ -1927,6 +1952,9 @@ let main () =
                     ~event_count:(List.length state.events)
                     ~visible_rows:row_budget.attention_rows
                     state.overview_event_scroll
+            | System_logs ->
+                if state.system_logs_scroll > 0 then
+                  state.system_logs_scroll <- state.system_logs_scroll - 1
             | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
@@ -1968,7 +1996,7 @@ let main () =
                       | None -> ())
                  | Planning_detail _ -> ())
             | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals -> ())
+            | Approvals | System_logs -> ())
        | Some "l" | Some "L" ->
            (* L opens log view from detail *)
            (match state.view with
@@ -1986,7 +2014,7 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning -> ())
+            | Board | Approvals | Planning | System_logs -> ())
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
            (match state.view with
@@ -1997,7 +2025,7 @@ let main () =
                 open_message_for_keeper state keeper.k_name;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning -> ())
+            | Board | Approvals | Planning | System_logs -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -2030,7 +2058,7 @@ let main () =
                     ~mailbox:async_messages
               | Board_list -> ())
          | Overview | Keepers Keeper_list | Keepers Keeper_message
-         | Approvals | Planning -> ());
+         | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background
       end;

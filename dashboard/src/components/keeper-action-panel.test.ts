@@ -198,7 +198,7 @@ describe('runKeeperAction', () => {
   it('forwards the observed owner generation for typed resume', async () => {
     vi.mocked(resumeKeeper).mockResolvedValueOnce({ ok: true })
 
-    await runKeeperAction('rondo', 'resume', 7)
+    await runKeeperAction('rondo', 'resume')
 
     expect(resumeKeeper).toHaveBeenCalledWith('rondo', 7)
   })

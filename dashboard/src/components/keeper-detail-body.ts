@@ -112,7 +112,7 @@ export function KeeperDetailBody({
         >
           <${KeeperCommsPanel} keeper=${keeper} />
           <${CollapsibleSection} title="세션 활동 로그" open=${false} mountWhenOpen=${true}>
-            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
+            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} />
           <//>
         <//>
 

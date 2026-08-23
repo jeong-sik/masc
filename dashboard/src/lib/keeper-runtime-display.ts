@@ -415,16 +415,15 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
     return 'idle'
   }
 
-  const generation = keeper.generation ?? 0
   const turnCount = keeper.turn_count ?? 0
 
-  // Never ran a single turn or generation — never booted
-  if (generation === 0 && turnCount === 0) {
+  // Never ran a single turn — never booted
+  if (turnCount === 0) {
     return 'unbooted'
   }
 
   // Had activity before but now offline — stopped/crashed
-  if (generation > 0 || turnCount > 0) {
+  if (turnCount > 0) {
     return 'stopped'
   }
 

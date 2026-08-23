@@ -55,7 +55,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with no activity as unbooted', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 0,
         turn_count: 0,
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
@@ -64,7 +63,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies inactive keeper with no activity as unbooted', () => {
       const keeper = makeKeeper({
         status: 'inactive',
-        generation: 0,
         turn_count: 0,
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
@@ -73,7 +71,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with generation > 0 as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 3,
         turn_count: 0,
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
@@ -82,7 +79,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with turn_count > 0 as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 0,
         turn_count: 5,
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
@@ -91,7 +87,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with all activity signals as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 2,
         turn_count: 10,
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')

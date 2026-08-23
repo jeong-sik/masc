@@ -284,7 +284,7 @@ function keeperHint(
   if (signalHint) return signalHint
   if (band === 'paused') return '재개 대기 상태입니다. 원인은 차단/오류 근거를 확인하세요.'
   if (band === 'attention') return stage.description
-  if (band === 'offline' && keeper.generation === 0 && (keeper.turn_count ?? 0) === 0) {
+  if (band === 'offline' && (keeper.turn_count ?? 0) === 0) {
     return '아직 부팅된 적 없는 등록 런타임입니다.'
   }
   if (stage.key === 'idle' || stage.key === 'offline') return null

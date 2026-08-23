@@ -1132,7 +1132,7 @@ describe('keeper lifecycle', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('janitor', 7, {
+    const result = await resumeKeeper('janitor', {
       operatorOperationId: 'dashboard-resume-test-1',
     })
 
@@ -1168,7 +1168,7 @@ describe('keeper lifecycle', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('offline-janitor', 7, {
+    const result = await resumeKeeper('offline-janitor', {
       operatorOperationId: 'dashboard-resume-offline-1',
     })
 
@@ -1190,8 +1190,8 @@ describe('keeper lifecycle', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    expect((await resumeKeeper('janitor', 7)).ok).toBe(false)
-    expect((await resumeKeeper('janitor', 7)).ok).toBe(true)
+    expect((await resumeKeeper('janitor')).ok).toBe(false)
+    expect((await resumeKeeper('janitor')).ok).toBe(true)
 
     const firstInit = fetchMock.mock.calls[0]![1] as RequestInit
     const secondInit = fetchMock.mock.calls[1]![1] as RequestInit
@@ -1199,17 +1199,6 @@ describe('keeper lifecycle', () => {
     const second = JSON.parse(String(secondInit.body))
     expect(first.operator_operation_id).toBe('dashboard-resume-stable-resume-uuid')
     expect(second.operator_operation_id).toBe(first.operator_operation_id)
-  })
-
-  it('refuses resume when the current owner generation is unavailable', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await resumeKeeper('janitor', undefined)
-
-    expect(result.ok).toBe(false)
-    expect(result.error).toContain('current owner generation is unavailable')
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('sends POST with action=wakeup via directive endpoint', async () => {

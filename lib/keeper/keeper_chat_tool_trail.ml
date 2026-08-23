@@ -214,6 +214,4 @@ let append_to ?max_rows t ~text =
     | Some rows -> Printf.sprintf "%s\n```\n%s\n```" text rows)
 ;;
 
-module For_testing = struct
-  let tool_subject = tool_subject
-end
+

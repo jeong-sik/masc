@@ -8,7 +8,9 @@ module Board_detail = Masc_tui_board_detail
 module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
+module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
@@ -310,6 +312,10 @@ type async_msg =
       * bool
       * (Keeper_chat.response, Keeper_chat.error) result
       * unit Eio.Promise.u
+  | Keeper_chat_stream_deltas of Keeper_chat.request * Keeper_chat_live.delta list
+  | Keeper_chat_stream_unavailable of Keeper_chat.request * string
+  | Keeper_chat_interrupt_done of
+      Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
   | Keeper_chat_cleanup_done of Keeper_chat.request * (unit, string) result
@@ -365,6 +371,80 @@ let enqueue_dispatch_start mailbox request was_replay =
     (Keeper_chat_dispatch_started (request, was_replay, acknowledge));
   Eio.Promise.await acknowledged
 
+(* Send the turn and read it as it arrives.
+
+   Bounding the silence needs a clock. Without one the buffered send is used
+   instead -- it is what shipped before this and stays correct, so a missing
+   clock costs the live view and nothing else. It is said out loud rather than
+   passed over: a pane that quietly stops drawing looks like a keeper that
+   stopped working. *)
+let post_keeper_chat_watching ~mailbox ~port request =
+  let host = Env_config_core.masc_host () in
+  match Eio_context.get_clock_opt () with
+  | None ->
+      enqueue_async mailbox
+        (Keeper_chat_stream_unavailable
+           ( request
+           , "sending without a live view: no Eio clock to bound the stream" ));
+      Masc_tui_http.post_keeper_chat ~host ~port request
+  | Some clock ->
+      let decoder = Keeper_chat_live.create () in
+      (* Runs on this fiber between reads, so it only decodes and hands the
+         result to the render loop; drawing happens there. *)
+      let on_chunk chunk =
+        match Keeper_chat_live.feed decoder chunk with
+        | [] -> ()
+        | deltas ->
+            enqueue_async mailbox (Keeper_chat_stream_deltas (request, deltas))
+      in
+      Masc_tui_http.post_keeper_chat_streaming ~clock ~host ~port ~on_chunk
+        request
+
+(* The strict decode carries no tool information, so the rows the live pane
+   drew are the only record of what the turn did. They are committed before
+   the reply lands so the scrollback reads in the order it happened. *)
+let settle_live_turn state (request : Keeper_chat.request) =
+  match state.msg_live with
+  | Some live
+    when String.equal
+           (Keeper_chat_transcript.request_id live)
+           request.Keeper_chat.request_id ->
+      (match Keeper_chat_transcript.tool_rows live with
+       | [] -> ()
+       | rows ->
+           append_chat_history state request Message_tool
+             (String.concat "\n" rows));
+      state.msg_live <- None
+  | Some _ | None -> ()
+
+(* Ask the server to interrupt the turn this request opened.
+
+   Nothing here decides that the turn stopped. The server reports whether it
+   signalled the running fiber, and a turn parked in an uncancellable section
+   keeps going after that (masc #29229). The stream ending is the proof, so the
+   pane keeps drawing until it does. *)
+let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let keeper_name = request.Keeper_chat.keeper_name in
+  let run () =
+    let result =
+      try Masc_tui_http.post_keeper_turn_interrupt ~host ~port ~keeper_name
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_chat_interrupt_done (request, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
+
 let launch_keeper_request state ~base_path ~mailbox request =
   state.msg_inflight <- Some request;
   state.msg_inflight_kind <- Some Dispatch_claim;
@@ -394,8 +474,7 @@ let launch_keeper_request state ~base_path ~mailbox request =
             then begin
               let result =
                 try
-                  Masc_tui_http.post_keeper_chat
-                    ~host:(Env_config_core.masc_host ()) ~port:state.port request
+                  post_keeper_chat_watching ~mailbox ~port:state.port request
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
@@ -1461,9 +1540,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 (Printf.sprintf "%s Keeper request: %s"
                    (if was_replay then "Replaying exact" else "Dispatching")
                    request.request_id);
+              state.msg_live <-
+                Some
+                  (Keeper_chat_transcript.create
+                     ~keeper_name:request.Keeper_chat.keeper_name
+                     ~request_id:request.request_id);
               proceed := true
           | Some _ | None -> ())
   | Keeper_chat_done (request, was_replay, result, acknowledge) ->
+      settle_live_turn state request;
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -1472,6 +1557,41 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               ~dispatch_was_replay:was_replay request result)
       in
       if applied then load_from_masc_dir state base_path
+  | Keeper_chat_stream_deltas (request, deltas) ->
+      (* Identity-guarded: a late chunk from a superseded turn must not draw
+         into the one now running. *)
+      (match state.msg_live with
+       | Some live
+         when String.equal
+                (Keeper_chat_transcript.request_id live)
+                request.Keeper_chat.request_id ->
+           List.iter (Keeper_chat_transcript.apply live) deltas
+       | Some _ | None -> ())
+  | Keeper_chat_stream_unavailable (request, detail) ->
+      append_chat_history state request Message_status detail
+  | Keeper_chat_interrupt_done (request, result) ->
+      (match state.msg_live with
+       | Some live
+         when String.equal
+                (Keeper_chat_transcript.request_id live)
+                request.Keeper_chat.request_id ->
+           let noted =
+             match result with
+             | Ok (Masc_tui_http.Signalled { turn_id }) ->
+                 Keeper_chat_transcript.Signal_sent { turn_id }
+             | Ok (Masc_tui_http.Not_signalled { reason; detail }) ->
+                 Keeper_chat_transcript.Signal_declined
+                   (match detail with
+                    | None -> reason
+                    | Some detail -> reason ^ ": " ^ detail)
+             | Error detail -> Keeper_chat_transcript.Signal_error detail
+           in
+           Keeper_chat_transcript.note_interrupt live noted
+       | Some _ | None ->
+           (* The turn settled before the answer came back. Nothing to mark,
+              and the outcome the transcript already recorded is the one that
+              counts. *)
+           ())
   | Keeper_chat_dispatch_reconcile request ->
       (match state.msg_inflight with
        | Some current when Keeper_chat.same_request_identity current request ->
@@ -1486,6 +1606,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            launch_keeper_reconciliation state ~mailbox request
        | Some _ | None -> ())
   | Keeper_chat_dispatch_blocked (request, detail) ->
+      settle_live_turn state request;
       (match state.msg_inflight with
        | Some current when Keeper_chat.same_request_identity current request ->
            state.msg_inflight <- None;
@@ -1855,8 +1976,28 @@ let main () =
                 state.log_scroll <- 0;
                 state.detail_scroll <- 0
             | Keepers Keeper_message ->
-                state.view <- Keepers Keeper_detail;
-                state.detail_scroll <- 0
+                (* While a turn is streaming, Esc interrupts it instead of
+                   leaving: leaving is one keypress away again once it settles,
+                   and a turn an operator wants stopped is the more urgent of
+                   the two. Asking twice does not stack -- the second press is
+                   ignored while the first is unanswered. *)
+                (match state.msg_live with
+                 | Some live
+                   when Keeper_chat_transcript.interrupt live
+                        = Keeper_chat_transcript.Not_requested ->
+                     (match state.msg_inflight with
+                      | Some request ->
+                          launch_keeper_interrupt state
+                            ~mailbox:async_messages request
+                      | None ->
+                          state.view <- Keepers Keeper_detail;
+                          state.detail_scroll <- 0)
+                 | Some _ ->
+                     (* An interrupt is already outstanding for this turn. *)
+                     ()
+                 | None ->
+                     state.view <- Keepers Keeper_detail;
+                     state.detail_scroll <- 0)
             | Board ->
                 (match state.board_mode with
                  | Board_read _ ->

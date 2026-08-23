@@ -3,6 +3,8 @@ type style =
   | Keeper
   | Status
   | Error
+  | Tool
+  | Thinking
 
 type entry = {
   style : style;

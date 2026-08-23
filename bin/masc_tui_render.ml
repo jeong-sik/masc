@@ -11,6 +11,7 @@ module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
 module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 
 let frame_lines buf =
@@ -1359,6 +1360,7 @@ let render_keeper_message (state : state) =
                 , Keeper_chat.terminal_safe_text message.me_keeper_name )
             | Message_status -> Message_layout.Status, "status"
             | Message_error -> Message_layout.Error, "error"
+            | Message_tool -> Message_layout.Tool, "tools"
           in
           ({ style;
              timestamp = message.me_timestamp;
@@ -1370,6 +1372,58 @@ let render_keeper_message (state : state) =
             : Message_layout.entry))
         messages
     in
+    (* Rows for the turn still streaming, drawn under the committed history so
+       the streaming reply sits at the bottom edge, where the eye rests while
+       waiting for it. Reasoning is kept to its last line: it arrives faster
+       than anything else and a full transcript of it would push the reply and
+       the tool rows off the pane. *)
+    let live_entries =
+      match state.msg_live with
+      | Some live
+        when String.equal (Keeper_chat_transcript.keeper_name live) keeper_name
+        ->
+          let request_label =
+            Keeper_chat.compact_request_id
+              (Keeper_chat_transcript.request_id live)
+          in
+          let entry style role_label body =
+            ({ style;
+               timestamp = "live";
+               role_label;
+               request_label;
+               body;
+             }
+              : Message_layout.entry)
+          in
+          let thinking_tail =
+            Keeper_chat_transcript.thinking live
+            |> String.split_on_char '\n'
+            |> List.filter (fun line -> String.trim line <> "")
+            |> List.rev
+            |> function
+            | [] -> []
+            | last :: _ -> [ entry Message_layout.Thinking "thinking" last ]
+          in
+          let tool_entry =
+            match Keeper_chat_transcript.tool_rows live with
+            | [] -> []
+            | rows ->
+                [ entry Message_layout.Tool "tools" (String.concat "\n" rows) ]
+          in
+          let text_entry =
+            match Keeper_chat_transcript.text live with
+            | "" -> []
+            | text ->
+                [ entry Message_layout.Keeper
+                    (Keeper_chat.terminal_safe_text
+                       (Keeper_chat_transcript.keeper_name live))
+                    text
+                ]
+          in
+          thinking_tail @ tool_entry @ text_entry
+      | Some _ | None -> []
+    in
+    let layout_entries = layout_entries @ live_entries in
     let visible_rows =
       Message_layout.visible_rows ~inner_width:(max 1 (cols - 4))
         ~height:history_height layout_entries
@@ -1391,6 +1445,8 @@ let render_keeper_message (state : state) =
             | Message_layout.Keeper -> Ansi.green
             | Message_layout.Status -> Ansi.yellow
             | Message_layout.Error -> Ansi.red
+            | Message_layout.Tool -> Ansi.dim
+            | Message_layout.Thinking -> Ansi.dim
           in
           box_line_styled buf cols ~style row.text)
         visible_rows;
@@ -1439,6 +1495,18 @@ let render_keeper_message (state : state) =
            (Printf.sprintf "  (processing %s…)"
               (Keeper_chat.compact_request_id request.request_id))
      | None, Some _ | None, None -> ());
+    (match state.msg_live with
+     | Some live ->
+         List.iter
+           (fun (kind, text) ->
+             let style =
+               match kind with
+               | Keeper_chat_transcript.Progress -> Ansi.dim
+               | Keeper_chat_transcript.Attention -> Ansi.yellow
+             in
+             box_line_styled buf cols ~style ("  " ^ text))
+           (Keeper_chat_transcript.status_rows live)
+     | None -> ());
     (match state.msg_prepared with
      | Some request when state.msg_inflight = None ->
          box_line_styled buf cols ~style:Ansi.yellow
@@ -1556,9 +1624,18 @@ let render_keeper_message (state : state) =
            | None, false -> "Enter:disabled (Keeper unavailable)"
            | None, true -> "Enter:send")
     in
+    let escape_hint =
+      match state.msg_live with
+      | Some live
+        when Keeper_chat_transcript.interrupt live
+             = Keeper_chat_transcript.Not_requested ->
+          "Esc:interrupt turn"
+      | Some _ -> "Esc:interrupt sent"
+      | None -> "Esc:back"
+    in
     let footer =
-      Printf.sprintf "%s  %s  Esc:back  Ctrl-U:clear line%s" Ansi.dim
-        enter_hint Ansi.reset
+      Printf.sprintf "%s  %s  %s  Ctrl-U:clear line%s" Ansi.dim enter_hint
+        escape_hint Ansi.reset
     in
     Buffer.add_string buf
       (Message_layout.fit_width footer (max 1 (cols - 1)));

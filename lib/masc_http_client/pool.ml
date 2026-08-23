@@ -561,6 +561,9 @@ type stream_outcome =
       }
   | Buffered of response
 
+(* The HTTP definition of a successful status, not a shared setting: other
+   modules spelling out the same range are implementing the same spec rather
+   than reading the same value, so there is nothing here for them to import. *)
 let status_is_success status = status >= 200 && status <= 299
 
 (* Mirrors [do_request]'s connection lifecycle exactly — the release rules and

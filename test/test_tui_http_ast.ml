@@ -1056,6 +1056,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
    chat surface -- so their wiring is pinned here. Without the startup line the
    first symptom is a recovered dispatch that can never settle. *)
 let test_missing_operator_token_is_reported () =
+  check int "startup binds the bearer to the workspace it opened" 1
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"Masc_tui_http.install_operator_token");
   check int "startup reads whether this process holds a bearer" 1
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"

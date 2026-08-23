@@ -79,6 +79,14 @@ type t = {
 
 (** {1 Mint entry point} *)
 
+val read_persisted_token :
+  base_path:string -> agent_name:string -> string option
+(** The bearer [masc login] persisted for [agent_name] in this workspace, or
+    [None] when the file is absent or empty. Token persistence is otherwise
+    private to this module; the reader is exposed because a local client
+    should find its own credential where login wrote it rather than require
+    the operator to re-export it into every shell. *)
+
 val mint :
   base_path:string ->
   host:string ->

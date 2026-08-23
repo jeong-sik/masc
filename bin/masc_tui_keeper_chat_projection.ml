@@ -221,8 +221,9 @@ let reader_unauthenticated = function
    guessing which side is broken. *)
 let unauthenticated_reader_remedy =
   "This masc-tui holds no operator token, so it cannot read the operation \
-   back; the operation itself is untouched on the server. Export MASC_TOKEN, \
-   restart masc-tui, then press Ctrl-R to settle this request."
+   back; the operation itself is untouched on the server. Run \
+   'masc login --agent masc-tui --client-env MASC_TOKEN', restart masc-tui, \
+   then press Ctrl-R to settle this request."
 
 let reconciliation_failure_detail error =
   if reader_unauthenticated error then unauthenticated_reader_remedy

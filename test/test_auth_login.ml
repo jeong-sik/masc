@@ -166,6 +166,28 @@ let test_login_url_uses_uri_components () =
     check (option string) "MCP IPv6 host" (Some "::1") (Uri.host mcp);
     check string "MCP path" "/mcp" (Uri.path mcp)
 
+(* What login persists is what a local client can read back. Asserting the
+   round trip rather than the path keeps the two sides free to move together
+   and pinned to each other. *)
+let test_persisted_token_round_trips () =
+  with_temp_dir "auth-login-read" @@ fun base_path ->
+  check (option string) "absent agent has no persisted token" None
+    (Auth_login.read_persisted_token ~base_path ~agent_name:"masc-tui");
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"masc-tui" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+      failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+      check (option string) "the client reads back what login wrote"
+        (Some report.bearer_token)
+        (Auth_login.read_persisted_token ~base_path ~agent_name:"masc-tui");
+      check (option string) "another agent's file is not borrowed" None
+        (Auth_login.read_persisted_token ~base_path ~agent_name:"other-agent")
+
 let () =
   run "auth_login"
     [
@@ -177,5 +199,7 @@ let () =
             `Quick test_login_long_lived_passes_env_var_through;
           test_case "URL uses URI components" `Quick
             test_login_url_uses_uri_components;
+          test_case "persisted token round-trips" `Quick
+            test_persisted_token_round_trips;
         ] );
     ]

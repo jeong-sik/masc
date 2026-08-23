@@ -32,8 +32,26 @@ let default_agent_name = "masc-tui"
 
 (* One name for the bearer the write routes require, so the header builder and
    the surfaces that report its absence cannot disagree about whether this
-   process holds one. *)
-let operator_token () = first_nonempty_env [ "MASC_TOKEN" ]
+   process holds one.
+
+   The bearer is discovered once, at boot, from the workspace the TUI was told
+   to open -- not per request. This module is never handed a base path, and
+   resolving one on its own would let the client present the credential of a
+   workspace other than the one on screen. *)
+let operator_token_cell = ref None
+
+(* [MASC_TOKEN] wins so a single run can be pointed at a different credential.
+   Its absence is no longer a failure: [masc login] already wrote this agent's
+   bearer under the workspace, and that file outlives the shell. *)
+let install_operator_token ~base_path =
+  operator_token_cell
+  := (match first_nonempty_env [ "MASC_TOKEN" ] with
+      | Some _ as token -> token
+      | None ->
+          Auth_login.read_persisted_token ~base_path
+            ~agent_name:default_agent_name)
+
+let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())
 
 let auth_headers () =

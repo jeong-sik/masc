@@ -6,7 +6,7 @@ type t =
   ; tool_approval : Agent_core.Hooks.tool_approval_callback
   }
 
-let create ~registry ~events ~clock ~keeper_name ~timeout_sec =
+let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
   let pre_tool_use (event : Agent_core.Hooks.hook_event) =
     match event with
     | Agent_core.Hooks.PreToolUse { tool_name; input; _ } -> (
@@ -32,7 +32,7 @@ let create ~registry ~events ~clock ~keeper_name ~timeout_sec =
     let tool_call_id =
       Agent_core.Tool_contract.Invocation.tool_use_id request.invocation
     in
-    Keeper_chat_events.publish events
+    publish
       (Keeper_chat_events.Tool_approval_requested
          { tool_call_id
          ; tool_call_name = request.tool_name
@@ -56,7 +56,7 @@ let create ~registry ~events ~clock ~keeper_name ~timeout_sec =
     in
     (* Sent on every path, including the ones where nobody answered, so a pane
        showing the prompt stops showing it. *)
-    Keeper_chat_events.publish events
+    publish
       (Keeper_chat_events.Tool_approval_settled
          { tool_call_id; outcome = label });
     decision

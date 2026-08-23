@@ -333,6 +333,7 @@ let run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ~surface
@@ -697,6 +698,7 @@ let run_keeper_invocation_turn_admitted_inner
 			                                ~world_observation
 		                                ?on_event
 		                                ?on_tool_result_ready
+		                                ?approval_gate
 		                                ~trajectory_acc
 		                                ?degraded_retry_runtime
 		                                ?fallback_reason
@@ -841,6 +843,7 @@ let run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ~surface
@@ -866,6 +869,7 @@ let run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ~surface
@@ -886,6 +890,7 @@ let handle_keeper_msg_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ctx
@@ -898,6 +903,7 @@ let handle_keeper_msg_admitted
     ?on_text_delta
     ?on_event
     ?on_tool_result_ready
+    ?approval_gate
     ?event_bus
     ?continuation_channel
     ~surface:Direct_message

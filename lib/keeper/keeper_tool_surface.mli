@@ -46,6 +46,7 @@ val dispatch_keeper_msg_stream_admitted :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_tool_result_ready:(tool_call_id:string -> unit) ->
+  ?approval_gate:Keeper_tool_approval_gate.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ context ->
   message:Keeper_invocation_contract.direct_message ->

@@ -2567,7 +2567,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text="A",
-            cursor_column=8,
+            cursor_column=5,
         )
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
 
@@ -2584,7 +2584,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text=combining_text,
-            cursor_column=8,
+            cursor_column=5,
         )
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
 
@@ -2597,7 +2597,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text=expected_text,
-            cursor_column=13,
+            cursor_column=10,
         )
         narrow_frame = resize_and_wait(
             process,
@@ -2614,7 +2614,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=16,
             input_text=expected_text,
-            cursor_column=13,
+            cursor_column=10,
         )
         resize_and_wait(
             process,

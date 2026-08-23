@@ -324,6 +324,12 @@ let prompts_dir () =
 let keepers_dir () =
   (resolve ()).keepers.path
 
+(* Not part of [resolution]: the diagnostics record (and its JSON
+   projection) reports the children whose absence warns on boot, and the
+   tools directory is created on demand by the asset sync instead. *)
+let tools_dir () =
+  Filename.concat (resolve ()).config_root.path "tools"
+
 let inputs_for_base_path ~base_path =
   {
     cwd = base_path;

@@ -11,60 +11,18 @@
     — useful when the bootstrap is wired into multiple lifecycle
     points.
 
-    Internal helpers (the [existing_dir] predicate, the
-    [prompt_markdown_dir_candidates] list, and the
-    [bootstrapped_signature] memo ref) are hidden — callers
-    consume only the entry point below. *)
+    Converging the directory's contents onto the binary-embedded
+    assets is {!Managed_asset_sync}'s job, run by the server
+    bootstrap before this module scans the directory.
+
+    Internal helpers (the [bootstrapped_signature] memo ref and
+    the registry observers) are hidden — callers consume only the
+    entry points below. *)
 
 val resolve_prompt_markdown_dir :
   workspace_path:string -> base_path:string -> string
-(** Return the first existing prompt markdown directory from the
-    candidate list, falling back to {!Config_dir_resolver.prompts_dir}
-    when none exist yet. *)
-
-type sync_result = {
-  copied : string list;
-  overwritten : string list;
-  removed : string list;
-  failed : (string * string) list;
-}
-(** Outcome of one prompt asset sync pass. Entries are embedded asset
-    paths (e.g. [prompts/keeper.md]); [removed] contains distribution
-    assets deleted from the runtime directory, and [failed]
-    pairs the path with the error message. *)
-
-val sync_prompt_assets :
-  read:(string -> string option) ->
-  files:string list ->
-  prompts_dir:string ->
-  unit ->
-  sync_result
-(** Converge the runtime prompt markdown dir onto the binary-embedded
-    assets (#20929). Only entries under [prompts/] in [files] are
-    considered. After all sync preconditions validate, each is written into
-    [prompts_dir] when missing or when its content differs from the embedded
-    copy; identical files are left untouched. The embedded managed-assets
-    manifest must exactly equal a non-empty current embedded prompt set. The
-    runtime prompt directory is an exact distribution-owned projection: paths
-    absent from the current manifest are removed, then the runtime manifest is
-    replaced with the current one.
-
-    Overwrite-on-differ is safe by design: operator prompt customization
-    lives in prompt_overrides.json (replayed after directory load), so a
-    divergent markdown file is a stale distribution copy, not an edit.
-    The rest of .masc/config is operator-edited in place and is out of
-    scope here.
-
-    [read]/[files] are typically [Embedded_config.read] /
-    [Embedded_config.file_list], passed in by the server bootstrap so
-    this module stays asset-source agnostic (and unit-testable).
-    Deletion is fail-closed: a malformed, incomplete, or unsafe manifest or an
-    unreadable runtime tree records an explicit [failed] entry and no path is
-    removed. Operator customization lives in [prompt_overrides.json], outside
-    this directory.
-    [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded in
-    [failed] without aborting the pass. *)
-
+(** Return the prompt markdown directory,
+    {!Config_dir_resolver.prompts_dir}. *)
 
 val bootstrap_runtime :
   workspace_path:string ->

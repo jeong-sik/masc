@@ -794,6 +794,42 @@ let test_tools_response_no_longer_carries_the_projection () =
     (List.mem "scheduled_automation" fields)
 ;;
 
+let test_tool_response_carries_structured_recurrence () =
+  with_config
+  @@ fun config ->
+  (* The dashboard projection and the tool response describe the same
+     `schedule_request`. Sending only `recurrence_kind` here made the client
+     rebuild the structure from flattened strings, with an unknown-shape
+     fallback at the end of that chain. *)
+  let recurrence = Schedule_domain.Interval { interval_sec = 60 } in
+  let _request =
+    create_service_exn
+      config
+      ~schedule_id:"sched-structured-recurrence"
+      ~due_at:200.0
+      ~payload:(keeper_wake_payload "every minute")
+      ~recurrence
+      ()
+  in
+  let listed =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc [])
+  in
+  let open Yojson.Safe.Util in
+  let entry =
+    Tool_result.data listed
+    |> member "schedules"
+    |> to_list
+    |> List.find (fun item ->
+      match item |> member "schedule_id" with
+      | `String id -> String.equal id "sched-structured-recurrence"
+      | _ -> false)
+  in
+  check bool "recurrence is present" true (entry |> member "recurrence" <> `Null);
+  check string "recurrence matches the domain serialiser"
+    (Yojson.Safe.to_string (Schedule_domain.recurrence_to_yojson recurrence))
+    (Yojson.Safe.to_string (entry |> member "recurrence"))
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
@@ -827,6 +863,8 @@ let () =
             test_keeper_wake_target_validation_is_inside_creation_fence
         ; test_case "Keeper wake creation respects shutdown fence" `Quick
             test_keeper_wake_creation_respects_shutdown_fence
+        ; test_case "tool response carries structured recurrence" `Quick
+            test_tool_response_carries_structured_recurrence
         ] )
     ]
 ;;

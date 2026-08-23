@@ -184,11 +184,15 @@
  (public_name masc-deployment-preflight-helper)
  (package masc)
  (libraries
+  masc
   masc.server
   masc.host_config
   masc.keeper_runtime
   masc.masc_schedule
   masc.masc_tool_blob_store
+  masc.fusion_core
+  masc.run_registry_core
+  masc.masc_core
   cmdliner
   unix
   yojson))

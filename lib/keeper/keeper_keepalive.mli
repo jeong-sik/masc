@@ -47,15 +47,6 @@ val not_in_registry_warn_state_step :
   float StringMap.t ->
   not_in_registry_warn_decision * float StringMap.t
 
-(** Test-only wrapper for the in-turn liveness pulse lifecycle. *)
-val with_in_turn_liveness_pulse_for_test :
-  sw:Eio.Switch.t ->
-  clock:'a Eio.Time.clock ->
-  interval_sec:float ->
-  tick:(unit -> unit) ->
-  (unit -> 'b) ->
-  'b
-
 (** Keepalive loop meta selection. Disk wins when it changed; otherwise
     fall back to the latest registry snapshot instead of the original boot
     meta so continuity/runtime fields do not regress across turns. *)

@@ -178,11 +178,11 @@ function AllKeepersMemory({ keepers, onPick }) {
       <div className="turn-sec">
         <h4>keeper별 메모리 <span className="mem-hint">행을 누르면 개별 보기</span></h4>
         <div className="mem-table">
-          <div className="mem-tr mem-th"><span>keeper</span><span>ctx</span><span>스토어</span><span>mem bytes</span></div>
+          <div className="mem-tr mem-th"><span>keeper</span><span title="마지막 턴 입력 비율 — 지금 쓰는 양은 알 수 없음 (not_observed)">마지막 턴</span><span>스토어</span><span>mem bytes</span></div>
           {agg.rows.map(r => (
             <button key={r.id} className="mem-tr" onClick={() => onPick && onPick(r.id)}>
               <span className="mem-td-id"><StatusDot status={r.status === 'run' ? 'run' : r.status === 'pause' ? 'idle' : 'bad'} /><span className="mono">{r.id}</span></span>
-              <span className="mono">{Math.round(r.ctx * 100)}%</span>
+              <span className="mono" title="마지막 턴 입력 비율 — 현재 점유율 아님 (not_observed)">{Math.round(r.ctx * 100)}%</span>
               <span className="mono">{r.store}</span>
               <span className="mem-td-bar"><i style={{ width: (r.memBytes / maxMem * 100) + '%' }}></i><b className="mono">{memFmtBytes(r.memBytes)}</b></span>
             </button>

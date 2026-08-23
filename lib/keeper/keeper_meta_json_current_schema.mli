@@ -38,8 +38,6 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Consecutive_noop_count
-  | Last_compaction_check_ts
-  | Last_compaction_decision
   | Last_autonomous_action_at
   | Autonomous_action_count
   | Autonomous_turn_count

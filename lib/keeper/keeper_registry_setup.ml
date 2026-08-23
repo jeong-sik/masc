@@ -1031,7 +1031,7 @@ let set_last_error_entry ~base_path ~name err =
   Error_tracking.set_last_error_entry ~base_path ~name err ~update_entry:update_entry_unit
 ;;
 
-(* record_error (MASC/AGENT_CORE Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so ca... *)
+(* record_error (MASC/AGENT_CORE Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so callers use that module directly. *)
 
 let clear_error ~base_path name =
   Error_tracking.clear_error ~base_path name ~update_entry:update_entry_unit
@@ -1039,24 +1039,6 @@ let clear_error ~base_path name =
 
 let set_failure_reason ~base_path name reason =
   Error_tracking.set_failure_reason ~base_path name reason ~update_entry:update_entry_unit
-;;
-
-let set_compaction_decision ~base_path name decision =
-  (* Reactive provider-overflow recovery has no other path to
-     [compaction_rt]: the [update_entry] helpers mutate only the turn
-     observation, and [meta.compaction_rt] is otherwise persisted wholesale by
-     the turn lifecycle (post_turn returns [updated_meta]; its caller persists).
-     Stamping the specific recovery decision onto the already-serialized
-     [last_decision] lets the dashboard surface why an overflow compaction
-     failed instead of only a generic [Turn_overflow_failure]. *)
-  update_entry_unit ~base_path name (fun e ->
-    { e with
-      meta =
-        map_compaction_rt
-          (fun rt ->
-            { rt with last_decision = compaction_runtime_decision_of_string decision })
-          e.meta
-    })
 ;;
 
 let set_last_correlation_id ~base_path name cid =

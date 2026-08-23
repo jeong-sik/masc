@@ -373,8 +373,6 @@ let decode_current_meta fields =
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
-  let* last_compaction_check_ts = float_field fields "last_compaction_check_ts" in
-  let* last_compaction_decision_raw = string_field fields "last_compaction_decision" in
   let* last_autonomous_action_at = string_field fields "last_autonomous_action_at" in
   let* autonomous_action_count = int_field fields "autonomous_action_count" in
   let* autonomous_turn_count = int_field fields "autonomous_turn_count" in
@@ -428,8 +426,6 @@ let decode_current_meta fields =
       ; last_ts = last_compaction_ts
       ; last_before_tokens = last_compaction_before_tokens
       ; last_after_tokens = last_compaction_after_tokens
-      ; last_check_ts = last_compaction_check_ts
-      ; last_decision = compaction_runtime_decision_of_string last_compaction_decision_raw
       }
     in
     let proactive_rt : proactive_runtime =

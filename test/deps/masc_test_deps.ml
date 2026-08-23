@@ -111,8 +111,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_turn_ts
         | Schema.Last_compaction_ts
         | Schema.Last_proactive_ts
-        | Schema.Last_visible_proactive_ts
-        | Schema.Last_compaction_check_ts -> `Float 0.
+        | Schema.Last_visible_proactive_ts -> `Float 0.
         | Schema.Last_proactive_outcome ->
           `String
             (Masc.Keeper_meta_contract.proactive_cycle_outcome_to_string
@@ -120,7 +119,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_proactive_reason
         | Schema.Last_proactive_preview
         | Schema.Last_autonomous_action_at -> `String ""
-        | Schema.Last_compaction_decision -> `String "initialized"
         | Schema.Message_scope_ack_id
         | Schema.Last_runtime_attempt
         | Schema.Latched_reason

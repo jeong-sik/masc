@@ -1042,6 +1042,67 @@ let verification_snapshot_json ?(total = 3) requests =
     ; ("requests", `List requests)
     ]
 
+(* Repositories. Shape is [repository_json] in the repositories route. *)
+let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true) () =
+  `Assoc
+    [ ("id", `String "repo-1")
+    ; ("name", `String "masc")
+    ; ("url", `String "https://github.com/jeong-sik/masc")
+    ; ("local_path", `String "/Users/dancer/me/workspace/yousleepwhen/masc")
+    ; ("aliases", `List [])
+    ; ("default_branch", `String "main")
+    ; ("keepers", `List (List.map (fun k -> `String k) keepers))
+    ; ("status", `String "ready")
+    ; ("auto_sync", auto_sync)
+    ; ("sync_interval", `Int 300)
+    ; ("created_at", `String "2026-08-01T00:00:00Z")
+    ]
+
+let repository_snapshot_json repos =
+  `Assoc [ ("repositories", `List repos); ("total", `Int (List.length repos)) ]
+
+let test_decode_repository_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "total" 1 snapshot.Tui_decode.rs_total;
+      (match snapshot.Tui_decode.rs_repositories with
+       | [ r ] ->
+           Alcotest.(check string) "name" "masc" r.Tui_decode.rp_name;
+           Alcotest.(check string) "branch" "main"
+             r.Tui_decode.rp_default_branch;
+           Alcotest.(check (list string)) "who works in it" [ "keeper.one" ]
+             r.Tui_decode.rp_keepers;
+           Alcotest.(check bool) "auto sync" true r.Tui_decode.rp_auto_sync
+       | rs -> Alcotest.failf "expected one repository, got %d" (List.length rs))
+
+let test_decode_repository_absent_auto_sync_is_off () =
+  (* A repository that does not declare auto-sync is not syncing. Reading a
+     missing flag as true would tell an operator work is being pulled that is
+     not. *)
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json ~auto_sync:`Null () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check bool) "absent means off" false r.Tui_decode.rp_auto_sync
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_repository_with_no_keepers () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json ~keepers:[] () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check (list string)) "nobody assigned yet" []
+        r.Tui_decode.rp_keepers
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
   `Assoc
@@ -1249,6 +1310,15 @@ let test_decode_system_log_requires_the_message () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_repositories",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_repository_snapshot_reads_the_live_shape;
+        Alcotest.test_case "absent auto-sync is off" `Quick
+          test_decode_repository_absent_auto_sync_is_off;
+        Alcotest.test_case "a repository with no keepers" `Quick
+          test_decode_repository_with_no_keepers;
+      ] );
     ( "decode_harness",
       [
         Alcotest.test_case "reads the live shape" `Quick

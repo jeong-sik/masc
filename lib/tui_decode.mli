@@ -113,6 +113,21 @@ type system_log_snapshot = {
 (** One task waiting on a verdict, as the verification surface lists it. *)
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
+(** A repository the workspace tracks. *)
+type repository = {
+  rp_name : string;
+  rp_local_path : string;
+  rp_default_branch : string;
+  rp_status : string;
+  rp_keepers : string list;  (** Which keepers work in it. *)
+  rp_auto_sync : bool;
+}
+
+type repository_snapshot = {
+  rs_repositories : repository list;
+  rs_total : int;
+}
+
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -268,6 +283,9 @@ type transport_health = {
 
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
+
+val decode_repository_snapshot :
+  Yojson.Safe.t -> (repository_snapshot, string) result
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

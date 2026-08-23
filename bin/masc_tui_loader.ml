@@ -167,7 +167,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Board | Approvals | Planning | Verification | Harness
-    | System_logs -> None
+    | Repositories | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -456,6 +456,13 @@ let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
   match fetch_dashboard_logs ~host ~port ~limit with
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json -> Tui_decode.decode_system_log_snapshot json
+
+(** Load the repository list from /api/v1/repositories *)
+let load_repositories ~(host : string) ~(port : int) :
+    (Tui_decode.repository_snapshot, string) result =
+  match fetch_repositories ~host ~port with
+  | Error err -> Error ("repository load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_repository_snapshot json
 
 (** Load the harness snapshot from /api/v1/dashboard/harness-health *)
 let load_harness ~(host : string) ~(port : int) :

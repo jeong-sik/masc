@@ -733,11 +733,18 @@ PLANNING_PATH = "/api/v1/dashboard/planning"
 
 
 def planning_goal(goal_id: str, title: str) -> dict[str, object]:
+    # The verification block is not optional on the wire. The server writes a
+    # default completion record for a goal with no ledger row precisely so an
+    # absent state cannot be read as "not verified yet", and the TUI marks a
+    # goal whose block is missing rather than guessing. A fixture that leaves
+    # it out is not a smaller server response, it is one the server never
+    # sends -- and it puts a warning mark on every row here.
     return {
         "id": goal_id,
         "title": title,
         "phase": "executing",
         "priority": 1,
+        "verification": {"completion": {"state": "idle"}},
     }
 
 

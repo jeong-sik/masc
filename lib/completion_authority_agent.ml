@@ -275,7 +275,8 @@ let prepare_review
             (`Assoc
                [ "verification_request", Verification.request_to_yojson request
                ; ( "submitted_evidence_access"
-                 , Workspace_verification_store.submitted_evidence_access_to_yojson
+                 , Workspace_verification_store
+                    .submitted_evidence_access_transport_to_yojson
                      evidence_access )
                ])
         in

@@ -2107,6 +2107,164 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
         ascii_prefix content
     | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
 
+(* #29615: a truncated artifact's prefix must not travel to the judge. The
+   persistence serializer keeps it for the audit record; the transport
+   projection replaces it with the size, the fact, and how to read the real
+   file. The length guard is the regression: one over-cap artifact plus a
+   readable one must not push the review request toward any slot's input
+   budget. *)
+let test_transport_projection_omits_truncated_prefix () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let large = String.make (cap + 50_000) 'x' in
+    Fs_compat.save_file (Filename.concat artifact_dir "large-proof.json") large;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "small-proof.txt")
+      "small readable proof";
+    let request_id = "vrf-transport-projection" in
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        [ "artifact:large-proof.json"
+        ; "artifact:small-proof.txt"
+        ; "note:producer summary"
+        ]
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"keeper-omega-agent"
+         ()
+     with
+    | Ok _ -> ()
+    | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available _ as access ->
+      Alcotest.(check bool)
+        "persistence serializer still carries the truncated prefix"
+        true
+        (String.length
+           (Yojson.Safe.to_string
+              (VS.submitted_evidence_access_to_yojson access))
+         > cap);
+      let transport =
+        Yojson.Safe.to_string
+          (VS.submitted_evidence_access_transport_to_yojson access)
+      in
+      Alcotest.(check bool)
+        "transport stays far under the snapshot cap"
+        true
+        (String.length transport < cap / 2);
+      let items =
+        match
+          VS.submitted_evidence_access_transport_to_yojson access
+        with
+        | `Assoc fields ->
+          (match List.assoc "items" fields with
+           | `List items -> items
+           | _ -> Alcotest.fail "transport items must be a list")
+        | _ -> Alcotest.fail "transport access must be an object"
+      in
+      let fields_of = function
+        | `Assoc fields -> fields
+        | _ -> Alcotest.fail "transport item must be an object"
+      in
+      let by_reference reference =
+        List.find_opt
+          (fun item ->
+             match List.assoc_opt "reference" (fields_of item) with
+             | Some (`String value) -> String.equal value reference
+             | _ -> false)
+          items
+        |> Option.get
+      in
+      let large_item = fields_of (by_reference "artifact:large-proof.json") in
+      Alcotest.(check bool)
+        "truncated artifact carries no content key"
+        true
+        (not (List.mem_assoc "content" large_item));
+      Alcotest.(check bool)
+        "truncated artifact declares content_omitted"
+        true
+        (List.assoc_opt "content_omitted" large_item = Some (`Bool true));
+      (match List.assoc_opt "bytes" large_item with
+       | Some (`Int bytes) ->
+         Alcotest.(check int) "transport keeps the full byte count"
+           (String.length large) bytes
+       | _ -> Alcotest.fail "truncated artifact must keep its byte count");
+      (match List.assoc_opt "content_note" large_item with
+       | Some (`String note) ->
+         Alcotest.(check bool)
+           "note states the file size"
+           true
+           (Astring.String.is_infix
+              ~affix:(string_of_int (String.length large))
+              note);
+         Alcotest.(check bool)
+           "note points at the verification tools"
+           true
+           (Astring.String.is_infix ~affix:"verification tools" note)
+       | _ -> Alcotest.fail "truncated artifact must explain the omission");
+      let small_item = fields_of (by_reference "artifact:small-proof.txt") in
+      Alcotest.(check string)
+        "readable artifact still travels in full"
+        "small readable proof"
+        (match List.assoc "content" small_item with
+         | `String content -> content
+         | _ -> Alcotest.fail "readable artifact content must be a string")
+    | VS.Evidence_unavailable { reason; _ } ->
+      Alcotest.failf
+        "evidence unavailable: %s"
+        (VS.evidence_access_failure_to_string
+           ~request_id
+           reason))
+
+let test_truncated_snapshot_items_names_only_truncated_artifacts () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let large = String.make (cap + 1_000) 'y' in
+    Fs_compat.save_file (Filename.concat artifact_dir "bulky.json") large;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "compact.json")
+      "{\"ok\":true}";
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        [ "artifact:bulky.json"; "artifact:compact.json" ]
+    in
+    match VS.truncated_snapshot_items evidence_snapshot with
+    | [ (reference, bytes) ] ->
+      Alcotest.(check string)
+        "only the over-cap artifact is reported"
+        "artifact:bulky.json"
+        reference;
+      Alcotest.(check int) "reported size is the full file" (String.length large)
+        bytes
+    | other ->
+      Alcotest.failf "expected exactly one truncated item, got %d" (List.length other))
+
 let test_submitted_evidence_rejects_malformed_utf8 () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
@@ -2519,6 +2677,11 @@ let () =
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
         test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
+      Alcotest.test_case "transport projection omits truncated prefix" `Quick
+        test_transport_projection_omits_truncated_prefix;
+      Alcotest.test_case "truncated snapshot items names over-cap artifacts"
+        `Quick
+        test_truncated_snapshot_items_names_only_truncated_artifacts;
       Alcotest.test_case "submitted evidence rejects unknown artifact field" `Quick
         test_submitted_evidence_rejects_unknown_artifact_field;
       Alcotest.test_case "submitted evidence rejects malformed UTF-8" `Quick

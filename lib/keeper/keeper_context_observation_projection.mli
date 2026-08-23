@@ -1,13 +1,9 @@
 (** Current Keeper context-observation wire projection. *)
 
-val missing_measurement_json : unit -> Yojson.Safe.t
-(** Typed reason emitted while no runtime owner supplies current context
-    occupancy. *)
-
 val missing_context_fields :
   unit ->
   (string * Yojson.Safe.t) list
-(** Null context fields plus {!missing_measurement_json}. Checkpoint inventory
+(** Null context fields plus the typed missing-measurement reason. Checkpoint inventory
     is a separate endpoint and is not loaded by fleet context observation. *)
 
 val context_fields :

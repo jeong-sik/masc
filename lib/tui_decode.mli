@@ -135,6 +135,99 @@ type system_log_snapshot = {
   sys_latest_seq : int;
 }
 
+(** One task waiting on a verdict, as the verification surface lists it. *)
+(** One verdict the harness recorded: which gate ran on which task, what it
+    decided, and which evaluator decided it. *)
+(** A repository the workspace tracks. *)
+(** A connector the gate can deliver through. *)
+(** A registered tool, as the inventory lists it. *)
+type tool_entry = {
+  tl_name : string;
+  tl_description : string;
+  tl_surfaces : string list;
+      (** Where the tool is visible: the MCP surface, keeper projections, and
+          so on. Empty means registered and projected nowhere. *)
+  tl_direct_call : bool;
+}
+
+type tool_snapshot = {
+  ts_tools : tool_entry list;
+  ts_count : int;
+}
+
+type connector = {
+  cn_id : string;
+  cn_display_name : string;
+  cn_available : bool;  (** Configured and usable. *)
+  cn_connected : bool;
+      (** Reachable right now. Kept apart from [cn_available]: a connector can
+          be configured and unreachable, and the two call for different
+          actions. *)
+  cn_status : string;
+  cn_channel : string option;
+}
+
+type connector_snapshot = {
+  cs_connectors : connector list;
+  cs_total : int;
+  cs_active : int;  (** How many the server counted as available. *)
+}
+
+type repository = {
+  rp_name : string;
+  rp_local_path : string;
+  rp_default_branch : string;
+  rp_status : string;
+  rp_keepers : string list;  (** Which keepers work in it. *)
+  rp_auto_sync : bool;
+}
+
+type repository_snapshot = {
+  rs_repositories : repository list;
+  rs_total : int;
+}
+
+type harness_verdict = {
+  hv_at : float;
+  hv_task_id : string;
+  hv_task_title : string;
+  hv_agent : string;
+  hv_gate : string;
+  hv_verdict : string;
+  hv_evaluator : string;
+  hv_fallback_reason : string option;
+      (** Why the named evaluator did not run, when something else did. A
+          verdict reached by a fallback is not the verdict that was asked for,
+          and the surface says so rather than showing them alike. *)
+}
+
+type harness_snapshot = {
+  hs_verdicts : harness_verdict list;  (** newest first, as the server sends *)
+}
+
+type verification_request = {
+  vr_request_id : string;
+  vr_task_id : string;
+  vr_task_title : string;
+  vr_kind : string;  (** What is being asked for, e.g. a review or a proof. *)
+  vr_summary : string;
+  vr_next_action : string option;
+      (** What would move it forward, when the server can say. *)
+  vr_submitted_by : string;
+  vr_created_at : string;
+  vr_required_artifacts : string list;
+  vr_submitted_evidence : string list;
+  vr_evidence_error : string option;
+      (** Why the submitted evidence could not be read, when it could not.
+          Kept apart from the list so an empty list means "none submitted"
+          rather than "none readable". *)
+}
+
+type verification_snapshot = {
+  vs_requests : verification_request list;
+  vs_total : int;  (** Requests the server holds, not the number returned. *)
+}
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
@@ -249,6 +342,21 @@ type transport_health = {
 
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
+
+val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
+(** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
+
+val decode_connector_snapshot :
+  Yojson.Safe.t -> (connector_snapshot, string) result
+
+val decode_repository_snapshot :
+  Yojson.Safe.t -> (repository_snapshot, string) result
+
+val decode_harness_snapshot :
+  Yojson.Safe.t -> (harness_snapshot, string) result
+
+val decode_verification_snapshot :
+  Yojson.Safe.t -> (verification_snapshot, string) result
 
 val decode_system_log_snapshot :
   Yojson.Safe.t -> (system_log_snapshot, string) result

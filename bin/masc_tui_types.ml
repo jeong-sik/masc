@@ -273,7 +273,31 @@ type surface =
   | Board
   | Approvals
   | Planning
+  | Verification
+  | Harness
+  | Repositories
+  | Connectors
+  | Tools
   | System_logs
+
+(** What a surface needs loaded to draw itself.
+
+    Declared per surface in one place rather than asked as a separate
+    exhaustive match per datum: a surface added later answers every question
+    at once, in a record the compiler makes it fill, instead of being spelled
+    into one match per fetch and quietly defaulting to false in the one that
+    was missed. *)
+type surface_needs = {
+  needs_transport : bool;
+  needs_keeper_roster : bool;
+}
+
+let surface_needs : surface -> surface_needs = function
+  | Overview -> { needs_transport = true; needs_keeper_roster = false }
+  | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
+  | Board | Approvals | Planning | Verification | Harness | Repositories
+  | Connectors | Tools | System_logs ->
+      { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
 type state = {
@@ -355,6 +379,24 @@ type state = {
   mutable goal_action_armed:
     (string * Goal_phase.Public_action.t) option;
   mutable goal_action_error: string option;
+  (* What is waiting on a verdict. Loaded when the surface is opened rather
+     than on every refresh: it is a queue an operator visits, not a number the
+     other surfaces read. *)
+  mutable tools_inventory: Tui_decode.tool_snapshot option;
+  mutable tools_error: string option;
+  mutable tools_scroll: int;
+  mutable connectors: Tui_decode.connector_snapshot option;
+  mutable connectors_error: string option;
+  mutable connectors_scroll: int;
+  mutable repositories: Tui_decode.repository_snapshot option;
+  mutable repositories_error: string option;
+  mutable repositories_scroll: int;
+  mutable harness: Tui_decode.harness_snapshot option;
+  mutable harness_error: string option;
+  mutable harness_scroll: int;
+  mutable verification: Tui_decode.verification_snapshot option;
+  mutable verification_error: string option;
+  mutable verification_scroll: int;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
   mutable system_logs_scroll: int;
@@ -503,6 +545,21 @@ let create_state ~workspace ~port ~refresh_interval = {
   goal_action_error = None;
   system_logs = None;
   system_logs_error = None;
+  tools_inventory = None;
+  tools_error = None;
+  tools_scroll = 0;
+  connectors = None;
+  connectors_error = None;
+  connectors_scroll = 0;
+  repositories = None;
+  repositories_error = None;
+  repositories_scroll = 0;
+  harness = None;
+  harness_error = None;
+  harness_scroll = 0;
+  verification = None;
+  verification_error = None;
+  verification_scroll = 0;
   system_logs_scroll = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;

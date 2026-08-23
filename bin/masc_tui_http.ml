@@ -439,6 +439,35 @@ let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
   get_json ~host ~port
     ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
 
+(** Fetch /api/v1/dashboard/tools. *)
+let fetch_dashboard_tools ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/tools"
+
+(** Fetch /api/v1/gate/connectors. *)
+let fetch_connectors ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/gate/connectors"
+
+(** Fetch /api/v1/repositories. *)
+let fetch_repositories ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/repositories"
+
+(** Fetch /api/v1/dashboard/harness-health. No window is passed: the surface
+    shows what the harness decided recently, and a window is a question an
+    operator asks in the dashboard rather than a default. *)
+let fetch_harness_health ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
+
+(** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
+    lists what is waiting rather than the whole history. *)
+let fetch_verification_requests ~(host : string) ~(port : int) ~(limit : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(Printf.sprintf "/api/v1/verification/requests?limit=%d" (max 1 limit))
+
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/planning"

@@ -2369,7 +2369,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 Some
                   (Keeper_chat_transcript.create
                      ~keeper_name:request.Keeper_chat.keeper_name
-                     ~request_id:request.request_id);
+                     ~request_id:request.request_id
+                     ~started_at:(Unix.gettimeofday ()));
               proceed := true
           | Some _ | None -> ())
   | Keeper_chat_done (request, was_replay, result, acknowledge) ->

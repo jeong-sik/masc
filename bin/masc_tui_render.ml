@@ -2271,7 +2271,7 @@ let render_keeper_message (state : state) =
                | Keeper_chat_transcript.Attention -> Ansi.yellow
              in
              box_line_styled buf cols ~style ("  " ^ text))
-           (Keeper_chat_transcript.status_rows live)
+           (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
     (match state.msg_prepared with
      | Some request when state.msg_inflight = None ->

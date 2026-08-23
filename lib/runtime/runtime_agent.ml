@@ -109,6 +109,7 @@ type config =
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_core.Hooks.hooks option;
+  tool_approval : Agent_core.Hooks.tool_approval_callback option;
   event_bus : Agent_core.Event_bus.t option;
   session_id : string option;
   description : string option;

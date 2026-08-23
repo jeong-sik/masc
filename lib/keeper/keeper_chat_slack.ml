@@ -724,7 +724,14 @@ let adapter_loop_with_transport
     | Tool_call_start { tool_call_name; _ } ->
         update_activity (Printf.sprintf "🔧 %s 사용 중…" tool_call_name);
         continue ()
+    (* An approval prompt has no operator on a connector channel: nobody is
+       sitting there to answer y/n, and posting the question would ask a room
+       to decide something it cannot. Approval is offered on the operator's
+       own surface, so this never arrives here -- it is spelled out rather
+       than left to a catch-all so a future surface has to make the same
+       decision deliberately. *)
     | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _
+    | Tool_approval_requested _ | Tool_approval_settled _
     | Tool_result_ready _ ->
         continue ()
     | Link_block { url; title; description; image = _ } ->

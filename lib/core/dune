@@ -13,6 +13,7 @@
   keeper_name_codec
   safe_ops
   common
+  frontmatter
   exec_buffer
   validation
   failure_observation

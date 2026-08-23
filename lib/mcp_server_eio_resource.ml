@@ -248,72 +248,26 @@ let handle_read_resource_eio state id params =
                 else begin
                 let parse_frontmatter path fallback_name =
                   try
-                    let content = Fs_compat.load_file path in
-                    let lines = String.split_on_char '\n' content in
-                    match lines with
-                    | "---" :: rest ->
-                        let title = ref fallback_name in
-                        let source = ref "" in
-                        let verified_by = ref "" in
-                        let date = ref "" in
-                        let tags = ref [] in
-                        let rec scan = function
-                          | [] -> ()
-                          | "---" :: _ -> ()
-                          | line :: tl ->
-                              let try_field prefix r =
-                                let plen = String.length prefix in
-                                if String.length line > plen
-                                   && String.sub line 0 plen = prefix then
-                                  r := String.trim (String.sub line plen (String.length line - plen))
-                              in
-                              try_field "title: " title;
-                              try_field "source: " source;
-                              try_field "verified_by: " verified_by;
-                              try_field "date: " date;
-                              let tp = "tags: " in
-                              let tplen = String.length tp in
-                              if String.length line > tplen
-                                 && String.sub line 0 tplen = tp then begin
-                                let raw = String.trim (String.sub line tplen (String.length line - tplen)) in
-                                let inner =
-                                  if String.length raw >= 2
-                                     && raw.[0] = '[' && raw.[String.length raw - 1] = ']' then
-                                    String.sub raw 1 (String.length raw - 2)
-                                  else raw
-                                in
-                                tags := String.split_on_char ',' inner
-                                  |> List.map String.trim
-                                  |> List.filter (fun s -> s <> "")
-                              end;
-                              scan tl
-                        in
-                        scan rest;
-                        (!title, !source, !verified_by, !date, !tags)
-                    | _ -> (fallback_name, "", "", "", [])
-                  with Sys_error _ -> (fallback_name, "", "", "", [])
+                    let parsed = Frontmatter.parse (Fs_compat.load_file path) in
+                    if parsed.Frontmatter.fields = []
+                       && not (Frontmatter.has_frontmatter (Fs_compat.load_file path))
+                    then fallback_name, "", "", "", []
+                    else (
+                      let field name = Frontmatter.field parsed name in
+                      let title =
+                        match field "title" with
+                        | "" -> fallback_name
+                        | value -> value
+                      in
+                      ( title
+                      , field "source"
+                      , field "verified_by"
+                      , field "date"
+                      , Frontmatter.list_field parsed "tags" ))
+                  with
+                  | Sys_error _ -> fallback_name, "", "", "", []
                 in
-                let strip_frontmatter content =
-                  if String.starts_with content ~prefix:"---" then
-                    match String.index_from_opt content 3 '\n' with
-                    | None -> content
-                    | Some first_nl ->
-                        let rec find_end pos =
-                          match String.index_from_opt content pos '\n' with
-                          | None -> content
-                          | Some nl ->
-                              let line_start = pos in
-                              let line = String.sub content line_start (nl - line_start) in
-                              if line = "---" then
-                                let rest_start = nl + 1 in
-                                if rest_start < String.length content then
-                                  String.trim (String.sub content rest_start (String.length content - rest_start))
-                                else ""
-                              else find_end (nl + 1)
-                        in
-                        find_end (first_nl + 1)
-                  else content
-                in
+                let strip_frontmatter content = (Frontmatter.parse content).Frontmatter.body in
                 let is_json, topic =
                   if s = library_index_json_id then (true, "")
                   else if s = library_index_id then (false, "")

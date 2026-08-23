@@ -92,6 +92,35 @@ let test_safe_filename_is_identity_on_live_names () =
 let test_safe_filename_folds_case () =
   check string "uppercase folds" "keeper-base" (Common.safe_filename "Keeper-Base")
 
+let test_frontmatter_crlf_delimiter_is_seen () =
+  (* Two of the three readers this replaced matched "---" exactly, so a file
+     written with CRLF had no frontmatter as far as they were concerned while
+     the third read it fine. *)
+  let content = "---\r\ntitle: Example\r\n---\r\nbody" in
+  let parsed = Frontmatter.parse content in
+  check string "title is read" "Example" (Frontmatter.field parsed "title")
+
+let test_frontmatter_absent_returns_whole_content () =
+  let content = "no frontmatter here" in
+  let parsed = Frontmatter.parse content in
+  check (list (pair string string)) "no fields" [] parsed.Frontmatter.fields;
+  check string "body is the input" content parsed.Frontmatter.body
+
+let test_frontmatter_body_excludes_the_block () =
+  let parsed = Frontmatter.parse "---\ntitle: T\n---\nline one\nline two" in
+  check string "body" "line one\nline two" parsed.Frontmatter.body
+
+let test_frontmatter_tags_accept_both_shapes () =
+  let bracketed = Frontmatter.parse "---\ntags: [a, b]\n---\n" in
+  let bare = Frontmatter.parse "---\ntags: a, b\n---\n" in
+  check (list string) "bracketed" [ "a"; "b" ] (Frontmatter.list_field bracketed "tags");
+  check (list string) "bare" [ "a"; "b" ] (Frontmatter.list_field bare "tags")
+
+let test_frontmatter_line_without_colon_is_skipped () =
+  let parsed = Frontmatter.parse "---\njust text\ntitle: T\n---\n" in
+  check string "title still read" "T" (Frontmatter.field parsed "title");
+  check int "only one field" 1 (List.length parsed.Frontmatter.fields)
+
 let () =
   run "Common" [
     "finalizer_guard", [
@@ -104,5 +133,14 @@ let () =
       test_case "neutralizes separators" `Quick test_safe_filename_neutralizes_separators;
       test_case "identity on live names" `Quick test_safe_filename_is_identity_on_live_names;
       test_case "folds case" `Quick test_safe_filename_folds_case;
+    ];
+    "frontmatter", [
+      test_case "CRLF delimiter is seen" `Quick test_frontmatter_crlf_delimiter_is_seen;
+      test_case "absent returns whole content" `Quick
+        test_frontmatter_absent_returns_whole_content;
+      test_case "body excludes the block" `Quick test_frontmatter_body_excludes_the_block;
+      test_case "tags accept both shapes" `Quick test_frontmatter_tags_accept_both_shapes;
+      test_case "line without colon is skipped" `Quick
+        test_frontmatter_line_without_colon_is_skipped;
     ];
   ]

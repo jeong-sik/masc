@@ -19,6 +19,7 @@
 @import "./variables.css";
 @import "./base.css";
 @import "./fonts.css";
+@import "./fonts-noto-sans-kr.css";
 @import "./keyframes.css";
 
 /* ── Feature imports (alphabetical, a11y.css last for runtime) ── */

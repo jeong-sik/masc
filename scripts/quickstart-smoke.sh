@@ -144,6 +144,14 @@ unauth_code="$(curl -sS -o "$unauth_body" -w '%{http_code}' \
   "http://127.0.0.1:${port}/mcp")"
 [[ "$unauth_code" == "401" ]] || {
   echo "quickstart-smoke: unauthenticated MCP returned HTTP $unauth_code, expected 401" >&2
+  # Without the body a 503 here reads the same whether the server refused the
+  # request or had not finished starting; the JSON-RPC error names which.
+  echo "quickstart-smoke: response body:" >&2
+  head -c 500 "$unauth_body" >&2
+  echo >&2
+  echo "quickstart-smoke: readiness probe:" >&2
+  curl -sS --max-time 2 "http://127.0.0.1:${port}/health/ready" >&2 || true
+  echo >&2
   exit 1
 }
 

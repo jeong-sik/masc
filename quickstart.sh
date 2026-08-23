@@ -131,15 +131,22 @@ write_mcp_client_env() {
   log "wrote MCP client exports to $env_file"
 }
 
-# ---- health wait -------------------------------------------------------------
-wait_for_health() {
+# ---- readiness wait ----------------------------------------------------------
+# /health answers 200 from the moment the accept loop runs; it says nothing
+# about whether the server finished starting. /health/ready is the probe that
+# reports state_ready, and state_ready is what /mcp gates on -- before it flips,
+# an MCP request is refused with -32002 "Server is starting up, not ready yet"
+# (HTTP 503) ahead of any authentication. Waiting on /health handed control back
+# inside that window, so the first thing a new client did after quickstart could
+# be refused for a reason that has nothing to do with its token.
+wait_for_ready() {
   local port="$1" max="${2:-60}" waited=0
   while [ "$waited" -lt "$max" ]; do
-    if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health/ready" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1; waited=$((waited + 1))
-    printf '%s   waiting for server health... (%ds/%ds)%s\r' "$c_dim" "$waited" "$max" "$c_off" >&2
+    printf '%s   waiting for server readiness... (%ds/%ds)%s\r' "$c_dim" "$waited" "$max" "$c_off" >&2
   done
   echo >&2
   return 1
@@ -211,12 +218,12 @@ run_quickstart() {
   disown "$SERVER_PID" 2>/dev/null || true
   log "server starting (pid $SERVER_PID, log: $MASC_LOG_FILE)"
 
-  if wait_for_health "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-180}"; then
+  if wait_for_ready "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-180}"; then
     write_mcp_client_env
     print_success
     open_browser
   else
-    warn "server did not report healthy in time; tail the log:"
+    warn "server did not report ready in time; tail the log:"
     warn "  tail -n 40 '$MASC_LOG_FILE'"
     exit 1
   fi

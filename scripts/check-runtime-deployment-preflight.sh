@@ -83,6 +83,20 @@ if [[ -z "$PREFLIGHT_HELPER" ]]; then
 fi
 [[ -x "$PREFLIGHT_HELPER" ]] || fail "typed deployment preflight helper is not executable: $PREFLIGHT_HELPER"
 
+# The durable filenames belong to the OCaml side. Spelling them out here once
+# left the fixtures on event-queue-v16.json after the writer moved to v17, and
+# the self-test failed on a version skew this gate exists to catch.
+QUEUE_SNAPSHOT_FILENAME=""
+QUEUE_WAL_FILENAME=""
+while IFS='=' read -r key value; do
+  case "$key" in
+    snapshot) QUEUE_SNAPSHOT_FILENAME="$value" ;;
+    wal) QUEUE_WAL_FILENAME="$value" ;;
+  esac
+done < <("$PREFLIGHT_HELPER" durable-filenames)
+[[ -n "$QUEUE_SNAPSHOT_FILENAME" && -n "$QUEUE_WAL_FILENAME" ]] \
+  || fail "preflight helper did not report both durable event-queue filenames"
+
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
   local keepers_root="$runtime_root/keepers"
@@ -130,13 +144,13 @@ run_gate() {
         --keeper-name "$keeper_name" \
         || fail "current queue snapshot or transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v16.json' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_SNAPSHOT_FILENAME" -print0)
 
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
         || fail "current transition WAL is not an exact regular file: $queue_path"
-      if [[ -e "$(dirname "$queue_path")/event-queue-v16.json" \
-            || -L "$(dirname "$queue_path")/event-queue-v16.json" ]]; then
+      if [[ -e "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" \
+            || -L "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" ]]; then
         continue
       fi
       keeper_name="${queue_path%/*}"
@@ -146,7 +160,7 @@ run_gate() {
         --keeper-name "$keeper_name" \
         || fail "current transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v6.jsonl' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_WAL_FILENAME" -print0)
   fi
 
   for schedules_path in \
@@ -264,7 +278,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
        pending: [], last_transition: null,
        projected_dispositions: [], transition_outbox: [],
        accepted_transfer_projections: []}
-    ' >"$queue_dir/event-queue-v16.json"
+    ' >"$queue_dir/${QUEUE_SNAPSHOT_FILENAME}"
   }
 
   expect_failure() {
@@ -377,27 +391,27 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   # The two malformed-wal cases below prepare it the same way.
   mkdir -p "$malformed_current_root/.masc/keepers/fixture"
   printf '{not-json\n' \
-    >"$malformed_current_root/.masc/keepers/fixture/event-queue-v16.json"
+    >"$malformed_current_root/.masc/keepers/fixture/${QUEUE_SNAPSHOT_FILENAME}"
   expect_failure malformed_current_queue "$malformed_current_root"
 
   malformed_current_wal_root="$fixture_root/malformed-current-wal"
   write_schedules "$malformed_current_wal_root" running
   write_current_queue "$malformed_current_wal_root"
   printf '{not-json\n' \
-    >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
+    >"$malformed_current_wal_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
   expect_failure malformed_current_wal "$malformed_current_wal_root"
 
   wal_only_root="$fixture_root/wal-only"
   write_schedules "$wal_only_root" running
   mkdir -p "$wal_only_root/.masc/keepers/fixture"
-  : >"$wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
+  : >"$wal_only_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
   "$0" --base-path "$wal_only_root" >/dev/null
 
   malformed_wal_only_root="$fixture_root/malformed-wal-only"
   write_schedules "$malformed_wal_only_root" running
   mkdir -p "$malformed_wal_only_root/.masc/keepers/fixture"
   printf '{not-json\n' \
-    >"$malformed_wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
+    >"$malformed_wal_only_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
   expect_failure malformed_wal_without_snapshot "$malformed_wal_only_root"
 
   malformed_root="$fixture_root/malformed"

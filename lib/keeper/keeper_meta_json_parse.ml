@@ -401,7 +401,6 @@ let decode_current_meta fields =
   let* trace_id = parse_trace_id trace_id_raw in
   let* multimodal_policy = parse_multimodal_policy fields in
   let* trace_history = parse_trace_history fields in
-  let* nonce = int_field fields "generation" in
   let* last_handoff_ts = float_field fields "last_handoff_ts" in
   let* created_at = string_field fields "created_at" in
   let* updated_at = string_field fields "updated_at" in
@@ -504,7 +503,6 @@ let decode_current_meta fields =
       { usage
       ; compaction_rt
       ; proactive_rt
-      ; nonce
       ; trace_id
       ; trace_history
       ; last_handoff_ts

@@ -393,7 +393,6 @@ let inventory_json config ~keeper_name =
       ; ( "owner"
         , `Assoc
             [ "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-            ; "generation", `Int meta.runtime.nonce
             ; "paused", `Bool meta.paused
             ; ( "pause_kind"
               , `String (Keeper_activation_readiness.pause_kind_to_wire pause_kind) )

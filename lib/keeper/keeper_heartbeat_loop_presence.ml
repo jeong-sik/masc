@@ -40,7 +40,6 @@ let effective_keepalive_meta
       when Keeper_id.Trace_id.equal
              registry_meta.runtime.trace_id
              selected.runtime.trace_id
-           && Int.equal registry_meta.runtime.nonce selected.runtime.nonce
            && Option.is_some
                 registry_meta.runtime.usage.last_usage_reported_at ->
       let observed_usage = registry_meta.runtime.usage in

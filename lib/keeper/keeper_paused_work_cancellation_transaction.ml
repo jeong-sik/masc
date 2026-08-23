@@ -107,13 +107,7 @@ let validate_durable_owner config ~keeper_name ~expected_generation =
          ~latched_reason:meta.latched_reason
      with
      | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
-     | Keeper_lifecycle_admission.Paused _ ->
-       if meta.runtime.nonce <> expected_generation
-       then
-         Error
-           (Durable_owner_nonce_changed
-              { expected = expected_generation; actual = meta.runtime.nonce })
-       else Ok meta)
+     | Keeper_lifecycle_admission.Paused _ -> Ok meta)
 ;;
 
 let validate_registry_owner ~base_path ~keeper_name ~expected_generation =

@@ -1011,7 +1011,6 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   in
   `Assoc
     ([ ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-     ; ("generation", `Int meta.runtime.nonce)
      ; ( "turn_id"
        , match
            latest_turn_id ~registry_entry:raw.registry_entry

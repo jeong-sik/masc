@@ -152,12 +152,7 @@ let read_meta config keeper_name =
 
 let validate_identity (receipt : Keeper_paused_work_disposition_receipt.t)
       (meta : Keeper_meta_contract.keeper_meta) =
-  if not (Int.equal meta.runtime.nonce receipt.expected_generation)
-  then
-    Error
-      (Durable_owner_nonce_changed
-         { expected = receipt.expected_generation; actual = meta.runtime.nonce })
-  else if not (Keeper_id.Trace_id.equal meta.runtime.trace_id receipt.expected_trace_id)
+  if not (Keeper_id.Trace_id.equal meta.runtime.trace_id receipt.expected_trace_id)
   then Error Durable_owner_identity_changed
   else Ok ()
 ;;

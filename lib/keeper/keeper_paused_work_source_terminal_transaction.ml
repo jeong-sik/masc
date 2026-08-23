@@ -133,13 +133,7 @@ let validate_paused_owner request (meta : Keeper_meta_contract.keeper_meta) =
       ~latched_reason:meta.latched_reason
   with
   | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
-  | Keeper_lifecycle_admission.Paused _ ->
-    if Int.equal meta.runtime.nonce request.owner_nonce
-    then Ok meta
-    else
-      Error
-        (Durable_owner_nonce_changed
-           { expected = request.owner_nonce; actual = meta.runtime.nonce })
+  | Keeper_lifecycle_admission.Paused _ -> Ok meta
 ;;
 
 let validate_source_queue config ~keeper_name request =

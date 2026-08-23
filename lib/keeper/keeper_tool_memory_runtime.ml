@@ -342,7 +342,6 @@ let keeper_context_status_json
     (`Assoc
         ([ "name", `String meta.name
          ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-         ; "generation", `Int meta.runtime.nonce
          ; "checkpoint_bytes", `Int checkpoint_bytes
          ; "message_count", `Int (List.length (messages_of_context ctx_work))
          ]

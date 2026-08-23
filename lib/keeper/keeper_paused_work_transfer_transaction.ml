@@ -184,13 +184,7 @@ let validate_source_owner request (meta : Keeper_meta_contract.keeper_meta) =
       ~latched_reason:meta.latched_reason
   with
   | Keeper_lifecycle_admission.Active -> Error Source_owner_not_paused
-  | Keeper_lifecycle_admission.Paused _ ->
-    if Int.equal meta.runtime.nonce request.owner_nonce
-    then Ok meta
-    else
-      Error
-        (Source_owner_nonce_changed
-           { expected = request.owner_nonce; actual = meta.runtime.nonce })
+  | Keeper_lifecycle_admission.Paused _ -> Ok meta
 ;;
 
 let validate_target_owner request (meta : Keeper_meta_contract.keeper_meta) =

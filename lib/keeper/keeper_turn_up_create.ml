@@ -146,7 +146,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                     Keeper_context_runtime.create_session ~session_id:trace_id
                       ~base_dir
                   in
-      let nonce = 1 in
       let meta : Keeper_meta_contract.keeper_meta = {
         id = None;
         name = p.name;
@@ -204,7 +203,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             consecutive_noop_count = 0;
           };
-          nonce;
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;

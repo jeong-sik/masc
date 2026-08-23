@@ -52,8 +52,22 @@ val request_header_of_yojson :
 val submitted_evidence_access_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
 
+val submitted_evidence_access_transport_to_yojson :
+  submitted_evidence_access -> Yojson.Safe.t
+(** Judge-transport projection of the snapshot: a [truncated=true] artifact
+    carries [content_omitted] and an explanatory [content_note] (file size,
+    snapshot cap, how to read ranges of the real file) instead of the prefix
+    content. {!submitted_evidence_access_to_yojson} remains the persistence
+    serializer and keeps the prefix for the audit record (#29615). *)
+
 val submitted_evidence_access_metadata_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
+
+val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
+(** [(reference, bytes)] for every truncated artifact in a persisted evidence
+    snapshot. Lets the submit path warn the producer at submission time
+    instead of leaving the "too large to read at once" fact discoverable only
+    after a review stalls. *)
 
 val evidence_read_failure_code : evidence_read_failure -> string
 (** Stable bounded code for diagnostics and metadata. Error detail is carried
@@ -65,10 +79,12 @@ val evidence_read_failure_of_owned_read_failure :
 
 val verification_evidence_max_bytes : int
 (** Byte cap on the snapshot taken of a producer-owned evidence artifact. The
-    artifact itself is not truncated; only the copy carried to the completion
-    authority is. Exposed so a test states the truncation property against this
-    value instead of copying the number, which made the constant unchangeable
-    without editing an assertion that never described the constant. *)
+    artifact itself is not truncated; only the copy persisted in the
+    verification request is. The judge-transport projection omits that prefix
+    entirely for a truncated artifact. Exposed so a test states the truncation
+    property against this value instead of copying the number, which made the
+    constant unchangeable without editing an assertion that never described
+    the constant. *)
 
 val project_root_of_base_path : string -> string
 (** The project root a BasePath names, whether the caller passed the project

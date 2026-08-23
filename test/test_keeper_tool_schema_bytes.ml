@@ -22,8 +22,21 @@ open Alcotest
 (* Raise only with the PR that grows the surface, and say what it bought.
    2026-08-07: 72,485 bytes across 98 model-visible tools — 7.9x the assembled
    system prompt (9,167 bytes, pinned next door). The headroom is deliberate
-   slack for one ordinary tool, not room to grow into. *)
-let ceiling_bytes = 80_000
+   slack for one ordinary tool, not room to grow into.
+
+   2026-08-23: 88,138 across 95. #29576 bought pipelines that keep piping when
+   a stage names a file, by giving [then] the same shape the command already
+   has — argv, pipeline, and the three redirects. That shape is a value, not a
+   reference, so declaring it twice serializes it twice: measured 79,534 before
+   that commit and 87,641 after, +8,107 for one field. The surface was already
+   at 466 bytes of slack when it landed, so the crossing is one PR's growth on
+   top of everyone's.
+
+   Read the number as two facts, not one: 4,474 bytes of the Execute schema are
+   the words a model reads, and 16,158 are what it receives. The gap is the
+   same sub-schemas written out again, and closing it needs $defs/$ref, which
+   needs to be true of every provider MASC talks to before it can be tried. *)
+let ceiling_bytes = 92_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

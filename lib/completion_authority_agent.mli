@@ -42,4 +42,22 @@ module For_testing : sig
   val process_outcome_of_evaluator_retryable : bool option -> process_outcome
   (** [Some true] is the only automatic-retry authority. [Some false] and
       [None] preserve the producer/operator action contract. *)
+
+  type review_key =
+    { task_id : string
+    ; verification_id : string
+    }
+
+  val retain_settled
+    :  awaiting:review_key list
+    -> review_key list
+    -> review_key list
+  (** Which already-settled review keys a backlog read still shows as awaiting
+      verification. [process_pending] is a level read over the whole backlog, so
+      any unrelated submission re-scans every awaiting Task; a [Deferred] key is
+      held back from those re-scans until the producer or operator moves, and
+      this drops it again once the Task advances or is re-submitted under a new
+      [verification_id]. Suppression is per key, never per Task, so a fresh
+      submission is never held back. Pure, so the pruning rule is checkable
+      without a backlog or an Eio runtime. *)
 end

@@ -65,13 +65,7 @@ type msg_entry = {
   me_at: float;
 }
 
-type msg_recovery_error = Recovery_blocked of string
 
-type msg_inflight_kind =
-  | Dispatch_claim
-  | Chat_post
-  | Operation_get
-  | Cleanup_delete
 
 (** Attention item for the Overview surface *)
 type attention_severity =
@@ -480,12 +474,11 @@ type state = {
      while a turn runs; sending a queued line to whoever happens to be selected
      later would put it in front of the wrong keeper. *)
   mutable msg_queued: Masc_tui_keeper_chat_queue.t;
-  mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_inflight_kind: msg_inflight_kind option;
-  mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_unverified: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_cleanup_pending: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_recovery_error: msg_recovery_error option;
+  (* One request per keeper, not one per workspace. Dispatch used to be
+     serialized on a single slot because the durable recovery fence held one
+     un-acknowledged POST for the whole workspace; with that gone the only
+     reason left is per keeper, which is how the server runs turns anyway. *)
+  mutable msg_inflight: Masc_tui_keeper_chat_projection.request list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -620,12 +613,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_older_loading = false;
   msg_older_error = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
-  msg_inflight = None;
-  msg_inflight_kind = None;
-  msg_prepared = None;
-  msg_unverified = None;
-  msg_cleanup_pending = None;
-  msg_recovery_error = None;
+  msg_inflight = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -677,13 +665,7 @@ let keeper_message_status_rows (state : state) =
       -> 0
     | Some _ | None -> 1
   in
-  (if Option.is_some state.msg_inflight then 1 else 0)
-  + (if Option.is_none state.msg_inflight && Option.is_some state.msg_prepared
-     then 1
-     else 0)
-  + (if Option.is_some state.msg_unverified then 1 else 0)
-  + (if Option.is_some state.msg_cleanup_pending then 1 else 0)
-  + (if Option.is_some state.msg_recovery_error then 1 else 0)
+  List.length state.msg_inflight
   + unavailable_target
   + (match state.msg_live with
      | None -> 0

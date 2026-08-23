@@ -29,8 +29,19 @@ val push : t -> keeper_name:string -> string -> (t * int, string) result
     dropping the oldest and leaving the operator to notice a line went
     missing. *)
 
-val pop : t -> ((string * string) * t) option
-(** Take the oldest. [None] when nothing waits. *)
+val take_first_sendable
+  :  t
+  -> sendable:(string -> bool)
+  -> ((string * string) * t) option
+(** Take the oldest line whose keeper [sendable] accepts, keeping the rest in
+    order.
+
+    Not {!pop}: a line waits because its own keeper had a turn running, and
+    keepers run turns independently. Taking strictly from the front stalls
+    every line behind one whose keeper is still busy — and nothing will ever
+    free them, because the keeper they are addressed to is idle and so has no
+    settle coming to drain them. *)
+
 
 val drop_for_keeper : t -> keeper_name:string -> t
 (** Forget what was waiting for one keeper. Used when that keeper is gone: a

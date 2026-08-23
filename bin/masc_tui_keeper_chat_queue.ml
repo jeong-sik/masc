@@ -19,7 +19,15 @@ let push queue ~keeper_name text =
     Ok (queue, List.length queue))
 ;;
 
-let pop = function [] -> None | head :: rest -> Some (head, rest)
+let take_first_sendable queue ~sendable =
+  let rec walk skipped = function
+    | [] -> None
+    | ((keeper_name, _) as entry) :: rest when sendable keeper_name ->
+      Some (entry, List.rev_append skipped rest)
+    | entry :: rest -> walk (entry :: skipped) rest
+  in
+  walk [] queue
+;;
 
 let drop_for_keeper queue ~keeper_name =
   List.filter (fun (queued, _) -> not (String.equal queued keeper_name)) queue

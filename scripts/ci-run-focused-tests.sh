@@ -784,7 +784,6 @@ sse_targets=(
   @test/runtest-test_tui_keeper_chat_live
   @test/runtest-test_tui_keeper_chat_transcript
   @test/runtest-test_tui_keeper_chat_projection
-  @test/runtest-test_tui_keeper_chat_recovery
   @test/runtest-test_tui_composer
   @test/runtest-test_tui_markdown
   @test/runtest-test_tui_keeper_control

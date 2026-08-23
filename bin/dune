@@ -270,21 +270,6 @@
  (libraries uucp uuseg))
 
 (library
- (name masc_tui_keeper_chat_recovery)
- (wrapped false)
- (modules masc_tui_keeper_chat_recovery)
- (libraries
-  masc.masc_core
-  masc.masc_process
-  masc.masc_random_id
-  masc
-  masc_tui_keeper_chat_projection
-  eio
-  fs_compat
-  yojson
-  unix))
-
-(library
  (name masc_tui_frame_presenter)
  (wrapped false)
  (modules masc_tui_frame_presenter))
@@ -383,7 +368,6 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
-  masc_tui_keeper_chat_recovery
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_keeper_control

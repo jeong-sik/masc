@@ -11,7 +11,6 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_history = Masc_tui_keeper_chat_history
 module Chat_queue = Masc_tui_keeper_chat_queue
 module Keeper_chat_live = Masc_tui_keeper_chat_live
-module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
@@ -250,7 +249,6 @@ let keeper_message_page_rows state =
   max 1 (rows - chrome - keeper_message_status_rows state)
 
 let handle_message_key (state : state) ~(submit_message : string -> unit)
-    ~(retry_message : unit -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
@@ -332,11 +330,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | s ->
     let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
-    if c = Some 18 then begin
-      (* Ctrl-R: reconnect using the exact unverified request identity. *)
-      retry_message ();
-      true
-    end else if c = Some 21 then begin
+    (* Ctrl-R reconnected an unverified request against the durable fence.
+       Both are gone: the server keys operations by request id and the
+       transcript reloads after every settle, so there is nothing here for a
+       key to reconcile. *)
+    if c = Some 21 then begin
       (* Ctrl-U: clear the composer *)
       Buffer.clear state.msg_input;
       true
@@ -422,12 +420,7 @@ type async_msg =
   | Autonomy_loaded of (Masc.Tui_decode.autonomy_snapshot, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
-  | Keeper_chat_dispatch_reconcile of Keeper_chat.request
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
-  | Keeper_chat_cleanup_done of Keeper_chat.request * (unit, string) result
-  | Keeper_chat_reconciled of
-      Keeper_chat.request
-      * (Keeper_chat.operation_reconciliation, Keeper_chat.error) result
   | Keeper_action_done of
       string
       * Keeper_control.action
@@ -461,7 +454,6 @@ let append_chat_history state request role text =
           me_at = Unix.gettimeofday ();
         } ]
 
-let remember_unverified state request = state.msg_unverified <- Some request
 
 let append_user_history_once state (request : Keeper_chat.request) =
   let expected_text =
@@ -801,49 +793,47 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
       enqueue_async mailbox
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
 
-let launch_keeper_request state ~base_path ~mailbox request =
-  state.msg_inflight <- Some request;
-  state.msg_inflight_kind <- Some Dispatch_claim;
+let inflight_for state keeper_name =
+  List.find_opt
+    (fun (request : Keeper_chat.request) ->
+      String.equal request.keeper_name keeper_name)
+    state.msg_inflight
+;;
+
+let inflight_by_request_id state request_id =
+  List.find_opt
+    (fun (request : Keeper_chat.request) ->
+      String.equal request.request_id request_id)
+    state.msg_inflight
+;;
+
+let drop_inflight state request =
+  state.msg_inflight <-
+    List.filter
+      (fun current -> not (Keeper_chat.same_request_identity current request))
+      state.msg_inflight
+;;
+
+(* POST the request. There is no durable claim to take first: the server keys
+   every chat operation by this request's id and refuses a second submission of
+   it ([Keeper_chat_operation_store.submit] answers [Existing] for a repeat and
+   [Idempotency_conflict] for the same id with different content), so a resend
+   cannot produce a second turn. The client used to hold its own five-phase
+   fence to prevent exactly that, and the price was one un-acknowledged POST
+   per workspace — talking to one keeper stopped every other. *)
+let launch_keeper_request state ~mailbox request =
+  state.msg_inflight <- request :: state.msg_inflight;
   let run () =
-    match
-      Keeper_chat_recovery.with_dispatch_claim ~base_path request (function
-        | Keeper_chat_recovery.Accepted_dispatch ->
-            enqueue_async mailbox (Keeper_chat_dispatch_reconcile request)
-        | Keeper_chat_recovery.Reconcile_dispatch ->
-            enqueue_async mailbox (Keeper_chat_dispatch_reconcile request)
-        | Keeper_chat_recovery.Rejected_dispatch ->
-            let result =
-              Keeper_chat_recovery.clear_pending ~base_path request
-            in
-            enqueue_async mailbox (Keeper_chat_cleanup_done (request, result))
-        | (Keeper_chat_recovery.First_dispatch
-          | Keeper_chat_recovery.Replay_dispatch) as claim ->
-            let was_replay =
-              match claim with
-              | Keeper_chat_recovery.First_dispatch -> false
-              | Keeper_chat_recovery.Replay_dispatch -> true
-              | Keeper_chat_recovery.Reconcile_dispatch
-              | Keeper_chat_recovery.Accepted_dispatch
-              | Keeper_chat_recovery.Rejected_dispatch -> assert false
-            in
-            if enqueue_dispatch_start mailbox request was_replay
-            then begin
-              let result =
-                try
-                  post_keeper_chat_watching ~mailbox ~port:state.port request
-                with
-                | Eio.Cancel.Cancelled _ as exn -> raise exn
-                | exn ->
-                    Error
-                      (Keeper_chat.Transport_error (Printexc.to_string exn))
-              in
-              enqueue_dispatch_ack mailbox (fun acknowledge ->
-                Keeper_chat_done (request, was_replay, result, acknowledge))
-            end)
-    with
-    | Ok () -> ()
-    | Error detail ->
-        enqueue_async mailbox (Keeper_chat_dispatch_blocked (request, detail))
+    if enqueue_dispatch_start mailbox request false
+    then begin
+      let result =
+        try post_keeper_chat_watching ~mailbox ~port:state.port request with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
+      in
+      enqueue_dispatch_ack mailbox (fun acknowledge ->
+        Keeper_chat_done (request, false, result, acknowledge))
+    end
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -855,14 +845,6 @@ let launch_keeper_request state ~base_path ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
-let persist_keeper_message_fence ~base_path request =
-  (* [Fs_compat.save_file_atomic_strict] can report a close failure directly to
-     stderr. This action already owns an input-triggered frame, so marking the
-     cached frame before the persistence attempt is sufficient to make that
-     presentation a full redraw without adding another wake-up. *)
-  Terminal_write_repair.note ();
-  Keeper_chat_recovery.persist_pending ~base_path request
-
 let queue_keeper_message state ~keeper_name text =
   match Chat_queue.push state.msg_queued ~keeper_name text with
   | Error _ as error -> error
@@ -871,464 +853,89 @@ let queue_keeper_message state ~keeper_name text =
       Ok waiting
 ;;
 
-let rec start_keeper_message ?keeper_name state ~base_path ~mailbox text =
-  match state.msg_prepared with
-  | Some request ->
+(* Send one line to one keeper.
+
+   The refusals here are about whether the message can be delivered at all: no
+   keeper selected, a roster this build could not read, a keeper that is no
+   longer registered. What used to sit above them — a prepared fence, an
+   unverified outcome, a blocked recovery, each with its own Ctrl-R — is gone
+   with the fence that produced them. *)
+let start_keeper_message ?keeper_name state ~mailbox text =
+  match
+    match keeper_name with
+    | Some _ -> keeper_name
+    | None -> state.msg_target_keeper_name
+  with
+  | None -> add_event state "error" "Cannot send: no Keeper is selected"
+  | Some _ when Option.is_some state.keepers_error ->
       add_event state "error"
-        (Printf.sprintf
-           "Keeper request %s is prepared for its first serialized dispatch; use Ctrl-R to retry its recovery fence"
-           request.request_id)
-  | None ->
-  match state.msg_cleanup_pending with
-  | Some request ->
+        "Cannot send while the Keeper roster is unavailable"
+  | Some target when not (keeper_available_for_new_message state target) ->
       add_event state "error"
-        (Printf.sprintf
-           "Keeper request %s is settled but its durable cleanup is incomplete; use Ctrl-R to finish cleanup"
-           request.request_id)
-  | None ->
-  match state.msg_recovery_error with
-  | Some (Recovery_blocked detail) ->
-      add_event state "error"
-        ("Cannot send while Keeper chat recovery is blocked; use Ctrl-R to reload the durable state: "
-       ^ detail)
-  | None ->
-  match state.msg_inflight with
-  | Some request -> (
-      (* A turn is running. Hold the line rather than refusing it: the operator
-         pressed Enter meaning "send this next", and the turn settling is what
-         "next" is. *)
-      match
-        match keeper_name with
-        | Some _ -> keeper_name
-        | None -> state.msg_target_keeper_name
-      with
-      | None -> add_event state "error" "Cannot queue: no Keeper is selected"
-      | Some target -> (
+        (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
+           (Keeper_chat.terminal_safe_text target))
+  | Some target -> (
+      match inflight_for state target with
+      | Some request -> (
+          (* A turn to this keeper is already running. Hold the line rather than
+             refusing it: the operator pressed Enter meaning "send this next",
+             and the turn settling is what "next" is. *)
           match queue_keeper_message state ~keeper_name:target text with
           | Error detail -> add_event state "error" detail
           | Ok waiting ->
               clear_current_message_draft state;
               add_event state "message"
-                (Printf.sprintf
-                   "Queued for %s behind %s (%d waiting)"
+                (Printf.sprintf "Queued for %s behind %s (%d waiting)"
                    (Keeper_chat.terminal_safe_text target)
-                   request.request_id
-                   waiting)))
-  | None -> (
-      match state.msg_unverified with
-      | Some request ->
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
-               request.request_id)
+                   request.request_id waiting))
       | None ->
-      match
-        (match keeper_name with Some _ -> keeper_name | None -> state.msg_target_keeper_name)
-      with
-      | None -> add_event state "error" "Cannot send: no Keeper is selected"
-      | Some _ when Option.is_some state.keepers_error ->
-          add_event state "error"
-            "Cannot send while the Keeper roster is unavailable"
-      | Some keeper_name
-        when not (keeper_available_for_new_message state keeper_name) ->
-          add_event state "error"
-            (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
-               (Keeper_chat.terminal_safe_text keeper_name))
-      | Some keeper_name ->
           let request =
-            Keeper_chat.create_request ~keeper_name ~message:text
+            Keeper_chat.create_request ~keeper_name:target ~message:text
           in
-          (match persist_keeper_message_fence ~base_path request with
-           | Error detail ->
-               state.msg_recovery_error <- Some (Recovery_blocked detail);
-               add_event state "error"
-                 ("Keeper message was not sent because its recovery fence could not be persisted; Ctrl-R rechecks the durable state: "
-                ^ detail)
-           | Ok (Keeper_chat_recovery.Visible_sync_unconfirmed detail) ->
-               state.msg_prepared <- Some request;
-               state.msg_recovery_error <- Some (Recovery_blocked detail);
-               add_event state "error"
-                 (Printf.sprintf
-                    "Keeper request %s is prepared, but parent-directory sync was not confirmed; no POST was issued. Ctrl-R retries the exact fence"
-                    request.request_id)
-           | Ok (Keeper_chat_recovery.Durable_write_cancelled detail) ->
-               state.msg_prepared <- Some request;
-               state.msg_recovery_error <- Some (Recovery_blocked detail);
-               add_event state "error"
-                 (Printf.sprintf
-                    "Keeper request %s is durably prepared, but dispatch was cancelled; no POST was issued. Ctrl-R retries the exact fence"
-                    request.request_id)
-           | Ok Keeper_chat_recovery.Dispatching_already ->
-               state.msg_prepared <- None;
-               remember_unverified state request;
-               add_event state "message"
-                 (Printf.sprintf
-                    "Keeper request %s was claimed by another dispatcher; entering serialized phase recheck"
-                    request.request_id);
-               launch_keeper_request state ~base_path ~mailbox request
-           | Ok Keeper_chat_recovery.Accepted_already ->
-               remember_unverified state request;
-               append_user_history_once state request;
-               consume_dispatched_message_draft state request;
-               add_event state "message"
-                 (Printf.sprintf
-                    "Keeper request %s was accepted by another process; reconciling the exact operation"
-                    request.request_id);
-               launch_keeper_reconciliation state ~mailbox request
-           | Ok Keeper_chat_recovery.Fsync_completed ->
-               state.msg_prepared <- Some request;
-               add_event state "message"
-                 (Printf.sprintf "Keeper message durably fenced: %s"
-                    request.request_id);
-               launch_keeper_request state ~base_path ~mailbox request))
+          launch_keeper_request state ~mailbox request)
+;;
 
-and launch_keeper_reconciliation state ~mailbox request =
-  state.msg_inflight <- Some request;
-  state.msg_inflight_kind <- Some Operation_get;
-  state.msg_recovery_error <- None;
-  let run clock =
-    let rec poll remaining =
-      let result =
-        try
-          Masc_tui_http.fetch_keeper_chat_operation
-            ~host:(Env_config_core.masc_host ()) ~port:state.port request
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
-      in
-      match result with
-      | Ok (Keeper_chat.Operation_pending _ as pending) ->
-          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
-           | `Poll remaining ->
-               Eio.Time.sleep clock 1.5;
-               poll remaining
-           | `Stop ->
-               enqueue_async mailbox
-                 (Keeper_chat_reconciled (request, Ok pending)))
-      | Error (Keeper_chat.Http_error { status = 404; _ })
-        as not_found ->
-          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
-           | `Poll remaining ->
-               Eio.Time.sleep clock 1.5;
-               poll remaining
-           | `Stop ->
-               enqueue_async mailbox
-                 (Keeper_chat_reconciled (request, not_found)))
-      | (Ok
-          (Keeper_chat.Operation_succeeded _ | Keeper_chat.Operation_failed _
-          | Keeper_chat.Operation_cancelled)
-        | Error _) as settled ->
-          enqueue_async mailbox (Keeper_chat_reconciled (request, settled))
-    in
-    poll Keeper_chat_recovery.max_reconciliation_polls
-  in
-  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
-  | Some sw, Some clock ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run clock;
-          `Stop_daemon)
-  | Some _, None | None, Some _ | None, None ->
-      enqueue_async mailbox
-        (Keeper_chat_reconciled
-           ( request
-           , Error
-               (Keeper_chat.Transport_error
-                  "Eio switch or clock is unavailable") ))
+let drain_queued_message state ~mailbox =
+  (* Send everything that can go now, oldest first, skipping lines whose own
+     keeper still has a turn running. Sending sets that keeper's in-flight, so
+     the next pass will not pick it again and the walk terminates.
 
-let launch_keeper_cleanup state ~base_path ~mailbox request =
-  state.msg_prepared <- None;
-  state.msg_cleanup_pending <- None;
-  state.msg_unverified <- None;
-  state.msg_recovery_error <- None;
-  state.msg_inflight <- Some request;
-  state.msg_inflight_kind <- Some Cleanup_delete;
-  let run () =
-    let result =
-      match
-        Keeper_chat_recovery.with_dispatch_lock ~base_path (fun () ->
-          Keeper_chat_recovery.clear_pending ~base_path request)
-      with
-      | Ok result -> result
-      | Error _ as error -> error
-    in
-    enqueue_async mailbox (Keeper_chat_cleanup_done (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-        run ();
-        `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_chat_cleanup_done
-           (request, Error "Eio switch is unavailable"))
-
-(* Send the oldest waiting line, once. Only one at a time: dispatch is
-   serialized on a single in-flight request, and the next settle drains the
-   next. Nothing is sent while a prepared fence, an unverified outcome, or a
-   blocked recovery is standing — those want the operator's Ctrl-R, and
-   pushing a queued line into them would turn a wait into an error. The queue
-   keeps its place and drains when the block clears. *)
-let drain_queued_message state ~base_path ~mailbox =
-  (* One send per settle: dispatch is serialized on a single in-flight request
-     and the next settle drains the next. The loop is only for lines that
-     cannot be sent at all — it skips past them to reach one that can, rather
-     than stopping the whole queue behind a keeper that left.
+     Taking strictly from the front would stall the queue behind a busy
+     keeper — and permanently, because the lines behind it are addressed to
+     keepers that are idle and so have no settle coming to drain them.
 
      Recursion stays inside so the exported name has no self-call: a wiring
      test that counts calls to it would otherwise be satisfied by this
      function calling itself, and pass with nothing else calling it at all. *)
   let rec next () =
-    match Chat_queue.pop state.msg_queued with
+    match
+      Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
+        Option.is_none (inflight_for state keeper_name))
+    with
     | None -> ()
     | Some ((keeper_name, text), rest) ->
-        (* Nothing is sent while a prepared fence, an unverified outcome, or a
-           blocked recovery is standing — those want the operator's Ctrl-R, and
-           pushing a queued line into them would turn a wait into an error. The
-           queue keeps its place and drains when the block clears. *)
-        if
-          Option.is_none state.msg_inflight
-          && Option.is_none state.msg_prepared
-          && Option.is_none state.msg_unverified
-          && Option.is_none state.msg_recovery_error
-        then
-          if keeper_available_for_new_message state keeper_name
-          then (
-            state.msg_queued <- rest;
-            start_keeper_message ~keeper_name state ~base_path ~mailbox text)
-          else (
-            (* The keeper this was written to is no longer registered. Sending
-               it would fail; holding it would leave a count reporting work that
-               never moves. Say what is being let go, and let it go. *)
-            let before = Chat_queue.length state.msg_queued in
-            state.msg_queued <-
-              Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
-            add_event state "error"
-              (Printf.sprintf
-                 "Keeper %s is no longer registered; %d queued message(s) for \
-                  it were not sent"
-                 (Keeper_chat.terminal_safe_text keeper_name)
-                 (before - Chat_queue.length state.msg_queued));
-            next ())
+        if keeper_available_for_new_message state keeper_name
+        then (
+          state.msg_queued <- rest;
+          start_keeper_message ~keeper_name state ~mailbox text;
+          next ())
+        else (
+          (* The keeper this was written to is no longer registered. Sending it
+             would fail; holding it would leave a count reporting work that
+             never moves. Say what is being let go, and let it go. *)
+          let before = Chat_queue.length state.msg_queued in
+          state.msg_queued <-
+            Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
+          add_event state "error"
+            (Printf.sprintf
+               "Keeper %s is no longer registered; %d queued message(s) for it \
+                were not sent"
+               (Keeper_chat.terminal_safe_text keeper_name)
+               (before - Chat_queue.length state.msg_queued));
+          next ())
   in
   next ()
 ;;
-
-let clear_keeper_chat_recovery state ~base_path request =
-  match Keeper_chat_recovery.clear_pending ~base_path request with
-  | Ok () ->
-      state.msg_cleanup_pending <- None;
-      state.msg_unverified <- None;
-      state.msg_recovery_error <- None
-  | Error detail ->
-      state.msg_cleanup_pending <- Some request;
-      state.msg_unverified <- None;
-      state.msg_recovery_error <- Some (Recovery_blocked detail);
-      add_event state "error"
-        ("Keeper chat settled, but its recovery fence could not be cleared: "
-       ^ detail)
-
-let rec retry_keeper_message state ~base_path ~mailbox =
-  match state.msg_cleanup_pending with
-  | Some request ->
-      (match state.msg_inflight with
-       | Some inflight ->
-           add_event state "system"
-             (Printf.sprintf "Keeper message already in progress: %s"
-                inflight.request_id)
-       | None ->
-           add_event state "message"
-             (Printf.sprintf "Retrying Keeper recovery cleanup: %s"
-                request.request_id);
-           launch_keeper_cleanup state ~base_path ~mailbox request)
-  | None ->
-  match state.msg_inflight, state.msg_prepared, state.msg_unverified with
-  | Some request, _, _ ->
-      add_event state "system"
-        (Printf.sprintf "Keeper message already in progress: %s"
-           request.request_id)
-  | None, Some request, _ ->
-      add_event state "message"
-        (Printf.sprintf
-           "Rechecking prepared Keeper request under the exclusive dispatch lock: %s"
-           request.request_id);
-      launch_keeper_request state ~base_path ~mailbox request
-  | None, None, None ->
-      (match state.msg_recovery_error with
-       | None ->
-           add_event state "system" "No unverified Keeper request to reconnect"
-       | Some _ ->
-           (match Keeper_chat_recovery.load_pending ~base_path with
-            | Error detail ->
-                state.msg_recovery_error <- Some (Recovery_blocked detail);
-                add_event state "error"
-                  ("Keeper recovery reload still fails: " ^ detail)
-            | Ok None ->
-                state.msg_recovery_error <- None;
-                add_event state "message"
-                  "Keeper recovery has no pending fence; new sends are enabled"
-            | Ok (Some pending) ->
-                state.msg_recovery_error <- None;
-                Keeper_chat_recovery.resume_pending pending
-                  ~retry_prepared:(fun request ->
-                    state.msg_unverified <- None;
-                    state.msg_prepared <- Some request;
-                    retry_keeper_message state ~base_path ~mailbox)
-                  ~reconcile_dispatching:(fun request ->
-                    state.msg_prepared <- None;
-                    remember_unverified state request;
-                    append_user_history_once state request;
-                    add_event state "message"
-                      (Printf.sprintf
-                         "Dispatch result was not durably classified; waiting for serialized GET-only reconciliation: %s"
-                         request.request_id);
-                    launch_keeper_request state ~base_path ~mailbox request)
-                  ~retry_replayable:(fun request ->
-                    state.msg_prepared <- None;
-                    remember_unverified state request;
-                    launch_keeper_request state ~base_path ~mailbox request)
-                  ~reconcile_accepted:(fun request ->
-                    remember_unverified state request;
-                    append_user_history_once state request;
-                    launch_keeper_reconciliation state ~mailbox request)
-                  ~cleanup_rejected:(fun request ->
-                    add_event state "message"
-                      (Printf.sprintf
-                         "Removing definitively rejected Keeper recovery fence: %s"
-                         request.request_id);
-                    launch_keeper_cleanup state ~base_path ~mailbox request)))
-  | None, None, Some request ->
-      (match Keeper_chat_recovery.load_pending ~base_path with
-       | Error detail ->
-           state.msg_recovery_error <- Some (Recovery_blocked detail);
-           add_event state "error"
-             ("Keeper recovery phase could not be reloaded: " ^ detail)
-       | Ok None ->
-           state.msg_prepared <- None;
-           state.msg_unverified <- None;
-           state.msg_recovery_error <- None;
-           add_event state "message"
-             "Keeper recovery fence was cleared by the serialized dispatcher; new sends are enabled"
-       | Ok (Some pending)
-         when Keeper_chat.same_request_identity pending.request request ->
-           Keeper_chat_recovery.resume_pending pending
-             ~retry_prepared:(fun prepared ->
-               state.msg_unverified <- None;
-               state.msg_prepared <- Some prepared;
-               retry_keeper_message state ~base_path ~mailbox)
-             ~reconcile_dispatching:(fun dispatching ->
-               state.msg_prepared <- None;
-               remember_unverified state dispatching;
-               append_user_history_once state dispatching;
-               add_event state "message"
-                 (Printf.sprintf
-                    "Waiting to reconcile unclassified dispatch by exact ID without POST: %s"
-                    dispatching.request_id);
-               launch_keeper_request state ~base_path ~mailbox dispatching)
-             ~retry_replayable:(fun dispatching ->
-               state.msg_prepared <- None;
-               remember_unverified state dispatching;
-               launch_keeper_request state ~base_path ~mailbox dispatching)
-             ~reconcile_accepted:(fun accepted ->
-               append_user_history_once state accepted;
-               add_event state "message"
-                 (Printf.sprintf "Reconciling Keeper request by exact ID: %s"
-                    accepted.request_id);
-               launch_keeper_reconciliation state ~mailbox accepted)
-             ~cleanup_rejected:(fun rejected ->
-               add_event state "message"
-                 (Printf.sprintf
-                    "Removing definitively rejected Keeper recovery fence: %s"
-                    rejected.request_id);
-               launch_keeper_cleanup state ~base_path ~mailbox rejected)
-       | Ok (Some pending) ->
-           state.msg_recovery_error <-
-             Some
-               (Recovery_blocked
-                  (Printf.sprintf
-                     "durable request %s differs from in-memory request %s"
-                     pending.request.request_id request.request_id));
-           add_event state "error"
-             "Keeper recovery identity mismatch; no POST or GET was issued")
-
-let mark_keeper_chat_accepted state ~base_path request =
-  match Keeper_chat_recovery.mark_accepted ~base_path request with
-  | Ok Keeper_chat_recovery.Fsync_completed
-  | Ok Keeper_chat_recovery.Dispatching_already
-  | Ok Keeper_chat_recovery.Accepted_already -> true
-  | Ok (Keeper_chat_recovery.Durable_write_cancelled detail) ->
-      add_event state "system"
-        ("Keeper acceptance is durable, but the write completion was cancelled: "
-       ^ detail);
-      false
-  | Ok (Keeper_chat_recovery.Visible_sync_unconfirmed detail) ->
-      add_event state "system"
-        ("Keeper acceptance is visible, but parent-directory sync was not confirmed: "
-       ^ detail);
-      true
-  | Error detail ->
-      add_event state "error"
-        ("Keeper request was accepted, but its recovery phase did not advance to accepted; recovery remains GET-only: "
-       ^ detail);
-      true
-
-let mark_keeper_chat_rejected state ~base_path request =
-  match Keeper_chat_recovery.mark_rejected ~base_path request with
-  | Ok Keeper_chat_recovery.Fsync_completed -> true
-  | Ok (Keeper_chat_recovery.Durable_write_cancelled detail) ->
-      add_event state "system"
-        ("Keeper rejection is durable, but the write completion was cancelled: "
-       ^ detail);
-      false
-  | Ok (Keeper_chat_recovery.Visible_sync_unconfirmed detail) ->
-      add_event state "system"
-        ("Keeper rejection is visible, but parent-directory sync was not confirmed: "
-       ^ detail);
-      true
-  | Ok Keeper_chat_recovery.Dispatching_already
-  | Ok Keeper_chat_recovery.Accepted_already ->
-      add_event state "error"
-        "Keeper rejection reached an impossible persistence outcome; cleanup is deferred";
-      false
-  | Error detail ->
-      add_event state "error"
-        ("Keeper request was rejected, but its durable terminal phase could not be recorded; cleanup is deferred and recovery remains GET-only: "
-       ^ detail);
-      false
-
-let mark_keeper_chat_replayable state ~base_path request =
-  match Keeper_chat_recovery.mark_replayable ~base_path request with
-  | Ok Keeper_chat_recovery.Fsync_completed -> ()
-  | Ok (Keeper_chat_recovery.Durable_write_cancelled detail) ->
-      state.msg_recovery_error <- Some (Recovery_blocked detail);
-      add_event state "system"
-        ("Exact-ID replay permission is durable, but write completion was cancelled: "
-       ^ detail)
-  | Ok (Keeper_chat_recovery.Visible_sync_unconfirmed detail) ->
-      state.msg_recovery_error <- Some (Recovery_blocked detail);
-      add_event state "system"
-        ("Exact-ID replay permission is visible, but parent-directory sync was not confirmed: "
-       ^ detail)
-  | Ok Keeper_chat_recovery.Dispatching_already
-  | Ok Keeper_chat_recovery.Accepted_already ->
-      let detail =
-        "exact-ID replay permission reached an impossible persistence outcome"
-      in
-      state.msg_recovery_error <- Some (Recovery_blocked detail);
-      add_event state "error" detail
-  | Error detail ->
-      state.msg_recovery_error <- Some (Recovery_blocked detail);
-      add_event state "error"
-        ("Keeper outcome is unverified, but exact-ID replay permission was not recorded; recovery is GET-only: "
-       ^ detail)
-
-let defer_keeper_chat_cleanup state request detail =
-  state.msg_cleanup_pending <- Some request;
-  state.msg_unverified <- None;
-  state.msg_recovery_error <- Some (Recovery_blocked detail);
-  add_event state "error"
-    ("Keeper request settled, but cancellation deferred its durable cleanup: "
-   ^ detail)
 
 let chat_status_text completed =
   let turn_ref = completed.Keeper_chat.turn_ref in
@@ -1347,25 +954,12 @@ let chat_status_text completed =
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 
-let apply_keeper_chat_result state ~base_path ~dispatch_was_replay request result =
-  match state.msg_inflight with
+let apply_keeper_chat_result state request result =
+  match inflight_by_request_id state request.Keeper_chat.request_id with
   | Some current when Keeper_chat.same_request_identity current request ->
-      let reconnecting_unverified =
-        dispatch_was_replay
-        ||
-        match state.msg_unverified with
-        | Some pending -> Keeper_chat.same_request_identity pending request
-        | None -> false
-      in
-      state.msg_inflight <- None;
-      state.msg_inflight_kind <- None;
+      drop_inflight state request;
       (match result with
        | Ok (Keeper_chat.Turn_completed completed) ->
-           if mark_keeper_chat_accepted state ~base_path request
-           then clear_keeper_chat_recovery state ~base_path request
-           else
-             defer_keeper_chat_cleanup state request
-               "Ctrl-R retries only recovery-fence removal";
            let role =
              match completed.turn_outcome with
              | Keeper_chat.Visible_reply
@@ -1381,127 +975,38 @@ let apply_keeper_chat_result state ~base_path ~dispatch_was_replay request resul
            add_event state "message"
              (Printf.sprintf "Keeper turn finished: %s" request.request_id)
        | Ok (Keeper_chat.Replayed_succeeded _) ->
-           if mark_keeper_chat_accepted state ~base_path request
-           then clear_keeper_chat_recovery state ~base_path request
-           else
-             defer_keeper_chat_cleanup state request
-               "Ctrl-R retries only recovery-fence removal";
+           (* The server answered [Existing] for this id: the turn already ran
+              and this POST produced no second one. *)
            append_chat_history state request Message_status
              "Request was already completed; canonical reply is not present in this replay stream";
            add_event state "message"
              (Printf.sprintf "Keeper request already completed: %s"
                 request.request_id)
        | Error error ->
-           let acceptance_observed =
-             Keeper_chat.error_acceptance_observed error
-           in
-           let acceptance_mark_allows_cleanup =
-             if acceptance_observed
-             then mark_keeper_chat_accepted state ~base_path request
-             else true
-           in
-           let certainty =
-             Keeper_chat.error_certainty
-               ~was_unverified:reconnecting_unverified error
-           in
            let detail =
              Keeper_chat.error_to_string error
              |> Keeper_chat.terminal_safe_text
            in
            let detail =
-             match certainty with
-             | Keeper_chat.Verified_rejected ->
-                 if mark_keeper_chat_rejected state ~base_path request
-                 then clear_keeper_chat_recovery state ~base_path request
-                 else
-                   defer_keeper_chat_cleanup state request
-                     "Ctrl-R retries only recovery-fence removal";
-                 detail
-             | Keeper_chat.Verified_failed ->
-                 if acceptance_mark_allows_cleanup
-                 then clear_keeper_chat_recovery state ~base_path request
-                 else
-                   defer_keeper_chat_cleanup state request
-                     "Ctrl-R retries only recovery-fence removal";
+             match
+               Keeper_chat.error_certainty ~was_unverified:false error
+             with
+             | Keeper_chat.Verified_rejected | Keeper_chat.Verified_failed ->
                  detail
              | Keeper_chat.Outcome_unverified ->
-                 if not acceptance_observed
-                 then mark_keeper_chat_replayable state ~base_path request;
-                 remember_unverified state request;
+                 (* The POST did not come back with an answer, so the turn may
+                    have run anyway. Nothing here has to reconcile it: the
+                    transcript reloads from the server after every settle, and
+                    a turn that ran appears there. Sending the line again is
+                    safe too — that request carries a new id, so the server
+                    treats it as the new message it is. *)
                  Printf.sprintf
-                   "Outcome unverified for %s; the operation may still execute. Do not resend with a new ID; use Ctrl-R to reconnect. %s"
+                   "Outcome unverified for %s; the turn may still be running. The transcript reload will show it. %s"
                    request.request_id detail
            in
            append_chat_history state request Message_error detail;
            add_event state "error"
              (Printf.sprintf "Keeper message %s: %s" request.request_id detail));
-      true
-  | Some _ | None -> false
-
-let apply_keeper_chat_reconciliation state ~base_path request result =
-  match state.msg_inflight with
-  | Some current when Keeper_chat.same_request_identity current request ->
-      state.msg_inflight <- None;
-      state.msg_inflight_kind <- None;
-      (match result with
-       | Ok (Keeper_chat.Operation_succeeded { outcome_ref }) ->
-           clear_keeper_chat_recovery state ~base_path request;
-           append_chat_history state request Message_status
-             (Printf.sprintf
-                "Operation settled successfully (%s); canonical reply is unavailable after transport recovery"
-                outcome_ref);
-           add_event state "message"
-             (Printf.sprintf "Keeper operation reconciled: %s"
-                request.request_id)
-       | Ok
-           (Keeper_chat.Operation_failed
-             { failure_kind; detail; outcome_ref }) ->
-           clear_keeper_chat_recovery state ~base_path request;
-           let outcome =
-             match outcome_ref with
-             | None -> ""
-             | Some value -> "; outcome " ^ value
-           in
-           let detail =
-             Printf.sprintf "Operation failed (%s%s): %s" failure_kind outcome
-               detail
-           in
-           append_chat_history state request Message_error detail;
-           add_event state "error"
-             (Printf.sprintf "Keeper operation failed: %s" request.request_id)
-       | Ok Keeper_chat.Operation_cancelled ->
-           clear_keeper_chat_recovery state ~base_path request;
-           append_chat_history state request Message_status
-             "Operation was cancelled";
-           add_event state "message"
-             (Printf.sprintf "Keeper operation cancelled: %s"
-                request.request_id)
-       | Ok (Keeper_chat.Operation_pending state_value) ->
-           remember_unverified state request;
-           append_chat_history state request Message_error
-             (Printf.sprintf
-                "Operation reconciliation stopped while still %s; outcome remains unverified"
-                (match state_value with
-                 | Keeper_chat.Queued -> "queued"
-                 | Keeper_chat.Running -> "running"
-                 | Keeper_chat.Succeeded | Keeper_chat.Failed
-                 | Keeper_chat.Cancelled -> "in an unexpected terminal state"))
-       | Error error ->
-           (* The request stays unverified for every failure here, including the
-              statuses [Keeper_chat.error_certainty] calls a verified rejection.
-              That classifier answers "did the dispatch POST create anything";
-              this branch is reading back an operation an authenticated
-              predecessor already created, so a refused read proves nothing
-              about it. Routing this through the certainty classifier would
-              clear the recovery fence for an operation that is still running. *)
-           remember_unverified state request;
-           let detail = Keeper_chat.reconciliation_failure_detail error in
-           append_chat_history state request Message_error
-             ("Operation reconciliation failed; outcome remains unverified. "
-            ^ detail);
-           add_event state "error"
-             (Printf.sprintf "Keeper operation reconciliation failed: %s"
-                request.request_id));
       true
   | Some _ | None -> false
 
@@ -2379,13 +1884,12 @@ let handle_composer_key state ~base_path ~mailbox key =
       let text = Buffer.contents state.msg_input in
       state.msg_scroll <- 0;
       state.view <- Keepers Keeper_message;
-      start_keeper_message state ~base_path ~mailbox text;
+      start_keeper_message state ~mailbox text;
       true
   | Composer.Edit ->
       let _handled =
         handle_message_key state
           ~submit_message:(fun _ -> ())
-          ~retry_message:(fun () -> ())
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           key
@@ -2485,15 +1989,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       Fun.protect
         ~finally:(fun () -> Eio.Promise.resolve acknowledge !proceed)
         (fun () ->
-          match state.msg_inflight with
+          match inflight_by_request_id state request.Keeper_chat.request_id with
           | Some current
             when Keeper_chat.same_request_identity current request ->
-              state.msg_prepared <- None;
-              state.msg_inflight_kind <- Some Chat_post;
-              state.msg_recovery_error <- None;
-              if was_replay
-              then remember_unverified state request
-              else state.msg_unverified <- None;
               append_user_history_once state request;
               consume_dispatched_message_draft state request;
               add_event state "message"
@@ -2520,12 +2018,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
           (fun () ->
-            apply_keeper_chat_result state ~base_path
-              ~dispatch_was_replay:was_replay request result)
+            apply_keeper_chat_result state request result)
       in
       if applied then load_from_masc_dir state base_path;
       (* The turn settled, so "next" has arrived for whatever was waiting. *)
-      drain_queued_message state ~base_path ~mailbox
+      drain_queued_message state ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
       (* Identity-guarded: a late chunk from a superseded turn must not draw
          into the one now running. *)
@@ -2580,110 +2077,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               and the outcome the transcript already recorded is the one that
               counts. *)
            ())
-  | Keeper_chat_dispatch_reconcile request ->
-      (match state.msg_inflight with
-       | Some current when Keeper_chat.same_request_identity current request ->
-           state.msg_prepared <- None;
-           remember_unverified state request;
-           append_user_history_once state request;
-           consume_dispatched_message_draft state request;
-           add_event state "message"
-             (Printf.sprintf
-                "Keeper request %s does not authorize a POST; switching to exact operation reconciliation"
-                request.request_id);
-           launch_keeper_reconciliation state ~mailbox request
-       | Some _ | None -> ())
   | Keeper_chat_dispatch_blocked (request, detail) ->
+      (* The POST never left. Nothing durable was written for it, so there is
+         nothing to reconcile: say what happened and let the operator send
+         again if they want to. *)
       settle_live_turn state request;
-      (match state.msg_inflight with
+      (match inflight_by_request_id state request.Keeper_chat.request_id with
        | Some current when Keeper_chat.same_request_identity current request ->
-           state.msg_inflight <- None;
-           state.msg_inflight_kind <- None;
-           (match Keeper_chat_recovery.load_pending ~base_path with
-            | Ok None ->
-                state.msg_prepared <- None;
-                state.msg_unverified <- None;
-                state.msg_recovery_error <- None;
-                add_event state "error"
-                  ("Keeper request was not dispatched; its fence was cleared: "
-                 ^ detail)
-            | Ok (Some pending)
-              when not
-                     (Keeper_chat.same_request_identity pending.request request) ->
-                state.msg_prepared <- None;
-                state.msg_unverified <- None;
-                state.msg_recovery_error <-
-                  Some
-                    (Recovery_blocked
-                       (Printf.sprintf
-                          "another durable request %s replaced dispatch %s"
-                          pending.request.request_id request.request_id));
-                add_event state "error"
-                  "Keeper dispatch identity changed; no POST was issued"
-            | Ok (Some { phase = Keeper_chat_recovery.Prepared; _ }) ->
-                state.msg_prepared <- Some request;
-                state.msg_unverified <- None;
-                state.msg_recovery_error <- Some (Recovery_blocked detail);
-                add_event state "error"
-                  ("Keeper dispatch is blocked before its first POST: " ^ detail)
-            | Ok (Some { phase = Keeper_chat_recovery.Dispatching; _ }) ->
-                state.msg_prepared <- None;
-                remember_unverified state request;
-                state.msg_recovery_error <- Some (Recovery_blocked detail);
-                append_user_history_once state request;
-                consume_dispatched_message_draft state request;
-                add_event state "error"
-                  ("Keeper dispatch is held or not durably classified; Ctrl-R reconciles the exact operation without POST: "
-                 ^ detail)
-            | Ok (Some { phase = Keeper_chat_recovery.Replayable; _ }) ->
-                state.msg_prepared <- None;
-                remember_unverified state request;
-                state.msg_recovery_error <- Some (Recovery_blocked detail);
-                append_user_history_once state request;
-                consume_dispatched_message_draft state request;
-                add_event state "error"
-                  ("Keeper exact-ID replay is waiting for the serialized dispatch lock; Ctrl-R retries: "
-                 ^ detail)
-            | Ok (Some { phase = Keeper_chat_recovery.Accepted; _ }) ->
-                state.msg_prepared <- None;
-                remember_unverified state request;
-                append_user_history_once state request;
-                consume_dispatched_message_draft state request;
-                launch_keeper_reconciliation state ~mailbox request
-            | Ok (Some { phase = Keeper_chat_recovery.Rejected; _ }) ->
-                add_event state "message"
-                  (Printf.sprintf
-                     "Keeper request %s was definitively rejected; removing only its durable fence"
-                     request.request_id);
-                launch_keeper_cleanup state ~base_path ~mailbox request
-            | Error recovery_detail ->
-                state.msg_recovery_error <-
-                  Some (Recovery_blocked recovery_detail);
-                add_event state "error"
-                  ("Keeper dispatch failed and recovery could not be reloaded: "
-                 ^ recovery_detail))
-       | Some _ | None -> ())
-  | Keeper_chat_cleanup_done (request, result) ->
-      (match state.msg_inflight with
-       | Some current when Keeper_chat.same_request_identity current request ->
-           state.msg_inflight <- None;
-           state.msg_inflight_kind <- None;
-           state.msg_prepared <- None;
-           (match result with
-            | Ok () ->
-                state.msg_cleanup_pending <- None;
-                state.msg_unverified <- None;
-                state.msg_recovery_error <- None;
-                add_event state "message"
-                  (Printf.sprintf "Keeper recovery cleanup completed: %s"
-                     request.request_id)
-            | Error detail ->
-                state.msg_prepared <- None;
-                state.msg_cleanup_pending <- Some request;
-                state.msg_unverified <- None;
-                state.msg_recovery_error <- Some (Recovery_blocked detail);
-                add_event state "error"
-                  ("Keeper recovery cleanup retry failed: " ^ detail))
+           drop_inflight state request;
+           add_event state "error"
+             (Printf.sprintf "Keeper request %s was not dispatched: %s"
+                request.request_id detail)
        | Some _ | None -> ())
   | Keeper_chat_history_loaded (keeper_name, result) -> (
       match result with
@@ -2789,10 +2193,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             (* The cursor is kept so the same page can be asked for again;
                what is on screen is untouched. *)
             state.msg_older_error <- Some detail)
-  | Keeper_chat_reconciled (request, result) ->
-      if apply_keeper_chat_reconciliation state ~base_path request result then
-        load_from_masc_dir state base_path
-
 let drain_async_messages state ~base_path ~http_refresh_inflight mailbox =
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
@@ -2902,61 +2302,6 @@ let main () =
       "No operator token: neither MASC_TOKEN nor this workspace holds one, so \
        sends and approvals are refused and a recovered dispatch cannot be \
        reconciled. Run: masc login --agent masc-tui --client-env MASC_TOKEN";
-  (match Keeper_chat_recovery.load_pending ~base_path with
-   | Ok None -> ()
-   | Error detail ->
-       state.msg_recovery_error <- Some (Recovery_blocked detail);
-       add_event state "error"
-         ("Keeper chat recovery could not be loaded; new sends are blocked: "
-        ^ detail)
-   | Ok (Some pending) ->
-       Keeper_chat_recovery.resume_pending pending
-         ~retry_prepared:(fun request ->
-            state.msg_unverified <- None;
-            state.msg_prepared <- Some request;
-            append_chat_history state request Message_status
-              "Recovered a prepared request; claiming its first serialized dispatch";
-            add_event state "message"
-              (Printf.sprintf "Recovered prepared Keeper request: %s"
-                 request.request_id);
-            retry_keeper_message state ~base_path ~mailbox:async_messages)
-         ~reconcile_dispatching:(fun request ->
-            state.msg_prepared <- None;
-            remember_unverified state request;
-            append_user_history_once state request;
-            append_chat_history state request Message_status
-              "Recovered an unclassified dispatch; waiting for serialized exact-operation reconciliation without POST";
-            add_event state "message"
-              (Printf.sprintf "Recovered dispatching Keeper request: %s"
-                 request.request_id);
-            launch_keeper_request state ~base_path ~mailbox:async_messages request)
-         ~retry_replayable:(fun request ->
-            state.msg_prepared <- None;
-            remember_unverified state request;
-            append_chat_history state request Message_status
-              "Recovered a replayable request; replaying the exact ID under the cross-process lock";
-            add_event state "message"
-              (Printf.sprintf "Recovered replayable Keeper request: %s"
-                 request.request_id);
-            launch_keeper_request state ~base_path ~mailbox:async_messages
-              request)
-         ~reconcile_accepted:(fun request ->
-            remember_unverified state request;
-            append_user_history_once state request;
-            append_chat_history state request Message_status
-              "Recovered an accepted request; reconciling the exact durable operation";
-            add_event state "message"
-              (Printf.sprintf "Recovered accepted Keeper request: %s"
-                 request.request_id);
-            launch_keeper_reconciliation state ~mailbox:async_messages request)
-         ~cleanup_rejected:(fun request ->
-            append_chat_history state request Message_status
-              "Recovered a definitively rejected request; removing its durable fence without POST or GET";
-            add_event state "message"
-              (Printf.sprintf "Recovered rejected Keeper request: %s"
-                 request.request_id);
-            launch_keeper_cleanup state ~base_path ~mailbox:async_messages
-              request));
   start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight
     ~mailbox:async_messages;
   add_event state "system" "TUI started";
@@ -3038,13 +2383,13 @@ let main () =
              let _handled =
                handle_message_key state
                  ~submit_message:
-                   (start_keeper_message state ~base_path
-                      ~mailbox:async_messages)
-                 ~retry_message:(fun () ->
-                   retry_keeper_message state ~base_path
-                     ~mailbox:async_messages)
+                   (start_keeper_message state ~mailbox:async_messages)
                  ~answer_approval:(fun ~tool_call_id ~allow ->
-                   match state.msg_inflight with
+                   match
+                     Option.bind state.msg_live (fun live ->
+                       inflight_by_request_id state
+                         (Keeper_chat_transcript.request_id live))
+                   with
                    | Some request ->
                        launch_keeper_approval state ~mailbox:async_messages
                          request ~tool_call_id ~allow
@@ -3179,7 +2524,10 @@ let main () =
                  | Some live
                    when Keeper_chat_transcript.interrupt live
                         = Keeper_chat_transcript.Not_requested ->
-                     (match state.msg_inflight with
+                     (match
+                        inflight_by_request_id state
+                          (Keeper_chat_transcript.request_id live)
+                      with
                       | Some request ->
                           launch_keeper_interrupt state
                             ~mailbox:async_messages request

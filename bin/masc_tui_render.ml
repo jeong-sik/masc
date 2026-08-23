@@ -29,6 +29,12 @@ let finish_frame ~surface_key ~cursor ~rows ~cols buf :
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
+(* Only offered while the server is unreachable. A hint for an action that
+   would be refused is worse than no hint. *)
+let server_start_hint : Masc_tui_types.connection_status -> string = function
+  | Disconnected | Degraded -> "  s:start server"
+  | Connecting | Reconnecting | Connected -> ""
+
 let connection_badge : Masc_tui_types.connection_status -> string = function
   | Connected -> Ansi.green ^ "[connected]" ^ Ansi.reset
   | Degraded -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
@@ -281,8 +287,9 @@ let render_overview (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
-    Ansi.dim state.refresh_interval state.port Ansi.reset);
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:events  q:quit  r:refresh  Tab:next  2:keepers%s  | Refresh: %.0fs | Port: %d%s\n"
+    Ansi.dim (server_start_hint state.connection_status)
+    state.refresh_interval state.port Ansi.reset);
 
   finish_frame ~surface_key:"overview" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf

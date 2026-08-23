@@ -224,6 +224,12 @@
   yojson))
 
 (library
+ (name masc_tui_server_control)
+ (wrapped false)
+ (modules masc_tui_server_control)
+ (libraries unix))
+
+(library
  (name masc_tui_message_layout)
  (wrapped false)
  (modules masc_tui_message_layout)
@@ -318,6 +324,7 @@
  (libraries
   masc
   masc_tui_context_state
+  masc_tui_server_control
   masc_tui_frame_presenter
   masc_tui_keeper_activity
   masc_tui_keeper_chat_projection

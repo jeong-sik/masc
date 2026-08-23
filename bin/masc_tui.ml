@@ -1770,6 +1770,19 @@ let main () =
                        ~mailbox:async_messages
                  | None -> ())
             | _ -> ())
+       | Some "s" | Some "S" -> (
+           (* The badge already says whether the server answers. Starting on top
+              of a live server would only make start-masc.sh refuse the port and
+              write that refusal to a log the operator is not reading. *)
+           match state.connection_status with
+           | Connected | Connecting | Reconnecting ->
+               add_event state "system" "server already reachable; not starting"
+           | Disconnected | Degraded ->
+               let outcome =
+                 Masc_tui_server_control.start ~base_path ~port:state.port
+               in
+               add_event state "system"
+                 (Masc_tui_server_control.describe outcome))
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            load_from_masc_dir state base_path;

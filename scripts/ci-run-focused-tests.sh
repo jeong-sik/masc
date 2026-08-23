@@ -414,6 +414,7 @@ sse_targets=(
   @test/runtest-test_tui_keeper_activity
   @test/runtest-test_tui_transport_health
   @test/runtest-test_tui_message_layout
+  @test/runtest-test_tui_server_control
   @test/runtest-test_tui_metrics_tail
   @test/runtest-test_tui_observation_layout
   @test/runtest-test_tui_planning_selection

@@ -2598,6 +2598,11 @@
   unix))
 
 (test
+ (name test_tui_server_control)
+ (modules test_tui_server_control)
+ (libraries alcotest unix masc_tui_server_control))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries alcotest masc_tui_message_layout))

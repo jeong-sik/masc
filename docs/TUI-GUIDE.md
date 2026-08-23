@@ -69,6 +69,28 @@ lands in Recent Events:
 A count of `0` next to `data unreliable` means the read failed. It does not
 mean the board is empty.
 
+### Starting one from here
+
+`s` runs the repo's `start-masc.sh` with the TUI's own `--base-path` and
+`--port`, and the footer offers the key only while the server is unreachable.
+
+The script backgrounds the server and owns its PID lock, so the server outlives
+the TUI. That is deliberate: a status screen that takes its subject down on exit
+is not what an operator wants.
+
+The script prints to `<base-path>/.masc/tui-server-start.log` rather than the
+terminal the TUI is drawing on. Recent Events reports which script ran, or names
+every path that was searched:
+
+```
+   server start requested: /path/to/masc/start-masc.sh
+   server start script not found; set MASC_START_SCRIPT (tried: ...)
+```
+
+`MASC_START_SCRIPT` overrides the search, which an installed `masc-tui` needs:
+the search walks up from the executable and finds the script only in a build
+tree.
+
 ## Surfaces
 
 ### Overview
@@ -289,6 +311,7 @@ Global, outside message input:
 | `Tab` | Next surface: Overview -> Keepers -> Approvals -> Board -> Planning -> Overview |
 | `2` | Jump to Keepers from anywhere |
 | `r` | Force refresh |
+| `s` | Start the server, while it is unreachable |
 | `q` | Quit |
 
 Per surface:

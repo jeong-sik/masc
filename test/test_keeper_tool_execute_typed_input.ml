@@ -516,15 +516,37 @@ let test_script_carries_cwd_onto_every_stage () =
   | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
 ;;
 
-(* A construct outside the subset is refused by name rather than run. The name
-   is the point: inside [bash -c] it was counted as nothing. *)
-let test_script_outside_the_subset_is_named () =
+(* 83% of the shell escapes measured over 2026-08-21..23 used a logic
+   operator. It lowers to the Sequence the IR already had. *)
+let test_script_lowers_a_guarded_run () =
   let input =
     parse_json_exn (`Assoc [ "script", `String "test -w /tmp && echo ok" ])
   in
   match Execute_input.to_shell_ir input with
-  | Ok _ -> Alcotest.fail "&& is not in the subset yet"
-  | Error (Execute_input.Script_outside_the_subset `Logic_op) -> ()
+  | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (And_if, _) ]; _ }) -> ()
+  | Ok _ -> Alcotest.fail "&& must lower to a Sequence guarded on success"
+  | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+;;
+
+let test_script_lowers_an_alternative_run () =
+  let input =
+    parse_json_exn (`Assoc [ "script", `String "grep x f || echo none" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (Or_if, _) ]; _ }) -> ()
+  | Ok _ -> Alcotest.fail "|| must lower to a Sequence guarded on failure"
+  | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+;;
+
+(* A construct outside the subset is refused by name rather than run. The name
+   is the point: inside [bash -c] it was counted as nothing. *)
+let test_script_outside_the_subset_is_named () =
+  let input =
+    parse_json_exn (`Assoc [ "script", `String "cat $(echo foo)" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok _ -> Alcotest.fail "command substitution is outside the subset"
+  | Error (Execute_input.Script_outside_the_subset `Cmd_subst) -> ()
   | Error e ->
     Alcotest.failf "expected a named subset refusal, got %a"
       Execute_input.pp_validation_error e
@@ -1658,6 +1680,13 @@ let suite =
           `Quick
           test_script_carries_cwd_onto_every_stage
       ; Alcotest.test_case
+          "script_lowers_a_guarded_run"
+          `Quick
+          test_script_lowers_a_guarded_run
+      ; Alcotest.test_case
+          "script_lowers_an_alternative_run"
+          `Quick
+          test_script_lowers_an_alternative_run      ; Alcotest.test_case
           "script_outside_the_subset_is_named"
           `Quick
           test_script_outside_the_subset_is_named

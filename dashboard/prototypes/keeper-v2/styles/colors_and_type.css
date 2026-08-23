@@ -7,6 +7,14 @@
    Paper/Ink dashboard inversion (used as the docs/light surface).
    ══════════════════════════════════════════════════════════════ */
 
+/* Webfonts the viewer also uses — fetched from Google when available.
+   NOTE: moved above the @font-face rules on 2026-08-23. A CSS @import
+   after another rule is invalid and silently dropped, so EB Garamond,
+   JetBrains Mono and Share Tech Mono never loaded here and the prototype
+   rendered them from system fallbacks; the parity harness then measured
+   the fallback, not the design. Above the first rule it loads. */
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Share+Tech+Mono&display=swap');
+
 /* Local fonts — copied from viewer/assets/fonts */
 @font-face {
   font-family: 'Cinzel';
@@ -20,8 +28,6 @@
   font-weight: 300 700;
   font-display: swap;
 }
-/* Webfonts the viewer also uses — fetched from Google when available */
-@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Share+Tech+Mono&display=swap');
 
 /* ── Dark Fantasy (default) — Visceral · decay-forward ── */
 :root,

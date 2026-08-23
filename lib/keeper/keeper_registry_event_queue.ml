@@ -19,7 +19,6 @@ let publish_pending ~base_path name pending =
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -27,7 +26,6 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -44,7 +42,6 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -712,14 +709,12 @@ let ack_pending_result ~base_path name ~selection =
 let cancel_pending_accepted_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~cancellation
   =
   Keeper_event_queue_persistence.cancel_pending_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~cancellation
     ~after_commit:(publish_pending ~base_path name)
@@ -730,7 +725,6 @@ let transfer_pending_accepted_result
       ?intake_token
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
   =
@@ -738,7 +732,6 @@ let transfer_pending_accepted_result
     Keeper_event_queue_persistence.transfer_pending_accepted_result
       ~base_path
       ~keeper_name:name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
       ~after_commit:(publish_pending ~base_path name)
@@ -772,14 +765,12 @@ let transfer_pending_accepted_result
 let ack_pending_source_terminal_result
       ~base_path
       name
-      ~current_owner_nonce
       ~acked_at
       ~source_terminal
   =
   Keeper_event_queue_persistence.ack_pending_source_terminal_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~acked_at
     ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
@@ -790,7 +781,6 @@ let ack_pending_source_terminal_result
 let terminalize_pending_turn_attempt_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~detail
@@ -798,7 +788,6 @@ let terminalize_pending_turn_attempt_result
   Keeper_event_queue_persistence.terminalize_pending_turn_attempt_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~detail
@@ -810,14 +799,12 @@ let terminalize_pending_turn_attempt_result
 let terminalize_pending_turn_completed_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~selection
   =
   Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~after_commit:(publish_pending ~base_path name)

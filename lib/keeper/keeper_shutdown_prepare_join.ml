@@ -130,11 +130,7 @@ let read_guarded_meta
     when not
            (Keeper_id.Trace_id.equal
               latest.runtime.trace_id
-              observed.runtime.trace_id)
-         || not
-              (Int.equal
-                 latest.runtime.nonce
-                 observed.runtime.nonce) ->
+              observed.runtime.trace_id) ->
     Error Meta_snapshot_identity_changed
   | Ok (Some latest) ->
     ignore cleanup_reason;

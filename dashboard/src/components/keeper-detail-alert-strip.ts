@@ -238,7 +238,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         action === 'pause'
           ? await pauseKeeper(keeper.name)
           : action === 'resume'
-            ? await resumeKeeper(keeper.name, keeper.generation)
+            ? await resumeKeeper(keeper.name)
             : await wakeKeeper(keeper.name)
       if (res.ok) {
         const msg =

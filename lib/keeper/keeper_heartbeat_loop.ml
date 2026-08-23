@@ -763,7 +763,6 @@ let run_keepalive_unified_turn
                 meta_after_triage.name
                 (Int64.of_float (audit_wall_clock *. 1000.0)))
            ~keeper_name:meta_after_triage.name
-           ~generation:meta_after_triage.runtime.nonce
            ~turn_verdict:turn_decision.verdict
            ~wall_clock:audit_wall_clock
            ?tool_diversity_entropy
@@ -1028,7 +1027,6 @@ let run_keepalive_unified_turn
                   ~keeper_name:meta_after_triage.name
                   (Keeper_owner_reducer.Record_compaction_commit
                      { trace_id = meta_after_triage.runtime.trace_id
-                     ; generation = meta_after_triage.runtime.nonce
                      ; commit_count
                      ; at = Unix.gettimeofday () (* NDT-OK: stamps when this commit landed; no branch reads it *)
                      ; before_bytes

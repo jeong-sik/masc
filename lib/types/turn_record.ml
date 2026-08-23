@@ -83,7 +83,6 @@ type t =
   { execution_ids : Ids.Execution_id.t list
   ; keeper : string
   ; agent_name : string
-  ; generation : int
   ; turn_kind : turn_kind
   ; trace_id : string
   ; absolute_turn : int
@@ -178,7 +177,6 @@ let to_json (r : t) : Yojson.Safe.t =
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
      ; ("keeper", `String r.keeper)
      ; ("agent_name", `String r.agent_name)
-     ; ("generation", `Int r.generation)
      ; ("turn_kind", `String (turn_kind_to_string r.turn_kind))
      ; ("trace_id", `String r.trace_id)
      ; ("absolute_turn", `Int r.absolute_turn)
@@ -617,7 +615,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         { execution_ids
         ; keeper
         ; agent_name
-        ; generation
         ; turn_kind
         ; trace_id
         ; absolute_turn

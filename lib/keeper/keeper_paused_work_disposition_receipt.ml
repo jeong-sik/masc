@@ -28,7 +28,6 @@ type keeper_lock = { keeper_name : string }
 type t =
   { keeper_name : string
   ; expected_trace_id : Keeper_id.Trace_id.t
-  ; expected_generation : int
   ; operator_operation_id : string
   ; requested_at : float
   ; operation : operation
@@ -44,7 +43,6 @@ let schema = "masc.keeper.paused-work-disposition.v6"
 let equal left right =
   String.equal left.keeper_name right.keeper_name
   && Keeper_id.Trace_id.equal left.expected_trace_id right.expected_trace_id
-  && Int.equal left.expected_generation right.expected_generation
   && String.equal left.operator_operation_id right.operator_operation_id
   && Float.equal left.requested_at right.requested_at
   && left.operation = right.operation
@@ -69,8 +67,6 @@ let continuation_binding_of_source source =
 let validate receipt =
   if String.equal (String.trim receipt.keeper_name) ""
   then Error "paused-work disposition keeper name must not be empty"
-  else if receipt.expected_generation < 0
-  then Error "paused-work disposition owner generation must not be negative"
   else if String.equal (String.trim receipt.operator_operation_id) ""
   then Error "paused-work disposition operation ID must not be empty"
   else if not (Float.is_finite receipt.requested_at)
@@ -138,7 +134,6 @@ let transfer_owner_to_yojson transfer =
     [ "from_keeper", `String transfer.from_keeper
     ; "to_keeper", `String transfer.to_keeper
     ; "target_trace_id", `String (Keeper_id.Trace_id.to_string transfer.target_trace_id)
-    ; "target_generation", `Int transfer.target_generation
     ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
     ; "source_incarnation", `Intlit (Int64.to_string transfer.source_incarnation)
     ; "continuation_binding", continuation_binding_to_yojson transfer.continuation_binding
@@ -169,7 +164,6 @@ let to_yojson receipt =
        ; "keeper_name", `String receipt.keeper_name
        ; ( "expected_trace_id"
          , `String (Keeper_id.Trace_id.to_string receipt.expected_trace_id) )
-       ; "expected_generation", `Int receipt.expected_generation
        ; "operator_operation_id", `String receipt.operator_operation_id
        ; "requested_at", `Float receipt.requested_at
        ]
@@ -228,7 +222,6 @@ let transfer_owner_of_yojson = function
        ; ("from_keeper", `String from_keeper)
        ; ("source", source_json)
        ; ("source_incarnation", source_incarnation_json)
-       ; ("target_generation", `Int target_generation)
        ; ("target_trace_id", `String target_trace_id)
        ; ("to_keeper", `String to_keeper)
        ] ->
@@ -276,7 +269,6 @@ let source_terminal_operation_of_yojson = function
 let receipt_of_common
       ~keeper_name
       ~expected_trace_id
-      ~expected_generation
       ~operator_operation_id
       ~requested_at_json
       ~operation
@@ -286,7 +278,6 @@ let receipt_of_common
   let receipt =
     { keeper_name
     ; expected_trace_id
-    ; expected_generation
     ; operator_operation_id
     ; requested_at
     ; operation
@@ -299,8 +290,7 @@ let receipt_of_common
 let of_yojson = function
   | `Assoc fields ->
     (match sorted fields with
-     | [ ("expected_generation", `Int expected_generation)
-       ; ("expected_trace_id", `String expected_trace_id)
+     | [ ("expected_trace_id", `String expected_trace_id)
        ; ("keeper_name", `String keeper_name)
        ; ("operation", `String "resume_owner")
        ; ("operator_operation_id", `String operator_operation_id)
@@ -313,12 +303,10 @@ let of_yojson = function
          receipt_of_common
            ~keeper_name
            ~expected_trace_id
-           ~expected_generation
            ~operator_operation_id
            ~requested_at_json
            ~operation:Resume_owner
-     | [ ("expected_generation", `Int expected_generation)
-       ; ("expected_trace_id", `String expected_trace_id)
+     | [ ("expected_trace_id", `String expected_trace_id)
        ; ("keeper_name", `String keeper_name)
        ; ("operation", `String "transfer_owner")
        ; ("operator_operation_id", `String operator_operation_id)
@@ -333,12 +321,10 @@ let of_yojson = function
          receipt_of_common
            ~keeper_name
            ~expected_trace_id
-           ~expected_generation
            ~operator_operation_id
            ~requested_at_json
            ~operation:(Transfer_owner transfer)
-     | [ ("expected_generation", `Int expected_generation)
-       ; ("expected_trace_id", `String expected_trace_id)
+     | [ ("expected_trace_id", `String expected_trace_id)
        ; ("keeper_name", `String keeper_name)
        ; ("operation", `String "ack_source_terminal")
        ; ("operator_operation_id", `String operator_operation_id)
@@ -355,7 +341,6 @@ let of_yojson = function
          receipt_of_common
            ~keeper_name
            ~expected_trace_id
-           ~expected_generation
            ~operator_operation_id
            ~requested_at_json
            ~operation:(Ack_source_terminal operation)

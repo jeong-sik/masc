@@ -180,7 +180,6 @@ type t =
   ; keeper_name : string
   ; lane_ownership : lane_ownership
   ; trace_id : Keeper_id.Trace_id.t
-  ; generation : int
   ; actor : string
   ; cleanup_intent : cleanup_intent
   ; turn_disposition : turn_disposition

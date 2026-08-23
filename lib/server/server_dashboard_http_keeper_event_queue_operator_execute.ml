@@ -187,7 +187,6 @@ let execute_cancellation ~base_path ~keeper_name prepared =
   Keeper_registry_event_queue.cancel_pending_accepted_result
     ~base_path
     keeper_name
-    ~current_owner_nonce:cancellation.owner_nonce
     ~applied_at:prepared.applied_at
     ~cancellation
   |> Result.map (fun result ->
@@ -212,7 +211,6 @@ let execute_transfer ~base_path ~keeper_name prepared =
         ~intake_token:source_intake_token
         ~base_path
         keeper_name
-        ~current_owner_nonce:transfer.owner_nonce
         ~applied_at:prepared.applied_at
         ~transfer
       |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string

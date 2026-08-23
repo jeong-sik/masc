@@ -115,7 +115,6 @@ let repair_identity_drift_for_keepalive ?lifecycle_token ~(ctx : _ context) (met
               ; trace_history =
                   Json_util.dedupe_keep_order
                     (previous_trace_id :: meta.runtime.trace_history)
-              ; generation = meta.runtime.nonce + 1
               ; updated_at = now_iso ()
               })
        with

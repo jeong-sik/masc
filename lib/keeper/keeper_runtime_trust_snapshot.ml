@@ -1079,7 +1079,6 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let cache_key =
     { Snapshot_cache.base_path = config.base_path
     ; keeper_name = meta.name
-    ; generation = meta.runtime.nonce
     ; last_turn_ts = meta.runtime.usage.last_turn_ts
     ; approval_queue_revision =
         Keeper_approval_queue.store_revision_for_workspace

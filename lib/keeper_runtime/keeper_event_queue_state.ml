@@ -1,7 +1,6 @@
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -9,11 +8,9 @@ type accepted_cancellation =
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -26,7 +23,6 @@ type source_terminal_receipt =
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -415,8 +411,6 @@ let validate_accepted_cancellation (cancellation : accepted_cancellation) =
   then Error "accepted cancellation source post id must not be empty"
   else if Int64.compare cancellation.source_incarnation 0L < 0
   then Error "accepted cancellation source incarnation must not be negative"
-  else if cancellation.owner_nonce < 0
-  then Error "accepted cancellation owner generation must not be negative"
   else if String.equal (String.trim cancellation.operator_operation_id) ""
   then Error "accepted cancellation operator operation id must not be empty"
   else if String.equal (String.trim cancellation.reason) ""
@@ -429,16 +423,12 @@ let validate_accepted_transfer (transfer : accepted_transfer) =
   then Error "accepted transfer source post id must not be empty"
   else if Int64.compare transfer.source_incarnation 0L < 0
   then Error "accepted transfer source incarnation must not be negative"
-  else if transfer.owner_nonce < 0
-  then Error "accepted transfer owner generation must not be negative"
   else if String.equal (String.trim transfer.operator_operation_id) ""
   then Error "accepted transfer operator operation id must not be empty"
   else if String.equal (String.trim transfer.from_keeper) ""
   then Error "accepted transfer source Keeper must not be empty"
   else if String.equal (String.trim transfer.to_keeper) ""
   then Error "accepted transfer target Keeper must not be empty"
-  else if transfer.target_generation < 0
-  then Error "accepted transfer target generation must not be negative"
   else if String.equal transfer.from_keeper transfer.to_keeper
   then Error "accepted transfer source and target Keepers must differ"
   else Ok ()
@@ -468,8 +458,6 @@ let validate_accepted_source_terminal
   then Error "source-terminal ACK source post id must not be empty"
   else if Int64.compare source_terminal.source_incarnation 0L < 0
   then Error "source-terminal ACK source incarnation must not be negative"
-  else if source_terminal.owner_nonce < 0
-  then Error "source-terminal ACK owner generation must not be negative"
   else if String.equal (String.trim source_terminal.operator_operation_id) ""
   then Error "source-terminal ACK operation id must not be empty"
   else (
@@ -565,7 +553,6 @@ let accepted_pending_cancellation_replay cancellation state =
 ;;
 
 let cancel_pending_accepted
-      ~current_owner_nonce
       ~applied_at
       ~cancellation
       state
@@ -639,7 +626,6 @@ let accepted_pending_transfer_replay transfer state =
 ;;
 
 let transfer_pending_accepted
-      ~current_owner_nonce
       ~applied_at
       ~transfer
       state
@@ -728,7 +714,6 @@ let turn_attempt_terminal_operation_id
 ;;
 
 let ack_pending_source_terminal
-      ~current_owner_nonce
       ~applied_at
       ~source_terminal
       state
@@ -739,16 +724,6 @@ let ack_pending_source_terminal
   | Ok (Some receipt) -> Ok (state, Transition_already_applied receipt)
   | Ok None ->
     let* () = validate_accepted_source_terminal source_terminal in
-    let* () =
-      if Int.equal current_owner_nonce source_terminal.owner_nonce
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "source-terminal ACK owner generation changed: expected %d, current %d"
-             source_terminal.owner_nonce
-             current_owner_nonce)
-    in
     let* () =
       validate_pending_selection
         ~selection:
@@ -801,7 +776,6 @@ let turn_terminal_receipt_matches_replay left right =
 ;;
 
 let terminalize_pending_turn
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~source_receipt
@@ -810,7 +784,6 @@ let terminalize_pending_turn
   let { source; admitted_revision } = selection in
   let operator_operation_id =
     turn_attempt_terminal_operation_id
-      ~owner_nonce:current_owner_nonce
       ~admitted_revision
       source
   in
@@ -847,21 +820,18 @@ let terminalize_pending_turn
       }
     in
     ack_pending_source_terminal
-      ~current_owner_nonce
       ~applied_at
       ~source_terminal
       state
 ;;
 
 let terminalize_pending_turn_attempt
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~detail
       state
   =
   terminalize_pending_turn
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~source_receipt:(Turn_attempt_terminal { detail })
@@ -869,13 +839,11 @@ let terminalize_pending_turn_attempt
 ;;
 
 let terminalize_pending_turn_completed
-      ~current_owner_nonce
       ~applied_at
       ~selection
       state
   =
   terminalize_pending_turn
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~source_receipt:Turn_completed
@@ -921,7 +889,6 @@ let replay_transition_outbox_entry entry state =
      | Cancel_accepted cancellation, [ source ] when source = cancellation.source ->
        restore_pending_transition entry state (fun state ->
          cancel_pending_accepted
-           ~current_owner_nonce:cancellation.owner_nonce
            ~applied_at:entry.receipt.applied_at
            ~cancellation
            state)
@@ -932,7 +899,6 @@ let replay_transition_outbox_entry entry state =
      | Transfer_accepted transfer, [ source ] when source = transfer.source ->
        restore_pending_transition entry state (fun state ->
          transfer_pending_accepted
-           ~current_owner_nonce:transfer.owner_nonce
            ~applied_at:entry.receipt.applied_at
            ~transfer
            state)
@@ -944,7 +910,6 @@ let replay_transition_outbox_entry entry state =
        when source = source_terminal.source ->
        restore_pending_transition entry state (fun state ->
          ack_pending_source_terminal
-           ~current_owner_nonce:source_terminal.owner_nonce
            ~applied_at:entry.receipt.applied_at
            ~source_terminal
            state)
@@ -1041,7 +1006,6 @@ let transition_to_yojson = function
       [ "kind", `String "cancel_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson cancellation.source
       ; "source_incarnation", int64_json cancellation.source_incarnation
-      ; "owner_nonce", `Int cancellation.owner_nonce
       ; "operator_operation_id", `String cancellation.operator_operation_id
       ; "reason", `String cancellation.reason
       ]
@@ -1050,11 +1014,9 @@ let transition_to_yojson = function
       [ "kind", `String "transfer_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
       ; "source_incarnation", int64_json transfer.source_incarnation
-      ; "owner_nonce", `Int transfer.owner_nonce
       ; "operator_operation_id", `String transfer.operator_operation_id
       ; "from_keeper", `String transfer.from_keeper
       ; "to_keeper", `String transfer.to_keeper
-      ; "target_generation", `Int transfer.target_generation
       ; "target_trace_id", `String (Keeper_id.Trace_id.to_string transfer.target_trace_id)
       ]
   | Ack_source_terminal source_terminal ->
@@ -1062,7 +1024,6 @@ let transition_to_yojson = function
       [ "kind", `String "ack_source_terminal"
       ; "source", Keeper_event_queue.stimulus_to_yojson source_terminal.source
       ; "source_incarnation", int64_json source_terminal.source_incarnation
-      ; "owner_nonce", `Int source_terminal.owner_nonce
       ; "operator_operation_id", `String source_terminal.operator_operation_id
       ]
     in

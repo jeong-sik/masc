@@ -9,7 +9,6 @@
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -17,11 +16,9 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -34,7 +31,6 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }

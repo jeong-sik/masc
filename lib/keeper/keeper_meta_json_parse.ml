@@ -454,8 +454,6 @@ let decode_current_meta fields =
      same bound on every read, so the bound is carried here rather than
      relaxed. Absence is already rejected because [int_field] goes through
      [required_field]. *)
-  else if nonce < 1
-  then invalidf "persisted keeper generation must be a positive integer"
   else if
     not
       (String.equal

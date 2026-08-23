@@ -78,7 +78,6 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
-  turn_generation : int;
   checkpoint_bytes : int;
   message_count : int;
 }
@@ -247,7 +246,6 @@ let dispatch_post_turn_lifecycle_events
         ~keeper_name
         (Keeper_state_machine.Handoff_completed
            {
-             generation = lifecycle.updated_meta.runtime.nonce;
              new_trace_id =
                Keeper_id.Trace_id.to_string
                  lifecycle.updated_meta.runtime.trace_id;

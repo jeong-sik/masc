@@ -239,7 +239,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:ctx0
-            ~generation:nonce
           |> Result.map_error (fun error -> `Write_error error)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e

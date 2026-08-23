@@ -28,7 +28,6 @@ let write
     { execution_ids
     ; keeper = keeper_name
     ; agent_name
-    ; generation
     ; turn_kind
     ; trace_id
     ; absolute_turn

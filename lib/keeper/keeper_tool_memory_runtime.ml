@@ -499,7 +499,6 @@ let upsert_explicit_fact
       ~source:
         { kind = Keeper_memory_os_current.Explicit_write
         ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
         }
       fact
   in

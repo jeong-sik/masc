@@ -46,7 +46,6 @@ val set_turn_context :
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
@@ -167,7 +166,6 @@ val log_call :
   ?parent_tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->

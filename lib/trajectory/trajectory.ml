@@ -49,7 +49,6 @@ type trajectory = {
   scenario_id : string option;      (** None for live runs, Some for eval *)
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
@@ -189,7 +188,6 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
     ("scenario_id", Json_util.string_opt_to_json t.scenario_id);
     ("keeper_name", `String t.keeper_name);
     ("trace_id", `String t.trace_id);
-    ("generation", `Int t.generation);
     ("started_at", `Float t.started_at);
     ("ended_at", `Float t.ended_at);
     ("total_turns", `Int t.total_turns);
@@ -492,7 +490,6 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("type", `String "trajectory_summary");
     ("keeper_name", `String traj.keeper_name);
     ("trace_id", `String traj.trace_id);
-    ("generation", `Int traj.generation);
     ("total_turns", `Int traj.total_turns);
     ("total_tool_calls", `Int traj.total_tool_calls);
     ("outcome", outcome_to_json traj.outcome);
@@ -525,7 +522,6 @@ type accumulator = {
   mutable turn : int;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
@@ -551,14 +547,13 @@ let unregister_accumulator (acc : accumulator) =
   Stdlib.Mutex.protect active_acc_mu (fun () ->
     Hashtbl.remove active_accumulators (acc.keeper_name, acc.trace_id))
 
-let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~generation () : accumulator =
+let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id () : accumulator =
   let acc = {
     entries = [];
     total_calls = 0;
     turn = 0;
     keeper_name;
     trace_id;
-    generation;
     started_at = Time_compat.now ();
     masc_root;
     task_id = None;
@@ -650,7 +645,6 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
     scenario_id = None;
     keeper_name = acc.keeper_name;
     trace_id = acc.trace_id;
-    generation = acc.generation;
     started_at = acc.started_at;
     ended_at = Time_compat.now ();
     entries = List.rev acc.entries;

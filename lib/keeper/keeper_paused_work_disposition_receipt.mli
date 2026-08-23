@@ -28,7 +28,6 @@ type operation =
 type t =
   { keeper_name : string
   ; expected_trace_id : Keeper_id.Trace_id.t
-  ; expected_generation : int
   ; operator_operation_id : string
   ; requested_at : float
   ; operation : operation

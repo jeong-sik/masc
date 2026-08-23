@@ -85,7 +85,6 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
           key = Some key;
           value = Some value;
           expires_at = Time_compat.now () +. ttl_s;
-          generation = cache.generation;
         }
       in
       if Atomic.compare_and_set cache_ref cache next then value
@@ -138,7 +137,6 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
              ; trace_history =
                  Json_util.dedupe_keep_order
                    (previous_trace_id :: meta.runtime.trace_history)
-             ; generation = meta.runtime.nonce + 1
              ; updated_at = Keeper_meta_contract.now_iso ()
              })
       with

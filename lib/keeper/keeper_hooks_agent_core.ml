@@ -542,7 +542,6 @@ let make_hooks
              ~batch_size:schedule.batch_size
              ~execution_mode:schedule.execution_mode
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
-             ?generation:tctx.generation
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id
              ?task_id:tctx.task_id
              ?sandbox_profile:tctx.sandbox_profile
@@ -754,7 +753,6 @@ let make_hooks
                 ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
                 ~turn:(Agent_core.Tool_contract.Invocation.turn invocation)
                 ?trace_id:tctx.trace_id ?session_id:tctx.session_id
-                ?generation:tctx.generation
                 ?keeper_turn_id:tctx.keeper_turn_id
                 ?task_id:tctx.task_id
                 ~result_bytes:(String.length error)

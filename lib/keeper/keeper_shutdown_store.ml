@@ -400,7 +400,6 @@ let to_json operation =
     ; "keeper_name", `String operation.keeper_name
     ; "lane_ownership", lane_ownership_to_json operation.lane_ownership
     ; "trace_id", `String (Keeper_id.Trace_id.to_string operation.trace_id)
-    ; "generation", `Int operation.generation
     ; "actor", `String operation.actor
     ; ( "cleanup_intent"
       , `Assoc
@@ -765,7 +764,6 @@ let of_json json =
       ; keeper_name
       ; lane_ownership
       ; trace_id
-      ; generation
       ; actor
       ; cleanup_intent = { reason; remove_session }
       ; turn_disposition

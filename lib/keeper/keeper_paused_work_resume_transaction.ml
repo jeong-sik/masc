@@ -1,7 +1,4 @@
-type request =
-  { owner_nonce : int
-  ; operator_operation_id : string
-  }
+type request = { operator_operation_id : string }
 
 type projection_stage =
   | Durable_meta
@@ -16,17 +13,9 @@ type failure =
   | Receipt_write_failed of string
   | Durable_meta_read_failed of string
   | Durable_meta_missing
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
   | Registry_owner_missing
-  | Registry_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Registry_owner_identity_changed
   | Registry_owner_not_paused of Keeper_state_machine.phase
   | Projection_failed of
@@ -70,26 +59,15 @@ let failure_to_string = function
   | Receipt_read_failed detail -> "Resume_owner receipt read failed: " ^ detail
   | Receipt_conflict receipt ->
     Printf.sprintf
-      "Resume_owner operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
+      "Resume_owner operation ID conflicts with keeper=%s requested_at=%.17g"
       receipt.keeper_name
-      receipt.expected_generation
       receipt.requested_at
   | Receipt_write_failed detail -> "Resume_owner receipt write failed: " ^ detail
   | Durable_meta_read_failed detail -> "Resume_owner durable meta read failed: " ^ detail
   | Durable_meta_missing -> "Resume_owner durable Keeper metadata is missing"
-  | Durable_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Resume_owner durable generation changed: expected %d, actual %d"
-      expected
-      actual
   | Durable_owner_identity_changed -> "Resume_owner durable trace identity changed"
   | Durable_owner_not_paused -> "Resume_owner requires a durably paused Keeper"
   | Registry_owner_missing -> "Resume_owner requires the exact registered Keeper lane"
-  | Registry_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Resume_owner registry generation changed: expected %d, actual %d"
-      expected
-      actual
   | Registry_owner_identity_changed -> "Resume_owner registry trace identity changed"
   | Registry_owner_not_paused phase ->
     Printf.sprintf
@@ -118,16 +96,13 @@ let error_to_string error =
 ;;
 
 let validate_request request =
-  if request.owner_nonce < 0
-  then Error "owner generation must not be negative"
-  else if String.equal (String.trim request.operator_operation_id) ""
+  if String.equal (String.trim request.operator_operation_id) ""
   then Error "operator operation ID must not be empty"
   else Ok ()
 ;;
 
 let receipt_matches_request ~keeper_name request receipt =
   String.equal receipt.Keeper_paused_work_disposition_receipt.keeper_name keeper_name
-  && Int.equal receipt.expected_generation request.owner_nonce
   && String.equal receipt.operator_operation_id request.operator_operation_id
   && receipt.operation = Keeper_paused_work_disposition_receipt.Resume_owner
 ;;
@@ -176,12 +151,6 @@ let registered_owner_opt config receipt =
       receipt.Keeper_paused_work_disposition_receipt.keeper_name
   with
   | None -> Ok None
-  | Some entry when entry.meta.runtime.nonce <> receipt.expected_generation ->
-    Error
-      (Registry_owner_nonce_changed
-         { expected = receipt.expected_generation
-         ; actual = entry.meta.runtime.nonce
-         })
   | Some entry
     when not
            (Keeper_id.Trace_id.equal
@@ -271,7 +240,6 @@ let create_receipt config ~keeper_name request =
   let receipt : Keeper_paused_work_disposition_receipt.t =
     { keeper_name
     ; expected_trace_id = current.runtime.trace_id
-    ; expected_generation = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; requested_at = Time_compat.now ()
     ; operation = Keeper_paused_work_disposition_receipt.Resume_owner
@@ -330,7 +298,6 @@ let resume config ~keeper_name request =
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name
-         ~expected_generation:request.owner_nonce
          ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
      with
      | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->

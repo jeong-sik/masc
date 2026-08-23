@@ -17,7 +17,6 @@ type task = {
 type keeper = {
   k_name : string;
   k_trace_id : string;
-  k_generation : int;
   k_paused : bool;
   k_current_task_id : string option;
   k_total_turns : int;
@@ -357,7 +356,6 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   {
     k_name = meta.name;
     k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
-    k_generation = runtime.nonce;
     k_paused = meta.paused;
     k_current_task_id =
       Option.map Keeper_id.Task_id.to_string meta.current_task_id;

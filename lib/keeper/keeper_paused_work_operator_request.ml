@@ -50,7 +50,6 @@ let nonnegative_int64 field value =
 let parse_resume = function
   | [ ("operation", `String "resume_owner")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ]
     when String.equal request_schema schema ->
@@ -65,7 +64,6 @@ let parse_resume = function
 let parse_cancel_pending = function
   | [ ("operation", `String "cancel_accepted")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("reason", `String reason)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
@@ -97,11 +95,9 @@ let parse_transfer = function
   | [ ("continuation_binding", continuation_binding_json)
     ; ("operation", `String "transfer_owner")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
     ; ("source_incarnation", source_incarnation_json)
-    ; ("target_generation", `Int target_generation)
     ; ("to_keeper", `String to_keeper)
     ]
     when String.equal request_schema schema ->
@@ -136,7 +132,6 @@ let parse_transfer = function
 let parse_source_terminal = function
   | [ ("operation", `String "ack_source_terminal")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
     ; ("source_incarnation", source_incarnation_json)

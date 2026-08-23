@@ -1079,16 +1079,10 @@ type parsed_bulk_directive =
   | Bulk_resume_owner of bulk_resume_target list
 
 let required_resume_owner_request json =
-  match
-    Safe_ops.json_int_opt "owner_nonce" json,
-    Safe_ops.json_string_opt "operator_operation_id" json
-  with
-  | Some owner_nonce, Some operator_operation_id ->
-    Ok
-      Keeper_paused_work_resume_transaction.
-        { owner_nonce; operator_operation_id }
-  | None, _ -> Error "resume requires integer \"owner_nonce\""
-  | _, None -> Error "resume requires string \"operator_operation_id\""
+  match Safe_ops.json_string_opt "operator_operation_id" json with
+  | Some operator_operation_id ->
+    Ok Keeper_paused_work_resume_transaction.{ operator_operation_id }
+  | None -> Error "resume requires string \"operator_operation_id\""
 
 let parse_keeper_directive_json json =
   (* STR-OK: HTTP boundary parse of the untrusted wire "action" field into a
@@ -1183,7 +1177,7 @@ module For_testing = struct
   let parse_resume_request json =
     match parse_keeper_directive_json json with
     | Ok (Resume_owner request) ->
-      Ok (request.owner_nonce, request.operator_operation_id)
+      Ok request.operator_operation_id
     | Ok (Plain_directive _) -> Error "request is not Resume_owner"
     | Error _ as error -> error
   ;;
@@ -1194,9 +1188,7 @@ module For_testing = struct
       Ok
         (List.map
            (fun target ->
-              ( target.name
-              , target.request.owner_nonce
-              , target.request.operator_operation_id ))
+              (target.name, target.request.operator_operation_id))
            targets)
     | Ok (Bulk_plain _) -> Error "request is not bulk Resume_owner"
     | Error _ as error -> error
@@ -1214,10 +1206,8 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Durable_meta_missing -> `Not_found
   | Reservation_conflict _
   | Receipt_conflict _
-  | Durable_owner_nonce_changed _
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Registry_owner_nonce_changed _
   | Registry_owner_identity_changed
   | Registry_owner_not_paused _ -> `Conflict
   | Receipt_lock_failed _
@@ -1232,7 +1222,6 @@ let resume_receipt_json
   `Assoc
     [ "keeper_name", `String receipt.keeper_name
     ; "expected_trace_id", `String (Keeper_id.Trace_id.to_string receipt.expected_trace_id)
-    ; "expected_generation", `Int receipt.expected_generation
     ; "operator_operation_id", `String receipt.operator_operation_id
     ; "requested_at", `Float receipt.requested_at
     ; "operation", `String "resume_owner"

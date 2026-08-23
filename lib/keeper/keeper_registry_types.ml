@@ -121,7 +121,6 @@ type lifecycle_transaction_purpose =
 
 type lifecycle_reservation_snapshot =
   { owner_id : string
-  ; expected_generation : int
   ; purpose : lifecycle_transaction_purpose
   }
 

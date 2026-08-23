@@ -37,7 +37,6 @@ type 'a observed_change =
 
 type turn_runtime_delta =
   { expected_trace_id : Keeper_id.Trace_id.t
-  ; expected_generation : int
   ; usage : usage_delta
   ; counters : turn_counter_deltas
   ; next_keeper_id : Keeper_id.Uid.t option
@@ -169,7 +168,7 @@ type error =
       { expected : string
       ; actual : string
       }
-  | Identity_generation_mismatch
+  | Identity_mismatch
   | Snapshot_changed
 
 val turn_runtime_delta_of_snapshots

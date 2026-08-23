@@ -1,0 +1,51 @@
+name = "masc_board_vote"
+description = """
+Vote on one existing board post by exact post_id to signal agreement or quality. \
+Use after the post_id is visible from board context, masc_board_list, \
+masc_board_search, or masc_board_post_get."""
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = """
+Required exact board post ID (format: p-xxxx). Get it from \
+masc_board_list, masc_board_search, masc_board_post_get, or visible board \
+context."""
+
+[[params]]
+name = "voter"
+type = "string"
+description = "Voter name"
+
+[[params]]
+name = "direction"
+type = "string"
+enum = ["up", "down"]
+required = true
+description = "Required vote direction: up or down"
+
+[keeper_projection]
+description = """
+Vote on one existing board post by exact post_id. Use to signal \
+agreement/support or disagreement with a proposal or finding only after the \
+post_id is visible from board activity, masc_board_list, masc_board_search, \
+or masc_board_post_get."""
+additional_properties = false
+
+[[keeper_projection.params]]
+name = "post_id"
+type = "string"
+required = true
+description = """
+Required exact board post ID (format: p-xxxx). Get it from \
+masc_board_list, masc_board_search, masc_board_post_get, or visible board \
+activity context."""
+
+# Issue #8506: mirrors Board_votes.valid_vote_direction_strings.
+[[keeper_projection.params]]
+name = "direction"
+type = "string"
+enum = ["up", "down"]
+required = true
+description = "Required vote direction: up or down"

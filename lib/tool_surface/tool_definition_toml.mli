@@ -16,10 +16,19 @@
 
     Definitions are read once at boot; there is no hot reload (RFC §6). *)
 
+type loaded =
+  { schema : Masc_domain.tool_schema
+  ; keeper_projection : Masc_domain.tool_schema option
+  }
+(** One decoded tool definition. [schema] is the canonical schema published
+    to MCP clients; [keeper_projection], when the file declares a
+    [keeper_projection] table, is the deliberately narrower shape handed to
+    keeper models (same tool name, own description and params). *)
+
 val load
   :  name:string
   -> contents:string
-  -> (Masc_domain.tool_schema, string) result
+  -> (loaded, string) result
 (** [load ~name ~contents] parses [contents] as one tool definition.
 
     [name] is the canonical tool name the caller derives from the file path
@@ -27,15 +36,16 @@ val load
     renamed file cannot silently redefine a different tool.
 
     Accepted top-level keys: [name], [description] (non-empty),
-    [additional_properties] (bool), and [[params]]. Accepted param keys:
-    [name], [type] (string | integer | number | boolean | object | array),
-    [required] (bool), [description], [enum] (non-empty string list, string
-    params only), [default] (matching the declared scalar type), [minimum] /
-    [maximum] (integer params only), [max_length] / [pattern] (string params
-    only), and [items] (array params only; an items table carries [type] and,
-    for object items, nested [params] restricted to [name] / [type] /
-    [description]). Everything else is an [Error] naming the offending
-    key or value. *)
+    [additional_properties] (bool), [[params]], and [keeper_projection]
+    (a table of [description] / [additional_properties] / [[params]]).
+    Accepted param keys: [name], [type] (string | integer | number |
+    boolean | object | array), [required] (bool), [description], [enum]
+    (non-empty string list, string params only), [default] (matching the
+    declared scalar type), [minimum] / [maximum] (integer params only),
+    [max_length] / [pattern] (string params only), and [items] (array
+    params only; an items table carries [type] and, for object items,
+    nested [params] restricted to [name] / [type] / [description]).
+    Everything else is an [Error] naming the offending key or value. *)
 
 val validate_embedded
   :  read:(string -> string option)

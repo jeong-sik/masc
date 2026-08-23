@@ -42,8 +42,12 @@
   time_compat
   fs_compat
   yojson
-  ; Tool_definition_toml parses config/tools/<name>.toml declarations.
+  ; Tool_definition_toml parses config/tools/<name>.toml declarations, and
+  ; the board keeper projections read them from the binary-embedded config
+  ; tree. embedded_config is generated data with no masc dependencies, so
+  ; the leaf constraint above still holds.
   otoml
+  masc.embedded_config
   eio
   unix)
  (preprocess

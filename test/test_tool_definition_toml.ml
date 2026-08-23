@@ -22,8 +22,20 @@ let json_string (schema : Masc_domain.tool_schema) =
 
 let check_loads ~name ~contents (expected : Masc_domain.tool_schema) =
   match Tool_definition_toml.load ~name ~contents with
-  | Ok actual -> check string "schema JSON" (json_string expected) (json_string actual)
+  | Ok { Tool_definition_toml.schema; keeper_projection } ->
+    check string "schema JSON" (json_string expected) (json_string schema);
+    check bool "no keeper projection" true (Option.is_none keeper_projection)
   | Error message -> failf "expected a schema, got error: %s" message
+;;
+
+let check_loads_keeper_projection ~name ~contents (expected : Masc_domain.tool_schema) =
+  match Tool_definition_toml.load ~name ~contents with
+  | Ok { Tool_definition_toml.keeper_projection = Some projection; _ } ->
+    check string "keeper projection JSON" (json_string expected)
+      (json_string projection)
+  | Ok { Tool_definition_toml.keeper_projection = None; _ } ->
+    fail "expected a keeper projection, got none"
+  | Error message -> failf "expected a keeper projection, got error: %s" message
 ;;
 
 let contains ~needle haystack =
@@ -35,8 +47,9 @@ let contains ~needle haystack =
 
 let check_rejects ~name ~contents needle =
   match Tool_definition_toml.load ~name ~contents with
-  | Ok (schema : Masc_domain.tool_schema) ->
-    failf "expected an error mentioning %S, got schema %s" needle schema.name
+  | Ok { Tool_definition_toml.schema; _ } ->
+    failf "expected an error mentioning %S, got schema %s" needle
+      schema.Masc_domain.name
   | Error message ->
     check bool
       (Printf.sprintf "error %S mentions %S" message needle)
@@ -273,9 +286,93 @@ default = 20
     (load description_first)
 ;;
 
-(* ── Rejections ───────────────────────────────────────────────────────── *)
-
 let minimal name = Printf.sprintf "name = %S\ndescription = \"d.\"\n" name
+
+(* A [keeper_projection] table yields a second schema under the same tool
+   name: own description, own params, own additionalProperties. *)
+let keeper_projection_toml =
+  {|name = "masc_example_vote"
+description = "Vote a board post up or down."
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = "Exact board post ID."
+
+[keeper_projection]
+description = "Vote on one existing board post by exact post_id."
+additional_properties = false
+
+[[keeper_projection.params]]
+name = "post_id"
+type = "string"
+required = true
+description = "Required exact board post ID (format: p-xxxx)."
+
+[[keeper_projection.params]]
+name = "direction"
+type = "string"
+enum = ["up", "down"]
+required = true
+description = "Required vote direction: up or down"
+|}
+;;
+
+let test_keeper_projection_round_trip () =
+  check_loads_keeper_projection ~name:"masc_example_vote"
+    ~contents:keeper_projection_toml
+    { name = "masc_example_vote"
+    ; description = "Vote on one existing board post by exact post_id."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "post_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String "Required exact board post ID (format: p-xxxx)." )
+                      ] )
+                ; ( "direction"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "enum", `List [ `String "up"; `String "down" ]
+                      ; ( "description"
+                        , `String "Required vote direction: up or down" )
+                      ] )
+                ] )
+          ; "required", `List [ `String "post_id"; `String "direction" ]
+          ; "additionalProperties", `Bool false
+          ]
+    };
+  (* The canonical schema of the same file is unaffected by the table. *)
+  match
+    Tool_definition_toml.load ~name:"masc_example_vote"
+      ~contents:keeper_projection_toml
+  with
+  | Ok { Tool_definition_toml.schema; _ } ->
+    check string "canonical description" "Vote a board post up or down."
+      schema.Masc_domain.description
+  | Error message -> failf "expected a schema, got error: %s" message
+;;
+
+let test_keeper_projection_rejections () =
+  check_rejects ~name:"t"
+    ~contents:
+      (minimal "t" ^ "[keeper_projection]\nadditional_properties = false\n")
+    "keeper_projection is missing the required key \"description\"";
+  check_rejects ~name:"t"
+    ~contents:
+      (minimal "t" ^ "[keeper_projection]\ndescription = \"d.\"\nvisibility = \"model\"\n")
+    "keeper_projection: unknown key \"visibility\"";
+  check_rejects ~name:"t"
+    ~contents:(minimal "t" ^ "keeper_projection = \"board\"\n")
+    "must be a table"
+;;
+
+(* ── Rejections ───────────────────────────────────────────────────────── *)
 
 let test_rejections () =
   check_rejects ~name:"t" ~contents:"name = \"t\"\n" "description";
@@ -428,6 +525,10 @@ let () =
             test_no_params_yields_empty_properties
         ; test_case "published JSON preserves the author's key order" `Quick
             test_key_order_is_preserved
+        ; test_case "keeper_projection table yields the keeper schema" `Quick
+            test_keeper_projection_round_trip
+        ; test_case "keeper_projection decode is fail-closed" `Quick
+            test_keeper_projection_rejections
         ; test_case "unknown keys, values, and missing keys reject" `Quick
             test_rejections
         ] )

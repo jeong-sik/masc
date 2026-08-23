@@ -1,0 +1,14 @@
+name = "masc_board_curation_read"
+description = """
+Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, \
+highlights, tag suggestions, answer matches, rationale, and operator-auditable \
+provenance. Returns null when no snapshot has been submitted \
+yet."""
+
+[keeper_projection]
+description = """
+Read the latest AI curation snapshot for the board, including summary, \
+recommended ordering, highlights, tag suggestions, answer matches, health \
+score, rationale, and provenance. Returns null when no snapshot has been \
+submitted yet."""
+additional_properties = false

@@ -1,8 +1,5 @@
 (** Tool_shard_types — pure Keeper schema families and enum-string mirrors. *)
 
-val sort_order_enum_strings : string list
-(** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
-
 val memory_search_source_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_memory_runtime.valid_memory_search_source_strings]
     (#8484). *)
@@ -10,9 +7,6 @@ val memory_search_source_enum_strings : string list
 val fs_write_mode_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]
     (#8490). *)
-
-val vote_direction_enum_strings : string list
-(** Hand-mirrored from [Board_votes.valid_vote_direction_strings] (#8506). *)
 
 (** {1 Schema selection} *)
 

@@ -217,8 +217,15 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
   in
   check bool "section header states the depth" true
     (contains ~needle:"### Your Recent Actions (1 turns)" user);
+  (* Named, not replayed: a call that succeeded needs to say it happened so the
+     turn does not repeat it, and the arguments add nothing to that. #29701
+     dropped them after a turn's own history filled a 131,072-byte model input
+     and the keeper refused every turn for eight hours. The rejected call below
+     still carries its arguments, because there the argument is the reason. *)
   check bool "the work it already did is stated" true
-    (contains ~needle:{|- [turn 27486] keeper_board_post {"title":"status"} -> ok|} user);
+    (contains ~needle:{|- [turn 27486] keeper_board_post -> ok|} user);
+  check bool "a call that succeeded does not replay its arguments" false
+    (contains ~needle:{|{"title":"status"}|} user);
   check bool "the rejected call is stated with its arguments" true
     (contains ~needle:{|keeper_broadcast {} -> REJECTED: "message": MISSING|} user);
   check bool "rows are marked as context" true

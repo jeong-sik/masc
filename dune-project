@@ -49,7 +49,15 @@
   ; Standard dependencies
   (re (>= 1.10))
   (ptime (>= 1.2))
-  (yojson (>= 3.0))
+  ; Upper bound, not just a floor. yojson 3.0 landed through a floor-only
+  ; constraint on a cache miss and broke every build on main (#28327); the
+  ; repair raised the floor and left 3 -> 4 open (#28543). --locked pins the
+  ; exact version now, so this is the answer for anything that resolves
+  ; without the lock.
+  (yojson
+   (and
+    (>= 3.0)
+    (< 4.0)))
   (otoml (>= 1.0))
   (graphql (>= 0.14.0))
   (graphql_parser (>= 0.14.0))

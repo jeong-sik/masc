@@ -47,8 +47,14 @@ run_opam_install_attempt() {
   echo "Starting opam install attempt ${attempt}/3 (timeout: ${INSTALL_TIMEOUT_MINUTES}m)"
 
   set +e
+  # --locked: install what masc.opam.locked pins, not whatever the solver picks
+  # today from masc.opam's lower bounds. Without it, yojson 3.0 arrived on a
+  # cache miss and broke every build on main (#28327); the same door stands
+  # open for the next major bump, and it opens at cache expiry rather than at
+  # a commit anyone can point at (#28543). The keeper-sandbox image already
+  # built from the lock, so CI and the sandbox could resolve different graphs.
   timeout --signal=TERM --kill-after=60s "${INSTALL_TIMEOUT_MINUTES}m" \
-    opam install . --deps-only "${install_args[@]}" --yes &
+    opam install . --deps-only --locked "${install_args[@]}" --yes &
   opam_pid=$!
   (
     while kill -0 "${opam_pid}" 2>/dev/null; do

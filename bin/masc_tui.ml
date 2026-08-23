@@ -2336,7 +2336,15 @@ let main () =
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
                  | Planning_list -> ())
-            | Overview | Keepers Keeper_list | Approvals | System_logs -> ())
+            | Overview ->
+                (* Back out one level: an open task detail closes to the panel,
+                   a focused task panel hands j/k back to the event log. *)
+                if Option.is_some state.task_detail_id then begin
+                  state.task_detail_id <- None;
+                  state.task_detail_scroll <- 0
+                end
+                else state.task_focus <- false
+            | Keepers Keeper_list | Approvals | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -2380,14 +2388,22 @@ let main () =
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
             | Overview ->
-                let _, _, row_budget =
-                  overview_layout state ~terminal_rows
-                in
-                state.overview_event_scroll <-
-                  Render_schedule.scroll_overview_events_older
-                    ~event_count:(List.length state.events)
-                    ~visible_rows:row_budget.attention_rows
-                    state.overview_event_scroll
+                if Option.is_some state.task_detail_id then
+                  state.task_detail_scroll <- state.task_detail_scroll + 1
+                else if state.task_focus then begin
+                  if state.task_cursor < List.length state.tasks - 1 then
+                    state.task_cursor <- state.task_cursor + 1
+                end
+                else begin
+                  let _, _, row_budget =
+                    overview_layout state ~terminal_rows
+                  in
+                  state.overview_event_scroll <-
+                    Render_schedule.scroll_overview_events_older
+                      ~event_count:(List.length state.events)
+                      ~visible_rows:row_budget.attention_rows
+                      state.overview_event_scroll
+                end
             | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
@@ -2430,14 +2446,24 @@ let main () =
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
             | Overview ->
-                let _, _, row_budget =
-                  overview_layout state ~terminal_rows
-                in
-                state.overview_event_scroll <-
-                  Render_schedule.scroll_overview_events_newer
-                    ~event_count:(List.length state.events)
-                    ~visible_rows:row_budget.attention_rows
-                    state.overview_event_scroll
+                if Option.is_some state.task_detail_id then begin
+                  if state.task_detail_scroll > 0 then
+                    state.task_detail_scroll <- state.task_detail_scroll - 1
+                end
+                else if state.task_focus then begin
+                  if state.task_cursor > 0 then
+                    state.task_cursor <- state.task_cursor - 1
+                end
+                else begin
+                  let _, _, row_budget =
+                    overview_layout state ~terminal_rows
+                  in
+                  state.overview_event_scroll <-
+                    Render_schedule.scroll_overview_events_newer
+                      ~event_count:(List.length state.events)
+                      ~visible_rows:row_budget.attention_rows
+                      state.overview_event_scroll
+                end
             | System_logs ->
                 if state.system_logs_scroll > 0 then
                   state.system_logs_scroll <- state.system_logs_scroll - 1
@@ -2445,6 +2471,15 @@ let main () =
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
+            | Overview ->
+                (* Only under task focus: Enter while the events own j/k would
+                   open whatever row the cursor happens to rest on. *)
+                if state.task_focus then
+                  (match List.nth_opt state.tasks state.task_cursor with
+                   | Some task ->
+                       state.task_detail_id <- Some task.id;
+                       state.task_detail_scroll <- 0
+                   | None -> ())
             | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some k ->
@@ -2481,8 +2516,17 @@ let main () =
                           state.planning_scroll <- 0
                       | None -> ())
                  | Planning_detail _ -> ())
-            | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
+            | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
             | Approvals | System_logs -> ())
+       | Some "t" | Some "T" ->
+           (* Focus the Overview task panel. The list is always on screen, but
+              j/k belong to the event log until the operator asks for tasks. *)
+           (match state.view with
+            | Overview when Option.is_none state.task_detail_id ->
+                state.task_focus <- not state.task_focus;
+                if not state.task_focus then state.task_cursor <- 0
+            | Overview | Keepers _ | Board | Approvals | Planning
+            | System_logs -> ())
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the

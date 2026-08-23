@@ -943,8 +943,20 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
        check int "tool effect is not replayed" 1 !call_count;
        let state = load_state base_path in
        match state.phase with
-       | Recovery_required { failure = Provider_rejected; _ } -> ()
-       | _ -> fail "post-effect context overflow did not retain recovery evidence")
+       | Recovery_required
+           { failure =
+               Input_rejected
+                 Keeper_official_client_session_store.Effect_fenced
+           ; _
+           } -> ()
+       | phase ->
+         fail
+           ("post-effect context overflow did not durably fence the input: "
+            ^ (match phase with
+               | Recovery_required { failure; _ } ->
+                 Keeper_official_client_session_store
+                 .recovery_failure_to_string failure
+               | _ -> "not-in-recovery")))
 ;;
 
 let test_keeper_settles_and_resumes () =
@@ -1294,6 +1306,35 @@ let test_repeated_tool_stop_preserves_terminal_hook_failure () =
                 "post-tool fixture terminal failure")))
 ;;
 
+(* The activity axis decides which admission fence the durable session gets:
+   an overflow with any observed activity is effect-fenced, an activity-free
+   overflow that exhausted the in-run shrink floor is floor-exceeded. Both
+   must stop the next cycle from replaying the same over-capacity input. *)
+let test_context_overflow_maps_to_input_rejected_recovery () =
+  let map = Keeper_claude_code_runtime.For_testing.recovery_failure_of_client_error in
+  let overflow ~tool_effect_attempted ~response_emitted =
+    Runtime_claude_code.Context_window_exceeded
+      { message = "Prompt is too long"; tool_effect_attempted; response_emitted }
+  in
+  check bool "no-activity overflow is floor-exceeded"
+    (map (overflow ~tool_effect_attempted:false ~response_emitted:false)
+    = Keeper_official_client_session_store.(
+         Input_rejected Bootstrap_floor_exceeded))
+    true;
+  check bool "response observed is effect-fenced"
+    (map (overflow ~tool_effect_attempted:false ~response_emitted:true)
+    = Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true;
+  check bool "tool effect observed is effect-fenced"
+    (map (overflow ~tool_effect_attempted:true ~response_emitted:false)
+    = Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true;
+  check bool "other provider rejections stay generic"
+    (map (Runtime_claude_code.Subscription_required "auth required")
+    = Keeper_official_client_session_store.Provider_rejected)
+    true
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
@@ -1328,6 +1369,10 @@ let () =
             "does not retry context error after tool effect"
             `Quick
             test_keeper_does_not_retry_context_error_after_tool_effect
+        ; test_case
+            "context overflow maps to input-rejected recovery"
+            `Quick
+            test_context_overflow_maps_to_input_rejected_recovery
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
         ; test_case
             "spawn failure releases claim"

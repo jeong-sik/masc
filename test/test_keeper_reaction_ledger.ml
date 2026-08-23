@@ -110,7 +110,7 @@ let write_file path content =
 let event_queue_snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v15.json"
+    "event-queue-v16.json"
 ;;
 
 let reaction_ledger_dir ~base_path ~keeper_name =
@@ -470,7 +470,7 @@ let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
   in
   mkdir_p invalid_keeper_dir;
   write_file
-    (Filename.concat invalid_keeper_dir "event-queue-v15.json")
+    (Filename.concat invalid_keeper_dir "event-queue-v16.json")
     (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json

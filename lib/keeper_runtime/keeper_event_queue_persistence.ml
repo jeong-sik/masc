@@ -79,7 +79,7 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v15.json"
+let snapshot_filename = "event-queue-v16.json"
 let transition_wal_filename = "event-queue-transitions-v6.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
@@ -803,7 +803,7 @@ let commit_transform_unlocked
              (* [load_state_unlocked] above replayed the transition WAL, so
                 [next] already carries that transition's pending mutation and
                 its transition outbox, and the snapshot just written persists
-                both (schema v15). Retire the WAL here, paired with the revision
+                both (schema v16). Retire the WAL here, paired with the revision
                 bump that absorbed it. Leaving it behind is what latches the
                 owner: the next load replays an already-absorbed row against
                 the advanced revision, [commit_transition] rejects it on

@@ -130,13 +130,13 @@ run_gate() {
         --keeper-name "$keeper_name" \
         || fail "current queue snapshot or transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v15.json' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v16.json' -print0)
 
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
         || fail "current transition WAL is not an exact regular file: $queue_path"
-      if [[ -e "$(dirname "$queue_path")/event-queue-v15.json" \
-            || -L "$(dirname "$queue_path")/event-queue-v15.json" ]]; then
+      if [[ -e "$(dirname "$queue_path")/event-queue-v16.json" \
+            || -L "$(dirname "$queue_path")/event-queue-v16.json" ]]; then
         continue
       fi
       keeper_name="${queue_path%/*}"
@@ -260,11 +260,11 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     local queue_dir="$target_root/.masc/keepers/fixture"
     mkdir -p "$queue_dir"
     jq -n '
-      {schema: "keeper.event_queue.state.v15", revision: 1,
+      {schema: "keeper.event_queue.state.v16", revision: 1,
        pending: [], last_transition: null,
        projected_dispositions: [], transition_outbox: [],
        accepted_transfer_projections: []}
-    ' >"$queue_dir/event-queue-v15.json"
+    ' >"$queue_dir/event-queue-v16.json"
   }
 
   expect_failure() {
@@ -377,7 +377,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   # The two malformed-wal cases below prepare it the same way.
   mkdir -p "$malformed_current_root/.masc/keepers/fixture"
   printf '{not-json\n' \
-    >"$malformed_current_root/.masc/keepers/fixture/event-queue-v15.json"
+    >"$malformed_current_root/.masc/keepers/fixture/event-queue-v16.json"
   expect_failure malformed_current_queue "$malformed_current_root"
 
   malformed_current_wal_root="$fixture_root/malformed-current-wal"

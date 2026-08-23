@@ -830,6 +830,7 @@ function ConnectorLivePanel({
         pills=${deriveRail(
           {
             sidecarUp: connector?.available === true,
+            hasSidecarProcess: !isInProcessConnector(connectorId),
             gateHealthy: connector?.gate_healthy ?? null,
             bindingCount: configuredBindings.length,
             keeperCount: keepers.length,

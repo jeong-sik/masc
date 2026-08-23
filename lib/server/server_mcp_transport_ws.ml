@@ -406,8 +406,9 @@ let valid_dashboard_slice = function
   | _ -> false
 
 let dashboard_slice_for_sse_type = function
-  | "project_snapshot" | "namespace_truth_snapshot" ->
-      Some "namespace"
+  (* "namespace_truth_snapshot" was accepted here alongside the canonical name
+     while both were broadcast. Only one is now (#27664). *)
+  | "project_snapshot" -> Some "namespace"
   | "execution_snapshot" ->
       Some "execution"
   | "operator_snapshot" | "operator_digest" ->

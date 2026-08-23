@@ -57,7 +57,6 @@ const BACKEND_EMITTED: Record<string, string> = {
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
   keeper_turn_complete: '../lib/keeper/keeper_hooks_agent_core.ml',
   agent_core_telemetry_sample: '../lib/runtime/dashboard_agent_core_bridge.ml',
-  namespace_truth_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
   operator_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   post_created: '../lib/keeper_runtime/keeper_event_queue.ml',

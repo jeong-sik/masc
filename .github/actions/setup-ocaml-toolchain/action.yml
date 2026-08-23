@@ -43,7 +43,11 @@ runs:
         # 그 안의 ocamlc 는 x86_64 ELF 라 실행되지 않는다. 그 결과
         # `ocamlc -version` 이 빈 문자열이 되어 opam-pin-external-deps.sh 가
         # "OCaml unknown detected" 로 거부한다 (run 32332266041).
-        key: opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v2
+        # masc.opam.locked has to be in the key: it does not match the *.opam
+        # glob, so bumping the lock left every runner restoring a switch built
+        # from the previous one — the file CI installs from was invisible to
+        # the cache that decides whether to install at all (#28543).
+        key: opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v3
         restore-keys: |
           opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
 

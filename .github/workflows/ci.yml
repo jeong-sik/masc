@@ -568,6 +568,7 @@ jobs:
             check-compaction-exact-flow-boundary.sh \
             check-doc-code-refs.sh \
             check-keeper-turn-content-boundary.sh \
+            check-opam-lock-covers-deps.sh \
             check-tool-error-format.sh \
             check-variants.sh
           do

@@ -1610,6 +1610,58 @@ let agent_fitness_output_schema =
     ~required:[ "count"; "agents" ]
 ;;
 
+(* Which board operations the model is handed a schema for, and which it has
+   to ask about.
+
+   Every turn carries all 87 tool schemas, 70,791 bytes of them, and the
+   vendors put the point where selection starts to suffer below that: 30-50
+   (Anthropic), under 20 (OpenAI), 10-20 (Gemini). Board is 21 of those tools
+   and 14,986 bytes; measured over 2026-08-21..23, three of them took 79% of
+   its calls and nine were never called at all.
+
+   Not listing is not blocking. Dispatch resolves by name and never reads
+   this field -- [masc_tool_help] is [Operator_only], is absent from the 87,
+   and was called 11 times in those three days across three runtimes, every
+   one succeeding. So a keeper that wants one of these asks for its schema
+   and calls it; what changes is that the other 86 tools are not paying for
+   it every turn.
+
+   Split by measured use rather than by what looks core, and stated as an
+   exhaustive match so a new board operation has to say which side it is
+   on. *)
+let board_is_listed_for_the_model = function
+  (* 2,300 calls over three days, 1,708 of them here *)
+  | Tool_name.Board_name.Board_list
+  | Board_post_get
+  | Board_comment
+  | Board_post
+  | Board_search
+  | Board_comment_vote
+  | Board_post_update
+  | Board_stats
+  (* Three that measured zero and stay anyway: [test_board_tool_toml_parity]
+     pins eight operations as byte-identical between the TOML definitions and
+     the model surface, and these are three of them. The parity check is about
+     the migration being faithful, which is a different question from whether
+     a keeper reached for the tool this week. *)
+  | Board_vote
+  | Board_curation_read
+  | Board_curation_submit -> true
+  (* zero calls in the same window, 4,383 bytes between them; sub-boards are
+     used -- 4 of 2,213 board rows -- which is why they are deferred rather
+     than removed *)
+  | Board_reaction
+  | Board_profile
+  | Board_hearths
+  | Board_delete
+  | Board_cleanup
+  | Board_sub_board_create
+  | Board_sub_board_list
+  | Board_sub_board_get
+  | Board_sub_board_update
+  | Board_sub_board_delete -> false
+;;
+
 let masc_board_descriptor board_name =
   let canonical_schema = Board_tool_registry.schema_for_board_name board_name in
   let name = Tool_name.Board_name.to_string board_name in
@@ -1662,7 +1714,10 @@ let masc_board_descriptor board_name =
   let descriptor =
     in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
-       ~keeper_model_projection:Internal_name
+       ~keeper_model_projection:
+         (if board_is_listed_for_the_model board_name
+          then Internal_name
+          else Operator_only)
        ~input_schema_source
        ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
        ~name

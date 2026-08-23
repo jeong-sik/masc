@@ -656,10 +656,11 @@ let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
   =
   let agent_name = get_string args "agent_name" "" in
   if String.length agent_name = 0 then
-    Tool_result.make_err
+    error_result_typed
       ~tool_name
-      ~class_:Tool_result.Workflow_rejection
       ~start_time
+      ~failure_class:Tool_result.Workflow_rejection
+      ~code:Validation_error
       "agent_name is required"
   else
     let since_hours = get_float args "since_hours" 24.0 in

@@ -33,7 +33,7 @@ Threshold:
 | MCP `tools/list` tool count | > 0 |
 | `masc_status` read path | PASS |
 | dashboard `mission` read path | PASS |
-| dashboard `namespace-truth` read path | PASS |
+| dashboard `project-snapshot` read path | PASS |
 
 ## Gate 2: Keeper Turn Evidence Chain
 

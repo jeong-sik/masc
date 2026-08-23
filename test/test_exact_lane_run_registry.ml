@@ -326,14 +326,6 @@ let v5_registration_row =
 let v4_registration_row =
   {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
 
-(* Replay drops runs still marked running, because an exact-output fiber does
-   not survive a restart (#26931). So a registration row alone replays to [None]
-   whether it decoded or not, which cannot tell an accepted row from a rejected
-   one. Each row is paired with its completion, giving a decoded row a state
-   that survives and leaving [None] to mean rejection alone. *)
-let completion_row =
-  {|{"event":"complete","id":"exact-board-attention-pin","completion":{"outcome":"succeeded","elapsed_s":1.5,"output":{},"selected_slot":null}}|}
-
 let test_store_version_pins_the_registration_shape () =
   (* Reads the decoder's verdict on the row, not what survives replay. A
      registration that decodes is still dropped from the replayed registry —

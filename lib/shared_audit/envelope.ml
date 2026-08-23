@@ -7,10 +7,9 @@ type t = {
 }
 
 (* ULID-lite: 16 hex chars of timestamp-ms, "-", 20 hex chars of entropy. The
-   shape is unchanged; the entropy used to come from a per-domain
-   [Random.State.make_self_init] this module kept for itself, which is neither
-   the OS CSPRNG the rest of the tree draws from nor the same generator any
-   other ID uses (#26718). *)
+   shape is unchanged; the entropy used to come from a self-seeded generator
+   this module kept for itself, which was neither the OS CSPRNG the rest of the
+   tree draws from nor the source any other ID uses (#26718). *)
 let random_hex_bytes = 10
 
 (* NDT-OK: opaque identifier entropy, never a branch input. *)

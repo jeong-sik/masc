@@ -114,6 +114,37 @@ type system_log_snapshot = {
   sys_latest_seq : int;
 }
 
+type blocked_keeper = {
+  bk_name : string;
+  bk_reason : string;
+  bk_action : string option;
+}
+(** A keeper the fleet wanted to run and could not. [bk_action] is the
+    server's recommended operator step when it names one. *)
+
+type fleet_safety = {
+  fs_status : string;
+  fs_blocker : string option;
+  fs_operator_action_required : bool;
+  fs_bootable_count : int;
+  fs_running_count : int;
+  fs_executable_count : int;
+  fs_failing_count : int;
+  fs_recovering_count : int;
+  fs_paused_count : int;
+  fs_target_reaction_capacity : int;
+  fs_reaction_capacity_shortfall : int;
+  fs_blocked_keepers : blocked_keeper list;
+  fs_active_task_owner_without_fiber_count : int;
+  fs_completion_authority_pending_count : int;
+}
+(** The operator reading of the keeper fleet, as [/health?full=1] reports it.
+
+    Every count here answers "how many keepers are not doing what the fleet
+    intends", which is the question the keeper list cannot answer: that list
+    holds one row per running keeper, so a keeper that failed to start is
+    absent rather than shown as failed. *)
+
 type log_kind =
   | Log_turn
   | Log_heartbeat
@@ -182,6 +213,12 @@ val system_log_level_label : system_log_level -> string
 
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result
+
+val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+(** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
+    A body without the section is an error rather than an empty reading: an
+    absent section and a healthy fleet are different facts, and rendering the
+    second for the first is how a blocked keeper stays invisible. *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

@@ -190,6 +190,31 @@ type planning_backlog = Tui_decode.planning_backlog
   pb_cancelled: int;
 }
 
+type blocked_keeper = Tui_decode.blocked_keeper
+  = {
+  bk_name: string;
+  bk_reason: string;
+  bk_action: string option;
+}
+
+type fleet_safety = Tui_decode.fleet_safety
+  = {
+  fs_status: string;
+  fs_blocker: string option;
+  fs_operator_action_required: bool;
+  fs_bootable_count: int;
+  fs_running_count: int;
+  fs_executable_count: int;
+  fs_failing_count: int;
+  fs_recovering_count: int;
+  fs_paused_count: int;
+  fs_target_reaction_capacity: int;
+  fs_reaction_capacity_shortfall: int;
+  fs_blocked_keepers: blocked_keeper list;
+  fs_active_task_owner_without_fiber_count: int;
+  fs_completion_authority_pending_count: int;
+}
+
 type planning_snapshot = Tui_decode.planning_snapshot
   = {
   pl_goals: planning_goal list;
@@ -239,6 +264,11 @@ type state = {
   mutable overview_event_scroll: int;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* The keeper list holds one row per running keeper, so a keeper that failed
+     to start is absent from it rather than shown as failed. This carries the
+     fleet's own reading of what is missing. *)
+  mutable fleet_safety: fleet_safety option;
+  mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable last_refresh: float;
   mutable view: surface;
@@ -307,6 +337,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   overview_event_scroll = 0;
   keepers = [];
   keepers_error = None;
+  fleet_safety = None;
+  fleet_safety_error = None;
   connection_status = Disconnected;
   last_refresh = 0.0;
   view = Overview;

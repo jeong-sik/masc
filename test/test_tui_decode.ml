@@ -363,6 +363,80 @@ let test_decode_planning_snapshot_rejects_running_alias () =
        (Tui_decode.decode_planning_snapshot
           (planning_snapshot_json ~running_key:"running" ())))
 
+(* The shape the server actually sent while a keeper was failing to start,
+   trimmed to the fields the TUI reads. *)
+let fleet_safety_json ?(blocked = true) () =
+  `Assoc
+    [ ( "keeper_fleet_safety"
+      , `Assoc
+          ([ "status", `String "degraded"
+           ; "blocker", `String "reaction_capacity_below_target"
+           ; "operator_action_required", `Bool true
+           ; "bootable_keeper_count", `Int 10
+           ; "running_keeper_fiber_count", `Int 9
+           ; "executable_keeper_fiber_count", `Int 9
+           ; "failing_keeper_fiber_count", `Int 0
+           ; "recovering_keeper_fiber_count", `Int 0
+           ; "paused_keeper_count", `Int 0
+           ; "target_reaction_capacity_count", `Int 10
+           ; "reaction_capacity_shortfall_count", `Int 1
+           ; "active_task_owner_without_executable_fiber_count", `Int 1
+           ; "completion_authority_pending_task_count", `Int 1
+           ]
+           @
+           if blocked
+           then
+             [ ( "blocked_keepers"
+               , `List
+                   [ `Assoc
+                       [ "keeper_name", `String "sangsu"
+                       ; "reason", `String "materialization_failed"
+                       ; "action", `String "inspect_keeper_autoboot_logs"
+                       ] ] ) ]
+           else []) )
+    ]
+
+let test_decode_fleet_safety_carries_the_blocked_keeper () =
+  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check string) "status" "degraded" fleet.fs_status;
+      Alcotest.(check (option string)) "blocker"
+        (Some "reaction_capacity_below_target") fleet.fs_blocker;
+      Alcotest.(check bool) "operator must act" true
+        fleet.fs_operator_action_required;
+      Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
+      Alcotest.(check int) "running" 9 fleet.fs_running_count;
+      Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
+      Alcotest.(check int) "task owner without fiber" 1
+        fleet.fs_active_task_owner_without_fiber_count;
+      (match fleet.fs_blocked_keepers with
+       | [ blocked ] ->
+           Alcotest.(check string) "blocked name" "sangsu" blocked.bk_name;
+           Alcotest.(check string) "blocked reason" "materialization_failed"
+             blocked.bk_reason;
+           Alcotest.(check (option string)) "recommended action"
+             (Some "inspect_keeper_autoboot_logs") blocked.bk_action
+       | other ->
+           Alcotest.failf "expected one blocked keeper, got %d"
+             (List.length other))
+
+(* A fleet with nothing blocked still decodes: the absence of the list is the
+   healthy reading, not a malformed one. *)
+let test_decode_fleet_safety_without_blocked_keepers () =
+  match Tui_decode.decode_fleet_safety (fleet_safety_json ~blocked:false ()) with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check int) "no blocked keepers" 0
+        (List.length fleet.fs_blocked_keepers)
+
+(* A body without the section is refused rather than read as a healthy fleet.
+   Rendering "ok" for "the server did not say" is how a blocked keeper stays
+   invisible, which is the state this reading exists to end. *)
+let test_decode_fleet_safety_rejects_a_body_without_the_section () =
+  Alcotest.(check bool) "missing section is an error" true
+    (Result.is_error (Tui_decode.decode_fleet_safety (`Assoc [ "status", `String "ok" ])))
+
 let metrics_common_fields ~kind ~channel =
   [ "schema", `String Keeper_metrics_record.schema
   ; "record_kind", `String kind
@@ -1060,6 +1134,15 @@ let () =
           test_decode_planning_snapshot_current_contract;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
+      ] );
+    ( "decode_fleet_safety",
+      [
+        Alcotest.test_case "carries the blocked keeper" `Quick
+          test_decode_fleet_safety_carries_the_blocked_keeper;
+        Alcotest.test_case "healthy fleet has no blocked list" `Quick
+          test_decode_fleet_safety_without_blocked_keepers;
+        Alcotest.test_case "a body without the section is refused" `Quick
+          test_decode_fleet_safety_rejects_a_body_without_the_section;
       ] );
     ( "terminal_text",
       [ Alcotest.test_case "escapes control sequences" `Quick

@@ -823,7 +823,6 @@ let test_run_named_media_degrade_emits_typed_manifest () =
       { manifest_keeper_name = "media-degrade-keeper"
       ; manifest_agent_name = Some "media-degrade-agent"
       ; manifest_trace_id = "media-degrade-trace"
-      ; manifest_generation = Some 1
       ; manifest_keeper_turn_id = Some 1
       }
     in
@@ -890,7 +889,6 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
       { manifest_keeper_name = "checkpoint-runtime-compat-keeper"
       ; manifest_agent_name = Some "checkpoint-runtime-compat-agent"
       ; manifest_trace_id = "checkpoint-runtime-compat-trace"
-      ; manifest_generation = Some 1
       ; manifest_keeper_turn_id = Some 1
       }
     in

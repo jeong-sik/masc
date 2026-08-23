@@ -37,14 +37,12 @@ type 'a observed_change =
 
 type turn_runtime_delta =
   { expected_trace_id : Keeper_id.Trace_id.t
-  ; expected_generation : int
   ; usage : usage_delta
   ; counters : turn_counter_deltas
   ; next_keeper_id : Keeper_id.Uid.t option
   ; next_agent_name : string
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
-  ; next_generation : int
   ; next_last_handoff_ts : float
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
@@ -59,7 +57,6 @@ type identity_handoff =
   ; agent_name : string
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
-  ; generation : int
   ; updated_at : string
   }
 
@@ -101,10 +98,9 @@ type meta_command =
       }
   | Update_profile of profile_update
   | Handoff_identity of identity_handoff
-  | Repair_trace_generation of
+  | Repair_trace_identity of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list
-      ; generation : int
       ; updated_at : string
       }
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
@@ -130,7 +126,6 @@ type meta_command =
       }
   | Record_compaction_commit of
       { trace_id : Keeper_id.Trace_id.t
-      ; generation : int
       ; commit_count : int
       ; at : float
       ; before_bytes : int
@@ -169,7 +164,7 @@ type error =
       { expected : string
       ; actual : string
       }
-  | Identity_generation_mismatch
+  | Identity_mismatch
   | Snapshot_changed
 
 val turn_runtime_delta_of_snapshots

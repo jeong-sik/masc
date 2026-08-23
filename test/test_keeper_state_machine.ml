@@ -235,7 +235,7 @@ let test_apply_handoff_lifecycle () =
     apply_ok
       ~current_phase:SM.HandingOff
       ~conditions:tr1.updated_conditions
-      ~event:(SM.Handoff_completed { new_trace_id = "abc"; generation = 2 })
+      ~event:(SM.Handoff_completed { new_trace_id = "abc" })
   in
   check phase_t "-> Running" SM.Running tr2.new_phase
 ;;
@@ -761,7 +761,7 @@ let test_chain_happy_path () =
       ; ( SM.Compaction_completed
         , SM.Running )
       ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2"; generation = 2 }, SM.Running
+      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; SM.Stop_requested, SM.Draining
       ; SM.Drain_complete, SM.Stopped
       ]
@@ -820,7 +820,7 @@ let test_chain_compaction_fail_handoff_fallback () =
       [ SM.Compaction_started, SM.Compacting
       ; SM.Compaction_failed { reason = "insufficient reduction" }, SM.Running
       ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen3"; generation = 3 }, SM.Running
+      ; SM.Handoff_completed { new_trace_id = "gen3" }, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ]
   in
@@ -848,7 +848,7 @@ let test_chain_long_running_multi_cycle () =
         , SM.Running )
       ; (* Cycle 3: handoff (context still growing) *)
         SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2"; generation = 2 }, SM.Running
+      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ; (* Cycle 4: compaction in new generation *)
         SM.Compaction_started, SM.Compacting
@@ -856,7 +856,7 @@ let test_chain_long_running_multi_cycle () =
         , SM.Running )
       ; (* Cycle 5: another handoff *)
         SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen3"; generation = 3 }, SM.Running
+      ; SM.Handoff_completed { new_trace_id = "gen3" }, SM.Running
       ; (* Clean shutdown *)
         SM.Stop_requested, SM.Draining
       ; SM.Drain_complete, SM.Stopped
@@ -879,7 +879,7 @@ let test_chain_crash_during_compaction_recovery () =
       ; SM.Fiber_started, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2"; generation = 2 }, SM.Running
+      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ]
   in
@@ -1020,7 +1020,7 @@ let test_chain_handoff_fail_retry () =
       ; SM.Handoff_failed { reason = "target generation conflict" }, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2"; generation = 2 }, SM.Running
+      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ]
   in
   check phase_t "handoff retry succeeded" SM.Running final_phase
@@ -1058,7 +1058,7 @@ let test_chain_stop_during_handoff () =
       [ SM.Handoff_started, SM.HandingOff
       ; SM.Operator_stop { remove_meta = false }, SM.Draining
       ; SM.Drain_complete, SM.Draining
-      ; SM.Handoff_completed { new_trace_id = "t"; generation = 2 }, SM.Stopped
+      ; SM.Handoff_completed { new_trace_id = "t" }, SM.Stopped
       ]
   in
   check phase_t "handoff completes then Stopped" SM.Stopped final_phase
@@ -1127,7 +1127,7 @@ let test_chain_maximum_turbulence () =
         , SM.Running )
       ; (* Handoff cycle *)
         SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2"; generation = 2 }, SM.Running
+      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; (* Failure cycle *)
         SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
@@ -1429,7 +1429,7 @@ let test_invariant_stop_requested_monotonic () =
     ; SM.Compaction_started
     ; SM.Compaction_completed
     ; SM.Handoff_started
-    ; SM.Handoff_completed { new_trace_id = "x"; generation = 1 }
+    ; SM.Handoff_completed { new_trace_id = "x" }
     ; SM.Operator_pause
     ; SM.Operator_resume
     ; (* Fiber_started intentionally OMITTED — it resets stop *)
@@ -1500,7 +1500,7 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Compaction_completed
     ; SM.Compaction_failed { reason = "test" }
     ; SM.Handoff_started
-    ; SM.Handoff_completed { new_trace_id = "x"; generation = 1 }
+    ; SM.Handoff_completed { new_trace_id = "x" }
     ; SM.Handoff_failed { reason = "test" }
     ; SM.Operator_pause
     ; SM.Operator_resume
@@ -1713,7 +1713,7 @@ let test_setclear_coverage () =
       , SM.Compaction_completed )
     ; "Compaction_failed", SM.Compaction_failed { reason = "test" }
     ; "Handoff_started", SM.Handoff_started
-    ; "Handoff_completed", SM.Handoff_completed { new_trace_id = "x"; generation = 99 }
+    ; "Handoff_completed", SM.Handoff_completed { new_trace_id = "x" }
     ; "Handoff_failed", SM.Handoff_failed { reason = "test" }
     ; "Operator_pause", SM.Operator_pause
     ; "Operator_resume", SM.Operator_resume

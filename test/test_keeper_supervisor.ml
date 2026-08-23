@@ -45,12 +45,11 @@ let aq_resolve ~base_path ~id ~decision =
 
 let supervisor_agent_name = Sup.supervisor_agent_name
 
-let with_launch_token ~base_path ~keeper_name ~expected_generation f =
+let with_launch_token ~base_path ~keeper_name f =
   match
     Lifecycle_reservation.acquire
       ~base_path
       ~keeper_name
-      ~expected_generation
       ~purpose:Lifecycle_reservation.Keepalive_launch
   with
   | Error (Lifecycle_reservation.Already_reserved owner) ->
@@ -1599,7 +1598,6 @@ let test_supervised_stop_joins_board_attention_worker () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:reg.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber
@@ -1673,7 +1671,6 @@ let test_supervised_stop_drains_librarian_before_terminal () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:reg.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber
@@ -1805,7 +1802,6 @@ let test_launch_fork_rejection_does_not_announce_running () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:reg.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber
@@ -1865,7 +1861,6 @@ let test_fork_rejection_preserves_replacement_lane () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:rejected.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
@@ -2212,7 +2207,6 @@ let test_active_librarian_abort_defers_then_retries_restart () =
          Launch_transaction.run
            ~base_path:config.base_path
            ~keeper_name:name
-           ~expected_generation:previous.transition_seq
            ~register:(fun token intake_token ->
              Reg.register_restarting_for_lifecycle
                ~intake_token
@@ -2351,7 +2345,6 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
           Launch_transaction.run
             ~base_path:config.base_path
             ~keeper_name:name
-            ~expected_generation:crashed.transition_seq
             ~register:(register_restart ~base_path:config.base_path ~name ~meta)
             ~rollback:(Launch_transaction.Restore_previous crashed)
             (fun _intake_token _token _replacement ->
@@ -2374,7 +2367,6 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
          Launch_transaction.run
            ~base_path:config.base_path
            ~keeper_name:name
-           ~expected_generation:crashed.transition_seq
            ~register:(register_restart ~base_path:config.base_path ~name ~meta)
            ~rollback:(Launch_transaction.Restore_previous crashed)
            (fun _intake_token _token replacement -> replacement)
@@ -2418,7 +2410,6 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
                  (Launch_transaction.run
                     ~base_path:config.base_path
                     ~keeper_name:name
-                    ~expected_generation:crashed.transition_seq
                     ~register:
                       (register_restart ~base_path:config.base_path ~name ~meta)
                     ~rollback:(Launch_transaction.Restore_previous crashed)
@@ -2489,7 +2480,6 @@ let test_register_cancellation_rolls_back_restart_transaction () =
                  (Launch_transaction.run
                     ~base_path:config.base_path
                     ~keeper_name:name
-                    ~expected_generation:crashed.transition_seq
                     ~register:(fun token intake_token ->
                       match
                         register_restart
@@ -2556,7 +2546,6 @@ let test_started_launch_exception_retains_registered_lane () =
           Launch_transaction.run
             ~base_path:config.base_path
             ~keeper_name:name
-            ~expected_generation:crashed.transition_seq
             ~register:(register_restart ~base_path:config.base_path ~name ~meta)
             ~rollback:(Launch_transaction.Restore_previous crashed)
             (fun _intake_token _token replacement ->
@@ -2604,7 +2593,6 @@ let test_offline_launch_exception_retains_retryable_lane () =
          Launch_transaction.run
            ~base_path:config.base_path
            ~keeper_name:name
-           ~expected_generation:offline.transition_seq
            ~register:(fun _token _intake_token -> Ok offline)
            ~rollback:Launch_transaction.Retain_registered
            launch
@@ -2670,7 +2658,6 @@ let test_restart_intake_epoch_survives_shutdown_overlap () =
            Launch_transaction.run
              ~base_path:config.base_path
              ~keeper_name:name
-             ~expected_generation:crashed.transition_seq
              ~register:(fun token intake_token ->
                match
                  register_restart

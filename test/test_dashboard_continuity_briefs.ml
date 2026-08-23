@@ -14,7 +14,6 @@ let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
       ("status", `String status);
       ("paused", `Bool paused);
       ("keepalive_running", `Bool keepalive_running);
-      ("generation", `Int 0);
       ("turn_count", `Int turn_count);
       ("autonomous_turn_count", `Int autonomous_turn_count);
       ("autonomous_action_count", `Int 0);

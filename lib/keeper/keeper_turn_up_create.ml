@@ -146,7 +146,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                     Keeper_context_runtime.create_session ~session_id:trace_id
                       ~base_dir
                   in
-      let nonce = 1 in
       let meta : Keeper_meta_contract.keeper_meta = {
         id = None;
         name = p.name;
@@ -204,7 +203,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             consecutive_noop_count = 0;
           };
-          nonce;
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
@@ -241,7 +239,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:ctx0
-            ~generation:nonce
           |> Result.map_error (fun error -> `Write_error error)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -336,7 +333,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("name", `String meta.name);
           ("agent_name", `String meta.agent_name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("generation", `Int meta.runtime.nonce);
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);

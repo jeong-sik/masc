@@ -117,7 +117,6 @@ let run_keeper_cycle_admitted
         ~meta:meta_after_triage
         ~publication_recovery_provider:ctx.publication_recovery_provider
         ~observation:obs
-        ~generation:meta_after_triage.runtime.nonce
         ~wake
         ?hitl_resolution
         (* RFC-0315: pass the whole decision, not just its channel — the

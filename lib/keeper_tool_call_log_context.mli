@@ -24,7 +24,6 @@ type turn_context =
   ; prompt_fingerprint : string option
   ; trace_id : string option
   ; session_id : string option
-  ; generation : int option
   ; turn : int option
   ; keeper_turn_id : int option
   ; task_id : string option
@@ -52,7 +51,6 @@ val set_turn_context :
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->

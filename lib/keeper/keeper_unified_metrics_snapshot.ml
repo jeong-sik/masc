@@ -13,7 +13,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
-    ~(turn_generation : int)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(checkpoint_bytes : int)
     ~(message_count : int)
@@ -94,7 +93,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-        ("generation", `Int turn_generation);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);

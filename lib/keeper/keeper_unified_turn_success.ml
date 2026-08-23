@@ -147,7 +147,6 @@ let append_metrics_snapshot
          ~result
          ~latency_ms
          ~turn_cost
-         ~turn_generation:lifecycle.KEC.turn_generation
          ~channel
          ~checkpoint_bytes:lifecycle.checkpoint_bytes
          ~message_count:lifecycle.message_count
@@ -620,7 +619,6 @@ let handle
   run_projection KTP.Lifecycle_broadcast (fun () ->
     KUM.broadcast_lifecycle_events
       ~name:updated_meta.name
-      ~turn_generation:lifecycle.turn_generation
       ~handoff_json:lifecycle.handoff_json);
   run_projection KTP.Decision_record (fun () ->
     KUM.append_decision_record

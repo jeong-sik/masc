@@ -400,7 +400,6 @@ let to_json operation =
     ; "keeper_name", `String operation.keeper_name
     ; "lane_ownership", lane_ownership_to_json operation.lane_ownership
     ; "trace_id", `String (Keeper_id.Trace_id.to_string operation.trace_id)
-    ; "generation", `Int operation.generation
     ; "actor", `String operation.actor
     ; ( "cleanup_intent"
       , `Assoc
@@ -743,7 +742,6 @@ let of_json json =
       Keeper_id.Trace_id.of_string trace_id_wire
       |> Result.map_error (fun e -> Decode_error e)
     in
-    let* generation = int "generation" json in
     let* actor = string "actor" json in
     let* cleanup_json = assoc "cleanup_intent" json in
     let* reason_json = assoc "reason" cleanup_json in
@@ -765,7 +763,6 @@ let of_json json =
       ; keeper_name
       ; lane_ownership
       ; trace_id
-      ; generation
       ; actor
       ; cleanup_intent = { reason; remove_session }
       ; turn_disposition

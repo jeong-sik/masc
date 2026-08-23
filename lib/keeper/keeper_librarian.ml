@@ -15,7 +15,6 @@ type current_selection =
 
 type input =
   { turn_ref : Ids.Turn_ref.t
-  ; generation : int
   ; keeper_instructions : string
   ; current : current_selection option
   ; max_recall_fact_bytes : int

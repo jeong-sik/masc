@@ -79,7 +79,7 @@ let test_failure_and_commit_project_to_different_shapes () =
          ~keeper_id:keeper
          ~expected_revision:None
          ~now:1_700_000_100.0
-         ~source:{ kind = Librarian; trace_id = "trace-b"; generation = 1 }
+         ~source:{ kind = Librarian; trace_id = "trace-b" }
          ~facts:[ fact ]
          ()
      with
@@ -188,7 +188,7 @@ let test_drop_reasons_survive_the_projection () =
           [ { memory_id = "id:gone"; reason = "superseded by the openssl decision" } ]
         ~expected_revision:None
         ~now:1_700_000_000.0
-        ~source:{ kind = Librarian; trace_id = "trace-a"; generation = 1 }
+        ~source:{ kind = Librarian; trace_id = "trace-a" }
         ~facts:[ fact ]
         ()
     with

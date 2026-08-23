@@ -45,7 +45,6 @@ let make_acc root =
     ~masc_root:root
     ~keeper_name
     ~trace_id:(trace_id ())
-    ~generation:1
     ()
 ;;
 

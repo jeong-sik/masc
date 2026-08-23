@@ -741,7 +741,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           : asString(row.last_heartbeat),
         heartbeat_observation_error: asString(row.heartbeat_observation_error) ?? null,
         last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,
-        generation: asNumber(row.generation),
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
         total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
         total_tokens: asNumber(row.total_tokens),

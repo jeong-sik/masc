@@ -55,7 +55,6 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
       ("name", json_string name);
       ("status", json_string status);
       ("agent_name", json_string agent_name);
-      ("generation", `Int generation);
       ("context_ratio", `Float context_ratio);
       ("last_turn_ago_s", `Float 30.0);
       ("compaction_count", `Int 1);

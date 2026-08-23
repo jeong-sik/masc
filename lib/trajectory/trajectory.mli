@@ -37,7 +37,6 @@ type trajectory = {
   scenario_id : string option;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
@@ -160,7 +159,6 @@ type accumulator = {
   mutable turn : int;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
@@ -173,7 +171,7 @@ type accumulator = {
 val create_accumulator :
   ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> unit -> accumulator
+  unit -> accumulator
 
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit

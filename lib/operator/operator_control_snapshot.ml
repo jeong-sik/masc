@@ -415,7 +415,6 @@ let keepers_json
                          ; "status", `String status
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
-                         ; "generation", `Int meta.runtime.nonce
                          ; "turn_count", `Int meta.runtime.usage.total_turns
                          ; ( "keeper_keepalive_interval_s"
                            , `Float keeper_keepalive_interval_s )

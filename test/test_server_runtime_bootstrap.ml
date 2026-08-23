@@ -4314,7 +4314,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
         ; keeper_name = fenced_keeper.name
         ; lane_ownership = Keeper_shutdown_types.Dormant_meta
         ; trace_id = fenced_keeper.runtime.trace_id
-        ; generation = fenced_keeper.runtime.nonce
         ; actor = "startup-test"
         ; cleanup_intent =
             { reason = Keeper_shutdown_types.Operator_stop_retain_meta

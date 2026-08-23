@@ -591,7 +591,10 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
         { entry with
           meta =
             { entry.meta with
-              runtime = { entry.meta.runtime with nonce = -1 }
+              runtime =
+                { entry.meta.runtime with
+                  usage = { entry.meta.runtime.usage with total_turns = -1 }
+                }
             }
         }
       in
@@ -604,7 +607,7 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
         (function
           | Publication_scope.Registry_entry_unhealthy
               (KR.Required_field_missing { field }) ->
-            String.equal field "generation"
+            String.equal field "usage.total_turns"
           | _ -> false)
         (Publication_scope.resolve_turn_resources
            ~provider

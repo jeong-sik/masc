@@ -374,7 +374,6 @@ let test_agent_core_checkpoint_starts_official_client_turn () =
                       "claude-fixture"
                   ; manifest_agent_name = Some "claude-fixture-agent"
                   ; manifest_trace_id = "claude-fixture-trace"
-                  ; manifest_generation = Some 1
                   ; manifest_keeper_turn_id = Some 1
                   }
                 ~runtime_manifest_append:(fun manifest ->

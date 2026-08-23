@@ -218,7 +218,6 @@ function CharacterPlate({ name }: { name: string }) {
   const activityLabel = keeperActivity?.label ?? '마지막 확인'
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
-  const generation = keeper?.generation
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const isKeeper = keeper != null
   const workerState = worker?.state
@@ -246,7 +245,6 @@ function CharacterPlate({ name }: { name: string }) {
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="text-base text-[var(--color-fg-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="text-sm font-bold text-[var(--color-accent-fg)] bg-[var(--accent-10)] border border-[var(--accent-30)] px-1.5 py-px tabular-nums rounded-[var(--r-1)]" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
         </div>
 
         <div class="flex items-center gap-1.5 flex-wrap">
@@ -295,7 +293,6 @@ function CharacterPlate({ name }: { name: string }) {
         ${isKeeper ? html`
           <${StatGrid} cols=${4} items=${[
             { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : MISSING_DATA_DASH, delta: keeper.context_tokens != null && keeper.context_max != null ? { direction: 'flat' as const, text: `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` } : undefined },
-            { label: '세대', value: generation ?? 0 },
             { label: '턴', value: keeper.turn_count ?? 0 },
             { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, delta: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ? { direction: 'flat' as const, text: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) } : undefined },
           ]} />

@@ -1461,7 +1461,6 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                 ~user_message
                                 ~turn_kind:Turn_record.Direct
                                 ~runtime_id:"codex.codex"
-                                ~generation:1
                                 ()))))))
 ;;
 

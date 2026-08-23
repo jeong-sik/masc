@@ -25,9 +25,8 @@ let registry_entry_validation_error_to_string = function
   | Healthy -> "registry entry is healthy"
   | Lifecycle_transaction_reserved owner ->
     Printf.sprintf
-      "registry mutation reserved by lifecycle transaction owner=%s expected_generation=%d"
+      "registry mutation reserved by lifecycle transaction owner=%s"
       owner.owner_id
-      owner.expected_generation
   | Meta_validation_failed { reason } ->
       Printf.sprintf "registry entry meta validation failed: %s" reason
   | Required_field_missing { field } ->
@@ -73,8 +72,6 @@ let validate_string_list field names =
 let validate_runtime_fields (runtime : agent_runtime_state) =
   if String.equal (Trace_id.to_string runtime.trace_id) ""
   then Error (Required_field_missing { field = "trace_id" })
-  else if runtime.nonce < 0
-  then Error (Required_field_missing { field = "generation" })
   else if runtime.usage.total_turns < 0
   then Error (Required_field_missing { field = "usage.total_turns" })
   else if runtime.usage.total_tokens < 0

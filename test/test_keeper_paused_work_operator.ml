@@ -112,7 +112,6 @@ let with_source_terminal_lane f =
              Some
                (Keeper_latched_reason.Operator_paused
                   { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-         ; runtime = { meta.runtime with nonce = 19 }
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> require_ok "persist source-terminal metadata";
@@ -145,7 +144,6 @@ let with_source_terminal_lane f =
        let request : Keeper_paused_work_source_terminal_transaction.request =
          { source
          ; source_incarnation
-         ; owner_nonce = meta.runtime.nonce
          ; source_receipt
          ; operator_operation_id = "operator-source-terminal-response"
          }
@@ -157,14 +155,13 @@ let test_strict_request_codec () =
   let resume =
     common
       "resume_owner"
-      [ "owner_nonce", `Int 7
-      ; "operator_operation_id", `String "operator-resume"
+      [ "operator_operation_id", `String "operator-resume"
       ]
   in
   (match Operator.request_of_yojson resume with
    | Ok
        (Operator.Resume_owner
-         { owner_nonce = 7; operator_operation_id = "operator-resume" }) ->
+         { operator_operation_id = "operator-resume" }) ->
      ()
    | Ok _ -> Alcotest.fail "resume request decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
@@ -196,7 +193,6 @@ let test_strict_request_codec () =
       [ "source_state", `String "pending"
       ; "source", Queue.stimulus_to_yojson board_source
       ; "source_incarnation", int64_json 11L
-      ; "owner_nonce", `Int 7
       ; "operator_operation_id", `String "operator-cancel"
       ; "reason", `String "operator rejected retained work"
       ]
@@ -224,8 +220,6 @@ let test_strict_request_codec () =
       "transfer_owner"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_incarnation", int64_json 12L
-      ; "owner_nonce", `Int 7
-      ; "target_generation", `Int 8
       ; "to_keeper", `String "successor"
       ; ( "continuation_binding"
         , Disposition.continuation_binding_to_yojson (Disposition.Routed channel) )
@@ -253,7 +247,6 @@ let test_strict_request_codec () =
       "ack_source_terminal"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_incarnation", int64_json 13L
-      ; "owner_nonce", `Int 7
       ; "source_receipt_kind", `String "hitl_terminal"
       ; "operator_operation_id", `String "operator-source-terminal"
       ]
@@ -355,7 +348,6 @@ let test_inventory_exposes_exact_durable_fences () =
             Some
               (Keeper_latched_reason.Operator_paused
                  { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-        ; runtime = { meta.runtime with nonce = 17 }
         }
       in
       Keeper_meta_store.replace_snapshot config meta |> require_ok "persist inventory metadata";
@@ -375,10 +367,6 @@ let test_inventory_exposes_exact_durable_fences () =
         "inventory trace fence"
         "trace-paused-work-inventory"
         (json |> member "owner" |> member "trace_id" |> to_string);
-      Alcotest.(check int)
-        "inventory generation fence"
-        17
-        (json |> member "owner" |> member "generation" |> to_int);
       Alcotest.(check int64)
         "inventory revision fence"
         (State.revision state)

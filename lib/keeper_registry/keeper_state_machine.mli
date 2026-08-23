@@ -143,7 +143,7 @@ type event =
   | Handoff_started
     (** Emit only through the registry lifecycle origin guard. See the
         paired lifecycle contract above. *)
-  | Handoff_completed of { new_trace_id : string; generation : int }
+  | Handoff_completed of { new_trace_id : string }
     (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Handoff_failed of { reason : string }
     (** Must fire in the same turn as the matching [Handoff_started]. *)

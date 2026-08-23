@@ -48,7 +48,6 @@ let prepare_run_context
       ~(runtime_id : string)
       ?temperature
       ?shared_context
-      ~(generation : int)
       ()
   =
   let receipt_started_at = Masc_domain.now_iso () in
@@ -72,11 +71,6 @@ let prepare_run_context
     | Some ctx -> ctx
     | None -> Agent_core.Context.create ()
   in
-  (* AGENT_CORE uses the caller-supplied context as the checkpoint context for both
-     new and resumed agents. Bind MASC's generation before dispatch so every
-     AGENT_CORE-produced checkpoint carries the current keeper identity. *)
-  Agent_core.Context.set_scoped shared_context Agent_core.Context.Session
-    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   (* 1. Ensure session directory tree exists *)
   let session_dir =
     Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id)

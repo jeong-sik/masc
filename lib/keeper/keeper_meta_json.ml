@@ -26,7 +26,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; Multimodal_policy, `String (multimodal_policy_to_string m.multimodal_policy)
     ; Trace_history, `List (List.map (fun s -> `String s) rt.trace_history)
-    ; Generation, `Int rt.nonce
     ; Last_handoff_ts, `Float rt.last_handoff_ts
     ; Created_at, `String m.created_at
     ; Updated_at, `String m.updated_at

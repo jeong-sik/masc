@@ -764,7 +764,6 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
        keeper_name
-       ~current_owner_nonce:17
        ~applied_at:202.0
        ~selection:first_selection
        ~detail:"first schedule occurrence completed"
@@ -976,11 +975,9 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 53
     ; operator_operation_id = "resolved-owner-fence-transfer"
     ; from_keeper = source_keeper
     ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -988,7 +985,6 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
      Keeper_registry_event_queue.transfer_pending_accepted_result
        ~base_path
        source_keeper
-       ~current_owner_nonce:53
        ~applied_at:201.5
        ~transfer
    with
@@ -1230,7 +1226,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         | Ok state -> state
         | Error detail -> fail detail
       in
-      let generation = entry.meta.runtime.nonce in
       let selection =
         Keeper_event_queue_state.select_when
           ~ready:(fun _ -> true)
@@ -1242,7 +1237,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       let cancellation : Keeper_event_queue_state.accepted_cancellation =
         { source = selection.source
         ; source_incarnation = selection.admitted_revision
-        ; owner_nonce = generation
         ; operator_operation_id = "cancel-schedule-occurrence"
         ; reason = "operator cancelled retained schedule work"
         }
@@ -1251,7 +1245,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
          Keeper_registry_event_queue.cancel_pending_accepted_result
            ~base_path
            keeper_name
-          ~current_owner_nonce:generation
           ~applied_at:203.0
           ~cancellation
        with
@@ -1394,7 +1387,6 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
        keeper_name
-       ~current_owner_nonce:91
        ~applied_at:201.5
        ~selection
        ~detail:"terminal before schedule retry"
@@ -1472,7 +1464,6 @@ let test_terminal_retry_requires_acceptance_commit () =
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
        keeper_name
-       ~current_owner_nonce:97
        ~applied_at:201.5
        ~selection
        ~detail:"terminal acceptance evidence"

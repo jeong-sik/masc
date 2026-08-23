@@ -1177,7 +1177,6 @@ export interface Keeper {
   drift_count_total?: number
   runtime_warning_ctx_ratio?: number | null
   trust?: KeeperTrustSummary | null
-  generation?: number
   turn_count?: number
   total_turns?: number
   total_tokens?: number

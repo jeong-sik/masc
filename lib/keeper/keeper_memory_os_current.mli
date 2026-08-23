@@ -16,7 +16,6 @@ type source_kind =
 type source =
   { kind : source_kind
   ; trace_id : string
-  ; generation : int
   }
 
 type change =

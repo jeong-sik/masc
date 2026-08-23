@@ -13,7 +13,6 @@ type field =
   | Trace_id
   | Multimodal_policy
   | Trace_history
-  | Generation
   | Last_handoff_ts
   | Created_at
   | Updated_at

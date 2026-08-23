@@ -205,7 +205,6 @@ let assemble_hooks
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
       ~(shared_context : Agent_core.Context.t)
       ~(start_turn_count : int)
-      ~(generation : int)
       ~(runtime_id_string : string)
       ~is_retry:(_ : bool)
       ~(config_root : string)
@@ -267,7 +266,6 @@ let assemble_hooks
         ~config
         ~meta_ref
         ~turn_ctx_cell
-        ~generation
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
@@ -538,7 +536,6 @@ let assemble_hooks
                   ~prompt_fingerprint:prompt_metrics.fingerprint
                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  ~generation
                   ~turn
                   ~keeper_turn_id
                   ?task_id:

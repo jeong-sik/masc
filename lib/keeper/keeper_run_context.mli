@@ -38,7 +38,6 @@ val prepare_run_context :
   -> runtime_id:string
   -> ?temperature:float
   -> ?shared_context:Agent_core.Context.t
-  -> generation:int
   -> unit
   -> run_context
 (** Resolve [temperature] as the caller fallback; a temperature declared by the

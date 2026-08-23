@@ -15,7 +15,6 @@ type task = {
 type keeper = {
   k_name : string;
   k_trace_id : string;
-  k_generation : int;
   k_paused : bool;
   k_current_task_id : string option;
   k_total_turns : int;

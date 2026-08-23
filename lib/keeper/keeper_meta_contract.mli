@@ -232,7 +232,6 @@ type agent_runtime_state = {
   usage : usage_metrics;
   compaction_rt : compaction_runtime;
   proactive_rt : proactive_runtime;
-  nonce : int;
   trace_id : Keeper_id.Trace_id.t;
   trace_history : string list;
   last_handoff_ts : float;

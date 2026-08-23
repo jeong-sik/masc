@@ -12,7 +12,6 @@ type source_kind =
 type source =
   { kind : source_kind
   ; trace_id : string
-  ; generation : int
   }
 
 type change =
@@ -107,23 +106,21 @@ let source_to_json source =
   `Assoc
     [ "kind", `String (source_kind_to_string source.kind)
     ; "trace_id", `String source.trace_id
-    ; "generation", `Int source.generation
     ]
 ;;
 
 let source_of_json = function
   | `Assoc fields
-    when exact_object_fields [ "kind"; "trace_id"; "generation" ] fields ->
+    when exact_object_fields [ "kind"; "trace_id" ] fields ->
     (match
        List.assoc_opt "kind" fields
        , List.assoc_opt "trace_id" fields
-       , List.assoc_opt "generation" fields
      with
-     | Some (`String kind), Some (`String trace_id), Some (`Int generation) ->
+     | Some (`String kind), Some (`String trace_id) ->
        (match source_kind_of_string kind with
         | Some kind
-          when not (String.equal (String.trim trace_id) "") && generation >= 0 ->
-          Some { kind; trace_id; generation }
+          when not (String.equal (String.trim trace_id) "") ->
+          Some { kind; trace_id }
         | Some _ | None -> None)
      | _ -> None)
   | _ -> None

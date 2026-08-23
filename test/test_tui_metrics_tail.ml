@@ -27,7 +27,6 @@ let heartbeat ?(timestamp = "2026-08-21T12:00:00Z")
     ; "name", `String name
     ; "agent_name", `String "codex"
     ; "trace_id", `String "trace-current"
-    ; "generation", `Int 4
     ; "message_count", `Int count
     ]
 

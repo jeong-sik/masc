@@ -37,7 +37,6 @@ let record ~keeper_name ~wall_clock =
   Audit.make
     ~cycle_id:"cycle-1"
     ~keeper_name
-    ~generation:0
     ~turn_verdict:
       (Masc.Keeper_world_observation.Run { reasons = Never_started, [] })
     ~wall_clock

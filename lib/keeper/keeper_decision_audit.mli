@@ -13,7 +13,6 @@ type decision_record
 val make :
   cycle_id:string ->
   keeper_name:string ->
-  generation:int ->
   turn_verdict:Keeper_world_observation.turn_verdict ->
   wall_clock:float ->
   ?tool_diversity_entropy:float ->

@@ -264,7 +264,7 @@ let test_committed_line_decodes_as_a_commit () =
         ~keeper_id
         ~expected_revision:None
         ~now:1_700_000_000.0
-        ~source:{ kind = Librarian; trace_id = "trace-commit"; generation = 1 }
+        ~source:{ kind = Librarian; trace_id = "trace-commit" }
         ~facts:[ fact ]
         ()
     with

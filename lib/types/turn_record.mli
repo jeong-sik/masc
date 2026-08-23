@@ -120,7 +120,6 @@ type t =
   { execution_ids : Ids.Execution_id.t list (* tool calls in this turn *)
   ; keeper : string
   ; agent_name : string
-  ; generation : int
   ; turn_kind : turn_kind
   ; trace_id : string
   ; absolute_turn : int

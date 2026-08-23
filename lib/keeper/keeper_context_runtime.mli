@@ -58,7 +58,6 @@ val save_agent_core_checkpoint
   -> session:session_context
   -> agent_name:string
   -> ctx:working_context
-  -> generation:int
   -> (Agent_core.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
 
 type post_turn_lifecycle =
@@ -67,7 +66,6 @@ type post_turn_lifecycle =
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
-  ; turn_generation : int
   ; checkpoint_bytes : int
   ; message_count : int
   }

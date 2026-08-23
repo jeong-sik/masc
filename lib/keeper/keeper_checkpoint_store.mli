@@ -22,7 +22,6 @@ val agent_core_history_path :
     checkpoint. Single definition of the wire literal; every writer and
     reader (context core, tests) must reference this value so the key
     cannot drift between sites. *)
-val keeper_generation_context_key : string
 val compaction_commit_count_context_key : string
 
 val compaction_commit_count_of_context :
@@ -131,8 +130,6 @@ val load_agent_core :
 
 type checkpoint_identity_error =
   | Session_id_invalid of string
-  | Generation_missing
-  | Generation_not_integer
   | Ref_create_failed of Keeper_checkpoint_ref.create_error
 
 type checkpoint_ref_load_error =

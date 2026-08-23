@@ -6,7 +6,6 @@ let manifest ~event ~decision ~links =
   ; M.keeper_name = "test-keeper"
   ; M.agent_name = None
   ; M.trace_id = "trace/test"
-  ; M.generation = None
   ; M.keeper_turn_id = Some 1
   ; M.agent_core_turn_count = Some 1
   ; M.logical_seq = None

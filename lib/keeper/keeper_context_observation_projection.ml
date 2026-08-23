@@ -183,10 +183,7 @@ let last_turn_usage_json ~base_path
     | Some entry
       when Keeper_id.Trace_id.equal
              entry.meta.runtime.trace_id
-             persisted_meta.runtime.trace_id
-           && Int.equal
-                entry.meta.runtime.nonce
-                persisted_meta.runtime.nonce ->
+             persisted_meta.runtime.trace_id ->
       entry.meta
     | Some _ | None -> persisted_meta
   in

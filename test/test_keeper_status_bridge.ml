@@ -101,7 +101,6 @@ let shutdown_operation_with_phase phase =
   ; keeper_name = "verifier"
   ; lane_ownership = Keeper_shutdown_types.Dormant_meta
   ; trace_id
-  ; generation = 1
   ; actor = "test"
   ; cleanup_intent =
       { Keeper_shutdown_types.reason =
@@ -251,7 +250,6 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
            @ [ "ts", `String "2026-07-30T05:00:01Z"
              ; "ts_unix", `Float 1_785_388_401.0
              ; "trace_id", `String "trace-tool-audit-cache"
-             ; "generation", `Int 0
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1
@@ -295,7 +293,6 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
            @ [ "ts", `String "2026-07-30T05:00:01Z"
              ; "ts_unix", `Float 1_785_388_401.0
              ; "trace_id", `String "trace-recreated-keeper"
-             ; "generation", `Int 0
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1

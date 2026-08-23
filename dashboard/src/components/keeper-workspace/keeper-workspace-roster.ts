@@ -403,7 +403,7 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
 
 async function runRosterKeeperAction(keeper: Keeper, action: KeeperActionKey): Promise<void> {
   if (action === 'resume') {
-    await runKeeperAction(keeper.name, action, keeper.generation)
+    await runKeeperAction(keeper.name, action)
   } else {
     await runKeeperAction(keeper.name, action)
   }

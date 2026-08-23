@@ -14,7 +14,6 @@ let finalize
     ~meta
     ~publication_recovery
     ~ctx_snapshot
-    ~generation
     ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
     ~manifest_keeper_turn_id
     ~session
@@ -248,7 +247,6 @@ let finalize
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
-      ~generation
       ~turn:manifest_keeper_turn_id
       ~agent_core_turn_count:result.turns
       ~actual_tools:actual_keeper_tool_names

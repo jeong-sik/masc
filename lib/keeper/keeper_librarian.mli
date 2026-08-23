@@ -18,7 +18,6 @@ type current_selection =
 
 type input =
   { turn_ref : Ids.Turn_ref.t
-  ; generation : int
   ; keeper_instructions : string
     (** The same instructions the keeper's own system prompt carries.
         The librarian curates on the keeper's behalf, so it judges

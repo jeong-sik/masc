@@ -309,8 +309,13 @@ let assert_ollama_cloud_seed_runtime runtimes case =
   | Some runtime ->
     check string (case.runtime_id ^ " api name") case.api_name
       runtime.model.api_name;
+    (* The effective window, not the declaration. These cases pinned
+       runtime.model.max_context, the runtime.toml override, which holds only
+       while it stays under the model's catalog window; above it the resolver
+       clamps and the pinned number never reaches anything (#28738). What the
+       seed must keep stable is the window the runtime resolves. *)
     check (option int) (case.runtime_id ^ " context") (Some case.context)
-      runtime.model.max_context;
+      (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
     check bool (case.runtime_id ^ " tools") case.tools
       runtime.model.tools_support;
     check bool (case.runtime_id ^ " thinking") case.thinking
@@ -975,6 +980,44 @@ let test_retired_native_streaming_capability_is_rejected () =
             && String_util.contains_substring error.message "was removed")
          errors)
 
+(* A [models.X].max-context above the model's catalog window resolves to the
+   catalog number with source Override_clamped_by_capability: the declaration
+   is clamped away and reaches nothing. Two shipped runtimes carried one, and
+   one of them — glm-coding.glm-5-turbo, declaring 203000 against a catalog
+   window of 200000 — was cited in #28737 as this model's context window while
+   the number in effect was the catalog's (#28738).
+
+   The clamp itself stays — it is the safe direction if the catalog ever
+   shrinks under a deployment's override. What must not ship is a declaration
+   that reads as authoritative and is not. This drives the real resolver over
+   the real config rather than reading the file as text. *)
+let test_repo_runtime_toml_declares_no_clamped_max_context () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    let clamped =
+      List.filter_map
+        (fun (rt : Runtime.t) ->
+           match Runtime.resolve_max_context_of_runtime rt with
+           | Some (effective, Runtime.Override_clamped_by_capability) ->
+             Some
+               (Printf.sprintf
+                  "%s declares %s and the catalog gives %d"
+                  rt.Runtime.id
+                  (match rt.Runtime.model.Runtime_schema.max_context with
+                   | Some declared -> string_of_int declared
+                   | None -> "<none>")
+                  effective)
+           | Some (_, (Runtime.Override | Runtime.Capability)) | None -> None)
+        runtimes
+    in
+    check (list string)
+      "no shipped runtime declares a max-context its model cannot take"
+      []
+      (List.sort String.compare clamped)
+
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -1192,7 +1235,11 @@ List.iter
      | None -> fail "expected Kimi K2.7 Code Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "Kimi K2.7 Code api name" "kimi-k2.7-code" runtime.model.api_name;
-       check (option int) "Kimi K2.7 Code context" (Some 262144) runtime.model.max_context;
+       (* Effective window, not the declaration: what matters is what the
+          runtime resolves, and an override only holds while it stays under
+          the model's catalog window (#28738). *)
+       check (option int) "Kimi K2.7 Code context" (Some 262144)
+         (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
        (match runtime.model.capabilities with
         | Some caps ->
           check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
@@ -3942,6 +3989,8 @@ let () =
             test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "repo-runtime-toml-declares-no-clamped-max-context" `Quick
+            test_repo_runtime_toml_declares_no_clamped_max_context;
           test_case
             "deployment exact-output catalog admits repo seed lanes"
             `Quick

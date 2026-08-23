@@ -2583,6 +2583,11 @@
  (libraries alcotest masc_tui_operator_projection yojson))
 
 (test
+ (name test_tui_task_detail)
+ (modules test_tui_task_detail)
+ (libraries alcotest masc_tui_task_selection masc.masc_types))
+
+(test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
  (libraries

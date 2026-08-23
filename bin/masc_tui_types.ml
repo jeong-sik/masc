@@ -271,6 +271,14 @@ type surface =
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
+  (* The full domain rows the Overview list is projected from, kept so the
+     detail view can show a task after it turns terminal -- the active list
+     drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
+  mutable tasks_domain: Masc_domain.task list;
+  mutable task_focus: bool;
+  mutable task_cursor: int;
+  mutable task_detail_id: string option;
+  mutable task_detail_scroll: int;
   mutable tasks_error: string option;
   mutable events: event list;
   mutable overview_event_scroll: int;
@@ -387,6 +395,11 @@ let keeper_available_for_new_message (state : state) keeper_name =
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];
   tasks = [];
+  tasks_domain = [];
+  task_focus = false;
+  task_cursor = 0;
+  task_detail_id = None;
+  task_detail_scroll = 0;
   tasks_error = None;
   events = [];
   overview_event_scroll = 0;

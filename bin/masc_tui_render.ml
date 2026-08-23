@@ -14,6 +14,7 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Keeper_control = Masc_tui_keeper_control
+module Task_selection = Masc_tui_task_selection
 module Status = Masc.Keeper_status_runtime
 
 let frame_lines buf =
@@ -78,7 +79,7 @@ let task_line (task : task) =
     | Some name -> Printf.sprintf " @%s" (Terminal_text.single_line name)
     | None -> ""
   in
-  Printf.sprintf "  %s [%s] %s (%s%s) %s"
+  Printf.sprintf "%s [%s] %s (%s%s) %s"
     (task_status_icon task.status)
     (Terminal_text.single_line task.id)
     (Terminal_text.single_line task.title)
@@ -276,18 +277,181 @@ let render_overview (state : state) =
   if row_budget.task_rows > 0 && List.is_empty state.tasks
      && Option.is_none tasks_error then
     box_line buf cols (Ansi.dim ^ "  (no tasks)" ^ Ansi.reset)
-  else
+  else begin
+    (* The panel is shorter than the list can get, so the cursor can sit below
+       the last visible row; the window follows it the way Board's does. *)
+    let task_scroll_offset =
+      max 0 (state.task_cursor - row_budget.task_rows + 1)
+    in
     for i = 0 to row_budget.task_rows - 1 do
-      let t = List.nth state.tasks i in
-      box_line buf cols (task_line t)
-    done;
+      let idx = i + task_scroll_offset in
+      if idx < List.length state.tasks then begin
+        let t = List.nth state.tasks idx in
+        let is_selected = state.task_focus && idx = state.task_cursor in
+        let content =
+          if is_selected then
+            Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ task_line t
+          else "  " ^ task_line t
+        in
+        box_line buf cols content
+      end
+    done
+  end;
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
-    Ansi.dim state.refresh_interval state.port Ansi.reset);
+  let overview_hint =
+    if state.task_focus then "j/k:tasks  Enter:detail  esc:events"
+    else "j/k:events  t:tasks"
+  in
+  Buffer.add_string buf (Printf.sprintf "%s  %s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
+    Ansi.dim overview_hint state.refresh_interval state.port Ansi.reset);
 
   finish_frame ~surface_key:"overview" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
+
+(** Render one backlog task in full, from the same load the Overview list was
+    projected from. The dispatch falls back to the Overview when the row is no
+    longer in the backlog, so the task argument always exists here. *)
+let render_task_detail (state : state) (task : Masc_domain.task) =
+  let (rows, cols) = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let header = Printf.sprintf " MASC Task  %s[%s]%s  %s  %s"
+    Ansi.cyan (fit_width task.id 20) Ansi.reset timestamp
+    (connection_badge state.connection_status) in
+
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+
+  box_line buf cols
+    (Ansi.bold ^ "  "
+    ^ fit_width (Terminal_text.single_line task.title) (cols - 6)
+    ^ Ansi.reset);
+  (* Each status carries its own timestamps and actors; one exhaustive match
+     keeps the row and the status from disagreeing about who did what. *)
+  (let status_line, note_lines =
+     match task.task_status with
+     | Masc_domain.Todo ->
+         ("todo — unclaimed", [])
+     | Masc_domain.Claimed { assignee; claimed_at } ->
+         ( Printf.sprintf "claimed by %s at %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line claimed_at)
+         , [] )
+     | Masc_domain.InProgress { assignee; started_at } ->
+         ( Printf.sprintf "in progress by %s since %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line started_at)
+         , [] )
+     | Masc_domain.AwaitingVerification
+         { assignee; submitted_at; verification_id; _ } ->
+         ( Printf.sprintf "awaiting verification by %s, submitted %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line submitted_at)
+         , [Printf.sprintf "verification %s"
+              (Terminal_text.single_line verification_id)] )
+     | Masc_domain.Done { assignee; completed_at; notes } ->
+         ( Printf.sprintf "done by %s at %s"
+             (Terminal_text.single_line assignee)
+             (Terminal_text.single_line completed_at)
+         , match notes with None -> [] | Some note -> [note] )
+     | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
+         ( Printf.sprintf "cancelled by %s at %s"
+             (Terminal_text.single_line cancelled_by)
+             (Terminal_text.single_line cancelled_at)
+         , match reason with None -> [] | Some r -> [r] )
+   in
+   box_line buf cols
+     (Ansi.dim ^ "  status   " ^ Ansi.reset
+     ^ fit_width status_line (cols - 16));
+   List.iter
+     (fun note ->
+        box_line buf cols
+          (Ansi.dim ^ "           " ^ fit_width
+             (Terminal_text.single_line note) (cols - 16)
+          ^ Ansi.reset))
+     note_lines);
+  box_line buf cols
+    (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
+       (Terminal_text.single_line task.created_at)
+       (match task.created_by with
+        | Some by -> Terminal_text.single_line by
+        | None -> "-")
+       task.priority task.cycle_count
+    ^ Ansi.reset);
+  box_divider buf cols;
+
+  (* Labeled block: the label rides the first wrapped line and continuation
+     lines keep the text column, so long handoff summaries stay readable. *)
+  let labeled_lines label text =
+    let width = max 10 (cols - 16) in
+    Message_layout.wrap_words ~max_cells:width
+      (Terminal_text.single_line text)
+    |> List.mapi
+         (fun index line ->
+            if index = 0 then Printf.sprintf "  %-8s %s" label line
+            else Printf.sprintf "           %s" line)
+  in
+  let some_lines label = function
+    | None -> []
+    | Some text -> labeled_lines label text
+  in
+  let list_lines label items =
+    List.concat_map (fun item -> labeled_lines label item) items
+  in
+  let body_lines =
+    (if String.equal task.description "" then [] else labeled_lines "what" task.description)
+    @ (match task.handoff_context with
+       | None -> []
+       | Some handoff ->
+           some_lines "why" handoff.Masc_domain.reason
+           @ (if String.equal handoff.Masc_domain.summary "" then []
+              else labeled_lines "handoff" handoff.Masc_domain.summary)
+           @ some_lines "next" handoff.Masc_domain.next_step
+           @ some_lines "failure" handoff.Masc_domain.failure_mode
+           @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
+    @ (match task.contract with
+       | None -> []
+       | Some contract ->
+           (if contract.Masc_domain.strict then
+              ["  contract strict"]
+            else [])
+           @ list_lines "done-when" contract.Masc_domain.completion_contract
+           @ list_lines "evidence" contract.Masc_domain.required_evidence)
+    @ list_lines "file" task.files
+  in
+  let total_lines = List.length body_lines in
+  (* Five chrome rows above and below: top, header, divider+title block opener,
+     bottom, helper. Clamped through the same helper the keeper log pane uses. *)
+  let content_height = max 1 (rows - 9) in
+  state.task_detail_scroll <-
+    min state.task_detail_scroll
+      (Metrics_tail.maximum_scroll ~entry_count:total_lines
+         ~content_height);
+  let offset = state.task_detail_scroll in
+  for i = 0 to content_height - 1 do
+    let line_index = i + offset in
+    let text =
+      if line_index < total_lines then
+        List.nth body_lines line_index
+      else ""
+    in
+    box_line buf cols
+      (Ansi.dim ^ fit_width (Terminal_text.single_line text) (cols - 8)
+      ^ Ansi.reset)
+  done;
+
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  esc:back  r:refresh  | Task %s | Refresh: %.0fs%s\n"
+       Ansi.dim (Terminal_text.single_line task.id)
+       state.refresh_interval Ansi.reset);
+
+  finish_frame ~surface_key:"task-detail" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
@@ -1978,7 +2142,19 @@ let render_system_logs (state : state) =
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
-  | Overview -> render_overview state
+  | Overview ->
+      (* Same fallback shape as Board/Planning detail: a detail id whose row
+         left the backlog renders the list, not a frame for a missing task. *)
+      (match state.task_detail_id with
+       | Some _ -> (
+           match
+             Task_selection.detail_row
+               ~detail_id:state.task_detail_id
+               ~tasks:state.tasks_domain
+           with
+           | Some task -> render_task_detail state task
+           | None -> render_overview state )
+       | None -> render_overview state)
   | Keepers Keeper_list -> render_keeper_list state
   | Keepers Keeper_detail -> render_keeper_detail state
   | Keepers Keeper_logs -> render_keeper_logs state

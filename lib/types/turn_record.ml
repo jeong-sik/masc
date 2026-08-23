@@ -448,7 +448,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             [ "execution_ids"
             ; "keeper"
             ; "agent_name"
-            ; "generation"
             ; "turn_kind"
             ; "trace_id"
             ; "absolute_turn"
@@ -495,8 +494,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* keeper = as_nonempty_string "keeper" keeper_json in
       let* agent_name_json = require "agent_name" fields in
       let* agent_name = as_nonempty_string "agent_name" agent_name_json in
-      let* generation_json = require "generation" fields in
-      let* generation = as_nonnegative_int "generation" generation_json in
       let* turn_kind_json = require "turn_kind" fields in
       let* turn_kind_string = as_string "turn_kind" turn_kind_json in
       let* turn_kind = turn_kind_of_string turn_kind_string in

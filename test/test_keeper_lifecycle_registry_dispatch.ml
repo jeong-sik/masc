@@ -609,7 +609,7 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
         (function
           | Publication_scope.Registry_entry_unhealthy
               (KR.Required_field_missing { field }) ->
-            String.equal field "generation"
+            String.equal field "usage.total_turns"
           | _ -> false)
         (Publication_scope.resolve_turn_resources
            ~provider

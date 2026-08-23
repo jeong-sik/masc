@@ -471,7 +471,6 @@ let decode_log_entry json =
   let* _name = require_string_field json "name" in
   let* _agent_name = require_string_field json "agent_name" in
   let* _trace_id = require_string_field json "trace_id" in
-  let* _generation = require_int_field json "generation" in
   match kind with
   | Keeper_metrics_record.Heartbeat ->
       if not (String.equal raw_channel "heartbeat") then

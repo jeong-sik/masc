@@ -12,7 +12,7 @@ type accepted_cancellation =
   ; reason : string
   }
 (** Exact operator authority for terminally cancelling one accepted event.
-    [source_incarnation] and [owner_nonce] fence the observed paused owner;
+    [source_incarnation] fences the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
 type accepted_transfer =
@@ -24,7 +24,7 @@ type accepted_transfer =
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 (** Exact causal authority for terminally transferring one accepted event.
-    [target_generation] and [target_trace_id] prevent delayed outbox replay
+    [target_trace_id] prevents delayed outbox replay
     from projecting into a purged or same-name replacement Keeper. *)
 
 type source_terminal_receipt =

@@ -1457,7 +1457,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
 
 (** Bulk variant of [handle_keeper_directive_post]. Pause and wakeup accept
     [{names: [name, ...]}]. Resume accepts exact per-owner
-    [{targets: [{name, owner_nonce, operator_operation_id}, ...]}] fences.
+    [{targets: [{name, operator_operation_id}, ...]}] fences.
     Cache invalidation still runs once for the whole batch. *)
 let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let parsed =

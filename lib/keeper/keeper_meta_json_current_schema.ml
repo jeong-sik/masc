@@ -23,7 +23,6 @@ type field =
   | Trace_id
   | Multimodal_policy
   | Trace_history
-  | Generation
   | Last_handoff_ts
   | Created_at
   | Updated_at
@@ -77,7 +76,6 @@ let all_fields =
   ; Trace_id
   ; Multimodal_policy
   ; Trace_history
-  ; Generation
   ; Last_handoff_ts
   ; Created_at
   ; Updated_at
@@ -132,7 +130,6 @@ let field_name = function
   | Trace_id -> "trace_id"
   | Multimodal_policy -> "multimodal_policy"
   | Trace_history -> "trace_history"
-  | Generation -> "generation"
   | Last_handoff_ts -> "last_handoff_ts"
   | Created_at -> "created_at"
   | Updated_at -> "updated_at"

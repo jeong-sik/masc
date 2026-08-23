@@ -941,12 +941,6 @@ let float_field ~context name fields =
   | _ -> Error (Printf.sprintf "%s.%s must be a number" context name)
 ;;
 
-let int_field ~context name fields =
-  let* value = required_field ~context name fields in
-  match value with
-  | `Int value -> Ok value
-  | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
-;;
 
 let int64_field ~context name fields =
   let* value = required_field ~context name fields in
@@ -1031,7 +1025,6 @@ let transition_of_yojson json =
           [ "kind"
           ; "source"
           ; "source_incarnation"
-          ; "owner_nonce"
           ; "operator_operation_id"
           ; "reason"
           ]
@@ -1057,7 +1050,6 @@ let transition_of_yojson json =
           [ "kind"
           ; "source"
           ; "source_incarnation"
-          ; "owner_nonce"
           ; "operator_operation_id"
           ; "from_keeper"
           ; "to_keeper"
@@ -1068,7 +1060,6 @@ let transition_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_incarnation = int64_field ~context "source_incarnation" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -1095,7 +1086,6 @@ let transition_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_incarnation = int64_field ~context "source_incarnation" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -1106,7 +1096,6 @@ let transition_of_yojson json =
       [ "kind"
       ; "source"
       ; "source_incarnation"
-      ; "owner_nonce"
       ; "operator_operation_id"
       ; "source_receipt_kind"
       ]

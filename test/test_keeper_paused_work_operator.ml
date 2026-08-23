@@ -155,8 +155,7 @@ let test_strict_request_codec () =
   let resume =
     common
       "resume_owner"
-      [ "owner_nonce", `Int 7
-      ; "operator_operation_id", `String "operator-resume"
+      [ "operator_operation_id", `String "operator-resume"
       ]
   in
   (match Operator.request_of_yojson resume with
@@ -194,7 +193,6 @@ let test_strict_request_codec () =
       [ "source_state", `String "pending"
       ; "source", Queue.stimulus_to_yojson board_source
       ; "source_incarnation", int64_json 11L
-      ; "owner_nonce", `Int 7
       ; "operator_operation_id", `String "operator-cancel"
       ; "reason", `String "operator rejected retained work"
       ]
@@ -222,8 +220,6 @@ let test_strict_request_codec () =
       "transfer_owner"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_incarnation", int64_json 12L
-      ; "owner_nonce", `Int 7
-      ; "target_generation", `Int 8
       ; "to_keeper", `String "successor"
       ; ( "continuation_binding"
         , Disposition.continuation_binding_to_yojson (Disposition.Routed channel) )
@@ -251,7 +247,6 @@ let test_strict_request_codec () =
       "ack_source_terminal"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_incarnation", int64_json 13L
-      ; "owner_nonce", `Int 7
       ; "source_receipt_kind", `String "hitl_terminal"
       ; "operator_operation_id", `String "operator-source-terminal"
       ]

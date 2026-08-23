@@ -42,12 +42,10 @@ let test_bulk_resume_requires_per_owner_targets () =
            , `List
                [ `Assoc
                    [ "name", `String "beta"
-                   ; "owner_nonce", `Int 3
                    ; "operator_operation_id", `String "resume-beta-1"
                    ]
                ; `Assoc
                    [ "name", `String "mu-king"
-                   ; "owner_nonce", `Int 5
                    ; "operator_operation_id", `String "resume-qa-1"
                    ]
                ] )
@@ -66,7 +64,7 @@ let () =
     "keeper paused-work resume surface"
     [ ( "resume request contract"
       , [ test_case
-            "single requires generation and operation id"
+            "single requires the operation id"
             `Quick
             test_single_resume_requires_exact_fences
         ; test_case

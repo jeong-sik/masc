@@ -191,7 +191,7 @@ let cancel_pending config ~keeper_name request =
     ~keeper_name
     ~replay:
       (Keeper_event_queue_state.accepted_pending_cancellation_replay cancellation)
-    ~commit:(fun current_owner_nonce ->
+    ~commit:(fun () ->
       Keeper_registry_event_queue.cancel_pending_accepted_result
         ~base_path:config.Workspace.base_path
         keeper_name

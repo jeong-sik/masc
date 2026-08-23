@@ -448,7 +448,7 @@ let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
   let* () = wait_until_stopped ~host ~port ~keeper_name in
   (* The nonce is re-read after shutdown: that is the durable owner state
      the resume directive must name. *)
-  let* _trace_id_paused, owner_nonce =
+  let* _trace_id_paused, _owner_nonce =
     trajectory_identity ~host ~port ~keeper_name
   in
   let boot () = lifecycle_post ~host ~port ~keeper_name ~action:"boot" ~body:"{}" () in
@@ -465,7 +465,6 @@ let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
         Yojson.Safe.to_string
           (`Assoc
             [ ("action", `String "resume")
-            ; ("owner_nonce", `Int owner_nonce)
             ; ( "operator_operation_id"
               , `String (Printf.sprintf "canary-restart-%s" run_id) )
             ])

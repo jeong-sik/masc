@@ -326,7 +326,7 @@ let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string)
     "clock slice escapes selected terminal controls"
     "0\\x1B]2;Xab"
-    (Tui_decode.clock_timestamp_for_terminal
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "2026-08-22T0\027]2;Xabcd")
 
 let test_decode_keeper_rejects_retired_fields () =

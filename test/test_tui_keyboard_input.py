@@ -1045,6 +1045,16 @@ def run_terminal_scenario(
                 environment.update(
                     {
                         "MASC_BASE_PATH": base_path,
+                        # Without a reachable operator token the TUI opens
+                        # with an extra startup event and a different composer
+                        # state. Inheriting the developer's MASC_TOKEN made
+                        # that depend on whose shell ran the suite, so it
+                        # passed locally and failed on CI, where nothing
+                        # exports one. The value is never checked -- the TUI
+                        # only asks whether a token is reachable -- so a fixed
+                        # one pins the state every assertion below was written
+                        # against.
+                        "MASC_TOKEN": "tui-keyboard-test-token",
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",

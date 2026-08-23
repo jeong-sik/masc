@@ -29,9 +29,6 @@ let collect_keepalive_board_events = Keeper_heartbeat_loop_board_events.collect_
 let in_turn_liveness_pulse_interval_sec =
   Keeper_heartbeat_loop_in_turn_pulse.in_turn_liveness_pulse_interval_sec
 
-let with_in_turn_liveness_pulse_for_test =
-  Keeper_heartbeat_loop_in_turn_pulse.with_in_turn_liveness_pulse_for_test
-
 let emit_in_turn_liveness_pulse =
   Keeper_heartbeat_loop_in_turn_pulse.emit_in_turn_liveness_pulse
 

@@ -65,6 +65,9 @@ let subject_keys =
   ; "url"
   ; "target"
   ; "task_id"
+  ; "goal_id"
+  ; "agent_name" (* MASC agent/keeper tools: whose record was read *)
+  ; "keeper_name"
   ; "post_id"
   ; "operation_id"
   ; "sha256"
@@ -142,13 +145,33 @@ let shorten s =
       head ^ "…")
 ;;
 
+(* The keys above are a preference, not a gate. They name the argument that
+   identifies a call best when the shape is known; when none of them is
+   present, the whole argument object is still a better answer than nothing.
+
+   It used to return [None] there, and [render_rows] drew the bare tool name.
+   On one live keeper that was three of six calls: [keeper_tasks_audit
+   {"limit":20}], [masc_agent_timeline {"agent_name":…,"limit":5,…}] and
+   [masc_agent_card {}] all scrolled back as a name with no argument, so a turn
+   that read a specific agent's timeline looked the same as one that read
+   anything else. An empty object is the one case that legitimately says
+   nothing, and [value_text] already answers [None] for it. *)
 let subject_of_assoc fields =
-  List.find_map
-    (fun key ->
-      match List.assoc_opt key fields with
-      | None -> None
-      | Some value -> Option.map shorten (value_text value))
-    subject_keys
+  match
+    List.find_map
+      (fun key -> Option.bind (List.assoc_opt key fields) value_text)
+      subject_keys
+  with
+  | Some subject -> Some (shorten subject)
+  | None ->
+    (* Fields that carry no text are dropped first, so a blank value cannot
+       become a name by riding along inside the object: [{"file_path":"   "}]
+       still names nothing, the way it did when the key matched. *)
+    (match
+       List.filter (fun (_, value) -> Option.is_some (value_text value)) fields
+     with
+     | [] -> None
+     | named -> Option.map shorten (value_text (`Assoc named)))
 ;;
 
 let tool_subject ~name:_ ~args =

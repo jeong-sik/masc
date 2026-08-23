@@ -697,7 +697,7 @@ let budgeted_model_input_projection
             messages
         with
         | Error error ->
-          Error (Runtime_model_input_tail_window.budget_error_to_string error)
+          Error (Runtime_model_input_tail_window.budget_error_to_core_error error)
         | Ok (planned, windowed, history_atom_count) ->
           Ok (planned, windowed, history_atom_count))
     in
@@ -741,7 +741,7 @@ let budgeted_model_input_projection
               | Ok recut -> keep recut
               | Error error ->
                 Error
-                  (Runtime_model_input_tail_window.budget_error_to_string error)))
+                  (Runtime_model_input_tail_window.budget_error_to_core_error error)))
     in
     match windowed with
     | Error error -> Error error

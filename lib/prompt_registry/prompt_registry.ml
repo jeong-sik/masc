@@ -74,26 +74,9 @@ type persisted_mutation_error =
     Returns (assoc list of key-value pairs, body after frontmatter).
     If no frontmatter found, returns ([], full content). *)
 let parse_frontmatter content =
-  let lines = String.split_on_char '\n' content in
-  match lines with
-  | first :: rest when String.trim first = "---" ->
-      let rec collect_meta acc = function
-        | [] -> (List.rev acc, "")
-        | line :: remaining when String.trim line = "---" ->
-            (List.rev acc, String.concat "\n" remaining)
-        | line :: remaining ->
-            let pair =
-              match String.index_opt line ':' with
-              | Some i ->
-                  let key = String.trim (String.sub line 0 i) in
-                  let value = String.trim (String.sub line (i + 1) (String.length line - i - 1)) in
-                  Some (key, value)
-              | None -> None
-            in
-            collect_meta (match pair with Some p -> p :: acc | None -> acc) remaining
-      in
-      collect_meta [] rest
-  | _ -> ([], content)
+  let parsed = Frontmatter.parse content in
+  parsed.Frontmatter.fields, parsed.Frontmatter.body
+;;
 
 let markdown_body content =
   let _metadata, body = parse_frontmatter content in

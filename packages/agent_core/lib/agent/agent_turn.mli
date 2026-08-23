@@ -53,7 +53,7 @@ val prepare_turn
   -> turn_params:Hooks.turn_params
   -> ?model_input_projection:Agent_types.model_input_projection
   -> unit
-  -> (turn_preparation, string) result
+  -> (turn_preparation, Error.t) result
 
 (** Project caller-owned turn controls onto the exact provider carrier.
     Provider identity and transport fields remain unchanged; model-specific

@@ -324,6 +324,39 @@ let test_write_and_unknown_methods_rejected () =
      Alcotest.fail "unknown method must stay diagnostic, not coerce")
 ;;
 
+(* One method, one table. definition, references, documentSymbol,
+   documentHighlight and inlayHint were written in both after RFC-0378 rung E
+   turned them into plain relays, so two lists decided the same thing about the
+   same method (#28686). *)
+let test_relayed_and_handled_tables_are_disjoint () =
+  let handled = Lsp.handled_lsp_methods () |> List.map fst in
+  let relayed = Lsp.relayed_lsp_methods () |> List.map fst in
+  let both = List.filter (fun m -> List.mem m handled) relayed in
+  check (list string) "no method is named by both tables" [] (List.sort String.compare both);
+  (* The five still forward — from the catalog's Read_only classification, not
+     from a second copy of their names. *)
+  List.iter
+    (fun m ->
+      check bool (m ^ " forwards from the catalog") true
+        (Lsp.classify_forwarded_method m = Lsp.Forward_read_only))
+    [ "textDocument/definition"
+    ; "textDocument/references"
+    ; "textDocument/documentSymbol"
+    ; "textDocument/documentHighlight"
+    ; "textDocument/inlayHint"
+    ]
+;;
+
+(* Every relayed method resolves to exactly the disposition its table row
+   declares, so the table is the decision and not a hint. *)
+let test_relayed_table_drives_the_decision () =
+  List.iter
+    (fun (method_, expected) ->
+      check bool (method_ ^ " matches its row") true
+        (Lsp.classify_forwarded_method method_ = expected))
+    (Lsp.relayed_lsp_methods ())
+;;
+
 let require_handled_method_class method_ expected =
   match Lsp.classify_handled_lsp_method method_ with
   | Some actual ->
@@ -473,6 +506,10 @@ let () =
             test_write_and_unknown_methods_rejected
         ; test_case "handled method catalog is classified" `Quick
             test_handled_lsp_method_catalog_is_classified
+        ; test_case "relayed and handled tables are disjoint" `Quick
+            test_relayed_and_handled_tables_are_disjoint
+        ; test_case "relayed table drives the decision" `Quick
+            test_relayed_table_drives_the_decision
         ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
         ; test_case "overlay code actions carry no write edit" `Quick
             test_code_actions_have_no_workspace_edit

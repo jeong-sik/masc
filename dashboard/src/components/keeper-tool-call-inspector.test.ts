@@ -4,6 +4,7 @@ import {
   deriveKeeperToolCallDossier,
   formatInput,
   groupToolCallTree,
+  toolCallRouteLinks,
 } from './keeper-tool-call-inspector'
 import type { ToolCallEntry } from '../api/dashboard'
 
@@ -257,5 +258,25 @@ describe('latest call tone', () => {
 
   it('reads neutral when there is no call at all', () => {
     expect(latestTone([])).toBe('neutral')
+  })
+})
+
+describe('toolCallRouteLinks', () => {
+  it('promotes a Code link for a file target', () => {
+    const links = toolCallRouteLinks(toolCall({
+      action_radius: { target_kind: 'path', target_path: 'lib/keeper/keeper_meta.ml' },
+    }))
+    expect(links.some(l => Object.values(l.params).includes('lib/keeper/keeper_meta.ml')))
+      .toBe(true)
+  })
+
+  it('does not promote a Code link for a directory target', () => {
+    // Execute records its cwd here. Before masc#29013 it arrived as
+    // target_kind "path" and this row opened a directory as if it were a file.
+    const links = toolCallRouteLinks(toolCall({
+      tool: 'Execute',
+      action_radius: { target_kind: 'directory', target_path: 'repos/masc' },
+    }))
+    expect(links.some(l => Object.values(l.params).includes('repos/masc'))).toBe(false)
   })
 })

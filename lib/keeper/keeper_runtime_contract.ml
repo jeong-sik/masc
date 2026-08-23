@@ -138,15 +138,42 @@ let collect_observed_paths json =
   loop [] json
   |> List.sort_uniq String.compare
 
-let target_kind_of_input input target_path =
+(* Which input key the target came from, in the order they are tried. A file
+   target and a working directory are both strings and were both reported as
+   [target_kind "path"], so a consumer reading "path" as "a file" opened a
+   directory instead: on 2026-08-18, 1,094 of the day's 1,323 Execute rows
+   carried a directory that way, and the dashboard held Execute back from Code
+   links by name to work around it (#29013, #29010). *)
+type target_source =
+  | File_target
+  | Directory_target
+
+let target_candidates =
+  [ "target_path", File_target
+  ; "path", File_target
+  ; "file_path", File_target
+  ; "repo_path", Directory_target
+  ; "cwd", Directory_target
+  ]
+;;
+
+let first_target_field input =
+  List.find_map
+    (fun (name, source) ->
+       json_string_field name input |> Option.map (fun value -> value, source))
+    target_candidates
+;;
+
+let target_kind_of_input input target =
   match json_string_field "target_kind" input with
   | Some value -> value
   | None -> (
       match json_string_field "kind" input with
       | Some value -> value
       | None -> (
-          match target_path with
-          | Some _ -> "path"
+          match target with
+          | Some (_, File_target) -> "path"
+          | Some (_, Directory_target) -> "directory"
           | None -> "tool"))
 
 let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
@@ -155,23 +182,13 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
     first_string_field [ "action"; "action_key"; "op"; "cmd"; "command" ] input
     |> Option.value ~default:tool_name
   in
-  let target_path =
-    first_string_field
-      [
-        "target_path";
-        "path";
-        "file_path";
-        "repo_path";
-        "cwd";
-      ]
-      input
-  in
+  let target = first_target_field input in
   `Assoc
     [
       ("tool_name", `String tool_name);
       ("action_key", `String action_key);
-      ("target_kind", `String (target_kind_of_input input target_path));
-      ("target_path", string_opt_json target_path);
+      ("target_kind", `String (target_kind_of_input input target));
+      ("target_path", string_opt_json (Option.map fst target));
       ("sandbox_target", string_opt_json sandbox_target);
       ("observed_paths", Json_util.json_string_list (collect_observed_paths input));
       ("success", `Bool success);

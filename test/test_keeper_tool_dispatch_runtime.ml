@@ -85,7 +85,7 @@ let project_replay_message_exn ~base_path
      | Ok [ _canonical; projected ] ->
        Agent_core.Types.text_of_content projected.content
      | Ok _ -> fail "replay projection did not append exact evidence"
-     | Error detail -> fail detail)
+     | Error detail -> fail (Agent_core.Error.to_string detail))
 ;;
 
 let make_meta ?(name = "keeper-exec-tools") () =

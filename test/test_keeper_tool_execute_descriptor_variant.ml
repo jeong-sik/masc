@@ -94,6 +94,63 @@ let test_descriptor_is_typed_only () =
     (bool_field execute_schema.input_schema "additionalProperties")
 ;;
 
+(* Prose is stated once per position. A pipeline or [then] stage repeats the
+   top level's field names and shapes, so a second copy of the same sentence is
+   bytes on every Keeper turn that say nothing new. The one exception is
+   [argv]: a stage is where a model reaches for '|', so "there is no shell"
+   is restated there in short form.
+
+   Checked by walking to the two nested stages by name rather than scanning the
+   document for anything called "description", so a field that grows prose in a
+   stage fails here instead of passing a count. *)
+let descriptions_in (json : Yojson.Safe.t) =
+  let rec collect acc (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc kvs ->
+      List.fold_left
+        (fun acc (key, value) ->
+           match key, value with
+           | "description", `String text -> text :: acc
+           | _ -> collect acc value)
+        acc
+        kvs
+    | `List items -> List.fold_left collect acc items
+    | _ -> acc
+  in
+  List.rev (collect [] json)
+;;
+
+let member (json : Yojson.Safe.t) path =
+  List.fold_left
+    (fun acc key ->
+       match assoc_field_opt acc key with
+       | Some found -> found
+       | None -> Alcotest.failf "%s missing under %s" key (pp_json acc))
+    json
+    path
+;;
+
+let test_nested_stages_restate_only_the_no_shell_rule () =
+  let execute_schema = Tool_shard_types.typed_execute_tools |> find_execute_schema in
+  let nested_argv_note =
+    "Same shape as the top-level argv. Still no shell: '|', '&&' and '>' are data, \
+     and wildcards are not expanded."
+  in
+  List.iter
+    (fun (label, path) ->
+       let distinct =
+         descriptions_in (member execute_schema.input_schema path)
+         |> List.sort_uniq String.compare
+       in
+       Alcotest.(check (list string))
+         (label ^ " restates the no-shell rule and nothing else")
+         [ nested_argv_note ]
+         distinct)
+    [ "a pipeline stage", [ "properties"; "pipeline"; "items" ]
+    ; "a then continuation", [ "properties"; "then"; "items" ]
+    ]
+;;
+
 let test_description_does_not_advertise_cmd () =
   let execute_schema =
     Tool_shard_types.typed_execute_tools
@@ -156,6 +213,10 @@ let () =
             "descriptions avoid raw search scans"
             `Quick
             test_descriptions_do_not_advertise_raw_search_scans
+        ; Alcotest.test_case
+            "nested stages restate only the no-shell rule"
+            `Quick
+            test_nested_stages_restate_only_the_no_shell_rule
         ] )
     ]
 ;;

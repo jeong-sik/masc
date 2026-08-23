@@ -1177,8 +1177,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               name=${row.agent.name}
               status=${row.presenceDisplay.status}
               size="md"
-              currentWork=${row.currentWork}
-              activityAge=${row.lastActivityAge}
             />
           </span>
           <div class="fl-id-txt">
@@ -1374,8 +1372,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   name=${selectedRow.agent.name}
                   status=${selectedRow.presenceDisplay.status}
                   size="lg"
-                  currentWork=${selectedRow.currentWork}
-                  activityAge=${selectedRow.lastActivityAge}
                 />
               </span>
               <div class="min-w-0">

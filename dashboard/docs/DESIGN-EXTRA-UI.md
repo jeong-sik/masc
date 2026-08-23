@@ -32,22 +32,22 @@ side.** Most are per-surface detail. The ones that recur are below.
 
 ## Candidates worth a decision
 
-### Two avatar systems
+### Two avatar systems — resolved 2026-08-23
 
-`.pixel-avatar` and its five sub-classes render on overview, keepers and
+`.pixel-avatar` and its five sub-classes rendered on overview, keepers and
 monitoring. The design draws a `.sigil` — the two-letter monogram — in the same
-places, and **the rest of the dashboard already agrees with it**: `.sigil` is
+places, and the rest of the dashboard already agreed with it: `.sigil` was
 rendered by `chat/primitives.ts`, `board/board-surface.ts`, `keeper-badge.ts`,
-`ide/ide-editor-ownership.ts` and `v2/primitives-v2.ts`. `.pixel-avatar` has
-exactly one consumer left, `overview/agent-avatar.ts`.
+`ide/ide-editor-ownership.ts` and `v2/primitives-v2.ts`, while `.pixel-avatar`
+had exactly one renderer left, `overview/agent-avatar.ts`.
 
-So this is not "the dashboard chose pixel avatars" — it is one component that did
-not move when the others did. It is the same shape as the `.chip` collision
-resolved in #29334: a single leftover holding a second implementation of
-something the design already owns.
-
-Not changed here: an avatar is a character surface, and swapping it is visible to
-every operator. It needs a decision, not a refactor.
+Resolved: `agent-avatar.ts` now renders the same `<Sigil>` primitive
+(`common/sigil-chip.ts`, slot via `keeper-badge.ts` `kSlot`/`kSigil`) with a
+heartbeat on the old animated statuses. `pixel-avatar.css`,
+`config/avatar-palettes.ts` and the overlay vocabulary (activity dot, speech
+bubble, blocker ring, signal ring) are deleted; the roster/profile rows carry
+that operational context in their own cells. Sizes map to px (`xs` 20 keeps
+the fusion dense-list row height previously forced by a `.fus-list` override).
 
 ### Shell containers with no design counterpart
 

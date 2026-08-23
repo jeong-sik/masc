@@ -84,8 +84,12 @@ function ApprovalAuditWriteFailureAlert() {
 }
 
 type ApprovalsView = 'queue' | 'history'
-type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision
+type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision | GateDecisionSource
 
+// Design pill order (keeper-v2 approvals.jsx AP_HIST_FILTERS): decision pills
+// first, then decider pills. The design's 보류 pill is omitted — the live
+// decision model is the closed {approve, reject} set (see file header); the
+// decider pills are backed by the live decision_source field.
 const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   id: ApprovalHistoryFilter
   label: string
@@ -94,6 +98,9 @@ const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   { id: 'all', label: '전체', predicate: () => true },
   { id: 'approve', label: '승인', predicate: item => item.decision === 'approve' },
   { id: 'reject', label: '거부', predicate: item => item.decision === 'reject' },
+  { id: 'human_operator', label: 'HITL 수동', predicate: item => item.decision_source === 'human_operator' },
+  { id: 'auto_judge', label: 'Auto Judge', predicate: item => item.decision_source === 'auto_judge' },
+  { id: 'always_allowed', label: 'Always', predicate: item => item.decision_source === 'always_allowed' },
 ]
 const DEFAULT_APPROVAL_HISTORY_FILTER = APPROVAL_HISTORY_FILTERS[0]!
 
@@ -177,6 +184,12 @@ function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
             ? html`<span class="ap-hist-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
             : null}
         </div>
+        ${/* The design's .ap-hist-reason slot, fed by the audit record's own
+             decision_reason — rendered only when the server recorded one
+             (mark, don't fake). */''}
+        ${item.decision_reason
+          ? html`<div class="ap-hist-reason" data-testid="approval-history-reason">${item.decision_reason}</div>`
+          : null}
         ${judgeSummary
           ? html`
               <details class="ap-hist-judge" data-testid="approval-history-judge">
@@ -272,6 +285,7 @@ function ApHistory({
   const counts = useMemo(() => ({
     approve: sorted.filter(item => item.decision === 'approve').length,
     reject: sorted.filter(item => item.decision === 'reject').length,
+    autoJudge: sorted.filter(item => item.decision_source === 'auto_judge').length,
     keepers: new Set(sorted.map(item => item.keeper_name)).size,
   }), [sorted])
 
@@ -281,6 +295,10 @@ function ApHistory({
       <div class="ap-hist-summary" aria-label="승인 이력 요약">
         <div class="ap-hist-stat"><b class="mono ok">${counts.approve}</b> 승인</div>
         <div class="ap-hist-stat"><b class="mono bad">${counts.reject}</b> 거부</div>
+        <div class="ap-hist-stat"><b class="mono">${counts.autoJudge}</b> Auto Judge</div>
+        ${/* Design's 4th stat is median decision latency; the audit record has
+             no latency field, so the slot carries the live-only keeper count
+             instead of a fabricated number. */''}
         <div class="ap-hist-stat"><b class="mono">${counts.keepers}</b> 관련 키퍼</div>
       </div>
       <div class="ap-hist-filters" role="tablist" aria-label="승인 이력 필터">

@@ -663,7 +663,12 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
-    expect(container.textContent).toContain('provider 입력 토큰 / 모델 윈도우')
+    // Design's ctx-usage row (rails.jsx): leading "마지막 턴 input" label,
+    // volt-accented value, trailing "마지막 턴 · 창 크기" label.
+    expect(container.querySelector('.ctx-usage .ctx-usage-k')?.textContent).toBe('마지막 턴 input')
+    expect(container.textContent).toContain('마지막 턴 · 창 크기')
+    // ...and the design's typed not_observed line for live occupancy.
+    expect(container.querySelector('.ctx-notobs')).not.toBeNull()
     expect(meter).not.toBeNull()
     expect(meter?.getAttribute('role')).toBe('meter')
     expect(meter?.getAttribute('aria-label')).toBe('마지막 완료 요청의 컨텍스트 윈도우 사용률')

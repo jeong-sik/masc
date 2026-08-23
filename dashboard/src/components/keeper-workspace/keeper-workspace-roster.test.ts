@@ -472,6 +472,18 @@ describe('KeeperWorkspaceRoster', () => {
     expect(rows[0]?.textContent).toContain('rama')
   })
 
+  // Design structure (rails.jsx): the open search field sits in its own
+  // `.roster-head` band below `.roster-filters` — the vendored kit rule
+  // (v2.css `.roster-head`) owns the band's padding + bottom border.
+  it('wraps the open search field in the design .roster-head band', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    expect(host.querySelector('.roster-head')).toBeNull()
+    fireEvent.click(host.querySelector('.kw-rfilter-icon') as HTMLButtonElement)
+    const band = host.querySelector('.roster-head') as HTMLElement
+    expect(band).not.toBeNull()
+    expect(band.querySelector('.kw-roster-search.roster-search')).not.toBeNull()
+  })
+
   it('sorts the roster by name and attention count', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const sort = host.querySelector('.kw-roster-sort') as HTMLSelectElement
@@ -590,6 +602,24 @@ describe('KeeperWorkspaceRoster', () => {
     const handle = host.querySelector('.kw-kp-handle') as HTMLElement
     expect(handle?.textContent).toBe('…/keepers/keeper-miso')
     expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
+  })
+
+  // Design roster sub-line marker (rails.jsx `.kp-sandbox`): the ⬡ glyph flags a
+  // keeper with a dedicated worktree folder. Live source: sandbox_profile —
+  // 'local' is the git-worktree profile the glyph's title describes.
+  it('renders the design ⬡ sandbox glyph only for local-worktree keepers', () => {
+    keepers.value = [
+      mk({ name: 'miso', status: 'running', sandbox_profile: 'local', sandbox_target: '/workspace/keepers/keeper-miso' }),
+      mk({ name: 'plain', status: 'running' }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="miso" />`, host)
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
+    const miso = rows.find(r => r.textContent?.includes('miso')) as HTMLElement
+    const plain = rows.find(r => r.textContent?.includes('plain')) as HTMLElement
+    const glyph = miso.querySelector('.kp-sandbox') as HTMLElement
+    expect(glyph?.textContent).toBe('⬡')
+    expect(glyph?.getAttribute('title')).toContain('git worktree')
+    expect(plain.querySelector('.kp-sandbox')).toBeNull()
   })
 
   it('falls back to the runtime scope proxy when a keeper has no sandbox_target', () => {

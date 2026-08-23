@@ -27,7 +27,7 @@ surfaces behind tabs and drawers that no click recipe covers.
 
 ## Where it stands (2026-08-22)
 
-**1344 of 2435 design components implemented — 55.2%.** The vendored kit is the
+**1398 of 2435 design components implemented — 57.4%** (re-measured 2026-08-23; the 55.2% / 1344 figure is the 2026-08-22 baseline). The vendored kit is the
 mirror image: **42% of its 2870 selectors (1216) style nothing in the app.**
 
 `lanes.css` is the shape of the problem. The Lane Queue sub-view scores 0.959,
@@ -62,6 +62,12 @@ components have no markup on this side yet.
 | turn-inspector | 98.2% | 55/56 |
 | dock, app | 100% | |
 
+2026-08-23: `internal-agents-monitor.ts` was rebuilt onto the design's
+`.ia-*`/`.ai-*` vocabulary, and approvals history was extended (decider pills
+from the live `decision_source` field, `.ap-hist-reason` ← `decision_reason`,
+Auto Judge summary stat). Every number on this page predates that work —
+re-run the probes before quoting them.
+
 ## The gap is three different problems
 
 `design-parity-renames.mjs` proposes 310 pairs where the dashboard looks like it
@@ -85,6 +91,15 @@ the comments cite the prototype by file and line, and it pins the same literals
 where the repo's tokens differ. It was correct in every respect except the one
 that decides whether the design's stylesheet reaches it.
 
+approvals history moved again on 2026-08-23: the summary now follows the
+design's stat strip (승인/거부/Auto Judge — the design's fourth slot, median
+decision latency, has no live field and carries the live keeper count instead
+of a fabricated number), the filter pills include the design's decider set
+backed by the live `decision_source` field, and `.ap-hist-reason` renders the
+audit record's `decision_reason` when the server recorded one. The 76.3%
+above predates this; re-measured 2026-08-23: overall coverage is 57.4%
+(1398/2435), internal-agents 88.6% (31/35).
+
 ### Deliberate — the different name is the point
 
 Do not rename these. The reason is written in each stylesheet's header.
@@ -101,7 +116,8 @@ Do not rename these. The reason is written in each stylesheet's header.
 | Command palette | its own `cmdk-*` markup, 16 components | `ninja-keys`, a third-party web component. None of the 16 can ever apply. |
 | Lane Queue | 72 `dl-*` components | nothing; `lanes.css` is vendored anyway |
 | Journey | 53 `ev-*` components | nothing |
-| monitor-internal, lab | `.ia-badge`, `.ai-table`, `.ai-strip` — a named vocabulary | Tailwind utilities assembled inline. A vendored stylesheet cannot reach a surface with nothing named to style. |
+| monitor-internal | `.ia-badge`, `.ai-table`, `.ai-strip` — a named vocabulary | Rebuilt onto that vocabulary 2026-08-23 (`internal-agents-monitor.ts`); re-measured 2026-08-23: 88.6% (31/35) |
+| lab | — | Tailwind utilities assembled inline. A vendored stylesheet cannot reach a surface with nothing named to style. |
 | Verify queue | 69 `vq-*` components | 8 |
 
 ## Tokens that resolve to nothing

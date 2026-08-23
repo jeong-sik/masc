@@ -3,8 +3,8 @@
    .turn-* overlay; everything new is .sch-*. v2 tokens only.
    ══════════════════════════════════════════════════════════════ */
 
-/* status tone helper — map cls → color var */
-.sch-pill, .sch-exec, .sch-sig-kind { --tone: var(--text-dim); }
+/* status/risk tone helper — map cls → color var */
+.sch-pill, .sch-risk, .sch-decision, .sch-exec, .sch-sig-kind { --tone: var(--text-dim); }
 .sch-risk.volt { --tone: var(--volt-strong); }
 .sch-risk.bad  { --tone: var(--status-bad); }
 .sch-risk.warn { --tone: var(--status-warn); }
@@ -13,12 +13,12 @@
 .sch-risk.dim  { --tone: var(--text-dim); }
 .sch-risk { font-family: var(--font-mono); font-size: var(--fs-10); padding: 1px 7px; border-radius: var(--radius-xs); color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 32%, transparent); }
 .ok   { }
-.sch-pill.ok,   .sch-exec.ok,   .sch-sig-kind.ok   { --tone: var(--status-ok); }
-.sch-pill.warn, .sch-sig-kind.warn { --tone: var(--status-warn); }
-.sch-pill.bad,  .sch-exec.bad   { --tone: var(--status-bad); }
+.sch-pill.ok,   .sch-decision.ok,   .sch-exec.ok,   .sch-sig-kind.ok   { --tone: var(--status-ok); }
+.sch-pill.warn, .sch-decision.warn, .sch-sig-kind.warn { --tone: var(--status-warn); }
+.sch-pill.bad,  .sch-decision.bad,  .sch-exec.bad   { --tone: var(--status-bad); }
 .sch-pill.info  { --tone: var(--info); }
 .sch-pill.volt  { --tone: var(--volt-strong); }
-.sch-pill.dim   { --tone: var(--text-dim); }
+.sch-pill.dim,  .sch-decision.dim   { --tone: var(--text-dim); }
 
 /* ── filter tabs ── */
 .sch-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 14px; }
@@ -151,6 +151,9 @@
 
 @media (max-width: 720px) {
   .sch-kv .k { width: 96px; }
+  .sch-cadsum { margin-left: 0; width: 100%; }
+  .sch-poll-list { grid-template-columns: 1fr; }
+  .sch-ev-time { width: 40px; }
   .sch-surf button,
   .sch-surf summary,
   .sch-surf input,

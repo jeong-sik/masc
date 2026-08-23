@@ -217,13 +217,13 @@ const PB_CATALOG = [
     family: 'MASC 관리 프롬프트',
     note: 'managed-assets.json 에 선언된 6개 — 이 중 keeper 턴에 들어가는 건 keeper.md 하나',
     feedsTurn: true,
-    files: ['keeper.md', 'librarian.md', 'verification.md', 'judge.board.md', 'judge.effect.md'],
+    files: ['keeper.md', 'librarian.md', 'verification.md', 'judge.board.md', 'judge.catchup.md', 'judge.effect.md'],
   },
   {
     family: '내부 에이전트 전용',
     note: '같은 파일들이 별도 호출자에게 쓰인다 — 라이브러리안 · 검증 · 심판. keeper 턴 아님',
     feedsTurn: false,
-    files: ['librarian.md', 'verification.md', 'judge.board.md', 'judge.effect.md'],
+    files: ['librarian.md', 'verification.md', 'judge.board.md', 'judge.catchup.md', 'judge.effect.md'],
   },
   {
     family: '런타임이 붙이는 절',

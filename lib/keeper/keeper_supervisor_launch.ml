@@ -528,40 +528,6 @@ let launch_supervised_fiber_body
 	                  ~base_path
                   meta.name
                   (Some (Keeper_registry.Fiber_unresolved Unexpected));
-                (* Stamp the durable blocker through the Keeper owner. Failure
-                   remains best-effort for supervisor cleanup, but no snapshot
-                   assembled by this fiber can overwrite owner state. *)
-                (match
-                   Keeper_owner_registry.apply_meta
-                     ~base_path
-                     ~keeper_name:meta.name
-                     (Keeper_owner_reducer.Set_blocker
-                        { blocker =
-                            Some
-                              (blocker_info_of_class
-                                 ~detail:"fiber_unresolved"
-                                 Fiber_unresolved)
-                        ; updated_at = Keeper_meta_contract.now_iso ()
-                        })
-                 with
-                 | Ok (Some _) -> ()
-                 | Ok None ->
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string WriteMetaFailures)
-                     ~labels:[ "keeper", meta.name; "phase", "fiber_unresolved_stamp" ]
-                     ();
-                   Log.Keeper.warn
-                     "%s: fiber_unresolved owner metadata missing"
-                     meta.name
-                 | Error error ->
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string WriteMetaFailures)
-                     ~labels:[ "keeper", meta.name; "phase", "fiber_unresolved_stamp" ]
-                     ();
-                   Log.Keeper.warn
-                     "%s: fiber_unresolved owner command failed: %s"
-                     meta.name
-                     (Keeper_owner_registry.command_error_to_string error));
                 let ts = Time_compat.now () in
                 Keeper_registry.record_crash ~base_path meta.name ts reason;
                 let rc =

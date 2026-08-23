@@ -968,7 +968,6 @@ let render_keeper_detail (state : state) =
     add_section "Current Work";
     add_row "Task:"
       (Terminal_text.single_line_or ~default:"-" k.k_current_task_id);
-    add_row "Last Blocker:" (Tui_decode.keeper_blocker_for_terminal k);
     add_empty ();
 
     (* Live Context section (Phase 2) *)

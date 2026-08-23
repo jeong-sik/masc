@@ -215,7 +215,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
           message_scope_ack_id = None;
-	          last_blocker = None;
 	          last_runtime_attempt = None;
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());

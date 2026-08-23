@@ -29,7 +29,6 @@ type keeper = {
   k_mention_reactive_turn_count : int;
   k_noop_turn_count : int;
   k_last_proactive_outcome : string;
-  k_last_blocker : string option;
   k_created_at : string;
   k_updated_at : string;
 }
@@ -50,9 +49,6 @@ val clock_timestamp_for_terminal : string -> string
     present, then sanitize the result. The final sanitizer makes arbitrary
     external timestamp bytes safe even when the byte slice splits UTF-8. *)
 
-val keeper_blocker_for_terminal : keeper -> string
-(** Terminal-boundary projection for the raw typed blocker stored in
-    {!type-keeper}. Missing blockers render as [-]. *)
 
 type planning_goal = {
   pg_id : string;

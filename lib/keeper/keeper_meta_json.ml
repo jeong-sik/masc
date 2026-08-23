@@ -68,10 +68,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.message_scope_ack_id with
         | Some id -> `String id
         | None -> `Null )
-    ; ( Last_blocker
-      , match rt.last_blocker with
-        | Some info -> blocker_info_to_json info
-        | None -> `Null )
     ; ( Last_runtime_attempt
       , match rt.last_runtime_attempt with
         | Some record -> runtime_attempt_record_to_json record

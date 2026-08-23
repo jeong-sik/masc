@@ -87,14 +87,6 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
-type blocked_keeper = {
-  bk_name : string;
-  bk_reason : string;
-  bk_action : string option;
-}
-(** A keeper the fleet wanted to run and could not. [bk_action] is the
-    server's recommended operator step when it names one. *)
-
 type fleet_safety = {
   fs_status : string;
   fs_blocker : string option;
@@ -107,7 +99,8 @@ type fleet_safety = {
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
-  fs_blocked_keepers : blocked_keeper list;
+  fs_bootable_names : string list;
+  fs_executable_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -116,7 +109,11 @@ type fleet_safety = {
     Every count here answers "how many keepers are not doing what the fleet
     intends", which is the question the keeper list cannot answer: that list
     holds one row per running keeper, so a keeper that failed to start is
-    absent rather than shown as failed. *)
+    absent rather than shown as failed.
+
+    The two name lists are carried raw. Which keepers are missing is
+    [bootable] minus [executable] — a subtraction the reader does, not a
+    field the server precomputes. *)
 
 type log_kind =
   | Log_turn

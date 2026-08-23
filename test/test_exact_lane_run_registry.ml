@@ -188,7 +188,41 @@ let test_running_shape_has_no_invented_completion () =
 ;;
 
 let test_current_storage_generation () =
-  check string "current store file" "exact-lane-runs-v4.jsonl" R.storage_filename
+  check string "current store file" "exact-lane-runs-v5.jsonl" R.storage_filename
+;;
+
+(* The registration decoder is exact-field, so removing a field from it makes
+   every row written with that field unreadable, and the store then never
+   compacts again (#29598 did this to v4: 2,000 of 4,090 live rows skipped on
+   every boot). A removed field has to ride on the store version. This test
+   holds the two together: the fixture below is a full v5 registration row, so
+   a decoder that stops accepting one of its keys fails here, and the fix is
+   to change the fixture and [storage_filename] in the same commit. *)
+let v5_registration_row =
+  {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
+
+(* The same row as v4 wrote it: [subject_id] inside the registration. *)
+let v4_registration_row =
+  {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
+
+let test_store_version_pins_the_registration_shape () =
+  let replay_single row =
+    let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
+    Fs_compat.save_file path (row ^ "\n");
+    let replayed = R.replay path in
+    let status =
+      R.get replayed ~run_id:"exact-board-attention-pin"
+      |> Option.map (fun run -> R.status_label run.R.status)
+    in
+    remove_if_exists path;
+    status
+  in
+  check string "the row shape below belongs to this store version"
+    "exact-lane-runs-v5.jsonl" R.storage_filename;
+  check (option string) "a v5 registration row replays as a running run"
+    (Some "running") (replay_single v5_registration_row);
+  check (option string) "the field v4 carried and v5 removed is rejected, not ignored"
+    None (replay_single v4_registration_row)
 ;;
 
 (* The retained-run bound exists to serve the internal-agents monitor, which
@@ -500,6 +534,8 @@ let () =
             test_blank_selected_slot_is_rejected_before_write
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
         ; test_case "current storage generation" `Quick test_current_storage_generation
+        ; test_case "store version pins the registration shape" `Quick
+            test_store_version_pins_the_registration_shape
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
         ; test_case "retention is derived from the monitor page size" `Quick

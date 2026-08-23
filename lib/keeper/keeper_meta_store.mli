@@ -23,14 +23,33 @@ val read_meta_file_path :
   string ->
   (Keeper_meta_contract.keeper_meta option, string) result
 
-(** Deploy-gate twin of [read_meta_file_path]: the same decode-and-repair
-    decision without the fail-open. [Ok ()] when the runtime keeps the
-    persisted snapshot (directly or after the in-place enum repair);
-    [Error] exactly when the runtime would discard the meta as unreadable
-    and re-materialise the Keeper from its declaration, losing the
-    accumulated counters and the persisted task binding. The deployment
-    preflight calls this before the runtime swap. *)
-val validate_current_meta_file_result : string -> (unit, string) result
+(** Why the deployment gate rejects a persisted Keeper meta, split by what
+    the boot path does with the same file.  The two classes need different
+    operator action, so the split is typed here rather than read out of the
+    detail text. *)
+type current_meta_rejection =
+  | Unreadable of string
+      (** The file cannot be read or is not JSON.  [read_meta_file_path]
+          returns [Error] for it and the boot path refuses the Keeper
+          outright.  The lossless fix is restoring the file from backup. *)
+  | Not_current of string
+      (** The JSON does not decode as the current schema, even after the
+          enumerated-field repair.  The boot path reads it as absent and
+          re-materialises the Keeper from its declaration (#29610), losing
+          the accumulated counters and the persisted task binding.  The
+          lossless fix is stripping retired fields or filling missing ones. *)
+
+(** Deploy-gate twin of [read_meta_file_path]: the same decode decision
+    (exact decode, then the issue #28844 enumerated-field repair with a
+    redecode), shared with the runtime read so the two cannot drift, minus
+    the fail-open and the repair write.  [Ok ()] when the runtime would keep
+    the snapshot, directly or after repairing it in place, or when there is
+    no file at [path]; [Error] carries the class above and the same detail
+    the runtime logs.  The deployment preflight runs this between the
+    previous runtime's stop and the next one's start, so a rejection holds
+    the plane down until the operator repairs the file and redeploys. *)
+val validate_current_meta_file_result :
+  string -> (unit, current_meta_rejection) result
 
 (** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
 (** List keeper names with persisted JSON in [.masc/keepers/].

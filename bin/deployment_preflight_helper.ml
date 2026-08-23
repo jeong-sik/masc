@@ -83,16 +83,31 @@ let validate_current_wal ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+(* The two rejection classes call for different operator action, so each
+   verdict carries a single-token [class=] label: cmdliner re-wraps the error
+   text at the terminal margin and can split a phrase across lines, a token
+   survives intact. *)
 let validate_current_meta path =
   Masc.Keeper_meta_store.validate_current_meta_file_result path
-  |> Result.map_error (fun detail ->
-    `Msg
-      (Printf.sprintf
-         "current keeper meta production validation rejected path=%s (on boot \
-          the runtime discards this meta and re-materialises the keeper from \
-          its declaration, losing accumulated counters): %s"
-         path
-         detail))
+  |> Result.map_error (function
+    | Masc.Keeper_meta_store.Unreadable detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta is unreadable class=unreadable_json path=%s \
+            (on boot the runtime refuses this keeper instead of \
+            re-materialising it; restore the file from backup): %s"
+           path
+           detail)
+    | Masc.Keeper_meta_store.Not_current detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta production validation rejected \
+            class=not_current_schema path=%s (on boot the runtime reads this \
+            meta as absent and re-materialises the keeper from its \
+            declaration, losing the accumulated counters and the task \
+            binding; strip retired fields or fill missing ones): %s"
+           path
+           detail))
 ;;
 
 let validate_schedule_ledger path =

@@ -108,6 +108,54 @@ module Problem_report_state = struct
   ;;
 end
 
+(** The current-schema decode decision, shared by the runtime read and the
+    deployment gate so the two cannot drift: the exact decode first, then the
+    enumerated-field repair of issue #28844 followed by a redecode.  No I/O —
+    persisting a repair is the runtime caller's step.  [Error] carries the
+    detail the runtime reports when it fails open, so the gate names a
+    rejection in the runtime's own words. *)
+type decoded_meta =
+  | Exact of keeper_meta
+  | Repaired of
+      { meta : keeper_meta
+      ; decode_error : string
+      ; repair_detail : string
+      }
+
+let decode_current_meta_with_repair json : (decoded_meta, string) result =
+  match meta_of_json json with
+  | Ok meta -> Ok (Exact meta)
+  | Error e ->
+    (match repair_non_canonical_enum_fields json with
+     | None -> Error e
+     | Some (repaired_json, repairs) ->
+       let repair_detail =
+         repairs
+         |> List.map (fun (repair : enum_field_repair) ->
+           Printf.sprintf
+             "%s %S -> %S"
+             repair.field
+             repair.previous_value
+             repair.repaired_value)
+         |> String.concat ", "
+       in
+       (match meta_of_json repaired_json with
+        | Ok meta -> Ok (Repaired { meta; decode_error = e; repair_detail })
+        | Error redecode_detail ->
+          (* Resetting the enumerated fields did not make the file
+             decodable; the original failure stands, with the new decode
+             error attached when it differs. *)
+          Error
+            (if String.equal redecode_detail e
+             then e
+             else
+               Printf.sprintf
+                 "%s; auto-repair of %s did not decode: %s"
+                 e
+                 repair_detail
+                 redecode_detail)))
+;;
+
 let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta option, string) result =
   (* Fail open. A meta this binary cannot read is an absent meta, not a dead
      keeper: the TOML declaration carries the whole setup, so the boot path
@@ -139,13 +187,13 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
-      (match meta_of_json json with
-       | Ok meta ->
+      (match decode_current_meta_with_repair json with
+       | Ok (Exact meta) ->
          if Problem_report_state.note_recovered ~site:Meta_read ~path
          then Log.Keeper.info "keeper meta parse recovered for %s" path;
          Problem_report_state.clear ~site:Meta_repair ~path;
          Ok (Some meta)
-       | Error e ->
+       | Ok (Repaired { meta = repaired_meta; decode_error; repair_detail }) ->
          (* Issue #28844: a non-canonical enumerated field used to brick every
             reader until something external rewrote the file.  When the
             corruption is confined to fields with a canonical default, repair
@@ -155,87 +203,53 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
             WARN is deduped on the repair detail via [Meta_repair], so the
             log storm does not return; the residual cost is one atomic
             rewrite of a small file per scan against an active corrupter. *)
-         (match repair_non_canonical_enum_fields json with
-          | Some (repaired_json, repairs) ->
-            let repair_detail =
-              repairs
-              |> List.map
-                   (fun (repair : enum_field_repair) ->
-                      Printf.sprintf
-                        "%s %S -> %S"
-                        repair.field
-                        repair.previous_value
-                        repair.repaired_value)
-              |> String.concat ", "
-            in
-            (match meta_of_json repaired_json with
-             | Ok repaired_meta ->
-               (match
-                  persist_snapshot ?ownership_root path repaired_meta
-                with
-                | Ok () ->
-                  if Problem_report_state.should_report
-                       ~site:Meta_repair
-                       ~path
-                       ~detail:repair_detail
-                  then
-                    Log.Keeper.warn
-                      "keeper meta auto-repaired %s: %s"
-                      path
-                      repair_detail;
-                  Ok (Some repaired_meta)
-                | Error write_detail ->
-                  fail_open
-                    (Printf.sprintf
-                       "%s; auto-repair of %s failed to persist: %s"
-                       e
-                       repair_detail
-                       write_detail))
-             | Error redecode_detail ->
-               (* Resetting the enumerated fields did not make the file
-                  decodable; the original failure stands, with the new
-                  decode error attached when it differs. *)
-               fail_open
-                 (if String.equal redecode_detail e
-                  then e
-                  else
-                    Printf.sprintf
-                      "%s; auto-repair of %s did not decode: %s"
-                      e
-                      repair_detail
-                      redecode_detail))
-          | None -> fail_open e)))
+         (match persist_snapshot ?ownership_root path repaired_meta with
+          | Ok () ->
+            if Problem_report_state.should_report
+                 ~site:Meta_repair
+                 ~path
+                 ~detail:repair_detail
+            then
+              Log.Keeper.warn
+                "keeper meta auto-repaired %s: %s"
+                path
+                repair_detail;
+            Ok (Some repaired_meta)
+          | Error write_detail ->
+            fail_open
+              (Printf.sprintf
+                 "%s; auto-repair of %s failed to persist: %s"
+                 decode_error
+                 repair_detail
+                 write_detail))
+       | Error detail -> fail_open detail))
 ;;
 
-let validate_current_meta_file_result path : (unit, string) result =
-  (* Deploy-gate twin of [read_meta_file_path]: the same decode-and-repair
-     decision, without the fail-open. [Error] fires exactly when the runtime
-     would discard the persisted snapshot as unreadable and re-materialise
-     the Keeper from its declaration (2026-08-23: three fleet-down incidents
-     before #29610 made the read fail open, losing the accumulated counters
-     and the persisted task binding). The deployment preflight surfaces this
-     while the previous runtime is still serving, so the operator can strip
-     retired fields losslessly before the swap takes downtime. *)
+type current_meta_rejection =
+  | Unreadable of string
+  | Not_current of string
+
+let validate_current_meta_file_result path : (unit, current_meta_rejection) result =
+  (* Deploy-gate twin of [read_meta_file_path]: the same decode decision
+     through [decode_current_meta_with_repair], minus the fail-open and the
+     repair write. [Not_current] fires exactly when the runtime would read
+     the file as absent and re-materialise the Keeper from its declaration
+     (#29610), losing the accumulated counters and the persisted task
+     binding; [Unreadable] when [read_meta_file_path] itself returns [Error]
+     and the boot path refuses the keeper. The deployment preflight runs this
+     between the previous runtime's stop and the next one's start — the
+     writer lease has to be free — so a rejection holds the plane down until
+     the operator repairs the file and redeploys. That downtime is the price
+     of keeping the counters the boot-time fail-open would lose. *)
   if not (Fs_compat.file_exists path)
   then Ok ()
   else
     match Safe_ops.read_json_file_safe path with
-    | Error detail -> Error detail
+    | Error detail -> Error (Unreadable detail)
     | Ok json ->
-      (match meta_of_json json with
-       | Ok _meta -> Ok ()
-       | Error detail ->
-         (match repair_non_canonical_enum_fields json with
-          | Some (repaired_json, _repairs) ->
-            (match meta_of_json repaired_json with
-             | Ok _meta -> Ok ()
-             | Error redecode_detail ->
-               Error
-                 (Printf.sprintf
-                    "%s; auto-repair did not decode: %s"
-                    detail
-                    redecode_detail))
-          | None -> Error detail))
+      (match decode_current_meta_with_repair json with
+       | Ok (Exact _ | Repaired _) -> Ok ()
+       | Error detail -> Error (Not_current detail))
 ;;
 
 let persisted_keeper_names_result config =

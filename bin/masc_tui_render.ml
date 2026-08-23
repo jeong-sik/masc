@@ -349,13 +349,26 @@ let render_overview (state : state) =
                (Terminal_text.single_line t.th_queue_pressure)
                t.th_sse_sessions websocket grpc dropped
          in
+         (* The runtime event feed rides the same tail. "live N" counts the
+            frames this stream has delivered; a closed feed keeps its count
+            and says why it closed, so a stream that dropped after a thousand
+            events and one that never opened do not read alike. *)
+         let observer_summary =
+           match state.observer with
+           | Observer_off -> ""
+           | Observer_opening -> "  feed: opening"
+           | Observer_live { events; _ } -> Printf.sprintf "  feed: live %d" events
+           | Observer_closed { reason; events; _ } ->
+               Printf.sprintf "  feed: closed after %d (%s)" events
+                 (Terminal_text.single_line reason)
+         in
          let cluster_line =
-           Printf.sprintf "  Cluster: %s%s%s  Project: %s%s"
+           Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"
              Ansi.dim
              (fit_width (Terminal_text.single_line o.ov_cluster) 24)
              Ansi.reset
              (fit_width (Terminal_text.single_line o.ov_project) 20)
-             transport_summary
+             transport_summary observer_summary
        in
        box_line buf cols cluster_line);
 

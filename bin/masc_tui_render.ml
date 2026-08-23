@@ -857,15 +857,18 @@ let render_keeper_list (state : state) =
        if counts <> [] then
          box_line buf cols
            (Ansi.dim ^ "  " ^ String.concat "   " counts ^ Ansi.reset);
-       List.iter
-         (fun bk ->
-            let action =
-              match bk.bk_action with None -> "" | Some a -> "  -> " ^ a
-            in
-            box_line buf cols
-              (Printf.sprintf "%s  blocked: %s  %s%s%s" Ansi.red bk.bk_name
-                 bk.bk_reason action Ansi.reset))
-         fleet.fs_blocked_keepers);
+       (* Which keepers are missing is the subtraction, done here rather than
+          read from a field: the server reports what should run and what does,
+          and the difference is this reader's to take. *)
+       let missing =
+         List.filter
+           (fun name -> not (List.mem name fleet.fs_executable_names))
+           fleet.fs_bootable_names
+       in
+       if missing <> [] then
+         box_line buf cols
+           (Printf.sprintf "%s  not running: %s%s" Ansi.red
+              (String.concat ", " missing) Ansi.reset));
 
   (* Column headers *)
   let col_header = Printf.sprintf "  %s  %-20s  %-8s %10s  %s"

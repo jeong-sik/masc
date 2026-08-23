@@ -190,13 +190,6 @@ type planning_backlog = Tui_decode.planning_backlog
   pb_cancelled: int;
 }
 
-type blocked_keeper = Tui_decode.blocked_keeper
-  = {
-  bk_name: string;
-  bk_reason: string;
-  bk_action: string option;
-}
-
 type fleet_safety = Tui_decode.fleet_safety
   = {
   fs_status: string;
@@ -210,7 +203,8 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_paused_count: int;
   fs_target_reaction_capacity: int;
   fs_reaction_capacity_shortfall: int;
-  fs_blocked_keepers: blocked_keeper list;
+  fs_bootable_names: string list;
+  fs_executable_names: string list;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
 }

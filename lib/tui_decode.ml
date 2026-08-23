@@ -68,12 +68,6 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
-type blocked_keeper = {
-  bk_name : string;
-  bk_reason : string;
-  bk_action : string option;
-}
-
 type fleet_safety = {
   fs_status : string;
   fs_blocker : string option;
@@ -86,7 +80,8 @@ type fleet_safety = {
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
-  fs_blocked_keepers : blocked_keeper list;
+  fs_bootable_names : string list;
+  fs_executable_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -1002,11 +997,14 @@ let decode_planning_snapshot json =
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
 
-let decode_blocked_keeper json =
-  let* bk_name = required_string_field json "keeper_name" in
-  let* bk_reason = required_string_field json "reason" in
-  let* bk_action = optional_string_field json "action" in
-  Ok { bk_name; bk_reason; bk_action }
+let decode_string_name_list json key =
+  let* items = optional_list_field json key in
+  decode_list key
+    (fun item ->
+       match item with
+       | `String value -> Ok value
+       | bad -> field_type_error key "a string" bad)
+    items
 
 (* The counts are read with a default rather than required: the server adds
    fields to this section over time, and a TUI that refuses the whole reading
@@ -1040,9 +1038,9 @@ let decode_fleet_safety json =
   let* fs_reaction_capacity_shortfall =
     int_field_or section "reaction_capacity_shortfall_count" ~default:0
   in
-  let* blocked_json = optional_list_field section "blocked_keepers" in
-  let* fs_blocked_keepers =
-    decode_list "blocked_keepers" decode_blocked_keeper blocked_json
+  let* fs_bootable_names = decode_string_name_list section "bootable_keeper_names" in
+  let* fs_executable_names =
+    decode_string_name_list section "executable_keeper_names"
   in
   let* fs_active_task_owner_without_fiber_count =
     int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
@@ -1062,7 +1060,8 @@ let decode_fleet_safety json =
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall
-    ; fs_blocked_keepers
+    ; fs_bootable_names
+    ; fs_executable_names
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count
     }

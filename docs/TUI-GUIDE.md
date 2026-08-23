@@ -14,7 +14,8 @@ code_refs:
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Five surfaces
-rotate with `Tab`: Overview, Keepers, Approvals, Board, Planning.
+rotate with `Tab`: Overview, Keepers, Approvals, Board, Planning, System
+Logs.
 
 ## Quick Start
 
@@ -90,7 +91,12 @@ list, Recent Events, and active tasks.
   j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: 2s | Port: 8935
 ```
 
-`j`/`k` scroll the events pane, not the task list. Events are windowed against
+`j`/`k` scroll the events pane, not the task list. `t` hands `j`/`k` to the
+task list instead; under task focus, `Enter` opens the selected task in full -
+description, status with its assignee and timestamps, handoff summary, the
+completion contract's evidence list, attached files - read from the same
+backlog load the list was projected from. `Esc` closes the detail, a second
+`Esc` returns `j`/`k` to the events. Events are windowed against
 both panel columns, so a long event wraps to the width actually available
 rather than the header width.
 
@@ -103,7 +109,9 @@ spelled out - a steady queue that drops is not a healthy transport.
 
 This tail is read only while Overview is the current surface.
 
-Tasks show terminal states in Planning rollups but not in this list.
+Tasks show terminal states in Planning rollups but not in this list. A task
+detail that is open when its task turns terminal stays open - the detail reads
+the full backlog rows, not the active projection.
 
 ### Keepers
 

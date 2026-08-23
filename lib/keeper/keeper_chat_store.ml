@@ -1602,7 +1602,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                    delivery_provenance })
   with Yojson.Json_error detail ->
     report_persistence_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
       ~path:file_path
       ~detail;
     None

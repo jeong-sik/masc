@@ -184,11 +184,15 @@
  (public_name masc-deployment-preflight-helper)
  (package masc)
  (libraries
+  masc
   masc.server
   masc.host_config
   masc.keeper_runtime
   masc.masc_schedule
   masc.masc_tool_blob_store
+  masc.fusion_core
+  masc.run_registry_core
+  masc.masc_core
   cmdliner
   unix
   yojson))
@@ -212,6 +216,12 @@
  (libraries masc masc.operator masc.masc_core yojson))
 
 (library
+ (name masc_tui_task_selection)
+ (wrapped false)
+ (modules masc_tui_task_selection)
+ (libraries masc.masc_types))
+
+(library
  (name masc_tui_keeper_chat_projection)
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
@@ -228,6 +238,12 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
  (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_keeper_chat_queue)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_queue)
+ (libraries))
 
 (library
  (name masc_tui_keeper_chat_history)
@@ -310,6 +326,18 @@
  (modules masc_tui_planning_selection))
 
 (library
+ (name masc_tui_markdown)
+ (wrapped false)
+ (modules masc_tui_markdown)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_composer)
+ (wrapped false)
+ (modules masc_tui_composer)
+ (libraries masc_tui_render_schedule))
+
+(library
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
@@ -350,9 +378,12 @@
   masc_tui_keeper_chat_history
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_recovery
   masc_tui_keeper_chat_transcript
+  masc_tui_composer
   masc_tui_keeper_control
+  masc_tui_markdown
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_observation_layout
@@ -361,6 +392,7 @@
   masc_tui_board_selection
   masc_tui_keeper_selection
   masc_tui_planning_selection
+  masc_tui_task_selection
   masc_tui_render_schedule
   masc_tui_terminal_write_repair
   masc.dashboard

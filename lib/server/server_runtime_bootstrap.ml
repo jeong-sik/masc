@@ -762,7 +762,8 @@ let initialize_owner_state_blocking
   Fs_compat.set_fs fs;
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
   let fusion_registry =
-    Filename.concat masc_dir "fusion-runs.jsonl" |> Fusion_run_registry.replay
+    Filename.concat masc_dir Fusion_run_registry.storage_filename
+    |> Fusion_run_registry.replay
   in
   (match Fusion_run_registry.install_global fusion_registry with
    | Ok () -> ()
@@ -771,7 +772,7 @@ let initialize_owner_state_blocking
        (Owner_initialization_failed
           (Run_registry_already_installed `Fusion)));
   let verification_registry =
-    Filename.concat masc_dir "verification-runs.jsonl"
+    Filename.concat masc_dir Verification_run_registry.storage_filename
     |> Verification_run_registry.replay
   in
   (match Verification_run_registry.install_global verification_registry with

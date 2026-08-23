@@ -409,11 +409,15 @@ sse_targets=(
   @test/runtest-test_tui_decode
   @test/runtest-test_tui_frame_presenter
   @test/runtest-test_tui_keeper_chat_history
+  @test/runtest-test_tui_keeper_chat_queue
+  @test/runtest-test_tui_chat_queue_wiring
   @test/runtest-test_tui_chat_surface_mirror
   @test/runtest-test_tui_keeper_chat_live
   @test/runtest-test_tui_keeper_chat_transcript
   @test/runtest-test_tui_keeper_chat_projection
   @test/runtest-test_tui_keeper_chat_recovery
+  @test/runtest-test_tui_composer
+  @test/runtest-test_tui_markdown
   @test/runtest-test_tui_keeper_control
   @test/runtest-test_tui_keeper_selection
   @test/runtest-test_tui_keyboard_input
@@ -423,6 +427,7 @@ sse_targets=(
   @test/runtest-test_tui_metrics_tail
   @test/runtest-test_tui_observation_layout
   @test/runtest-test_tui_planning_selection
+  @test/runtest-test_tui_task_detail
   @test/runtest-test_tui_http_ast
   @test/runtest-test_tui_render_schedule
   @test/runtest-test_tui_terminal_write_repair

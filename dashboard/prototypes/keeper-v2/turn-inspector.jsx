@@ -98,7 +98,6 @@ available tools
   const injectedCtx =
 `# world snapshot
 fsm.state      = ${keeper.phase}
-ctx.window     = ${ctxPct}%   (${tokIn.toLocaleString()} / 200,000 tok)
 owned.tasks    = ${tasks.length}
 
 # owned tasks
@@ -237,7 +236,7 @@ function MetaTab({ keeper, m, t }) {
         <span className="k">상태</span><span className="v">{keeper.phase}</span>
         <span className="k">입력 토큰</span><span className="v">{t.tokIn.toLocaleString()}</span>
         <span className="k">output tokens</span><span className="v">{t.tokOut.toLocaleString()}</span>
-        <span className="k">ctx window</span><span className="v">{t.ctxPct}% / 200K</span>
+        <span className="k">마지막 턴 / window</span><span className="v" title="마지막 턴 입력 기준 — 현재 점유율 아님 (not_observed)">{t.ctxPct}%</span>
         <span className="k">tool calls</span><span className="v">{t.tools.length}</span>
         <span className="k">duration</span><span className="v">{t.total.toFixed(2)}s</span>
         <span className="k">est. cost</span><span className="v">${t.cost.toFixed(3)}</span>
@@ -287,7 +286,7 @@ function TurnInspector({ keeper, m, onClose }) {
         <div className="ti-tok">
           <div className="ti-tok-top">
             <span className="lbl">토큰 경제</span>
-            <span className="ctxpct">컨텍스트 {t.ctxPct}% / 200K</span>
+            <span className="ctxpct" title="마지막 턴 입력 기준 — 지금 쓰는 양은 알 수 없음 (not_observed)">마지막 턴 {t.ctxPct}% / 200K</span>
           </div>
           <div className="ti-tok-bar">
             <span className="seg-in" style={{ width: (t.tokIn / (t.tokIn + t.tokOut) * 100) + '%' }}></span>

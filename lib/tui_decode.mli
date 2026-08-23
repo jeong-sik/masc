@@ -249,6 +249,11 @@ val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
 val decode_json_response_body :
   allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result
+
+(** The [/api/v1/tools/*] write envelope [{ok, message}] as a one-line
+    outcome; a shape the endpoints never send is an error, not a guessed
+    success. *)
+val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result

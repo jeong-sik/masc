@@ -426,6 +426,7 @@ type async_msg =
       string
       * Keeper_control.action
       * (Keeper_control.outcome, string) result
+  | Board_new_post_done of (string, string) result
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -1442,7 +1443,7 @@ let apply_approval_observation state observation =
 let replace_board_posts state posts =
   let source =
     match state.board_mode with
-    | Board_list -> Board_selection.List_cursor
+    | Board_list | Board_compose -> Board_selection.List_cursor
     | Board_read post_id -> Board_selection.Detail_post post_id
   in
   let post_ids posts = List.map (fun post -> post.bp_id) posts in
@@ -1464,7 +1465,7 @@ let leave_missing_board_detail state =
   | Board_read post_id
     when not (List.exists (fun post -> String.equal post.bp_id post_id) state.board_posts) ->
       leave_board_detail state
-  | Board_list | Board_read _ -> ()
+  | Board_list | Board_read _ | Board_compose -> ()
 
 let apply_board_list_load state = function
   | Ok posts ->
@@ -1689,7 +1690,7 @@ let board_detail_request_still_current state request =
   match state.board_mode with
   | Board_read post_id ->
       String.equal post_id (Board_detail.request_post_id request)
-  | Board_list -> false
+  | Board_list | Board_compose -> false
 
 let apply_board_post_load state request result =
   if board_detail_request_still_current state request then
@@ -1950,6 +1951,85 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
       in
       enqueue_async mailbox (Keeper_action_done (keeper_name, action, result))
 
+(* The Board draft splits at the first newline: commit-message shape, one
+   buffer covering title and body. Trimming the title keeps a draft whose
+   first line has stray spaces publishable without surprising the operator. *)
+let split_board_draft (text : string) : string * string =
+  match String.index_opt text '\n' with
+  | None -> (String.trim text, "")
+  | Some idx ->
+      ( String.trim (String.sub text 0 idx)
+      , String.sub text (idx + 1) (String.length text - idx - 1) )
+
+(* Post the draft through the tools endpoint. Runs in a fiber like a keeper
+   action: the compose pane must keep accepting keys while the request is
+   out, and the outcome lands in the same mailbox everything else does. *)
+let start_board_post state ~mailbox ~(title : string) ~(body : string) =
+  state.board_post_error <- None;
+  add_event state "system" "posting to Board";
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_post () =
+    let result =
+      match Masc_tui_http.post_board_new ~host ~port ~title ~body with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Board_new_post_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_post
+  | None -> run_post ()
+
+(* Compose-mode keys. Sending is armed rather than pressed: esc offers
+   send-or-discard, so a stray key during writing cannot publish. Returns
+   false for keys this pane does not own, so Tab and quit keep their global
+   meaning. *)
+let handle_board_compose_key state ~mailbox (key : string) : bool =
+  if
+    state.board_compose_armed
+    && not
+         (List.mem key [ "s"; "S"; "d"; "D"; "esc" ])
+  then state.board_compose_armed <- false;
+  match key with
+  | "esc" ->
+      state.board_compose_armed <- not state.board_compose_armed;
+      true
+  | "s" | "S" when state.board_compose_armed -> (
+      let title, body = split_board_draft (Buffer.contents state.board_draft) in
+      match String.split_on_char '\n' (String.trim title) with
+      | [] | [ "" ] ->
+          state.board_compose_armed <- false;
+          state.board_post_error <- Some "the first line (title) is empty";
+          true
+      | _ ->
+          state.board_compose_armed <- false;
+          start_board_post state ~mailbox ~title ~body;
+          true )
+  | "d" | "D" when state.board_compose_armed ->
+      Buffer.clear state.board_draft;
+      state.board_compose_armed <- false;
+      state.board_post_error <- None;
+      state.board_mode <- Board_list;
+      add_event state "system" "Board draft discarded";
+      true
+  | "\r" | "\n" ->
+      Buffer.add_char state.board_draft '\n';
+      true
+  | "\127" | "\b" ->
+      let new_content =
+        Buffer.contents state.board_draft
+        |> Masc_tui_message_layout.drop_last_utf8_scalar
+      in
+      Buffer.clear state.board_draft;
+      Buffer.add_string state.board_draft new_content;
+      true
+  | "\t" -> false
+  | s when String.length s = 1 ->
+      Buffer.add_string state.board_draft s;
+      true
+  | _ -> true
+
 (* The keypress path. The reading decides which actions exist at all, so a key
    that names an action the reading does not offer says why instead of sending
    a request the server would refuse. *)
@@ -2075,6 +2155,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          waiting out the refresh interval. *)
       start_http_refresh state ~host:(Env_config_core.masc_host ())
         ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+  | Board_new_post_done result -> (
+      match result with
+      | Ok message ->
+          Buffer.clear state.board_draft;
+          state.board_compose_armed <- false;
+          state.board_post_error <- None;
+          state.board_mode <- Board_list;
+          add_event state "system" ("Board: " ^ message);
+          (* The posted row is the half the periodic refresh has not fetched
+             yet; without this the operator returns to a list that does not
+             contain what they just published. *)
+          start_http_refresh state ~host:(Env_config_core.masc_host ())
+            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+      | Error err ->
+          state.board_compose_armed <- false;
+          (* The draft stays: a rejected post is usually one field short, and
+             losing the text over it would make the error a dead end. *)
+          state.board_post_error <- Some err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -2603,6 +2701,15 @@ let main () =
                  k
              in
              ()
+       | Some k
+         when (not message_mode)
+              && state.view = Board
+              && state.board_mode = Board_compose ->
+           (* Same shape as the chat pane: while a draft is being written,
+              printable keys belong to the draft. Tab falls through so the
+              surface cycle keeps working, and quit was answered above. *)
+           let _handled = handle_board_compose_key state ~mailbox:async_messages k in
+           ()
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -2641,7 +2748,7 @@ let main () =
                  | Board_read post_id ->
                      start_board_post_refresh state ~host ~port ~post_id
                        ~mailbox:async_messages
-                 | Board_list -> ())
+                 | Board_list | Board_compose -> ())
             | Keepers Keeper_message ->
                 (match state.msg_target_keeper_name with
                  | Some keeper_name ->
@@ -2699,7 +2806,7 @@ let main () =
                 (match state.board_mode with
                  | Board_read _ ->
                      leave_board_detail state
-                 | Board_list -> ())
+                 | Board_list | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_detail _ ->
@@ -2744,7 +2851,8 @@ let main () =
                      if state.board_cursor < List.length state.board_posts - 1 then
                        state.board_cursor <- state.board_cursor + 1
                  | Board_read _ ->
-                     state.board_scroll <- state.board_scroll + 1)
+                     state.board_scroll <- state.board_scroll + 1
+                 | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -2806,7 +2914,8 @@ let main () =
                        state.board_cursor <- state.board_cursor - 1
                  | Board_read _ ->
                      if state.board_scroll > 0 then
-                       state.board_scroll <- state.board_scroll - 1)
+                       state.board_scroll <- state.board_scroll - 1
+                 | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -2871,7 +2980,7 @@ let main () =
                             ~post_id:p.bp_id
                             ~mailbox:async_messages
                       | None -> ())
-                 | Board_read _ -> ())
+                 | Board_read _ | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -2962,12 +3071,23 @@ let main () =
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | System_logs -> ())
        | Some "w" | Some "W" ->
+           (* Two unrelated bindings share a key: "write" on the Board list,
+              "wake up" on a keeper row. The surface decides which one is
+              live, and Board compose takes the key only from the list --
+              inside the compose pane the letter is draft text. *)
            (match state.view with
+            | Board ->
+                (match state.board_mode with
+                 | Board_list ->
+                     state.board_mode <- Board_compose;
+                     state.board_compose_armed <- false;
+                     state.board_post_error <- None
+                 | Board_read _ | Board_compose -> ())
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | System_logs -> ())
+            | Approvals | Planning | System_logs -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -2998,7 +3118,7 @@ let main () =
               | Board_read post_id ->
                   start_board_post_refresh state ~host ~port ~post_id
                     ~mailbox:async_messages
-              | Board_list -> ())
+              | Board_list | Board_compose -> ())
          | Overview | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;

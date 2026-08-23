@@ -942,6 +942,40 @@ let test_decode_json_response_body_allows_empty_success () =
       Alcotest.failf "expected empty object, got %s" (Yojson.Safe.to_string json)
   | Error err -> Alcotest.fail err
 
+(* The tools write envelope {ok, message}: the Board compose pane reports the
+   server's own message either way, and a shape the endpoint never sends is
+   an error rather than a guessed success. *)
+let test_tool_envelope_outcome_ok_carries_message () =
+  match Tui_decode.tool_envelope_outcome (`Assoc [ ("ok", `Bool true); ("message", `String "post created") ]) with
+  | Ok "post created" -> ()
+  | Ok other -> Alcotest.failf "expected server message, got %s" other
+  | Error err -> Alcotest.fail err
+
+let test_tool_envelope_outcome_ok_without_message_defaults () =
+  match Tui_decode.tool_envelope_outcome (`Assoc [ ("ok", `Bool true) ]) with
+  | Ok "posted" -> ()
+  | Ok other -> Alcotest.failf "expected default ok note, got %s" other
+  | Error err -> Alcotest.fail err
+
+let test_tool_envelope_outcome_rejection_carries_message () =
+  match
+    Tui_decode.tool_envelope_outcome
+      (`Assoc [ ("ok", `Bool false); ("message", `String "Title must not be empty") ])
+  with
+  | Error "Title must not be empty" -> ()
+  | Error other -> Alcotest.failf "expected server rejection, got %s" other
+  | Ok other -> Alcotest.failf "expected error, got %s" other
+
+let test_tool_envelope_outcome_rejects_unexpected_shapes () =
+  let cases = [ `String "nope"; `Assoc [ ("ok", `String "yes") ]; `Assoc [] ] in
+  List.iter
+    (fun json ->
+       match Tui_decode.tool_envelope_outcome json with
+       | Error "unexpected tool response envelope" -> ()
+       | Error other -> Alcotest.failf "expected envelope error, got %s" other
+       | Ok other -> Alcotest.failf "expected error, got %s" other)
+    cases
+
 type parent_node = {
   node_id : string;
   parent_id : string option;
@@ -1171,6 +1205,14 @@ let () =
           test_decode_json_response_body_rejects_error_status;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
+        Alcotest.test_case "tool envelope ok carries the message" `Quick
+          test_tool_envelope_outcome_ok_carries_message;
+        Alcotest.test_case "tool envelope ok without message defaults" `Quick
+          test_tool_envelope_outcome_ok_without_message_defaults;
+        Alcotest.test_case "tool envelope rejection carries the message" `Quick
+          test_tool_envelope_outcome_rejection_carries_message;
+        Alcotest.test_case "tool envelope rejects unexpected shapes" `Quick
+          test_tool_envelope_outcome_rejects_unexpected_shapes;
       ] );
     ( "bounded_parent_depth",
       [

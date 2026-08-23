@@ -778,6 +778,30 @@ let decode_json_response_body ~allow_empty ~status_code ~body :
     try Ok (Yojson.Safe.from_string body)
     with Yojson.Json_error e -> Error (Printf.sprintf "(JSON parse: %s)" e)
 
+(** The [/api/v1/tools/*] write endpoints answer one envelope,
+    [{ok : bool; message : string}]. Reduced to a one-line outcome here so
+    every call site reports the server's own message instead of re-decoding
+    the envelope -- and a shape the endpoint never sends is an error rather
+    than a guessed success. *)
+let tool_envelope_outcome (json : Yojson.Safe.t) : (string, string) result =
+  let envelope_message fields =
+    match List.assoc_opt "message" fields with
+    | Some (`String message) -> message
+    | Some _ | None -> ""
+  in
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "ok" fields with
+      | Some (`Bool ok) ->
+          let message = envelope_message fields in
+          if ok then
+            Ok (if String.equal message "" then "posted" else message)
+          else
+            Error
+              (if String.equal message "" then "request rejected" else message)
+      | _ -> Error "unexpected tool response envelope")
+  | _ -> Error "unexpected tool response envelope"
+
 let missing_field key =
   Error (Printf.sprintf "missing required field '%s'" key)
 

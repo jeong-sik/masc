@@ -111,6 +111,12 @@ type board_comment = {
 type board_mode =
   | Board_list
   | Board_read of string
+  | Board_compose
+      (** New-post draft. The first line of the draft is the title, the rest
+          is the body -- the commit-message convention, so one buffer covers
+          both fields and no second input mode is needed. Sending is a
+          two-step arm, not a key: [esc] offers send-or-discard, so a stray
+          Enter during writing cannot publish. *)
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -330,6 +336,12 @@ type state = {
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
+  (* The new-post draft and its send arm. The arm is the operator's explicit
+     answer to "publish what is typed": while it is unset, esc re-offers
+     send-or-discard and no other key can send. *)
+  mutable board_draft: Buffer.t;
+  mutable board_compose_armed: bool;
+  mutable board_post_error: string option;
   mutable planning: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
@@ -461,6 +473,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   board_cursor = 0;
   board_scroll = 0;
   board_mode = Board_list;
+  board_draft = Buffer.create 256;
+  board_compose_armed = false;
+  board_post_error = None;
   planning = None;
   planning_error = None;
   planning_cursor = 0;

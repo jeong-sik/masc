@@ -2097,8 +2097,12 @@ def approval_selection_identity_interaction(
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
     plain = CSI_RE.sub(b"", frame)
+    # The row carries a proof mark between the status bracket and the
+    # priority: " " when idle, and one of the pending/proven/refuted/
+    # unreadable glyphs otherwise (masc_tui_render.planning_proof_mark).
+    # This pattern predated the mark and matched only the idle spacing.
     selected_row = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][ \t]+P1[ \t]+" + re.escape(title)
+        rb">[ \t]+\[[^\]\r\n]+\][ \t]*\S?[ \t]*P1[ \t]+" + re.escape(title)
     )
     if selected_row.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")

@@ -15,13 +15,23 @@ SELF_TEST=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PREFLIGHT_HELPER="${MASC_DEPLOYMENT_PREFLIGHT_HELPER:-}"
+# Build commit the resolved helper reports for itself; empty until resolved.
+PREFLIGHT_HELPER_COMMIT=""
 
 usage() {
   sed -n '2,/^$/p' "$0"
 }
 
+# Every verdict names the helper that produced it: the fallback below can pick
+# an older installed helper, and a verdict from the wrong binary is worthless.
+helper_identity() {
+  if [[ -n "$PREFLIGHT_HELPER_COMMIT" ]]; then
+    printf ' helper=%s helper_commit=%s' "$PREFLIGHT_HELPER" "$PREFLIGHT_HELPER_COMMIT"
+  fi
+}
+
 fail() {
-  printf '[runtime-deployment-preflight] FAIL: %s\n' "$*" >&2
+  printf '[runtime-deployment-preflight] FAIL: %s%s\n' "$*" "$(helper_identity)" >&2
   exit 1
 }
 
@@ -82,6 +92,10 @@ if [[ -z "$PREFLIGHT_HELPER" ]]; then
   fi
 fi
 [[ -x "$PREFLIGHT_HELPER" ]] || fail "typed deployment preflight helper is not executable: $PREFLIGHT_HELPER"
+PREFLIGHT_HELPER_COMMIT="$("$PREFLIGHT_HELPER" build-commit)" \
+  || fail "typed deployment preflight helper did not report its build commit: $PREFLIGHT_HELPER"
+[[ -n "$PREFLIGHT_HELPER_COMMIT" ]] \
+  || fail "typed deployment preflight helper reported an empty build commit: $PREFLIGHT_HELPER"
 
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
@@ -224,10 +238,10 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
-  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d\n' \
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
     "$signal_row_count" "$current_owner_count" "$keeper_meta_count" \
-    "$in_progress_count_total"
+    "$in_progress_count_total" "$(helper_identity)"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then

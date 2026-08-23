@@ -110,6 +110,15 @@ let validate_current_meta path =
            detail))
 ;;
 
+(* The gate prints this next to its verdict so the operator can tell a
+   freshly built helper from an older installed one. [binary_commit] is the
+   SHA the Dune build rule embeds; a helper built outside a checkout has none. *)
+let print_build_commit () =
+  match (Masc.Build_identity.current ()).Masc.Build_identity.binary_commit with
+  | Some commit -> Printf.printf "%s\n%!" commit
+  | None -> Printf.printf "unstamped\n%!"
+;;
+
 let validate_schedule_ledger path =
   try
     let json = Yojson.Safe.from_file path in
@@ -557,6 +566,11 @@ let validate_current_meta_cmd =
            $ current_meta_file))
 ;;
 
+let build_commit_cmd =
+  let doc = "print the git commit stamped into this helper at build time" in
+  Cmd.v (Cmd.info "build-commit" ~doc) Term.(const print_build_commit $ const ())
+;;
+
 let schedule_ledger_file =
   let doc = "Validate one current schedule ledger." in
   Arg.(required & pos 0 (some file) None & info [] ~docv:"SCHEDULE_LEDGER" ~doc)
@@ -689,6 +703,7 @@ let () =
           ; validate_current_queue_cmd
           ; validate_current_wal_cmd
           ; validate_current_meta_cmd
+          ; build_commit_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ]))

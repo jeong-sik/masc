@@ -38,7 +38,11 @@ type parsed =
       ; args : string
       }
 
-let parse_row = function
+(* Annotated rather than inferred: an inferred parameter widens to an open
+   variant and accepts tags Yojson does not have, which leaves the match below
+   exhaustive over nothing. yojson 3 has no `Tuple or `Variant. *)
+let parse_row (entry : Yojson.Safe.t) =
+  match entry with
   | `Assoc fields -> (
       let at = Option.value ~default:0.0 (float_field fields "ts") in
       let content = Option.value ~default:"" (string_field fields "content") in
@@ -59,8 +63,7 @@ let parse_row = function
             (fun tool_name -> Tool_call { at; tool_name; args = content })
             (string_field fields "tool_call_name")
       | Some _ | None -> None)
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _
-  | `Tuple _ | `Variant _ ->
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       None
 
 (* Fold consecutive tool calls into one block, the way a live turn draws its
@@ -86,7 +89,8 @@ let fold_tool_blocks parsed_rows =
   in
   loop [] [] parsed_rows
 
-let rows_of_json = function
+let rows_of_json (payload : Yojson.Safe.t) =
+  match payload with
   | `List entries ->
       let parsed = List.map parse_row entries in
       let dropped = List.length (List.filter Option.is_none parsed) in
@@ -94,6 +98,5 @@ let rows_of_json = function
         { rows = fold_tool_blocks (List.filter_map (fun row -> row) parsed)
         ; dropped
         }
-  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _
-  | `Tuple _ | `Variant _ ->
+  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
       Error "keeper chat history did not come back as an array of rows"

@@ -86,7 +86,14 @@ let custom_deltas fields =
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
   | Some _ -> []
 
-let event_deltas = function
+(* Annotated rather than inferred. Without it the parameter widens to an open
+   variant, every tag listed below is accepted whether or not Yojson has it,
+   and the exhaustiveness this match is written for stops being checked
+   against anything. That is how the two arms removed here -- `Tuple and
+   `Variant, dropped by yojson 3 -- read as covered cases while being
+   unreachable. *)
+let event_deltas (event : Yojson.Safe.t) =
+  match event with
   | `Assoc fields -> (
       match string_field fields "type" with
       | None -> [ Undecodable "event has no type" ]
@@ -116,8 +123,7 @@ let event_deltas = function
           []
       | Some unknown ->
           [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ])
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _
-  | `Tuple _ | `Variant _ ->
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       (* Spelled out rather than left to a catch-all so a new Yojson variant
          stops the build instead of landing here. *)
       [ Undecodable "event is not a JSON object" ]

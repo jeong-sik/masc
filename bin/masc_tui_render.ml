@@ -1010,7 +1010,7 @@ let render_keeper_list (state : state) =
     Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset);
 
   (* Footer *)
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  Tab:dashboard  q:quit  r:refresh%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  Tab:next  q:quit  r:refresh%s\n"
     Ansi.dim Ansi.reset);
 
   finish_frame ~surface_key:"keeper-list" ~cursor:Frame_presenter.Hidden ~rows
@@ -1180,7 +1180,7 @@ let render_keeper_detail (state : state) =
     box_bottom buf cols;
 
     (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:dashboard  q:quit  r:refresh%s\n"
+    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:next  q:quit  r:refresh%s\n"
       Ansi.dim Ansi.reset);
 
     finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden

@@ -378,6 +378,27 @@ let post_board_new ~(host : string) ~(port : int) ~(title : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
     ~body:(Yojson.Safe.to_string payload)
 
+(** POST /api/v1/tools/masc_goal_transition. The action travels as the tool's
+    own wire word via [Goal_phase.Public_action.to_string] rather than a
+    local literal, so the TUI and the tool cannot disagree about what
+    "drop" means. The server owns the phase rules; an invalid transition is
+    its rejection to return, not the TUI's to pre-guess. *)
+let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
+    ~(action : Goal_phase.Public_action.t)
+    ~(note : string option) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      ([ ("goal_id", `String goal_id)
+       ; ("action", `String (Goal_phase.Public_action.to_string action))
+       ]
+      @
+      match note with
+      | Some text -> [ ("note", `String text) ]
+      | None -> [])
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_goal_transition"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** Fetch /api/v1/board/<postId> (post detail + comments). *)
 let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
   get_json ~host ~port

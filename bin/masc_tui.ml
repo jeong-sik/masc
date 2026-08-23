@@ -416,6 +416,7 @@ type async_msg =
       * Keeper_control.action
       * (Keeper_control.outcome, string) result
   | Board_new_post_done of (string, string) result
+  | Goal_transition_done of (string, string) result
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -1942,6 +1943,66 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) =
   | Some sw -> Eio.Fiber.fork ~sw run_post
   | None -> run_post ()
 
+(* Request a goal lifecycle change through the tools route. Runs in a fiber
+   like the other writes; the outcome lands in the shared mailbox and the
+   server's phase rules decide, so the TUI never pre-guesses a transition. *)
+let start_goal_transition state ~mailbox ~(goal_id : string)
+    ~(action : Goal_phase.Public_action.t) =
+  state.goal_action_error <- None;
+  add_event state "system"
+    (Printf.sprintf "goal %s: %s" goal_id
+       (Goal_phase.Public_action.to_string action));
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_transition () =
+    let result =
+      match
+        Masc_tui_http.post_goal_transition ~host ~port ~goal_id ~action
+          ~note:None
+      with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Goal_transition_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_transition
+  | None -> run_transition ()
+
+(* The lifecycle keys on a goal detail. Arming is the pattern the keeper
+   lifecycle already uses: the first press names the action, the same press
+   again submits it, and any other key disarms. [Goal_phase.Public_action.t]
+   rides along so no string name of an action exists in this file. *)
+let goal_public_action_key (action : Goal_phase.Public_action.t) =
+  match action with
+  | Goal_phase.Public_action.Request_complete -> "c"
+  | Goal_phase.Public_action.Drop -> "x"
+  | Goal_phase.Public_action.Reopen -> "o"
+
+let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
+    =
+  match state.planning_mode with
+  | Planning_detail goal_id -> (
+      match state.goal_action_armed with
+      | Some (armed_goal, armed_action)
+        when String.equal armed_goal goal_id
+             && armed_action = action ->
+          state.goal_action_armed <- None;
+          start_goal_transition state ~mailbox ~goal_id ~action
+      | Some _ | None ->
+          state.goal_action_armed <- Some (goal_id, action);
+          state.goal_action_error <- None;
+          add_event state "system"
+            (Printf.sprintf "press %s again to %s goal %s"
+               (goal_public_action_key action)
+               (match action with
+                | Goal_phase.Public_action.Request_complete ->
+                    "request completion of"
+                | Goal_phase.Public_action.Drop -> "drop"
+                | Goal_phase.Public_action.Reopen -> "reopen")
+               goal_id))
+  | Planning_list -> ()
+
 (* Compose-mode keys. Sending is armed rather than pressed: esc offers
    send-or-discard, so a stray key during writing cannot publish. Returns
    false for keys this pane does not own, so Tab and quit keep their global
@@ -2133,6 +2194,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The draft stays: a rejected post is usually one field short, and
              losing the text over it would make the error a dead end. *)
           state.board_post_error <- Some err)
+  | Goal_transition_done result -> (
+      match result with
+      | Ok message ->
+          state.goal_action_armed <- None;
+          state.goal_action_error <- None;
+          add_event state "system" ("Goal: " ^ message);
+          (* The phase shown is the half the periodic refresh has not fetched
+             yet; without this the detail keeps the old phase after the
+             operator already changed it. *)
+          start_http_refresh state ~host:(Env_config_core.masc_host ())
+            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+      | Error err ->
+          state.goal_action_armed <- None;
+          state.goal_action_error <- Some err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -2553,9 +2628,11 @@ let main () =
        (* An armed shutdown expires on the next unrelated key. Otherwise it
           waits indefinitely and a later press of the same key -- after the
           cursor has moved, after a refresh -- submits work the operator armed
-          minutes ago for something else. *)
+          minutes ago for something else. Same rule for an armed goal action. *)
        | Keepers _, Some ("s" | "S") -> ()
        | Keepers _, Some _ -> state.keeper_action_pending <- None
+       | Planning, Some ("c" | "C" | "x" | "X" | "o" | "O") -> ()
+       | Planning, Some _ -> state.goal_action_armed <- None
        | _ -> ());
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
@@ -2910,6 +2987,17 @@ let main () =
                 if not state.task_focus then state.task_cursor <- 0
             | Overview | Keepers _ | Board | Approvals | Planning
             | System_logs -> ())
+       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
+           (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
+              letters stay navigation-free there. The first press arms, the
+              same press submits; the server owns the phase rules. *)
+           let action =
+             match key with
+             | Some ("c" | "C") -> Goal_phase.Public_action.Request_complete
+             | Some ("x" | "X") -> Goal_phase.Public_action.Drop
+             | _ -> Goal_phase.Public_action.Reopen
+           in
+           handle_goal_action_key state ~mailbox:async_messages ~action
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the

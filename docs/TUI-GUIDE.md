@@ -296,6 +296,12 @@ Goals with backlog rollups.
 The cursor tracks goal identity in visible order, so a refresh that reorders
 goals keeps the same goal selected.
 
+In a goal detail, `c` requests completion, `x` drops, `o` reopens. Each is
+armed rather than pressed - the first press shows what the same key again
+would send, any other key disarms - and the server owns the phase rules: a
+transition the current phase does not allow comes back as the server's
+rejection on the detail, not a local guess.
+
 ### System Logs
 
 The server's log ring, the same source the dashboard `logs` tab reads.

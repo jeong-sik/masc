@@ -303,30 +303,14 @@ def fixture_cell_width(text: str) -> int:
     return sum(widths.get(character, 1) for character in text)
 
 
-# Cells the composer's prompt occupies before the caret, mirroring
-# [Masc_tui_message_layout.chat_input_prompt_prefix] ("  > "). Named once so a
-# prompt change is one edit here rather than a magic number at every call site:
-# #29822 narrowed the prefix from seven cells to four and four hardcoded
-# expectations went stale together.
-CHAT_PROMPT_CELLS = 4
-
-
 def assert_message_input_frame(
     segment: bytes,
     *,
     row: int,
     columns: int,
     input_text: str,
-    cursor_column: int | None = None,
+    cursor_column: int,
 ) -> None:
-    """The caret sits immediately after the drawn input.
-
-    [cursor_column] defaults to the prompt width plus the input's own cells,
-    which is the contract; pass it only to assert a column that contract does
-    not produce, such as the clamp at a narrow terminal.
-    """
-    if cursor_column is None:
-        cursor_column = CHAT_PROMPT_CELLS + fixture_cell_width(input_text)
     frame_start = segment.rfind(FRAME_START)
     if frame_start >= 0:
         frame = segment[frame_start:]
@@ -2662,6 +2646,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text="A",
+            cursor_column=8,
         )
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
 
@@ -2678,6 +2663,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text=combining_text,
+            cursor_column=8,
         )
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
 
@@ -2690,6 +2676,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=100,
             input_text=expected_text,
+            cursor_column=13,
         )
         narrow_frame = resize_and_wait(
             process,
@@ -2706,6 +2693,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             row=25,
             columns=16,
             input_text=expected_text,
+            cursor_column=13,
         )
         resize_and_wait(
             process,

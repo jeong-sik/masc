@@ -302,6 +302,7 @@ type surface =
   | Repositories
   | Connectors
   | Tools
+  | Autonomy
   | System_logs
 
 (** What a surface needs loaded to draw itself.
@@ -320,7 +321,7 @@ let surface_needs : surface -> surface_needs = function
   | Overview -> { needs_transport = true; needs_keeper_roster = false }
   | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
   | Board | Approvals | Planning | Verification | Harness | Repositories
-  | Connectors | Tools | System_logs ->
+  | Connectors | Tools | Autonomy | System_logs ->
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
@@ -418,6 +419,12 @@ type state = {
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
+  (* The feature-proof reading. Kept beside its error rather than collapsed
+     into an option: a report that failed to load must not draw as a report
+     with no features, which reads as "nothing is proven". *)
+  mutable autonomy: Tui_decode.autonomy_snapshot option;
+  mutable autonomy_error: string option;
+  mutable autonomy_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -581,6 +588,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
+  autonomy = None;
+  autonomy_error = None;
+  autonomy_scroll = 0;
   verification = None;
   verification_error = None;
   verification_scroll = 0;

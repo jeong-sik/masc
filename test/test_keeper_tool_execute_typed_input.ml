@@ -552,6 +552,23 @@ let test_script_outside_the_subset_is_named () =
       Execute_input.pp_validation_error e
 ;;
 
+(* A separated list carries a redirect often enough that naming the redirect
+   was the classifier's usual answer. Measured over the 548 command lines the
+   runtime produced 2026-08-21..23, all 31 refusals reported as a redirect
+   were this. *)
+let test_a_separator_is_not_reported_as_a_redirect () =
+  let input =
+    parse_json_exn
+      (`Assoc [ "script", `String "ls docs 2>/dev/null; echo done" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok _ -> Alcotest.fail "; is outside the subset"
+  | Error (Execute_input.Script_outside_the_subset `Command_separator) -> ()
+  | Error e ->
+    Alcotest.failf "expected the separator to be named, got %a"
+      Execute_input.pp_validation_error e
+;;
+
 let test_script_and_argv_together_are_refused () =
   let msg =
     parse_json_error
@@ -1691,6 +1708,9 @@ let suite =
           `Quick
           test_script_outside_the_subset_is_named
       ; Alcotest.test_case
+          "a_separator_is_not_reported_as_a_redirect"
+          `Quick
+          test_a_separator_is_not_reported_as_a_redirect      ; Alcotest.test_case
           "script_and_argv_together_are_refused"
           `Quick
           test_script_and_argv_together_are_refused      ; Alcotest.test_case

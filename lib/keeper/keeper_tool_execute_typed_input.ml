@@ -931,6 +931,7 @@ let pp_validation_error ppf = function
        | `Function_def -> "a function definition"
        | `Glob_brace -> "brace expansion"
        | `Background -> "a background job"
+       | `Command_separator -> "a ; between commands"
        | `Redirect -> "a redirection"
        | `Unknown_construct name -> name)
   | Script_nested_pipeline ->

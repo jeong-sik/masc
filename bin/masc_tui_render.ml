@@ -104,7 +104,7 @@ let awaiting_approval_notice (state : state) =
             | Keepers Keeper_message -> ""
             | Overview | Keepers _ | Board | Approvals | Planning
             | Verification | Harness | Repositories | Connectors | Tools
-            | System_logs ->
+            | Autonomy | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -3060,6 +3060,144 @@ let render_tools (state : state) =
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
+(* Which autonomy features have behaviour evidence, and which still need it.
+
+   The server already computes this report; the surface draws it rather than
+   deriving a second opinion. Each feature that falls short gets its own
+   continuation rows: the keepers that have not exercised it, the ones whose
+   record would not open, and what the server says would close the gap. A
+   status column on its own says a feature is unproven without saying who to
+   go look at, which is the part an operator acts on. *)
+let autonomy_status_style (status : Masc.Tui_decode.feature_proof_status) =
+  match status with
+  | Masc.Tui_decode.Fp_pass -> Ansi.green
+  | Masc.Tui_decode.Fp_warn -> Ansi.yellow
+  (* An unreadable status is drawn like a failure on purpose: this build
+     cannot tell whether the feature works, and the safe reading of "I do not
+     know" is not "it does". *)
+  | Masc.Tui_decode.Fp_fail | Masc.Tui_decode.Fp_unreadable _ -> Ansi.red
+
+let autonomy_rows (features : Masc.Tui_decode.feature_proof list) =
+  let open Masc.Tui_decode in
+  List.concat_map
+    (fun f ->
+      let head =
+        Printf.sprintf "  %-30s %-6s %-7s %s"
+          (Terminal_text.single_line f.fp_label)
+          (feature_proof_status_label f.fp_status)
+          (Printf.sprintf "%d/%d" (List.length f.fp_observed) f.fp_keeper_count)
+          (Terminal_text.single_line f.fp_summary)
+      in
+      let head_row = (autonomy_status_style f.fp_status, head) in
+      if not (feature_proof_is_gap f.fp_status) then [ head_row ]
+      else
+        let missing_row =
+          match f.fp_missing with
+          | [] -> []
+          | names ->
+              [ ( Ansi.dim
+                , Printf.sprintf "      no evidence yet: %s"
+                    (Terminal_text.single_line (String.concat ", " names)) )
+              ]
+        in
+        let unreadable_row =
+          match f.fp_read_errors with
+          | [] -> []
+          | names ->
+              [ ( Ansi.red
+                , Printf.sprintf "      record would not open: %s"
+                    (Terminal_text.single_line (String.concat ", " names)) )
+              ]
+        in
+        let action_row =
+          [ ( Ansi.dim
+            , Printf.sprintf "      -> %s"
+                (Terminal_text.single_line f.fp_next_action) )
+          ]
+        in
+        (head_row :: missing_row) @ unreadable_row @ action_row)
+    features
+
+let render_autonomy (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let features =
+    match state.autonomy with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.au_features
+  in
+  let lines = autonomy_rows features in
+  let shown = List.length lines in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.autonomy with
+    | None ->
+        Printf.sprintf " MASC Autonomy  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some s ->
+        let open Masc.Tui_decode in
+        (* Proven against total, then the gap count. The pair is the whole
+           reading: five features all passing and five features where four
+           reports failed to load both leave the same "5" if only one number
+           is drawn. *)
+        Printf.sprintf " MASC Autonomy (%d/%d proven, %d gap%s, %d keepers)  %s  %s"
+          s.au_pass_count s.au_feature_count s.au_gap_count
+          (if s.au_gap_count = 1 then "" else "s")
+          s.au_keeper_count timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-30s %-6s %-7s %s" "Feature" "Proof" "Keepers"
+      "What the report measured"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.autonomy_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.autonomy_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.autonomy_scroll max_scroll) in
+  state.autonomy_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.autonomy_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (the report named no features)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt lines idx with
+      | None -> box_empty buf cols
+      | Some (style, text) -> box_line_styled buf cols ~style text
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d rows, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"autonomy" ~rows:terminal_rows ~cols buf
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -3103,6 +3241,7 @@ let render_surface (state : state) =
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
   | Tools -> render_tools state
+  | Autonomy -> render_autonomy state
   | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =

@@ -51,11 +51,8 @@ import {
   WidgetSoloBar,
   widgetSoloUrlForRoute,
 } from './widget-solo'
-import {
-  CURRENT_KEEPER_FLEET_FACT_INVALID,
-  keeperFleetOperatorFactPresentation,
-  keeperFleetOperatorFacts,
-} from './keeper-fleet-operator-fact'
+import { keepersNotRunning } from './fleet-health-panel'
+import { ShieldAlert } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
 const shellRuntimeProviderProbe = signal<DashboardRuntimeProbePayload | null>(null)
@@ -243,14 +240,13 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   if (!fleetSafety) return null
   const fleet = fleetSafety.keeper_fleet_safety
   if (fleet?.status === 'ok') return null
-  const facts = keeperFleetOperatorFacts(fleet)
-  const fact = facts[0] ?? CURRENT_KEEPER_FLEET_FACT_INVALID
-  const presentation = keeperFleetOperatorFactPresentation(fact, fleet?.status)
+  const notRunning = keepersNotRunning(fleet)
   return {
     key: 'fleet-liveness-risk',
-    label: presentation.label,
+    label: 'Keeper fleet degraded',
     detail: [
       `status=${fleet?.status ?? 'current_fact_invalid'}`,
+      fleet?.reason ? `reason=${fleet.reason}` : null,
       fleet?.executable_keeper_fiber_count != null
         ? `executable_keeper_fiber_count=${fleet.executable_keeper_fiber_count}`
         : null,
@@ -276,19 +272,14 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
         ? `reaction_capacity_shortfall_count=${fleet.reaction_capacity_shortfall_count}`
         : null,
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,
-      `keeper=${presentation.keeper}`,
-      presentation.taskId ? `task=${presentation.taskId}` : null,
-      `reason=${presentation.reason}`,
-      `execution_truth=${presentation.executionTruth}`,
-      `non_executable_cause=${presentation.nonExecutableCause}`,
-      // One chip speaks for the whole fleet, so it has to say when it is
-      // showing the most severe of several blocked keepers rather than the
-      // only one.
-      facts.length > 1 ? `blocked_keeper_fact_count=${facts.length}` : null,
-      `operator_action=${presentation.action}`,
+      // One chip speaks for the whole fleet, so it names every keeper that is
+      // not running rather than picking one to stand for the rest.
+      notRunning.length > 0 ? `not_running=${notRunning.join(' ')}` : null,
     ].filter((item): item is string => item != null).join(', '),
-    tone: presentation.tone,
-    Icon: presentation.Icon,
+    // Only a degraded fleet is a warning. Blocked, and a payload this
+    // normalizer could not read, are both bad.
+    tone: fleet?.status === 'degraded' ? 'warn' : 'bad',
+    Icon: ShieldAlert,
   }
 }
 

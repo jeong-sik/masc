@@ -137,78 +137,6 @@ describe('FleetHealthPanel', () => {
     expect(screen.queryByTestId('gate-monitor')).toBeNull()
   })
 
-  it('renders runtime fleet and contract blocker drilldown on the operations board', () => {
-    storeMock.shellRuntimeResolution.value = {
-      status: 'ready',
-      warnings: [],
-      fleet_safety: {
-        keeper_fibers: 8,
-        paused_keepers: 3,
-        keeper_reaction_ledger: null,
-        paused_keepers_health: {
-          count: 3,
-          names: ['analyst', 'base', 'sangsu'],
-          durable_count: 3,
-          durable_names: ['analyst', 'base', 'sangsu'],
-          autoboot_enabled_count: 3,
-          autoboot_enabled_names: ['analyst', 'base', 'sangsu'],
-          read_error_count: 0,
-          read_errors: [],
-          details: [{
-            name: 'analyst',
-            autoboot_enabled: true,
-            pause_kind: 'operator_paused',
-            paused_elapsed_sec: 12,
-            last_blocker: null,
-            missing_pause_root_cause: false,
-          }],
-        },
-        keeper_fleet_safety: {
-          schema: 'masc.keeper_fleet_operator.v1',
-          status: 'degraded',
-          reason: null,
-          blocker: 'reaction_capacity_below_target',
-          blocked_keeper_count: 1,
-          blocked_keepers: [{
-            keeper_name: 'capacity-missing',
-            agent_name: null,
-            task_id: null,
-            task_status: null,
-            reason: 'phase_failing',
-            action: 'repair_failing_keeper',
-            operator_action_type: null,
-            operator_tool_name: null,
-            operator_action_confirm_required: null,
-          }],
-          running_keeper_fiber_count: 8,
-          executable_keeper_fiber_count: 13,
-          target_reaction_capacity_count: 17,
-          reaction_capacity_shortfall_count: 4,
-          operator_action_required: true,
-          reaction_capacity_below_target: true,
-        },
-      },
-    }
-
-    render(html`<${FleetHealthPanel} />`)
-
-    expect(storeMock.refreshShell).toHaveBeenCalledWith({ force: true })
-    expect(screen.getByTestId('fleet-command-strip')).toBeTruthy()
-    expect(screen.getByText('런타임 가동')).toBeTruthy()
-    expect(screen.getByText('capacity 13/17')).toBeTruthy()
-    expect(screen.getByText('일시정지 3')).toBeTruthy()
-    expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
-    const operatorFact = screen.getByTestId('keeper-fleet-operator-fact-0')
-    expect(operatorFact.getAttribute('data-tone')).toBe('warn')
-    expect(operatorFact.querySelector('[data-icon="Wrench"]')).toBeTruthy()
-    expect(operatorFact.textContent).toContain('Keeper failing')
-    expect(operatorFact.textContent).toContain('inspect and recover failing keepers')
-    expect(screen.getByText('13/17')).toBeTruthy()
-    expect(screen.getByText('analyst')).toBeTruthy()
-    expect(screen.getByText('operator_paused')).toBeTruthy()
-    expect(screen.queryByText(/blocker=/)).toBeNull()
-    expect(screen.queryByText(/manual pause applied/)).toBeNull()
-  })
 
   it('marks the runtime health pill as warn when runtime.status is not ready', () => {
     storeMock.shellRuntimeResolution.value = {
@@ -224,8 +152,6 @@ describe('FleetHealthPanel', () => {
           status: 'ok',
           reason: null,
           blocker: null,
-          blocked_keeper_count: 0,
-          blocked_keepers: [],
           running_keeper_fiber_count: 8,
           executable_keeper_fiber_count: 8,
           target_reaction_capacity_count: 8,

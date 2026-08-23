@@ -94,7 +94,6 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         keeper_name: 'sangsu',
         state: 'deferred',
         waiting_count: 2,
-        next_action: 'keeper_owner_start_fifo_head',
         waiting_on: [
           {
             keeper_name: 'sangsu',
@@ -172,7 +171,6 @@ function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
         waiting_count_truncated: true,
         truncated_sources: { external_attention: true },
         sources: { external_attention: 64, chat_operation_queued: 5 },
-        next_action: 'keeper_process_external_attention',
         waiting_on: [...externalRows, ...chatRows],
       },
     ],

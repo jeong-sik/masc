@@ -1572,6 +1572,96 @@ let render_keeper_message (state : state) =
       ~rows ~cols buf
     end
 
+
+let render_dashboard_chat (state : state) =
+  let (rows, cols) = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let header =
+    Printf.sprintf " Dashboard Chat & Operator Directives (port %d)" state.port
+  in
+  let history_height = max 0 (rows - 8) in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+
+  let messages = state.msg_history in
+  let layout_entries =
+    List.map
+      (fun message ->
+        let style, role_label =
+          match message.me_role with
+          | Message_user -> Message_layout.User, "you/operator"
+          | Message_keeper ->
+              ( Message_layout.Keeper
+              , Keeper_chat.terminal_safe_text message.me_keeper_name )
+          | Message_status -> Message_layout.Status, "status"
+          | Message_error -> Message_layout.Error, "error"
+        in
+        ({ style;
+           timestamp = message.me_timestamp;
+           role_label;
+           request_label =
+             Keeper_chat.compact_request_id message.me_request_id;
+           body = message.me_text;
+         }
+          : Message_layout.entry))
+      messages
+  in
+  let visible_rows =
+    Message_layout.visible_rows ~inner_width:(max 1 (cols - 4))
+      ~height:history_height layout_entries
+  in
+
+  if visible_rows = [] then begin
+    if history_height > 0 then
+      box_line_styled buf cols ~style:Ansi.dim
+        "  (no global messages yet -- type message or /directive <keeper> <msg> below)";
+    for _ = 1 to history_height - 1 do
+      box_empty buf cols
+    done
+  end else begin
+    List.iter
+      (fun (row : Message_layout.row) ->
+        let style =
+          match row.style with
+          | Message_layout.User -> Ansi.cyan
+          | Message_layout.Keeper -> Ansi.green
+          | Message_layout.Status -> Ansi.yellow
+          | Message_layout.Error -> Ansi.red
+        in
+        box_line_styled buf cols ~style row.text)
+      visible_rows;
+    for _ = List.length visible_rows to history_height - 1 do
+      box_empty buf cols
+    done
+  end;
+
+  box_divider buf cols;
+
+  let input = Buffer.contents state.msg_input in
+  let visible_input =
+    Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)) input
+  in
+  let input_row = 3 + history_height in
+  box_line_styled buf cols ~style:Ansi.cyan
+    (Printf.sprintf "  > %s" visible_input);
+
+  box_bottom buf cols;
+
+  let footer =
+    Printf.sprintf "%sEnter:send  Tab:surface  Esc:back  Ctrl-U:clear line%s" Ansi.dim Ansi.reset
+  in
+  Buffer.add_string buf (Message_layout.fit_width footer (max 1 (cols - 1)));
+  Buffer.add_char buf '\n';
+
+  let input_column =
+    Message_layout.input_cursor_column ~terminal_cols:cols ~input:visible_input
+  in
+  finish_frame ~surface_key:"dashboard-chat"
+    ~cursor:(Frame_presenter.Visible_at { row = input_row; column = input_column })
+    ~rows ~cols buf
+
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -1596,6 +1686,7 @@ let render_surface (state : state) =
            | Some goal -> render_planning_detail state goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
+  | Dashboard_chat -> render_dashboard_chat state
 
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in

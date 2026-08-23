@@ -206,6 +206,29 @@
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
 
 (library
+ (name masc_tui_types)
+ (wrapped false)
+ (modules masc_tui_types)
+ (libraries
+  masc
+  masc.masc_goal
+  masc_tui_context_state
+  masc_tui_frame_presenter
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_recovery
+  masc_tui_message_layout
+  masc_tui_metrics_tail
+  masc_tui_observation_layout
+  masc_tui_operator_projection
+  masc_tui_board_detail
+  masc_tui_board_selection
+  masc_tui_keeper_selection
+  masc_tui_planning_selection
+  masc_tui_render_schedule
+  masc_tui_terminal_write_repair
+  yojson))
+
+(library
  (name masc_tui_operator_projection)
  (wrapped false)
  (modules masc_tui_operator_projection)
@@ -302,7 +325,6 @@
  (name masc_tui)
  (modules
   masc_tui
-  masc_tui_types
   masc_tui_ansi
   masc_tui_render
   masc_tui_loader
@@ -311,6 +333,7 @@
  (package masc)
  (libraries
   masc
+  masc_tui_types
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_chat_projection

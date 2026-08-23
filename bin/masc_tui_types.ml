@@ -226,6 +226,7 @@ type surface =
   | Board
   | Approvals
   | Planning
+  | Dashboard_chat
 
 (** Dashboard state *)
 type state = {

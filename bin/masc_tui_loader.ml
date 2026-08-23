@@ -162,7 +162,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Board | Approvals | Planning -> None
+    | Overview | Board | Approvals | Planning | Dashboard_chat -> None
   in
   let current_navigation =
     match current_keeper_mode with

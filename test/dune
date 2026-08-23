@@ -2760,3 +2760,9 @@
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
  (libraries alcotest yojson masc masc_test_deps))
+
+(test
+ (name test_tui_dashboard_chat)
+ (modules test_tui_dashboard_chat)
+ (libraries alcotest masc_tui_types))
+

@@ -221,6 +221,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   match key with
   | "esc" ->
     save_message_draft state;
+    if state.view = Dashboard_chat then begin
+      state.view <- Overview;
+      true
+    end else
     let target_registered =
       match state.msg_target_keeper_name with
       | Some keeper_name ->
@@ -460,7 +464,21 @@ let rec start_keeper_message state ~base_path ~mailbox text =
                request.request_id)
       | None ->
       match state.msg_target_keeper_name with
-      | None -> add_event state "error" "Cannot send: no Keeper is selected"
+      | None ->
+          if state.view = Dashboard_chat then begin
+            let now_iso = current_clock_text () in
+            let entry : msg_entry = {
+              me_role = Message_user;
+              me_text = text;
+              me_timestamp = now_iso;
+              me_keeper_name = "operator";
+              me_request_id = "global-chat";
+            } in
+            state.msg_history <- state.msg_history @ [entry];
+            Buffer.clear state.msg_input;
+            add_event state "message" (Printf.sprintf "Dashboard chat sent: %s" text)
+          end else
+            add_event state "error" "Cannot send: no Keeper is selected"
       | Some _ when Option.is_some state.keepers_error ->
           add_event state "error"
             "Cannot send while the Keeper roster is unavailable"
@@ -1696,7 +1714,7 @@ let main () =
         Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
       in
       let message_mode =
-        (not compact_viewport) && state.view = Keepers Keeper_message
+        (not compact_viewport) && (state.view = Keepers Keeper_message || state.view = Dashboard_chat)
       in
       (match state.view, key with
        | _ when compact_viewport -> ()
@@ -1727,6 +1745,9 @@ let main () =
                  k
              in
              ()
+       | Some ("c" | "C") when not message_mode ->
+           state.msg_target_keeper_name <- None;
+           state.view <- Dashboard_chat
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -1767,7 +1788,7 @@ let main () =
                        ~mailbox:async_messages
                  | Board_list -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-            | Approvals | Planning -> ());
+            | Approvals | Planning | Dashboard_chat -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab cycles through primary surfaces *)
@@ -1778,7 +1799,8 @@ let main () =
                 state.pending_approval_action <- None;
                 state.view <- Board
             | Board -> state.view <- Planning
-            | Planning -> state.view <- Overview)
+            | Planning -> state.view <- Dashboard_chat
+            | Dashboard_chat -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
@@ -1803,7 +1825,7 @@ let main () =
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
                  | Planning_list -> ())
-            | Overview | Keepers Keeper_list | Approvals -> ())
+            | Overview | Keepers Keeper_list | Approvals | Dashboard_chat -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -1855,7 +1877,7 @@ let main () =
                     ~event_count:(List.length state.events)
                     ~visible_rows:row_budget.attention_rows
                     state.overview_event_scroll
-            | Keepers Keeper_message -> ())
+            | Keepers Keeper_message | Dashboard_chat -> ())
        | Some "k" | Some "up" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -1904,7 +1926,7 @@ let main () =
                     ~event_count:(List.length state.events)
                     ~visible_rows:row_budget.attention_rows
                     state.overview_event_scroll
-            | Keepers Keeper_message -> ())
+            | Keepers Keeper_message | Dashboard_chat -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
@@ -1944,7 +1966,7 @@ let main () =
                       | None -> ())
                  | Planning_detail _ -> ())
             | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals -> ())
+            | Approvals | Dashboard_chat -> ())
        | Some "l" | Some "L" ->
            (* L opens log view from detail *)
            (match state.view with
@@ -1962,7 +1984,7 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning -> ())
+            | Board | Approvals | Planning | Dashboard_chat -> ())
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
            (match state.view with
@@ -1973,7 +1995,7 @@ let main () =
                 open_message_for_keeper state keeper.k_name;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning -> ())
+            | Board | Approvals | Planning | Dashboard_chat -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -2006,7 +2028,7 @@ let main () =
                     ~mailbox:async_messages
               | Board_list -> ())
          | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-         | Approvals | Planning -> ());
+         | Approvals | Planning | Dashboard_chat -> ());
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background
       end;

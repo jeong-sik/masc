@@ -261,6 +261,67 @@ let test_extra_fields_allowed () =
   | Proceed _ -> ()
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
 
+(* The four input template shapes used to live only in the tool's description
+   while the schema said `{"type":"object"}`, so a malformed template reached
+   the executor and failed there. Stated in the schema, it is refused at the
+   boundary. *)
+let plan_schema = Masc.Keeper_tool_composition_surface.plan_execute_input_schema
+
+let plan_args input =
+  `Assoc
+    [ ( "nodes"
+      , `List
+          [ `Assoc
+              [ "id", `String "n"
+              ; "tool", `String "keeper_time_now"
+              ; "input", input
+              ]
+          ] )
+    ]
+;;
+
+let test_plan_accepts_an_output_reference () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:plan_schema
+      ~name:"keeper_plan_execute"
+      ~args:
+        (plan_args
+           (`Assoc
+             [ "kind", `String "output"
+             ; "node", `String "clock"
+             ; "pointer", `String "/now_iso"
+             ]))
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "an output reference must pass, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+;;
+
+(* Where the schema stops. [validate_args] reads [oneOf] and [properties] off
+   the top-level schema only, so a template stated inside [nodes.items] is
+   what the model is told, not what it is held to: an [output] with no [node]
+   passes here and is refused later by [Keeper_tool_plan]. Pinned so the day
+   the validator descends, this test says so rather than the schema quietly
+   becoming load-bearing. *)
+let test_plan_template_is_advertised_not_enforced () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:plan_schema
+      ~name:"keeper_plan_execute"
+      ~args:(plan_args (`Assoc [ "kind", `String "output" ]))
+      ()
+  with
+  | Ok _ -> ()
+  | Error _ ->
+    Alcotest.fail
+      "the nested template is not checked here; if it now is, move this \
+       assertion rather than deleting it"
+;;
+
 let test_empty_schema_allows_empty_args () =
   let schema = `Assoc [] in
   match
@@ -2213,6 +2274,10 @@ let () =
       Alcotest.test_case "null args rejected at AGENT_CORE layer" `Quick test_null_args_rejected_at_agent_core_layer;
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
+      Alcotest.test_case "plan accepts an output reference" `Quick
+        test_plan_accepts_an_output_reference;
+      Alcotest.test_case "plan template is advertised, not enforced" `Quick
+        test_plan_template_is_advertised_not_enforced;
       Alcotest.test_case "empty schema allows empty args" `Quick
         test_empty_schema_allows_empty_args;
       Alcotest.test_case "empty schema rejects arguments" `Quick

@@ -49,6 +49,11 @@ type msg_role =
           drew while it ran. The strict stream decode carries no tool
           information, so without this a turn that read six files and edited
           two scrolls back looking like one answered from memory. *)
+  | Message_thinking
+      (** The reasoning of one autonomous turn as the transcript carried it:
+          the lines the server kept and the count it withheld. Drawn with the
+          live pane's thinking style, so a turn the keeper ran on its own and
+          one watched live read alike. *)
 
 (** Request-correlated message history entry. *)
 type msg_entry = {

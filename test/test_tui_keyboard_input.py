@@ -2680,6 +2680,89 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def autonomous_turn_history_fixture() -> HttpResponse:
+    """One transcript row the way an autonomous turn persists it.
+
+    Blank ``content`` and a ``trace`` block behind it: on one live keeper 32
+    of 183 assistant rows looked like this, and every one drew as a timestamp
+    over an empty line.
+    """
+
+    return (
+        200,
+        [
+            {
+                "id": "autonomous:trace-1787333555531-00020#54",
+                "role": "assistant",
+                "content": "",
+                "ts": 1787348490.3,
+                "autonomous_turn": {"turn_id": "trace-1787333555531-00020#54"},
+                "blocks": [
+                    {
+                        "t": "trace",
+                        "trace": [
+                            {"kind": "think", "text": "", "content_withheld": True},
+                            {
+                                "kind": "tool",
+                                "name": "masc_task_history",
+                                "status": "ok",
+                                "dur": "32ms",
+                            },
+                            {"kind": "think", "text": "", "content_withheld": True},
+                            {
+                                "kind": "tool",
+                                "name": "tool_execute",
+                                "status": "err",
+                                "dur": "1.2s",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+
+
+def autonomous_turn_history_interaction() -> Interaction:
+    """The chat pane draws what an autonomous turn did, not a blank line."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+        pane_start = len(output)
+        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+        # The transcript is fetched on a background fiber once the pane opens,
+        # so the rows land in a later frame than the header.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"masc_task_history",
+            start=pane_start,
+            timeout=5.0,
+        )
+        pane = bytes(output[pane_start:])
+        for needle, what in (
+            (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
+            ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
+            ("\u2717 tool_execute \u00b7 1.2s".encode(), "the failed call"),
+        ):
+            if needle not in pane:
+                raise AssertionError(
+                    f"Autonomous turn history did not draw {what}: {pane!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def composer_newline_interaction(requests: HttpRequests) -> Interaction:
     """Ctrl-J opens a line; Return sends.
 
@@ -2757,6 +2840,14 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=utf8_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Autonomous turn history",
+        interact=autonomous_turn_history_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
     )
     composer_requests: HttpRequests = []
     run_terminal_scenario(

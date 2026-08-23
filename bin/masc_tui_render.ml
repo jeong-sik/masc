@@ -2240,6 +2240,7 @@ let render_keeper_message (state : state) =
             | Message_status -> Message_layout.Status, "status"
             | Message_error -> Message_layout.Error, "error"
             | Message_tool -> Message_layout.Tool, "tools"
+            | Message_thinking -> Message_layout.Thinking, "thinking"
           in
           (* One column for every speaker so the [timestamp] speaker request
              rows line up down the pane, whatever name each row carries. *)

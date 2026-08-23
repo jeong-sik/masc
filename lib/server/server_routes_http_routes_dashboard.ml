@@ -1442,20 +1442,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let timing = Server_timing.create () in
-         (* RFC-0138 Phase 3 Step 3: wait-free read via
-            [Dashboard_snapshot.current ()].namespace_truth when the
-            refresh fiber has populated it.  Cold start (or refresh
-            spawned without ~state) falls through to the synchronous
-            namespace-truth path inside the timing measurement. *)
-         let json =
-           Server_dashboard_snapshot_select.select_project_snapshot_json
-             ~state ~sw ~clock ~timing req
-         in
-         Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
          (* The default execution surface is a large proactive cached snapshot.

@@ -94,7 +94,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // entry in sse-store.ts.
   'masc/task_claimed',
   'project_snapshot',
-  'namespace_truth_snapshot',
   'execution_snapshot',
   'operator_snapshot',
   'operator_digest',

@@ -354,16 +354,10 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
             ("ts_unix", `Float (Time_compat.now ()));
           ]
       in
-      let namespace_alias_sse_json =
-        `Assoc
-          [
-            ("type", `String "namespace_truth_snapshot");
-            ("payload", snapshot);
-            ("ts_unix", `Float (Time_compat.now ()));
-          ]
-      in
+      (* One event, not two. The alias carried the identical payload and every
+         consumer handled the two names in the same branch, so the fanout sent
+         each namespace-truth snapshot twice to say one thing (#27664). *)
       Sse.broadcast_to Observers namespace_sse_json;
-      Sse.broadcast_to Observers namespace_alias_sse_json;
       (* Snapshot broadcasts are normal dashboard fanout. The cache/update
          failures around this path are logged separately. *)
       Log.Dashboard.routine "project-snapshot pushed via SSE"

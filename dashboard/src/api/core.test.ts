@@ -540,7 +540,9 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.message).toContain('warming up')
   })
 
-  it('remaps the namespace-truth alias the same as project-snapshot', async () => {
+  // The namespace-truth route used to answer here too, with a handler
+  // byte-identical to project-snapshot's and no caller fetching it (masc#27664).
+  it('does not remap the retired namespace-truth route', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(
         new Response('{"error":"not initialized"}', {
@@ -554,9 +556,8 @@ describe('get bootstrap warm-up mapping', () => {
     expect(canonical.status).toBe('initializing')
     expect(canonical.message).toContain('warming up')
 
-    const legacyNamespace = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
-    expect(legacyNamespace.status).toBe('initializing')
-    expect(legacyNamespace.message).toContain('warming up')
+    const retired = await get<{ status?: string; error?: string }>('/api/v1/dashboard/namespace-truth')
+    expect(retired.status).toBeUndefined()
   })
 
   it('maps execution not-initialized 5xx to empty execution payload', async () => {

@@ -727,7 +727,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
 }
 
 export function hydrateServerPushEvent(event: SSEEvent): boolean {
-  if ((event.type === 'project_snapshot' || event.type === 'namespace_truth_snapshot') && event.payload) {
+  if (event.type === 'project_snapshot' && event.payload) {
     handleNamespaceTruthSnapshot(event.payload)
     return true
   }
@@ -913,7 +913,6 @@ function eventPayloadRecord(payload: unknown): Record<string, unknown> {
 export function hydrateDashboardSlice(_slice: string, payload: unknown, eventType?: string): void {
   switch (eventType) {
     case 'project_snapshot':
-    case 'namespace_truth_snapshot':
     case 'execution_snapshot':
     case 'operator_snapshot':
     case 'operator_digest':

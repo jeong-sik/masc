@@ -21,10 +21,10 @@ let retention_days () =
 let prune_mu = Stdlib.Mutex.create ()
 let last_prune_day_by_base_dir : (string, string) Hashtbl.t = Hashtbl.create 64
 
-let today_key () =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+(* The layout this key indexes is decided by [Jsonl_writer.dated_path]; ask it
+   for the key rather than rebuilding the same [gmtime]/[sprintf] pair here. A
+   second spelling of the same key drifts silently — nothing compares them. *)
+let today_key () = Jsonl_writer.day_key ~ts:(Unix.gettimeofday ())
 
 let is_runtime_manifest_file name =
   String.ends_with ~suffix:".jsonl" name

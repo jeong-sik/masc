@@ -21,6 +21,7 @@ export type IconKey =
   | 'logs'
   | 'fusion'
   | 'clock'
+  | 'flask'
 
 export const ICONS: Readonly<Record<IconKey, Icon>> = {
   grid: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1.4" /><rect x="14" y="3" width="7" height="7" rx="1.4" /><rect x="3" y="14" width="7" height="7" rx="1.4" /><rect x="14" y="14" width="7" height="7" rx="1.4" /></svg>`,
@@ -37,6 +38,7 @@ export const ICONS: Readonly<Record<IconKey, Icon>> = {
   logs: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 10h16M4 14h13M4 18h9" /></svg>`,
   fusion: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="5" r="1.7" /><circle cx="4.5" cy="12" r="1.7" /><circle cx="4.5" cy="19" r="1.7" /><path d="M6.2 5.4 11 11M6.2 12H11M6.2 18.6 11 13" /><circle cx="12.9" cy="12" r="2" /><path d="M14.9 12H19.5" /><circle cx="20" cy="12" r="1.6" fill="currentColor" /></svg>`,
   clock: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>`,
+  flask: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6" /><path d="M10 3v5.2L5.4 17.2A2 2 0 0 0 7.2 20h9.6a2 2 0 0 0 1.8-2.8L14 8.2V3" /><path d="M7.4 14h9.2" /></svg>`,
 }
 
 export const ICON_MORE: Icon = html`<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>`

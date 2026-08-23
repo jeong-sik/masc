@@ -243,6 +243,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -553,6 +554,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -1738,6 +1740,8 @@
 
 (include stanzas/test_ci_run_tests_script.inc)
 
+(include stanzas/test_telemetry_gate_handler_detection.inc)
+
 (include stanzas/test_contract_harness_auth_script.inc)
 
 (include stanzas/test_context_max_observed_9953.inc)
@@ -2707,7 +2711,7 @@
 (test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
- (libraries alcotest masc masc_tui_keeper_control yojson))
+ (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))
 
 (test
  (name test_tui_keeper_selection)

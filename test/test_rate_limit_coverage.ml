@@ -1,7 +1,6 @@
 (** Rate Limit Module Coverage Tests
 
     Tests for MASC Rate Limiting:
-    - default_rate, default_burst constants
     - create function
 *)
 
@@ -20,27 +19,23 @@ let comma_header_values value =
    Constants Tests
    ============================================================ *)
 
-let test_default_rate () =
-  check (float 0.001) "default rate" 60.0 Rate_limit.default_rate
 
-let test_default_burst () =
-  check int "default burst" 150 Rate_limit.default_burst
 
 (* ============================================================
    Create Tests
    ============================================================ *)
 
 let test_create_default () =
-  let limiter = Rate_limit.create () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:150 () in
   check (float 0.001) "rate" 60.0 (Rate_limit.rate limiter);
   check int "burst" 150 (Rate_limit.burst limiter)
 
 let test_create_custom_rate () =
-  let limiter = Rate_limit.create ~rate:100.0 () in
+  let limiter = Rate_limit.create ~rate:100.0 ~burst:150 () in
   check (float 0.001) "custom rate" 100.0 (Rate_limit.rate limiter)
 
 let test_create_custom_burst () =
-  let limiter = Rate_limit.create ~burst:200 () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:200 () in
   check int "custom burst" 200 (Rate_limit.burst limiter)
 
 let test_create_both_custom () =
@@ -53,11 +48,11 @@ let test_create_both_custom () =
    ============================================================ *)
 
 let test_check_allows_first () =
-  let limiter = Rate_limit.create ~burst:10 () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:10 () in
   check bool "first allowed" true (Rate_limit.check limiter ~key:"test")
 
 let test_check_within_burst () =
-  let limiter = Rate_limit.create ~burst:5 () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:5 () in
   let results = List.init 5 (fun _ -> Rate_limit.check limiter ~key:"test") in
   check bool "all within burst" true (List.for_all Fun.id results)
 
@@ -79,7 +74,7 @@ let test_check_different_keys () =
    ============================================================ *)
 
 let test_remaining_new_key () =
-  let limiter = Rate_limit.create ~burst:10 () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:10 () in
   let rem = Rate_limit.remaining limiter ~key:"new" in
   check int "new key has burst" 10 rem
 
@@ -102,7 +97,7 @@ let test_remaining_multiple () =
    ============================================================ *)
 
 let test_cleanup_removes_old () =
-  let limiter = Rate_limit.create () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:150 () in
   let _ = Rate_limit.check limiter ~key:"old" in
   (* Ensure entry is older than the cleanup threshold. *)
   Time_compat.sleep 0.01;
@@ -110,7 +105,7 @@ let test_cleanup_removes_old () =
   check int "removes immediately when threshold=0" 1 removed
 
 let test_cleanup_keeps_recent () =
-  let limiter = Rate_limit.create () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:150 () in
   let _ = Rate_limit.check limiter ~key:"recent" in
   (* Cleanup with large threshold should keep recent *)
   let removed = Rate_limit.cleanup limiter ~older_than_seconds:3600 in
@@ -150,19 +145,19 @@ let test_remaining_global () =
    ============================================================ *)
 
 let test_headers_has_limit () =
-  let limiter = Rate_limit.create ~burst:100 () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:100 () in
   let hdrs = Rate_limit.headers limiter ~key:"test" in
   check bool "has X-RateLimit-Limit" true
     (List.mem_assoc "X-RateLimit-Limit" hdrs)
 
 let test_headers_has_remaining () =
-  let limiter = Rate_limit.create () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:150 () in
   let hdrs = Rate_limit.headers limiter ~key:"test" in
   check bool "has X-RateLimit-Remaining" true
     (List.mem_assoc "X-RateLimit-Remaining" hdrs)
 
 let test_headers_limit_value () =
-  let limiter = Rate_limit.create ~burst:100 () in
+  let limiter = Rate_limit.create ~rate:60.0 ~burst:100 () in
   let hdrs = Rate_limit.headers limiter ~key:"test" in
   match List.assoc_opt "X-RateLimit-Limit" hdrs with
   | Some v -> check string "limit is burst" "100" v
@@ -236,11 +231,7 @@ let test_headers_global_has_remaining () =
    Per-Agent Configuration Tests
    ============================================================ *)
 
-let test_default_agent_rate () =
-  check (float 0.001) "default agent rate" 20.0 Rate_limit.default_agent_rate
 
-let test_default_agent_burst () =
-  check int "default agent burst" 50 Rate_limit.default_agent_burst
 
 let test_agent_rate_of_config_returns_float () =
   let rate = Rate_limit.agent_rate_of_config () in
@@ -398,8 +389,6 @@ let () =
   Time_compat.set_clock (Eio.Stdenv.clock env);
   run "Rate Limit Coverage" [
     "constants", [
-      test_case "default_rate" `Quick test_default_rate;
-      test_case "default_burst" `Quick test_default_burst;
     ];
     "create", [
       test_case "default" `Quick test_create_default;
@@ -451,8 +440,6 @@ let () =
       test_case "has remaining header" `Quick test_headers_global_has_remaining;
     ];
     "per_agent_config", [
-      test_case "default_agent_rate" `Quick test_default_agent_rate;
-      test_case "default_agent_burst" `Quick test_default_agent_burst;
       test_case "agent_rate_of_config" `Quick test_agent_rate_of_config_returns_float;
       test_case "agent_burst_of_config" `Quick test_agent_burst_of_config_returns_int;
       test_case "create_agent_of_config" `Quick test_create_agent_of_config;

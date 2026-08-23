@@ -1308,9 +1308,8 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
       (match run_resume_owner config ~name request with
        | Error error ->
          Log.Keeper.warn
-           "directive resume_owner rejected for %s generation=%d operation_id=%s: %s"
+           "directive resume_owner rejected for %s operation_id=%s: %s"
            name
-           request.owner_nonce
            request.operator_operation_id
            (Keeper_paused_work_resume_transaction.error_to_string error);
          Http.Response.json_value
@@ -1331,16 +1330,14 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
          (match success.projection with
           | Applied _ ->
             Log.Keeper.info
-              "directive resume_owner applied for %s generation=%d operation_id=%s"
+              "directive resume_owner applied for %s operation_id=%s"
               name
-              request.owner_nonce
               request.operator_operation_id;
             Http.Response.json_value ~compress:true ~request:req response reqd
           | Committed_followup_failed failure ->
             Log.Keeper.warn
-              "directive resume_owner committed with pending projection for %s generation=%d operation_id=%s: %s"
+              "directive resume_owner committed with pending projection for %s operation_id=%s: %s"
               name
-              request.owner_nonce
               request.operator_operation_id
               (resume_failure_message failure);
             Http.Response.json_value

@@ -321,7 +321,6 @@ let to_json_with_operator_disposition
       ~agent_name:receipt.agent_name
       ~trace_id:receipt.trace_id
       ~session_id:receipt.trace_id
-      ~generation:receipt.generation
       ?keeper_turn_id:receipt.turn_count
       ?task_id:receipt.current_task_id
       ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
@@ -351,7 +350,6 @@ let to_json_with_operator_disposition
     ; "keeper_name", `String receipt.keeper_name
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
-    ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; ( "agent_core_turn_count", Json_util.int_opt_to_json receipt.agent_core_turn_count )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
@@ -447,7 +445,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "keeper_name", `String receipt.keeper_name
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
-    ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; "disposition", `String disposition_s
     ; "disposition_reason", `String reason_s

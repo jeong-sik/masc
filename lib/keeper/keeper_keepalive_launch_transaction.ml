@@ -77,7 +77,6 @@ let run
       ?intake_token
       ~base_path
       ~keeper_name
-      ~expected_generation
       ~register
       ~rollback
       launch

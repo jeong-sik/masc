@@ -105,7 +105,6 @@ val ack_pending_result :
 val cancel_pending_accepted_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   cancellation:accepted_cancellation ->
   (transition_result, string) result
@@ -116,7 +115,6 @@ val transfer_pending_accepted_result :
   ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
   (transition_result, transfer_pending_error) result
@@ -130,7 +128,6 @@ val transfer_pending_accepted_result :
 val ack_pending_source_terminal_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   acked_at:float ->
   source_terminal:accepted_source_terminal ->
   (source_ack_result, string) result
@@ -141,7 +138,6 @@ val ack_pending_source_terminal_result :
 val terminalize_pending_turn_attempt_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
@@ -153,7 +149,6 @@ val terminalize_pending_turn_attempt_result :
 val terminalize_pending_turn_completed_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   (source_ack_result, string) result

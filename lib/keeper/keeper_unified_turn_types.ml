@@ -311,7 +311,6 @@ let streaming_cancellation_source_to_fsm = function
 let record_streaming_cancelled_observation
       ~(config : Workspace.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
-      ~(run_generation : int)
       ~(runtime_id : string)
       ~(keeper_turn_id : int)
       ()

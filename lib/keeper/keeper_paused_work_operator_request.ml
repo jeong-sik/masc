@@ -37,10 +37,6 @@ let nonblank field value =
   else Ok value
 ;;
 
-let nonnegative_int field value =
-  if value < 0 then Error (field ^ " must not be negative") else Ok value
-;;
-
 let nonnegative_int64 field value =
   if Int64.compare value 0L < 0
   then Error (field ^ " must not be negative")

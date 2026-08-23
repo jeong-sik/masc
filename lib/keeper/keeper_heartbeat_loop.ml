@@ -895,7 +895,6 @@ let run_keepalive_unified_turn
         Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
           ~base_path:ctx.config.base_path
           meta_after_triage.name
-          ~current_owner_nonce:meta_after_triage.runtime.nonce
           ~applied_at:(Time_compat.now ())
           ~selection
           ~detail
@@ -906,7 +905,6 @@ let run_keepalive_unified_turn
         Keeper_registry_event_queue.terminalize_pending_turn_completed_result
           ~base_path:ctx.config.base_path
           meta_after_triage.name
-          ~current_owner_nonce:meta_after_triage.runtime.nonce
           ~applied_at:(Time_compat.now ())
           ~selection
         |> record_terminal_selection_result ~label:"turn completion"

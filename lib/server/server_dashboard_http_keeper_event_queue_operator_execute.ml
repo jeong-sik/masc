@@ -110,7 +110,6 @@ let fresh_cancellation_for_request
   let cancellation : Keeper_registry_event_queue.accepted_cancellation =
     { source = selection.source
     ; source_incarnation
-    ; owner_nonce
     ; operator_operation_id
     ; reason
     }
@@ -169,11 +168,9 @@ let fresh_transfer_for_request
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation
-    ; owner_nonce
     ; operator_operation_id
     ; from_keeper = keeper_name
     ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -453,7 +450,6 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error "keeper is not registered"
   | Some entry ->
-    let owner_nonce = entry.meta.runtime.nonce in
     (match
        Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
@@ -461,8 +457,6 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
          (fun () ->
             match Keeper_registry.get ~base_path keeper_name with
             | None -> Error "keeper registration disappeared"
-            | Some current when current.meta.runtime.nonce <> owner_nonce ->
-              Error "keeper owner nonce changed"
             | Some _ ->
               run_admitted_request
                 ~config

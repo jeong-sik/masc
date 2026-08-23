@@ -109,7 +109,6 @@ include Keeper_hooks_agent_core_cost_events
     observation and is not part of the pre-tool decision surface.
 
     @param meta_ref Mutable ref to keeper metadata
-    @param generation Current generation counter
     @param on_tool_executed Optional callback after each tool execution
     @param trajectory_acc Optional trajectory accumulator for cost attribution
 
@@ -130,7 +129,6 @@ let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
-    ~(generation : int)
     ~(trace_id : string)
     ~(keeper_turn_id : int)
     ~(on_after_turn_ordinal : int -> unit)
@@ -393,7 +391,6 @@ let make_hooks
                [
                  (key_type, `String sse_turn_complete);
                  (key_name, `String meta.name);
-                 (key_generation, `Int generation);
                  (key_turn, `Int turn);
                  (key_model_used, `Null);
                  (key_input_tokens, `Int input_tok);

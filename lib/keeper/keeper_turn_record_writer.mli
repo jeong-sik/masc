@@ -12,7 +12,6 @@ val write :
   config:Workspace.config ->
   keeper_name:string ->
   agent_name:string ->
-  generation:int ->
   turn_kind:Turn_record.turn_kind ->
   trace_id:string ->
   absolute_turn:int ->

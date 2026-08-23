@@ -43,7 +43,6 @@ type turn_runtime_delta =
   ; next_agent_name : string
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
-  ; next_generation : int
   ; next_last_handoff_ts : float
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change

@@ -157,7 +157,6 @@ val make_hooks :
   config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
-  generation:int ->
   trace_id:string ->
   keeper_turn_id:int ->
   on_after_turn_ordinal:(int -> unit) ->

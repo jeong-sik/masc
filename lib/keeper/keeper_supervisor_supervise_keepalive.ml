@@ -236,12 +236,11 @@ let supervise_keepalive
         (cleanup_detail "Librarian abort" librarian_abort_error)
         (cleanup_detail "registry rollback" rollback_error)
   in
-  let run_launch_transaction ~expected_generation ~register ~rollback =
+  let run_launch_transaction ~register ~rollback =
     match
       Keeper_keepalive_launch_transaction.run
         ~base_path
         ~keeper_name:meta.name
-        ~expected_generation
         ~register
         ~rollback
         launch_registered
@@ -251,7 +250,6 @@ let supervise_keepalive
   in
   let register_and_launch () =
     run_launch_transaction
-      ~expected_generation:0
       ~register:(fun token intake_token ->
         match Keeper_registry.get ~base_path meta.name with
         | Some current -> Error (`Occupied current)
@@ -324,7 +322,6 @@ let supervise_keepalive
        (match reg.phase with
         | Keeper_state_machine.Offline ->
           run_launch_transaction
-            ~expected_generation:reg.transition_seq
             ~register:(fun _token _intake_token ->
               match Keeper_registry.get ~base_path meta.name with
               | Some current when same_offline_generation ~expected:reg current ->

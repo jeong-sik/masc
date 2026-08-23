@@ -1,7 +1,6 @@
 type pending_request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -10,15 +9,7 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Registry_owner_not_paused of Keeper_state_machine.phase
-  | Registry_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Queue_replay_failed of string
   | Queue_commit_failed of string
 
@@ -40,20 +31,10 @@ let failure_to_string = function
   | Durable_meta_read_failed detail -> "durable Keeper metadata read failed: " ^ detail
   | Durable_meta_missing -> "durable Keeper metadata is missing"
   | Durable_owner_not_paused -> "durable Keeper owner is not paused"
-  | Durable_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "durable Keeper owner generation changed: expected %d, actual %d"
-      expected
-      actual
   | Registry_owner_not_paused phase ->
     Printf.sprintf
       "live Keeper owner is not paused: phase=%s"
       (Keeper_state_machine.phase_to_string phase)
-  | Registry_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "live Keeper owner generation changed: expected %d, actual %d"
-      expected
-      actual
   | Queue_replay_failed detail -> "accepted cancellation replay failed: " ^ detail
   | Queue_commit_failed detail -> "accepted cancellation commit failed: " ^ detail
 ;;

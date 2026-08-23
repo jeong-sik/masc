@@ -166,7 +166,6 @@ end
      @param world_observation Structured keeper world snapshot used by
             advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
-    @param generation Current generation counter
     @param history_user_source Source label for user messages in history
     @param history_assistant_source Source label for assistant messages in history
     @param temperature Subsystem temperature fallback; a selected runtime model
@@ -192,7 +191,6 @@ val run_turn
   -> ?user_blocks:Agent_core.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
-  -> generation:int
   -> ?history_user_source:string
   -> ?user_turn_record:Keeper_run_prompt.user_turn_record
   -> ?history_assistant_source:string

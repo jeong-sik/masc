@@ -820,8 +820,8 @@ let render_keeper_list (state : state) =
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
 
   (* Column headers *)
-  let col_header = Printf.sprintf "  %s  %-20s %5s  %-8s %10s  %s"
-    " " "Name" "Gen" "Paused" "Turns" "Current Task" in
+  let col_header = Printf.sprintf "  %s  %-20s  %-8s %10s  %s"
+    " " "Name" "Paused" "Turns" "Current Task" in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.dim (fit_width col_header (cols - 4)) Ansi.reset
@@ -892,20 +892,17 @@ let render_keeper_list (state : state) =
         let name_col =
           Printf.sprintf "%-20s" (Terminal_text.single_line k.k_name)
         in
-        let gen_col = Printf.sprintf "%5d" k.k_generation in
         let turns_col = Printf.sprintf "%10d" k.k_total_turns in
         let line_content =
           if is_selected then
             Ansi.reverse ^ ">" ^ Ansi.reset
             ^ "  " ^ Ansi.bold ^ name_col ^ Ansi.reset
-            ^ " " ^ gen_col
             ^ "  " ^ paused_str
             ^ " " ^ turns_col
             ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
           else
             " "
             ^ "  " ^ name_col
-            ^ " " ^ gen_col
             ^ "  " ^ paused_str
             ^ " " ^ turns_col
             ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
@@ -962,7 +959,6 @@ let render_keeper_detail (state : state) =
     (* Identity section *)
     add_section "Identity";
     add_row "Name:" (Terminal_text.single_line k.k_name);
-    add_row "Generation:" (string_of_int k.k_generation);
     add_row "Paused:"
       (if k.k_paused then Ansi.yellow ^ "yes" ^ Ansi.reset
        else Ansi.dim ^ "no" ^ Ansi.reset);

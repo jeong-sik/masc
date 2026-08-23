@@ -35,15 +35,9 @@ let test_typed_rejections () =
       ~canonical_checkpoint_bytes:"{}"
   in
   Alcotest.(check bool)
-    "negative generation"
-    true
-    (match make (-1) 0 with
-     | Error (Keeper_checkpoint_ref.Negative_generation (-1)) -> true
-     | Ok _ | Error _ -> false);
-  Alcotest.(check bool)
     "negative turn"
     true
-    (match make 0 (-2) with
+    (match make (-2) with
      | Error (Keeper_checkpoint_ref.Negative_turn_count (-2)) -> true
      | Ok _ | Error _ -> false)
 ;;
@@ -53,7 +47,6 @@ let test_persisted_roundtrip_is_canonical () =
   let restore sha256 =
     Keeper_checkpoint_ref.of_persisted
       ~trace_id
-      ~generation:expected.generation
       ~turn_count:expected.turn_count
       ~sha256
   in

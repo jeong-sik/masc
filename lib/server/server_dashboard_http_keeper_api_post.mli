@@ -155,8 +155,8 @@ module For_testing : sig
     unit
 
   val parse_resume_request :
-    Yojson.Safe.t -> (int * string, string) result
+    Yojson.Safe.t -> (string, string) result
 
   val parse_bulk_resume_requests :
-    Yojson.Safe.t -> ((string * int * string) list, string) result
+    Yojson.Safe.t -> ((string * string) list, string) result
 end

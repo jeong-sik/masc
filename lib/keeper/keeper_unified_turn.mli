@@ -195,7 +195,6 @@ val run_keeper_cycle
   -> publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
   -> observation:Keeper_world_observation.world_observation
-  -> generation:int
   -> wake:Keeper_registry.wake_reason
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?shared_context:Agent_core.Context.t
@@ -214,7 +213,6 @@ val run_keeper_cycle
     @param config Workspace configuration
     @param meta Current keeper metadata
     @param observation World state snapshot
-    @param generation Current generation counter
     @param wake What triggered this turn (#16, 38-bug campaign PR-5):
     reactive stimulus batch or the proactive cadence tick. Installed on
     [current_turn_observation] via [Keeper_registry.mark_turn_started] so

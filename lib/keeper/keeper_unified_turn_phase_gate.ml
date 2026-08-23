@@ -19,7 +19,6 @@ type phase_gate_outcome =
 let decide_and_record
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
-      ~(generation : int)
       ~(keeper_turn_id : int)
       ~(append_phase_gate_decision :
          Keeper_unified_turn_phase_plan.turn_plan

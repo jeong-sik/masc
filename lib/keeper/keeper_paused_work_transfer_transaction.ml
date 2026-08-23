@@ -1,8 +1,6 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
-  ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
   }
@@ -26,16 +24,8 @@ type failure =
       }
   | Durable_meta_missing of string
   | Source_owner_not_paused
-  | Source_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Source_owner_identity_changed
   | Target_owner_not_active
-  | Target_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
@@ -100,19 +90,9 @@ let failure_to_string = function
   | Durable_meta_missing keeper_name ->
     "Transfer_owner durable Keeper metadata is missing: " ^ keeper_name
   | Source_owner_not_paused -> "Transfer_owner source Keeper must be paused"
-  | Source_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Transfer_owner source generation changed: expected %d, actual %d"
-      expected
-      actual
   | Source_owner_identity_changed ->
     "Transfer_owner source trace identity changed"
   | Target_owner_not_active -> "Transfer_owner target Keeper must be active"
-  | Target_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Transfer_owner target generation changed: expected %d, actual %d"
-      expected
-      actual
   | Target_owner_identity_changed ->
     "Transfer_owner target trace identity changed"
   | Continuation_binding_mismatch ->
@@ -151,10 +131,6 @@ let validate_request ~from_keeper ~to_keeper request =
   then Error "target Keeper must not be empty"
   else if String.equal from_keeper to_keeper
   then Error "source and target Keepers must differ"
-  else if request.owner_nonce < 0
-  then Error "source owner generation must not be negative"
-  else if request.target_generation < 0
-  then Error "target owner generation must not be negative"
   else if Int64.compare request.source_incarnation 0L < 0
   then Error "source incarnation must not be negative"
   else if String.equal (String.trim request.source.post_id) ""
@@ -263,7 +239,7 @@ let create_receipt config ~from_keeper ~to_keeper request =
      : Keeper_paused_work_disposition_receipt.t)
 ;;
 
-let accepted_transfer receipt
+let accepted_transfer (receipt : Keeper_paused_work_disposition_receipt.t)
       (transfer : Keeper_paused_work_disposition_receipt.transfer_owner)
     : Keeper_registry_event_queue.accepted_transfer =
   { source = transfer.Keeper_paused_work_disposition_receipt.source
@@ -275,7 +251,8 @@ let accepted_transfer receipt
   }
 ;;
 
-let ack_source ?intake_token config receipt transfer =
+let ack_source ?intake_token config
+      (receipt : Keeper_paused_work_disposition_receipt.t) transfer =
   let causal = accepted_transfer receipt transfer in
   let base_path = config.Workspace.base_path in
   let* source_state =
@@ -306,7 +283,6 @@ let ack_source ?intake_token config receipt transfer =
         ?intake_token
         ~base_path
         transfer.from_keeper
-        ~current_owner_nonce:current.runtime.nonce
         ~applied_at:receipt.requested_at
         ~transfer:causal
       |> Result.map_error (function
@@ -377,11 +353,9 @@ let receipt_matches_accepted_transfer
       (accepted : Keeper_registry_event_queue.accepted_transfer)
   =
   String.equal receipt.Keeper_paused_work_disposition_receipt.keeper_name accepted.from_keeper
-  && Int.equal receipt.expected_generation accepted.owner_nonce
   && String.equal receipt.operator_operation_id accepted.operator_operation_id
   && String.equal receipt_transfer.from_keeper accepted.from_keeper
   && String.equal receipt_transfer.to_keeper accepted.to_keeper
-  && Int.equal receipt_transfer.target_generation accepted.target_generation
   && Keeper_id.Trace_id.equal receipt_transfer.target_trace_id accepted.target_trace_id
   && receipt_transfer.source = accepted.source
   && Int64.equal receipt_transfer.source_incarnation accepted.source_incarnation
@@ -510,7 +484,6 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
     Keeper_lifecycle_reservation.acquire
       ~base_path:config.Workspace.base_path
       ~keeper_name:from_keeper
-      ~expected_generation:request.owner_nonce
       ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
   with
   | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->

@@ -2105,6 +2105,15 @@ def approval_selection_identity_interaction(
 
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
+    """The goal named by [title] is the row the cursor is on.
+
+    Anchored on the gutter marker and the title, with the columns between them
+    left unread. Those columns carry a phase label, a proof mark and a priority,
+    and each is its own contract with its own tests; pinning their exact shape
+    here made this assertion fail whenever one of them changed. It did:
+    #29786 put a proof mark between the phase and the priority, and this regex
+    had required whitespace there.
+    """
     plain = CSI_RE.sub(b"", frame)
     # What sits between the status bracket and the priority is the renderer's
     # business: #29786 put a proof mark there and this assertion, which only

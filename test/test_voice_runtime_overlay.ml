@@ -290,11 +290,10 @@ let test_stt_request_mcp_rejected () =
 let make_keeper_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
+      (* agent_name is omitted: the fixture derives the canonical
+         keeper-<name>-agent form, which the parser requires. *)
       (`Assoc
-          [ "name", `String name
-          ; "agent_name", `String name
-          ; "trace_id", `String "voice-queue-test"
-          ])
+          [ "name", `String name; "trace_id", `String "voice-queue-test" ])
   with
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta: " ^ err)

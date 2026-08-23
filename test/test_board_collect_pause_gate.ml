@@ -55,7 +55,7 @@ let test_collection_failure_health_degrades_and_clears () =
       check bool "collection health requires operator action" true
         (failed |> member "operator_action_required" |> to_bool);
       check int "failed keeper count" 1
-        (failed |> member "failed_keeper_count" |> to_int);
+        (failed |> member "failures" |> to_list |> List.length);
       check bool "failure reason surfaced" true
         (failed |> member "status_reasons" |> to_list
          |> List.map to_string
@@ -76,7 +76,7 @@ let test_collection_failure_health_degrades_and_clears () =
       check bool "collection health no longer requires action" false
         (cleared |> member "operator_action_required" |> to_bool);
       check int "cleared failed keeper count" 0
-        (cleared |> member "failed_keeper_count" |> to_int))
+        (cleared |> member "failures" |> to_list |> List.length))
 
 let () =
   run "board_collect_pause_gate"

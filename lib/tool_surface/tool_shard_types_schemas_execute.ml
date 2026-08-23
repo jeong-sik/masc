@@ -63,37 +63,22 @@ let output_sink_properties =
 
 (* Each branch requires one name and forbids the rest. Branches are selected
    by position so the generator never compares the names themselves. *)
-let exactly_one_of names : Yojson.Safe.t =
-  let indexed = List.mapi (fun index name -> index, name) names in
-  let branch (index, chosen) =
-    `Assoc
-      [ "required", `List [ `String chosen ]
-      ; ( "allOf"
-        , `List
-            (List.filter_map
-               (fun (other_index, other) ->
-                  if Int.equal index other_index
-                  then None
-                  else
-                    Some
-                      (`Assoc
-                          [ "not", `Assoc [ "required", `List [ `String other ] ] ]))
-               indexed) )
-      ]
-  in
-  `List (List.map branch indexed)
-;;
 
 (* The object's own keys carry their meaning, so the wrapper adds no
-   description of its own. [oneOf] is derived from the properties, which is
-   why the two cannot drift apart. *)
+   description of its own. Exactly one key is present, said with the two
+   counting keywords rather than a [oneOf] branch per property: with
+   [additionalProperties] closed to the listed set, a count of one names the
+   same objects. The branch form spelled out every pair of names, so it grew
+   with the square of the property count and was written into stdin, stdout and
+   stderr at the top level and again in every pipeline stage. *)
 let redirect_field ~name ~properties =
   ( name
   , `Assoc
       [ "type", `String "object"
       ; "properties", `Assoc properties
       ; "additionalProperties", `Bool false
-      ; "oneOf", exactly_one_of (List.map fst properties)
+      ; "minProperties", `Float 1.
+      ; "maxProperties", `Float 1.
       ] )
 ;;
 

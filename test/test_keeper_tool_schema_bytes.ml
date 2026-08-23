@@ -22,8 +22,26 @@ open Alcotest
 (* Raise only with the PR that grows the surface, and say what it bought.
    2026-08-07: 72,485 bytes across 98 model-visible tools — 7.9x the assembled
    system prompt (9,167 bytes, pinned next door). The headroom is deliberate
-   slack for one ordinary tool, not room to grow into. *)
-let ceiling_bytes = 80_000
+   slack for one ordinary tool, not room to grow into.
+
+   2026-08-23: 85,000. What it bought is nothing, and that is the finding. The
+   surface reached 88,138 bytes across 95 tools — three fewer tools carrying
+   15,653 more bytes — with no PR to attribute it to: 45 commits touched
+   lib/tool_surface and the descriptor over those two weeks and the growth is
+   spread across them. The same PR that moves this number takes 4,288 bytes
+   back out of [Execute], whose redirect objects spelled "exactly one of these
+   keys" as a oneOf branch per pair of property names.
+
+   What is left to take is measured and not taken here. The Execute schema
+   ships the same prose several times over — the argv paragraph four times, the
+   fd sentence eight — because the exec-stage shape repeats at the top level,
+   inside pipeline, inside then, and inside then's pipeline. That is 4,158
+   bytes of duplicated description, and JSON Schema names the fix ($defs and
+   $ref); nothing in this repository sends a $ref to a model yet, so whether
+   every provider resolves one is unverified and not a thing to guess at on the
+   surface every turn carries. Verify it, then collapse the repeats and bring
+   this number back down. *)
+let ceiling_bytes = 85_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

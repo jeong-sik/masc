@@ -29,14 +29,16 @@ let freshness_slo_s = Masc_time_constants.hour
 
 let store_dir masc_root = Filename.concat masc_root "tool_usage"
 
+(* Opt-in: unset keeps everything. A malformed value now means the same here
+   as in every other store (#27110). *)
 let retention_days () =
-  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. *)
-  match Sys.getenv_opt "MASC_TOOL_USAGE_LOG_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | _ -> None)
-  | None -> None
+  match
+    Env_config_core.get_retention_days
+      ~default:Env_config_core.Retain_forever
+      "MASC_TOOL_USAGE_LOG_RETENTION_DAYS"
+  with
+  | Env_config_core.Retain_forever -> None
+  | Env_config_core.Prune_after_days days -> Some days
 
 let ts_of_record = Dashboard_tool_source_freshness.latest_ts_of_record
 

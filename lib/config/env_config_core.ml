@@ -76,6 +76,38 @@ let get_int ~default name =
         reject_malformed_env ~name ~raw:v ~type_name:"int";
         default)
 
+(* One reading of a MASC_*_RETENTION_DAYS knob, because the value decides
+   whether files are deleted and the stores disagreed about a malformed one.
+   tool_usage_log and keeper_runtime_manifest_housekeeping kept files forever;
+   keeper_tool_call_log started pruning at its 30-day default. Both cited the
+   third in a comment as the model they followed. A single operator typo —
+   3O for 30 — therefore deleted from one store and stopped deleting from
+   another, silently (#27110).
+
+   Malformed now means the same thing everywhere: the store's declared
+   default, with the WARN [reject_malformed_env] already emits. An explicit
+   zero or negative is the one way to say "keep everything", and it means that
+   in every store. *)
+type retention =
+  | Retain_forever
+  | Prune_after_days of int
+
+let get_retention_days ~default name =
+  match raw_value_opt name with
+  | None -> default
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = ""
+    then default
+    else (
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some days when days > 0 -> Prune_after_days days
+      | Some _ -> Retain_forever
+      | None ->
+        reject_malformed_env ~name ~raw ~type_name:"retention days (integer)";
+        default)
+;;
+
 let get_float ~default name =
   match raw_value_opt name with
   | None -> default

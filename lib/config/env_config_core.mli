@@ -33,6 +33,22 @@ val raw_value_opt : string -> string option
 (** {1 Typed getters with defaults} *)
 
 val get_string : default:string -> string -> string
+type retention =
+  | Retain_forever
+  | Prune_after_days of int
+
+val get_retention_days : default:retention -> string -> retention
+(** Read a [MASC_*_RETENTION_DAYS] knob.
+
+    Unset or empty gives [default], which each store declares for itself. A
+    positive value prunes after that many days. Zero or negative keeps
+    everything — the one way to say so, and it says it in every store.
+
+    A malformed value gives [default] and warns, rather than meaning opposite
+    things per store: two kept files forever and one began pruning at its own
+    default, and each of the two cited the third as the model it followed
+    (#27110). *)
+
 val get_int : default:int -> string -> int
 val get_float : default:float -> string -> float
 val get_bool : default:bool -> string -> bool

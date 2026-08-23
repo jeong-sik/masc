@@ -10,6 +10,10 @@
 
 type parse_error = Invalid_rfc3339
 
+val rfc3339_of_unix_ms : float -> string
+(** Same shape as {!rfc3339_of_unix} with millisecond precision. Callers that
+    need sub-second timestamps used to spell this out themselves. *)
+
 val rfc3339_of_unix : float -> string
 (** [rfc3339_of_unix seconds] renders UTC Unix seconds as
     ["YYYY-MM-DDTHH:MM:SSZ"]. Whole seconds only — a fractional part is

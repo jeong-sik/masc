@@ -226,6 +226,14 @@ let cell_suffix text max_cells =
   let start = drop_detached_zero_width pieces in
   String.sub text start (String.length text - start)
 
+let composer_max_rows = 5
+
+let composer_lines ~max_rows input =
+  let max_rows = max 1 max_rows in
+  let lines = String.split_on_char '\n' input in
+  let drop = max 0 (List.length lines - max_rows) in
+  List.filteri (fun index _ -> index >= drop) lines
+
 let input_viewport ~max_cells input =
   let max_cells = max 0 max_cells in
   if display_width input <= max_cells then input
@@ -337,3 +345,23 @@ let visible_rows ~inner_width ~height entries =
         collect (remaining - List.length chosen) (chosen @ selected) older
   in
   collect height [] (List.rev entries)
+
+let total_rows ~inner_width entries =
+  let inner_width = max 1 inner_width in
+  List.fold_left
+    (fun total entry -> total + List.length (rows_of_entry ~inner_width entry))
+    0 entries
+
+let max_scroll ~inner_width ~height entries =
+  max 0 (total_rows ~inner_width entries - max 1 height)
+
+let scrolled_rows ~inner_width ~height ~from_bottom entries =
+  if from_bottom <= 0 then visible_rows ~inner_width ~height entries
+  else begin
+    let inner_width = max 1 inner_width in
+    let height = max 0 height in
+    let all = List.concat_map (rows_of_entry ~inner_width) entries in
+    let bottom = max 0 (List.length all - from_bottom) in
+    let first = max 0 (bottom - height) in
+    List.filteri (fun index _ -> index >= first && index < bottom) all
+  end

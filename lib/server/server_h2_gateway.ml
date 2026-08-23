@@ -1022,17 +1022,21 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/openapi.json" ->
-          let resolved_host = Server_request_authority.host request_authority in
-          let resolved_port =
-            Option.value
-              ~default:(Env_config_core.masc_http_port_int ())
-              (Server_request_authority.port request_authority)
-          in
-          let json =
-            Transport.Rest.generate_openapi_document
-              ~host:resolved_host ~port:resolved_port ()
-          in
-          h2_respond_json_value h2_reqd json ~extra_headers:cors
+          (* HTTP/1 wraps this in Server_auth.with_public_read and the path is
+             not in the public-read allowlist, so strict mode answers 401
+             there; this arm used to answer the document (#28161). *)
+          with_h2_public_read h2_reqd (fun _state ->
+            let resolved_host = Server_request_authority.host request_authority in
+            let resolved_port =
+              Option.value
+                ~default:(Env_config_core.masc_http_port_int ())
+                (Server_request_authority.port request_authority)
+            in
+            let json =
+              Transport.Rest.generate_openapi_document
+                ~host:resolved_host ~port:resolved_port ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/namespace/current"
       | `GET, "/api/v1/workspace/current"
@@ -1287,6 +1291,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                  (Option.map
                     (fun state -> (Mcp_server.workspace_config state))
                     (current_server_state ()))
+               (* The delegated routes take this gateway's own public-read gate
+                  rather than deciding for themselves; five of them answered
+                  unauthenticated over h2c while HTTP/1 answered 401 (#28161). *)
+               ~with_public_read:(fun f ->
+                 with_h2_public_read h2_reqd (fun _state -> f ()))
                httpun_meth ->
           ()
 

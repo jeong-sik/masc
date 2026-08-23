@@ -46,7 +46,9 @@ type output_sink =
   | Append_file of { path : string }  (** absolute path, shell [>>] *)
   | Output_to_fd of int
       (** duplicate another standard descriptor of the same stage, which is
-          how [2>&1] is expressed without a shell. *)
+          how [2>&1] is expressed without a shell. The dispatcher captures the
+          two streams separately and joins them afterwards, so the merged text
+          is grouped by stream rather than ordered by time. *)
 
 type exec_stage = {
   argv : string list;

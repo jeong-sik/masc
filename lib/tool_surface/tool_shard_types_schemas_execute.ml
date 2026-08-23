@@ -35,7 +35,9 @@ let fd_property =
       ; ( "description"
         , `String
             "Send this stream into another of the stage's output descriptors, \
-             the typed form of '2>&1'." )
+             the typed form of '2>&1'. The two streams are captured \
+             separately and joined afterwards, so the merged text is grouped \
+             by stream, not ordered by time." )
       ] )
 ;;
 

@@ -1424,7 +1424,7 @@ let test_resolution_is_durable_and_origin_scoped () =
               Agent_core.Types.text_of_content projected.content
             | Ok _ ->
               Alcotest.fail "replay projection did not append exact evidence"
-            | Error detail -> Alcotest.fail detail)
+            | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
        in
        let replay_evidence =
          projected_text

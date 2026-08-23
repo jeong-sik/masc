@@ -43,7 +43,7 @@ let projected_model_text ~base_path
      | Ok [ _canonical; projected ] ->
        Agent_core.Types.text_of_content projected.content
      | Ok _ -> Alcotest.fail "replay projection did not append exact evidence"
-     | Error detail -> Alcotest.fail detail)
+     | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
 ;;
 
 (* Reconstruction carries the approved payload fields back to the write
@@ -549,7 +549,7 @@ let test_multimodal_goal_projects_replay_reference () =
            evidence
            [ canonical_message ]
        with
-       | Error detail -> Alcotest.fail detail
+       | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail)
        | Ok [ original; projected ] ->
          (match original.content, projected.content with
           | ( Agent_core.Types.Image _ :: Agent_core.Types.Text _ :: []
@@ -600,7 +600,7 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
            evidence
            [ Agent_core.Types.user_msg "reference was dropped" ]
        with
-       | Error detail -> Alcotest.fail detail
+       | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail)
        | Ok [ original; recovered ] ->
          Alcotest.check
            Alcotest.string

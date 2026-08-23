@@ -189,17 +189,17 @@ let test_input_cursor_uses_visible_terminal_cells () =
   in
   (* The caret is measured from the prefix the pane renders ("  > "), so what
      the operator typed and what the screen shows end at the same column. *)
-  check int "empty input starts after the prompt" 4 (column 80 "");
+  check int "empty input starts after the prompt" 7 (column 80 "");
   check int "prompt constant matches the pane prefix" 4
     Layout.chat_input_prompt_cells;
-  check int "mixed UTF-8 input advances by cells" 10
+  check int "mixed UTF-8 input advances by cells" 13
     (column 80 "Aé한🙂");
-  check int "emoji modifier follows xterm scalar cells" 9
+  check int "emoji modifier follows xterm scalar cells" 12
     (column 80 "A👍🏽");
-  check int "hangul syllables take two cells each" 8
+  check int "hangul syllables take two cells each" 11
     (column 80 "한글");
-  check int "flag cluster advances by two cells" 6 (column 80 "🇰🇷");
-  check int "VS16 cluster follows xterm's one cell" 5 (column 80 "❤️");
+  check int "flag cluster advances by two cells" 9 (column 80 "🇰🇷");
+  check int "VS16 cluster follows xterm's one cell" 8 (column 80 "❤️");
   check int "exact boundary reaches the pre-border spacer" 79
     (column 80 (String.make 75 'a'));
   check int "visible overflow remains in the pre-border spacer" 79

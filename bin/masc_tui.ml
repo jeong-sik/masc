@@ -289,6 +289,7 @@ type http_surface_results = {
   http_board: (board_post list, string) result;
   http_planning: (planning_snapshot, string) result;
   http_system_logs: (system_log_snapshot, string) result;
+  http_fleet_safety: (Tui_decode.fleet_safety, string) result;
 }
 
 type async_msg =
@@ -1102,6 +1103,20 @@ let apply_system_logs_load state = function
          it is stale rather than letting it read as a fresh zero. *)
       state.system_logs_error <- Some detail
 
+let apply_fleet_safety_load state = function
+  | Ok fleet ->
+      state.fleet_safety <- Some fleet;
+      state.fleet_safety_error <- None
+  | Error err ->
+      (* The last good reading is dropped: a stale fleet line is worse than an
+         absent one, because it reports keepers as running after the reading
+         that said so stopped arriving. *)
+      state.fleet_safety <- None;
+      remember_surface_error state ~surface:"fleet safety"
+        ~current_error:state.fleet_safety_error
+        ~set_error:(fun value -> state.fleet_safety_error <- value)
+        err
+
 let apply_planning_load state = function
   | Ok planning ->
       let goal_ids planning =
@@ -1173,12 +1188,14 @@ let load_http_surfaces ~host ~port ~approval_generation ~wants_transport =
   let http_board = load_board_list ~host ~port in
   let http_planning = load_planning ~host ~port in
   let http_system_logs = load_system_logs ~host ~port ~limit:system_log_page in
+  let http_fleet_safety = load_fleet_safety ~host ~port in
   { http_overview
   ; http_transport
   ; http_approvals
   ; http_board
   ; http_planning
   ; http_system_logs
+  ; http_fleet_safety
   }
 
 let apply_http_surfaces state results =
@@ -1188,6 +1205,7 @@ let apply_http_surfaces state results =
   apply_board_list_load state results.http_board;
   apply_planning_load state results.http_planning;
   apply_system_logs_load state results.http_system_logs;
+  apply_fleet_safety_load state results.http_fleet_safety;
   let approval_status =
     Option.map
       (fun observation ->

@@ -4,8 +4,9 @@
     application-owned LLM agent, not a Keeper, with no Keeper identity, task
     action, or lifecycle. It drains the durable [Proof_pending] rows the gate
     persists BEFORE any model call, written before the phase enters
-    [Verifying] (B3), judges each through
-    {!Task.Anti_rationalization.review} (so provider selection is the
+    [Verifying] (B3), asks one question of each — did the goal's declared
+    metric reach its declared target value — through
+    {!Task.Anti_rationalization.run} (so provider selection is the
     [verifier_exact] exact-output lane with frozen-order failover), and
     commits the verdict through the typed internal boundary
     {!Workspace_goals.commit_verifier_decision}, so the FSM decides, the
@@ -156,181 +157,25 @@ let collect_pending config : (pending_work list, string) result =
      | Ok rearmed -> Ok (from_rows @ rearmed))
 ;;
 
-(* {1 Review request construction}
+(* {1 Proof prompt}
 
-   The request rides the task-shaped {!Task.Anti_rationalization.review_request}
-   record; the goal shape lives in config/prompts/goal_verification.proof.md,
-   which renders [task_title] as the goal title, [task_description] as the
-   declared success condition (B1 makes metric/target_value mandatory at
-   creation), and [completion_notes] as the linked-task rollup. *)
+   A Goal declares a metric and a target value when it is created. The proof
+   review asks one question: did that metric reach that target. The prompt is
+   config/prompts/goal_verification.proof.md and its variables are the goal's
+   own — nothing about Tasks reaches the judge, because a Task proves its own
+   contract and says nothing about a Goal's metric. *)
 
-let criterion_description (goal : Goal_store.goal) =
-  let field name = function
-    | Some value when String.trim value <> "" -> Printf.sprintf "%s: %s" name value
-    | Some _ | None -> Printf.sprintf "%s: (not declared)" name
+let render_proof_prompt (goal : Goal_store.goal) =
+  let declared = function
+    | Some value when String.trim value <> "" -> value
+    | Some _ | None -> "(not declared)"
   in
-  String.concat
-    "\n"
-    [ field "metric" goal.metric
-    ; field "target_value" goal.target_value
-    ; field "due_date" goal.due_date
+  Prompt_registry.render_prompt_template
+    Prompt_names.goal_verification_proof
+    [ "goal_title", goal.Goal_store.title
+    ; "metric", declared goal.Goal_store.metric
+    ; "target_value", declared goal.Goal_store.target_value
     ]
-;;
-
-let task_rollup_json (task : Masc_domain.task) =
-  let verification_evidence =
-    Task.Completion_review.concrete_verification_evidence task
-  in
-  let producer = Masc_domain.task_performer_of_status task.task_status in
-  let status_fields =
-    match task.task_status with
-    | Masc_domain.Done { assignee; completed_at; notes } ->
-      [ "assignee", `String assignee
-      ; "completed_at", `String completed_at
-      ; ( "notes"
-        , match notes with
-          | Some notes -> `String notes
-          | None -> `Null )
-      ]
-    | Masc_domain.Todo
-    | Masc_domain.Claimed _
-    | Masc_domain.InProgress _
-    | Masc_domain.AwaitingVerification _
-    | Masc_domain.Cancelled _ -> []
-  in
-  `Assoc
-    ([ "task_id", `String task.id
-     ; "title", `String task.title
-     ; "status", `String (Masc_domain.task_status_to_string task.task_status)
-     ; ( "producer"
-       , match producer with
-         | Some producer -> `String producer
-         | None -> `Null )
-     ; ( "verification_evidence"
-       , Task.Completion_review.verification_evidence_to_yojson
-           verification_evidence )
-     ]
-     @ status_fields)
-;;
-
-let task_submitted_evidence (task : Masc_domain.task) =
-  let evidence =
-    Task.Completion_review.concrete_verification_evidence task
-  in
-  evidence.Task.Completion_review.submitted_evidence
-;;
-
-(* A backlog that does not read is infrastructure failure: the proof review
-   defers rather than judging a goal on an absent rollup. *)
-let linked_task_rollup config ~goal_id
-  : (string * string list * Masc_domain.task list, string) result
-  =
-  match Workspace_backlog.read_backlog_r config with
-  | Error detail -> Error detail
-  | Ok backlog ->
-    (match Workspace_goal_index.read_goal_task_links_r config with
-     | Error detail -> Error detail
-     | Ok goal_task_links ->
-       let index =
-         Workspace_goal_index.build_goal_task_index ~goal_task_links backlog.tasks
-       in
-       let tasks = Workspace_goal_index.tasks_for_goal index ~goal_id in
-       let evidence_refs =
-         tasks
-         |> List.concat_map task_submitted_evidence
-         |> List.sort_uniq String.compare
-       in
-       Ok
-         ( Yojson.Safe.pretty_to_string (`List (List.map task_rollup_json tasks))
-         , evidence_refs
-         , tasks ))
-;;
-
-(* [review_request] is task-shaped and its [agent_name] names the producer whose
-   work is being judged. A Goal has no producer: it is a shared intent that any
-   Keeper may advance, and the evidence under review is the Goal's own declared
-   criterion plus its linked Task rollup, not one agent's submission. The lane
-   passes [No_lookup_surface], so this string builds no producer-bound tool
-   surface -- it only tells the judge there is no single author to attribute. *)
-let goal_producer_name = "no single producer (shared Goal)"
-
-let task_producer (task : Masc_domain.task) =
-  match Masc_domain.task_performer_of_status task.task_status with
-  | Some producer when not (String.equal (String.trim producer) "") -> Ok producer
-  | Some _ | None ->
-    Error
-      (Printf.sprintf
-         "linked task %s has no performer tree for Goal verification"
-         task.id)
-;;
-
-let rec task_producers = function
-  | [] -> Ok []
-  | task :: rest ->
-    let open Result.Syntax in
-    let* producer = task_producer task in
-    let* producers = task_producers rest in
-    Ok (producer :: producers)
-;;
-
-let linked_task_lookup config tasks =
-  let open Result.Syntax in
-  let* producers = task_producers tasks in
-  let producers = List.sort_uniq String.compare producers in
-  let* tools =
-    Verification_authority_tools.create_forest ~config ~producers
-  in
-  let* root_layout = Verification_authority_tools.forest_root_layout tools in
-  Ok
-    (Task.Anti_rationalization.Lookup_tools
-       { schemas = Verification_authority_tools.forest_schemas tools
-       ; dispatch = Verification_authority_tools.dispatch_forest tools
-       ; scope = Task.Anti_rationalization.Producer_forest { producers }
-       ; root_layout
-       })
-;;
-
-let build_review_request config (goal : Goal_store.goal)
-  : ( Task.Anti_rationalization.review_request
-      * string
-      * Task.Anti_rationalization.lookup_surface
-    , string )
-      result
-  =
-  let base =
-    { Task.Anti_rationalization.task_title = goal.title
-    ; task_description = criterion_description goal
-    ; completion_notes = ""
-    ; agent_name = goal_producer_name
-    ; task_id = goal.id
-    ; evidence_refs = []
-    }
-  in
-  (match linked_task_rollup config ~goal_id:goal.id with
-     | Error _ as error -> error
-     (* An empty rollup is handed to the judge like any other. Nothing here
-        counts tasks and decides on the count: the prompt asks whether the
-        rollup's substance shows the declared metric reaching its target, and
-        an empty rollup shows nothing, so the judge says so and states why.
-        Refusing to run the review instead would move the decision out of the
-        verdict and into this branch, where it leaves no durable reason. *)
-     | Ok (rollup, evidence_refs, tasks) ->
-       let open Result.Syntax in
-       let* lookup =
-         match tasks with
-         (* No producer has a tree to open, so there is no forest to build.
-            [No_lookup_surface] states that the rollup is the whole of what
-            was available — it is not a verdict about the goal. *)
-         | [] -> Ok Task.Anti_rationalization.No_lookup_surface
-         | _ :: _ -> linked_task_lookup config tasks
-       in
-       Ok
-         ( { base with
-             Task.Anti_rationalization.completion_notes = rollup
-           ; evidence_refs
-           }
-         , Prompt_names.goal_verification_proof
-         , lookup ))
 ;;
 
 (* {1 Verdict commit}
@@ -367,8 +212,8 @@ let defer ~goal_id ~reason =
 (* Nothing stands between a pending proof request and the review. Whether the
    goal reached its target is the verdict's answer to give; a branch here that
    declined to run the review would be making that call without recording a
-   reason, and without the judge ever reading the rollup it claims to know
-   about. *)
+   reason. A goal that declared no metric is not refused here either — it is
+   shown to the judge as undeclared and refused in a verdict that says so. *)
 
 let process_pending_work_inner
       ?(sw : Eio.Switch.t option = None)
@@ -390,39 +235,45 @@ let process_pending_work_inner
   | Some goal ->
     (match goal.Goal_store.phase with
      | Goal_phase.Verifying ->
-       (match build_review_request config goal with
-        | Error detail ->
-          defer ~goal_id:work.goal_id ~reason:detail
-        | Ok (review_request, prompt_name, lookup) ->
-          (* The verdict channel drops the reason for [Approve]; capture the
-             stated reason from the successful verdict tool call — exactly one
-             such call exists per review, and it belongs to the winning slot
-             (a slot that recorded a verdict never fails over). *)
-          let stated_reason = ref None in
-          let on_tool_result ~input result =
-            observe_tool ~input result;
-            if Tool_result.is_success result
-            then
-              match
-                Task.Anti_rationalization.parse_review_verdict_from_json input
-              with
-              | Ok _ ->
-                (match Json_util.get_string input "reason" with
-                 | Some reason when String.trim reason <> "" ->
-                   stated_reason := Some reason
-                 | Some _ | None -> ())
-              | Error _ -> ()
-          in
-          let result =
-            Task.Anti_rationalization.review
-              ~base_path:config.base_path
-              ~sw
-              ~prompt_name
-              ~lookup
-              ~on_tool_result
-              review_request
-          in
-          observe_evaluator_runtime result.evaluator_runtime;
+       (* The verdict channel drops the reason for [Approve]; capture the
+          stated reason from the successful verdict tool call — exactly one
+          such call exists per review, and it belongs to the winning slot
+          (a slot that recorded a verdict never fails over). *)
+       let stated_reason = ref None in
+       let on_tool_result ~input result =
+         observe_tool ~input result;
+         if Tool_result.is_success result
+         then
+           match
+             Task.Anti_rationalization.parse_review_verdict_from_json input
+           with
+           | Ok _ ->
+             (match Json_util.get_string input "reason" with
+              | Some reason when String.trim reason <> "" ->
+                stated_reason := Some reason
+              | Some _ | None -> ())
+           | Error _ -> ()
+       in
+       let result =
+         Task.Anti_rationalization.run
+           ~base_path:config.base_path
+           ~sw
+           ~log_info:(fun message ->
+             Log.Misc.info
+               "[goal-proof-review] goal_id=%s %s"
+               work.goal_id
+               message)
+           ~log_warn:(fun message ->
+             Log.Misc.warn
+               "[goal-proof-review] goal_id=%s %s"
+               work.goal_id
+               message)
+           ~render_prompt:(fun () -> render_proof_prompt goal)
+           ~lookup:Task.Anti_rationalization.No_lookup_surface
+           ~on_tool_result
+           ()
+       in
+       observe_evaluator_runtime result.evaluator_runtime;
           (match result.verdict with
            | None ->
              let detail =
@@ -479,7 +330,7 @@ let process_pending_work_inner
                   ~goal_id:work.goal_id
                   ~reason:
                     "verdict without a stated reason is not a judgment; the \
-                     pending row stays durable")))
+                     pending row stays durable"))
      | Goal_phase.Executing ->
        (* The crash window of persist-before-model-call: the durable request
           exists but the phase write never landed. Reviewing now would produce

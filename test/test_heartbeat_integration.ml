@@ -222,14 +222,9 @@ let seed_keeper_sandbox_profile ~base_dir name =
     List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
   in
   Fs_compat.mkdir_p keepers_dir;
-  let profile_dir = Filename.concat keepers_dir name in
-  Fs_compat.mkdir_p profile_dir;
-  Fs_compat.save_file
-    (Filename.concat profile_dir "AGENT.md")
-    ("# " ^ name ^ "\n");
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    "[keeper]\nsandbox_profile = \"local\"\n"
+    ("[keeper]\nsandbox_profile = \"local\"\ninstructions = \"# " ^ name ^ "\"\n")
 
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)

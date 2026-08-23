@@ -543,8 +543,10 @@ let test_tui_current_projection_wiring () =
        ~binding_name:"render_keeper_logs"
        ~callee:"Metrics_tail.empty_message"
      = 1);
+  (* Exact, not substring: the retired alias is the whole key "running", and
+     the fleet reading legitimately holds "running_keeper_fiber_count". *)
   check int "retired planning running alias absent" 0
-    (Ast_grep.count_string_literals
+    (Ast_grep.count_exact_string_literals
        ~module_path:"lib/tui_decode.ml"
        ~needle:"running");
   check int "verify appears only inside verifying_count" 1

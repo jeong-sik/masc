@@ -153,7 +153,7 @@ let schemas : tool_schema list = [
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");
-          ("description", `String "Complete Keeper instructions written to keepers/<name>/AGENT.md (kept across compaction/handoff).");
+          ("description", `String "Complete Keeper instructions, written to the keeper TOML declaration (kept across compaction/handoff).");
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");

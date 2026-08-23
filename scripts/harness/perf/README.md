@@ -148,7 +148,7 @@ probes `/health` while those keepers and optional host hogs contend for the one 
 
 ```bash
 # MASC_KEEPER_SOURCE_ROOT points at a populated MASC root containing
-# config/keepers/<keeper>/AGENT.md. The gate copies that Keeper prompt into its
+# config/keepers/<keeper>.toml. The gate copies that Keeper declaration into its
 # ephemeral base path. It is resolved from an explicit path (SSOT-R6).
 MASC_KEEPER_SOURCE_ROOT=<your-masc-root> \
   MOCK_REPLY_BYTES=150000 INJECT_INTERVAL=0.05 WARM_TURNS_SEC=30 \
@@ -156,7 +156,7 @@ MASC_KEEPER_SOURCE_ROOT=<your-masc-root> \
 ```
 
 `MASC_KEEPER_SOURCE_ROOT` is the `.masc` dir that holds
-`config/keepers/<keeper>/AGENT.md` (for example `<root>/.masc`). The gate copies
+`config/keepers/<keeper>.toml` (for example `<root>/.masc`). The gate copies
 that prompt into its ephemeral base path from the explicit root.
 
 `mock_openai_provider.py` serves `POST /v1/chat/completions` in both non-streaming JSON (the
@@ -179,7 +179,7 @@ that prompt into its ephemeral base path from the explicit root.
    `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
    **not** via `harness_start_server`, which disables Keeper bootstrap and autonomous activation.
 5. Every generated Keeper has a non-empty
-   `$BASE/.masc/config/keepers/<keeper>/AGENT.md`; the gate copies a checked-in
+   `$BASE/.masc/config/keepers/<keeper>.toml`; the gate copies a checked-in
    Keeper prompt as the source.
 
 The gate refuses to report numbers if zero provider calls are seen during warmup (the mock wiring

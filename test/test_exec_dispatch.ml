@@ -563,7 +563,10 @@ let () =
           [
             Masc_exec.Redirect_scope.Fd_to_fd { src = 2; dst = 1 };
             Masc_exec.Redirect_scope.File
-              { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+              { fd = 1
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
           ];
         sandbox = docker_sandbox;
       }
@@ -595,7 +598,10 @@ let () =
         redirects =
           [
             Masc_exec.Redirect_scope.File
-              { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+              { fd = 2
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
           ];
         sandbox = docker_sandbox;
       }
@@ -633,7 +639,7 @@ let () =
             Masc_exec.Redirect_scope.File
               {
                 fd = 1;
-                target = unsupported_target;
+                target = Masc_exec.Redirect_scope.In_command_namespace unsupported_target;
                 mode = Masc_exec.Redirect_scope.Write;
               };
           ];
@@ -915,7 +921,10 @@ let () =
           redirects =
             [
               Masc_exec.Redirect_scope.File
-                { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+                { fd = 2
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
             ];
           sandbox = docker_sandbox;
         };

@@ -50,6 +50,10 @@ type execute_input = {
 type validation_error =
   | Empty_argv
   | Empty_program
+  | Redirect_outside_the_sandbox_mount of {
+      path : string;
+      visible_root : string;
+    }
   | Directory_change_is_not_a_program of { requested : string }
   | Argv_contains_nul of {
       index : int;
@@ -575,53 +579,96 @@ let dev_null = "/dev/null"
    source always opens for reading and the sink knows its own write mode. An
    inherited stream yields no IR entry — the child keeps the parent's
    descriptor. *)
-let input_entry ~classify source =
+let input_entry ~resolve source =
+  let ( let* ) = Result.bind in
   let file path =
-    Some
-      (Masc_exec.Redirect_scope.File
-         { fd = stdin_fd; target = classify path; mode = Masc_exec.Redirect_scope.Read })
+    let* target = resolve path in
+    Ok
+      (Some
+         (Masc_exec.Redirect_scope.File
+            { fd = stdin_fd; target; mode = Masc_exec.Redirect_scope.Read }))
   in
   match source with
-  | Inherit_input -> None
+  | Inherit_input -> Ok None
   | Empty_input -> file dev_null
   | Read_file { path } -> file path
 ;;
 
-let output_entry ~classify ~fd sink =
+let output_entry ~resolve ~fd sink =
+  let ( let* ) = Result.bind in
   let file ~path ~mode =
-    Some (Masc_exec.Redirect_scope.File { fd; target = classify path; mode })
+    let* target = resolve path in
+    Ok (Some (Masc_exec.Redirect_scope.File { fd; target; mode }))
   in
   match sink with
-  | Inherit_output -> None
+  | Inherit_output -> Ok None
   | Discard_output -> file ~path:dev_null ~mode:Masc_exec.Redirect_scope.Write
   | Truncate_file { path } -> file ~path ~mode:Masc_exec.Redirect_scope.Write
   | Append_file { path } -> file ~path ~mode:Masc_exec.Redirect_scope.Append
-  | Output_to_fd src -> Some (Masc_exec.Redirect_scope.Fd_to_fd { src = fd; dst = src })
+  | Output_to_fd src ->
+    Ok (Some (Masc_exec.Redirect_scope.Fd_to_fd { src = fd; dst = src }))
 ;;
 
-let redirects_of_stage ~cwd { argv = _; stdin; stdout; stderr } =
+(* Where a redirect target lives. A keeper in a container writes paths as the
+   container sees them; [Bound_mount] carries the two roots that make one of
+   those a path here, which only holds inside the bind mount. Without it the
+   target stays in the command's namespace and a sandboxed dispatch refuses
+   it rather than opening whatever this host has at that path. *)
+type redirect_namespace =
+  | Command_filesystem
+  | Bound_mount of {
+      visible_root : string;
+      host_root : string;
+    }
+
+let host_path_under ~visible_root ~host_root path =
+  let prefix = visible_root ^ "/" in
+  if String.equal path visible_root
+  then Some host_root
+  else if String.starts_with ~prefix path
+  then
+    Some
+      (Filename.concat
+         host_root
+         (String.sub path (String.length prefix) (String.length path - String.length prefix)))
+  else None
+;;
+
+let redirect_target ~namespace ~classify path =
+  let as_written = classify path in
+  (* The null device is the same device in either namespace, so it needs no
+     translation to be openable here. *)
+  if String.equal path dev_null
+  then Ok (Masc_exec.Redirect_scope.on_this_host as_written dev_null)
+  else (
+    match namespace with
+    | Command_filesystem -> Ok (Masc_exec.Redirect_scope.In_command_namespace as_written)
+    | Bound_mount { visible_root; host_root } ->
+      (match host_path_under ~visible_root ~host_root path with
+       | Some host_path -> Ok (Masc_exec.Redirect_scope.on_this_host as_written host_path)
+       | None -> Error (Redirect_outside_the_sandbox_mount { path; visible_root })))
+;;
+
+let redirects_of_stage ~namespace ~cwd { argv = _; stdin; stdout; stderr } =
+  let ( let* ) = Result.bind in
   let cwd_str = Option.value cwd ~default:"/" in
   let classify path = Masc_exec.Path_scope.classify ~raw:path ~cwd:cwd_str in
-  List.filter_map
-    (fun x -> x)
-    [ input_entry ~classify stdin
-    ; output_entry ~classify ~fd:stdout_fd stdout
-    ; output_entry ~classify ~fd:stderr_fd stderr
-    ]
+  let resolve path = redirect_target ~namespace ~classify path in
+  let* stdin_entry = input_entry ~resolve stdin in
+  let* stdout_entry = output_entry ~resolve ~fd:stdout_fd stdout in
+  let* stderr_entry = output_entry ~resolve ~fd:stderr_fd stderr in
+  Ok (List.filter_map (fun x -> x) [ stdin_entry; stdout_entry; stderr_entry ])
 ;;
 
 let to_shell_ir_unvalidated
       ?(sandbox = Masc_exec.Sandbox_target.host ())
+      ?(namespace = Command_filesystem)
       { program; next; cwd; env; timeout_sec = _ }
   =
   let ( let* ) = Result.bind in
   let lower stage =
-    shell_simple
-      ~sandbox
-      ?cwd
-      ~env
-      ~redirects:(redirects_of_stage ~cwd stage)
-      stage.argv
+    let* redirects = redirects_of_stage ~namespace ~cwd stage in
+    shell_simple ~sandbox ?cwd ~env ~redirects stage.argv
   in
   let lower_program = function
     | { head; tail = [] } -> lower head
@@ -657,13 +704,22 @@ let to_shell_ir_unvalidated
     Ok (Masc_exec.Shell_ir.Sequence { head; tail })
 ;;
 
-let to_shell_ir ?sandbox input =
+let to_shell_ir ?sandbox ?namespace input =
   let ( let* ) = Result.bind in
   let* () = validate input in
-  to_shell_ir_unvalidated ?sandbox input
+  to_shell_ir_unvalidated ?sandbox ?namespace input
 ;;
 
 let pp_validation_error ppf = function
+  | Redirect_outside_the_sandbox_mount { path; visible_root } ->
+    Format.fprintf
+      ppf
+      "redirect target %S sits outside %s, the directory this sandbox and the \
+       host share. Outside it the same path names two different files and only \
+       one of them can be opened from here, so redirect somewhere under %s."
+      path
+      visible_root
+      visible_root
   | Directory_change_is_not_a_program { requested } ->
     Format.fprintf
       ppf

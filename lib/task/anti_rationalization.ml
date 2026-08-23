@@ -23,16 +23,11 @@ type review_request =
   ; evidence_refs : string list
   }
 
-type lookup_scope =
-  | Producer_tree
-  | Producer_forest of { producers : string list }
-
 type lookup_surface =
   | No_lookup_surface
   | Lookup_tools of
       { schemas : Types_core.tool_schema list
       ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
-      ; scope : lookup_scope
       ; root_layout : string list
       }
 
@@ -156,29 +151,16 @@ let tool_names schemas =
 
 let lookup_section = function
   | No_lookup_surface -> render Prompt_names.verification_lookup_none []
-  | Lookup_tools { schemas; dispatch = _; scope = Producer_tree; root_layout } ->
+  | Lookup_tools { schemas; dispatch = _; root_layout } ->
     render
       Prompt_names.verification_lookup_producer_tree
       [ "lookup_tools", tool_names schemas
-      ; "lookup_root_layout", root_layout_lines root_layout
-      ]
-  | Lookup_tools
-      { schemas
-      ; dispatch = _
-      ; scope = Producer_forest { producers }
-      ; root_layout
-      } ->
-    render
-      Prompt_names.verification_lookup_producer_forest
-      [ "lookup_producers", String.concat ", " producers
-      ; "lookup_tools", tool_names schemas
       ; "lookup_root_layout", root_layout_lines root_layout
       ]
 ;;
 
 let build_prompt ?(few_shot_block = "") ?completion_contract
       ?(required_evidence = [])
-      ?(prompt_name = Prompt_names.verification)
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
   let ( let* ) = Result.bind in
@@ -206,9 +188,7 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
     ; "calibration_section", calibration_section
     ]
   in
-  Prompt_registry.render_prompt_template
-    prompt_name
-    vars
+  Prompt_registry.render_prompt_template Prompt_names.verification vars
 ;;
 
 (* ================================================================ *)
@@ -310,41 +290,32 @@ let resolve_evaluator_slots = function
 
 let unresolved_evaluator_runtime = "unresolved"
 
-let review
+let run
       ?evaluator_runtime
       ?generator_runtime
-      ?(completion_contract : string list option)
-      ?(required_evidence = [])
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
-      ?(few_shot_block = "")
-      ?(prompt_name = Prompt_names.verification)
       ?(sw : Eio.Switch.t option = None)
+      ~(log_info : string -> unit)
+      ~(log_warn : string -> unit)
+      ~(render_prompt : unit -> (string, string) result)
       ~(lookup : lookup_surface)
       ~base_path
-      (req : review_request)
+      ()
   : review_result
   =
   let emit result =
     on_verdict result;
     result
   in
-  let task_info fmt =
-    Stdlib.Format.ksprintf
-      (fun message -> Log.Task.info "task_id=%s %s" req.task_id message)
-      fmt
-  in
-  let task_warn fmt =
-    Stdlib.Format.ksprintf
-      (fun message -> Log.Task.warn "task_id=%s %s" req.task_id message)
-      fmt
-  in
+  let task_info fmt = Stdlib.Format.ksprintf log_info fmt in
+  let task_warn fmt = Stdlib.Format.ksprintf log_warn fmt in
   match resolve_evaluator_slots evaluator_runtime with
   | Error reason ->
     (Atomic.get outcome_observer_fn)
       ~outcome:"unavailable"
       ~runtime:unresolved_evaluator_runtime;
-    task_warn "[task-completion-review] %s; task remains nonterminal" reason;
+    task_warn "%s; no verdict committed" reason;
     emit
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
@@ -360,7 +331,7 @@ let review
       ~outcome:"unavailable"
       ~runtime:unresolved_evaluator_runtime;
     let reason = "verifier_exact exact-output lane resolved to no admitted slots" in
-    task_warn "[task-completion-review] %s; task remains nonterminal" reason;
+    task_warn "%s; no verdict committed" reason;
     emit
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
@@ -370,21 +341,13 @@ let review
       ; evaluator_error_retryable = None
       }
   | Ok (first_slot :: rest_slots) ->
-    (match
-       build_prompt
-         ~few_shot_block
-         ?completion_contract
-         ~required_evidence
-         ~prompt_name
-         ~lookup
-         req
-     with
+    (match render_prompt () with
      | Error detail ->
        (Atomic.get outcome_observer_fn)
          ~outcome:"unavailable"
          ~runtime:first_slot;
        task_warn
-         "[task-completion-review] prompt unavailable runtime=%s: %s"
+         "prompt unavailable runtime=%s: %s"
          first_slot
          detail;
        emit
@@ -399,7 +362,7 @@ let review
        (match generator_runtime with
         | Some generator when List.exists (String.equal generator) (first_slot :: rest_slots) ->
           task_warn
-            "[task-completion-review] generator runtime %s is one of the verifier_exact lane slots"
+            "generator runtime %s is one of the verifier_exact lane slots"
             generator
         | None | Some _ -> ());
        (* Frozen-order slot failover, the same contract as the librarian /
@@ -438,7 +401,7 @@ let review
            ( Error
                (Agent_core.Error.Internal
                   (Printf.sprintf
-                     "task completion evaluator raised unexpectedly: %s"
+                     "review evaluator raised unexpectedly: %s"
                      (Printexc.to_string exn)))
            , !nested_retryable_error_seen )
        in
@@ -448,11 +411,11 @@ let review
            (match verdict with
             | Approve ->
               task_info
-                "[task-completion-review] LLM approved runtime=%s"
+                "LLM approved runtime=%s"
                 slot
             | Reject reason ->
               task_info
-                "[task-completion-review] LLM rejected runtime=%s reason=%s"
+                "LLM rejected runtime=%s reason=%s"
                 slot
                 reason);
            emit
@@ -465,7 +428,7 @@ let review
              }
          | Ok None, nested_retryable_error_seen ->
            let detail =
-             "task completion evaluator did not call report_review_verdict exactly once"
+             "evaluator did not call report_review_verdict exactly once"
            in
            (Atomic.get outcome_observer_fn)
              ~outcome:"invalid_verdict"
@@ -473,13 +436,13 @@ let review
            (match remaining with
             | next :: rest ->
               task_warn
-                "[task-completion-review] %s runtime=%s; failing over to next verifier_exact slot %s"
+                "%s runtime=%s; failing over to next verifier_exact slot %s"
                 detail
                 slot
                 next;
               attempt ~retryable_error_seen next rest
             | [] ->
-              task_warn "[task-completion-review] %s" detail;
+              task_warn "%s" detail;
               emit
                 { verdict = None
                 ; evaluator_runtime = slot
@@ -503,7 +466,7 @@ let review
            (match remaining with
             | next :: rest ->
               task_warn
-                "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; failing over to next verifier_exact slot %s: %s"
+                "evaluator unavailable runtime=%s retryable=%b; failing over to next verifier_exact slot %s: %s"
                 slot
                 retryable
                 next
@@ -515,7 +478,7 @@ let review
             | [] ->
               let exhausted_retryable = retryable_error_seen || retryable in
               task_warn
-                "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; task remains nonterminal: %s"
+                "evaluator unavailable runtime=%s retryable=%b; no verdict committed: %s"
                 slot
                 exhausted_retryable
                 detail;
@@ -530,4 +493,37 @@ let review
                 })
        in
        attempt ~retryable_error_seen:false first_slot rest_slots)
+;;
+
+(* The Task lane: its own prompt variables, its own log subject. Everything
+   after the prompt string is the shared {!run}. *)
+let review
+      ?evaluator_runtime
+      ?generator_runtime
+      ?(completion_contract : string list option)
+      ?(required_evidence = [])
+      ?on_verdict
+      ?on_tool_result
+      ?(few_shot_block = "")
+      ?(sw : Eio.Switch.t option = None)
+      ~(lookup : lookup_surface)
+      ~base_path
+      (req : review_request)
+  : review_result
+  =
+  run
+    ?evaluator_runtime
+    ?generator_runtime
+    ?on_verdict
+    ?on_tool_result
+    ~sw
+    ~log_info:(fun message ->
+      Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
+    ~log_warn:(fun message ->
+      Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
+    ~render_prompt:(fun () ->
+      build_prompt ~few_shot_block ?completion_contract ~required_evidence ~lookup req)
+    ~lookup
+    ~base_path
+    ()
 ;;

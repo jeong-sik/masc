@@ -173,7 +173,6 @@ let with_config_dir f =
 let write_keeper_toml config_dir ~name =
   let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
   mkdir_p profile_dir;
-  write_file (Filename.concat profile_dir "AGENT.md") ("# " ^ name ^ "\n");
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -188,7 +187,6 @@ sandbox_profile = "local"
 let write_keeper_toml_with_instructions config_dir ~name ~instructions =
   let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
   mkdir_p profile_dir;
-  write_file (Filename.concat profile_dir "AGENT.md") (instructions ^ "\n");
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -203,15 +201,13 @@ instructions = "%s"
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
 
 let write_empty_keeper_toml config_dir ~name =
-  let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
-  mkdir_p profile_dir;
-  write_file (Filename.concat profile_dir "AGENT.md") ("# " ^ name ^ "\n");
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
        {|
 [keeper]
 name = "%s"
+instructions = "test keeper"
 sandbox_profile = "local"
 proactive_enabled = false
 |}

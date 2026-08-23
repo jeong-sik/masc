@@ -412,13 +412,13 @@ Keeper work budget.
 Canonical file model:
 
 ```text
-<basepath>/.masc/config/keepers/{name}/AGENT.md
+<basepath>/.masc/config/keepers/{name}.toml
 <basepath>/.masc/config/keepers/{name}.toml
 <basepath>/.masc/keepers/{name}.json
 <basepath>/.masc/keepers/{name}/...
 ```
 
-- `AGENT.md`: complete Keeper prompt
+- `keeper.instructions`: complete Keeper prompt
 - `keepers/{name}.toml`: deployment declaration for this basepath
 - `.masc/keepers/{name}.json`: durable runtime state
 - `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts

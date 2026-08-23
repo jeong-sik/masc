@@ -819,6 +819,57 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
 
+  (* Fleet reading — what the roster below cannot say.
+
+     The rows are one per running keeper, so a keeper the fleet wanted and
+     could not start is simply absent from them. These lines carry the
+     server's own count of that gap and name the keepers behind it. *)
+  (match state.fleet_safety, state.fleet_safety_error with
+   | _, Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  fleet: " ^ fit_width err (cols - 12) ^ Ansi.reset)
+   | None, None -> ()
+   | Some fleet, None ->
+       let tone =
+         if fleet.fs_operator_action_required then Ansi.red
+         else if String.equal fleet.fs_status "ok" then Ansi.green
+         else Ansi.yellow
+       in
+       let blocker =
+         match fleet.fs_blocker with None -> "" | Some b -> "  blocker: " ^ b
+       in
+       box_line buf cols
+         (Printf.sprintf "%s  fleet %s   running %d/%d   capacity %d/%d%s%s"
+            tone fleet.fs_status
+            fleet.fs_running_count fleet.fs_bootable_count
+            (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
+            fleet.fs_target_reaction_capacity blocker Ansi.reset);
+       let counts =
+         [ ("paused", fleet.fs_paused_count)
+         ; ("failing", fleet.fs_failing_count)
+         ; ("recovering", fleet.fs_recovering_count)
+         ; ("task owner without fiber", fleet.fs_active_task_owner_without_fiber_count)
+         ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
+         ]
+         |> List.filter (fun (_, n) -> n > 0)
+         |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n)
+       in
+       if counts <> [] then
+         box_line buf cols
+           (Ansi.dim ^ "  " ^ String.concat "   " counts ^ Ansi.reset);
+       (* Which keepers are missing is the subtraction, done here rather than
+          read from a field: the server reports what should run and what does,
+          and the difference is this reader's to take. *)
+       let missing =
+         List.filter
+           (fun name -> not (List.mem name fleet.fs_executable_names))
+           fleet.fs_bootable_names
+       in
+       if missing <> [] then
+         box_line buf cols
+           (Printf.sprintf "%s  not running: %s%s" Ansi.red
+              (String.concat ", " missing) Ansi.reset));
+
   (* Column headers *)
   let col_header = Printf.sprintf "  %s  %-20s  %-8s %10s  %s"
     " " "Name" "Paused" "Turns" "Current Task" in

@@ -9,7 +9,7 @@
     [Mcp_tool_runtime_types.context] with Eio fiber infrastructure).
 
     The join gate validates the Keeper-owned
-    [<base_path>/.masc/config/keepers/<name>/AGENT.md] prompt. *)
+    [<base_path>/.masc/config/keepers/<name>.toml] declaration. *)
 
 open Alcotest
 open Masc
@@ -94,10 +94,8 @@ let test_join_gate_uses_keeper_check () =
       check string "resolved Keeper" input resolved;
       check string "searched Keeper prompt path"
         (Filename.concat
-           (Filename.concat
-              (Filename.concat base_path ".masc/config/keepers")
-              input)
-           "AGENT.md")
+           (Filename.concat base_path ".masc/config/keepers")
+           (input ^ ".toml"))
         searched
   | Error other ->
       fail

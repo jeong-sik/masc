@@ -529,7 +529,6 @@ let process_task_once
               Task.Anti_rationalization.Lookup_tools
                 { schemas = Verification_authority_tools.schemas lookup_tools
                 ; dispatch = Verification_authority_tools.dispatch lookup_tools
-                ; scope = Task.Anti_rationalization.Producer_tree
                 ; root_layout
                 }
             in

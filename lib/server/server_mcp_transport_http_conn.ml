@@ -58,26 +58,16 @@ type sse_connect_guard_state = {
 let sse_connect_guard_by_session :
     sse_connect_guard_state SMap.t Atomic.t = Atomic.make SMap.empty
 
-let env_float_or ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw -> (
-      Option.value ~default (float_of_string_opt raw))
-
-let env_int_or ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw -> (
-      Option.value ~default:default (int_of_string_opt raw))
-
+(* Read through Env_config_runtime like every other knob. This file used to
+   carry its own Sys.getenv_opt wrappers, the one place in the server that did
+   not (#28910); the values and the env-var names are unchanged. *)
 let sse_reconnect_min_interval_s =
-  env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:1.0
+  Env_config_runtime.Sse_connect_guard.reconnect_min_interval_seconds
 
-let sse_connect_window_s =
-  env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:60.0
+let sse_connect_window_s = Env_config_runtime.Sse_connect_guard.connect_window_seconds
 
 let sse_connect_max_in_window =
-  env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:10
+  Env_config_runtime.Sse_connect_guard.connect_max_in_window
 
 let guard_deadline state =
   let session_deadline =

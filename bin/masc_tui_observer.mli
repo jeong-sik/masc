@@ -57,7 +57,9 @@ type agent_core_kind =
 
 type agent_core = {
   kind : agent_core_kind;
-  agent : string;  (** [agent_name] *)
+  agent : string option;
+      (** [agent_name]: the runtime lane on tool and turn events, absent on
+          provider streaming telemetry, which names no agent at all *)
   tool : string option;  (** [tool_name], set on tool events *)
   task : string option;  (** [task_id] *)
   turn : int option;  (** [payload.turn] *)
@@ -70,8 +72,8 @@ type agent_core = {
 
 type keeper_heartbeat = {
   hb_keeper : string;
-  hb_phase : string;
-  hb_in_turn : bool;
+  hb_phase : string option;  (** absent on the bare liveness beat *)
+  hb_in_turn : bool option;
   hb_in_flight_ms : float option;
   hb_since_progress_ms : float option;
   hb_at : float;
@@ -88,9 +90,21 @@ type keeper_turn_complete = {
   tc_at : float;
 }
 
+(** A keeper's tool call as the keeper layer records it: named by keeper,
+    with the call's duration and disposition. The agent_core family reports
+    the same call from the runtime's side, named by lane. *)
+type keeper_tool_call = {
+  kt_keeper : string;
+  kt_tool : string;
+  kt_duration_ms : float option;
+  kt_disposition : string option;  (** [completed], as the server writes it *)
+  kt_at : float;
+}
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
+  | Keeper_tool_call of keeper_tool_call
   | Keeper_turn_complete of keeper_turn_complete
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
@@ -108,7 +122,8 @@ type decoded =
 
 val event_of_json : Yojson.Safe.t -> (event, string) result
 (** Decode one [data:] payload. [Error] for a payload with no [type], or an
-    [agent_core:*] payload missing the fields the family always carries. *)
+    [agent_core:*] payload missing [event_type] or [ts_unix], which every
+    row of the family carries. *)
 
 (** Incremental reader over the stream's bytes. *)
 type t

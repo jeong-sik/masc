@@ -32,7 +32,8 @@ let decode_all chunks =
 
 let summary = function
   | Observer.Event (Observer.Agent_core e) ->
-      Printf.sprintf "agent_core(%s,%s,%s,turn=%s,batch=%s)" e.Observer.agent
+      Printf.sprintf "agent_core(%s,%s,%s,turn=%s,batch=%s)"
+        (Option.value ~default:"-" e.Observer.agent)
         (match e.Observer.kind with
          | Observer.Tool_called -> "tool_called"
          | Observer.Tool_completed -> "tool_completed"
@@ -52,8 +53,18 @@ let summary = function
          | Some (i, n) -> Printf.sprintf "%d/%d" i n
          | None -> "-")
   | Observer.Event (Observer.Keeper_heartbeat h) ->
-      Printf.sprintf "heartbeat(%s,%s,in_turn=%b)" h.Observer.hb_keeper
-        h.Observer.hb_phase h.Observer.hb_in_turn
+      Printf.sprintf "heartbeat(%s,%s,in_turn=%s)" h.Observer.hb_keeper
+        (Option.value ~default:"-" h.Observer.hb_phase)
+        (match h.Observer.hb_in_turn with
+         | Some b -> string_of_bool b
+         | None -> "-")
+  | Observer.Event (Observer.Keeper_tool_call c) ->
+      Printf.sprintf "keeper_tool_call(%s,%s,%s,%s)" c.Observer.kt_keeper
+        c.Observer.kt_tool
+        (match c.Observer.kt_duration_ms with
+         | Some ms -> Printf.sprintf "%.0fms" ms
+         | None -> "-")
+        (Option.value ~default:"-" c.Observer.kt_disposition)
   | Observer.Event (Observer.Keeper_turn_complete t) ->
       Printf.sprintf "turn_complete(%s,turn=%s,cost=%s)" t.Observer.tc_keeper
         (match t.Observer.tc_turn with Some n -> string_of_int n | None -> "-")
@@ -102,15 +113,28 @@ let test_the_initialize_body_names_the_method_and_the_client () =
 
 let test_a_tool_call_decodes_with_its_turn_and_batch () =
   check (list string) "the frame becomes one typed event"
-    [ "agent_core(analyst,read_file,turn=2086,batch=0/2)" ]
+    [ "agent_core(analyst,tool_called,read_file,turn=2086,batch=0/2)" ]
     (List.map summary (decode_all [ tool_called_frame ]))
 
+let bare_heartbeat_frame =
+  "data: {\"type\":\"keeper_heartbeat\",\"name\":\"lane-smith\",\"ts_unix\":1787505653.07}\n\n"
+
+let keeper_tool_call_frame =
+  "data: {\"type\":\"keeper_tool_call\",\"name\":\"rondo\",\"tool_name\":\"tool_execute\",\
+   \"duration_ms\":14534,\"disposition\":\"completed\",\"ts_unix\":1787507566.14,\
+   \"tool_args\":{\"argv\":[\"dune\",\"build\"]},\"tool_result\":{\"ok\":true}}\n\n"
+
 let test_keeper_events_decode_by_name () =
-  check (list string) "heartbeat and settlement"
+  check (list string) "heartbeat, bare heartbeat, settlement, keeper tool call"
     [ "heartbeat(taskmaster,turn_running,in_turn=true)"
+    ; "heartbeat(lane-smith,-,in_turn=-)"
     ; "turn_complete(rondo,turn=2086,cost=0.0258)"
+    ; "keeper_tool_call(rondo,tool_execute,14534ms,completed)"
     ]
-    (List.map summary (decode_all [ heartbeat_frame; turn_complete_frame ]))
+    (List.map summary
+       (decode_all
+          [ heartbeat_frame; bare_heartbeat_frame; turn_complete_frame
+          ; keeper_tool_call_frame ]))
 
 let test_a_line_cut_by_the_chunk_boundary_is_held () =
   let at = String.index tool_called_frame '{' + 40 in
@@ -122,7 +146,7 @@ let test_a_line_cut_by_the_chunk_boundary_is_held () =
   check (list string) "the cut line produces nothing yet" []
     (List.map summary (Observer.feed reader head));
   check (list string) "and decodes whole once the rest arrives"
-    [ "agent_core(analyst,read_file,turn=2086,batch=0/2)" ]
+    [ "agent_core(analyst,tool_called,read_file,turn=2086,batch=0/2)" ]
     (List.map summary (Observer.feed reader tail))
 
 let untaught_agent_core_frame =
@@ -133,7 +157,7 @@ let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
     [ "snapshot:execution_snapshot"
     ; "other:internal_agent_runs_changed"
-    ; "agent_core(lane-smith,-,turn=-,batch=-)"
+    ; "agent_core(lane-smith,other:relay_dropped,-,turn=-,batch=-)"
     ]
     (List.map summary
        (decode_all
@@ -147,12 +171,23 @@ let test_what_this_build_was_not_taught_keeps_its_name () =
       check string "the family keeps the untaught event_type" "relay_dropped" name
   | _ -> fail "expected one agent_core event of an untaught kind"
 
+let test_streaming_telemetry_names_no_agent () =
+  (* Provider streaming telemetry: agent_name null, payload a tagged list. *)
+  check (list string) "it is still an event of the family, with no agent"
+    [ "agent_core(-,telemetry,-,turn=-,batch=-)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"agent_core:telemetry_event\",\"event_type\":\
+             \"telemetry_event\",\"agent_name\":null,\"ts_unix\":1.0,\
+             \"payload\":[\"Streaming_summary\",{\"ttft_ms\":19048.7}]}\n"
+          ]))
+
 let test_a_frame_this_cannot_read_says_why () =
   let reasons =
     decode_all
       [ "data: nope\n"
       ; "data: {\"ts_unix\":1.0}\n"
-      ; "data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"ts_unix\":1.0}\n"
+      ; "data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"agent_name\":\"x\"}\n"
       ; "data:{\"type\":\"keeper_heartbeat\"}\n"
       ]
     |> List.map (function
@@ -164,8 +199,8 @@ let test_a_frame_this_cannot_read_says_why () =
       check bool "bad JSON is reported as such" true
         (String.starts_with ~prefix:"invalid JSON" bad_json);
       check string "a payload without a type" "event carries no type" no_type;
-      check string "an agent_core payload without its agent"
-        "agent_core:tool_called carries no agent_name" no_agent;
+      check string "an agent_core payload without its timestamp"
+        "agent_core:tool_called carries no ts_unix" no_agent;
       check bool "a data line without the canonical prefix is reported" true
         (String.starts_with ~prefix:"data line without" noncanonical)
   | _ -> failf "expected four reasons, got %d" (List.length reasons)
@@ -187,6 +222,8 @@ let () =
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "what this build was not taught keeps its name" `Quick
             test_what_this_build_was_not_taught_keeps_its_name
+        ; test_case "streaming telemetry names no agent" `Quick
+            test_streaming_telemetry_names_no_agent
         ; test_case "a frame this cannot read says why" `Quick
             test_a_frame_this_cannot_read_says_why
         ] )

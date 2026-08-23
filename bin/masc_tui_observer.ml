@@ -49,7 +49,7 @@ type agent_core_kind =
 
 type agent_core = {
   kind : agent_core_kind;
-  agent : string;
+  agent : string option;
   tool : string option;
   task : string option;
   turn : int option;
@@ -62,8 +62,8 @@ type agent_core = {
 
 type keeper_heartbeat = {
   hb_keeper : string;
-  hb_phase : string;
-  hb_in_turn : bool;
+  hb_phase : string option;
+  hb_in_turn : bool option;
   hb_in_flight_ms : float option;
   hb_since_progress_ms : float option;
   hb_at : float;
@@ -80,9 +80,18 @@ type keeper_turn_complete = {
   tc_at : float;
 }
 
+type keeper_tool_call = {
+  kt_keeper : string;
+  kt_tool : string;
+  kt_duration_ms : float option;
+  kt_disposition : string option;
+  kt_at : float;
+}
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
+  | Keeper_tool_call of keeper_tool_call
   | Keeper_turn_complete of keeper_turn_complete
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
@@ -149,8 +158,10 @@ let agent_core_prefix = "agent_core:"
    [event_type], which the server writes beside the type on every row. *)
 let decode_agent_core ~type_name fields =
   let* event_type = required string_field fields "event_type" ~event:type_name in
-  let* agent = required string_field fields "agent_name" ~event:type_name in
   let* at = required float_field fields "ts_unix" ~event:type_name in
+  (* Provider streaming telemetry rides this family with a null agent and a
+     list payload; it is still an event of the family, with no agent. *)
+  let agent = string_field fields "agent_name" in
   let payload = Option.value ~default:[] (assoc_field fields "payload") in
   let batch =
     match (int_field payload "batch_index", int_field payload "batch_size") with
@@ -174,14 +185,14 @@ let decode_agent_core ~type_name fields =
 let decode_keeper_heartbeat fields =
   let event = "keeper_heartbeat" in
   let* hb_keeper = required string_field fields "name" ~event in
-  let* hb_phase = required string_field fields "phase" ~event in
-  let* hb_in_turn = required bool_field fields "in_turn" ~event in
   let* hb_at = required float_field fields "ts_unix" ~event in
+  (* The bare beat carries only name and time; the in-turn beat adds phase
+     and progress. Both are heartbeats. *)
   Ok
     (Keeper_heartbeat
        { hb_keeper
-       ; hb_phase
-       ; hb_in_turn
+       ; hb_phase = string_field fields "phase"
+       ; hb_in_turn = bool_field fields "in_turn"
        ; hb_in_flight_ms = float_field fields "in_flight_elapsed_ms"
        ; hb_since_progress_ms = float_field fields "since_last_progress_ms"
        ; hb_at
@@ -203,6 +214,20 @@ let decode_keeper_turn_complete fields =
        ; tc_at
        })
 
+let decode_keeper_tool_call fields =
+  let event = "keeper_tool_call" in
+  let* kt_keeper = required string_field fields "name" ~event in
+  let* kt_tool = required string_field fields "tool_name" ~event in
+  let* kt_at = required float_field fields "ts_unix" ~event in
+  Ok
+    (Keeper_tool_call
+       { kt_keeper
+       ; kt_tool
+       ; kt_duration_ms = float_field fields "duration_ms"
+       ; kt_disposition = string_field fields "disposition"
+       ; kt_at
+       })
+
 let decode_named_keeper_event ~event fields make =
   let* keeper = required string_field fields "name" ~event in
   let* at = required float_field fields "ts_unix" ~event in
@@ -217,6 +242,7 @@ let event_of_json (json : Yojson.Safe.t) =
         ->
           decode_agent_core ~type_name fields
       | Some "keeper_heartbeat" -> decode_keeper_heartbeat fields
+      | Some "keeper_tool_call" -> decode_keeper_tool_call fields
       | Some "keeper_turn_complete" -> decode_keeper_turn_complete fields
       | Some ("keeper_composite_changed" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->

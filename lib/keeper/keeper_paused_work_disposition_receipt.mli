@@ -51,6 +51,11 @@ val continuation_binding_of_yojson : Yojson.Safe.t -> (continuation_binding, str
 val source_terminal_receipt_kind :
   Keeper_event_queue_state.source_terminal_receipt -> string
 
+val store_version : string
+(** The one place the receipt store's generation is written. The schema string
+    and the directory name are both derived from it, so a shape change moves
+    both or neither. *)
+
 val schema : string
 (** The only accepted durable receipt schema. *)
 

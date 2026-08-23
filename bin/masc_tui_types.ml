@@ -347,6 +347,12 @@ type state = {
   mutable planning_cursor: int;
   mutable planning_scroll: int;
   mutable planning_mode: planning_mode;
+  (* A goal lifecycle request armed for a second keypress, and what the last
+     one answered. Arming rather than pressing keeps the detail view's plain
+     letters safe: c/x/o are lifecycle only once, and any other key disarms. *)
+  mutable goal_action_armed:
+    (string * Goal_phase.Public_action.t) option;
+  mutable goal_action_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
   mutable system_logs_scroll: int;
@@ -417,6 +423,16 @@ let keeper_reading (state : state) (keeper : keeper) :
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+(** Whether a goal lifecycle arm targets this goal. Answered here rather
+    than at the renderer so the renderer never reads [pg_id] outside
+    [Terminal_text] -- the sanitize guard counts every access, comparison
+    included. *)
+let goal_action_armed_for (state : state) (goal_id : string) =
+  match state.goal_action_armed with
+  | Some (armed_goal, armed_action) when String.equal armed_goal goal_id ->
+      Some armed_action
+  | Some _ | None -> None
+
 (** New Keeper messages require a complete roster observation. [state.keepers]
     may intentionally retain the previous complete roster while a detail or log
     view survives a transient metadata read failure, so membership alone is not
@@ -481,6 +497,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   planning_cursor = 0;
   planning_scroll = 0;
   planning_mode = Planning_list;
+  goal_action_armed = None;
+  goal_action_error = None;
   system_logs = None;
   system_logs_error = None;
   system_logs_scroll = 0;

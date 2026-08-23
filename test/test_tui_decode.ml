@@ -425,9 +425,22 @@ let test_planning_goal_separates_unreadable_from_unreviewed () =
      with
      | Tui_decode.Proof_unreadable _ -> true
      | _ -> false);
-  Alcotest.check Alcotest.bool "no verification at all is idle" true
+  (* The server attaches this block to every goal -- the default record when
+     there is no ledger row, the ledger_error marker when the store will not
+     decode. A goal that arrives without one is a wire this build cannot read,
+     and reading it as "nobody asked" is the same disguise the server's own
+     note refuses to put on. *)
+  Alcotest.check Alcotest.bool "no verification block at all is not idle" true
     (match (decoded_proof ()).Tui_decode.pg_proof with
-     | Tui_decode.Proof_idle -> true
+     | Tui_decode.Proof_unreadable _ -> true
+     | _ -> false);
+  Alcotest.check Alcotest.bool "and neither is a block with no completion state"
+    true
+    (match
+       (decoded_proof ~verification:(`Assoc [ "completion", `Assoc [] ]) ())
+         .Tui_decode.pg_proof
+     with
+     | Tui_decode.Proof_unreadable _ -> true
      | _ -> false)
 ;;
 

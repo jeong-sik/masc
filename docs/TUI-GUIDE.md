@@ -206,15 +206,22 @@ its own is drawn as what it did, not as a blank line: a `thinking` row with
 the reasoning the server kept and a count of the steps it withheld, then a
 `tools` block with one row per call - the finished glyph for a call that
 returned, `✗` for one that returned an error, `·` for one the trace never
-saw finish, each with its duration - and then whatever the turn said.
+saw finish, `?` for one whose outcome the trace did not record - and then
+whatever the turn said. A call that finished carries its duration, in
+milliseconds as the server records it; a call still open when the trace
+closed has none.
 
 ```
  [21:41:34] thinking
    (2 reasoning steps, content withheld)
  [21:41:34] tools
    ✓ masc_task_history · 32ms
-   ✗ tool_execute · 1.2s
+   ✗ tool_execute · 1200ms
 ```
+
+Only rows the server marks as autonomous turns are read this way. A turn
+in the conversation itself already has its calls in the transcript as tool
+rows, so its trace block is not drawn a second time.
 
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes

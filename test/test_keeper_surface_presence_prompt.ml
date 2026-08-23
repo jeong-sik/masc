@@ -218,7 +218,11 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
   check bool "section header states the depth" true
     (contains ~needle:"### Your Recent Actions (1 turns)" user);
   check bool "the work it already did is stated" true
-    (contains ~needle:{|- [turn 27486] keeper_board_post {"title":"status"} -> ok|} user);
+    (contains ~needle:{|- [turn 27486] keeper_board_post -> ok|} user);
+  (* #29701: a call that landed says so and stops. Recognising the call is
+     what the arguments are for, and only a refusal needs recognising. *)
+  check bool "a call that landed does not replay its arguments" false
+    (contains ~needle:{|keeper_board_post {"title":"status"}|} user);
   check bool "the rejected call is stated with its arguments" true
     (contains ~needle:{|keeper_broadcast {} -> REJECTED: "message": MISSING|} user);
   check bool "rows are marked as context" true

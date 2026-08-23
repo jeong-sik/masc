@@ -68,6 +68,19 @@ module Json = struct
            name
            (Yojson.Safe.to_string json))
   ;;
+
+  let optional_float_field name fields =
+    match List.assoc_opt name fields with
+    | None -> Ok None
+    | Some (`Float value) -> Ok (Some value)
+    | Some (`Int value) -> Ok (Some (float_of_int value))
+    | Some json ->
+      Error
+        (Printf.sprintf
+           "field %s expected float when present, got %s"
+           name
+           (Yojson.Safe.to_string json))
+  ;;
 end
 
 module type Payload = sig
@@ -101,6 +114,7 @@ module Make (Payload : Payload) = struct
   type entry =
     { id : string
     ; started_at : float
+    ; updated_at : float
     ; registration : Payload.registration
     ; status : status
     }
@@ -115,11 +129,13 @@ module Make (Payload : Payload) = struct
     | Register of
         { id : string
         ; started_at : float
+        ; updated_at : float option
         ; registration : Payload.registration
         }
     | Complete of
         { id : string
         ; completion : Payload.completion
+        ; updated_at : float option
         }
 
   let ( let* ) = Result.bind
@@ -138,6 +154,12 @@ module Make (Payload : Payload) = struct
     | Completed _ -> false
   ;;
 
+  let compare_entries left right =
+    let c = Float.compare right.updated_at left.updated_at in
+    if c <> 0 then c
+    else Float.compare right.started_at left.started_at
+  ;;
+
   let prune entries =
     match Payload.completed_retention with
     | `All -> entries
@@ -145,7 +167,7 @@ module Make (Payload : Payload) = struct
       let running, completed = List.partition is_running entries in
       let recent_completed =
         completed
-        |> List.sort (fun left right -> Float.compare right.started_at left.started_at)
+        |> List.sort compare_entries
         |> List.filteri (fun index _ -> index < max_completed_retained)
       in
       running @ recent_completed
@@ -158,19 +180,33 @@ module Make (Payload : Payload) = struct
     }
 
   let event_to_yojson = function
-    | Register { id; started_at; registration } ->
-      `Assoc
+    | Register { id; started_at; updated_at; registration } ->
+      let base =
         [ "event", `String "register"
         ; "id", `String id
         ; "started_at", `Float started_at
         ; "registration", Payload.registration_to_yojson registration
         ]
-    | Complete { id; completion } ->
-      `Assoc
+      in
+      let extra =
+        match updated_at with
+        | Some u -> [ "updated_at", `Float u ]
+        | None -> []
+      in
+      `Assoc (base @ extra)
+    | Complete { id; completion; updated_at } ->
+      let base =
         [ "event", `String "complete"
         ; "id", `String id
         ; "completion", Payload.completion_to_yojson completion
         ]
+      in
+      let extra =
+        match updated_at with
+        | Some u -> [ "updated_at", `Float u ]
+        | None -> []
+      in
+      `Assoc (base @ extra)
   ;;
 
   let event_of_yojson json =
@@ -181,29 +217,35 @@ module Make (Payload : Payload) = struct
       let* () =
         Json.exact_fields
           ~required:[ "event"; "id"; "started_at"; "registration" ]
+          ~optional:[ "updated_at" ]
           fields
       in
       let* id = Json.string_field "id" fields in
       let* started_at = Json.float_field "started_at" fields in
+      let* updated_at = Json.optional_float_field "updated_at" fields in
       let* registration_json =
         match List.assoc_opt "registration" fields with
         | Some value -> Ok value
         | None -> Error "missing field registration"
       in
       let* registration = Payload.registration_of_yojson registration_json in
-      Ok (Register { id; started_at; registration })
+      Ok (Register { id; started_at; updated_at; registration })
     | "complete" ->
       let* () =
-        Json.exact_fields ~required:[ "event"; "id"; "completion" ] fields
+        Json.exact_fields
+          ~required:[ "event"; "id"; "completion" ]
+          ~optional:[ "updated_at" ]
+          fields
       in
       let* id = Json.string_field "id" fields in
+      let* updated_at = Json.optional_float_field "updated_at" fields in
       let* completion_json =
         match List.assoc_opt "completion" fields with
         | Some value -> Ok value
         | None -> Error "missing field completion"
       in
       let* completion = Payload.completion_of_yojson completion_json in
-      Ok (Complete { id; completion })
+      Ok (Complete { id; completion; updated_at })
     | label -> Error (Printf.sprintf "unknown %s event %S" Payload.name label)
   ;;
 
@@ -294,7 +336,8 @@ module Make (Payload : Payload) = struct
   ;;
 
   let register t ~id ~started_at ~registration =
-    let entry = { id; started_at; registration; status = Running } in
+    let updated_at = started_at in
+    let entry = { id; started_at; updated_at; registration; status = Running } in
     (* Memory publication and JSONL append are one ordered mutation. Without
        this registry-local lock, a completion on another domain can observe the
        new row after the CAS and append [Complete] before this [Register]
@@ -313,11 +356,12 @@ module Make (Payload : Payload) = struct
        down. The Eio gate makes a waiting fiber yield instead; the durable
        variant keeps cancellation out of the committed transaction. *)
     Cross_context_mutex.with_durable_lock t.mutation_mutex (fun () ->
-      append_event_exn t (Register { id; started_at; registration });
+      append_event_exn t (Register { id; started_at; updated_at = Some updated_at; registration });
       replace_entry_locked t entry)
   ;;
 
   let complete t ~id ~completion =
+    let now = Unix.gettimeofday () in
     Cross_context_mutex.with_durable_lock t.mutation_mutex (fun () ->
       let current = Atomic.get t.entries in
       if not (List.exists (fun entry -> String.equal entry.id id) current)
@@ -329,11 +373,13 @@ module Make (Payload : Payload) = struct
           current
           |> List.map (fun entry ->
             if String.equal entry.id id
-            then { entry with status = Completed completion }
+            then
+              let updated_at = Float.max entry.started_at now in
+              { entry with status = Completed completion; updated_at }
             else entry)
           |> prune
         in
-        match append_event_result t (Complete { id; completion }) with
+        match append_event_result t (Complete { id; completion; updated_at = Some now }) with
         | Error detail -> `Persistence_failed detail
         | Ok () ->
           Atomic.set t.entries next;
@@ -364,16 +410,19 @@ module Make (Payload : Payload) = struct
   ;;
 
   let apply_event entries = function
-    | Register { id; started_at; registration } ->
-      let entry = { id; started_at; registration; status = Running } in
+    | Register { id; started_at; updated_at; registration } ->
+      let u = Option.value updated_at ~default:started_at in
+      let entry = { id; started_at; updated_at = u; registration; status = Running } in
       entry :: List.filter (fun existing -> not (String.equal existing.id id)) entries
-    | Complete { id; completion } ->
+    | Complete { id; completion; updated_at } ->
       if List.exists (fun entry -> String.equal entry.id id) entries
       then
         List.map
           (fun entry ->
              if String.equal entry.id id
-             then { entry with status = Completed completion }
+             then
+               let u = Option.value updated_at ~default:entry.updated_at in
+               { entry with status = Completed completion; updated_at = u }
              else entry)
           entries
       else (
@@ -386,12 +435,13 @@ module Make (Payload : Payload) = struct
       Register
         { id = entry.id
         ; started_at = entry.started_at
+        ; updated_at = Some entry.updated_at
         ; registration = entry.registration
         }
     in
     match entry.status with
     | Running -> [ register ]
-    | Completed completion -> [ register; Complete { id = entry.id; completion } ]
+    | Completed completion -> [ register; Complete { id = entry.id; completion; updated_at = Some entry.updated_at } ]
   ;;
 
   let drop_replayed_running entries =

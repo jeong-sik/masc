@@ -113,6 +113,18 @@ let test_list_newest_first () =
   | [] -> fail "expected runs"
 ;;
 
+let test_updated_at_axis_sorting () =
+  let t = R.create () in
+  R.register_running t ~run_id:"run-early" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:100.0;
+  R.register_running t ~run_id:"run-late" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:200.0;
+  R.mark_completed t ~run_id:"run-early" ~outcome:R.Succeeded;
+  match R.list_runs t with
+  | first :: second :: _ ->
+    check string "recently updated completed run moves to top" "run-early" first.R.run_id;
+    check string "older updated run follows" "run-late" second.R.run_id
+  | _ -> fail "expected 2 runs"
+;;
+
 (* prune invariant: Running survives a flood of completed; oldest completed are
    evicted while the newest are kept (newest-first retention). *)
 let test_prune_keeps_running_and_recent () =
@@ -201,6 +213,7 @@ let () =
             test_finalize_before_suspend_keeps_completed
         ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
+; test_case "updated_at axis sorting" `Quick test_updated_at_axis_sorting
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent
         ] )
     ; ( "rfc-0266-phase4"

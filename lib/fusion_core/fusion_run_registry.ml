@@ -15,6 +15,7 @@ type run =
   ; preset : string
   ; topology : Fusion_types.fusion_topology
   ; started_at : float
+  ; updated_at : float
   ; status : run_status
   }
 
@@ -128,6 +129,7 @@ let run_of_entry (entry : Store.entry) =
   ; preset = entry.registration.preset
   ; topology = entry.registration.topology
   ; started_at = entry.started_at
+  ; updated_at = entry.updated_at
   ; status
   }
 ;;
@@ -148,6 +150,7 @@ let run_to_yojson run =
     ; "preset", `String run.preset
     ; "topology", `String (Fusion_types.fusion_topology_to_string run.topology)
     ; "started_at", `Float run.started_at
+    ; "updated_at", `Float run.updated_at
     ; "status", `String (status_label run.status)
     ]
   in

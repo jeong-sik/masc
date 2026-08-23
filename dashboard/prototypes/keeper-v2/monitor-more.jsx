@@ -27,15 +27,17 @@ const TM_FAILCATS = [
   { category: 'provider_stream_idle_timeout', count: 12 },
   { category: 'path_outside_workspace', count: 9 },
 ];
-const TM_FLEET = { executable: 5, target: 7, shortfall: 2, paused: 2 };
-const TM_FACTS = [
-  { keeper: 'sangsu', task: 'task-7741', label: '실행 불가 · fiber 없음', tone: 'bad',
-    reason: 'fiber_unresolved(unexpected)', truth: 'execution_truth=not_running', cause: 'supervisor 재기동 대기',
-    action: '재시작 후 소유 태스크 재확인' },
-  { keeper: 'nick0cave', task: null, label: 'operator 일시정지', tone: 'warn',
-    reason: 'paused_by_operator', truth: 'execution_truth=paused', cause: 'operator 명령',
-    action: '재개하거나 태스크를 인계' },
-];
+// #29602 이후 서버는 blocked_keepers 를 보내지 않는다 — 안 돌고 있는 keeper 는
+// 아래 두 이름 리스트의 차집합으로 대시보드가 직접 계산한다 (keepersNotRunning).
+const TM_FLEET = {
+  executable: 5, target: 7, shortfall: 2, paused: 2, blocker: 'reaction_capacity_shortfall',
+  autoboot_names: ['nick0cave', 'masc-improver', 'drifter', 'librarian', 'retro-01', 'sangsu'],
+  executable_names: ['nick0cave', 'masc-improver', 'drifter', 'librarian', 'retro-01'],
+};
+// 대시보드 keepersNotRunning 과 같은 뺄셈 — 정렬까지 동일하게.
+const TM_NOT_RUNNING = TM_FLEET.autoboot_names
+  .filter(name => !TM_FLEET.executable_names.includes(name))
+  .sort();
 const TM_PAUSED = [
   { name: 'nick0cave', pause_kind: 'operator', klass: null, detail: null, elapsed: 1840 },
   { name: 'reviewer', pause_kind: 'blocked', klass: 'gate_wait', detail: 'H-041 HITL 응답 대기', elapsed: 265 },
@@ -133,24 +135,23 @@ function TmOperations({ onView }) {
       </div>
 
       <section className="tm-sec">
-        <h4>Keeper operator facts</h4>
-        <div className="ai-tablewrap">
-          <table className="ai-table">
-            <thead><tr><th>키퍼</th><th>현재 사실</th><th>operator 행동</th></tr></thead>
-            <tbody>
-              {TM_FACTS.map(f => (
-                <tr key={f.keeper}>
-                  <td className="mono">{f.keeper}{f.task && <div className="mono dim tm-sub">{f.task}</div>}</td>
-                  <td>
-                    <span className={`ai-b ${f.tone}`}>{f.label}</span>
-                    <div className="mono dim tm-sub">{f.reason} · {f.truth} · {f.cause}</div>
-                  </td>
-                  <td className="ai-d">{f.action}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <h4>기동하지 않는 Keeper</h4>
+        {TM_NOT_RUNNING.length === 0
+          ? <div className="dim">모든 Keeper 가 돌고 있습니다.</div>
+          : <div className="ai-tablewrap">
+              <table className="ai-table">
+                <thead><tr><th>키퍼</th><th>상태</th></tr></thead>
+                <tbody>
+                  {TM_NOT_RUNNING.map(name => (
+                    <tr key={name}>
+                      <td className="mono">{name}</td>
+                      <td>기동하지 않음</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {TM_FLEET.blocker && <div className="mono dim tm-sub">blocker: {TM_FLEET.blocker}</div>}
+            </div>}
       </section>
 
       <section className="tm-sec">

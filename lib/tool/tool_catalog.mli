@@ -85,6 +85,14 @@ val register_runtime_metadata : string -> metadata -> (unit, string) result
     catalog-owned required permission. Unclassified tool names fail closed. *)
 
 val registered_metadata : string -> metadata option
+
+val known_names : unit -> string list
+(** Every tool name this catalog carries metadata for, sorted and deduplicated.
+
+    The schema lists elsewhere are not this set. A tool can have a catalog
+    policy and keep its schema outside [Config]'s front door, and a contract
+    test that walks the schema lists never reaches it — which is how the
+    Hidden-with-direct-calls-denied branch went unexercised. *)
 (** Explicit or [Tool_spec]-registered metadata, without surface-derived
     fallback metadata. *)
 

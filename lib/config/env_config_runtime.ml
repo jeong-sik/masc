@@ -13,6 +13,33 @@ module Session = struct
     get_float ~default:300.0 "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
 end
 
+(** {1 SSE Reconnect Guard} *)
+
+module Sse_connect_guard = struct
+  (* The transport read these three with its own Sys.getenv_opt wrappers, which
+     is the one place in the server that did not come through this module
+     (#28910). The numbers are unchanged and they are not measured against any
+     resource boundary; docs/spec/09-server-transport.md described them as
+     disabled by default while the code has always shipped them enabled, and
+     the live server log holds no session_cooldown or window_limit rejection at
+     all. Whether the default should be off is a separate decision from where
+     the value is read. *)
+
+  (** Minimum interval between SSE reconnects for one session (seconds).
+      [<= 0.0] disables the per-session cooldown. *)
+  let reconnect_min_interval_seconds =
+    get_float ~default:1.0 "MASC_SSE_RECONNECT_MIN_INTERVAL_S"
+
+  (** Sliding window over which reconnects are counted (seconds).
+      [<= 0.0] disables the window limit. *)
+  let connect_window_seconds =
+    get_float ~default:60.0 "MASC_SSE_CONNECT_WINDOW_S"
+
+  (** Reconnects admitted inside one window. [<= 0] disables the window
+      limit. *)
+  let connect_max_in_window = get_int ~default:10 "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+end
+
 (** {1 Tempo (Polling Interval) Configuration} *)
 
 module Tempo = struct

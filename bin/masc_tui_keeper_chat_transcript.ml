@@ -48,6 +48,10 @@ type unreadable =
 type t =
   { keeper_name : string
   ; request_id : string
+  ; started_at : float
+        (* When the request left, not when the run started. The wait before
+           RUN_STARTED is the part that hid a 63-minute hang (masc #29229), so
+           the age has to cover it. *)
   ; text_buffer : Buffer.t
   ; thinking_buffer : Buffer.t
   ; mutable reversed_tool_calls : tool_call list
@@ -59,9 +63,10 @@ type t =
   ; mutable awaiting : awaiting_approval option
   }
 
-let create ~keeper_name ~request_id =
+let create ~keeper_name ~request_id ~started_at =
   { keeper_name
   ; request_id
+  ; started_at
   ; text_buffer = Buffer.create 1024
   ; thinking_buffer = Buffer.create 256
   ; reversed_tool_calls = []
@@ -95,6 +100,16 @@ let unreadable t =
 let subject_of ~tool_name ~args =
   if String.equal (String.trim args) "" then None
   else Masc.Keeper_chat_tool_trail.tool_subject ~name:tool_name ~args
+
+(* Which reasoning lines the pane shows, kept here rather than in the drawing
+   because it is a question about the content. The whole trail, minus the runs
+   of blank lines models emit: reasoning is the only part of a live turn the
+   durable transcript does not keep, so one line out of it would say what the
+   keeper concluded without saying how it got there. *)
+let thinking_lines t =
+  Buffer.contents t.thinking_buffer
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
 
 let finished_marker = "✓"
 
@@ -190,6 +205,23 @@ let unreadable_text t =
           the recorded outcome is unaffected"
          t.unreadable_count t.last_unreadable)
 
+(* An age, not a duration budget: the row says how long this turn has been
+   outstanding so a watcher can tell slow from stuck. Rendered from a clock the
+   caller passes rather than one read here, so a test can state the instant.
+   A clock that moved backwards says nothing instead of a negative age. *)
+let elapsed_text ~now t =
+  let seconds = now -. t.started_at in
+  if seconds < 0. then None
+  else
+    let whole = int_of_float seconds in
+    if whole < 60 then Some (Printf.sprintf "%ds" whole)
+    else Some (Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60))
+
+let progress_text ~now t =
+  match elapsed_text ~now t with
+  | None -> phase_text t
+  | Some age -> Printf.sprintf "%s · %s" (phase_text t) age
+
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
    progress. *)
@@ -199,8 +231,8 @@ let awaiting_text t =
       Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question)
     t.awaiting
 
-let status_rows t =
-  [ Some (Progress, phase_text t)
+let status_rows ~now t =
+  [ Some (Progress, progress_text ~now t)
   ; Option.map (fun text -> (Attention, text)) (awaiting_text t)
   ; Option.map (fun text -> (Attention, text)) (interrupt_text t)
   ; Option.map (fun text -> (Attention, text)) (unreadable_text t)

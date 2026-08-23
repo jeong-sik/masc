@@ -39,18 +39,19 @@ scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
 
 #### Formatting
 
-CI checks `.ml` and `.mli` files with `ocamlformat` directly, on changed files
-only. Match it:
+CI checks `.ml` and `.mli` files with `ocamlformat`, on changed files only.
+Either command matches it:
 
 ```bash
-opam exec -- ocamlformat -i <changed .ml/.mli files>
+opam exec -- dune build --root . @fmt --auto-promote   # whole tree
+opam exec -- ocamlformat -i <changed .ml/.mli files>   # just what you touched
 ```
 
-Do **not** run `dune build @fmt --auto-promote`. It also rewrites `dune` files
-— 18 of them from a clean tree, including a blank line in `lib/dune` that puts
-the file one line over the `lib_dune_lines` baseline and fails the OCaml
-Structure Ratchet. CI never asks for those rewrites, so they are diff noise
-that costs a round trip. See #29253.
+`dune-project` scopes formatting to `ocaml`, so `dune fmt` leaves `dune` files
+alone. Without that scope it rewrote 18 of them from a clean tree, and the
+blank line it added to `lib/dune` put the file one over its `lib_dune_lines`
+baseline and failed the OCaml Structure Ratchet — the repo's own formatter
+breaking the repo's own gate. See #29253.
 
 ### Project Structure
 

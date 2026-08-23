@@ -80,6 +80,19 @@ id_prefix = "kimi-for-coding"
 provider_name = "kimi_code"
 base = "kimi"
 max_context_tokens = 256000
+# The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
+# models (3 models x 6 tools x 2 attempts) and every one of the 36 came back
+# carrying thinking. Nothing here declared it, so the default of false stood
+# and each request logged Thinking_returned_but_declared_unsupported (#28457).
+# Every other kimi row in the catalog declares reasoning; this one did not.
+supports_reasoning = true
+supports_extended_thinking = true
+# Kimi returns reasoning it was not asked for and offers no field to turn it
+# off, which is what "none" and an always-on stream mean here — the same shape
+# kimi-k2.7-code carries in the base catalog.
+thinking_control_format = "none"
+supports_reasoning_budget = false
+reasoning_streaming_format = "delta:reasoning"
 ignored_sampling_parameters = ["temperature", "top_p"]
 input_per_million = 0.0
 output_per_million = 0.0

@@ -35,18 +35,6 @@ val runtime_catalog_error_to_core_error : string -> Agent_core.Error.t
 
 (** {1 Provider resolution} *)
 
-val resolve_runtime_providers :
-  runtime_id:string -> unit ->
-  (Llm_provider.Provider_config.t list, string) result
-(** Resolve the requested runtime's provider config via the RFC-0207 runtime
-    catalog. An empty [runtime_id] resolves the default runtime; a non-empty
-    id that is not a configured runtime returns [Error] — never the default
-    runtime (no Unknown→Permissive substitution, RFC-0206 §2.1; audit F8).
-
-    This is the provider {i binding} only. A turn additionally carries the
-    runtime's inference seed — use {!resolve_runtime_providers_for_turn} when
-    the caller is about to dispatch. *)
-
 val apply_inference_seed
   :  seed:Runtime_inference.seed
   -> Llm_provider.Provider_config.t
@@ -68,3 +56,23 @@ val resolve_runtime_providers_for_turn :
     output tokens reasoning and emitted its tool call as bare JSON, which Ollama
     could not parse into [tool_calls], so it scored 0/12 as though it could not
     call tools at all. It called them every time (masc#28473). *)
+
+module For_testing : sig
+  val resolve_runtime_providers
+    :  runtime_id:string
+    -> unit
+    -> (Llm_provider.Provider_config.t list, string) result
+  (** The provider {i binding} with no inference seed on it.
+
+      Not exported outside this module: every caller about to dispatch wants
+      {!resolve_runtime_providers_for_turn}, and two of them reached for this
+      one instead — the capability probe, which scored a model 0/12 on tool
+      calls it had made every time (#28473), and fusion panels (#28529). The
+      doc comment here used to say "use the other one when you are about to
+      dispatch"; that is now what the module allows rather than what it asks
+      for.
+
+      An empty [runtime_id] resolves the default runtime; a non-empty id that
+      is not a configured runtime returns [Error] — never the default runtime
+      (no Unknown→Permissive substitution, RFC-0206 §2.1; audit F8). *)
+end

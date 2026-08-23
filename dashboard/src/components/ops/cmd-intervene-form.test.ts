@@ -70,7 +70,7 @@ describe('CmdInterveneForm (keeper-v2 command parity)', () => {
     expect(container.querySelector('.cmd-form')).not.toBeNull()
     expect(container.querySelectorAll('.cmd-form .lab-f')).toHaveLength(2)
     expect(container.querySelector('textarea.cmd-text')?.getAttribute('placeholder')).toBe('대상에게 전달할 내용…')
-    expect(container.querySelector('.cmd-actions .lab-run')?.textContent).toBe('실행')
+    expect(container.querySelector('.cmd-actions .lab-run')?.textContent).toBe('실행하기')
     expect(container.querySelector('.cmd-actions .mono.dim')?.textContent)
       .toBe('되돌릴 수 없는 행동 지시는 Gate 로 라우팅됩니다')
 

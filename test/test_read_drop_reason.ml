@@ -4,7 +4,7 @@
        constructor; [Other s] survives unchanged.
     2. Byte-for-byte wire compatibility with the legacy [string]
        constants in [Core.Safe_ops]
-       ([persistence_read_drop_reason_list_dir_error],
+       ([Read_drop_reason.List_dir_error],
        [_entry_load_error], [_invalid_payload]).
 
     PR-2 will swap [report_persistence_read_drop ~reason:string] to
@@ -58,9 +58,12 @@ let test_tail_partial_write_is_its_own_reason () =
     "distinct from entry_load_error"
     false
     (R.equal R.Tail_partial_write R.Entry_load_error);
+  (* This used to compare the variant's wire form against a string constant
+     that Safe_ops exported. With one vocabulary there is nothing to compare
+     it to, so pin the wire word itself — that is what leaves the process. *)
   Alcotest.(check string)
-    "matches the Safe_ops constant byte for byte"
-    Safe.persistence_read_drop_reason_tail_partial_write
+    "wire word"
+    "tail_partial_write"
     (R.to_wire R.Tail_partial_write)
 ;;
 
@@ -139,16 +142,16 @@ let test_legacy_constants_byte_compat () =
      forms of the corresponding typed constructors so PR-2 can swap
      callers without changing Otel_metric_store label cardinality. *)
   Alcotest.(check string)
-    "list_dir_error matches Safe_ops constant"
-    Safe.persistence_read_drop_reason_list_dir_error
+    "list_dir_error wire word"
+    "list_dir_error"
     (R.to_wire R.List_dir_error);
   Alcotest.(check string)
-    "entry_load_error matches Safe_ops constant"
-    Safe.persistence_read_drop_reason_entry_load_error
+    "entry_load_error wire word"
+    "entry_load_error"
     (R.to_wire R.Entry_load_error);
   Alcotest.(check string)
-    "invalid_payload matches Safe_ops constant"
-    Safe.persistence_read_drop_reason_invalid_payload
+    "invalid_payload wire word"
+    "invalid_payload"
     (R.to_wire R.Invalid_payload)
 ;;
 

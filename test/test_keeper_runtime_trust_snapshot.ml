@@ -125,8 +125,8 @@ let test_snapshot_counts_malformed_decision_rows () =
        let keeper_name = "runtime-trust-decision-drop" in
        let meta = make_meta keeper_name in
        let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
-       let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
-       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+       let entry_error = Read_drop_reason.to_wire Read_drop_reason.Entry_load_error in
+       let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
        let before_entry_error = drop_value entry_error in
        let before_invalid_payload = drop_value invalid_payload in
        write_file
@@ -183,8 +183,8 @@ let test_snapshot_counts_unterminated_tail_separately () =
        let keeper_name = "runtime-trust-decision-tail" in
        let meta = make_meta keeper_name in
        let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
-       let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
-       let tail_partial = Safe_ops.persistence_read_drop_reason_tail_partial_write in
+       let entry_error = Read_drop_reason.to_wire Read_drop_reason.Entry_load_error in
+       let tail_partial = Read_drop_reason.to_wire Read_drop_reason.Tail_partial_write in
        let before_entry_error = drop_value entry_error in
        let before_tail_partial = drop_value tail_partial in
        write_file

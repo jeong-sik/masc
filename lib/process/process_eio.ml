@@ -149,6 +149,25 @@ let default_env = function
    mandatory because new exception constructors can never be enumerated.
    RFC-0071 §3.4.1 sanctioned open-variant exemption, not a lazy
    catch-all over a closed sum. *)
+(* timeout(1)'s convention. Everything that used to write this literal, here
+   and in the three modules that had started reading it, goes through the two
+   names below. *)
+let timeout_exit_code = 124
+let timed_out_status = Unix.WEXITED timeout_exit_code
+
+type exit_reason =
+  | Completed of int
+  | Timed_out
+  | Signaled of int
+  | Stopped of int
+
+let exit_reason_of_status = function
+  | Unix.WEXITED code when code = timeout_exit_code -> Timed_out
+  | Unix.WEXITED code -> Completed code
+  | Unix.WSIGNALED signal -> Signaled signal
+  | Unix.WSTOPPED signal -> Stopped signal
+;;
+
 let rec should_retry_unix_fallback = function
   | Unix.Unix_error
       ((Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.EACCES | Unix.EPERM), "bind", _) ->
@@ -419,7 +438,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
             close_quietly stdout_r;
             stdout_r_ref := None;
             let status =
-              if !timed_out then Unix.WEXITED 124
+              if !timed_out then timed_out_status
               else
                 match !status_ref with
                 | Some status -> status
@@ -947,7 +966,7 @@ let run_argv_with_stdin_and_status_split
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
-                let timeout_status = Unix.WEXITED 124 in
+                let timeout_status = timed_out_status in
                 let stdout = Exec_buffer.render stdout_buf in
                 let stderr = Exec_buffer.render stderr_buf in
                 let stderr =
@@ -1125,7 +1144,7 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
          Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s" timeout_sec
            (Timeout_origin.to_label !phase_ref) label;
          observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
-         Ok (Unix.WEXITED 124, "", process_error_output ~label
+         Ok (timed_out_status, "", process_error_output ~label
                ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ())
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> Error (Printf.sprintf "%s: %s" label (Printexc.to_string exn))))
@@ -1168,7 +1187,7 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
-                let timeout_status = Unix.WEXITED 124 in
+                let timeout_status = timed_out_status in
                 let stdout = Exec_buffer.render stdout_buf in
                 let stderr = Exec_buffer.render stderr_buf in
                 let stderr =
@@ -1272,7 +1291,7 @@ let run_argv_with_status_split_streaming
             Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
               timeout_sec (Timeout_origin.to_label !phase_ref) label;
             observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
-            let timeout_status = Unix.WEXITED 124 in
+            let timeout_status = timed_out_status in
             let stdout = Exec_buffer.render stdout_buf in
             let stderr = Exec_buffer.render stderr_buf in
             let stderr =
@@ -1540,7 +1559,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                        ()
                    else streamed_stderr
                  in
-                 Ok (Unix.WEXITED 124, Exec_buffer.render stdout_buf, stderr)
+                 Ok (timed_out_status, Exec_buffer.render stdout_buf, stderr)
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn ->
                  if should_retry_unix_fallback exn then (

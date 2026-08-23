@@ -273,6 +273,13 @@ Selection follows post identity across refreshes. Opening a post binds the
 detail view to that post's request, so a late response for a post you already
 left is discarded rather than rendered under the current title.
 
+`w` on the list opens a new-post draft. The draft follows the commit-message
+convention: the first line is the title, the rest is the body. `Enter` makes
+a new line, and sending is armed rather than pressed - `esc` offers
+`s:send d:discard`, so no stray key publishes. The post goes out under the
+operator's agent identity; the server stamps the author. A rejected post
+keeps the draft and shows the server's message.
+
 ### Planning
 
 Goals with backlog rollups.
@@ -288,6 +295,12 @@ Goals with backlog rollups.
 
 The cursor tracks goal identity in visible order, so a refresh that reorders
 goals keeps the same goal selected.
+
+In a goal detail, `c` requests completion, `x` drops, `o` reopens. Each is
+armed rather than pressed - the first press shows what the same key again
+would send, any other key disarms - and the server owns the phase rules: a
+transition the current phase does not allow comes back as the server's
+rejection on the detail, not a local guess.
 
 ### System Logs
 

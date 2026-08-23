@@ -575,6 +575,26 @@ let test_run_argv_pipeline_timeout_reaps_all_stages () =
   let code = match status with Unix.WEXITED c -> c | _ -> 1 in
   check int "pipeline timeout exit code" 124 code
 
+(* repo_git, voice_bridge_core and exec_dispatch all decide "did this time
+   out" from Process_eio's status. They used to each compare against 124, so
+   the agreement was a coincidence the compiler could not see (#28651). This
+   pins the classifier they now share. *)
+let test_exit_reason_classifies_the_timeout_status () =
+  Alcotest.(check bool)
+    "the synthesized timeout status classifies as Timed_out"
+    true
+    (Process_eio.exit_reason_of_status Process_eio.timed_out_status
+     = Process_eio.Timed_out);
+  Alcotest.(check bool)
+    "a plain exit does not"
+    true
+    (Process_eio.exit_reason_of_status (Unix.WEXITED 0) = Process_eio.Completed 0);
+  Alcotest.(check bool)
+    "a signal is neither"
+    true
+    (Process_eio.exit_reason_of_status (Unix.WSIGNALED 9) = Process_eio.Signaled 9)
+;;
+
 let () =
   run "Process_eio coverage"
     [
@@ -656,5 +676,7 @@ let () =
              test_capture_bounds_oversized_stdout;
            test_case "capture-leaves-small-stdout-untouched" `Quick
              test_capture_leaves_small_stdout_untouched;
+           test_case "exit-reason-classifies-the-timeout-status" `Quick
+             test_exit_reason_classifies_the_timeout_status;
          ] );
     ]

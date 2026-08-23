@@ -246,9 +246,13 @@ let status_is_success = function
   | Unix.WEXITED 0 -> true
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
 
-let status_is_timeout = function
-  | Unix.WEXITED 124 -> true
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+let status_is_timeout status =
+  (* Process_eio decides what a timeout status is; this used to repeat its
+     number (#28651). *)
+  match Process_eio.exit_reason_of_status status with
+  | Process_eio.Timed_out -> true
+  | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
+    false
 
 let pipeline_status current stage_status =
   if status_is_success stage_status then current else stage_status

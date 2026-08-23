@@ -5,6 +5,16 @@
 (name masc)
 (version 0.24.0)
 
+; Format OCaml, and only OCaml. CI's formatting check runs ocamlformat over
+; **/*.ml and **/*.mli (.github/workflows/ocamlformat.yml) and says nothing
+; about dune files, but `dune fmt` formats every language it knows — so it
+; rewrote 18 dune files nobody checks, and the one blank line it added to
+; lib/dune pushed lib_dune_lines past its ratchet baseline. The repo's own
+; formatter broke the repo's own gate (#29253). Scoping formatting to the
+; language CI enforces makes `dune fmt` agree with it.
+(formatting
+ (enabled_for ocaml))
+
 (generate_opam_files true)
 (implicit_transitive_deps false)
 (executables_implicit_empty_intf false)

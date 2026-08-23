@@ -170,8 +170,9 @@ let observe_telemetry_drop ~reason =
     ()
 
 let report_telemetry_drop ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () -> observe_telemetry_drop ~reason)
+    ~on_drop:(fun () -> observe_telemetry_drop ~reason:reason_wire)
     ~surface:telemetry_eio_surface ~reason ~path ~detail
 
 (* Per-row decode. Reporting a drop only logs and bumps a counter, with no
@@ -181,7 +182,7 @@ let parse_event_record (json : Yojson.Safe.t) : event_record option =
   | Ok record -> Some record
   | Error msg ->
       report_telemetry_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~reason:Read_drop_reason.Invalid_payload
         ~path:"<in-memory>" ~detail:msg;
       None
 

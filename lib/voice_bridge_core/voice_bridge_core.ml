@@ -291,9 +291,11 @@ let run_local_playback ~sw:_ ~agent_id ~message ~audio_file () =
                            agent_id audio_file executable dur);
                       `Played dur
                     end
-                  | Unix.WEXITED 124, _ ->
-                    (* WEXITED 124 is Process_eio's synthesized status for a
-                       timeout kill: the player ran past the probed duration
+                  | status', _
+                    when Process_eio.exit_reason_of_status status'
+                         = Process_eio.Timed_out ->
+                    (* Process_eio classifies the timeout kill: the player ran
+                       past the probed duration
                        + margin, so partial audio has almost certainly been
                        heard. Terminal on purpose — falling through to the
                        next candidate would replay the SAME file from 0:00. *)

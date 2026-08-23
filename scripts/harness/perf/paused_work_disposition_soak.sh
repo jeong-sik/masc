@@ -317,7 +317,10 @@ post_disposition() {
 receipt_canonical() { jq -S -c '.receipt' <<<"$1"; }
 
 verify_receipt_file() {
-  local keeper="$1" operation_id="$2" root="$MASC_BASE_PATH/.masc/paused-work-dispositions-v6"
+  # The store generation is owned by
+  # Keeper_paused_work_disposition_receipt.store_version; shell cannot read it,
+  # so a missing directory is reported rather than read as "no receipts".
+  local keeper="$1" operation_id="$2" root="$MASC_BASE_PATH/.masc/paused-work-dispositions-v7"
   local matches=0 file
   [[ -d "$root" ]] || return 1
   while IFS= read -r -d '' file; do

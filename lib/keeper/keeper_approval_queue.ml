@@ -374,11 +374,13 @@ let replay_results_store_path ~base_path =
 ;;
 
 let report_pending_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ "surface", pending_store_surface; "reason", reason ]
+        ~labels:[ "surface", pending_store_surface; "reason", reason_wire ]
         ())
     ~surface:pending_store_surface
     ~reason
@@ -387,13 +389,15 @@ let report_pending_read_drop ~reason ~path ~detail =
 ;;
 
 let report_replay_results_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
         ~labels:
           [ "surface", replay_results_store_surface
-          ; "reason", reason
+          ; "reason", reason_wire
           ]
         ())
     ~surface:replay_results_store_surface
@@ -1375,7 +1379,7 @@ let load_snapshot_unlocked ~base_path =
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
         report_pending_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail:reason;
         Error { path; reason }
@@ -1406,7 +1410,7 @@ let load_snapshot_unlocked ~base_path =
            else Ok (loaded_pending, loaded_deliveries, loaded_next_sequence)
          | Error reason ->
            report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            Error { path; reason }))
@@ -1415,7 +1419,7 @@ let load_snapshot_unlocked ~base_path =
   | exn ->
     let reason = Printexc.to_string exn in
     report_pending_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~path
       ~detail:reason;
     Error { path; reason }
@@ -1473,7 +1477,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
         report_replay_results_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail:reason;
         delivery_map, Some { path; reason }
@@ -1481,7 +1485,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
         (match replay_results_of_yojson json with
          | Error reason ->
            report_replay_results_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            delivery_map, Some { path; reason }
@@ -1490,7 +1494,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
             | Ok delivery_map -> delivery_map, None
             | Error reason ->
               report_replay_results_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path
                 ~detail:reason;
               delivery_map, Some { path; reason })))
@@ -1499,7 +1503,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
   | exn ->
     let reason = Printexc.to_string exn in
     report_replay_results_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~path
       ~detail:reason;
     delivery_map, Some { path; reason }
@@ -3443,7 +3447,7 @@ let install_persistence_internal ~after_load ~base_path =
          | Error reason, _ | _, Error reason ->
            let path = pending_store_path ~base_path in
            report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            let error = { path; reason } in
@@ -3459,7 +3463,7 @@ let install_persistence_internal ~after_load ~base_path =
                   id
               in
               report_pending_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path
                 ~detail:reason;
               let error = { path; reason } in

@@ -58,6 +58,45 @@ let test_url_is_idempotent () =
       check string (Printf.sprintf "idempotent %S" input) once (url once))
     inputs
 
+(* One answer to "is this loopback". The SSOT compared against 127.0.0.1 alone
+   while its own doc said "any IPv4/IPv6 loopback address", so 127.0.0.2 and
+   systemd-resolved's 127.0.0.53 read as remote here and as loopback in the
+   two OAuth checks that carried their own octet test. It decides whether a
+   dev token may be minted and whether strict HTTP auth turns itself on, so
+   the three disagreeing about the same host was the defect (#27576). *)
+let test_loopback_covers_rfc1122 () =
+  List.iter
+    (fun host ->
+      check bool (Printf.sprintf "%S is loopback" host) true
+        (Masc_network_defaults.is_loopback_host host))
+    [ "127.0.0.1"
+    ; "127.0.0.2"
+    ; "127.0.0.53"
+    ; "127.255.255.254"
+    ; "::1"
+      (* The same address arriving over a dual-stack socket. Every
+         implementation missed it. *)
+    ; "::ffff:127.0.0.1"
+    ; "localhost"
+    ; "  LocalHost  "
+    ]
+;;
+
+let test_loopback_stops_at_the_prefix () =
+  List.iter
+    (fun host ->
+      check bool (Printf.sprintf "%S is not loopback" host) false
+        (Masc_network_defaults.is_loopback_host host))
+    [ "126.255.255.255"
+    ; "128.0.0.1"
+    ; "10.0.0.1"
+      (* Unspecified, not loopback — is_unspecified_host answers that one. *)
+    ; "0.0.0.0"
+      (* A prefix match on the string would take this; parsing refuses it. *)
+    ; "127.invalid"
+    ]
+;;
+
 let () =
   run
     "trailing_slash_rules"
@@ -67,4 +106,10 @@ let () =
         ; test_case "is idempotent" `Quick test_url_is_idempotent
         ] )
     ; ("path", [ test_case "keeps its root" `Quick test_path_keeps_its_root ])
+    ; ( "loopback"
+      , [ test_case "covers RFC 1122 127.0.0.0/8 and the mapped form" `Quick
+            test_loopback_covers_rfc1122
+        ; test_case "stops at the prefix boundary" `Quick
+            test_loopback_stops_at_the_prefix
+        ] )
     ]

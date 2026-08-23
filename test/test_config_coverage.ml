@@ -70,6 +70,42 @@ let test_is_tool_allowed_pause () =
   check bool "pause included with include_hidden" true
     (Tool_catalog.is_visible ~include_hidden:true "masc_pause")
 
+(* A malformed retention value used to mean opposite things: two stores kept
+   files forever and one began pruning at its own default, while each of the
+   two cited the third as its model. One operator typo therefore deleted from
+   one store and stopped deleting from another (#27110). *)
+let test_malformed_retention_lands_on_the_declared_default () =
+  let module E = Env_config_core in
+  let name = "MASC_TEST_RETENTION_DAYS_PROBE" in
+  let with_env value f =
+    let prior = Sys.getenv_opt name in
+    Unix.putenv name value;
+    Fun.protect
+      ~finally:(fun () ->
+        match prior with Some v -> Unix.putenv name v | None -> Unix.putenv name "")
+      f
+  in
+  let check_case label value ~default expected =
+    with_env value (fun () ->
+      Alcotest.(check bool) label true
+        (E.get_retention_days ~default name = expected))
+  in
+  (* Garbage takes the store's own default, whichever it is. *)
+  check_case "malformed keeps an opt-in store opt-in" "3O"
+    ~default:E.Retain_forever E.Retain_forever;
+  check_case "malformed keeps an opt-out store pruning" "3O"
+    ~default:(E.Prune_after_days 30) (E.Prune_after_days 30);
+  (* Zero says the same thing in every store. *)
+  check_case "explicit zero keeps everything" "0"
+    ~default:(E.Prune_after_days 30) E.Retain_forever;
+  check_case "negative keeps everything" "-1"
+    ~default:(E.Prune_after_days 30) E.Retain_forever;
+  check_case "a positive value is the window" "7"
+    ~default:E.Retain_forever (E.Prune_after_days 7);
+  check_case "empty is unset" "  "
+    ~default:(E.Prune_after_days 30) (E.Prune_after_days 30)
+;;
+
 let () =
   run "Config Coverage"
     [
@@ -88,5 +124,10 @@ let () =
           test_case "visible is subset of all" `Quick
             test_visible_tool_schemas_subset_of_all;
           test_case "pause public catalog allowed" `Quick test_is_tool_allowed_pause;
+        ] );
+      ( "retention",
+        [
+          test_case "malformed lands on the declared default" `Quick
+            test_malformed_retention_lands_on_the_declared_default;
         ] );
     ]

@@ -105,7 +105,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import functools
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -172,6 +174,53 @@ def is_skipped_name(name: str) -> bool:
     return name in SKIP_PARTS or name.startswith(".worktree")
 
 
+@functools.lru_cache(maxsize=None)
+def tracked_files(root: Path) -> frozenset[Path] | None:
+    """Absolute paths git tracks under [root], or [None] when git cannot say.
+
+    `SKIP_PARTS` names the directories that hold copies of this tree, and each
+    new place one appears has cost a wrong count before it was added: worktrees
+    under `.claude` reported 21 dead exports where a clean checkout reported
+    539 (see the note there). The list grows one entry per incident because it
+    answers "which directory" when the question is "which files are ours".
+
+    Git already knows. Measured 2026-08-23 at the same commit, a checkout
+    holding campaign output under `reports/`, two `task-*/` directories with a
+    stray `.ml` in each, and old `git.diff` files reported 13 dead exports
+    where a fresh worktree reported 47 -- the names written in that leftover
+    output counted as callers.
+
+    A file that is not tracked yet reads as absent, so a caller written in one
+    is not seen. That is the same thing CI sees, which is the point.
+
+    [None] rather than an empty set when git is unavailable or [root] is not
+    its own work tree: the self-test builds a tree in a temp directory, and
+    an empty set there would report every symbol dead.
+    """
+    def git(*args: str) -> str | None:
+        try:
+            done = subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return done.stdout if done.returncode == 0 else None
+
+    top = git("rev-parse", "--show-toplevel")
+    if top is None:
+        return None
+    if Path(top.strip()).resolve() != root.resolve():
+        return None
+    listed = git("ls-files", "-z")
+    if listed is None:
+        return None
+    return frozenset(root / name for name in listed.split("\0") if name)
+
+
 def all_files(root: Path) -> list[Path]:
     """Every authored file in the tree, whatever its extension.
 
@@ -193,6 +242,7 @@ def all_files(root: Path) -> list[Path]:
     still real -- `.git` and, after a build, `_build` (42,237 files here) were
     both walked and then discarded.
     """
+    tracked = tracked_files(root)
     out: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [name for name in dirnames if not is_skipped_name(name)]
@@ -201,6 +251,8 @@ def all_files(root: Path) -> list[Path]:
             if is_skipped_name(name):
                 continue
             path = directory / name
+            if tracked is not None and path not in tracked:
+                continue
             if path.is_file():
                 out.append(path)
     return out
@@ -596,7 +648,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # them, and the token scan read its own comment as a caller: the gate counted
 # three fewer than the tree held. State the test, not the roster -- as the
 # paragraph above already says.
-DEAD_EXPORT_BASELINE = 47
+DEAD_EXPORT_BASELINE = 43
 
 
 def run_ratchet(count: int) -> int:
@@ -639,6 +691,14 @@ def main(argv: list[str]) -> int:
 
     payload: dict[str, object] = {}
     dead_export_count: int | None = None
+    # Say which files were searched for callers. The same commit answers 13 or
+    # 47 depending on what is lying around untracked, and both used to print
+    # the same line.
+    scanned = "git-tracked files" if tracked_files(ROOT) is not None else (
+        "every file in the tree (git could not say what is tracked)")
+    payload["reference_scope"] = scanned
+    if not args.json and (args.modules or args.exports):
+        print(f"callers searched in: {scanned}")
     if args.modules:
         dead_modules = find_dead_modules(ROOT)
         payload["dead_modules"] = dead_modules

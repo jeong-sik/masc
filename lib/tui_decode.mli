@@ -50,6 +50,27 @@ val clock_timestamp_for_terminal : string -> string
     external timestamp bytes safe even when the byte slice splits UTF-8. *)
 
 
+(** Where a goal stands with the completion judge.
+
+    The phase says [executing] both for a goal nobody has reviewed and for one
+    the judge refused with a reason. Those are different situations, and the
+    reason is the whole product of the verification lane — a judge that states
+    what it measured and how it compared is no use if the reason stops at the
+    wire. *)
+type goal_proof =
+  | Proof_idle  (** No verdict on the ledger: nothing has been asked of it. *)
+  | Proof_pending  (** A completion request is durable and the judge has not answered. *)
+  | Proof_proven of string option
+      (** Approved. [Some] is what the judge measured; [None] is a verdict
+          recorded without text, which is a different fact from an empty
+          measurement and is drawn as such. *)
+  | Proof_refuted of string option  (** Refused; [Some] is why. *)
+  | Proof_unreadable of string option
+      (** The ledger did not decode, or named a state this build does not know.
+          Distinct from {!Proof_idle}: an unreadable store is not the same fact
+          as an unreviewed goal, and showing it as "not reviewed" would
+          disguise corruption as quiet. *)
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -58,6 +79,10 @@ type planning_goal = {
   pg_due_date : string option;
   pg_metric : string option;
   pg_target_value : string option;
+  pg_proof : goal_proof;
+  pg_last_review_note : string option;
+      (** What a keeper or operator wrote at the last transition. Free text,
+          unlike {!pg_proof}, which is the judge's. *)
 }
 
 type planning_rollup = {
@@ -108,6 +133,99 @@ type system_log_snapshot = {
   sys_entries : system_log_entry list;  (** newest last, as the server returns *)
   sys_total : int;  (** lines the ring has seen, not lines returned *)
   sys_latest_seq : int;
+}
+
+(** One task waiting on a verdict, as the verification surface lists it. *)
+(** One verdict the harness recorded: which gate ran on which task, what it
+    decided, and which evaluator decided it. *)
+(** A repository the workspace tracks. *)
+(** A connector the gate can deliver through. *)
+(** A registered tool, as the inventory lists it. *)
+type tool_entry = {
+  tl_name : string;
+  tl_description : string;
+  tl_surfaces : string list;
+      (** Where the tool is visible: the MCP surface, keeper projections, and
+          so on. Empty means registered and projected nowhere. *)
+  tl_direct_call : bool;
+}
+
+type tool_snapshot = {
+  ts_tools : tool_entry list;
+  ts_count : int;
+}
+
+type connector = {
+  cn_id : string;
+  cn_display_name : string;
+  cn_available : bool;  (** Configured and usable. *)
+  cn_connected : bool;
+      (** Reachable right now. Kept apart from [cn_available]: a connector can
+          be configured and unreachable, and the two call for different
+          actions. *)
+  cn_status : string;
+  cn_channel : string option;
+}
+
+type connector_snapshot = {
+  cs_connectors : connector list;
+  cs_total : int;
+  cs_active : int;  (** How many the server counted as available. *)
+}
+
+type repository = {
+  rp_name : string;
+  rp_local_path : string;
+  rp_default_branch : string;
+  rp_status : string;
+  rp_keepers : string list;  (** Which keepers work in it. *)
+  rp_auto_sync : bool;
+}
+
+type repository_snapshot = {
+  rs_repositories : repository list;
+  rs_total : int;
+}
+
+type harness_verdict = {
+  hv_at : float;
+  hv_task_id : string;
+  hv_task_title : string;
+  hv_agent : string;
+  hv_gate : string;
+  hv_verdict : string;
+  hv_evaluator : string;
+  hv_fallback_reason : string option;
+      (** Why the named evaluator did not run, when something else did. A
+          verdict reached by a fallback is not the verdict that was asked for,
+          and the surface says so rather than showing them alike. *)
+}
+
+type harness_snapshot = {
+  hs_verdicts : harness_verdict list;  (** newest first, as the server sends *)
+}
+
+type verification_request = {
+  vr_request_id : string;
+  vr_task_id : string;
+  vr_task_title : string;
+  vr_kind : string;  (** What is being asked for, e.g. a review or a proof. *)
+  vr_summary : string;
+  vr_next_action : string option;
+      (** What would move it forward, when the server can say. *)
+  vr_submitted_by : string;
+  vr_created_at : string;
+  vr_required_artifacts : string list;
+  vr_submitted_evidence : string list;
+  vr_evidence_error : string option;
+      (** Why the submitted evidence could not be read, when it could not.
+          Kept apart from the list so an empty list means "none submitted"
+          rather than "none readable". *)
+}
+
+type verification_snapshot = {
+  vs_requests : verification_request list;
+  vs_total : int;  (** Requests the server holds, not the number returned. *)
 }
 
 type keeper_runtime = {
@@ -225,6 +343,21 @@ type transport_health = {
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
 
+val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
+(** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
+
+val decode_connector_snapshot :
+  Yojson.Safe.t -> (connector_snapshot, string) result
+
+val decode_repository_snapshot :
+  Yojson.Safe.t -> (repository_snapshot, string) result
+
+val decode_harness_snapshot :
+  Yojson.Safe.t -> (harness_snapshot, string) result
+
+val decode_verification_snapshot :
+  Yojson.Safe.t -> (verification_snapshot, string) result
+
 val decode_system_log_snapshot :
   Yojson.Safe.t -> (system_log_snapshot, string) result
 
@@ -249,6 +382,11 @@ val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
 val decode_json_response_body :
   allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result
+
+(** The [/api/v1/tools/*] write envelope [{ok, message}] as a one-line
+    outcome; a shape the endpoints never send is an error, not a guessed
+    success. *)
+val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result

@@ -1065,6 +1065,41 @@ let test_docker_failure_class_is_typed_and_serializes_stable_string () =
      | Docker_daemon_timeout -> true
      | _ -> false)
 
+(* Under a non-default cluster the board, task and goal stores live in
+   .masc/clusters/<name>/, which is where Board_paths reads them. A mount
+   rooted at .masc/ handed the container a different set of files — usually
+   none, since the default-cluster copies do not exist (#28953). *)
+let test_docker_workspace_state_mounts_follow_the_cluster () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_CLUSTER_NAME" "cluster-alpha" @@ fun () ->
+  let default_root = Filename.concat base ".masc" in
+  let cluster_root =
+    Filename.concat (Filename.concat default_root "clusters") "cluster-alpha"
+  in
+  ensure_dir cluster_root;
+  write_file (Filename.concat cluster_root "board_posts.jsonl") "";
+  (* A same-named file in the default root, so a mount that ignores the cluster
+     still finds something and the assertion below is about which one. *)
+  ensure_dir default_root;
+  write_file (Filename.concat default_root "board_posts.jsonl") "";
+  let specs =
+    Keeper_sandbox_runtime.docker_workspace_state_mount_specs
+      ~base_path:base
+      ~container_root:"/home/keeper/playground/minjae"
+  in
+  Alcotest.(check bool) "mounts the cluster's board posts" true
+    (List.mem
+       (Filename.concat cluster_root "board_posts.jsonl"
+        ^ ":/tmp/masc-runtime/.masc/board_posts.jsonl:ro")
+       specs);
+  Alcotest.(check bool) "does not mount the default-cluster copy" false
+    (List.mem
+       (Filename.concat default_root "board_posts.jsonl"
+        ^ ":/tmp/masc-runtime/.masc/board_posts.jsonl:ro")
+       specs)
+;;
+
 let test_docker_workspace_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -2131,6 +2166,8 @@ let run_tests ~clock () =
             test_docker_failure_class_is_typed_and_serializes_stable_string;
           Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_workspace_state_mount_args_expose_safe_subset;
+          Alcotest.test_case "docker-workspace-state-mounts-follow-the-cluster" `Quick
+            test_docker_workspace_state_mounts_follow_the_cluster;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

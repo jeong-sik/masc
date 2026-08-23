@@ -37,8 +37,9 @@ let record_persistence_read_drop ~reason () =
     ()
 
 let report_persistence_read_drop ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () -> record_persistence_read_drop ~reason ())
+    ~on_drop:(fun () -> record_persistence_read_drop ~reason:reason_wire ())
     ~surface:persistence_surface
     ~reason
     ~path
@@ -485,7 +486,7 @@ let stream_lifecycle_fields = function
 let parse_stream_lifecycle ~path json =
   let invalid detail =
     report_persistence_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+      ~reason:Read_drop_reason.Invalid_payload
       ~path ~detail;
     None
   in
@@ -1343,7 +1344,7 @@ let parse_line ~file_path (line : string) : chat_message option =
               (* Unknown/invalid surface payload: surface it and keep the
                  row as unscoped chat content. *)
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid surface field: %s" detail);
               None)
@@ -1363,7 +1364,7 @@ let parse_line ~file_path (line : string) : chat_message option =
               (* Unknown authority label: surface it instead of guessing
                  a class; the row itself stays valid. *)
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:
                   (Printf.sprintf "unknown speaker_authority %S" label);
@@ -1375,7 +1376,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                (* id/name without an authority class never comes from our
                   writer; report so the producer gets fixed. *)
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"speaker_id/speaker_name without speaker_authority");
           None
@@ -1408,7 +1409,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                (* audio without token+mime is malformed; drop the field but
                   keep the row (text-only render). *)
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"audio field missing token/mime";
                None)
@@ -1454,7 +1455,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                   | None ->
                       report_persistence_read_drop
                         ~reason:
-                          Safe_ops.persistence_read_drop_reason_invalid_payload
+                          Read_drop_reason.Invalid_payload
                         ~path:file_path
                         ~detail:
                           (Printf.sprintf "empty mention entry %S" value);
@@ -1462,14 +1463,14 @@ let parse_line ~file_path (line : string) : chat_message option =
               | _ ->
                   report_persistence_read_drop
                     ~reason:
-                      Safe_ops.persistence_read_drop_reason_invalid_payload
+                      Read_drop_reason.Invalid_payload
                     ~path:file_path
                     ~detail:"non-string mention entry";
                   None)
             items
       | Some _ ->
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:"mentions field is not a list";
           []
@@ -1482,7 +1483,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some _ as blocks -> blocks
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:"invalid blocks field";
               None)
@@ -1500,7 +1501,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some kind -> kind
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "unknown chat row kind %S" label);
               Row_kind.Utterance)
@@ -1515,7 +1516,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some _ as tr -> tr
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid turn_ref %S" s);
               None)
@@ -1543,7 +1544,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Ok (Some provenance) -> Some provenance
           | Error detail ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid delivery provenance: %s" detail);
               None)
@@ -1556,7 +1557,7 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     if role_label = "" || (content = "" && not has_structured_payload) then (
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~reason:Read_drop_reason.Invalid_payload
         ~path:file_path
         ~detail:"chat row missing role and readable text/structured payload";
       None)
@@ -1567,13 +1568,13 @@ let parse_line ~file_path (line : string) : chat_message option =
              semantics (watermark, pending, rendering); surface it
              instead of carrying an untyped row. *)
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
           None
       | Some Role.Tool when tool_call_name = None ->
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
@@ -1581,7 +1582,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           (match opt_string "id", ts with
            | None, _ ->
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"chat row missing nonblank id";
                None
@@ -1589,7 +1590,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                (* [encode_line] always writes a float [ts]; a row without one
                   cannot be ordered, paged or joined, so it is dropped. *)
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"chat row missing float ts";
                None
@@ -1602,7 +1603,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                    delivery_provenance })
   with Yojson.Json_error detail ->
     report_persistence_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
+      ~reason:Read_drop_reason.Json_syntax_error
       ~path:file_path
       ~detail;
     None
@@ -1758,7 +1759,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
   with
   | Sys_error detail ->
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~reason:Read_drop_reason.Entry_load_error
         ~path
         ~detail;
       { messages = []; has_more = false }
@@ -1781,7 +1782,7 @@ let load_all ~base_dir ~keeper_name : chat_message list =
     match Safe_ops.read_file_safe path with
     | Error detail ->
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~reason:Read_drop_reason.Entry_load_error
         ~path
         ~detail;
       []

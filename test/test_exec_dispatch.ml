@@ -201,7 +201,7 @@ let () =
   in
   let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (String.trim result.stdout = "y");
-  assert (result.status <> Unix.WEXITED 124)
+  assert (result.status <> Process_eio.timed_out_status)
 
 (* --- dispatch forwards pipeline captured output chunks --- *)
 
@@ -295,7 +295,7 @@ let () =
       ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
       [ upstream_stage; timeout_stage ]
   in
-  assert (result.status = Unix.WEXITED 124);
+  assert (result.status = Process_eio.timed_out_status);
   assert (result.stdout = "visible");
   let streamed_stdout =
     List.rev !chunks

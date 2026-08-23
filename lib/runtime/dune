@@ -5,6 +5,7 @@
  (public_name masc.runtime)
  (wrapped false)
  (libraries
+  masc.build_version
   yojson
   cstruct
   otoml

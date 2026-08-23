@@ -245,9 +245,12 @@ export function KeeperWaitingInventoryPanel({
 function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
   const sourceActions = Object.entries(keeper.source_next_actions ?? {})
     .flatMap(([source, actions]) => actions.map(action => `${enumLabel(source)}: ${enumLabel(action)}`))
+  // No aggregate fallback: the producer emits source_next_actions and has never
+  // emitted a keeper-level next_action, so reading one only ever produced the
+  // same "unavailable" label by a longer route (#27750).
   const actionSummary = sourceActions.length > 0
     ? sourceActions.join(', ')
-    : evidenceLabel(keeper.next_action, 'source actions unavailable')
+    : 'source actions unavailable'
   const dueAt = timeLabel(keeper.due_at_iso)
   const since = timeLabel(keeper.since_iso)
   return [
@@ -288,9 +291,7 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
           <div><span class="font-mono text-[var(--color-fg-primary)]">${keeper.waiting_count.toLocaleString()}</span> lane rows</div>
           ${Object.keys(keeper.source_next_actions ?? {}).length > 0
             ? html`<div class="font-mono">source별 next action</div>`
-            : keeper.next_action
-              ? html`<div class="font-mono">${enumLabel(keeper.next_action)}</div>`
-              : html`<div class="font-mono text-[var(--color-status-warn)]">source actions unavailable</div>`}
+            : html`<div class="font-mono text-[var(--color-status-warn)]">source actions unavailable</div>`}
         </div>
       </div>
       <div class="mt-2">

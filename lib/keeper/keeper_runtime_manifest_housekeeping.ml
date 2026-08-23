@@ -9,14 +9,16 @@ include Keeper_runtime_manifest_types
    Retention pruning
    ═══════════════════════════════════════════════════════════════════════════════ *)
 
+(* Opt-in: unset keeps everything. A malformed value now means the same here
+   as in every other store (#27110). *)
 let retention_days () =
-  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. *)
-  match Sys.getenv_opt "MASC_RUNTIME_MANIFEST_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | _ -> None)
-  | None -> None
+  match
+    Env_config_core.get_retention_days
+      ~default:Env_config_core.Retain_forever
+      "MASC_RUNTIME_MANIFEST_RETENTION_DAYS"
+  with
+  | Env_config_core.Retain_forever -> None
+  | Env_config_core.Prune_after_days days -> Some days
 
 let prune_mu = Stdlib.Mutex.create ()
 let last_prune_day_by_base_dir : (string, string) Hashtbl.t = Hashtbl.create 64

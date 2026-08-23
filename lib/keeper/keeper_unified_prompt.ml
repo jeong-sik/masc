@@ -80,6 +80,21 @@ let format_fleet_messages
       message.fleet_content)
   |> String.concat "\n"
 
+(* The argument object rides on a refusal and not on a success, for the reason
+   this module already gives for outputs: a call that landed is a fact, and
+   "the returned body is where the bytes are". The request body is the same
+   kind of bulk. What a keeper must not repeat is a refused call, and to
+   recognise that one it has to read what it sent.
+
+   The two are not the same size. Keeper [analyst], 2026-08-23: 1,312 calls
+   succeeded carrying 538,743 bytes of arguments, 20 were refused carrying
+   6,417. Replaying the successes put 120,951 bytes of this section into a
+   131,072-byte model input and the keeper refused every turn for eight hours.
+
+   This is a narrower section, not a truncated one -- no call disappears and
+   no argument is cut mid-string. A keeper that needs the arguments of a call
+   that succeeded is asking what it did, which is what the board, the task and
+   the goal sections answer. *)
 let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : string =
   turns
   |> List.map (fun (turn : Keeper_own_recent_actions.turn) ->
@@ -87,7 +102,7 @@ let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : st
     |> List.map (fun (call : Keeper_own_recent_actions.call) ->
       match call.outcome with
       | Keeper_own_recent_actions.Ok_call ->
-        Printf.sprintf "- [turn %d] %s %s -> ok" turn.turn_id call.tool call.input
+        Printf.sprintf "- [turn %d] %s -> ok" turn.turn_id call.tool
       | Keeper_own_recent_actions.Failed_call None ->
         Printf.sprintf "- [turn %d] %s %s -> REJECTED" turn.turn_id call.tool call.input
       | Keeper_own_recent_actions.Failed_call (Some detail) ->

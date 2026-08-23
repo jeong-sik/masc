@@ -608,10 +608,6 @@ type lifecycle_event_origin =
 (** Pure converter for diagnostic / log labels. *)
 val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
 
-(** Internal: predicate over [Keeper_state_machine.event] identifying the
-    compaction- and handoff-pair half-events. *)
-val is_paired_lifecycle_event : Keeper_state_machine.event -> bool
-
 (** Pure dispatch-origin gate: returns true iff the (origin, event) pair
     is allowed under the paired-lifecycle invariant. *)
 val origin_allows_paired_lifecycle_event :

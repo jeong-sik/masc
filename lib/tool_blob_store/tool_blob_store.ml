@@ -375,10 +375,6 @@ type delete_error =
   ; reason : string
   }
 
-let delete_error_to_string { sha256; path; reason } =
-  Printf.sprintf "blob delete failed sha256=%s path=%s: %s" sha256 path reason
-;;
-
 let delete t ~sha256 =
   match validate_sha256 sha256 with
   | Error invalid ->

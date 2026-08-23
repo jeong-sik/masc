@@ -80,27 +80,6 @@ let voice_mcp_uri () =
       | Error _ -> default_voice_uri "/mcp")
   | Error _ -> default_voice_uri "/mcp"
 
-let voice_health_uri () =
-  match load_voice_config () with
-  | Ok config -> (
-      match Voice_runtime_overlay.session_endpoint_result config with
-      | Ok endpoint -> (
-          match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-          | Ok url -> Uri.of_string url
-          | Error _ -> default_voice_uri "/health" )
-      | Error _ -> default_voice_uri "/health")
-  | Error _ -> default_voice_uri "/health"
-
-let voice_mcp_host () =
-  match Uri.host (voice_mcp_uri ()) with
-  | Some host -> host
-  | None -> Env_config_runtime.Voice.default_host
-
-let voice_mcp_port () =
-  match Uri.port (voice_mcp_uri ()) with
-  | Some port -> port
-  | None -> Env_config_runtime.Voice.default_port
-
 (** ============================================
     Structured Logging
     ============================================ *)

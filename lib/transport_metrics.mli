@@ -18,8 +18,6 @@ type sse_session_kind =
   | Agent_stream
   | Presence
 
-val sse_session_kind_to_string : sse_session_kind -> string
-
 (** Per-session snapshot recorded into the SSE hot-queue
     Atomic ref by {!set_sse_queue_snapshot}.  Concrete record
     because callers construct + destructure it (notably the
@@ -221,12 +219,6 @@ val inc_ws_bytes_sent : bytes:int -> unit
     Paired with {!inc_ws_bytes_sent}: counter for total volume,
     histogram for per-message distribution. *)
 val observe_ws_message_bytes_sent : int -> unit
-
-(** [observe_ws_message_bytes_recv n] records [n] (clamped to
-    [max 0 n]) into [masc_ws_message_bytes{direction="recv"}].
-    Observed at the inbound frame boundary before message
-    re-assembly. *)
-val observe_ws_message_bytes_recv : int -> unit
 
 (** Increments [masc_ws_delta_built]. *)
 val inc_ws_delta_built : unit -> unit

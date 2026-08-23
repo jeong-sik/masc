@@ -73,26 +73,6 @@ let find_flag_value tokens flag =
 
 let has_flag tokens flag = List.exists (String.equal flag) tokens
 
-let process_to_yojson (process : llama_process) =
-  `Assoc
-    [
-      ("pid", Json_util.int_opt_to_json process.pid);
-      ("command", `String process.command);
-      ("port", Json_util.int_opt_to_json process.port);
-      ("host", Json_util.string_opt_to_json process.host);
-      ("alias", Json_util.string_opt_to_json process.alias);
-      ("model_path", Json_util.string_opt_to_json process.model_path);
-      ("ctx_size", Json_util.int_opt_to_json process.ctx_size);
-      ("batch_size", Json_util.int_opt_to_json process.batch_size);
-      ("ubatch_size", Json_util.int_opt_to_json process.ubatch_size);
-      ("slots_enabled", `Bool process.slots_enabled);
-    ]
-
-let process_matches_runtime_ports ports (process : llama_process) =
-  match process.port with
-  | Some port -> List.mem port ports
-  | None -> false
-
 let discover_processes () =
   let argv = [ "ps"; "-ax"; "-o"; "pid=,command=" ] in
   let status, body =
@@ -147,34 +127,3 @@ let discover_processes () =
   | Unix.WSTOPPED sig_num ->
       Error (Printf.sprintf "ps stopped by signal %d" sig_num)
 
-let fetch_models_at base_url =
-  let url =
-    String.trim base_url ^ Masc_network_defaults.openai_models_path
-  in
-  let argv = [ "curl"; "-sS"; "--max-time"; "10"; url ] in
-  let status, body =
-    Process_eio.run_argv_with_status argv
-  in
-  match status with
-  | Unix.WEXITED 0 -> (
-      try
-        let json = Yojson.Safe.from_string body in
-        let models =
-          match Json_util.get_array json "data" with
-          | Some (`List items) ->
-              items
-              |> List.filter_map (fun item ->
-                     Json_util.get_string item "id")
-          | _ -> []
-        in
-        Ok (url, models)
-      with Yojson.Json_error msg -> Error ("invalid llama models response: " ^ msg))
-  | Unix.WEXITED code ->
-      Error
-        (Printf.sprintf "llama models request failed with exit code %d" code)
-  | Unix.WSIGNALED sig_num ->
-      Error (Printf.sprintf "llama models request killed by signal %d" sig_num)
-  | Unix.WSTOPPED sig_num ->
-      Error (Printf.sprintf "llama models request stopped by signal %d" sig_num)
-
-let fetch_models () = fetch_models_at Env_config.Local_runtime.server_url

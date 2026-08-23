@@ -28,10 +28,6 @@ type category =
 val category_to_string : category -> string
 (** Canonical lowercase wire label for a {!category}. *)
 
-val category_of_string_opt : string -> category option
-(** Parse a category from its wire label.  Returns [None] for
-    unrecognised input. *)
-
 val level_to_string : level -> string
 (** Convert level to string representation. *)
 

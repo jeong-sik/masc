@@ -188,12 +188,6 @@ let get_string_required args key =
       else Error (Printf.sprintf "%s must not be empty" key)
   | None -> Error (Printf.sprintf "%s is required" key)
 
-(** Required integer. *)
-let get_int_required args key =
-  match Safe_ops.json_int_opt key args with
-  | Some i -> Ok i
-  | None -> Error (Printf.sprintf "%s is required" key)
-
 (** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
     Chains required field extractions with early error return. *)
 let ( let*! ) r f =

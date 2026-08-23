@@ -32,10 +32,6 @@ let openai_chat_completions_path = "/v1/chat/completions"
     matches what the Agent Core's own [api_openai.ml] uses internally. *)
 let chat_completions_path = "/chat/completions"
 
-(** OpenAI-compatible model listing path.  See
-    {!openai_chat_completions_path}. *)
-let openai_models_path = "/v1/models"
-
 (** Default URL for Ollama. *)
 let ollama_default_url =
   Printf.sprintf "http://127.0.0.1:%d" ollama_default_port

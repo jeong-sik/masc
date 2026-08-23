@@ -12,8 +12,6 @@ type secret_scope =
   | Shared_secret
   | Keeper_secret
 
-val secret_root_info : base_path:string -> keeper_name:string -> secret_root_info
-
 val secret_root : base_path:string -> keeper_name:string -> string
 
 val secret_roots : base_path:string -> keeper_name:string -> secret_root_info list

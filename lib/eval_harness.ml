@@ -60,10 +60,6 @@ type ownership =
   | Self_owned
   | Foreign
 
-let ownership_to_string = function
-  | Self_owned -> "self_owned"
-  | Foreign -> "foreign"
-
 type scenario = {
   id : string;                        (** Unique scenario identifier *)
   name : string;                      (** Human-readable name *)

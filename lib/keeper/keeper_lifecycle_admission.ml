@@ -34,11 +34,6 @@ let admit_autonomous = function
   | Paused latch -> Autonomous_denied (Autonomous_paused latch)
 ;;
 
-let paused_latch_to_wire = function
-  | Classified reason -> Keeper_latched_reason.to_wire reason
-  | Unclassified -> "unclassified"
-;;
-
 let state_to_wire = function
   | Active -> "active"
   | Paused _ -> "paused"

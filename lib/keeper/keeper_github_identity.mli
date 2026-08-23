@@ -40,9 +40,6 @@ val validate_local_tool_env : (string * string) list -> (unit, string) result
 val strip_github_token_env : string array -> string array
 val projected_token_env_names : string array -> string list
 
-val runtime_env :
-  config:Workspace.config -> keeper_name:string -> string array -> (string array, string) result
-
 type tool_identity_state =
   | Unconfigured
   | Configured of string
@@ -89,8 +86,6 @@ val docker_args_for_tool :
   container_masc_dir:string ->
   (docker_tool_projection, string) result
 
-val login_argv : hostname:string -> string list
-val logout_argv : hostname:string -> string list
 val login_env : config:Workspace.config -> keeper_name:string -> (string array, string) result
 
 val run_inherited : timeout_sec:float -> env:string array -> string list -> Unix.process_status
@@ -104,11 +99,7 @@ val observe :
     [effective_probe_scope] prevents callers from presenting it as proof that a
     Docker image contains a usable CLI/network stack. *)
 
-val auth_result_to_yojson : auth_result -> Yojson.Safe.t
 val observation_to_yojson : observation -> Yojson.Safe.t
-val secure_config_files :
-  config:Workspace.config -> keeper_name:string -> (unit, string) result
-
 val stream_login :
   config:Workspace.config ->
   keeper_name:string ->

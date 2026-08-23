@@ -126,8 +126,6 @@ val route_kind_label : route -> string
 (** Stable telemetry label: ["retry_after_observed" | "rotate_now" |
     "exhausted_visible_alive"]. *)
 
-val retry_class_label : retry_class -> string
-val rotate_class_label : rotate_class -> string
 val route_class_label : route -> string
 (** The route's class label ([retry_class_label] / [rotate_class_label] /
     [terminal_class_label] respectively). *)

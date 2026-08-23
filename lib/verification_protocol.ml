@@ -197,14 +197,6 @@ let notify_submit_for_verification ~(config : Workspace.config)
   ] @ spec.evidence_fields));
   ()
 
-let on_submit_for_verification ~(config : Workspace.config)
-    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
-  match create_submit_request ~config ~task ~assignee ~verification_id ~evidence_refs with
-  | Error e -> Error e
-  | Ok () ->
-    notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
-    Ok ()
-
 let completion_authority_fields (authority : Masc_domain.completion_authority) =
   [ ( "authority_kind"
     , `String (Masc_domain.completion_authority_kind authority) )

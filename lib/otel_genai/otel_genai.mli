@@ -88,20 +88,6 @@ module Event_name : sig
   val client_operation_exception : string
 end
 
-val keeper_turn_span_name : keeper_name:string -> string
-
-val keeper_turn_attrs
-  :  keeper_name:string
-  -> agent_name:string
-  -> runtime_id:string
-  -> trace_id:string
-  -> generation:int
-  -> max_context:int
-  -> channel:string
-  -> is_retry:bool
-  -> current_task_id:string option
-  -> attr list
-
 val tool_execution_attrs : tool_name:string -> attr list
 
 val with_keeper_turn_span

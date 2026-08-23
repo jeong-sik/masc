@@ -249,20 +249,6 @@ let session_mcp_url_of_endpoint (endpoint : Voice_config.endpoint) =
        | None -> Ok (default_session_url ~path:"/mcp")))
 ;;
 
-let session_health_url_of_endpoint (endpoint : Voice_config.endpoint) =
-  let adapter = adapter_for_endpoint endpoint in
-  if adapter.transport <> Voice_mcp
-  then
-    Error (Printf.sprintf "session endpoint %s must use voice_mcp transport" endpoint.id)
-  else (
-    match endpoint.health_url with
-    | Some url -> Ok url
-    | None ->
-      (match endpoint.base_url with
-       | Some base_url -> Ok (compose_endpoint_url ~base_url ~path:"/health")
-       | None -> Ok (default_session_url ~path:"/health")))
-;;
-
 let default_elevenlabs_base_url = Voice_config.default_elevenlabs_base_url
 
 let endpoint_base_url (endpoint : Voice_config.endpoint) =

@@ -6,10 +6,6 @@
 
 include module type of Keeper_config
 
-(** Resolve the keeper base directory ([.masc/keepers]) for [config],
-    creating it if missing. *)
-val keeper_dir_ : Workspace.config -> string
-
 (** Resolve the trace base directory ([.masc/traces]) for [config],
     creating it if missing. *)
 val session_base_dir_ : Workspace.config -> string

@@ -4,10 +4,6 @@
     empty PATH entry as the current directory. Callers use them only for
     pre-spawn availability checks; the actual spawn path remains the authority. *)
 
-val regular_file_is_executable : string -> bool
-(** [regular_file_is_executable path] returns [true] when [path] is an
-    executable regular file. *)
-
 val search_path_separator : char
 (** Platform search-path separator for [PATH]-style variables. *)
 

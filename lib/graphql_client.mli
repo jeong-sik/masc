@@ -43,7 +43,3 @@ val mutate
   -> unit
   -> (Yojson.Safe.t, string) result
 
-val extract_mutation_result
-  :  string
-  -> Yojson.Safe.t
-  -> (bool * string option, string) result

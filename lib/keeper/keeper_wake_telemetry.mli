@@ -13,11 +13,7 @@ type sizes = {
 
 val role_key : Agent_core.Types.role -> string
 
-val bytes_of_content_block : Agent_core.Types.content_block -> int
-
 val bytes_of_message_content : Agent_core.Types.message -> int
-
-val bytes_of_tool_schema_json : Agent_core.Tool.t list -> int
 
 val role_counts_with_pending_user :
   Agent_core.Types.message list -> (string * int) list

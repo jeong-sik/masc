@@ -418,7 +418,6 @@ let locator_target_leaf (locator : locator) =
   Capability_leaf.to_string locator.target_leaf
 ;;
 
-let prepared_owner (prepared : prepared) = prepared.owner
 let prepared_operation_id (prepared : prepared) = prepared.operation_id
 let prepared_locator (prepared : prepared) = prepared.locator
 let bound_prepared (bound : bound) = bound.prepared

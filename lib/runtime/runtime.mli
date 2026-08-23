@@ -415,10 +415,6 @@ val turn_timeout_s_of_runtime_id : string -> float option
     "keep whatever bound the caller already has". Consumed by
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
-val provider_id_of_runtime_id : string -> string option
-(** Owning provider id ([providers.<id>] in runtime.toml) of the runtime with
-    this binding-key id, or [None] when the runtime id is unknown. *)
-
 val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime
     snapshot.  Use this form across a provider call so a concurrent catalog

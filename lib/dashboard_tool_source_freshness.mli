@@ -79,16 +79,6 @@ val active_coverage_gaps :
 (** Filter coverage gaps down to the entries still active for the
     current source timestamp. *)
 
-val coverage_gaps_for_store :
-  source_name:string ->
-  durable_store:string ->
-  Yojson.Safe.t list
-(** Read the most recent 50 telemetry coverage-gap entries
-    (via {!Telemetry_coverage_gap.read_recent}) under
-    [<dirname durable_store>] and filter them down to entries
-    whose [source] field equals [source_name]. Returns the
-    empty list when [durable_store] is empty. *)
-
 val metadata_fields :
   source_name:string ->
   source_producer:string ->

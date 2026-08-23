@@ -231,15 +231,6 @@ val operator_disposition : t -> operator_disposition_kind * operator_disposition
     indicates a silent dead-end that operators must be notified about. *)
 val needs_operator_broadcast : operator_disposition_kind -> bool
 
-(** Structured payload emitted for [keeper.operator_broadcast_required].
-    Exposed so tests can pin the diagnostic fields of a durable receipt whose
-    disposition requires operator attention. *)
-val operator_broadcast_payload
-  :  t
-  -> disposition:operator_disposition_kind
-  -> reason:operator_disposition_reason
-  -> Yojson.Safe.t
-
 val append : Workspace.config -> t -> unit
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option
 val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.Safe.t) list

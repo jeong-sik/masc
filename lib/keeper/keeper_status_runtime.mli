@@ -46,11 +46,6 @@ val augment_keeper_diagnostic_json :
   Yojson.Safe.t ->
   Yojson.Safe.t
 
-(** Strict parse: returns [None] when the wire string is not one of the
-    seven canonical keeper_health labels so drift is visible at the
-    call site. *)
-val keeper_health_of_string_opt : string -> keeper_health option
-
 (** Keeper display status derived from keeper health. Closed so consumers that
     classify it match exhaustively. "paused" is an operator override applied
     above this layer, not a member of this domain. *)

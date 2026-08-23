@@ -15,7 +15,6 @@
 
 (** {1 Request timeout} *)
 
-val default_timeout_seconds : float
 val playback_dedup_window_sec : float
 
 val request_timeout_seconds : unit -> float
@@ -48,20 +47,9 @@ val get_voice_for_agent : string -> string
 
 (** {1 URI / endpoint resolution} *)
 
-val default_voice_uri : string -> Uri.t
-(** Construct the default voice session URI rooted at the local
-    runtime endpoint. *)
-
 val voice_mcp_uri : unit -> Uri.t
 (** MCP voice URL from the configured endpoint, falling back to
     [default_voice_uri "/mcp"] on any resolution failure. *)
-
-val voice_health_uri : unit -> Uri.t
-(** Health URL from the configured endpoint, falling back to
-    [default_voice_uri "/health"]. *)
-
-val voice_mcp_host : unit -> string
-val voice_mcp_port : unit -> int
 
 (** {1 Playback timeout} *)
 
@@ -144,10 +132,6 @@ val ensure_audio_dir : unit -> unit
 
 val log_info : string -> unit
 val log_error : string -> unit
-val log_debug : string -> unit
-(** Wrap [Log.info] / [Log.error] / [Log.debug] with the
-    [\[VoiceBridge\]] tag prefix so call sites read uniformly. *)
-
 (** {1 TTS payload projection} *)
 
 val append_provider_metadata :

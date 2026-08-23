@@ -53,19 +53,6 @@ let record_keeper_internal_tool_call ~tool_name ~disposition ~duration_ms =
     ()
 ;;
 
-let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
-  tool_usage_for_keeper keeper_name
-  |> List.sort (fun (_, a) (_, b) ->
-    Float.compare b.Keeper_types.last_used_at a.Keeper_types.last_used_at)
-  |> fun l ->
-  let rec take n acc = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | (name, _) :: rest -> take (n - 1) (name :: acc) rest
-  in
-  take limit [] l
-;;
-
 (* ── end tracking ────────────────────────────────────────────── *)
 
 (* Build AGENT_CORE Tool.t list from keeper's allowed tools.

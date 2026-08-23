@@ -306,10 +306,6 @@ let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
   Keeper_tool_memory_runtime.keeper_context_status_json ~config ~meta ~ctx_work
 ;;
 
-let handle_memory_search ~config ~(meta : keeper_meta) ~ctx_work ~args =
-  Keeper_tool_memory_runtime.keeper_memory_search_json ~config ~meta ~ctx_work ~args
-;;
-
 let handle_memory_write_with_outcome
       ~config
       ~(meta : keeper_meta)
@@ -1501,10 +1497,6 @@ let handle_voice_with_outcome
     ()
 ;;
 
-let handle_task ~config ~(meta : keeper_meta) ~name ~args =
-  Keeper_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
-;;
-
 (* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
    returned by [Tool_*.dispatch] to the producer-owned execution outcome.
    [None] means the dispatcher does not recognise the name (the descriptor →
@@ -1758,27 +1750,6 @@ let handle_masc_local_runtime_with_outcome
     ~name
     ~args
   |> dispatch_option_to_execution ~name
-;;
-
-let handle_masc_local_runtime
-      ~config
-      ~meta
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~name
-      ~args
-      ()
-  =
-  (handle_masc_local_runtime_with_outcome
-     ~config
-     ~meta
-     ?continuation_channel
-     ?gate_context
-     ?gate_grant
-     ~name
-     ~args
-     ()).raw_output
 ;;
 
 (* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/

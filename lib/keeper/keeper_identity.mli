@@ -13,7 +13,6 @@ val keeper_name_from_agent_name : string -> string option
     caller never holds "this is an alias" without the name it resolves to. *)
 val keeper_name_of_agent_alias : string -> string option
 
-val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
 val is_keeper_principal_agent_name : string -> bool
 (** [is_keeper_principal_agent_name name] returns true for task-owner
@@ -68,8 +67,6 @@ type parsed_identity = {
   agent_name : string;
   trace_id : string option;
 }
-
-val parse_json_identity : Yojson.Safe.t -> parsed_identity
 
 (** {1 SSOT keeper identity names (RFC P1)} *)
 

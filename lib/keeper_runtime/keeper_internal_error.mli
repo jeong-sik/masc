@@ -28,12 +28,6 @@ type capacity_backpressure_source =
   | Client_capacity
   | Runtime_slot
 
-val capacity_backpressure_source_to_string :
-  capacity_backpressure_source -> string
-
-val capacity_backpressure_source_of_string :
-  string -> capacity_backpressure_source option
-
 type capacity_retry_after =
   | Explicit of float
   | No_retry_hint
@@ -70,8 +64,6 @@ val network_error_kind_to_string :
   Llm_provider.Http_client.network_error_kind -> string
 
 val accept_rejection_kind_to_string : accept_rejection_kind -> string
-val accept_rejection_kind_of_string : string -> accept_rejection_kind option
-
 type accept_response_shape =
   | Accept_response_empty
   | Accept_response_thinking_only
@@ -81,8 +73,6 @@ type accept_response_shape =
   | Accept_response_mixed_without_deliverable_content
   | Accept_response_has_deliverable_content
 
-val accept_response_shape_to_string : accept_response_shape -> string
-val accept_response_shape_of_string : string -> accept_response_shape option
 val accept_response_shape_of_agent_core :
   Agent_core.Response_shape.content_shape -> accept_response_shape
 
@@ -174,8 +164,6 @@ type masc_internal_error =
       stage : gate_replay_repair_stage;
       detail : string;
     }
-
-val masc_internal_error_prefix : string
 
 val runtime_runner_execute_site : string
 

@@ -210,13 +210,6 @@ let authorization_source_of_string = function
   | _ -> None
 ;;
 
-let string_opt_of_json = function
-  | `String value ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then None else Some trimmed
-  | _ -> None
-;;
-
 let bool_member key json ~default =
   match Json_util.assoc_member_opt key json with
   | Some (`Bool value) -> value

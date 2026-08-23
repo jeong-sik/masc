@@ -293,12 +293,6 @@ let projected_token_env_names env =
     github_token_env_names
 ;;
 
-let runtime_env ~config ~keeper_name env =
-  match ensure_config_dir ~config ~keeper_name with
-  | Error _ as error -> error
-  | Ok keeper_config_dir -> Ok (overlay_config_env ~config_dir:keeper_config_dir env)
-;;
-
 type tool_identity_state =
   | Unconfigured
   | Configured of string

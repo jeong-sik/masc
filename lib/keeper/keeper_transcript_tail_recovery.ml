@@ -28,15 +28,6 @@ let empty_report =
   }
 ;;
 
-let outcome_to_wire = function
-  | Already_dispatchable -> "already_dispatchable"
-  | Closed _ -> "closed"
-  | Unparseable _ -> "unparseable"
-  | Meta_unavailable _ -> "meta_unavailable"
-  | Checkpoint_unavailable _ -> "checkpoint_unavailable"
-  | Commit_rejected _ -> "commit_rejected"
-;;
-
 (* A keeper with no durable metadata, or whose canonical checkpoint has not been
    written yet, has no in-flight tool cycle to recover. Those are ordinary
    startup states, not failures, so they do not inflate the failure count that

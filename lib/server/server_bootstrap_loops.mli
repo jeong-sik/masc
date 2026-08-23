@@ -94,13 +94,8 @@ val prepare_keeper_persistence :
     [requested_base_path] is diagnostic identity only; every persistence and
     backend operation uses the canonical [config]. *)
 
-val keeper_persistence_report :
-  prepared_keeper_persistence -> keeper_persistence_report
-
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string
-
-val keeper_persistence_failure_to_string : keeper_persistence_failure -> string
 
 val claim_prepared_keeper_persistence :
   config:Workspace.config ->

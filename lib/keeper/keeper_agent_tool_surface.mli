@@ -17,7 +17,6 @@ type turn_lane =
   | Lane_retry
 
 val turn_lane_to_string : turn_lane -> string
-val turn_lane_of_string : string -> turn_lane option
 val turn_lane_to_yojson : turn_lane -> Yojson.Safe.t
 
 (** Diagnostic surface metrics emitted into trajectory entries. *)

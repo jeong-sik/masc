@@ -581,7 +581,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # export (mcp_server.jsonrpc_request_to_yojson).
 # 521 -> 519: dropping server_routes_http_common.state_switch_opt and
 # state_clock_opt removed two more dead exports.
-DEAD_EXPORT_BASELINE = 519
+# 519 -> 55: swept every export the audit could reach. The facades here mirror
+# their sub-modules with `include module type of` and never re-declare what
+# they forward, so dropping the declaration at the owning module narrowed the
+# facade with it and no facade needed editing. Declarations went first; the
+# compiler then reported the orphaned implementations, and each round exposed
+# more, so the count fell further than the declarations removed. Held back:
+# twelve names carrying the spec-bridge shape this file warns about above.
+# Those need the three questions answered one at a time, not a scan. What
+# remains is those twelve plus the entries an odoc link names as an intended
+# entry point.
+#
+# Do not name the survivors here. A first draft of this note listed three of
+# them, and the token scan read its own comment as a caller: the gate counted
+# three fewer than the tree held. State the test, not the roster -- as the
+# paragraph above already says.
+DEAD_EXPORT_BASELINE = 55
 
 
 def run_ratchet(count: int) -> int:

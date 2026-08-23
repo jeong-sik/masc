@@ -37,18 +37,6 @@ val notify_submit_for_verification :
     Used by callers that have already created the board post via
     {!create_submit_request} but need a separate SSE broadcast. *)
 
-val on_submit_for_verification :
-  config:Workspace.config ->
-  task:Masc_domain.task ->
-  assignee:string ->
-  verification_id:string ->
-  evidence_refs:string list ->
-  (unit, string) result
-(** [on_submit_for_verification ...] is the combined wrapper:
-    {!create_submit_request} + {!notify_submit_for_verification}.
-    Returns the result of the persist step; SSE notify runs only
-    on success. *)
-
 (** {1 Task verdict notifications} *)
 
 val notify_approve_verification :

@@ -11,9 +11,6 @@
     and IDE reads against the user's working tree join on the same
     codebase identity. *)
 
-val store_subdir : string
-(** The literal subdirectory name [".masc-ide"]. *)
-
 val store_path : base_dir:string -> string
 (** [store_path ~base_dir] returns [base_dir/.masc-ide]. *)
 

@@ -1,12 +1,5 @@
 (** H2 gateway response helpers. *)
 
-val h2_respond_body :
-  ?status:H2.Status.t ->
-  ?extra_headers:(string * string) list ->
-  ?compress:bool ->
-  content_type:string ->
-  H2.Reqd.t -> string -> unit
-
 val h2_respond_json :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->

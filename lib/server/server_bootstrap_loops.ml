@@ -934,8 +934,6 @@ let prepare_keeper_persistence ?requested_base_path ~config () =
        else Error Preparation_ownership_lost)
 ;;
 
-let keeper_persistence_report prepared = prepared.report
-
 type base_path_validation_error =
   | Base_path_mismatch of { observed_canonical : string }
   | Base_path_identity_unavailable of keeper_persistence_failure

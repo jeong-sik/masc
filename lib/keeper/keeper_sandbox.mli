@@ -76,9 +76,6 @@ end
 
 val backend_to_string : backend -> string
 
-val backend_of_profile :
-  Keeper_types_profile_sandbox.sandbox_profile -> backend
-
 (** {1 Path resolution} *)
 
 (** [backend_of_config_agent ~config ~agent_name] resolves the keeper's
@@ -93,13 +90,6 @@ val backend_of_config_agent :
 (** [host_root_rel_of_config_agent ~config ~agent_name] returns the
     backend-scoped relative sandbox root for [agent_name]. *)
 val host_root_rel_of_config_agent :
-  config:Workspace.config ->
-  agent_name:string ->
-  string
-
-(** [host_root_abs_of_config_agent ~config ~agent_name] returns the
-    backend-scoped absolute host-side sandbox root for [agent_name]. *)
-val host_root_abs_of_config_agent :
   config:Workspace.config ->
   agent_name:string ->
   string

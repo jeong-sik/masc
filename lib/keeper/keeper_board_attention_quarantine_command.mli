@@ -53,8 +53,6 @@ type report =
 val input_error_to_string : input_error -> string
 val input_error_to_json : input_error -> Yojson.Safe.t
 val execution_error_label : execution_error -> string
-val execution_error_to_json : execution_error -> Yojson.Safe.t
-
 val parse_request : Yojson.Safe.t -> (request, input_error) result
 val parse_tool_command : Yojson.Safe.t -> (t, input_error) result
 

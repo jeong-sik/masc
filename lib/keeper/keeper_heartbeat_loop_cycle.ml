@@ -80,22 +80,6 @@ let rec meta = function
   | Manual_compaction_applied { followup; _ } -> meta followup
 ;;
 
-let rec turn_failure = function
-  | Failed { failure; _ } -> Some failure
-  | Manual_compaction_applied { followup; _ } -> turn_failure followup
-  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
-  | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
-    None
-;;
-
-let manual_compaction_followup_failure = function
-  | Manual_compaction_applied { followup; _ } -> turn_failure followup
-  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
-  | Failed _ | Manual_compaction_failed _ | Manual_compaction_not_applied _
-    ->
-    None
-;;
-
 let rec deferred_runtime_lane = function
   | Failed { failure; _ } -> failure.Keeper_unified_turn.deferred_runtime_lane
   | Manual_compaction_applied { followup; _ } -> deferred_runtime_lane followup

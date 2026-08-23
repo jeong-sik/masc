@@ -932,26 +932,6 @@ let project_accepted_transfer_guarded_result
          | Ok () -> Ok (next, Transfer_projection_result result)))
 ;;
 
-let project_accepted_transfer_result
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  =
-  let projection =
-    project_accepted_transfer_guarded_result
-      ~authorize_first_projection:(fun () -> (Ok () : (unit, string) result))
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  in
-  Result.bind projection (function
-    | Transfer_projection_result result -> Ok result
-    | First_projection_rejected _ ->
-      Error "unguarded transfer projection rejected its unconditional authority")
-;;
-
 let update_result ?after_commit ~base_path ~keeper_name f =
   update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
 ;;

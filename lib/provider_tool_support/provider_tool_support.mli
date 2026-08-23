@@ -24,5 +24,4 @@ val provider_supports_inline_tools :
   Llm_provider.Provider_config.t ->
   bool
 
-val provider_debug_label : Llm_provider.Provider_config.t -> string
 val provider_kind_label : Llm_provider.Provider_config.t -> string

@@ -37,7 +37,6 @@ type schedule_source =
   | Automated_request
   | System_request
 
-val schedule_sources : schedule_source list
 val schedule_source_to_string : schedule_source -> string
 val schedule_source_of_string : string -> (schedule_source, decode_error) result
 val schedule_source_strings : string list
@@ -58,7 +57,6 @@ type wake_status =
   | Wake_succeeded
   | Wake_failed
 
-val wake_statuses : wake_status list
 val wake_status_to_string : wake_status -> string
 val wake_status_of_string : string -> (wake_status, decode_error) result
 val wake_status_strings : string list

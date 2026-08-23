@@ -46,17 +46,6 @@ let maybe_bool_override field default live acc =
   | _ -> acc
 ;;
 
-let maybe_string_list_override field default live acc =
-  match default with
-  | Some authored when authored <> live ->
-    override_field
-      field
-      ~default_value:(Json_util.json_string_list authored)
-      ~live_value:(Json_util.json_string_list live)
-    :: acc
-  | _ -> acc
-;;
-
 let nonempty_string_list_override field default live acc =
   if default <> [] && default <> live
   then
@@ -68,10 +57,3 @@ let nonempty_string_list_override field default live acc =
   else acc
 ;;
 
-let maybe_string_option_override field default live acc =
-  match default, live with
-  | Some authored, Some active when authored <> active ->
-    override_field field ~default_value:(`String authored) ~live_value:(`String active)
-    :: acc
-  | _ -> acc
-;;

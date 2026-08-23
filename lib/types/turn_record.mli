@@ -213,7 +213,6 @@ type t =
 
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
 val input_component_id_to_string : input_component_id -> string
-val input_component_to_json : input_component -> Yojson.Safe.t
 val turn_kind_to_string : turn_kind -> string
 val raw_trace_run_ref_to_json : raw_trace_run_ref -> Yojson.Safe.t
 

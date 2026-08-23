@@ -45,9 +45,6 @@ val reaction_kind_of_string : string -> (reaction_kind, reaction_decode_error) r
     reaction algebra return a typed decoder error and can never become a
     current reaction. *)
 
-val board_stimulus_id : post_id:string -> string
-(** Stable id for board-originated stimuli. *)
-
 val stimulus_id_of_event_queue : Keeper_event_queue.stimulus -> string
 (** Stable id derived from the event queue stimulus payload. Scheduled wakes
     preserve the enclosing schedule occurrence [post_id] exactly. *)

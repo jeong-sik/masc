@@ -29,10 +29,6 @@ val operator_snapshot_recent_completed_limit : unit -> int
 
 (** {1 Numeric helpers} *)
 
-val safe_age_seconds_opt :
-  now_ts:float -> event_ts:float -> int option
-(** Bounded non-negative age in seconds; [None] for NaN/Inf inputs. *)
-
 val keeper_tail_lines_or_empty :
   site:string -> string -> max_bytes:int -> max_lines:int -> string list
 (** Dashboard-local degraded tail read.  The caller must name the

@@ -374,16 +374,6 @@ val project_accepted_transfer_guarded_result :
     converges after target identity rotation, while a first projection cannot
     create state for an absent or replaced Keeper. *)
 
-val project_accepted_transfer_result :
-  after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  transfer:accepted_transfer ->
-  (transfer_projection_result, string) result
-(** Atomically persist target-side transfer accounting with the exact enqueue.
-    The accounting survives target consumption and makes later receipt replay
-    return [Transfer_already_projected] without a second target effect. *)
-
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 

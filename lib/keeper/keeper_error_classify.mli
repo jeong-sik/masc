@@ -106,22 +106,10 @@ type degraded_retry_reason =
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
-val normalized_runtime_id : catalog_names:string list -> string -> string
-(** Normalize a runtime name for rotation matching.
-    All runtime names are plain provider:model strings. *)
-
 type degraded_retry =
   { next_runtime : string
   ; fallback_reason : degraded_retry_reason
   }
-
-(** Opportunistically fail open to a broader runtime when the current
-    effective runtime is temporarily unavailable (for example cooldown /
-    phase-buffer bootstrap fallback). *)
-val fallback_runtime_for_unavailable_profile :
-  base_runtime:string ->
-  effective_runtime:string ->
-  string option
 
 (** Classifies an agent-core error into a fallback reason label when the runtime
     failure is recoverable via [fallback_runtime] or [degraded_rotation].
@@ -143,13 +131,6 @@ val fallback_runtime_for_unavailable_profile :
     [degraded_rotation_after_recoverable_error]. *)
 val recoverable_runtime_failure_reason :
   Agent_core.Error.t -> degraded_retry_reason option
-
-(** Returns the one-shot degraded retry lane for recoverable whole-runtime
-    failures. Already-degraded lanes do not broaden further. *)
-val degraded_retry_after_recoverable_error :
-  effective_runtime:string ->
-  Agent_core.Error.t ->
-  degraded_retry option
 
 (** Returns the next untried runtime in the same-turn recovery group for a
     whole-runtime failure. Uses the default degraded rotation candidate set

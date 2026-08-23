@@ -25,7 +25,6 @@ type inventory =
   }
 
 val database_file : string
-val database_schema : string
 val open_or_create : path:string -> (t, error) result
 val close : t -> (unit, error) result
 val path : t -> string

@@ -21,10 +21,6 @@ type keeper_outcome =
   | Checkpoint_unavailable of Keeper_checkpoint_store.checkpoint_ref_load_error
   | Commit_rejected of Keeper_checkpoint_store.checkpoint_cas_error
 
-val outcome_to_wire : keeper_outcome -> string
-(** Stable projection for logs and metrics. Decisions must match on the typed
-    value, not this string. *)
-
 type report =
   { examined : int
   ; closed : int

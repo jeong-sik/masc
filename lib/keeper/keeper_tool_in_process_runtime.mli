@@ -95,13 +95,6 @@ val handle_context_status
   -> args:Yojson.Safe.t
   -> string
 
-val handle_memory_search
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> ctx_work:working_context
-  -> args:Yojson.Safe.t
-  -> string
-
 val handle_memory_write_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
@@ -172,15 +165,6 @@ val handle_voice_with_outcome
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
-
-(** [handle_task] dispatches to [Keeper_tool_task_runtime.handle_keeper_task_tool]
-    by [name]. Caller must pass a name in the task / broadcast cluster. *)
-val handle_task
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> string
 
 (** RFC-0182 §3.1 — [handle_masc_task_with_outcome] is the descriptor-projection
     cluster handler for [masc_task_*] tools (add_task / batch_add_tasks /
@@ -355,21 +339,6 @@ val handle_masc_keeper_with_outcome
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
-
-(** Dispatch the local-runtime descriptor cluster. The arbitrary-network
-    Ollama probe crosses the neutral external-effect Gate with the exact
-    operation identity and complete input; other registered local-runtime
-    operations retain their existing dispatch behavior. *)
-val handle_masc_local_runtime
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?gate_context:(unit -> Keeper_gate.causal_context)
-  -> ?gate_grant:Keeper_gate.cycle_grant
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> unit
-  -> string
 
 val handle_masc_local_runtime_with_outcome
   :  config:Workspace.config

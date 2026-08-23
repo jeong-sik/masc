@@ -64,17 +64,6 @@ val format_current_task_observation
     provenance, and handoff as an autonomous wake without persisting that
     context. Storage error text is not model-facing content. *)
 
-val effective_autonomous_instructions :
-  meta:Keeper_meta_contract.keeper_meta ->
-  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?channel:Keeper_world_observation.keeper_cycle_channel ->
-  unit ->
-  string
-(** Resolve the single instructions value used by every system-prompt
-    entrypoint and its dashboard projection. When [channel] is
-    [Scheduled_autonomous] and [meta.autonomous_instructions] is set and
-    non-empty, returns autonomous_instructions instead of the default. *)
-
 val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->

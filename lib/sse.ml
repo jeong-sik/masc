@@ -187,8 +187,6 @@ type session_snapshot = {
   idle_seconds : float;
 }
 
-let session_kind_to_string = Transport_metrics.sse_session_kind_to_string
-
 (** Minimum interval between full transport snapshot computations (seconds).
     The snapshot iterates all SSE clients and builds per-session records;
     at ~9 broadcasts/sec this path accounts for most allocation on the

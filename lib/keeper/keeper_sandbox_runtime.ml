@@ -794,27 +794,6 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     ]
 ;;
 
-let docker_preflight_failure_message (preflight : docker_preflight) =
-  let reasons =
-    [ preflight.docker_runtime_error
-    ; preflight.hardening_error
-    ; preflight.image_error
-    ]
-    |> List.filter_map (fun item -> item)
-    |> List.filter (fun s -> s <> "")
-    |> Json_util.dedupe_keep_order
-  in
-  let next_actions =
-    match preflight.next_actions with
-    | [] -> ""
-    | actions -> " Next: " ^ String.concat " " actions
-  in
-  Printf.sprintf
-    "Docker sandbox preflight failed: %s.%s"
-    (String.concat "; " reasons)
-    next_actions
-;;
-
 let ensure_keeper_sandbox_runtime_optional ?timeout_sec () =
   let seccomp_profile =
     String.trim (Env_config_sandbox.Hardening.seccomp_profile ())

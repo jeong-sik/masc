@@ -123,11 +123,6 @@ val unregister_if_current : string -> int -> unit
     fire against the new one. *)
 val set_disconnect_hook : string -> (unit -> unit) -> unit
 
-(** [clear_disconnect_hook session_id] removes any hook previously
-    installed for [session_id].  Idempotent — safe to call when no hook
-    exists. *)
-val clear_disconnect_hook : string -> unit
-
 val exists : string -> bool
 val touch : string -> unit
 val update_last_event_id : string -> int -> unit
@@ -225,8 +220,6 @@ val rewrite_event_buffer_for_test : unit -> unit
 (** {1 Snapshots} *)
 
 val sync_transport_snapshot : ?force:bool -> unit -> unit
-val session_kind_to_string : session_kind -> string
-
 (** {1 Test Hooks} *)
 
 val register_commit_test_hook : (unit -> unit) option Atomic.t

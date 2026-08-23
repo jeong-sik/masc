@@ -327,23 +327,24 @@ let v4_registration_row =
   {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
 
 let test_store_version_pins_the_registration_shape () =
-  let replay_single row =
+  (* Reads the decoder's verdict on the row, not what survives replay. A
+     registration that decodes is still dropped from the replayed registry —
+     running exact-output fibers do not outlive a restart — so "does the run
+     come back" cannot tell an accepted row from a refused one. [cut_replay_log]
+     reports what the same decoder read, and counts what it refused. *)
+  let malformed_lines row =
     let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
     Fs_compat.save_file path (row ^ "\n");
-    let replayed = R.replay path in
-    let status =
-      R.get replayed ~run_id:"exact-board-attention-pin"
-      |> Option.map (fun run -> R.status_label run.R.status)
-    in
+    let report = R.cut_replay_log ~execute:false path in
     remove_if_exists path;
-    status
+    report.Run_registry_core.lines_read, report.Run_registry_core.malformed_lines
   in
   check string "the row shape below belongs to this store version"
     "exact-lane-runs-v5.jsonl" R.storage_filename;
-  check (option string) "a v5 registration row replays as a running run"
-    (Some "running") (replay_single v5_registration_row);
-  check (option string) "the field v4 carried and v5 removed is rejected, not ignored"
-    None (replay_single v4_registration_row)
+  check (pair int int) "a v5 registration row is read and accepted"
+    (1, 0) (malformed_lines v5_registration_row);
+  check (pair int int) "the field v4 carried and v5 removed is rejected, not ignored"
+    (1, 1) (malformed_lines v4_registration_row)
 ;;
 
 (* The retained-run bound exists to serve the internal-agents monitor, which

@@ -323,7 +323,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "keeper_library_search"
     ; "masc_library_add"
     ; "masc_library_list"
-    ; "masc_heartbeat"
     ; "masc_gc"
     ; "masc_get_metrics"
     ];
@@ -349,6 +348,19 @@ let test_registered_cluster_model_projections_are_explicit () =
          authority. *)
     ; "masc_runtime_verify"
     ; "masc_runtime_ollama_probe"
+      (* #29681 took these off the Keeper model surface: call counts of zero,
+         and every Keeper turn was paying for their schemas. They stay
+         registered for MCP/HTTP consumers, which is what Operator_only means
+         here. *)
+    ; "masc_agent_card"
+    ; "masc_agent_timeline"
+    ; "masc_check"
+    ; "masc_heartbeat"
+    ; "masc_plan_get"
+    ; "masc_plan_init"
+    ; "masc_plan_set_task"
+    ; "masc_plan_update"
+    ; "masc_tool_help"
     ];
   List.iter
     (fun (name, projected_by) ->

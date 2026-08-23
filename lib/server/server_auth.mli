@@ -271,6 +271,16 @@ val auth_error_headers :
     responses receive a plain Bearer challenge; MCP resource metadata is added
     only by MCP transport responders. *)
 
+val auth_error_cors_headers : Httpun.Request.t -> (string * string) list
+(** The CORS headers an auth-error response carries, for either protocol.
+
+    The origin goes through admission: an admitted one is reflected, and
+    anything else — absent, rejected, multiple, malformed — gets [vary: Origin]
+    and nothing more. H1 used to reflect [get_origin] instead, which answers
+    ["*"] with no Origin present and raises on a malformed one, so the same 401
+    left the server with different CORS headers depending on the protocol
+    (#28166). *)
+
 val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer

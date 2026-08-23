@@ -5,6 +5,7 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ApiCore from '../api/core'
 
 // 90s window absorbs cold-build transform overhead (observed 60-140s on
 // the first run) for the first/heaviest test in this file — render of a
@@ -204,7 +205,7 @@ async function loadComponentWithApi(api: {
   // helpers), and a hand-listed stub breaks the whole suite whenever that
   // graph grows (36/37 failed on main, 2026-08-23).
   vi.doMock('../api/core', async () => {
-    const actual = await vi.importActual<typeof import('../api/core')>('../api/core')
+    const actual = await vi.importActual<typeof ApiCore>('../api/core')
     return {
       ...actual,
       post: api.post ?? vi.fn().mockResolvedValue({ ok: true }),

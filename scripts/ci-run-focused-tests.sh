@@ -257,6 +257,76 @@ normal_targets=(
   @test/runtest-test_schedule_tool_wiring
   @test/runtest-test_keeper_system_prompt_bytes
   @test/runtest-test_keeper_tool_schema_bytes
+  @test/runtest-test_sandbox_inspect_trim_10488
+  @test/runtest-test_server_activity_http
+  @test/runtest-test_server_base_path_diagnostics
+  @test/runtest-test_server_dashboard_http_keeper_api_trace
+  @test/runtest-test_server_dashboard_http_keeper_memory_health
+  @test/runtest-test_server_hibernation
+  @test/runtest-test_server_ide_http
+  @test/runtest-test_server_ide_lsp_proxy
+  @test/runtest-test_server_startup_takeover
+  @test/runtest-test_server_timing
+  @test/runtest-test_session
+  @test/runtest-test_session_lifecycle_event
+  @test/runtest-test_set_util
+  @test/runtest-test_shutdown_benign_termination
+  @test/runtest-test_sse
+  @test/runtest-test_sse_external_sub
+  @test/runtest-test_sse_qw
+  @test/runtest-test_start_masc_mcp_script
+  @test/runtest-test_stop_reason_label
+  @test/runtest-test_streamable_http_upgrade
+  @test/runtest-test_string_util
+  @test/runtest-test_subscriptions
+  @test/runtest-test_surface_ref
+  @test/runtest-test_system_error_class
+  @test/runtest-test_task_transition_broadcast
+  @test/runtest-test_telemetry_error_occurred_wire_10358
+  @test/runtest-test_telemetry_observe
+  @test/runtest-test_telemetry_unified
+  @test/runtest-test_telemetry_unified_source
+  @test/runtest-test_timeout_origin
+  @test/runtest-test_tool_agent_timeline_build
+  @test/runtest-test_tool_agent_timeline_name_match
+  @test/runtest-test_tool_assignment_telemetry
+  @test/runtest-test_tool_bridge_externalize
+  @test/runtest-test_tool_dispatch
+  @test/runtest-test_tool_error
+  @test/runtest-test_tool_hooks
+  @test/runtest-test_tool_local_runtime_probe
+  @test/runtest-test_tool_metrics
+  @test/runtest-test_tool_metrics_persist
+  @test/runtest-test_tool_output_washing_e2e
+  @test/runtest-test_tool_quality_classify
+  @test/runtest-test_tool_registry
+  @test/runtest-test_tool_resolution_runtime_projection
+  @test/runtest-test_tool_result
+  @test/runtest-test_tool_token
+  @test/runtest-test_tool_unified
+  @test/runtest-test_trajectory
+  @test/runtest-test_transport_read_model
+  @test/runtest-test_turn_id_propagation
+  @test/runtest-test_validation
+  @test/runtest-test_verify_handoff_tool
+  @test/runtest-test_voice_bridge_error
+  @test/runtest-test_with_cleanups_on_release
+  @test/runtest-test_with_process_coverage
+  @test/runtest-test_workspace_bind_fail_closed
+  @test/runtest-test_workspace_coverage
+  @test/runtest-test_workspace_file_confidentiality
+  @test/runtest-test_workspace_goal_index
+  @test/runtest-test_workspace_handoff_boundary
+  @test/runtest-test_workspace_messages_raw
+  @test/runtest-test_workspace_routes_keeper
+  @test/runtest-test_workspace_state_recovery
+  @test/runtest-test_workspace_task_delete
+  @test/runtest-test_workspace_task_lifecycle
+  @test/runtest-test_workspace_task_verification_phase_e
+  @test/runtest-test_workspace_telemetry_drop_non_eio
+  @test/runtest-test_workspace_tree_exclusions
+  @test/runtest-test_worktree_detection
+  @test/runtest-test_yojson_type_error_board
   @test/runtest-test_keeper_prompt_metrics
   @test/runtest-test_keeper_surface_presence_prompt
   @test/runtest-test_keeper_board_attention_partition

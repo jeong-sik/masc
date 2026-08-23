@@ -1331,16 +1331,22 @@ let keeper_status_word (status : Status.control_plane_status option) =
   | Some value -> Status.control_plane_status_to_string value
 
 (* The runtime id is [provider.model], and the provider half repeats inside the
-   model half often enough that printing both costs the column its width. *)
+   model half often enough that printing both costs the column its width. The
+   phase is the fine-grained state-machine reading from GET /api/v1/gate/keepers,
+   shown ahead of the model so an operator scanning the column sees lifecycle
+   state first. *)
 let keeper_runtime_label (runtime : keeper_runtime option) =
   match runtime with
   | None -> "\xe2\x80\x94"
   | Some row -> (
       let raw = Terminal_text.single_line row.kr_runtime_id in
-      match String.index_opt raw '.' with
-      | Some idx when idx + 1 < String.length raw ->
-          String.sub raw (idx + 1) (String.length raw - idx - 1)
-      | Some _ | None -> raw)
+      let model =
+        match String.index_opt raw '.' with
+        | Some idx when idx + 1 < String.length raw ->
+            String.sub raw (idx + 1) (String.length raw - idx - 1)
+        | Some _ | None -> raw
+      in
+      Printf.sprintf "%s %s" (Terminal_text.single_line row.kr_phase) model)
 
 (* Two dispositions an operator needs before stopping anything: whether the
    keeper comes back by itself, and whether it takes turns without being

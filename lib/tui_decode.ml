@@ -49,6 +49,7 @@ type keeper_runtime = {
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
+  kr_phase : string;
 }
 
 type goal_proof =
@@ -1425,6 +1426,7 @@ let decode_keeper_runtime json =
   let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
   let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
   let* kr_runtime_id = required_string_field json "runtime_id" in
+  let* kr_phase = required_string_field json "phase" in
   Ok
     { kr_name
     ; kr_status
@@ -1432,6 +1434,7 @@ let decode_keeper_runtime json =
     ; kr_autoboot_enabled
     ; kr_proactive_enabled
     ; kr_runtime_id
+    ; kr_phase
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

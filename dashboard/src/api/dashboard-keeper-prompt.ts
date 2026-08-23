@@ -13,7 +13,7 @@
 import { get, post, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import { isRecord, asNumber, asString } from '../components/common/normalize'
-import { type TurnPromptBlockId } from './dashboard-turn-records'
+import { decodeTurnPromptBlockId, type TurnPromptBlockId } from './dashboard-turn-records'
 
 export type PromptCaptureBlock = {
   readonly id: TurnPromptBlockId
@@ -31,22 +31,9 @@ export type PromptCapture = {
   readonly assembledBytes: number
 }
 
-function decodeBlockId(raw: unknown): TurnPromptBlockId | null {
-  switch (raw) {
-    case 'keeper_instructions':
-    case 'dynamic_context':
-    case 'temporal_summary':
-    case 'memory_os_recall':
-    case 'operator_note':
-      return raw
-    default:
-      return null
-  }
-}
-
 function decodeCaptureBlock(raw: unknown): PromptCaptureBlock | null {
   if (!isRecord(raw)) return null
-  const id = decodeBlockId(raw.id)
+  const id = decodeTurnPromptBlockId(raw.id)
   const bytes = asNumber(raw.bytes)
   const text = typeof raw.text === 'string' ? raw.text : null
   if (id === null || bytes == null || !Number.isSafeInteger(bytes) || bytes < 0 || text === null) {

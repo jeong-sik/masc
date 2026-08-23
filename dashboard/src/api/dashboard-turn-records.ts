@@ -7,12 +7,26 @@ import { ensureDevToken } from './dev-token'
 import { isRecord, asBoolean, asNumber, asString, asRecordArray } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
-export type TurnPromptBlockId =
-  | 'keeper_instructions'
-  | 'dynamic_context'
-  | 'temporal_summary'
-  | 'memory_os_recall'
-  | 'operator_note'
+// The type is derived from the list, and the decoder reads the list, so a
+// block id is added or removed in one place. It used to be a hand-written
+// union with a switch beside it and a second switch in dashboard-keeper-prompt:
+// the persona hard-cut (masc#27048) updated the type and one switch, the twin
+// kept `case 'persona'`, and three adversarial-review rounds ran red on it.
+export const TURN_PROMPT_BLOCK_IDS = [
+  'keeper_instructions',
+  'dynamic_context',
+  'temporal_summary',
+  'memory_os_recall',
+  'operator_note',
+] as const
+
+export type TurnPromptBlockId = (typeof TURN_PROMPT_BLOCK_IDS)[number]
+
+export function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
+  return (TURN_PROMPT_BLOCK_IDS as readonly unknown[]).includes(raw)
+    ? (raw as TurnPromptBlockId)
+    : null
+}
 
 export type TurnInputComponentId =
   | `prompt.${TurnPromptBlockId}`
@@ -314,19 +328,6 @@ function wholeSecondIsoOfUnixSeconds(raw: number): string | null {
   const date = new Date(Math.floor(raw) * 1000)
   if (!Number.isFinite(date.getTime())) return null
   return date.toISOString().replace('.000Z', 'Z')
-}
-
-function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
-  switch (raw) {
-    case 'keeper_instructions':
-    case 'dynamic_context':
-    case 'temporal_summary':
-    case 'memory_os_recall':
-    case 'operator_note':
-      return raw
-    default:
-      return null
-  }
 }
 
 function decodeTurnBlock(raw: unknown): TurnBlock | null {

@@ -17,6 +17,7 @@ import { keepers, executionError, executionLoaded } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
+import { BroadcastComposer } from './broadcast-composer'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../../composite-signals'
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import { formatCompactAge, formatRelativeSec } from '../../lib/format-time'
@@ -533,6 +534,7 @@ export function KeeperWorkspaceRoster({
 }): VNode {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [bcastOpen, setBcastOpen] = useState(false)
   const filter = rosterFilterPref.value
   const sort = rosterSortPref.value
   const setFilter = (next: RosterFilter) => {
@@ -736,6 +738,16 @@ export function KeeperWorkspaceRoster({
               >
                 <${Search} size=${14} aria-hidden="true" />
               </button>
+              <button
+                type="button"
+                class="kw-rfilter-icon rfilter-icon v2-monitoring-action"
+                aria-label="전체 브로드캐스트"
+                title="전체 브로드캐스트 — 모든 keeper에게 동일 메시지"
+                data-testid="roster-broadcast-open"
+                onClick=${() => setBcastOpen(true)}
+              >
+                ⊚
+              </button>
               <select
                 class="kw-roster-sort roster-sort v2-monitoring-action"
                 aria-label="키퍼 정렬"
@@ -789,6 +801,9 @@ export function KeeperWorkspaceRoster({
             onSelect=${select}
             onOpenConfig=${onOpenConfig}
           />`
+        : null}
+      ${bcastOpen
+        ? html`<${BroadcastComposer} keepers=${all} onClose=${() => setBcastOpen(false)} />`
         : null}
     </aside>
   `

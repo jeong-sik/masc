@@ -73,8 +73,9 @@ import {
   runtimeCatalogRequestConfig,
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
-import { refreshKeeperRuntimeStatus } from '../store'
+import { keepers, refreshKeeperRuntimeStatus } from '../store'
 import { bumpKeeperRuntimeTraceRefresh } from './keeper-runtime-trace-refresh'
+import { KcfAvatarBlock, KcfPlan } from './keeper-config-v2-blocks'
 import { navigate } from '../router'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
@@ -1638,6 +1639,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const c = state.data
   const isEditing = editMode.value
   const isSaving = saving.value
+  // Fleet-roster row for this keeper: carries the live fields the config API
+  // does not project (koreanName, sandbox_target, created_at) — the top bar
+  // and the identity tab's 파생 사실 section read from it.
+  const keeperRow = keepers.value.find(k => k.name === keeperName) ?? null
+  const keeperKoreanName = keeperRow?.koreanName?.trim() || null
+  const keeperSandboxTarget = keeperRow?.sandbox_target?.trim() || null
+  const keeperCreatedAt = keeperRow?.created_at?.trim() || null
   const runtimeWriteUnsupportedReason = keeperRuntimeConfigWriteUnsupportedReason(c)
   const runtimeCanEdit = runtimeWriteUnsupportedReason === null
 
@@ -1812,7 +1820,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     <${SectionHeader} size="xs" class="mt-3 mb-0.5" right=${html`
       <button
         type="button"
-        class="text-2xs text-accent-fg hover:underline v2-monitoring-action"
+        class="set-link text-2xs v2-monitoring-action"
         data-testid="kcf-prompt-global-edit-link"
         title="세계관·능력 등 전역 프롬프트 블록은 설정 › 프롬프트에서 관리합니다"
         onClick=${() => { navigate('settings', { section: 'prompts' }) }}
@@ -1852,8 +1860,38 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     : c.workspace.mention_targets
 
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
-  // identity ◈ — source provenance
+  // identity ◈ — avatar + owned attrs + derived facts + source provenance
   const identityTab = html`
+    <${KcfSec} title="아바타" desc="이 keeper 의 얼굴 — 시길(슬롯 색 + 2글자 모노그램)은 keeper id 에서 결정론적으로 파생되어 목록·채팅·보드와 항상 일치합니다. 초상화·슬롯 색·시길 편집은 keeper avatar API 가 없어 기획 단계입니다.">
+      <${KcfAvatarBlock} keeperName=${keeperName} displayName=${keeperKoreanName ?? keeperName} />
+    </${KcfSec}>
+
+    <${KcfSec} title="정체성" desc="이 keeper가 소유한 속성. 아래 파생 사실은 배정·파생된 값이라 여기서 바꾸지 않습니다.">
+      <div class="kcf-idrow">
+        <div class="kcf-field">
+          <div class="kcf-tf-h">
+            <label>표시 이름</label>
+            <span class="kcf-tf-hint">목록·채팅·보드에 표시 · <${KcfPlan}>이름 변경</KcfPlan></span>
+          </div>
+          <input
+            class="kcf-input"
+            value=${keeperKoreanName ?? keeperName}
+            readOnly
+            aria-label="표시 이름"
+            title="표시 이름 변경 API 미노출 — 기획 단계"
+          />
+        </div>
+      </div>
+    </${KcfSec}>
+
+    <${KcfSec} title="파생 사실" desc="배정·파생된 사실 — 읽기 전용. 격리는 sandbox_profile 기준입니다.">
+      <${KcfFacts} rows=${[
+        ['sandbox', keeperSandboxTarget ? keeperSandboxTarget : '— 비활성', true],
+        ['생성', keeperCreatedAt],
+        ['runtime profile', c.execution.selected_runtime_id, true],
+      ]} />
+    </${KcfSec}>
+
     <${KcfSec} title="편집 가능 범위" desc="keeper 프롬프트 · live override · [runtime.assignments]">
       <${KcfFacts} rows=${[
         ['기본 소스', c.sources.default_source_kind],
@@ -1940,6 +1978,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${RuntimeList} runtimes=${c.execution.models} />
       </div>
     </${KcfSec}>
+
+    ${c.execution.runtime_options.length > 1 ? html`
+      <${KcfSec} title="fallback 후보" desc="runtime.toml [runtime.assignments] 에 등록된 이 keeper 의 런타임 후보 — 등록 순서대로 표시됩니다.">
+        <div class="kcf-chain">
+          ${c.execution.runtime_options.map(r => html`<span key=${r} class="kcf-chain-item mono">${r}</span>`)}
+        </div>
+      </${KcfSec}>
+    ` : null}
   `
 
   // policy ⚖ — verify gate + proactive + tool policy
@@ -1947,6 +1993,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
+    <div class="kcf-dead">☠ 제거됨 · <span class="mono">ratio / message / token 게이트</span>와 <span class="mono">context_within_budget</span> FSM 조건은 zero-consumer 로 소스에서 삭제됐습니다. 컴팩션 임계치를 설정하는 곳은 없습니다 (컴팩션은 owner-lane 런타임이 provider overflow 시 실행 · metrics.compaction_count 로 관측).</div>
+    <div class="kcf-dead">☠ 제거됨 · <span class="mono">Handoff_triggered</span> 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.</div>
 
     <${SectionHeader} title="프로액티브" />
     ${rd && runtimeCanEdit ? html`
@@ -2005,23 +2053,19 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         dirty=${dirtyFlags.network_mode}
       />
-      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
-          <span class="text-xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
+      <div class="kcf-paths">
+        <div class="kcf-tf-h">
+          <label>allowed_paths${dirtyFlags.allowed_paths ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</label>
+          <span class="kcf-tf-hint">한 줄에 하나 · 명시 경로만 허용</span>
         </div>
-        <textarea aria-label="allowed_paths" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+        <textarea aria-label="allowed_paths" class="kcf-text mono"
           rows=${4}
           value=${rd.allowed_paths_text}
           placeholder=".masc/keepers/<name>/"
           onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
         ></textarea>
+        <span class="kcf-path-eff mono">effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}</span>
       </div>
-      ${(c.effective_allowed_paths ?? []).length > 0 ? html`
-        <div class="py-1.5 px-3 text-3xs text-[var(--color-fg-muted)]">
-          effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
-        </div>
-      ` : null}
       ${rd.sandbox_profile === 'docker' ? html`
         <${SetupGuideCard} connectorId="sandbox_hardened" />
       ` : null}
@@ -2133,6 +2177,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           ]} />
         </div>
       ` : null}
+      <div class="kc-inh-note">외부 효과 호출은 <button type="button" class="set-link" onClick=${() => navigate('approvals')}>Gate 큐</button>로 갑니다.</div>
     `
   })() : html`<div class="text-2xs text-[var(--color-fg-muted)] py-4">hook 정보가 없습니다.</div>`
 
@@ -2222,13 +2267,16 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <div class="kcf-top">
           <${KeeperBadge} id=${keeperName} name=${keeperName} variant="sigil" size="lg" />
           <div class="kcf-top-id">
-            <div class="kcf-top-name">${keeperName}</div>
+            <div class="kcf-top-name">${keeperName}${keeperKoreanName ? html`<span class="kcf-top-kr">${keeperKoreanName}</span>` : null}</div>
             <div class="kcf-top-sub mono">${c.execution.selected_runtime_id || c.sources.default_source_kind || MISSING_DATA_DASH}</div>
           </div>
           <span class="kcf-top-phase">
             <span style=${`width:7px;height:7px;border-radius:50%;background:${phaseDotColor};display:inline-block;${phaseToken === 'running' ? 'box-shadow:0 0 6px ' + phaseDotColor + ';' : ''}`} aria-hidden="true"></span>
             ${phaseLabel}
           </span>
+          ${keeperSandboxTarget ? html`
+            <span class="kcf-top-sandbox" title="이 keeper 전용 작업 경로 (live field: sandbox_target) — local 은 worktree root, docker 는 container target 입니다">⬡ ${keeperSandboxTarget}</span>
+          ` : null}
           <div class="kcf-top-spacer"></div>
           ${onClose ? html`
             <button type="button" class="kcf-top-x" onClick=${onClose} data-testid="kw-config-close" title="닫기 (Esc)">✕</button>

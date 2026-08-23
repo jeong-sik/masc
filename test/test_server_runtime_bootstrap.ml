@@ -1693,9 +1693,9 @@ let test_health_json_surfaces_board_event_collection_failure () =
         Alcotest.(check string) "board collection health degraded"
           "degraded"
           (collection |> member "status" |> to_string);
-        Alcotest.(check int) "board collection failed keeper count"
+        Alcotest.(check int) "board collection failure count"
           1
-          (collection |> member "failed_keeper_count" |> to_int);
+          (collection |> member "failure_count" |> to_int);
         Alcotest.(check bool) "board collection failure reason surfaced"
           true
           (collection |> member "status_reasons" |> to_list
@@ -1717,9 +1717,9 @@ let test_health_json_surfaces_board_event_collection_failure () =
           runtime_resolution |> member "keeper_board_event_collection"
         in
         Alcotest.(check int)
-          "runtime resolution exposes board collection failed keeper count"
+          "runtime resolution exposes board collection failure count"
           1
-          (runtime_collection |> member "failed_keeper_count" |> to_int);
+          (runtime_collection |> member "failure_count" |> to_int);
         let light_runtime_resolution =
           `Assoc
             (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
@@ -1728,9 +1728,9 @@ let test_health_json_surfaces_board_event_collection_failure () =
           light_runtime_resolution |> member "keeper_board_event_collection"
         in
         Alcotest.(check int)
-          "light runtime resolution exposes board collection failed keeper count"
+          "light runtime resolution exposes board collection failure count"
           1
-          (light_runtime_collection |> member "failed_keeper_count" |> to_int)))
+          (light_runtime_collection |> member "failure_count" |> to_int)))
 
 let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
   with_temp_dir "keeper-identity-drift" (fun dir ->

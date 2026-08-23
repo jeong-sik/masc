@@ -85,7 +85,7 @@ let project_replay_message_exn ~base_path
      | Ok [ _canonical; projected ] ->
        Agent_core.Types.text_of_content projected.content
      | Ok _ -> fail "replay projection did not append exact evidence"
-     | Error detail -> fail detail)
+     | Error detail -> fail (Agent_core.Error.to_string detail))
 ;;
 
 let make_meta ?(name = "keeper-exec-tools") () =
@@ -5236,6 +5236,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5323,6 +5324,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5724,6 +5726,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5837,6 +5840,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5965,6 +5969,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name

@@ -1183,27 +1183,34 @@ let run_failing_projection projection =
   Agent_core.Agent.run ~sw agent "canonical input"
 ;;
 
-let check_projection_failure expected_detail = function
-  | Error
-      (Agent_core.Error.Agent
-         (HookExecutionFailed
-            { hook_name; stage; tool_name = None; tool_use_id = None; detail })) ->
-    check string "projection hook name" "model_input_projection" hook_name;
-    check string "projection stage" "turn:parse" stage;
-    check string "projection detail" expected_detail detail
-  | Error error -> fail (Agent_core.Error.to_string error)
+(* The projection's own error reaches the caller unchanged. It used to be
+   rewrapped as [HookExecutionFailed { hook_name = "model_input_projection" }],
+   which renamed whatever the projection had decided -- a per-candidate
+   capacity bound became a hook defect -- and nothing ever read the hook name
+   back. *)
+let check_projection_failure expected = function
+  | Error error ->
+    check string "the projection's own error survives" expected
+      (Agent_core.Error.to_string error)
   | Ok _ -> fail "failed projection must abort the turn"
 ;;
 
-let test_agent_projection_failure_is_typed () =
-  run_failing_projection (fun _ -> Error "artifact unavailable")
-  |> check_projection_failure "artifact unavailable"
+let test_agent_projection_failure_passes_its_own_error_through () =
+  let refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow
+         { message = "artifact unavailable"; limit = None })
+  in
+  run_failing_projection (fun _ -> Error refusal)
+  |> check_projection_failure (Agent_core.Error.to_string refusal)
 ;;
 
 let test_agent_projection_exception_is_typed () =
   let exception_ = Failure "projection exploded" in
   run_failing_projection (fun _ -> raise exception_)
-  |> check_projection_failure (Printexc.to_string exception_)
+  |> check_projection_failure
+       (Agent_core.Error.to_string
+          (Agent_core.Error.Internal (Printexc.to_string exception_)))
 ;;
 
 let test_agent_count_preflight_uses_completion_timeout () =
@@ -1529,7 +1536,7 @@ let () =
         ; test_case
             "Agent projection failure is typed"
             `Quick
-            test_agent_projection_failure_is_typed
+            test_agent_projection_failure_passes_its_own_error_through
         ; test_case
             "Agent projection exception is typed"
             `Quick

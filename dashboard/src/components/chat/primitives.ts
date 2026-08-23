@@ -8,6 +8,8 @@ import { ringFocusClasses } from '../common/ring'
 import { ATTACHMENT_INPUT_ACCEPT, collectAttachments } from './attachments'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
+import { buildChatContextScope, ChatContextScopeRow, ChatSpeakerHandle } from './message-context-scope'
+import type { ChatContextScope } from './message-context-scope'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ArrowRight, ExternalLink, Mic, ShieldCheck, Square } from 'lucide-preact'
@@ -35,6 +37,7 @@ import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { navigate } from '../../router'
 import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
+import { fusionDecisionSpec } from '../v2/fusion-constants'
 import { STREAMING_THINKING_PREVIEW_CHARS } from '../../config/constants'
 
 /** Keeper identity used by SigilBadge. */
@@ -1271,7 +1274,7 @@ function ChatSuggestionsBlock({ items }: ChatSuggestionsBlock) {
   return html`
     <div class="chat-block-suggestions" data-chat-block="suggestions">
       <span class="chat-block-suggestions-label" id=${labelId}>${CHAT_SUGGESTIONS_LABEL}</span>
-      <div class="chat-block-suggestions-row" role="group" aria-labelledby=${labelId}>
+      <div class="chat-block-suggestions-row suggest-row" role="group" aria-labelledby=${labelId}>
         ${items.map((it, i) => html`
           <${ChatSuggestionChip}
             key=${i}
@@ -1446,14 +1449,17 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
+  // Keeper-v2 messages.jsx image block: figure.img-out > .img-frame > img | .img-ph.
+  // chat-block-media-frame stays alongside img-frame — it owns the dashboard-only
+  // extras the design never had to solve (placeholder min-height, img max-height cap).
   return html`
-    <figure class="chat-block-media" data-chat-block="image">
-      <div class="chat-block-media-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
+    <figure class="img-out" data-chat-block="image">
+      <div class="chat-block-media-frame img-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
         ${safeSrc
           ? html`<img src=${safeSrc} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
-          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
+          : html`<div class="chat-block-media-ph img-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
-      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${cap ? html`<figcaption>${cap}</figcaption>` : null}
       ${open && safeSrc
         ? html`
             <${ChatPreviewModal} title=${cap || '이미지'} onClose=${() => setOpen(false)}>
@@ -1472,14 +1478,15 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const clean = useMemo(() => sanitizeHtml(svg), [svg])
+  // Keeper-v2 messages.jsx svg block: figure.svg-out > .svg-frame (sanitized inline svg).
   return html`
-    <figure class="chat-block-media" data-chat-block="svg">
+    <figure class="svg-out" data-chat-block="svg">
       <div
-        class="chat-block-media-frame cursor-zoom-in"
+        class="chat-block-media-frame svg-frame cursor-zoom-in"
         onClick=${() => setOpen(true)}
         dangerouslySetInnerHTML=${{ __html: clean }}
       />
-      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${cap ? html`<figcaption>${cap}</figcaption>` : null}
       ${open
         ? html`
             <${ChatPreviewModal} title=${cap || 'SVG'} onClose=${() => setOpen(false)}>
@@ -1803,22 +1810,26 @@ function ChatLinkBlock(b: ChatLinkBlock) {
   }
   const safeUrl = isSafeUrl(b.url) ? b.url : '#'
   const unsafe = safeUrl === '#'
+  // Keeper-v2 messages.jsx LinkCard vocabulary (linkcard / -fav / -body / -title /
+  // -desc / -meta mono / -go); skin is vendored in keeper-v2/v2.css. The
+  // chat-block-linkcard-unsafe hook is dashboard-only: the design has no unsafe-URL
+  // state, and the live renderer refuses javascript:/data: hrefs.
   return html`
     <a
-      class="chat-block-linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
+      class="linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
       href=${safeUrl}
       target="_blank"
       rel=${unsafe ? undefined : 'noopener noreferrer'}
       data-chat-block="link"
       onClick=${unsafe ? (e: MouseEvent) => { e.preventDefault() } : undefined}
     >
-      <span class="chat-block-linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
-      <span class="chat-block-linkcard-body">
-        <span class="chat-block-linkcard-title">${b.title}</span>
-        ${b.desc ? html`<span class="chat-block-linkcard-desc">${b.desc}</span>` : null}
-        <span class="chat-block-linkcard-meta">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
+      <span class="linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
+      <span class="linkcard-body">
+        <span class="linkcard-title">${b.title}</span>
+        ${b.desc ? html`<span class="linkcard-desc">${b.desc}</span>` : null}
+        <span class="linkcard-meta mono">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
       </span>
-      <span class="chat-block-linkcard-go">↗</span>
+      <span class="linkcard-go">↗</span>
     </a>
   `
 }
@@ -2005,39 +2016,40 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
     return () => { alive = false }
   }, [expanded, boardPostId])
 
-  const runLabel = runId ? ` · ${runId.slice(0, 12)}` : ''
   const answeredCount = state.panel.filter((p) => p.status === 'answered').length
   const usageLabel =
     state.totalOutputTokens !== undefined ? ` · ${state.totalOutputTokens.toLocaleString()} tok` : ''
+  // Keeper-v2 messages.jsx fusion block: .msg-fusion > .msg-fusion-h (tag · run ·
+  // decision badge) + .msg-fusion-ans + .msg-fusion-foot (panel count · run link).
+  // Skin is vendored in keeper-v2/fusion.css. The decision badge/answer only render
+  // once the board post is lazy-fetched on expand — before that the live signal
+  // does not exist locally and nothing is fabricated for them.
+  const decSpec = state.status === 'loaded' && state.judge?.decision
+    ? fusionDecisionSpec(state.judge.decision)
+    : null
   return html`
-    <div class="rounded-[var(--r-1,8px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-brass-soft,rgba(216,166,87,0.06))] overflow-hidden" data-fusion-card>
+    <div class=${`msg-fusion${decSpec?.cls ? ` dec-${decSpec.cls}` : ''}`} data-fusion-card>
       <button
         type="button"
-        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs ${CHAT_FOCUS_RING}"
+        class="msg-fusion-h w-full text-left ${CHAT_FOCUS_RING}"
         aria-expanded=${expanded}
         onClick=${() => setExpanded((v) => !v)}
       >
         <span aria-hidden="true">${expanded ? '▾' : '▸'}</span>
-        <span class="font-medium">Fusion 심의</span>
+        <span class="msg-fusion-tag">◈ Fusion 심의</span>
         <span class="text-[var(--color-fg-secondary,#9da7b3)]">
           ${state.status === 'loaded'
-            ? `패널 ${answeredCount}/${state.panel.length} 합의${runLabel}${usageLabel}`
-            : `패널 합의 상세${runLabel}`}
+            ? `패널 ${answeredCount}/${state.panel.length} 합의${usageLabel}`
+            : '패널 합의 상세'}
         </span>
+        ${runId ? html`<span class="msg-fusion-run mono">${runId.slice(0, 12)}</span>` : null}
+        ${decSpec
+          ? html`<span class=${`fus-dec-badge ${decSpec.cls}`}>${decSpec.glyph} ${decSpec.lbl}</span>`
+          : null}
       </button>
-      <div class="flex flex-wrap items-center gap-2 px-3 pb-2">
-        ${runId
-          ? html`
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-[var(--r-0,4px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-bg-surface,#111827)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-secondary,#9da7b3)] hover:text-[var(--color-fg-primary,#f3f4f6)] ${CHAT_FOCUS_RING}"
-              onClick=${() => navigate('fusion', { run_id: runId })}
-              data-testid="fusion-chat-open-run"
-            >
-              <${ExternalLink} size=${12} aria-hidden="true" />
-              <span>Fusion</span>
-            </button>
-          `
+      <div class="msg-fusion-foot">
+        ${state.status === 'loaded'
+          ? html`<span>패널 ${state.panel.length}개 · 심판 종합</span>`
           : null}
         <button
           type="button"
@@ -2048,6 +2060,16 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
           <${ExternalLink} size=${12} aria-hidden="true" />
           <span>Board</span>
         </button>
+        ${runId
+          ? html`
+            <button
+              type="button"
+              class="msg-fusion-link"
+              onClick=${() => navigate('fusion', { run_id: runId })}
+              data-testid="fusion-chat-open-run"
+            >전체 패널·심판 보기 →</button>
+          `
+          : null}
       </div>
       ${expanded
         ? html`
@@ -2072,11 +2094,11 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
                         judge · ${state.judge.status}${state.judge.decision ? html` · ${state.judge.decision}` : null}
                       </div>
                       ${state.judge.synthesis
-                        ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
+                        ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
                         : state.judge.resolvedAnswer
-                          ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
+                          ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
                           : state.judge.error
-                            ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.error} /></div>`
+                            ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.error} /></div>`
                             : null}
                     </div>
                   `
@@ -2655,12 +2677,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   showMetadata = true,
   variant = 'default',
   showSourceBadge = false,
+  contextScope = null,
   action,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   showSourceBadge?: boolean
+  // Keeper-v2 CtxFrom strip, precomputed by ChatTranscript from the transcript's
+  // own channel rows (null for non-connector entries). Precomputed upstream so
+  // this memo's shallow compare sees a stable object across unrelated re-renders.
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   if (
@@ -2758,6 +2785,11 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const speakerInfo = speakerMeta(entry)
   const routeInfo = routeMeta(entry)
 
+  // Keeper-v2 messages.jsx Message row vocabulary: the operator avatar is
+  // `.msg-av.op` (keeper rows draw the sigil badge in the design, so msg-av
+  // goes on user rows only); msg-col/msg-hd mark the content column and the
+  // header row. The row keeps the dashboard's chat-bubble chrome — delivery,
+  // stream-contract and meta chips are live signals the design has no slot for.
   return html`
     <article
       ref=${bubbleRef}
@@ -2797,19 +2829,20 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
+            class=${`chat-avatar ${tone}${entry.role === 'user' ? ' msg-av op' : ''} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
               isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
             }`}
           >
             ${avatarMonogram(entry)}
           </div>
-          <div class="min-w-0 flex-1">
+          <div class="msg-col min-w-0 flex-1">
             ${isMessenger
               ? html`
-                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <div class="msg-hd flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">
                       ${avatarLabel(entry)}
                     </span>
+                    <${ChatSpeakerHandle} entry=${entry} />
                     ${timestamp
                       ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
                       : null}
@@ -2836,12 +2869,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   </div>
                 `
               : html`
-                  <div class="flex flex-wrap items-center gap-1.5">
+                  <div class="msg-hd flex flex-wrap items-center gap-1.5">
                     <span
                       class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
                     >
                       ${entry.label}
                     </span>
+                    <${ChatSpeakerHandle} entry=${entry} />
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
@@ -2916,6 +2950,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             `
           : null}
       </div>
+
+      ${contextScope ? html`<${ChatContextScopeRow} scope=${contextScope} />` : null}
 
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
@@ -3030,12 +3066,14 @@ function ChatMessageSurface({
   showMetadata = true,
   variant = 'default',
   showSourceBadge = false,
+  contextScope = null,
   action,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   showSourceBadge?: boolean
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   return chatControlStatus(entry)
@@ -3046,6 +3084,7 @@ function ChatMessageSurface({
           showMetadata=${showMetadata}
           variant=${variant}
           showSourceBadge=${showSourceBadge}
+          contextScope=${contextScope}
           action=${action}
         />
       `
@@ -3737,6 +3776,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   toolOutputsCoveredSinceMs,
   toolOutputsCoveredThroughMs,
   toolOutputHydrationContract,
+  contextScope = null,
   action,
 }: {
   tools: KeeperConversationEntry[]
@@ -3747,6 +3787,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
   toolOutputHydrationContract: ToolCallOutputHydrationContract | null
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
@@ -3769,6 +3810,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
         showMetadata=${showMetadata !== false}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        contextScope=${contextScope}
         action=${action}
       />
     </div>
@@ -3782,6 +3824,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   && prev.toolOutputsCoveredSinceMs === next.toolOutputsCoveredSinceMs
   && prev.toolOutputsCoveredThroughMs === next.toolOutputsCoveredThroughMs
   && prev.toolOutputHydrationContract === next.toolOutputHydrationContract
+  && prev.contextScope === next.contextScope
   && prev.action === next.action
 )
 
@@ -4322,6 +4365,7 @@ function renderChatTranscriptBody(opts: {
         showMetadata=${showMetadata !== false}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        contextScope=${unit.entry.surface ? buildChatContextScope(unit.entry, entries) : null}
         action=${action}
       />`)
     }

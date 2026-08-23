@@ -216,7 +216,7 @@ let render_proof_prompt ~lookup (goal : Goal_store.goal) =
 let goal_proof_lookup config =
   let open Result.Syntax in
   let* tools = Verification_authority_tools.create_goal_proof ~config in
-  let* root_layout = Verification_authority_tools.root_layout tools in
+  let* root_layout = Verification_authority_tools.goal_proof_root_layout tools in
   Ok
     (Task.Anti_rationalization.Lookup_tools
        { schemas = Verification_authority_tools.schemas tools

@@ -151,7 +151,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes source_projection
     with
     | Ok projected -> Ok projected
     | Error error ->
-      Error (Runtime_model_input_tail_window.budget_error_to_string error))
+      Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
@@ -438,6 +438,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -506,6 +510,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let* dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count

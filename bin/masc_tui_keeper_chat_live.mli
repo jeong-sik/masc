@@ -47,6 +47,20 @@ type delta =
       }
   | Tool_ended of { call_id : string }
   | Tool_result of { call_id : string }
+  | Approval_requested of
+      { call_id : string
+      ; tool_name : string
+      ; args : string
+      ; question : string
+      }
+      (** The turn is held at this call until it is answered. *)
+  | Approval_settled of
+      { call_id : string
+      ; outcome : string
+      }
+      (** How the wait ended -- the answer, or that none came. Drawn so a
+          prompt stops being shown, including on the paths where nobody
+          answered. *)
   | Checkpoint  (** The turn is continuing past a context checkpoint. *)
   | External_effect_completed
   | Run_failed of { message : string }

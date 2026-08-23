@@ -2619,6 +2619,21 @@
  (libraries alcotest masc masc_tui_keeper_chat_history yojson))
 
 (test
+ (name test_keeper_tool_approval_gate)
+ (modules test_keeper_tool_approval_gate)
+ (libraries alcotest agent_core eio eio_main fmt masc yojson))
+
+(test
+ (name test_keeper_tool_approval_policy)
+ (modules test_keeper_tool_approval_policy)
+ (libraries alcotest masc yojson))
+
+(test
+ (name test_keeper_tool_approval_registry)
+ (modules test_keeper_tool_approval_registry)
+ (libraries alcotest eio eio_main fmt masc))
+
+(test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
  (libraries alcotest fmt masc_tui_keeper_chat_live yojson))

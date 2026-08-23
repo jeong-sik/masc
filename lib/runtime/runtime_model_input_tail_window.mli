@@ -180,9 +180,18 @@ val observe : history_atom_count:int -> projection -> window_observation
     first cut, which is the only one taken against the full history. *)
 
 val budget_error_to_string : budget_error -> string
-(** Diagnostic rendering carrying the measured values. Suitable as the
-    [Error] payload of an [Agent_core.Agent.model_input_projection], which
-    aborts the turn before request measurement or dispatch. *)
+(** Diagnostic rendering carrying the measured values. *)
+
+val budget_error_to_core_error : budget_error -> Agent_core.Error.t
+(** The [Error] payload of an [Agent_core.Agent.model_input_projection], which
+    aborts the turn before request measurement or dispatch.
+
+    Both constructors are named [Api (ContextOverflow _)]: each says this
+    candidate's declared ceiling cannot carry the turn, which is a
+    per-candidate capacity bound rather than a defect in the request, and the
+    lane loop already treats that constructor as grounds to try the next
+    candidate. [limit] is [None] — it is a token count and this window
+    measures bytes. *)
 
 val project_with_drop
   :  ?allow_empty_history:bool

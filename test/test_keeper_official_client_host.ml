@@ -94,6 +94,7 @@ let one_dynamic_tool
         Masc.Keeper_tools_agent_core.Terminal_effect_open)
       ?(hooks = Agent_core.Hooks.empty)
       ?(pre_tool_rejects = ref [])
+      ?tool_approval
       ~active
       handler
   =
@@ -108,6 +109,7 @@ let one_dynamic_tool
   let terminal_error = ref None in
   let projected =
     Host.dynamic_tools
+      ~tool_approval
       ~runtime_label:"test"
       ~keeper_name:"keeper-raw-authority"
       ~turn_count:1
@@ -1006,6 +1008,105 @@ let test_pre_tool_reject_is_recorded () =
       fail (Printf.sprintf "expected one recorded reject, got %d" (List.length rejects)))
 ;;
 
+(* One settlement for one decision.
+
+   This host used to reach its own verdict for every pre_tool_use decision,
+   and disagreed with AGENT_CORE's tool loop in two places: a hook that failed
+   came back as an ordinary tool failure rather than a turn-level reject, and
+   ElicitToolApproval was refused outright rather than offered to a
+   caller-supplied approval callback. A keeper therefore got a different
+   answer to the same hook depending on which runtime it was bound to. *)
+
+let approval_tool ~active ?tool_approval ~executions () =
+  let hooks =
+    { Agent_core.Hooks.empty with
+      pre_tool_use =
+        Some
+          (fun _ ->
+            Agent_core.Hooks.ElicitToolApproval
+              { question = "run the effect?" })
+    }
+  in
+  one_dynamic_tool ~hooks ?tool_approval ~active (fun _input ->
+    incr executions;
+    Ok { Agent_core.Types.content = "ran"; _meta = None })
+
+let test_approved_tool_runs () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let executions = ref 0 in
+    let asked = ref [] in
+    let tool_approval (request : Agent_core.Hooks.tool_approval_request) =
+      asked := request.prompt.question :: !asked;
+      Agent_core.Hooks.Approved
+    in
+    let tool, terminal_error =
+      approval_tool ~active ~tool_approval ~executions ()
+    in
+    let result = tool.call ~call_id:"call-approve" (`Assoc []) in
+    check bool "an approved call runs" true result.success;
+    check int "and runs exactly once" 1 !executions;
+    check (list string) "the callback saw the hook's question"
+      [ "run the effect?" ] !asked;
+    check (option string) "nothing terminal happened" None !terminal_error)
+
+let test_denied_tool_is_a_repairable_failure_not_a_dead_turn () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let executions = ref 0 in
+    let tool, terminal_error =
+      approval_tool ~active
+        ~tool_approval:(fun _ -> Agent_core.Hooks.Denied)
+        ~executions ()
+    in
+    let result = tool.call ~call_id:"call-deny" (`Assoc []) in
+    check bool "a denied call fails" false result.success;
+    check int "the tool body never ran" 0 !executions;
+    (* Denial goes back to the model as a tool failure it can act on, the way
+       a Block does. Killing the turn would leave the keeper unable to say
+       anything about being refused. *)
+    check (option string) "the turn is not killed" None !terminal_error)
+
+let test_approval_without_a_callback_is_rejected_not_admitted () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let executions = ref 0 in
+    let tool, terminal_error =
+      approval_tool ~active ~executions ()
+    in
+    let result = tool.call ~call_id:"call-no-callback" (`Assoc []) in
+    check bool "the call fails" false result.success;
+    check int "the tool body never ran" 0 !executions;
+    (* Fail closed: a host with nowhere to ask must not decide on the
+       operator's behalf. *)
+    check bool "and the turn records why it stopped" true
+      (Option.is_some !terminal_error))
+
+let test_a_failed_hook_is_a_turn_level_reject () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let hooks =
+      { Agent_core.Hooks.empty with
+        pre_tool_use =
+          Some
+            (fun _ ->
+              Agent_core.Hooks.HookFailed
+                { stage = Agent_core.Hooks.Pre_tool_use
+                ; detail = "hook raised"
+                })
+      }
+    in
+    let executions = ref 0 in
+    let tool, terminal_error =
+      one_dynamic_tool ~hooks ~active (fun _input ->
+        incr executions;
+        Ok { Agent_core.Types.content = "never"; _meta = None })
+    in
+    let result = tool.call ~call_id:"call-hook-failed" (`Assoc []) in
+    check bool "the call fails" false result.success;
+    check int "the tool body never ran" 0 !executions;
+    (* A hook that failed is not something the model can repair by calling
+       differently, so it stops the turn rather than reading as one bad call.
+       This host used to return it as an ordinary tool failure. *)
+    check bool "the turn records why it stopped" true
+      (Option.is_some !terminal_error))
+
 let persistence_checkpoint ~session_id =
   Agent_core.Checkpoint.
     { version = checkpoint_version
@@ -1236,6 +1337,24 @@ let () =
             "seed reaches the provider whole"
             `Quick
             test_seed_reaches_the_provider_whole
+        ] )
+    ; ( "pre_tool_use settles through one gate"
+      , [ test_case
+            "an approved call runs"
+            `Quick
+            test_approved_tool_runs
+        ; test_case
+            "a denied call fails without killing the turn"
+            `Quick
+            test_denied_tool_is_a_repairable_failure_not_a_dead_turn
+        ; test_case
+            "approval with no callback is rejected, not admitted"
+            `Quick
+            test_approval_without_a_callback_is_rejected_not_admitted
+        ; test_case
+            "a failed hook stops the turn"
+            `Quick
+            test_a_failed_hook_is_a_turn_level_reject
         ] )
     ; ( "reject round-trip persistence (masc#28885)"
       , [ test_case

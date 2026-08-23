@@ -212,7 +212,7 @@ let save_auth_config config (auth_cfg : auth_config) =
 
 (** Get credential file path for an agent *)
 let credential_file config agent_name =
-  Filename.concat (agents_dir config) (agent_name ^ ".json")
+  Filename.concat (agents_dir config) (Common.safe_filename agent_name ^ ".json")
 ;;
 
 module Nickname_helpers = Auth_nickname
@@ -223,7 +223,7 @@ let extract_agent_type_prefix = Nickname_helpers.extract_agent_type_prefix
 let credential_agent_name = Nickname_helpers.credential_agent_name
 
 let raw_token_file config agent_name =
-  Filename.concat (auth_dir config) (agent_name ^ ".token")
+  Filename.concat (auth_dir config) (Common.safe_filename agent_name ^ ".token")
 ;;
 
 (** Load agent credential.

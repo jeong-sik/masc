@@ -13,7 +13,6 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-ref
 import { formatMsCompact, formatNumber } from '../lib/format-number'
 import { refreshShell, shellRuntimeResolution } from '../store'
 import type {
-  DashboardBlockedKeeperFact,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
   DashboardPausedKeeperDetail,
@@ -36,10 +35,6 @@ import {
 } from './fleet-data-core'
 import { coverageGapDisplay, freshnessText, sourceHealthClass } from './common/source-health'
 import { CoverageGapBlock } from './common/coverage-gap-block'
-import {
-  keeperFleetOperatorFactPresentation,
-  keeperFleetOperatorFacts,
-} from './keeper-fleet-operator-fact'
 
 type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'gate' | 'attribution' | 'keeper-health'
 
@@ -250,12 +245,7 @@ function FleetCommandStrip() {
   const target = fleet?.target_reaction_capacity_count
   const shortfall = fleet?.reaction_capacity_shortfall_count
   const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
-  const operatorFact = fleet?.status === 'ok' ? null : keeperFleetOperatorFacts(fleet)[0]
-  const operatorPresentation = operatorFact
-    ? keeperFleetOperatorFactPresentation(operatorFact, fleet?.status)
-    : null
-  const tone = operatorPresentation?.tone
-    ?? (fleet?.status === 'ok' && runtime?.status === 'ready' ? 'ok' : 'warn')
+  const tone = fleet?.status === 'ok' && runtime?.status === 'ready' ? 'ok' : 'warn' 
   const runtimeLabel = runtime?.status === 'ready' ? '런타임 가동' : `런타임 ${runtime?.status ?? 'unknown'}`
   const tick = fleetSafety ? 'runtime sample' : 'no runtime sample'
 
@@ -361,82 +351,47 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
   `
 }
 
-function RuntimeBlockedKeeperFactRow({
-  fact,
-  fleetStatus,
-  index,
-}: {
-  fact: DashboardBlockedKeeperFact
-  fleetStatus: DashboardFleetPressureHealth['status'] | null | undefined
-  index: number
-}) {
-  const presentation = keeperFleetOperatorFactPresentation(fact, fleetStatus)
-  const Icon = presentation.Icon
-  const toneClass = presentation.tone === 'bad'
-    ? 'text-[var(--color-status-err)]'
-    : 'text-[var(--warn-bright)]'
-  return html`
-    <tr
-      class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 last:border-b-0"
-      data-testid=${`keeper-fleet-operator-fact-${index}`}
-      data-tone=${presentation.tone}
-    >
-      <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">
-        ${presentation.keeper}
-        ${presentation.taskId
-          ? html`<div class="font-mono text-3xs text-[var(--color-fg-muted)]">${presentation.taskId}</div>`
-          : null}
-      </td>
-      <td class=${`px-3 py-2 ${toneClass}`}>
-        <span class="inline-flex items-center gap-1.5">
-          <${Icon} size=${14} aria-hidden="true" />
-          <span>${presentation.label}</span>
-        </span>
-        <div class="font-mono text-3xs text-[var(--color-fg-muted)]">
-          ${presentation.reason} · ${presentation.executionTruth} · ${presentation.nonExecutableCause}
-        </div>
-      </td>
-      <td class="px-3 py-2 text-[var(--color-fg-secondary)]">${presentation.action}</td>
-    </tr>
-  `
+// Which keepers are not running is autoboot minus executable. The server
+// reports both lists; taking the difference here keeps it out of the wire.
+export function keepersNotRunning(
+  fleet: DashboardFleetPressureHealth | null | undefined,
+): string[] {
+  const executable = new Set(fleet?.executable_keeper_names ?? [])
+  return (fleet?.autoboot_enabled_keeper_names ?? [])
+    .filter(name => !executable.has(name))
+    .sort((a, b) => a.localeCompare(b))
 }
 
-function RuntimeBlockedKeeperFactTable({
+function RuntimeKeepersNotRunning({
   fleet,
 }: {
   fleet: DashboardFleetPressureHealth | null | undefined
 }) {
-  const facts = keeperFleetOperatorFacts(fleet)
-  if (facts.length === 0) {
+  const missing = keepersNotRunning(fleet)
+  if (missing.length === 0) {
     return html`
       <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
-        No current Keeper blockers.
+        모든 Keeper 가 돌고 있습니다.
       </div>
     `
   }
   return html`
-    <div class="v2-monitoring-card overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
-      <table class="v2-monitoring-table w-full text-2xs" aria-label="Keeper fleet operator facts">
-        <thead>
-          <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
-            <th scope="col" class="px-3 py-2 text-left font-medium">Keeper</th>
-            <th scope="col" class="px-3 py-2 text-left font-medium">Current fact</th>
-            <th scope="col" class="px-3 py-2 text-left font-medium">Operator action</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${facts.map((fact, index) => html`
-            <${RuntimeBlockedKeeperFactRow}
-              fact=${fact}
-              fleetStatus=${fleet?.status}
-              index=${index}
-            />
-          `)}
-        </tbody>
-      </table>
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-3">
+      <ul class="space-y-1 text-2xs">
+        ${missing.map(name => html`
+          <li class="flex items-baseline gap-2">
+            <span class="font-mono text-[var(--color-fg-primary)]">${name}</span>
+            <span class="text-[var(--color-fg-muted)]">기동하지 않음</span>
+          </li>
+        `)}
+      </ul>
+      ${fleet?.blocker
+        ? html`<div class="mt-2 text-3xs text-[var(--color-fg-muted)]">blocker: ${fleet.blocker}</div>`
+        : null}
     </div>
   `
 }
+
 
 function RuntimeBlockerBoard() {
   useEffect(() => {
@@ -452,15 +407,15 @@ function RuntimeBlockerBoard() {
   const shortfall = fleet?.reaction_capacity_shortfall_count
   const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
   const pausedNames = pausedHealth?.names ?? []
-  const operatorFact = fleet?.status === 'ok' ? null : keeperFleetOperatorFacts(fleet)[0]
-  const operatorTone = operatorFact
-    ? keeperFleetOperatorFactPresentation(operatorFact, fleet?.status).tone
-    : null
-  const capacityStatus = operatorTone === 'bad'
-    ? 'crit'
-    : operatorTone === 'warn'
-      ? 'warn'
-      : fleet ? 'ok' : undefined
+  // The tone follows the fleet's own verdict, so one keeper's condition never
+  // speaks for the whole set.
+  const capacityStatus = fleet == null
+    ? undefined
+    : fleet.status === 'ok'
+      ? 'ok'
+      : fleet.status === 'blocked'
+        ? 'crit'
+        : 'warn' 
 
   return html`
     <section class="grid gap-3" data-testid="runtime-blocker-board">
@@ -479,8 +434,8 @@ function RuntimeBlockerBoard() {
         />
       </div>
       <div>
-        <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keeper operator facts</div>
-        <${RuntimeBlockedKeeperFactTable} fleet=${fleet} />
+        <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">기동하지 않은 Keeper</div>
+        <${RuntimeKeepersNotRunning} fleet=${fleet} />
       </div>
       <div>
         <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Paused keeper diagnostics</div>

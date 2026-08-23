@@ -492,30 +492,7 @@ and keeper_non_executable_cause =
   | Cause_metadata_unavailable
   | Cause_runtime_not_live
 
-let keeper_non_executable_cause_to_wire = function
-  | Cause_owner_absent_from_snapshot -> "owner_absent_from_snapshot"
-  | Cause_owner_unregistered -> "owner_unregistered"
-  | Cause_no_keeper_binding -> "no_keeper_binding"
-  | Cause_fiber_dead -> "fiber_dead"
-  | Cause_lane_exited -> "lane_exited"
-  | Cause_completion_settled -> "completion_settled"
-  | Cause_autoboot_disabled -> "autoboot_disabled"
-  | Cause_proactive_disabled -> "proactive_disabled"
-  | Cause_lifecycle_denied -> "lifecycle_denied"
-  | Cause_runtime_terminal -> "runtime_terminal"
-  | Cause_shutdown_fenced -> "shutdown_fenced"
-  | Cause_metadata_unavailable -> "metadata_unavailable"
-  | Cause_runtime_not_live -> "runtime_not_live"
-;;
 
-let owner_execution_truth_to_wire = function
-  | Keeper_activation_readiness.Executable -> "executable"
-  | Keeper_activation_readiness.Recoverable -> "recoverable"
-  | Keeper_activation_readiness.Retained_disabled _ -> "retained_disabled"
-  | Keeper_activation_readiness.Paused_dead _ -> "paused_dead"
-  | Keeper_activation_readiness.Shutdown_fenced _ -> "shutdown_fenced"
-  | Keeper_activation_readiness.Unknown _ -> "unknown"
-;;
 
 let non_executable_cause ~registry_entry = function
   | Keeper_activation_readiness.Executable -> None
@@ -627,18 +604,6 @@ let owner_execution_truth snapshot ~keeper_name =
       "owner absent from canonical execution snapshot"
 ;;
 
-let owner_execution_fact snapshot ~keeper_name =
-  match
-    List.find_opt
-      (fun owner -> String.equal owner.keeper_name keeper_name)
-      snapshot.owners
-  with
-  | Some owner -> owner.truth, owner.non_executable_cause
-  | None ->
-    ( Keeper_activation_readiness.Unknown
-        "owner absent from canonical execution snapshot"
-    , Some Cause_owner_absent_from_snapshot )
-;;
 
 let string_set_of_list values =
   List.fold_left (fun acc value -> String_set.add value acc) String_set.empty values
@@ -735,197 +700,6 @@ let keeper_identity_drift_health_json_of_scan scan =
 let keeper_identity_drift_health_json config =
   keeper_identity_drift_scan config |> keeper_identity_drift_health_json_of_scan
 
-let json_string_list_field field = function
-  | `Assoc fields -> (
-      match List.assoc_opt field fields with
-      | Some (`List values) ->
-          values
-          |> List.filter_map (function
-               | `String value -> Some value
-               | _ -> None)
-          |> sorted_unique_strings
-      | _ -> [])
-  | _ -> []
-
-type blocked_keeper_reason =
-  | Durable_paused_autoboot_enabled
-  | Meta_read_error
-  | Not_bootable
-  | Boot_failure of Keeper_runtime.boot_meta_failure_cause
-  | Phase of Keeper_state_machine.phase
-  | Bootstrap_disabled
-  | Not_registered
-  | Not_running
-  | No_keeper_binding
-  | Current_fact_invalid
-
-let blocked_keeper_reason_label = function
-  | Durable_paused_autoboot_enabled -> "durable_paused_autoboot_enabled"
-  | Meta_read_error -> "meta_read_error"
-  | Not_bootable -> "not_bootable"
-  | Boot_failure cause -> Keeper_runtime.boot_meta_failure_cause_label cause
-  | Phase phase -> "phase_" ^ Keeper_state_machine.phase_to_string phase
-  | Bootstrap_disabled -> "keeper_bootstrap_disabled"
-  | Not_registered -> "not_registered"
-  | Not_running -> "not_running"
-  | No_keeper_binding -> "no_keeper_binding"
-  | Current_fact_invalid -> "current_fact_invalid"
-
-type blocked_keeper_operator_action =
-  | Resume_or_leave_paused
-  | Repair_keeper_meta_file
-  | Add_keeper_toml_or_disable_stale_autoboot_meta
-  | Run_keeper_up_or_recreate_meta
-  | Repair_keeper_toml_config
-  | Add_sandbox_profile_to_keeper_toml
-  | Inspect_keeper_autoboot_logs
-  | Enable_keeper_bootstrap_or_start_manually
-  | Restart_or_disable_stopped_keeper
-  | Start_or_recover_keeper
-  | Inspect_capacity_accounting
-  | Repair_failing_keeper
-  | Recover_context_overflow
-  | Wait_for_compaction
-  | Wait_for_handoff
-  | Wait_for_keeper_drain
-  | Inspect_crashed_keeper
-  | Wait_for_keeper_restart
-  | Create_keeper_or_reassign_task
-  | Inspect_current_keeper_fact
-
-let blocked_keeper_operator_action_to_string = function
-  | Resume_or_leave_paused -> "resume_or_leave_paused"
-  | Repair_keeper_meta_file -> "repair_keeper_meta_file"
-  | Add_keeper_toml_or_disable_stale_autoboot_meta ->
-      "add_keeper_toml_or_disable_stale_autoboot_meta"
-  | Run_keeper_up_or_recreate_meta -> "run_keeper_up_or_recreate_meta"
-  | Repair_keeper_toml_config -> "repair_keeper_toml_config"
-  | Add_sandbox_profile_to_keeper_toml -> "add_sandbox_profile_to_keeper_toml"
-  | Inspect_keeper_autoboot_logs -> "inspect_keeper_autoboot_logs"
-  | Enable_keeper_bootstrap_or_start_manually ->
-      "enable_keeper_bootstrap_or_start_manually"
-  | Restart_or_disable_stopped_keeper -> "restart_or_disable_stopped_keeper"
-  | Start_or_recover_keeper -> "start_or_recover_keeper"
-  | Inspect_capacity_accounting -> "inspect_capacity_accounting"
-  | Repair_failing_keeper -> "repair_failing_keeper"
-  | Recover_context_overflow -> "recover_context_overflow"
-  | Wait_for_compaction -> "wait_for_compaction"
-  | Wait_for_handoff -> "wait_for_handoff"
-  | Wait_for_keeper_drain -> "wait_for_keeper_drain"
-  | Inspect_crashed_keeper -> "inspect_crashed_keeper"
-  | Wait_for_keeper_restart -> "wait_for_keeper_restart"
-  | Create_keeper_or_reassign_task -> "create_keeper_or_reassign_task"
-  | Inspect_current_keeper_fact -> "inspect_current_keeper_fact"
-
-let blocked_keeper_action = function
-  | Durable_paused_autoboot_enabled -> Resume_or_leave_paused
-  | Meta_read_error -> Repair_keeper_meta_file
-  | Not_bootable -> Add_keeper_toml_or_disable_stale_autoboot_meta
-  | Boot_failure Keeper_runtime.Missing_meta -> Run_keeper_up_or_recreate_meta
-  | Boot_failure Keeper_runtime.Meta_read_error -> Repair_keeper_meta_file
-  | Boot_failure Keeper_runtime.Config_invalid ->
-      Repair_keeper_toml_config
-  | Boot_failure Keeper_runtime.Sandbox_profile_required ->
-      Add_sandbox_profile_to_keeper_toml
-  | Boot_failure Keeper_runtime.Materialization_failed ->
-      Inspect_keeper_autoboot_logs
-  | Bootstrap_disabled -> Enable_keeper_bootstrap_or_start_manually
-  | Phase Keeper_state_machine.Stopped -> Restart_or_disable_stopped_keeper
-  | Phase Keeper_state_machine.Paused -> Resume_or_leave_paused
-  | Phase Keeper_state_machine.Offline -> Start_or_recover_keeper
-  | Phase Keeper_state_machine.Running -> Inspect_capacity_accounting
-  | Phase Keeper_state_machine.Failing -> Repair_failing_keeper
-  | Phase Keeper_state_machine.Overflowed ->
-    (* Retired phase (#26546): unreachable for live keepers; kept for
-       exhaustiveness over the preserved variant. *)
-    Recover_context_overflow
-  | Phase Keeper_state_machine.Compacting -> Wait_for_compaction
-  | Phase Keeper_state_machine.HandingOff -> Wait_for_handoff
-  | Phase Keeper_state_machine.Draining -> Wait_for_keeper_drain
-  | Phase Keeper_state_machine.Crashed -> Inspect_crashed_keeper
-  | Phase Keeper_state_machine.Restarting -> Wait_for_keeper_restart
-  | Not_registered -> Start_or_recover_keeper
-  | Not_running -> Start_or_recover_keeper
-  | No_keeper_binding -> Create_keeper_or_reassign_task
-  | Current_fact_invalid -> Inspect_current_keeper_fact
-
-let blocked_keeper_action_label reason =
-  reason |> blocked_keeper_action |> blocked_keeper_operator_action_to_string
-
-let blocked_keeper_operator_action = function
-  | Phase
-      ( Keeper_state_machine.Failing
-      | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Restarting ) ->
-      List.find_opt
-        (fun (action : Operator_pending_confirm.available_action) ->
-          String.equal action.action_type Operator_action_constants.keeper_recover)
-        Operator_pending_confirm.available_actions
-  | Durable_paused_autoboot_enabled
-  | Meta_read_error
-  | Not_bootable
-  | Boot_failure _
-  | Bootstrap_disabled
-  | Phase
-      ( Keeper_state_machine.Offline
-      | Keeper_state_machine.Running
-      | Keeper_state_machine.Overflowed
-      | Keeper_state_machine.Compacting
-      | Keeper_state_machine.HandingOff
-      | Keeper_state_machine.Draining
-      | Keeper_state_machine.Paused
-      | Keeper_state_machine.Stopped )
-  | Not_registered
-  | Not_running
-  | No_keeper_binding
-  | Current_fact_invalid ->
-      None
-
-let blocked_keeper_operator_action_fields reason =
-  match blocked_keeper_operator_action reason with
-  | None ->
-      [
-        ("operator_action_type", `Null);
-        ("operator_tool_name", `Null);
-        ("operator_action_confirm_required", `Null);
-      ]
-  | Some action ->
-      [
-        ("operator_action_type", `String action.action_type);
-        ("operator_tool_name", `String action.tool_name);
-        ("operator_action_confirm_required", `Bool action.confirm_required);
-      ]
-
-let latest_crash_log_reason crash_log =
-  let latest =
-    List.fold_left
-      (fun acc (ts, reason) ->
-        let reason = String.trim reason in
-        if String.equal reason "" then acc
-        else
-          match acc with
-          | None -> Some (ts, reason)
-          | Some (latest_ts, _) when ts > latest_ts -> Some (ts, reason)
-          | Some _ -> acc)
-      None
-      crash_log
-  in
-  Option.map snd latest
-
-let phase_supports_crash_log_failure_reason = function
-  | Keeper_state_machine.Failing
-  | Keeper_state_machine.Crashed ->
-      true
-  | Keeper_state_machine.Offline
-  | Keeper_state_machine.Running
-  | Keeper_state_machine.Overflowed
-  | Keeper_state_machine.Compacting
-  | Keeper_state_machine.HandingOff
-  | Keeper_state_machine.Draining
-  | Keeper_state_machine.Paused
-  | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Restarting ->
-      false
 
 let active_task_owner_fiber_scan_semantics =
   "reports keeper-shaped active task owners without executable keeper fibers; \
@@ -935,227 +709,7 @@ let active_task_owner_fiber_scan_semantics =
    credentialed non-keeper client task owners are reported separately as \
    advisory rows"
 
-let paused_keeper_last_blocker_json paused_keepers_json name =
-  match paused_keepers_json with
-  | `Assoc fields -> (
-    match List.assoc_opt "details" fields with
-    | Some (`List details) ->
-      (match
-         details
-         |> List.find_map (function
-           | `Assoc detail_fields
-             when (match List.assoc_opt "name" detail_fields with
-                   | Some (`String detail_name) -> String.equal detail_name name
-                   | _ -> false) ->
-               (match List.assoc_opt "last_blocker" detail_fields with
-                | Some last_blocker -> Some last_blocker
-                | None -> Some `Null)
-           | _ -> None)
-       with
-       | Some last_blocker -> last_blocker
-       | None -> `Null)
-    | Some _ | None -> `Null)
-  | _ -> `Null
 
-(* Maximum length of the diagnostic string surfaced on public [/health]
-   fields via [public_health_diagnostic_preview]. Operational limit (UX
-   contract for operator-facing snippets), not a security bound — full
-   redaction happens upstream through [Keeper_secret_redaction] and
-   [Observability_redact.redact_text]; this only truncates the tail. *)
-let max_public_diagnostic_preview_len = 240
-
-let public_health_diagnostic_preview ?base_path ~keeper_name text =
-  let text =
-    match base_path with
-    | None -> text
-    | Some base_path ->
-        let base_path = String.trim base_path in
-        if base_path = "" then text
-        else
-          String_util.replace_substring
-            ~needle:base_path
-            ~by:"[REDACTED_PATH]"
-            text
-  in
-  let text =
-    match base_path with
-    | None -> Observability_redact.redact_text text
-    | Some base_path ->
-        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
-        Keeper_secret_redaction.redact_text redaction text
-  in
-  Observability_redact.redact_preview ~max_len:max_public_diagnostic_preview_len text
-
-let blocked_keeper_detail_json
-    ?base_path
-    ?(last_blocker = `Null)
-    ?phase_detail
-    ~execution_snapshot
-    ~keeper_bootstrap_enabled
-    ~bootable_set
-    ~capacity_set
-    ~paused_set
-    ~read_error_set
-    name =
-  let execution_truth, non_executable_cause =
-    owner_execution_fact execution_snapshot ~keeper_name:name
-  in
-  let is_paused = String_set.mem name paused_set in
-  let is_bootable = String_set.mem name bootable_set in
-  let is_capacity = String_set.mem name capacity_set in
-  let has_read_error = String_set.mem name read_error_set in
-  let phase_from_detail =
-    Option.bind
-      (Option.map (fun detail -> detail.phase) phase_detail)
-      Keeper_state_machine.phase_of_string
-  in
-  let last_failure =
-    match base_path with
-    | None -> None
-    | Some base_path -> Keeper_runtime.boot_meta_failure_for ~base_path ~name
-  in
-  let registry_entry =
-    match base_path with
-    | None -> None
-    | Some base_path -> Keeper_registry.get ~base_path name
-  in
-  let diagnostic_preview =
-    public_health_diagnostic_preview ?base_path ~keeper_name:name
-  in
-  let registry_phase =
-    match registry_entry with
-    | Some (entry : Keeper_registry.registry_entry) -> Some entry.phase
-    | None -> None
-  in
-  let phase =
-    match registry_phase with
-    | Some _ as phase -> phase
-    | None -> phase_from_detail
-  in
-  let phase_name =
-    match phase with
-    | Some phase -> Some (Keeper_state_machine.phase_to_string phase)
-    | None -> Option.map (fun detail -> detail.phase) phase_detail
-  in
-  let registry_last_failure_reason =
-    let raw =
-      match registry_entry with
-      | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
-          Some (Keeper_registry.failure_reason_to_string reason)
-      | Some { Keeper_registry.last_failure_reason = None; crash_log; _ }
-        when Option.value
-               ~default:false
-               (Option.map phase_supports_crash_log_failure_reason phase) ->
-          latest_crash_log_reason crash_log
-      | Some { Keeper_registry.last_failure_reason = None; _ } | None -> None
-    in
-    Option.map diagnostic_preview raw
-  in
-  let reason =
-    if is_paused then Durable_paused_autoboot_enabled
-    else if has_read_error then Meta_read_error
-    else
-      match last_failure with
-      | Some failure -> Boot_failure failure.Keeper_runtime.cause
-      | None ->
-          if not is_bootable then Not_bootable
-          else if not is_capacity then
-            (match phase with
-             | Some phase -> Phase phase
-             | None ->
-               if keeper_bootstrap_enabled then Not_registered
-               else Bootstrap_disabled)
-          else Current_fact_invalid
-  in
-  let terminal_phase_field =
-    match phase with
-    | Some phase -> [ ("terminal_phase", `Bool (Keeper_state_machine.is_terminal phase)) ]
-    | None -> []
-  in
-  let keeper_bootstrap_blocker =
-    match reason with
-    | Bootstrap_disabled -> Some "keeper_bootstrap_disabled"
-    | _ -> None
-  in
-  let last_failure_fields =
-    match last_failure with
-    | None ->
-        [
-          ("last_bootstrap_reason", `Null);
-          ("last_bootstrap_error", `Null);
-          ("last_bootstrap_config_error", `Null);
-          ("last_bootstrap_recorded_at", `Null);
-        ]
-    | Some failure ->
-        [
-          ( "last_bootstrap_reason"
-          , `String
-              (Keeper_runtime.boot_meta_failure_cause_label
-                 failure.Keeper_runtime.cause) );
-          ("last_bootstrap_error", `String failure.Keeper_runtime.error);
-          ( "last_bootstrap_config_error"
-          , Json_util.option_to_yojson
-              (fun error ->
-                 Keeper_types_profile.keeper_toml_config_error_of_load_error
-                   ~keeper_name:name
-                   error
-                 |> Keeper_types_profile.keeper_toml_config_error_to_json)
-              failure.Keeper_runtime.config_error );
-          ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
-        ]
-  in
-  let phase_detail_fields =
-    match phase_detail with
-    | None ->
-        [
-          ( "last_failure_reason"
-          , Json_util.string_opt_to_json registry_last_failure_reason );
-          ("last_error", `Null);
-          ("restart_count", `Null);
-          ("latest_crash_at", `Null);
-          ("latest_crash_reason", `Null);
-        ]
-    | Some detail ->
-        let last_failure_reason =
-          match detail.last_failure_reason with
-          | Some reason -> Some (diagnostic_preview reason)
-          | None -> registry_last_failure_reason
-        in
-        [
-          ( "last_failure_reason"
-          , Json_util.string_opt_to_json last_failure_reason );
-          ("last_error", Json_util.string_opt_to_json (Option.map diagnostic_preview detail.last_error));
-          ("restart_count", `Int detail.restart_count);
-          ("latest_crash_at", Json_util.float_opt_to_json detail.latest_crash_at);
-          ( "latest_crash_reason"
-          , Json_util.string_opt_to_json
-              (Option.map diagnostic_preview detail.latest_crash_reason) );
-        ]
-  in
-  `Assoc
-    ([
-       ("keeper_name", `String name);
-       ("reason", `String (blocked_keeper_reason_label reason));
-       ("action", `String (blocked_keeper_action_label reason));
-       ("execution_truth", `String (owner_execution_truth_to_wire execution_truth));
-       ( "non_executable_cause"
-       , match non_executable_cause with
-         | Some cause -> `String (keeper_non_executable_cause_to_wire cause)
-         | None -> `Null );
-       ("phase", Json_util.string_opt_to_json phase_name);
-       ("last_blocker", last_blocker);
-       ("bootable", `Bool is_bootable);
-       ("reaction_capacity", `Bool is_capacity);
-       ("paused", `Bool is_paused);
-       ("meta_read_error", `Bool has_read_error);
-       ("keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled);
-       ( "keeper_bootstrap_blocker"
-       , Json_util.string_opt_to_json keeper_bootstrap_blocker );
-     ]
-     @ terminal_phase_field
-     @ blocked_keeper_operator_action_fields reason
-     @ last_failure_fields
-     @ phase_detail_fields)
 
 type active_task_owner_without_executable_fiber = {
   keeper_name : string option;
@@ -1241,11 +795,6 @@ let active_task_assignment (task : Masc_domain.task) =
                })
 
 let active_task_owner_without_executable_fiber_json row =
-  let action =
-    match row.keeper_name with
-    | Some _ -> blocked_keeper_action_label Not_running
-    | None -> blocked_keeper_action_label No_keeper_binding
-  in
   `Assoc
     [
       ("keeper_name", Json_util.string_opt_to_json row.keeper_name);
@@ -1253,7 +802,6 @@ let active_task_owner_without_executable_fiber_json row =
       ("task_id", `String row.task_id);
       ("task_status", `String row.task_status);
       ("executable", `Bool false);
-      ("action", `String action);
     ]
 
 let completion_authority_pending_task_json row =
@@ -1265,7 +813,6 @@ let completion_authority_pending_task_json row =
       ("verification_id", `String row.verification_id);
       ("owner_kind", `String "system_llm_completion_authority");
       ("fleet_blocking", `Bool false);
-      ("action", `String "await_system_llm_verdict");
     ]
 
 let non_keeper_active_task_owner_json row =
@@ -1276,7 +823,6 @@ let non_keeper_active_task_owner_json row =
       ("task_status", `String row.task_status);
       ("owner_kind", `String "non_keeper_client");
       ("fleet_blocking", `Bool false);
-      ("action", `String "track_client_task_or_release_when_done");
     ]
 
 type keeper_agent_binding_scan = {
@@ -1445,39 +991,7 @@ let active_task_owner_fiber_scan config ~executable_names =
         active_task_owner_scan_errors = backlog_read_errors @ meta_read_errors;
       }
 
-let active_task_owner_blocked_name row =
-  match row.keeper_name with
-  | Some keeper_name -> keeper_name
-  | None -> row.agent_name
 
-let active_task_owner_blocked_detail_json ~execution_snapshot row =
-  let reason =
-    match row.keeper_name with
-    | Some _ -> Not_running
-    | None -> No_keeper_binding
-  in
-  let execution_truth, non_executable_cause =
-    match row.keeper_name with
-    | Some keeper_name -> owner_execution_fact execution_snapshot ~keeper_name
-    | None ->
-      ( Keeper_activation_readiness.Unknown "task owner has no Keeper binding"
-      , Some Cause_no_keeper_binding )
-  in
-  `Assoc
-    ([
-       ("keeper_name", Json_util.string_opt_to_json row.keeper_name);
-       ("agent_name", `String row.agent_name);
-       ("task_id", `String row.task_id);
-       ("task_status", `String row.task_status);
-       ("reason", `String (blocked_keeper_reason_label reason));
-       ("action", `String (blocked_keeper_action_label reason));
-       ("execution_truth", `String (owner_execution_truth_to_wire execution_truth));
-       ( "non_executable_cause"
-       , match non_executable_cause with
-         | Some cause -> `String (keeper_non_executable_cause_to_wire cause)
-         | None -> `Null );
-     ]
-     @ blocked_keeper_operator_action_fields reason)
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
@@ -1552,11 +1066,6 @@ let keeper_fleet_safety_health_json
     |> List.filter_map (fun row -> row.keeper_name)
     |> sorted_unique_strings
   in
-  let active_task_owner_blocked_names =
-    active_task_owner_scan.active_task_owner_without_executable_fibers
-    |> List.map active_task_owner_blocked_name
-    |> sorted_unique_strings
-  in
   let active_task_owner_without_executable_fiber_count =
     List.length active_task_owner_scan.active_task_owner_without_executable_fibers
   in
@@ -1575,12 +1084,6 @@ let keeper_fleet_safety_health_json
     List.length active_task_owner_scan.completion_authority_pending_tasks
   in
   let completion_authority_pending = completion_authority_pending_task_count > 0 in
-  let phase_details =
-    match phase_snapshot with
-    | Some snapshot -> snapshot.phase_details
-    | None -> []
-  in
-  let phase_detail name = List.assoc_opt name phase_details in
   let no_executable_keeper_fibers = target_count > 0 && executable_count = 0 in
   let reaction_capacity_shortfall_count =
     max 0 (target_count - executable_count)
@@ -1591,13 +1094,6 @@ let keeper_fleet_safety_health_json
   let keeper_bootstrap_blocked =
     (not keeper_bootstrap_enabled)
     && (no_executable_keeper_fibers || reaction_capacity_below_target)
-  in
-  let active_task_owner_is_selected_blocker =
-    active_task_owner_without_executable_fiber
-    && not
-         (no_executable_keeper_fibers
-          || reaction_capacity_below_target
-          || keeper_bootstrap_blocked)
   in
   let paused_total_count =
     match paused_keepers_json with
@@ -1615,12 +1111,6 @@ let keeper_fleet_safety_health_json
        | _ -> 0)
     | _ -> 0
   in
-  let names_not_in active_names =
-    let active_names = sorted_unique_strings active_names in
-    autoboot_scan.autoboot_names
-    |> List.filter (fun name -> not (List.mem name active_names))
-    |> sorted_unique_strings
-  in
   let status =
     if no_executable_keeper_fibers then "blocked"
     else if reaction_capacity_below_target then "degraded"
@@ -1628,49 +1118,9 @@ let keeper_fleet_safety_health_json
     else if backlog_observation_degraded then "degraded"
     else "ok"
   in
-  let blocked_keeper_names =
-    if no_executable_keeper_fibers || reaction_capacity_below_target
-    then names_not_in executable_names
-    else if active_task_owner_is_selected_blocker then active_task_owner_blocked_names
-    else []
-  in
-  (* Counts unique blocked keeper NAMES, not capacity shortfall. This
-     intentionally differs from pre-#22388 behavior, which reported
-     a capacity shortfall; see the PR summary.
-     Consumers should read this as "number of named blockers" rather than
-     missing capacity slots. *)
-  let active_capacity_names = executable_names in
-  let bootable_set = string_set_of_list bootable_names in
-  let capacity_set = string_set_of_list active_capacity_names in
-  let paused_set =
-    paused_keepers_json
-    |> json_string_list_field "autoboot_enabled_names"
-    |> string_set_of_list
-  in
-  let read_error_set =
-    autoboot_scan.read_errors |> List.map fst |> string_set_of_list
-  in
-  let blocked_keepers =
-    if active_task_owner_is_selected_blocker then
-      active_task_owner_scan.active_task_owner_without_executable_fibers
-      |> List.map (active_task_owner_blocked_detail_json ~execution_snapshot)
-    else
-      blocked_keeper_names
-      |> List.map
-           (fun name ->
-             blocked_keeper_detail_json
-               ?base_path:runtime_base_path
-               ~last_blocker:(paused_keeper_last_blocker_json paused_keepers_json name)
-               ?phase_detail:(phase_detail name)
-               ~execution_snapshot
-               ~keeper_bootstrap_enabled
-               ~bootable_set
-               ~capacity_set
-               ~paused_set
-               ~read_error_set
-               name)
-  in
-  let blocked_keeper_count = List.length blocked_keepers in
+  (* Which keepers are not running is bootable minus executable, and both
+     lists ship in this response. The subtraction belongs to whoever reads
+     them, so it is not precomputed here. *)
   let blocker =
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
@@ -1763,10 +1213,6 @@ let keeper_fleet_safety_health_json
     ; "reaction_capacity_shortfall_count", `Int reaction_capacity_shortfall_count
     ; "paused_keeper_count", `Int paused_total_count
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
-    ; "blocked_keeper_count", `Int blocked_keeper_count
-    ; ( "blocked_keeper_count_semantics"
-      , `String "number of canonical blocked_keepers items" )
-    ; "blocked_keepers", `List blocked_keepers
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers

@@ -9,11 +9,7 @@ import { normalizeKeeperTrust } from './keeper-store-normalize'
 import { normalizeStopCause } from './lib/stop-cause'
 import { parseAgentStatus } from './lib/agent-status'
 import {
-  DASHBOARD_BLOCKED_KEEPER_REASONS,
-  DASHBOARD_KEEPER_EXECUTION_TRUTHS,
-  DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS,
   DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
-  DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES,
 } from './types/dashboard-execution'
 import { MENTION_DELIVERY_STATUSES } from './types/core'
 import type {
@@ -24,11 +20,6 @@ import type {
   DashboardExecutionContinuityBrief,
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
-  DashboardBlockedKeeperFact,
-  DashboardBlockedKeeperReason,
-  DashboardKeeperExecutionTruth,
-  DashboardKeeperFleetOperatorAction,
-  DashboardKeeperNonExecutableCause,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
   DashboardBlockerClassObject,
@@ -591,86 +582,6 @@ function normalizeDashboardPausedKeepersHealth(raw: unknown): DashboardPausedKee
   }
 }
 
-const dashboardBlockedKeeperReasonSet: ReadonlySet<string> =
-  new Set(DASHBOARD_BLOCKED_KEEPER_REASONS)
-const dashboardKeeperFleetOperatorActionSet: ReadonlySet<string> =
-  new Set(DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS)
-const dashboardKeeperExecutionTruthSet: ReadonlySet<string> =
-  new Set(DASHBOARD_KEEPER_EXECUTION_TRUTHS)
-const dashboardKeeperNonExecutableCauseSet: ReadonlySet<string> =
-  new Set(DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES)
-
-function currentKeeperFleetFactInvalid(): DashboardBlockedKeeperFact {
-  return {
-    keeper_name: null,
-    agent_name: null,
-    task_id: null,
-    task_status: null,
-    reason: 'current_fact_invalid',
-    action: 'inspect_current_keeper_fact',
-    execution_truth: 'unknown',
-    non_executable_cause: 'current_fact_invalid',
-    operator_action_type: null,
-    operator_tool_name: null,
-    operator_action_confirm_required: null,
-  }
-}
-
-function nonEmptyString(value: unknown): string | null {
-  const parsed = asString(value)?.trim()
-  return parsed ? parsed : null
-}
-
-function normalizeDashboardBlockedKeeperFact(raw: unknown): DashboardBlockedKeeperFact | null {
-  if (!isRecord(raw)) return null
-  const keeperName = raw.keeper_name === null ? null : nonEmptyString(raw.keeper_name)
-  const agentName = raw.agent_name == null ? null : nonEmptyString(raw.agent_name)
-  const taskId = raw.task_id == null ? null : nonEmptyString(raw.task_id)
-  const taskStatus = raw.task_status == null ? null : nonEmptyString(raw.task_status)
-  const rawReason = nonEmptyString(raw.reason)
-  const rawAction = nonEmptyString(raw.action)
-  const rawExecutionTruth = nonEmptyString(raw.execution_truth)
-  const rawNonExecutableCause = nonEmptyString(raw.non_executable_cause)
-  if (
-    rawReason == null
-    || !dashboardBlockedKeeperReasonSet.has(rawReason)
-    || rawAction == null
-    || !dashboardKeeperFleetOperatorActionSet.has(rawAction)
-    || rawExecutionTruth == null
-    || !dashboardKeeperExecutionTruthSet.has(rawExecutionTruth)
-    || rawNonExecutableCause == null
-    || !dashboardKeeperNonExecutableCauseSet.has(rawNonExecutableCause)
-  ) {
-    return null
-  }
-  const reason = rawReason as DashboardBlockedKeeperReason
-  const action = rawAction as DashboardKeeperFleetOperatorAction
-  const executionTruth = rawExecutionTruth as DashboardKeeperExecutionTruth
-  const nonExecutableCause =
-    rawNonExecutableCause as DashboardKeeperNonExecutableCause
-  if (keeperName == null && !(reason === 'no_keeper_binding' && agentName != null)) {
-    return null
-  }
-  return {
-    keeper_name: keeperName,
-    agent_name: agentName,
-    task_id: taskId,
-    task_status: taskStatus,
-    reason,
-    action,
-    execution_truth: executionTruth,
-    non_executable_cause: nonExecutableCause,
-    operator_action_type:
-      raw.operator_action_type == null ? null : nonEmptyString(raw.operator_action_type),
-    operator_tool_name:
-      raw.operator_tool_name == null ? null : nonEmptyString(raw.operator_tool_name),
-    operator_action_confirm_required:
-      raw.operator_action_confirm_required == null
-        ? null
-        : asBoolean(raw.operator_action_confirm_required) ?? null,
-  }
-}
-
 function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPressureHealth | null {
   if (!isRecord(raw)) return null
   const schema = asString(raw.schema)
@@ -681,11 +592,9 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
       : null
   const reason = asString(raw.reason) ?? null
   const blocker = raw.blocker === null ? null : asString(raw.blocker) ?? null
-  const blockedKeeperCount = asNumber(raw.blocked_keeper_count)
-  const blockedKeepers = Array.isArray(raw.blocked_keepers)
-    ? raw.blocked_keepers.map(normalizeDashboardBlockedKeeperFact)
-    : null
   const bootableKeeperCount = asNumber(raw.bootable_keeper_count)
+  const autobootKeeperNames = asStringArray(raw.autoboot_enabled_keeper_names)
+  const executableKeeperNames = asStringArray(raw.executable_keeper_names)
   const runningKeeperFiberCount = asNumber(raw.running_keeper_fiber_count)
   const failingKeeperFiberCount = asNumber(raw.failing_keeper_fiber_count)
   const recoveringKeeperFiberCount = asNumber(raw.recovering_keeper_fiber_count)
@@ -698,34 +607,21 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   const pausedAutobootEnabledKeeperCount = asNumber(raw.paused_autoboot_enabled_keeper_count)
   const targetReactionCapacityCount = asNumber(raw.target_reaction_capacity_count)
   const operatorActionRequired = asBoolean(raw.operator_action_required)
-  const canonicalBlockedKeepers =
-    blockedKeepers?.every((fact): fact is DashboardBlockedKeeperFact => fact != null)
-      ? blockedKeepers
-      : null
-  const blockedCountIsCurrent =
-    blockedKeeperCount != null
-    && Number.isInteger(blockedKeeperCount)
-    && blockedKeeperCount >= 0
   const currentShape =
     schema === DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA
     && status != null
     && Object.prototype.hasOwnProperty.call(raw, 'blocker')
-    && blockedCountIsCurrent
-    && canonicalBlockedKeepers != null
-    && blockedKeeperCount === canonicalBlockedKeepers.length
     && operatorActionRequired != null
     && operatorActionRequired === (status !== 'ok')
-    && ((status === 'ok' && canonicalBlockedKeepers.length === 0)
-      || (status !== 'ok' && canonicalBlockedKeepers.length > 0))
   if (!currentShape) {
     return {
       schema: DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
       status: 'blocked',
       reason: 'current_fact_invalid',
       blocker: 'current_fact_invalid',
-      blocked_keeper_count: 1,
-      blocked_keepers: [currentKeeperFleetFactInvalid()],
       bootable_keeper_count: bootableKeeperCount ?? null,
+      autoboot_enabled_keeper_names: autobootKeeperNames,
+      executable_keeper_names: executableKeeperNames,
       running_keeper_fiber_count: runningKeeperFiberCount ?? null,
       failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
       recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
@@ -745,9 +641,9 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     status,
     reason,
     blocker,
-    blocked_keeper_count: blockedKeeperCount,
-    blocked_keepers: canonicalBlockedKeepers,
     bootable_keeper_count: bootableKeeperCount ?? null,
+    autoboot_enabled_keeper_names: autobootKeeperNames,
+    executable_keeper_names: executableKeeperNames,
     running_keeper_fiber_count: runningKeeperFiberCount ?? null,
     failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
     recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,

@@ -441,29 +441,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         paused_autoboot_enabled_keeper_count: 13,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keeper_count: 2,
-        blocked_keepers: [
-          {
-            keeper_name: 'analyst',
-            reason: 'durable_paused_autoboot_enabled',
-            action: 'resume_or_leave_paused',
-            execution_truth: 'paused_dead',
-            non_executable_cause: 'lifecycle_denied',
-            operator_action_type: null,
-            operator_tool_name: null,
-            operator_action_confirm_required: null,
-          },
-          {
-            keeper_name: 'rondo',
-            reason: 'phase_restarting',
-            action: 'wait_for_keeper_restart',
-            execution_truth: 'recoverable',
-            non_executable_cause: 'fiber_dead',
-            operator_action_type: null,
-            operator_tool_name: null,
-            operator_action_confirm_required: null,
-          },
-        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -511,23 +488,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         paused_autoboot_enabled_keeper_count: 13,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keeper_count: 2,
-        blocked_keepers: [
-          {
-            keeper_name: 'analyst',
-            reason: 'durable_paused_autoboot_enabled',
-            action: 'resume_or_leave_paused',
-            execution_truth: 'paused_dead',
-            non_executable_cause: 'lifecycle_denied',
-          },
-          {
-            keeper_name: 'rondo',
-            reason: 'phase_restarting',
-            action: 'wait_for_keeper_restart',
-            execution_truth: 'recoverable',
-            non_executable_cause: 'fiber_dead',
-          },
-        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -539,34 +499,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     })
   })
 
-  it('collapses a malformed Keeper operator item into one bad current fact', () => {
-    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_fleet_safety: {
-        schema: 'masc.keeper_fleet_operator.v1',
-        status: 'degraded',
-        blocker: 'reaction_capacity_below_target',
-        blocked_keeper_count: 1,
-        blocked_keepers: [{
-          keeper_name: 'sangsu',
-          reason: 'phase_failing',
-          action: 'unsupported_action',
-        }],
-        operator_action_required: true,
-      },
-    }))
-
-    expect(result?.fleet_safety?.keeper_fleet_safety).toMatchObject({
-      status: 'blocked',
-      blocker: 'current_fact_invalid',
-      blocked_keeper_count: 1,
-      operator_action_required: true,
-      blocked_keepers: [{
-        keeper_name: null,
-        reason: 'current_fact_invalid',
-        action: 'inspect_current_keeper_fact',
-      }],
-    })
-  })
 
   it('keeps reaction-ledger health even when other fleet safety fields are absent', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({

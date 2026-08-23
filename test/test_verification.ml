@@ -1528,13 +1528,13 @@ let test_list_requests () =
 let test_list_requests_missing_dir_stays_quiet () =
   with_temp_dir (fun base_path ->
     let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error
+      persistence_counter (Read_drop_reason.to_wire Read_drop_reason.List_dir_error)
     in
     let reqs = list_requests_exn base_path in
     Alcotest.(check int) "no requests" 0 (List.length reqs);
     Alcotest.(check (float 0.1)) "missing dir does not increment metric"
       before
-      (persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error))
+      (persistence_counter (Read_drop_reason.to_wire Read_drop_reason.List_dir_error)))
 
 let test_verifications_dir_resolves_active_store () =
   with_temp_dir (fun base_path ->
@@ -1563,7 +1563,7 @@ let test_list_requests_isolates_bad_entry_with_metric () =
     let dir = active_verifications_dir base_path in
     Fs_compat.save_file (Filename.concat dir "broken.json") "{not-json";
     let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+      persistence_counter (Read_drop_reason.to_wire Read_drop_reason.Entry_load_error)
     in
     (match V.list_requests base_path with
      | Error detail -> Alcotest.fail detail
@@ -1590,7 +1590,7 @@ let test_list_requests_isolates_bad_entry_with_metric () =
           Alcotest.failf "expected exactly one unreadable entry, got %d"
             (List.length entries)));
     Alcotest.(check (float 0.1)) "broken file increments metric" 1.0
-      (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+      (persistence_counter (Read_drop_reason.to_wire Read_drop_reason.Entry_load_error)
        -. before))
 
 (* The scan reports every unreadable file, not just the one it stopped at. The

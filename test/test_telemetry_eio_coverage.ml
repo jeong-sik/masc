@@ -412,7 +412,7 @@ let test_parse_event_records_drop_increments_counter () =
   let labels =
     [
       ("surface", "telemetry_eio");
-      ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
+      ("reason", Read_drop_reason.to_wire Read_drop_reason.Invalid_payload);
     ]
   in
   let before = Otel_metric_store.metric_value_or_zero metric ~labels () in

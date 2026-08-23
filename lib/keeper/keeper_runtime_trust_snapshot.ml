@@ -354,10 +354,12 @@ let trust_model_json_fields (model : Trust_core.t) =
 let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"
 
 let report_decision_log_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
-        ~labels:[("surface", decision_log_persistence_surface); ("reason", reason)]
+        ~labels:[("surface", decision_log_persistence_surface); ("reason", reason_wire)]
         ())
     ~surface:decision_log_persistence_surface
     ~reason
@@ -397,18 +399,18 @@ let latest_decision_json ~(config : Workspace.config) ~(keeper_name : string) :
                let reason =
                  match (index, completion) with
                  | 0, Keeper_memory.Partial_last_line ->
-                     Safe_ops.persistence_read_drop_reason_tail_partial_write
+                     Read_drop_reason.Tail_partial_write
                  | 0, Keeper_memory.Complete
                  | _, Keeper_memory.Partial_last_line
                  | _, Keeper_memory.Complete ->
-                     Safe_ops.persistence_read_drop_reason_entry_load_error
+                     Read_drop_reason.Entry_load_error
                in
                report_decision_log_read_drop ~reason ~path ~detail;
                None
            | (`Assoc _ as json) -> Some json
            | _ ->
                report_decision_log_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path
                  ~detail:"decision log row is not a JSON object";
                None)

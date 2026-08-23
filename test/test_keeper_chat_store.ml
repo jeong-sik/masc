@@ -90,8 +90,8 @@ let test_load_records_malformed_row_drops () =
     (fun () ->
       let keeper_name = "keeper-chat-drop" in
       let path = chat_path ~base_dir ~keeper_name in
-      let syntax_error = Safe_ops.persistence_read_drop_reason_json_syntax_error in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let syntax_error = Read_drop_reason.to_wire Read_drop_reason.Json_syntax_error in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before_syntax_error = drop_value syntax_error in
       let before_invalid_payload = drop_value invalid_payload in
       write_file path
@@ -244,7 +244,7 @@ let test_rows_without_float_ts_are_dropped_and_counted () =
     (fun () ->
       let keeper_name = "keeper-chat-missing-ts" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"no-ts","role":"user","content":"hello"}|} ^ "\n"
@@ -722,7 +722,7 @@ let test_unknown_speaker_authority_reported_not_guessed () =
     (fun () ->
       let keeper_name = "keeper-chat-speaker-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"unknown-authority","role":"user","content":"hi","ts":1.0,"speaker_id":"x","speaker_authority":"admin"}|}
@@ -747,7 +747,7 @@ let test_unknown_role_row_dropped () =
     (fun () ->
       let keeper_name = "keeper-chat-role-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"role-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
@@ -767,7 +767,7 @@ let test_tool_row_missing_name_dropped () =
     (fun () ->
       let keeper_name = "keeper-chat-toolname" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"tool-name-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
@@ -1074,7 +1074,7 @@ let test_unknown_kind_reported_reads_utterance () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "keeper-chat-kind-unknown" in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
@@ -1916,7 +1916,7 @@ let test_malformed_stream_lifecycle_reads_none () =
     (fun () ->
       let keeper_name = "keeper-chat-store-lifecycle-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"bad-lifecycle","role":"assistant","content":"x","ts":1.0,"turn_ref":"trace-life#7","stream_lifecycle":["RUN_STARTED","NOT_A_REAL_EVENT"]}|}
@@ -1963,7 +1963,7 @@ let test_half_provenance_reads_none () =
     (fun () ->
       let keeper_name = "keeper-chat-half-provenance" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"half-pair","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"operation","operation_id":"kmsg-half-pair"}}|}
@@ -2122,9 +2122,7 @@ let test_delivery_key_malformed_reads_none () =
     (fun () ->
       let keeper_name = "keeper-chat-delivery-key-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload =
-        Safe_ops.persistence_read_drop_reason_invalid_payload
-      in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"bad-delivery-key","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"not_a_kind","request_id":"kmsg-1"}}|}

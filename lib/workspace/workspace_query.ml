@@ -123,7 +123,7 @@ let load_agents_from_dir config dir ~include_inactive =
          | Error (Agent_read_error detail) ->
              Safe_ops.report_persistence_read_drop_counted
                ~surface:agents_persistence_surface
-               ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+               ~reason:Read_drop_reason.Entry_load_error
                ~path ~detail;
              None)
 

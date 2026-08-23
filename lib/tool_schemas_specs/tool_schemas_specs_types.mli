@@ -35,7 +35,6 @@ type dashboard_scope =
 
 val dashboard_scope_to_string : dashboard_scope -> string
 val dashboard_scope_of_string_opt : string -> dashboard_scope option
-val all_dashboard_scopes : dashboard_scope list
 
 val dashboard_scope_strings : string list
 (** The enum, in the order the schema lists it. *)

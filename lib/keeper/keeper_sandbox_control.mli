@@ -66,7 +66,7 @@ end
 
 val live_status_json :
   ?include_preflight:bool ->
-  ?preflight_override:Yojson.Safe.t option ->
+  ?preflight_override:Keeper_sandbox_runtime.docker_preflight option ->
   ?containers_override:(Keeper_sandbox_runtime.live_container list, string) result ->
   ?include_repository_checkouts:bool ->
   config:Workspace.config ->

@@ -20,6 +20,13 @@ module For_testing : sig
   val host_stop_turn_identity : session_id:string -> turn_count:int -> string
   (** Deterministic durable identity used when a dynamic-tool host stop arrives
       before Claude emits its terminal result-frame turn id. *)
+
+  val recovery_failure_of_client_error
+    :  Runtime_claude_code.error
+    -> Keeper_official_client_session_store.recovery_failure
+  (** Typed map from a Claude Code client error to the durable recovery
+      failure. A typed context overflow becomes [Input_rejected] so the
+      session admission fence can hold instead of auto-replaying. *)
 end
 
 val run :

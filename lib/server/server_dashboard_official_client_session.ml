@@ -20,16 +20,8 @@ let client_kind_to_string = function
   | Antigravity -> "antigravity"
 ;;
 
-let failure_to_string = function
-  | Keeper_official_client_session_store.Transient_spawn_failed ->
-    "transient_spawn_failed"
-  | Owner_stopped_turn -> "owner_stopped_turn"
-  | Transport_interrupted -> "transport_interrupted"
-  | Protocol_failed -> "protocol_failed"
-  | Provider_rejected -> "provider_rejected"
-  | Host_hook_failed -> "host_hook_failed"
-  | State_persistence_failed -> "state_persistence_failed"
-  | Process_restarted -> "process_restarted"
+let failure_to_string =
+  Keeper_official_client_session_store.recovery_failure_to_string
 ;;
 
 let settlement_json (settlement : Keeper_official_client_session_store.settlement) =

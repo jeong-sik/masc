@@ -31,11 +31,15 @@ val install_from_store
   -> Workspace.config
   -> (int, install_error) result
 (** Load each valid persisted Keeper independently and start exactly one owner
-    actor for it under [sw]. A malformed, missing, or path-identity-mismatched
-    snapshot is reported and fenced under its exact Keeper name without
-    preventing other owners from starting. The affected name cannot be read,
-    created, or mutated until process restart re-audits durable state. Failure
-    to enumerate the inventory still fails installation. Returns the installed
+    actor for it under [sw]. A snapshot the store reads as absent (the file is
+    gone, or it does not decode under the current schema, which the store
+    reports at WARN) is not in the inventory: the name stays unknown to the
+    pool and [create_meta] materialises it, at boot from its TOML declaration.
+    A snapshot the store cannot read at all, or whose payload identity differs
+    from its path, is reported and fenced under its exact Keeper name without
+    preventing other owners from starting; that name cannot be read, created,
+    or mutated until process restart re-audits durable state. Failure to
+    enumerate the inventory still fails installation. Returns the installed
     owner count. *)
 
 val get

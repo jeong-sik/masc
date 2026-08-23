@@ -185,3 +185,37 @@ let rows_of_json (payload : Yojson.Safe.t) =
         }
   | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
       Error "keeper chat history did not come back as an array of rows"
+
+type page =
+  { decoded : decoded
+  ; has_more : bool
+  ; next_before : float option
+  }
+
+let page_of_json (payload : Yojson.Safe.t) =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt "messages" fields with
+      | Some (`List _ as messages) -> (
+          match rows_of_json messages with
+          | Error _ as error -> error
+          | Ok decoded ->
+              Ok
+                { decoded
+                ; (* A missing flag reads as "no more". Guessing true would
+                     leave the pane offering a page the server never promised,
+                     and every request for it would come back empty. *)
+                  has_more =
+                    (match List.assoc_opt "has_more" fields with
+                     | Some (`Bool value) -> value
+                     | Some _ | None -> false)
+                ; next_before =
+                    (match List.assoc_opt "next_before" fields with
+                     | Some (`Float value) -> Some value
+                     | Some (`Int value) -> Some (float_of_int value)
+                     | Some _ | None -> None)
+                })
+      | Some _ | None ->
+          Error "keeper chat page has no messages array")
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "keeper chat page did not come back as an object"

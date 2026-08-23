@@ -83,6 +83,16 @@ let test_keeper_chat_uses_current_async_contract () =
      Reading state.msg_history directly is what it did when the scrollback was
      session-only, and going back to that would silently drop the saved
      conversation while everything still compiled. *)
+  (* A held tool call expires. Its prompt lives in the chat pane, so an
+     operator on any other surface would lose the call without ever seeing it
+     was waiting. The composer line is the one row every surface draws, which
+     is why the notice goes there -- drawing it only in the chat pane is the
+     bug this pins. *)
+  check bool "every surface says when a keeper is holding a call" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"composer_line"
+       ~callee:"awaiting_approval_notice"
+     >= 1);
   check bool "the chat pane draws the merged transcript" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_keeper_message"

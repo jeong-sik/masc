@@ -252,7 +252,7 @@ let keeper_message_page_rows state =
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(retry_message : unit -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
-    (key : string) : bool =
+    ~(load_older : before:float -> unit) (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
@@ -297,6 +297,15 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | "up" ->
     state.msg_scroll <- state.msg_scroll + 1;
+    (* Scrolling into the oldest rows is the ask for older ones. Fetching on
+       the keypress rather than on reaching an exact row means the page is
+       usually there before the reader arrives; the render clamps the position
+       either way, so an early fetch costs nothing on screen. *)
+    (match state.msg_older_cursor with
+     | Some before
+       when state.msg_older_exist && not state.msg_older_loading ->
+         load_older ~before
+     | Some _ | None -> ());
     true
   | "down" ->
     state.msg_scroll <- max 0 (state.msg_scroll - 1);
@@ -403,6 +412,8 @@ type async_msg =
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
       string * (Keeper_chat_history.decoded, string) result
+  | Keeper_chat_older_loaded of
+      string * float * (Keeper_chat_history.page, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
@@ -553,6 +564,34 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
       enqueue_async mailbox
         (Keeper_chat_approval_answered
            (request, tool_call_id, allow, Error "Eio switch is unavailable"))
+
+(* Fetch the page before [before]. One at a time: msg_older_loading gates the
+   caller, so scrolling fast cannot open a request per keypress and land the
+   pages out of order. *)
+let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  state.msg_older_loading <- true;
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_keeper_chat_history_page ~host ~port ~keeper_name
+          ~before
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_chat_older_loaded (keeper_name, before, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_chat_older_loaded
+           (keeper_name, before, Error "Eio switch is unavailable"))
 
 let launch_keeper_history_load state ~mailbox ~keeper_name =
   let host = Env_config_core.masc_host () in
@@ -2005,6 +2044,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~submit_message:(fun _ -> ())
           ~retry_message:(fun () -> ())
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
+          ~load_older:(fun ~before:_ -> ())
           key
       in
       true
@@ -2250,11 +2290,61 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.msg_loaded_keeper <- Some keeper_name;
           state.msg_loaded_error <- None;
           state.msg_loaded_dropped <- dropped;
+          (* Where reading further back starts. The oldest row this load
+             carried is the cursor; if it carried none there is nothing to page
+             back from. Whether older rows exist is only learned by asking, so
+             the pane assumes they might and finds out on the first page. *)
+          state.msg_older_cursor <-
+            List.fold_left
+              (fun oldest (row : Keeper_chat_history.row) ->
+                match oldest with
+                | None -> Some row.Keeper_chat_history.at
+                | Some at -> Some (Float.min at row.Keeper_chat_history.at))
+              None rows;
+          state.msg_older_exist <- Option.is_some state.msg_older_cursor;
+          state.msg_older_error <- None;
           forget_session_rows_the_transcript_holds state keeper_name
       | Error detail ->
           (* The transcript is left as it was and the session rows stay: a
              failed load must not be the reason the pane goes blank. *)
           state.msg_loaded_error <- Some detail)
+  | Keeper_chat_older_loaded (keeper_name, before, result) ->
+      state.msg_older_loading <- false;
+      (* A page that arrived for a keeper the pane has since left, or after a
+         reload moved the cursor, is dropped: prepending it would put rows
+         above a transcript they do not belong to. *)
+      let still_current =
+        (match state.msg_loaded_keeper with
+         | Some loaded -> String.equal loaded keeper_name
+         | None -> false)
+        && state.msg_older_cursor = Some before
+      in
+      if still_current then (
+        match result with
+        | Ok page ->
+            let rows =
+              List.map
+                (msg_entry_of_history_row keeper_name)
+                page.Keeper_chat_history.decoded.Keeper_chat_history.rows
+            in
+            (* Prepended, not merged: these are strictly older than everything
+               loaded, and the pane orders the whole list by time anyway. *)
+            state.msg_loaded <- rows @ state.msg_loaded;
+            state.msg_loaded_dropped <-
+              state.msg_loaded_dropped
+              + page.Keeper_chat_history.decoded.Keeper_chat_history.dropped;
+            state.msg_older_cursor <- page.Keeper_chat_history.next_before;
+            (* A page with no cursor cannot be paged past even if the server
+               says more exist, so both have to hold for the pane to offer
+               another. *)
+            state.msg_older_exist <-
+              page.Keeper_chat_history.has_more
+              && Option.is_some page.Keeper_chat_history.next_before;
+            state.msg_older_error <- None
+        | Error detail ->
+            (* The cursor is kept so the same page can be asked for again;
+               what is on screen is untouched. *)
+            state.msg_older_error <- Some detail)
   | Keeper_chat_reconciled (request, result) ->
       if apply_keeper_chat_reconciliation state ~base_path request result then
         load_from_masc_dir state base_path
@@ -2504,6 +2594,12 @@ let main () =
                           The prompt belongs to a turn, so this is
                           unreachable while one is shown. *)
                        ())
+                 ~load_older:(fun ~before ->
+                   match state.msg_target_keeper_name with
+                   | Some keeper_name ->
+                       launch_keeper_older_page state ~mailbox:async_messages
+                         ~keeper_name ~before
+                   | None -> ())
                  k
              in
              ()

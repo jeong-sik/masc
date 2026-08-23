@@ -90,6 +90,29 @@ let composer_prompt_text composer =
 (* Unfocused the row is dim and says which key opens it; focused it is drawn in
    full and carries the cursor. Either way it occupies the same single row, so
    taking focus does not move the frame above it. *)
+(* The one line that tells an operator on any surface that a keeper is holding
+   a tool call. Returns None when nothing is held, which is the common case. *)
+let awaiting_approval_notice (state : state) =
+  match state.msg_live with
+  | None -> None
+  | Some live -> (
+      match Keeper_chat_transcript.awaiting_approval live with
+      | None -> None
+      | Some awaiting ->
+          let where =
+            match state.view with
+            | Keepers Keeper_message -> ""
+            | Overview | Keepers _ | Board | Approvals | Planning
+            | System_logs ->
+                "  (2 then m to answer)"
+          in
+          Some
+            (Printf.sprintf "  %s is holding %s%s"
+               (Terminal_text.single_line
+                  (Keeper_chat_transcript.keeper_name live))
+               (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
+               where))
+
 let composer_line state ~cols =
   let composer = composer_of_state state in
   let prompt = composer_prompt_text composer in
@@ -111,7 +134,15 @@ let composer_line state ~cols =
   let body =
     if String.equal draft "" then prompt ^ hint else prompt ^ draft
   in
-  tone ^ fit_width body cols ^ Ansi.reset
+  (* A held tool call is drawn on whatever surface the operator is looking at.
+     Its prompt lives in the chat pane, and a turn holding a call is denied
+     when the wait runs out -- so an operator reading the Board would lose the
+     call without ever seeing that it was waiting. This line says a keeper is
+     waiting and where to answer; the answer itself stays in the chat pane,
+     where it is unambiguous which keeper and which call it is for. *)
+  match awaiting_approval_notice state with
+  | Some notice -> Ansi.yellow ^ fit_width notice cols ^ Ansi.reset
+  | None -> tone ^ fit_width body cols ^ Ansi.reset
 
 let composer_cursor state ~rows ~cols =
   let composer = composer_of_state state in
@@ -474,49 +505,50 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
     ^ fit_width (Terminal_text.single_line task.title) (cols - 6)
     ^ Ansi.reset);
   (* Each status carries its own timestamps and actors; one exhaustive match
-     keeps the row and the status from disagreeing about who did what. *)
-  (let status_line, note_lines =
-     match task.task_status with
-     | Masc_domain.Todo ->
-         ("todo — unclaimed", [])
-     | Masc_domain.Claimed { assignee; claimed_at } ->
-         ( Printf.sprintf "claimed by %s at %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line claimed_at)
-         , [] )
-     | Masc_domain.InProgress { assignee; started_at } ->
-         ( Printf.sprintf "in progress by %s since %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line started_at)
-         , [] )
-     | Masc_domain.AwaitingVerification
-         { assignee; submitted_at; verification_id; _ } ->
-         ( Printf.sprintf "awaiting verification by %s, submitted %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line submitted_at)
-         , [Printf.sprintf "verification %s"
-              (Terminal_text.single_line verification_id)] )
-     | Masc_domain.Done { assignee; completed_at; notes } ->
-         ( Printf.sprintf "done by %s at %s"
-             (Terminal_text.single_line assignee)
-             (Terminal_text.single_line completed_at)
-         , match notes with None -> [] | Some note -> [note] )
-     | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
-         ( Printf.sprintf "cancelled by %s at %s"
-             (Terminal_text.single_line cancelled_by)
-             (Terminal_text.single_line cancelled_at)
-         , match reason with None -> [] | Some r -> [r] )
-   in
-   box_line buf cols
-     (Ansi.dim ^ "  status   " ^ Ansi.reset
-     ^ fit_width status_line (cols - 16));
-   List.iter
-     (fun note ->
-        box_line buf cols
-          (Ansi.dim ^ "           " ^ fit_width
-             (Terminal_text.single_line note) (cols - 16)
-          ^ Ansi.reset))
-     note_lines);
+     keeps the row and the status from disagreeing about who did what. The
+     note lines stay counted so the body budget below shrinks with them --
+     a verification id must not push the helper row off the screen. *)
+  let status_line, note_lines =
+    match task.task_status with
+    | Masc_domain.Todo -> ("todo — unclaimed", [])
+    | Masc_domain.Claimed { assignee; claimed_at } ->
+        ( Printf.sprintf "claimed by %s at %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line claimed_at)
+        , [] )
+    | Masc_domain.InProgress { assignee; started_at } ->
+        ( Printf.sprintf "in progress by %s since %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line started_at)
+        , [] )
+    | Masc_domain.AwaitingVerification
+        { assignee; submitted_at; verification_id; _ } ->
+        ( Printf.sprintf "awaiting verification by %s, submitted %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line submitted_at)
+        , [Printf.sprintf "verification %s"
+             (Terminal_text.single_line verification_id)] )
+    | Masc_domain.Done { assignee; completed_at; notes } ->
+        ( Printf.sprintf "done by %s at %s"
+            (Terminal_text.single_line assignee)
+            (Terminal_text.single_line completed_at)
+        , match notes with None -> [] | Some note -> [note] )
+    | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
+        ( Printf.sprintf "cancelled by %s at %s"
+            (Terminal_text.single_line cancelled_by)
+            (Terminal_text.single_line cancelled_at)
+        , match reason with None -> [] | Some r -> [r] )
+  in
+  box_line buf cols
+    (Ansi.dim ^ "  status   " ^ Ansi.reset
+    ^ fit_width status_line (cols - 16));
+  List.iter
+    (fun note ->
+       box_line buf cols
+         (Ansi.dim ^ "           " ^ fit_width
+            (Terminal_text.single_line note) (cols - 16)
+         ^ Ansi.reset))
+    note_lines;
   box_line buf cols
     (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
        (Terminal_text.single_line task.created_at)
@@ -568,11 +600,13 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   in
   let total_lines = List.length body_lines in
   (* Chrome above and below the scrolling body: top border, header, divider,
-     the title block, the bottom border and the helper row. Clamped through the
-     same helper the keeper log pane uses. Ten, not nine: at nine the frame came
-     out one row taller than its budget, which cost the surface the composer
-     row rather than a body row. *)
-  let content_height = max 1 (rows - 10) in
+     the title block, the bottom border, the helper row and the composer row.
+     Clamped through the same helper the keeper log pane uses. Ten, not nine:
+     at nine the frame came out one row taller than its budget, which cost the
+     surface the composer row rather than a body row. On top of the ten, the
+     status note lines vary by state -- a verification id or cancellation
+     reason must shrink the body, not push rows off the bottom. *)
+  let content_height = max 1 (rows - 10 - List.length note_lines) in
   state.task_detail_scroll <-
     min state.task_detail_scroll
       (Metrics_tail.maximum_scroll ~entry_count:total_lines
@@ -1918,14 +1952,18 @@ let render_keeper_message (state : state) =
              }
               : Message_layout.entry)
           in
-          let thinking_tail =
-            Keeper_chat_transcript.thinking live
-            |> String.split_on_char '\n'
-            |> List.filter (fun line -> String.trim line <> "")
-            |> List.rev
-            |> function
+          (* The whole trail, not its last line. Reasoning is the only part of
+             a live turn the durable transcript does not keep, so the pane is
+             the one place it can be read, and one line out of it says what the
+             keeper concluded without saying how it got there. Blank lines are
+             dropped because models emit runs of them; the rest is one entry
+             the layout wraps like any other body. *)
+          let thinking_entry =
+            match Keeper_chat_transcript.thinking_lines live with
             | [] -> []
-            | last :: _ -> [ entry Message_layout.Thinking "thinking" last ]
+            | lines ->
+                [ entry Message_layout.Thinking "thinking"
+                    (String.concat "\n" lines) ]
           in
           let tool_entry =
             match Keeper_chat_transcript.tool_rows live with
@@ -1943,7 +1981,7 @@ let render_keeper_message (state : state) =
                     text
                 ]
           in
-          thinking_tail @ tool_entry @ text_entry
+          thinking_entry @ tool_entry @ text_entry
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in
@@ -2052,6 +2090,15 @@ let render_keeper_message (state : state) =
                (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
                   (Keeper_chat.terminal_safe_text body)))
            queued);
+    (if state.msg_older_loading then
+       box_line_styled buf cols ~style:Ansi.dim
+         "  loading older messages…"
+     else
+       match state.msg_older_error with
+       | Some detail ->
+           box_line_styled buf cols ~style:Ansi.yellow
+             ("  older messages could not be loaded; up retries: " ^ detail)
+       | None -> ());
     (if scroll > 0 then
        box_line_styled buf cols ~style:Ansi.yellow
          (Printf.sprintf
@@ -2215,7 +2262,13 @@ let render_keeper_message (state : state) =
            | None, true -> "Enter:send")
     in
     let scroll_hint =
-      if scroll > 0 then "up/down:scroll  Ctrl-E:newest" else "up:scroll back"
+      if scroll > 0 then
+        (* At the oldest row with nothing more to fetch, say so: an operator
+           pressing up against a pane that will not move should know it is the
+           start of the conversation rather than a stuck key. *)
+        if state.msg_older_exist then "up/down:scroll  Ctrl-E:newest"
+        else "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+      else "up:scroll back"
     in
     let escape_hint =
       match state.msg_live with

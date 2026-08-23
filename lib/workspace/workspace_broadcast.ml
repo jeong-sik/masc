@@ -834,12 +834,25 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
   let seq = Workspace_state.next_seq config in
   let request_id = Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
   let mention = pre_extract_mention in
-  let safe_content = sanitize_message content in
-  let safe_agent = sanitize_agent_name from_agent in
+  (* Stored as written. This used to HTML-escape the content, so a message
+     containing a double quote was persisted as [&quot;] and every consumer
+     read the entity: the TUI, the Keeper prompts, the connectors. Models then
+     quoted [&quot;] back out of their own transcript into new broadcasts.
+
+     It protected nothing. The one consumer that needs escaping does it at its
+     own boundary -- [Keeper_chat_blocks.escape_html] builds the [html] block
+     the dashboard renders -- so escaping here only made that boundary escape
+     an entity twice and draw it as text.
+
+     Agent name and message type were escaped by the same call. Both are closed
+     or validated vocabularies, so that was a no-op; they are raw here for the
+     same reason the content is. *)
+  let safe_content = content in
+  let safe_agent = from_agent in
   let safe_msg_type =
     match String.trim msg_type with
     | "" -> "broadcast"
-    | value -> sanitize_message value
+    | value -> value
   in
   let msg = {
     request_id;

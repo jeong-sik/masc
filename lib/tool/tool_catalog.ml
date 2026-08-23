@@ -429,6 +429,16 @@ let explicit_metadata : (string * metadata) list =
 let metadata_table : (string, metadata) Hashtbl.t = Hashtbl.create 256
 let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_metadata
 
+(* Every name this catalog has an opinion about, static entries and anything
+   registered at load time alike. The contract tests need it because the
+   schema lists they used to walk are not the same set: the catalog decides
+   admission for tools whose schemas live outside Config's front door, and a
+   corpus built from those lists never visits them. *)
+let known_names () =
+  Hashtbl.fold (fun name _ acc -> name :: acc) metadata_table []
+  |> List.sort_uniq String.compare
+;;
+
 let register_metadata_for_testing name (meta : metadata) =
   Hashtbl.replace metadata_table name meta
 

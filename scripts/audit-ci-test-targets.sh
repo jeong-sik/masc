@@ -124,7 +124,15 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Exact current count. Adding an unwired suite is a regression.
-UNWIRED_BASELINE=509
+# 509 -> 160: wired 349 declared-but-unrun suites, each built and run before
+# being listed. The 160 left are not "the ones that fail": the wired list is
+# the alphabetical head of the set and stops at test_safe_ops. Measured on
+# the rest: 121 of the 125 after test_safe_ops pass and are follow-up wiring,
+# 4 fail; of the 35 before it, 17 fail, 5 are not runnable tests (4 e2e
+# stanzas gated on MASC_E2E_TESTS, 1 plain executable), test_fusion_wake
+# times out in CI (#29064), and the remainder is unmeasured. The declared
+# count also includes those 5 non-test aliases.
+UNWIRED_BASELINE=160
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

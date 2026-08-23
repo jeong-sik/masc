@@ -516,7 +516,7 @@ let test_masc_goal_transition_schema () =
            | Some action_schema ->
              Alcotest.(check (list string))
                "only lifecycle actions are public"
-               [ "request_complete"; "pause"; "resume"; "block"; "unblock"; "drop"; "reopen" ]
+               [ "request_complete"; "drop"; "reopen" ]
                (match get_json_list "enum" action_schema with
                 | Some values ->
                   List.map

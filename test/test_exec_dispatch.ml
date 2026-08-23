@@ -479,7 +479,21 @@ let () =
   in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
-  assert (result.stderr = "nested pipeline not supported in native dispatch")
+  (* The message names what is missing rather than what is unsupported: a
+     stage that is itself a pipeline or a sequence needs a subshell. *)
+  let mentions_subshell haystack =
+    let needle = "subshell" in
+    let n = String.length needle in
+    let rec scan i =
+      if i + n > String.length haystack
+      then false
+      else if String.sub haystack i n = needle
+      then true
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  assert (mentions_subshell result.stderr)
 
 (* --- dispatch_simple propagates sandbox runner (SND-05 regression) --- *)
 

@@ -32,8 +32,16 @@ type program = {
   tail : exec_stage list;
 }
 
+(* A guard reads the status of whatever ran last, so a run of them is left to
+   right with no precedence of its own -- the way a shell reads [a && b || c].
+   The list is empty for a single program. *)
+type conditional =
+  | And_then
+  | Or_else
+
 type execute_input = {
   program : program;
+  next : (conditional * program) list;
   cwd : string option;
   env : (string * string) list;
   timeout_sec : float option;
@@ -289,6 +297,114 @@ let rec split_last first rest =
     last, first :: middle
 ;;
 
+(* The fields that describe one program: which process or pipeline to run and
+   where its ends attach. [cwd], [env] and [timeout_sec] belong to the whole
+   call, so they are read once by the caller and are not repeated per
+   program. *)
+let program_fields = [ "argv"; "pipeline"; "stdin"; "stdout"; "stderr" ]
+
+let program_of_fields ~path fields =
+  let ( let* ) = Result.bind in
+  let argv_present = Option.is_some (member fields "argv") in
+  let pipeline_value =
+    match member fields "pipeline" with
+    | Some value -> Some (path ^ ".pipeline", value)
+    | None -> None
+  in
+  match argv_present, pipeline_value with
+  | true, Some _ ->
+    result_errorf
+      "%s.argv and %s.pipeline are mutually exclusive typed Execute fields. \
+       Pick exactly one form and drop the other: either {argv} for a single \
+       process OR {pipeline} for a multi-stage Shell IR pipeline. To pipe \
+       through a process, put it in pipeline; do not combine."
+      path
+      path
+  | true, None ->
+    let* head = stage_of_fields ~path fields in
+    Ok { head; tail = [] }
+  | false, Some (pipeline_path, value) ->
+    let* stages = parse_pipeline ~path:pipeline_path value in
+    (* Top-level redirections describe the program's own ends, which is where
+       a shell puts them: stdin feeds the first stage and stdout/stderr come
+       off the last. A stage that declared its own keeps it — the explicit
+       one wins over the program-level default. *)
+    let* stdin = optional_input_source ~path fields "stdin" in
+    let* stdout = optional_output_sink ~path fields "stdout" in
+    let* stderr = optional_output_sink ~path fields "stderr" in
+    let default_input fallback = function
+      | Inherit_input -> fallback
+      | declared -> declared
+    in
+    let default_output fallback = function
+      | Inherit_output -> fallback
+      | declared -> declared
+    in
+    (match stages with
+     | [] -> result_errorf "%s must contain at least one stage" pipeline_path
+     | [ only ] ->
+       let only =
+         { only with
+           stdin = default_input stdin only.stdin
+         ; stdout = default_output stdout only.stdout
+         ; stderr = default_output stderr only.stderr
+         }
+       in
+       Ok { head = only; tail = [] }
+     | head :: second :: rest ->
+       let head = { head with stdin = default_input stdin head.stdin } in
+       let last, middle = split_last second rest in
+       let last =
+         { last with
+           stdout = default_output stdout last.stdout
+         ; stderr = default_output stderr last.stderr
+         }
+       in
+       Ok { head; tail = middle @ [ last ] })
+  | false, None -> result_errorf "%s.argv or %s.pipeline is required" path path
+;;
+
+(* Which way the guard has to go for the next program to run. Written as the
+   status it waits for, because that is what the caller is thinking about. *)
+let conditional_of_string ~path = function
+  | "success" -> Ok And_then
+  | "failure" -> Ok Or_else
+  | other ->
+    result_errorf "%s.on must be \"success\" or \"failure\", got %S" path other
+;;
+
+let parse_next_entry ~path_prefix ~index (value : Yojson.Safe.t) =
+  let ( let* ) = Result.bind in
+  let path = Printf.sprintf "%s[%d]" path_prefix index in
+  let* fields = assoc_fields ~path value in
+  let* () = reject_unknown_fields ~path ~allowed:("on" :: program_fields) fields in
+  let* on =
+    match member fields "on" with
+    | Some (`String value) -> conditional_of_string ~path value
+    | Some value -> result_errorf "%s.on must be string, got %s" path (json_type_name value)
+    | None -> result_errorf "%s.on is required" path
+  in
+  let* program = program_of_fields ~path fields in
+  Ok (on, program)
+;;
+
+let optional_next ~path fields =
+  let ( let* ) = Result.bind in
+  match member fields "then" with
+  | None | Some `Null -> Ok []
+  | Some (`List entries) ->
+    let path_prefix = path ^ ".then" in
+    let rec loop index acc = function
+      | [] -> Ok (List.rev acc)
+      | entry :: rest ->
+        let* parsed = parse_next_entry ~path_prefix ~index entry in
+        loop (index + 1) (parsed :: acc) rest
+    in
+    loop 0 [] entries
+  | Some value ->
+    result_errorf "%s.then must be array, got %s" path (json_type_name value)
+;;
+
 let of_json (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields = assoc_fields ~path:"$" json in
@@ -303,78 +419,15 @@ let of_json (json : Yojson.Safe.t) =
   let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:
-        [ "argv"
-        ; "pipeline"
-        ; "cwd"
-        ; "env"
-        ; "timeout_sec"
-        ; "stdin"
-        ; "stdout"
-        ; "stderr"
-        ]
+      ~allowed:(program_fields @ [ "then"; "cwd"; "env"; "timeout_sec" ])
       fields
-  in
-  let argv_present = Option.is_some (member fields "argv") in
-  let pipeline_value =
-    match member fields "pipeline" with
-    | Some value -> Some ("$.pipeline", value)
-    | None -> None
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
   let* timeout_sec = optional_positive_float ~path:"$" fields "timeout_sec" in
-  match argv_present, pipeline_value with
-  | true, Some _ ->
-    Error
-      "$.argv and $.pipeline are mutually exclusive typed Execute \
-       fields. Pick exactly one form and drop the other: either {argv} for a \
-       single process OR {pipeline} for a multi-stage Shell IR \
-       pipeline. To pipe through a process, put it in pipeline; do not \
-       combine."
-  | true, None ->
-    let* head = stage_of_fields ~path:"$" fields in
-    Ok { program = { head; tail = [] }; cwd; env; timeout_sec }
-  | false, Some (path, value) ->
-    let* stages = parse_pipeline ~path value in
-    (* Top-level redirections describe the program's own ends, which is where
-       a shell puts them: stdin feeds the first stage and stdout/stderr come
-       off the last. A stage that declared its own keeps it — the explicit
-       one wins over the program-level default. *)
-    let* stdin = optional_input_source ~path:"$" fields "stdin" in
-    let* stdout = optional_output_sink ~path:"$" fields "stdout" in
-    let* stderr = optional_output_sink ~path:"$" fields "stderr" in
-    let default_input fallback = function
-      | Inherit_input -> fallback
-      | declared -> declared
-    in
-    let default_output fallback = function
-      | Inherit_output -> fallback
-      | declared -> declared
-    in
-    (match stages with
-     | [] -> result_errorf "%s must contain at least one stage" path
-     | [ only ] ->
-       let only =
-         { only with
-           stdin = default_input stdin only.stdin
-         ; stdout = default_output stdout only.stdout
-         ; stderr = default_output stderr only.stderr
-         }
-       in
-       Ok { program = { head = only; tail = [] }; cwd; env; timeout_sec }
-     | head :: second :: rest ->
-       let head = { head with stdin = default_input stdin head.stdin } in
-       let last, middle = split_last second rest in
-       let last =
-         { last with
-           stdout = default_output stdout last.stdout
-         ; stderr = default_output stderr last.stderr
-         }
-       in
-       Ok
-         { program = { head; tail = middle @ [ last ] }; cwd; env; timeout_sec })
-  | false, None -> Error "$.argv or $.pipeline is required"
+  let* program = program_of_fields ~path:"$" fields in
+  let* next = optional_next ~path:"$" fields in
+  Ok { program; next; cwd; env; timeout_sec }
 ;;
 
 let check_argv argv =
@@ -547,7 +600,7 @@ let redirects_of_stage ~cwd { argv = _; stdin; stdout; stderr } =
 
 let to_shell_ir_unvalidated
       ?(sandbox = Masc_exec.Sandbox_target.host ())
-      { program; cwd; env; timeout_sec = _ }
+      { program; next; cwd; env; timeout_sec = _ }
   =
   let ( let* ) = Result.bind in
   let lower stage =
@@ -558,19 +611,38 @@ let to_shell_ir_unvalidated
       ~redirects:(redirects_of_stage ~cwd stage)
       stage.argv
   in
-  match program with
-  | { head; tail = [] } -> lower head
-  | { head; tail } ->
-    let* simples =
+  let lower_program = function
+    | { head; tail = [] } -> lower head
+    | { head; tail } ->
+      let* simples =
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | stage :: rest ->
+            let* simple = lower stage in
+            loop (simple :: acc) rest
+        in
+        loop [] (head :: tail)
+      in
+      Ok (Keeper_tooling.Execute_shell_ir.pipeline simples)
+  in
+  let connector = function
+    | And_then -> Masc_exec.Shell_ir.And_if
+    | Or_else -> Masc_exec.Shell_ir.Or_if
+  in
+  let* head = lower_program program in
+  match next with
+  | [] -> Ok head
+  | _ :: _ ->
+    let* tail =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
-        | stage :: rest ->
-          let* simple = lower stage in
-          loop (simple :: acc) rest
+        | (guard, program) :: rest ->
+          let* ir = lower_program program in
+          loop ((connector guard, ir) :: acc) rest
       in
-      loop [] (head :: tail)
+      loop [] next
     in
-    Ok (Keeper_tooling.Execute_shell_ir.pipeline simples)
+    Ok (Masc_exec.Shell_ir.Sequence { head; tail })
 ;;
 
 let to_shell_ir ?sandbox input =

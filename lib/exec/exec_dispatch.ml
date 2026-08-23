@@ -427,7 +427,9 @@ let host_pipeline_specs ?base_host_env stages =
                  place to do. Those stay on the existing path. *)
               | Ok _ -> None)
          | Docker _ -> None)
-    | Shell_ir.Pipeline _ :: _ -> None
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
   in
   loop [] stages
 
@@ -452,7 +454,9 @@ let docker_pipeline_specs stages =
              loop (Some pipeline_runner) (Some sandbox_target) (stage :: acc) rest
          | _ -> None)
         [@warning "-4"]
-    | Shell_ir.Pipeline _ :: _ -> None
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
   in
   loop None None [] stages
 
@@ -570,11 +574,14 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                            ~status
                            ~stderr
                            rest)
-                   | Pipeline _ :: _ ->
+                   | (Pipeline _ | Sequence _) :: _ ->
                        { status = Unix.WEXITED 1
                        ; stdout = ""
                        ; stderr =
-                           stderr ^ "nested pipeline not supported in native dispatch"
+                           stderr
+                           ^ "a pipeline stage that is itself a pipeline or a \
+                              sequence needs a subshell, which native dispatch \
+                              does not spawn"
                        }
                  in
                  (match stages with
@@ -634,11 +641,42 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                             ~status
                             ~stderr:first_result.stderr
                             rest)
-                    | Pipeline _ ->
+                    | Pipeline _ | Sequence _ ->
                         invalid_pipeline
-                          "nested pipeline not supported in native dispatch" ))))
+                          "a pipeline stage that is itself a pipeline or a \
+                           sequence needs a subshell, which native dispatch \
+                           does not spawn" ))))
   in
   emit_unseen_captured_output on_output_chunk emitted result
+
+(* [a && b] runs b only when a exited zero, and [a || b] only when it did
+   not, exactly as a shell reads them. Whatever ran last decides, so a run of
+   connectors reads left to right without any precedence of its own. Output
+   from every command that ran is concatenated in the order it ran. *)
+and dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail () =
+  let run ir = dispatch ?base_host_env ?timeout_sec ?on_output_chunk ir in
+  let took_the_branch connector (status : Unix.process_status) =
+    match connector, status with
+    | Shell_ir.And_if, Unix.WEXITED 0 -> true
+    | Shell_ir.And_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> false
+    | Shell_ir.Or_if, Unix.WEXITED 0 -> false
+    | Shell_ir.Or_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> true
+  in
+  let rec step acc = function
+    | [] -> acc
+    | (connector, ir) :: rest ->
+      if not (took_the_branch connector acc.status)
+      then step acc rest
+      else (
+        let next = run ir in
+        step
+          { status = next.status
+          ; stdout = acc.stdout ^ next.stdout
+          ; stderr = acc.stderr ^ next.stderr
+          }
+          rest)
+  in
+  step (run head) tail
 
 and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
@@ -646,3 +684,5 @@ and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
     dispatch_simple ?base_host_env ?timeout_sec ?on_output_chunk s
   | Pipeline stages ->
     dispatch_pipeline ?base_host_env ?timeout_sec ?on_output_chunk stages
+  | Sequence { head; tail } ->
+    dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail ()

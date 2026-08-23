@@ -65,14 +65,23 @@ type program = {
     program unrepresentable, so emptiness is not something {!validate} has to
     check, and a single process is a program whose tail is empty. *)
 
+type conditional =
+  | And_then  (** run the next program only if the one before it exited zero *)
+  | Or_else  (** run the next program only if the one before it did not *)
+
 type execute_input = {
   program : program;
+  next : (conditional * program) list;
+      (** programs to run after [program], each guarded by how the one before
+          it ended. Empty for a single program. The guard looks at whatever
+          ran last, so a run of them reads left to right, as a shell reads
+          [a && b || c]. *)
   cwd : string option;
   env : (string * string) list;
   timeout_sec : float option;
 }
-(** [cwd] and [env] apply to every stage. [timeout_sec] is an explicit
-    optional execution boundary; absence means unbounded execution. *)
+(** [cwd] and [env] apply to every stage of every program. [timeout_sec] is an
+    explicit optional execution boundary; absence means unbounded execution. *)
 
 type validation_error =
   | Empty_argv

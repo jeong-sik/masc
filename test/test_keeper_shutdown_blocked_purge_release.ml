@@ -79,7 +79,6 @@ let make_operation ~cleanup_intent ~phase =
   ; keeper_name
   ; lane_ownership = Dormant_meta
   ; trace_id = trace_id_exn "trace-blocked-purge-release-test"
-  ; generation = 1
   ; actor = "dashboard"
   ; cleanup_intent
   ; turn_disposition = No_inflight_turn

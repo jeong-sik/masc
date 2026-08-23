@@ -163,7 +163,7 @@ let load_queue_state ~base_path ~keeper_name =
   | Ok state -> state
   | Error detail -> Alcotest.fail detail
 
-let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~operation_id =
+let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
   let target_meta = persist_event_queue_test_meta ~base_path to_keeper in
   (match
      Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -184,11 +184,9 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
   let transfer : Keeper_event_queue_persistence.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
-    ; owner_nonce
     ; operator_operation_id = operation_id
     ; from_keeper
     ; to_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -196,7 +194,6 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
      Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
        ~base_path
        from_keeper
-       ~current_owner_nonce:owner_nonce
        ~applied_at:101.0
        ~transfer
    with
@@ -950,7 +947,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:23
         ~operation_id:"recover-transfer-target";
       Alcotest.(check int)
         "source outbox awaits target projection"
@@ -1000,7 +996,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:27
         ~operation_id:"transfer-during-target-shutdown";
       let transfer =
         match
@@ -1074,7 +1069,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:29
         ~operation_id:"post-purge-transfer-recovery";
       let config = Masc.Workspace.default_config base_path in
       let shutdown_operation_id =
@@ -1158,11 +1152,9 @@ let () =
         let target_meta = event_queue_test_meta to_keeper ("trace-" ^ to_keeper) in
         { source = selection.source
         ; source_incarnation = selection.admitted_revision
-        ; owner_nonce = 31
         ; operator_operation_id = "source-transfer-during-shutdown"
         ; from_keeper
         ; to_keeper
-        ; target_generation = target_meta.runtime.nonce
         ; target_trace_id = target_meta.runtime.trace_id
         }
       in
@@ -1191,7 +1183,6 @@ let () =
               Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
                 ~base_path
                 from_keeper
-                ~current_owner_nonce:31
                 ~applied_at:31.0
                 ~transfer
             with
@@ -1227,7 +1218,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:28
         ~operation_id:"recovery-during-source-shutdown";
       let target_dir =
         Filename.concat
@@ -1304,7 +1294,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:28
         ~operation_id:"recovery-during-target-shutdown";
       let shutdown_operation_id =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
@@ -1373,7 +1362,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:29
         ~operation_id:"recover-transfer-target-failure";
       let target_path =
         Filename.concat
@@ -1423,7 +1411,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:31
         ~operation_id:"recover-transfer-first";
       let first_transition_id =
         match
@@ -1446,7 +1433,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:bootstrap_stim
-        ~owner_nonce:31
         ~operation_id:"recover-transfer-second";
       let second_transition_id =
         match

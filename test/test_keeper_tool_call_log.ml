@@ -508,7 +508,6 @@ let test_turn_context_fields_stored () =
       ~prompt_fingerprint:"prompt-fp-k"
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
-      ~generation:3
       ~turn:7
       ~keeper_turn_id:7
       ~task_id:"task-runtime-trust"
@@ -532,7 +531,6 @@ let test_turn_context_fields_stored () =
       ?thinking_budget:tctx.thinking_budget
       ?prompt_fingerprint:tctx.prompt_fingerprint
       ?trace_id:tctx.trace_id ?session_id:tctx.session_id
-      ?generation:tctx.generation
       ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
       ?task_id:tctx.task_id
       ?sandbox_profile:tctx.sandbox_profile

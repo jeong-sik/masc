@@ -593,7 +593,10 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
         { entry with
           meta =
             { entry.meta with
-              runtime = { entry.meta.runtime with nonce = -1 }
+              runtime =
+                { entry.meta.runtime with
+                  usage = { entry.meta.runtime.usage with total_turns = -1 }
+                }
             }
         }
       in

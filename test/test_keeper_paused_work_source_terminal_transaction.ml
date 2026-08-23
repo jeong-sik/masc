@@ -95,7 +95,6 @@ let with_source_terminal_lane f =
                   { operator_actor =
                       Keeper_latched_reason.operator_actor_grpc_directive
                   })
-         ; runtime = { meta.runtime with nonce = 51 }
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
@@ -140,7 +139,6 @@ let with_source_terminal_lane f =
        let request : Transaction.request =
          { source
          ; source_incarnation
-         ; owner_nonce = meta.runtime.nonce
          ; source_receipt = State.Hitl_terminal resolution
          ; operator_operation_id = "operator-source-terminal-1"
          }
@@ -199,13 +197,11 @@ let source_ack_transition_state (request : Transaction.request) state =
     State.
       { source = request.source
     ; source_incarnation = request.source_incarnation
-    ; owner_nonce = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; source_receipt = request.source_receipt
     }
   in
   State.ack_pending_source_terminal
-    ~current_owner_nonce:request.owner_nonce
     ~applied_at:2.0
     ~source_terminal
     state
@@ -324,7 +320,6 @@ let test_source_ack_identity_survives_checkpoint_reload () =
     let second_request : Transaction.request =
       { source = second_source
       ; source_incarnation = second_selection.admitted_revision
-      ; owner_nonce = request.owner_nonce
       ; source_receipt = State.Hitl_terminal second_resolution
       ; operator_operation_id = "operator-source-terminal-2"
       }
@@ -710,7 +705,6 @@ let test_projected_wal_recovery_allows_next_source_ack () =
              recovered
            |> require_some "select second recovered source")
             .admitted_revision
-      ; owner_nonce = first_request.owner_nonce
       ; source_receipt = State.Hitl_terminal second_resolution
       ; operator_operation_id = "operator-source-terminal-after-projection"
       }
@@ -797,7 +791,6 @@ let test_retired_v3_receipt_file_is_rejected () =
     let current : Receipt.t =
       { keeper_name
       ; expected_trace_id = meta.runtime.trace_id
-      ; expected_generation = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; requested_at = 2.0
       ; operation = Receipt.Ack_source_terminal operation

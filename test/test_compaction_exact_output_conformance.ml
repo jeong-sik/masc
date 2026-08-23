@@ -55,7 +55,6 @@ let persisted_checkpoint_source_exn trace_id =
     (match
        Keeper_checkpoint_ref.of_persisted
          ~trace_id
-         ~generation:1
          ~turn_count:1
          ~sha256:(String.make 64 'a')
      with

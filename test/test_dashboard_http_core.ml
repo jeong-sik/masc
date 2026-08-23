@@ -293,7 +293,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
     | Some value -> value
     | None -> fail (label ^ ": missing value")
   in
-  let make_meta ~name ~trace_id ~nonce =
+  let make_meta ~name ~trace_id =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
@@ -303,7 +303,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
           ])
     with
     | Error detail -> failf "meta fixture %s: %s" name detail
-    | Ok meta -> { meta with runtime = { meta.runtime with nonce } }
+    | Ok meta -> meta
   in
   let base_path = config.Workspace.base_path in
   let cancel_keeper = "event-source-ref-cancel-source" in
@@ -311,15 +311,12 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   let target_keeper = "event-source-ref-target" in
   let cancel_meta =
     make_meta ~name:cancel_keeper ~trace_id:"event-source-ref-cancel-trace"
-      ~nonce:41
   in
   let transfer_meta =
     make_meta ~name:transfer_keeper ~trace_id:"event-source-ref-transfer-trace"
-      ~nonce:42
   in
   let target_meta =
     make_meta ~name:target_keeper ~trace_id:"event-source-ref-target-trace"
-      ~nonce:43
   in
   let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
     { post_id; urgency = Normal; arrived_at; payload = Bootstrap }
@@ -1495,10 +1492,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
           ; "trace_id", `String "execution-trust-narrow-trace"
           ])
     with
-    | Ok meta ->
-      { meta with
-        runtime = { meta.runtime with nonce = 17 }
-      }
+    | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error
   in
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
@@ -2799,7 +2793,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "keeper_id", `String ("k-" ^ keeper_name)
            ; "status", `String "active"
            ; "keepalive_running", `Bool false
-           ; "generation", `Int 1
            ; "turn_count", `Int 1
            ; "autonomous_turn_count", `Int 1
            ; "autonomous_action_count", `Int 1

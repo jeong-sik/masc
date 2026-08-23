@@ -89,7 +89,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
   let fixture =
     `Assoc
       ([ ("name", `String "keeper-main")
-       ; ("generation", `Int 2)
        ; ("paused", `Bool paused)
        ; ("total_turns", `Int 4)
        ; ("total_tokens", `Int 120)
@@ -126,7 +125,6 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check string) "name" "keeper-main" keeper.k_name;
       Alcotest.(check bool) "trace identity is projected" true
         (String.trim keeper.k_trace_id <> "");
-      Alcotest.(check int) "generation" 2 keeper.k_generation;
       Alcotest.(check bool) "paused" true keeper.k_paused;
       Alcotest.(check (option string)) "current task" (Some "task-42")
         keeper.k_current_task_id;
@@ -374,7 +372,6 @@ let metrics_common_fields ~kind ~channel =
   ; "name", `String "keeper-main"
   ; "agent_name", `String "codex"
   ; "trace_id", `String "trace-current"
-  ; "generation", `Int 4
   ]
 
 type usage_fixture =

@@ -698,7 +698,7 @@ let rejected_rows_for ~stage =
        let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
        let hooks =
          Masc.Keeper_hooks_agent_core.make_hooks
-           ~config ~meta_ref ~turn_ctx_cell ~generation:0
+           ~config ~meta_ref ~turn_ctx_cell 
            ~trace_id:"rejection-trace" ~keeper_turn_id:1
            ~on_after_turn_ordinal:ignore ()
        in
@@ -787,7 +787,6 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
            ~config
            ~meta_ref
            ~turn_ctx_cell
-           ~generation:0
            ~trace_id:"cancelled-observer-trace"
            ~keeper_turn_id:1
            ~on_after_turn_ordinal:ignore

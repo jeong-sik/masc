@@ -1106,7 +1106,6 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-audit");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "tool_use");
             ("latency_ms", `Int 1);
@@ -1121,7 +1120,6 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-audit");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "text_response");
             ("latency_ms", `Int 1);
@@ -1246,7 +1244,6 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-recent-tools");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "tool_use");
             ("latency_ms", `Int 1);
@@ -1262,7 +1259,6 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
               ("ts", `String (Masc_domain.now_iso ()));
               ("ts_unix", `Float (Time_compat.now ()));
               ("trace_id", `String "trace-lightweight-recent-tools");
-              ("generation", `Int 0);
               ("channel", `String "turn");
               ("turn_mode", `String "text_response");
               ("latency_ms", `Int 1);

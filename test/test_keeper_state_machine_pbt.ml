@@ -35,8 +35,7 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     return SM.Compaction_completed;
     return (SM.Compaction_failed { reason = "pbt_test" });
     return SM.Handoff_started;
-    (let* gen = int_range 1 100 in
-     return (SM.Handoff_completed { new_trace_id = "pbt_trace"; generation = gen }));
+    return (SM.Handoff_completed { new_trace_id = "pbt_trace" });
     return (SM.Handoff_failed { reason = "pbt_test" });
     return SM.Operator_pause;
     return SM.Operator_resume;
@@ -89,7 +88,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Stop_requested;
       ]
     | SM.HandingOff ->
-      [ SM.Handoff_completed { new_trace_id = "t"; generation = 1 };
+      [ SM.Handoff_completed { new_trace_id = "t" };
         SM.Handoff_failed { reason = "test" };
         SM.Heartbeat_failed { consecutive = 1 };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };

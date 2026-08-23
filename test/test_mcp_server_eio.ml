@@ -2239,7 +2239,6 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
               Keeper_lifecycle_reservation.acquire
                 ~base_path
                 ~keeper_name
-                ~expected_generation:registered.transition_seq
                 ~purpose:Keepalive_launch
             with
             | Ok token -> token

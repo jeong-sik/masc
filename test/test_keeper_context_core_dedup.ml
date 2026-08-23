@@ -297,7 +297,6 @@ let test_checkpoint_save_load_preserves_exact_messages () =
            ~session
            ~agent_name:"checkpoint-exact"
            ~ctx:context
-           ~generation:1
        with
        | Ok checkpoint ->
          Alcotest.(check bool) "save returns exact source messages" true
@@ -378,7 +377,6 @@ let test_checkpoint_write_accepts_exact_open_tool_cycle () =
           ~session
           ~agent_name:"checkpoint-open-cycle"
           ~ctx:context
-          ~generation:1
       with
       | Ok checkpoint ->
         Alcotest.(check bool) "open cycle is persisted exactly" true
@@ -424,7 +422,6 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
            ~session
            ~agent_name:session_id
            ~ctx:context
-           ~generation:1
        with
        | Error
            (C.Tool_history_invalid

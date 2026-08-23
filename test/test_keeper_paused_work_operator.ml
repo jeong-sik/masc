@@ -112,7 +112,6 @@ let with_source_terminal_lane f =
              Some
                (Keeper_latched_reason.Operator_paused
                   { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-         ; runtime = { meta.runtime with nonce = 19 }
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> require_ok "persist source-terminal metadata";
@@ -145,7 +144,6 @@ let with_source_terminal_lane f =
        let request : Keeper_paused_work_source_terminal_transaction.request =
          { source
          ; source_incarnation
-         ; owner_nonce = meta.runtime.nonce
          ; source_receipt
          ; operator_operation_id = "operator-source-terminal-response"
          }
@@ -164,7 +162,7 @@ let test_strict_request_codec () =
   (match Operator.request_of_yojson resume with
    | Ok
        (Operator.Resume_owner
-         { owner_nonce = 7; operator_operation_id = "operator-resume" }) ->
+         { operator_operation_id = "operator-resume" }) ->
      ()
    | Ok _ -> Alcotest.fail "resume request decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
@@ -355,7 +353,6 @@ let test_inventory_exposes_exact_durable_fences () =
             Some
               (Keeper_latched_reason.Operator_paused
                  { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-        ; runtime = { meta.runtime with nonce = 17 }
         }
       in
       Keeper_meta_store.replace_snapshot config meta |> require_ok "persist inventory metadata";

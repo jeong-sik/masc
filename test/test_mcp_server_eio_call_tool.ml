@@ -663,7 +663,6 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check (option string) "session_id"
         (Some "session-explicit")
         ctx.session_id;
-      check bool "generation present" true (Option.is_some ctx.generation);
       check (option int) "turn" (Some 1) ctx.turn;
       check (option int) "keeper_turn_id" (Some 1) ctx.keeper_turn_id;
       check (option string) "task_id" (Some "task-123") ctx.task_id;

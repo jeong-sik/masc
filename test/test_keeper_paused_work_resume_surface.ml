@@ -17,12 +17,11 @@ let test_single_resume_requires_exact_fences () =
     Surface.parse_resume_request
       (`Assoc
          [ "action", `String "resume"
-         ; "owner_nonce", `Int 7
          ; "operator_operation_id", `String "dashboard-resume-7"
          ])
     |> require_ok "parse exact Resume_owner"
   in
-  check (pair int string) "exact fences" (7, "dashboard-resume-7") parsed
+  check string "exact fences" "dashboard-resume-7" parsed
 ;;
 
 let test_bulk_resume_requires_per_owner_targets () =
@@ -56,9 +55,9 @@ let test_bulk_resume_requires_per_owner_targets () =
     |> require_ok "parse bulk Resume_owner"
   in
   check
-    (list (triple string int string))
+    (list (pair string string))
     "per-owner fences"
-    [ "beta", 3, "resume-beta-1"; "mu-king", 5, "resume-qa-1" ]
+    [ "beta", "resume-beta-1"; "mu-king", "resume-qa-1" ]
     parsed
 ;;
 

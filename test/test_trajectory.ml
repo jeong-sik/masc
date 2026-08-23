@@ -38,7 +38,7 @@ let test_create_accumulator () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-001" ~generation:0 () in
+      ~trace_id:"trace-001" () in
     Alcotest.(check int) "initial turn" 0 acc.Trajectory.turn;
     Alcotest.(check int) "initial entries" 0 (List.length acc.Trajectory.entries))
 
@@ -50,7 +50,7 @@ let test_record_entry () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-002" ~generation:0 () in
+      ~trace_id:"trace-002" () in
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0;
       ts_iso = "2026-01-01T00:00:00Z";
@@ -76,7 +76,7 @@ let test_increment_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-005" ~generation:0 () in
+      ~trace_id:"trace-005" () in
     Alcotest.(check int) "turn 0" 0 acc.Trajectory.turn;
     Trajectory.increment_turn acc;
     Alcotest.(check int) "turn 1" 1 acc.Trajectory.turn;
@@ -87,7 +87,7 @@ let test_set_turn_adopts_runtime_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-005b" ~generation:0 () in
+      ~trace_id:"trace-005b" () in
     Alcotest.(check int) "turn starts at 0" 0 acc.Trajectory.turn;
     (* The runtime numbers turns itself; the accumulator adopts that number
        so tool-call entries land on the same turn as the reasoning entries
@@ -110,7 +110,7 @@ let test_finalize () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-006" ~generation:0 () in
+      ~trace_id:"trace-006" () in
     Trajectory.increment_turn acc;
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z";
@@ -149,7 +149,7 @@ let test_calls_in_current_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-007" ~generation:0 () in
+      ~trace_id:"trace-007" () in
     Trajectory.increment_turn acc;
     let mk tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
@@ -172,14 +172,14 @@ let test_task_id_default_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-001" ~generation:0 () in
+      ~trace_id:"trace-tid-001" () in
     Alcotest.(check (option string)) "task_id default" None acc.Trajectory.task_id)
 
 let test_set_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-002" ~generation:0 () in
+      ~trace_id:"trace-tid-002" () in
     Trajectory.set_task_id acc "task-042";
     Alcotest.(check (option string)) "task_id set"
       (Some "task-042") acc.Trajectory.task_id)
@@ -188,7 +188,7 @@ let test_clear_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-003" ~generation:0 () in
+      ~trace_id:"trace-tid-003" () in
     Trajectory.set_task_id acc "task-042";
     Trajectory.clear_task_id acc;
     Alcotest.(check (option string)) "task_id cleared" None acc.Trajectory.task_id)
@@ -197,7 +197,7 @@ let test_finalize_propagates_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-004" ~generation:0 () in
+      ~trace_id:"trace-tid-004" () in
     Trajectory.set_task_id acc "task-099";
     Trajectory.increment_turn acc;
     let traj = Trajectory.finalize acc Trajectory.Completed in
@@ -208,7 +208,7 @@ let test_task_id_in_trajectory_json () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-005" ~generation:0 () in
+      ~trace_id:"trace-tid-005" () in
     Trajectory.set_task_id acc "task-json-test";
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
@@ -223,7 +223,7 @@ let test_task_id_null_when_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-006" ~generation:0 () in
+      ~trace_id:"trace-tid-006" () in
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
     let open Yojson.Safe.Util in
@@ -374,7 +374,6 @@ let test_entry_to_json_includes_contract_and_radius () =
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
-      ~generation:2
       ~sandbox_profile:"docker"
       ()
   in
@@ -432,7 +431,6 @@ let test_runtime_contract_projection_redacts_backend_details () =
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
-      ~generation:2
       ~sandbox_profile:"docker"
       ~sandbox_root:"/workspace"
       ~network_mode:"none"
@@ -443,7 +441,6 @@ let test_runtime_contract_projection_redacts_backend_details () =
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
-      ~generation:2
       ~sandbox_profile:"docker"
       ~sandbox_root:"/workspace"
       ~network_mode:"none"
@@ -545,8 +542,7 @@ let test_read_recent_lines_skips_malformed_rows () =
   with_tmpdir (fun dir ->
     let acc =
       Trajectory.create_accumulator
-        ~masc_root:dir ~keeper_name:"test-keeper" ~trace_id:"trace-malformed"
-        ~generation:0 ()
+        ~masc_root:dir ~keeper_name:"test-keeper" ~trace_id:"trace-malformed" ()
     in
     Trajectory.record_entry acc
       (mk_entry "tool_execute" 10 "2026-07-01T00:00:00Z");
@@ -614,7 +610,6 @@ let next_round_summary_row : Yojson.Safe.t =
       ("type", `String "trajectory_summary");
       ("keeper_name", `String "k");
       ("trace_id", `String "t");
-      ("generation", `Int 0);
     ]
 
 (* Append rows to the trajectory JSONL for a keeper/trace. Uses a single append
@@ -867,7 +862,7 @@ let test_content_bearing_thinking_row_is_rejected () =
 let test_persist_response_content_per_turn_withheld () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~generation:0 () in
+      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" () in
     (* acc.turn stays 0; the hook passes ~turn:11 — assert ~turn wins. *)
     let big = String.make 5000 'a' in
     let content = [

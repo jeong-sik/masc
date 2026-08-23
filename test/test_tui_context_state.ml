@@ -7,7 +7,6 @@ let keeper =
   Decode.
     { k_name = "keeper-main";
       k_trace_id = "trace-current";
-      k_generation = 4;
       k_paused = false;
       k_current_task_id = None;
       k_total_turns = 0;

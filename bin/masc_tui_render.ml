@@ -2241,6 +2241,9 @@ let render_keeper_message (state : state) =
             | Message_error -> Message_layout.Error, "error"
             | Message_tool -> Message_layout.Tool, "tools"
           in
+          (* One column for every speaker so the [timestamp] speaker request
+             rows line up down the pane, whatever name each row carries. *)
+          let role_label = Message_layout.align_role_label role_label in
           ({ style;
              timestamp = message.me_timestamp;
              role_label;
@@ -2543,8 +2546,12 @@ let render_keeper_message (state : state) =
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
-           a wrapped thought reads as one message rather than several. *)
-        let prefix = if index = 0 then "  > " else "    " in
+           a wrapped thought reads as one message rather than several. The
+           prefix here is the one [Message_layout.input_cursor_column] measures
+           the caret from, so both say the same constant. *)
+        let prefix =
+          if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
+        in
         box_line_styled buf cols ~style:Ansi.cyan (prefix ^ line))
       composer;
 
@@ -2567,7 +2574,10 @@ let render_keeper_message (state : state) =
       | Some _, (Some Chat_post | None), _ | None, Some _, _ ->
           (match Masc_tui_keeper_chat_queue.length state.msg_queued with
            | 0 -> "Enter:queue for next turn"
-           | waiting -> Printf.sprintf "Enter:queue (%d waiting)" waiting)
+           | waiting ->
+             Printf.sprintf
+               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+               waiting)
       | None, None, _ ->
       match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
       with

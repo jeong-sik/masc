@@ -345,6 +345,29 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          far back is worse than a key that ends the trip. *)
       state.msg_scroll <- 0;
       true
+    end else if c = Some 11 then begin
+      (* Ctrl-K: drop the newest waiting line without sending it. The queue
+         shows what waits in the order it will go; the newest is the one a
+         mis-send just hit, and dropping it is local — nothing was
+         dispatched. *)
+      (match Chat_queue.take_newest state.msg_queued with
+       | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
+       | Some ((queued_keeper, _), rest) ->
+         state.msg_queued <- rest;
+         add_event state "info"
+           (Printf.sprintf "Cancelled queued message to %s"
+              (Keeper_chat.terminal_safe_text queued_keeper)));
+      true
+    end else if c = Some 16 then begin
+      (* Ctrl-P: pull the newest waiting line back into the composer. That is
+         the edit: fix it and Enter queues it again. *)
+      (match Chat_queue.take_newest state.msg_queued with
+       | None -> ()
+       | Some ((_, text), rest) ->
+         state.msg_queued <- rest;
+         Buffer.clear state.msg_input;
+         Buffer.add_string state.msg_input text);
+      true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       Buffer.add_string state.msg_input s;
       true

@@ -68,13 +68,6 @@ val severity_rank_of_health_level : health_level -> int
 
 (** {1 Status/health predicates} *)
 
-val is_keeper_offline : string -> bool
-(** True for the control-plane statuses that mean the keeper is not up:
-    [offline] and [inactive].  The caller passes
-    [Keeper_status_runtime.control_plane_status_to_string]'s output, whose
-    full range is paused / active / busy / listening / inactive / offline /
-    [idle].  Whether [idle] belongs here is open — see issue #27509. *)
-
 val is_health_critical : health_level -> bool
 val is_health_warning : health_level -> bool
 val is_health_at_risk : health_level -> bool

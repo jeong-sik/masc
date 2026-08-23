@@ -427,16 +427,25 @@ Two halves, decided separately:
   not: rows and segments the design leaves square because they sit inside a
   container that already owns the corner. Those are named in `craft-v2.css`
   rather than dropping the default the other 1,309 depend on.
-- **The body face is the same one — on this machine.** Width triangulation on a
-  Korean string (40px, stack vs `Noto Sans KR` alone vs a last-resort control)
-  returns 622.41px on both pages, against 585.17px for the fallback. So the
-  chrome outside buttons matches. But the prototype loads Noto Sans KR as a
-  webfont (`styles/fonts/`) and the dashboard does not — `fonts.css` keeps the
-  9.9MB TTF off the hot path deliberately — so the dashboard is resolving it
-  from the system. On a machine without it installed the dashboard falls back to
-  585.17px metrics while the prototype still renders at 622.41px, and every
-  measurement in this document shifts. Re-measure on a clean machine before
-  treating these numbers as machine-independent.
+- **The body face is the same one, everywhere now.** Both sides load the real
+  faces. The prototype resolved `styles/fonts/` TTFs (gitignored, filled by
+  `scripts/fetch-v2-fonts.sh`) and its Google `@import` was dead until
+  2026-08-23 — an `@import` after a rule is dropped by the CSS parser, so
+  EB Garamond / JetBrains Mono / Share Tech Mono never loaded and the
+  prototype rendered them from system fallbacks; the harness was measuring the
+  fallback, not the design. The import now sits above the first rule. The
+  dashboard serves the same bytes the harness browser would fetch itself:
+  latin woff2 subsets in `fonts.css` and Noto Sans KR as 124 unicode-range
+  slices in `fonts-noto-sans-kr.css` (the browser fetches only the 3-6 slices
+  a screen hits, ~150KB, so the no-9.9MB-TTF rule's intent survives). Width
+  triangulation returns identical metrics on both pages on any machine.
+  Mean after both fixes: **0.9527** (was 0.9621 when both sides rendered
+  fallbacks — the higher number measured the accident, not the design). Logs
+  and board return to 0.995/0.986. The monitor delta (0.864) is view-state,
+  not skin: the `.sigil` rules are byte-identical and the 30px/46px readings
+  that chase each other across the diff come from two different components
+  (`fleet.jsx:93` rail vs `fleet.jsx:252` detail) a naive leaf diff keys
+  together by their shared text.
 
 - **The font fallback is not.** Matching the design's `Arial` on buttons would
   put Korean UI text through a Latin fallback, and the design system's own

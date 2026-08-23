@@ -184,7 +184,8 @@ let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
          Some item
        | Keeper_external_attention.Recorded _
        | Keeper_external_attention.Resolved _
-       | Keeper_external_attention.Ignored _ ->
+       | Keeper_external_attention.Ignored _
+       | Keeper_external_attention.Quarantined _ ->
          None)
 ;;
 

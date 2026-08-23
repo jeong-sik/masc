@@ -25,7 +25,8 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
         Some item
       | Keeper_external_attention.Recorded _
       | Keeper_external_attention.Resolved _
-      | Keeper_external_attention.Ignored _ -> None)
+      | Keeper_external_attention.Ignored _
+      | Keeper_external_attention.Quarantined _ -> None)
   in
   let external_delivery_keys =
     external_items

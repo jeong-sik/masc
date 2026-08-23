@@ -231,6 +231,35 @@ let mark_connector_attention_resolved_after_delivery ~base_path ~keeper_name eve
          err)
 ;;
 
+(* The queue entry and the external-attention row are two separate writes. A
+   quarantining turn failure terminalizes the entry, so nothing is left to
+   deliver the row to a Keeper: the wake is edge-triggered (RFC-connector-
+   ambient-attention-wake) and only a *new* ambient message in that conversation
+   arms another stimulus. Without this append the row stays [Recorded] forever
+   and the waiting inventory reports work that no producer will ever pick up.
+   [Quarantined], not [Ignored] — no turn judged this row. *)
+let mark_connector_attention_quarantined_after_turn
+      ~base_path ~keeper_name ~detail event_ids =
+  match event_ids with
+  | [] -> ()
+  | _ :: _ ->
+    (match
+       Keeper_external_attention.mark_quarantined
+         ~base_path
+         ~keeper_name
+         ~event_ids
+         ~reason:(Printf.sprintf "connector_attention_turn_quarantined: %s" detail)
+         ()
+     with
+     | Ok () -> ()
+     | Error err ->
+       Log.Keeper.warn
+         "connector attention mark_quarantined after turn failed keeper=%s events=[%s]: %s"
+         keeper_name
+         (String.concat "," event_ids)
+         err)
+;;
+
 type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
@@ -398,6 +427,24 @@ let batch_disposition_of_cycle_outcome
       | Cycle.Skipped _ )
   | None ->
     Batch_no_action
+;;
+
+type connector_attention_settlement =
+  | Settle_resolved
+  | Settle_ignored
+  | Settle_quarantined of { detail : string }
+  | Settle_pending_in_queue
+
+let connector_attention_settlement_of_disposition = function
+  | Batch_ack_completed { connector_attention_outcome = Attention_resolved } ->
+    Settle_resolved
+  | Batch_ack_completed { connector_attention_outcome = Attention_ignored } ->
+    Settle_ignored
+  | Batch_quarantine { detail } -> Settle_quarantined { detail }
+  (* These two leave the queue entry in place, so the turn that finally drains
+     it owns the terminal event. Settling here would retire a row that is still
+     live. *)
+  | Batch_defer _ | Batch_no_action -> Settle_pending_in_queue
 ;;
 
 
@@ -962,37 +1009,55 @@ let run_keepalive_unified_turn
       (match !consumed_selections with
        | [] -> ()
        | (_ :: _) as selections ->
-           let remove_completed_selections ~connector_attention_outcome =
+           let settle_connector_attention settlement =
+             let event_ids =
+               connector_attention_event_ids_of_stimuli !consumed_stimuli
+             in
+             match settlement with
+             | Settle_resolved ->
+               mark_connector_attention_resolved_after_delivery
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+                 event_ids
+             | Settle_ignored ->
+               mark_connector_attention_ignored_after_turn
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+                 event_ids
+             | Settle_quarantined { detail } ->
+               mark_connector_attention_quarantined_after_turn
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+                 ~detail
+                 event_ids
+             | Settle_pending_in_queue -> ()
+           in
+           let remove_completed_selections ~settlement =
              let all_acked =
                List.for_all
                  (fun selection -> terminalize_completed_selection ~selection)
                  selections
              in
              stimuli_acked := all_acked;
-             if all_acked
-             then (
-               let event_ids =
-                 connector_attention_event_ids_of_stimuli !consumed_stimuli
-               in
-               match connector_attention_outcome with
-               | Attention_resolved ->
-                 mark_connector_attention_resolved_after_delivery
-                   ~base_path:ctx.config.base_path
-                   ~keeper_name:meta_after_triage.name
-                   event_ids
-               | Attention_ignored ->
-                 mark_connector_attention_ignored_after_turn
-                   ~base_path:ctx.config.base_path
-                   ~keeper_name:meta_after_triage.name
-                   event_ids)
+             (* A failed queue ack leaves the entry live, so the row it carries
+                is still someone's to settle. *)
+             if all_acked then settle_connector_attention settlement
            in
-           match batch_disposition_of_cycle_outcome !cycle_outcome_ref with
-           | Batch_ack_completed { connector_attention_outcome } ->
-             remove_completed_selections ~connector_attention_outcome
+           let disposition = batch_disposition_of_cycle_outcome !cycle_outcome_ref in
+           let settlement =
+             connector_attention_settlement_of_disposition disposition
+           in
+           match disposition with
+           | Batch_ack_completed _ -> remove_completed_selections ~settlement
            | Batch_quarantine { detail } ->
              List.iter
                (fun selection -> terminalize_failed_selection ~selection ~detail)
-               selections
+               selections;
+             (* The entries are gone from the queue whether or not each receipt
+                committed, and no new stimulus is coming for these rows. A late
+                duplicate terminal event is harmless — the projection keeps the
+                first terminal state — while skipping the append is not. *)
+             settle_connector_attention settlement
            | Batch_defer { reason } ->
              List.iter
                (fun selection -> defer_selection_to_queue_tail ~selection ~reason)

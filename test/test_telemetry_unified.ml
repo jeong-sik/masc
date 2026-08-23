@@ -259,7 +259,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
                   ("tool_name", `String "masc_status");
                   ("success", `Bool true);
                   ("duration_ms", `Int 12);
-                  ("agent_id", `String "keeper-sangsu-agent");
+                  ("agent_id", `String "keeper-alpha-agent");
                   ("execution_id", `String "exec-a");
                 ];
             ] );
@@ -269,7 +269,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
     `Assoc
       [
         ("ts", `Float 1000.0);
-        ("keeper", `String "sangsu");
+        ("keeper", `String "alpha");
         ("tool", `String "masc_status");
         ("success", `Bool true);
         ("duration_ms", `Float 12.0);
@@ -321,7 +321,7 @@ let test_distinct_calls_within_the_old_window_are_both_kept () =
                   ("tool_name", `String "masc_status");
                   ("success", `Bool true);
                   ("duration_ms", `Int 12);
-                  ("agent_id", `String "keeper-sangsu-agent");
+                  ("agent_id", `String "keeper-alpha-agent");
                   ("execution_id", `String execution_id);
                 ];
             ] );
@@ -331,7 +331,7 @@ let test_distinct_calls_within_the_old_window_are_both_kept () =
     `Assoc
       [
         ("ts", `Float ts);
-        ("keeper", `String "sangsu");
+        ("keeper", `String "alpha");
         ("tool", `String "masc_status");
         ("success", `Bool true);
         ("duration_ms", `Float 12.0);
@@ -378,13 +378,13 @@ let test_agent_event_without_execution_id_is_kept () =
                   [ ("tool_name", `String "masc_status")
                   ; ("success", `Bool true)
                   ; ("duration_ms", `Int 12)
-                  ; ("agent_id", `String "keeper-sangsu-agent")
+                  ; ("agent_id", `String "keeper-alpha-agent")
                   ] ] ) ]
     ];
   write_jsonl tool_calls_dir
     [ `Assoc
         [ ("ts", `Float 1000.0)
-        ; ("keeper", `String "sangsu")
+        ; ("keeper", `String "alpha")
         ; ("tool", `String "masc_status")
         ; ("success", `Bool true)
         ; ("duration_ms", `Float 12.0)
@@ -406,16 +406,16 @@ let test_keeper_metrics_per_keeper () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_metrics" in
-  let cheolsu_dir = Filename.concat dir ".masc/keepers/cheolsu/metrics" in
-  let sangsu_dir = Filename.concat dir ".masc/keepers/sangsu/metrics" in
-  Fs_compat.mkdir_p cheolsu_dir;
-  Fs_compat.mkdir_p sangsu_dir;
-  write_jsonl cheolsu_dir [
-    `Assoc [("ts_unix", `Float 3000.0); ("name", `String "cheolsu");
+  let beta_dir = Filename.concat dir ".masc/keepers/beta/metrics" in
+  let alpha_dir = Filename.concat dir ".masc/keepers/alpha/metrics" in
+  Fs_compat.mkdir_p beta_dir;
+  Fs_compat.mkdir_p alpha_dir;
+  write_jsonl beta_dir [
+    `Assoc [("ts_unix", `Float 3000.0); ("name", `String "beta");
             ("channel", `String "turn")];
   ];
-  write_jsonl sangsu_dir [
-    `Assoc [("ts_unix", `Float 4000.0); ("name", `String "sangsu");
+  write_jsonl alpha_dir [
+    `Assoc [("ts_unix", `Float 4000.0); ("name", `String "alpha");
             ("channel", `String "turn")];
   ];
   (* All keepers *)
@@ -423,10 +423,10 @@ let test_keeper_metrics_per_keeper () =
       ~sources:[Telemetry_unified.Keeper_metric] () in
   Alcotest.(check int) "two keeper entries" 2 (List.length all);
   (* Filter by keeper *)
-  let cheolsu_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+  let beta_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric]
-      ~keeper_name:"cheolsu" () in
-  Alcotest.(check int) "one cheolsu entry" 1 (List.length cheolsu_only)
+      ~keeper_name:"beta" () in
+  Alcotest.(check int) "one beta entry" 1 (List.length beta_only)
 
 let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
   Eio_main.run @@ fun env ->

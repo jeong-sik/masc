@@ -4,10 +4,27 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
+module Frame_presenter = Masc_tui_frame_presenter
+module Board_detail = Masc_tui_board_detail
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Render_schedule = Masc_tui_render_schedule
+
+let frame_lines buf =
+  match List.rev (String.split_on_char '\n' (Buffer.contents buf)) with
+  | "" :: reversed -> List.rev reversed
+  | reversed -> List.rev reversed
+
+let finish_frame ~surface_key ~cursor ~rows ~cols buf :
+    Frame_presenter.frame =
+  { surface_key;
+    terminal_rows = rows;
+    terminal_cols = cols;
+    cursor;
+    lines = frame_lines buf;
+  }
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
@@ -54,13 +71,13 @@ let task_line (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   let assignee =
     match Masc_domain.task_assignee_of_status task.status with
-    | Some name -> Printf.sprintf " @%s" name
+    | Some name -> Printf.sprintf " @%s" (Terminal_text.single_line name)
     | None -> ""
   in
   Printf.sprintf "  %s [%s] %s (%s%s) %s"
     (task_status_icon task.status)
-    task.id
-    task.title
+    (Terminal_text.single_line task.id)
+    (Terminal_text.single_line task.title)
     status
     assignee
     (priority_indicator task.priority)
@@ -70,16 +87,12 @@ let render_dashboard (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  (* Clear screen *)
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   (* Header *)
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf " MASC Dashboard  %s[%s]%s  %s  %s"
-    Ansi.cyan state.workspace Ansi.reset timestamp
+    Ansi.cyan (Terminal_text.single_line state.workspace) Ansi.reset timestamp
     (connection_badge state.connection_status) in
 
   (* Top border *)
@@ -119,10 +132,12 @@ let render_dashboard (state : state) =
     let agent_str =
       if i < List.length state.agents then
         let a = List.nth state.agents i in
+        let name = Terminal_text.single_line a.name in
+        let status = Terminal_text.single_line a.status in
         Printf.sprintf "%s %s%s%s %s%s%s"
-          (agent_icon a.name)
-          (agent_color a.name) a.name Ansi.reset
-          (status_color a.status) a.status Ansi.reset
+          (agent_icon name)
+          (agent_color name) name Ansi.reset
+          (status_color status) status Ansi.reset
       else ""
     in
     (* Event column *)
@@ -178,22 +193,37 @@ let render_dashboard (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  q:quit  r:refresh  Tab:keepers  | Refresh: %.0fs | Port: %d%s\n"
     Ansi.dim state.refresh_interval state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"dashboard" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
+
+(** Project the shared Overview row budget and its sanitized variable inputs. *)
+let overview_layout (state : state) ~terminal_rows =
+  let attention_items =
+    match state.overview with
+    | None -> []
+    | Some overview -> overview.ov_attention_items
+  in
+  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
+  let row_budget =
+    Render_schedule.allocate_overview ~terminal_rows
+      ~has_cluster:(Option.is_some state.overview)
+      ~attention_count:(List.length attention_items)
+      ~event_count:(List.length state.events)
+      ~task_count:(List.length state.tasks)
+      ~has_task_error:(Option.is_some tasks_error)
+  in
+  attention_items, tasks_error, row_budget
 
 (** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
 let render_overview (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf " MASC Overview  %s[%s]%s  %s  %s"
-    Ansi.cyan state.workspace Ansi.reset timestamp
+    Ansi.cyan (Terminal_text.single_line state.workspace) Ansi.reset timestamp
     (connection_badge state.connection_status) in
 
   box_top buf cols;
@@ -201,10 +231,13 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   let ov = state.overview in
+  let overview_error =
+    Terminal_text.optional_single_line state.overview_error
+  in
 
   (* Summary line *)
   let summary_line =
-    match (ov, state.overview_error) with
+    match (ov, overview_error) with
     | _, Some err ->
         Printf.sprintf "  %s(data unreliable: %s)%s" Ansi.red
           (fit_width err (cols - 24))
@@ -230,24 +263,39 @@ let render_overview (state : state) =
   (match ov with
    | None -> ()
    | Some o ->
-       let cluster_line =
-         Printf.sprintf "  Cluster: %s%s%s  Project: %s"
-           Ansi.dim (fit_width o.ov_cluster 24) Ansi.reset
-           (fit_width o.ov_project 32)
+         let cluster_line =
+           Printf.sprintf "  Cluster: %s%s%s  Project: %s"
+             Ansi.dim
+             (fit_width (Terminal_text.single_line o.ov_cluster) 24)
+             Ansi.reset
+             (fit_width (Terminal_text.single_line o.ov_project) 32)
        in
        box_line buf cols cluster_line);
 
   box_divider buf cols;
 
   (* Attention panel *)
-  let attention_items =
-    match ov with
-    | None -> []
-    | Some o -> o.ov_attention_items
+  let attention_items, tasks_error, row_budget =
+    overview_layout state ~terminal_rows:rows
   in
   let panel_width = (cols - 3) / 2 in
   let attention_title = " Attention " in
-  let events_title = " Recent Events " in
+  let event_count = List.length state.events in
+  let event_window =
+    Render_schedule.project_overview_event_window ~event_count
+      ~visible_rows:row_budget.attention_rows state.overview_event_scroll
+  in
+  state.overview_event_scroll <- event_window.oew_offset;
+  let events_title =
+    let title =
+      if event_window.oew_first_position = 0 then " Recent Events "
+      else
+        Printf.sprintf " Recent Events %d-%d/%d "
+          event_window.oew_first_position event_window.oew_last_position
+          event_count
+    in
+    fit_width title (max 0 panel_width)
+  in
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.bold attention_title Ansi.reset
@@ -257,21 +305,23 @@ let render_overview (state : state) =
     (String.make (max 0 (panel_width - String.length events_title)) ' ')
     (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
 
-  let attention_rows = min 6 (max 1 (List.length attention_items)) in
-  for i = 0 to attention_rows - 1 do
+  for i = 0 to row_budget.attention_rows - 1 do
     let attention_str =
       if i < List.length attention_items then
         let a = List.nth attention_items i in
         let sev_color = attention_severity_color a.ai_severity in
         let severity_label = attention_severity_label a.ai_severity in
-        Printf.sprintf "%s[%s]%s %s"
-          sev_color (fit_width severity_label 5) Ansi.reset
-          (fit_width a.ai_summary (panel_width - 12))
+          Printf.sprintf "%s[%s]%s %s"
+            sev_color (fit_width severity_label 5) Ansi.reset
+            (fit_width
+               (Terminal_text.single_line a.ai_summary)
+               (panel_width - 12))
       else ""
     in
     let event_str =
-      if i < List.length state.events then
-        let e = List.nth state.events i in
+      let event_index = i + event_window.oew_offset in
+      if event_index < event_count then
+        let e = List.nth state.events event_index in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
           (fit_width (Terminal_text.single_line e.content) (panel_width - 12))
@@ -294,38 +344,34 @@ let render_overview (state : state) =
     (String.make (max 0 (cols - 10)) ' ')
     Ansi.gray Ansi.box_v Ansi.reset);
 
-  let task_capacity =
-    match state.tasks_error with
-    | None -> 5
-    | Some err ->
+  (match tasks_error with
+   | Some err when row_budget.task_error_rows > 0 ->
         box_line buf cols
-          (Ansi.red ^ "  " ^ fit_width err (cols - 8) ^ Ansi.reset);
-        4
-  in
-  let task_rows = min task_capacity (List.length state.tasks) in
-  if task_rows = 0 && Option.is_none state.tasks_error then
+          (Ansi.red ^ "  "
+          ^ fit_width err (cols - 8)
+          ^ Ansi.reset)
+   | None | Some _ -> ());
+  if row_budget.task_rows > 0 && List.is_empty state.tasks
+     && Option.is_none tasks_error then
     box_line buf cols (Ansi.dim ^ "  (no tasks)" ^ Ansi.reset)
   else
-    for i = 0 to task_rows - 1 do
+    for i = 0 to row_budget.task_rows - 1 do
       let t = List.nth state.tasks i in
       box_line buf cols (task_line t)
     done;
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
     Ansi.dim state.refresh_interval state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"overview" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
 let render_approvals (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -334,7 +380,7 @@ let render_approvals (state : state) =
   let scope, visible_count, total_count, hidden_count =
     match state.approval_snapshot with
     | None -> "-", "?", "?", "?"
-    | Some snapshot ->
+     | Some snapshot ->
         ( (if snapshot.aps_filter_active then
              Terminal_text.single_line_or ~default:"?"
                snapshot.aps_actor_filter
@@ -469,16 +515,13 @@ let render_approvals (state : state) =
        "%s  j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"approvals" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render the Board surface (list view). *)
 let render_board_list (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -492,20 +535,27 @@ let render_board_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
 
+  let board_list_error =
+    Terminal_text.optional_single_line state.board_list_error
+  in
+  let render_list_error err =
+    box_line buf cols
+      (Ansi.red ^ "  (data unreliable: "
+      ^ fit_width err (max 1 (cols - 24))
+      ^ ")" ^ Ansi.reset)
+  in
   if count = 0 then begin
-    (match state.board_error with
-     | Some err ->
-         box_line buf cols
-           (Ansi.red ^ "  (data unreliable: "
-           ^ fit_width err (cols - 24)
-           ^ ")" ^ Ansi.reset)
+    (match board_list_error with
+     | Some err -> render_list_error err
      | None ->
          box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset));
     for _ = 1 to rows - 7 do
       box_empty buf cols
     done
   end else begin
-    let content_height = rows - 7 in
+    Option.iter render_list_error board_list_error;
+    let error_rows = if Option.is_some board_list_error then 1 else 0 in
+    let content_height = max 0 (rows - 7 - error_rows) in
     let scroll_offset =
       if state.board_cursor >= content_height then
         state.board_cursor - content_height + 1
@@ -518,9 +568,9 @@ let render_board_list (state : state) =
         let is_selected = idx = state.board_cursor in
         let line =
           Printf.sprintf "  %s  %s  %s  +%d  c%d"
-            (fit_width p.bp_id 12)
-            (fit_width p.bp_author 16)
-            (fit_width p.bp_title (cols - 52))
+            (fit_width (Terminal_text.single_line p.bp_id) 12)
+            (fit_width (Terminal_text.single_line p.bp_author) 16)
+            (fit_width (Terminal_text.single_line p.bp_title) (cols - 52))
             p.bp_votes
             p.bp_comment_count
         in
@@ -541,20 +591,30 @@ let render_board_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"board-list" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render the Board surface (read view). *)
-let render_board_read (state : state) (post : board_post) =
+let render_board_read (state : state) (list_post : board_post) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
+  let detail =
+    Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
+  in
+  let post =
+    match detail with
+    | Board_detail.Ready (detail_post, _) -> detail_post
+    | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+        list_post
+  in
 
   let header = Printf.sprintf " MASC Board  %s[%s]%s  by %s  +%d  c%d"
-    Ansi.cyan (fit_width post.bp_id 12) Ansi.reset
-    post.bp_author post.bp_votes post.bp_comment_count
+    Ansi.cyan
+    (fit_width (Terminal_text.single_line post.bp_id) 12)
+    Ansi.reset
+    (Terminal_text.single_line post.bp_author)
+    post.bp_votes post.bp_comment_count
   in
 
   box_top buf cols;
@@ -562,49 +622,71 @@ let render_board_read (state : state) (post : board_post) =
   box_divider buf cols;
 
   let title_line = Printf.sprintf "  %s%s%s"
-    Ansi.bold (fit_width post.bp_title (cols - 6)) Ansi.reset
+    Ansi.bold
+    (fit_width (Terminal_text.single_line post.bp_title) (cols - 6))
+    Ansi.reset
   in
   box_line buf cols title_line;
-  box_line buf cols (Ansi.dim ^ "  " ^ fit_width post.bp_created_at 40 ^ Ansi.reset);
+  box_line buf cols
+    (Ansi.dim ^ "  "
+    ^ fit_width (Terminal_text.single_line post.bp_created_at) 40
+    ^ Ansi.reset);
   box_divider buf cols;
 
   (* Body lines *)
   let text_width = cols - 8 in
   let body_lines =
-    let words = String.split_on_char ' ' post.bp_body in
-    let rec wrap acc current = function
-      | [] -> List.rev (if current = "" then acc else current :: acc)
-      | w :: ws ->
-          let candidate = if current = "" then w else current ^ " " ^ w in
-          if String.length candidate <= text_width then
-            wrap acc candidate ws
-          else
-            wrap (current :: acc) w ws
-    in
-    wrap [] "" words
+    Message_layout.wrap_words ~max_cells:text_width
+      (Terminal_text.single_line post.bp_body)
   in
-  let content_height = rows - 10 in
   let total_lines = List.length body_lines in
-  let scroll = min state.board_scroll (max 0 (total_lines - content_height)) in
+  let detail_lines =
+    match detail with
+    | Board_detail.Absent ->
+        [Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset]
+    | Board_detail.Loading ->
+        [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
+    | Board_detail.Failed error ->
+        [ Ansi.red ^ "  Board detail unavailable: "
+          ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
+          ^ Ansi.reset
+        ]
+    | Board_detail.Ready (_, comments) ->
+        List.map
+          (fun c ->
+             Printf.sprintf "  %s: %s"
+               (fit_width (Terminal_text.single_line c.bc_author) 16)
+               (fit_width (Terminal_text.single_line c.bc_content) (cols - 24)))
+          comments
+  in
+  let detail_line_count = List.length detail_lines in
+  let row_budget =
+    Render_schedule.allocate_board_read ~terminal_rows:rows
+      ~body_line_count:total_lines
+      ~comment_count:detail_line_count
+  in
+  let content_height = row_budget.body_rows in
+  let comment_height = row_budget.comment_rows in
+  let scroll =
+    Render_schedule.project_board_read_scroll ~body_line_count:total_lines
+      ~body_rows:content_height
+      ~comment_count:detail_line_count
+      ~comment_rows:comment_height state.board_scroll
+  in
+  state.board_scroll <- scroll.normalized_scroll;
   for i = 0 to content_height - 1 do
-    let idx = i + scroll in
+    let idx = i + scroll.body_offset in
     if idx < total_lines then
       box_line buf cols ("  " ^ List.nth body_lines idx)
     else
       box_empty buf cols
   done;
 
-  if List.length state.board_comments > 0 then begin
+  if comment_height > 0 then begin
     box_divider buf cols;
     box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
-    let comment_height = min 5 (List.length state.board_comments) in
     for i = 0 to comment_height - 1 do
-      let c = List.nth state.board_comments i in
-      let line = Printf.sprintf "  %s: %s"
-        (fit_width c.bc_author 16)
-        (fit_width c.bc_content (cols - 24))
-      in
-      box_line buf cols line
+      box_line buf cols (List.nth detail_lines (i + scroll.comment_offset))
     done
   end;
 
@@ -613,8 +695,8 @@ let render_board_read (state : state) (post : board_post) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"board-read" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 let planning_phase_label phase = Goal_phase.to_string phase
 
@@ -630,9 +712,6 @@ let planning_phase_color = function
 let render_planning_list (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -651,10 +730,13 @@ let render_planning_list (state : state) =
     | Some p -> planning_visible_goals p.pl_goals
   in
   let count = List.length goals in
+  let planning_error =
+    Terminal_text.optional_single_line state.planning_error
+  in
 
   (match state.planning with
    | None ->
-       (match state.planning_error with
+       (match planning_error with
         | Some err ->
             box_line buf cols
               (Ansi.red ^ "  (data unreliable: "
@@ -704,14 +786,21 @@ let render_planning_list (state : state) =
              let branch = if depth > 0 then "└─ " else "  " in
              let status_color = planning_phase_color g.pg_phase in
              let status_label = planning_phase_label g.pg_phase in
-             let due = match g.pg_due_date with Some d -> "  " ^ d | None -> "" in
+            let due =
+              match Terminal_text.optional_single_line g.pg_due_date with
+              | Some d -> "  " ^ d
+              | None -> ""
+            in
              let line =
                Printf.sprintf "%s%s%s[%s]%s P%d  %s%s"
                  indent branch status_color
                  (fit_width status_label 8)
                  Ansi.reset
                  g.pg_priority
-                 (fit_width g.pg_title (cols - 30 - (depth * 2) - String.length due))
+                 (fit_width
+                    (Terminal_text.single_line g.pg_title)
+                    (cols - 30 - (depth * 2)
+                   - Message_layout.display_width due))
                  (Ansi.dim ^ due ^ Ansi.reset)
              in
              let content =
@@ -731,22 +820,19 @@ let render_planning_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"planning-list" ~cursor:Frame_presenter.Hidden
+    ~rows ~cols buf
 
 (** Render the Planning surface (detail view). *)
 let render_planning_detail (state : state) (goal : planning_goal) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf " MASC Planning  %s[%s]%s  %s"
     status_color (fit_width status_label 8) Ansi.reset
-    (fit_width goal.pg_id 20)
+    (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
 
   box_top buf cols;
@@ -754,16 +840,25 @@ let render_planning_detail (state : state) (goal : planning_goal) =
   box_divider buf cols;
 
   box_line buf cols (Printf.sprintf "  %s%s%s"
-    Ansi.bold (fit_width goal.pg_title (cols - 6)) Ansi.reset);
+    Ansi.bold
+    (fit_width (Terminal_text.single_line goal.pg_title) (cols - 6))
+    Ansi.reset);
   box_line buf cols (Printf.sprintf "  Phase: %s  Priority: P%d"
     (fit_width (planning_phase_label goal.pg_phase) 14) goal.pg_priority);
-  (match goal.pg_due_date with
-   | Some d -> box_line buf cols (Printf.sprintf "  Due: %s" d)
+  (match Terminal_text.optional_single_line goal.pg_due_date with
+   | Some d ->
+       box_line buf cols
+         (Printf.sprintf "  Due: %s" d)
    | None -> box_empty buf cols);
-  (match goal.pg_metric with
+  (match Terminal_text.optional_single_line goal.pg_metric with
    | Some m ->
-       let target = match goal.pg_target_value with Some t -> " = " ^ t | None -> "" in
-       box_line buf cols (Printf.sprintf "  Metric: %s%s" m target)
+       let target =
+         match Terminal_text.optional_single_line goal.pg_target_value with
+         | Some t -> " = " ^ t
+         | None -> ""
+       in
+       box_line buf cols
+         (Printf.sprintf "  Metric: %s%s" m target)
    | None -> box_empty buf cols);
   box_empty buf cols;
   box_divider buf cols;
@@ -777,16 +872,13 @@ let render_planning_detail (state : state) (goal : planning_goal) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"planning-detail" ~cursor:Frame_presenter.Hidden
+    ~rows ~cols buf
 
 (** Render the keeper list view *)
 let render_keeper_list (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   (* Header *)
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -824,12 +916,17 @@ let render_keeper_list (state : state) =
 
   (* Keeper rows *)
   let content_height = max 0 (rows - 8) in
+  let keepers_error =
+    Terminal_text.optional_single_line state.keepers_error
+  in
   let keeper_rows =
-    match state.keepers_error with
+    match keepers_error with
     | None -> content_height
     | Some err ->
         box_line buf cols
-          (Ansi.red ^ "  " ^ fit_width err (cols - 8) ^ Ansi.reset);
+          (Ansi.red ^ "  "
+          ^ fit_width err (cols - 8)
+          ^ Ansi.reset);
         max 0 (content_height - 1)
   in
   let visible_count = min keeper_rows (List.length state.keepers) in
@@ -842,7 +939,7 @@ let render_keeper_list (state : state) =
 
   if visible_count = 0 then begin
     let empty_rows =
-      match state.keepers_error with
+      match keepers_error with
       | Some _ -> keeper_rows
       | None ->
           Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no keepers found in .masc/keepers/)%s %s%s%s%s\n"
@@ -871,9 +968,13 @@ let render_keeper_list (state : state) =
         in
         let task_width = max 8 (cols - 58) in
         let current_task =
-          fit_width (Option.value ~default:"-" k.k_current_task_id) task_width
+          fit_width
+            (Terminal_text.single_line_or ~default:"-" k.k_current_task_id)
+            task_width
         in
-        let name_col = Printf.sprintf "%-20s" k.k_name in
+        let name_col =
+          Printf.sprintf "%-20s" (Terminal_text.single_line k.k_name)
+        in
         let gen_col = Printf.sprintf "%5d" k.k_generation in
         let turns_col = Printf.sprintf "%10d" k.k_total_turns in
         let line_content =
@@ -912,21 +1013,18 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  Tab:dashboard  q:quit  r:refresh%s\n"
     Ansi.dim Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"keeper-list" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
 let render_keeper_detail (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   if state.keeper_cursor >= List.length state.keepers then begin
     Buffer.add_string buf "No keeper selected.\n";
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let inner = cols - 4 in  (* width inside borders *)
@@ -946,7 +1044,7 @@ let render_keeper_detail (state : state) =
 
     (* Identity section *)
     add_section "Identity";
-    add_row "Name:" k.k_name;
+    add_row "Name:" (Terminal_text.single_line k.k_name);
     add_row "Generation:" (string_of_int k.k_generation);
     add_row "Paused:"
       (if k.k_paused then Ansi.yellow ^ "yes" ^ Ansi.reset
@@ -955,14 +1053,19 @@ let render_keeper_detail (state : state) =
 
     (* Current work section *)
     add_section "Current Work";
-    add_row "Task:" (Option.value ~default:"-" k.k_current_task_id);
+    add_row "Task:"
+      (Terminal_text.single_line_or ~default:"-" k.k_current_task_id);
     add_row "Last Blocker:" (Tui_decode.keeper_blocker_for_terminal k);
     add_empty ();
 
     (* Live Context section (Phase 2) *)
     add_section "Live Context";
-    (match state.live_context_error, state.live_context with
-     | Some error, _ -> add_row "Context:" (Ansi.red ^ error ^ Ansi.reset)
+    (match
+       Terminal_text.optional_single_line state.live_context_error,
+       state.live_context
+     with
+     | Some error, _ ->
+         add_row "Context:" (Ansi.red ^ error ^ Ansi.reset)
      | None, Some observation ->
          (match Observation_layout.context_summary observation with
           | Observation_layout.Context_measured observation ->
@@ -977,14 +1080,18 @@ let render_keeper_detail (state : state) =
                    (ctx_color ratio) pct Ansi.reset
                    (ctx_bar ratio bar_width) observation.tokens
                    observation.maximum);
-              add_row "Observed:" (short_ts observation.observed_at);
-              add_row "Turn Ref:" observation.turn_ref
+              add_row "Observed:"
+                (Terminal_text.short_timestamp observation.observed_at);
+              add_row "Turn Ref:"
+                (Terminal_text.single_line observation.turn_ref)
           | Observation_layout.Context_partial observation ->
               add_row "Context:"
                 (Printf.sprintf "%d tokens; context window not observed"
                    observation.tokens);
-              add_row "Observed:" (short_ts observation.observed_at);
-              add_row "Turn Ref:" observation.turn_ref
+              add_row "Observed:"
+                (Terminal_text.short_timestamp observation.observed_at);
+              add_row "Turn Ref:"
+                (Terminal_text.single_line observation.turn_ref)
           | Observation_layout.Context_unavailable reason ->
               add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
      | None, None ->
@@ -996,7 +1103,7 @@ let render_keeper_detail (state : state) =
     add_row "Total Turns:" (string_of_int k.k_total_turns);
     add_row "Total Tokens:" (string_of_int k.k_total_tokens);
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
-    add_row "Last Turn:" (short_ts k.k_last_turn_ts);
+    add_row "Last Turn:" (Terminal_text.short_timestamp k.k_last_turn_ts);
     add_row "Compactions:" (string_of_int k.k_compaction_count);
     add_empty ();
 
@@ -1016,8 +1123,8 @@ let render_keeper_detail (state : state) =
 
     (* Timestamps section *)
     add_section "Timestamps";
-    add_row "Created:" (short_ts k.k_created_at);
-    add_row "Updated:" (short_ts k.k_updated_at);
+    add_row "Created:" (Terminal_text.short_timestamp k.k_created_at);
+    add_row "Updated:" (Terminal_text.short_timestamp k.k_updated_at);
 
     (* Reverse to get correct order *)
     let all_lines = List.rev !lines in
@@ -1027,7 +1134,11 @@ let render_keeper_detail (state : state) =
     box_top buf cols;
 
     (* Title *)
-    let title = Printf.sprintf " Keeper: %s%s%s " Ansi.bold k.k_name Ansi.reset in
+    let title =
+      Printf.sprintf " Keeper: %s%s%s " Ansi.bold
+        (Terminal_text.single_line k.k_name)
+        Ansi.reset
+    in
     Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s%s%s\n"
       Ansi.gray Ansi.box_v Ansi.reset
       title
@@ -1038,9 +1149,13 @@ let render_keeper_detail (state : state) =
     box_divider buf cols;
 
     (* Content area with scrolling *)
-    let content_height = rows - 6 in  (* header + title + divider + bottom + footer + extra *)
+    let content_height = max 0 (rows - 6) in  (* header + title + divider + bottom + footer + extra *)
     let visible_lines = min content_height total_lines in
-    let scroll = min state.detail_scroll (max 0 (total_lines - content_height)) in
+    let scroll =
+      Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
+        ~content_height state.detail_scroll
+    in
+    state.detail_scroll <- scroll;
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in
@@ -1068,8 +1183,8 @@ let render_keeper_detail (state : state) =
     Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:dashboard  q:quit  r:refresh%s\n"
       Ansi.dim Ansi.reset);
 
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end
 
 (** Render keeper log view *)
@@ -1077,20 +1192,19 @@ let render_keeper_logs (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   if state.keeper_cursor >= List.length state.keepers then begin
     Buffer.add_string buf "No keeper selected.\n";
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-logs" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let total_entries = List.length state.log_entries in
 
     (* Header *)
     let header =
-      Printf.sprintf " Keeper Logs: %s  (%d entries)" k.k_name total_entries
+      Printf.sprintf " Keeper Logs: %s  (%d entries)"
+        (Terminal_text.single_line k.k_name)
+        total_entries
     in
 
     box_top buf cols;
@@ -1143,19 +1257,25 @@ let render_keeper_logs (state : state) =
         if idx < total_entries then begin
           let e = List.nth state.log_entries idx in
           (* Extract just the time portion from ts *)
-          let time_str =
-            if String.length e.le_ts >= 19 then
-              String.sub e.le_ts 11 8  (* HH:MM:SS *)
-            else e.le_ts
-          in
+          let time_str = Terminal_text.clock_timestamp e.le_ts in
+          let tool_names = Terminal_text.single_lines e.le_tools_used in
           let tools_str =
-            if List.length e.le_tools_used > 0 then
+            if List.length tool_names > 0 then
               " "
               ^ String.concat ","
-                  (List.filteri (fun i _ -> i < 2) e.le_tools_used)
+                  (List.filteri (fun i _ -> i < 2) tool_names)
             else ""
           in
-          let line = Observation_layout.plain_log_row ~time:time_str e ^ tools_str in
+          let terminal_entry =
+            { e with
+              le_work_kind =
+                Terminal_text.optional_single_line e.le_work_kind
+            }
+          in
+          let line =
+            Observation_layout.plain_log_row ~time:time_str terminal_entry
+            ^ tools_str
+          in
           box_line buf cols line
         end else
           box_empty buf cols
@@ -1177,8 +1297,8 @@ let render_keeper_logs (state : state) =
     Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  q:quit  r:refresh%s\n"
       Ansi.dim Ansi.reset);
 
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-logs" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end
 
 (** Render message input/conversation view *)
@@ -1186,21 +1306,18 @@ let render_keeper_message (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   match state.msg_target_keeper_name with
   | None ->
     Buffer.add_string buf "No keeper selected.\n";
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
       Printf.sprintf " Message to: %s  (port %d)" display_keeper_name state.port
     in
     let target_registered =
-      keeper_message_target_registered state keeper_name
+      keeper_available_for_new_message state keeper_name
     in
     let status_rows = keeper_message_status_rows state in
     if
@@ -1213,8 +1330,8 @@ let render_keeper_message (state : state) =
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
-      print_string (Buffer.contents buf);
-      flush stdout
+      finish_frame ~surface_key:"keeper-message"
+        ~cursor:Frame_presenter.Hidden ~rows ~cols buf
     end else begin
     (* Header *)
     box_top buf cols;
@@ -1383,11 +1500,18 @@ let render_keeper_message (state : state) =
            ("  recovery needs retry; Ctrl-R reloads durable recovery state: "
           ^ Keeper_chat.terminal_safe_text detail)
      | Some _, _, None | None, Some _, None | None, None, None -> ());
-    if not target_registered then
-      box_line_styled buf cols ~style:Ansi.red
-        (Printf.sprintf
-           "  Keeper %s is no longer registered; draft retained; Esc to choose another"
-           display_keeper_name);
+    if not target_registered then begin
+      let unavailable_message =
+        match state.keepers_error with
+        | Some _ ->
+            "  Keeper roster is unavailable; draft retained; Esc to choose another"
+        | None ->
+            Printf.sprintf
+              "  Keeper %s is no longer registered; draft retained; Esc to choose another"
+              display_keeper_name
+      in
+      box_line_styled buf cols ~style:Ansi.red unavailable_message
+    end;
     let input = Buffer.contents state.msg_input in
     let visible_input =
       Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)) input
@@ -1424,6 +1548,8 @@ let render_keeper_message (state : state) =
       | None, None, None ->
           (match state.msg_unverified, target_registered with
            | Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
+           | None, false when Option.is_some state.keepers_error ->
+               "Enter:disabled (roster unavailable)"
            | None, false -> "Enter:disabled (Keeper unavailable)"
            | None, true -> "Enter:send")
     in
@@ -1439,15 +1565,15 @@ let render_keeper_message (state : state) =
       Message_layout.input_cursor_column ~terminal_cols:cols
         ~input:visible_input
     in
-    Buffer.add_string buf (Ansi.move_to input_row input_column);
-    Buffer.add_string buf Ansi.show_cursor;
-
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-message"
+      ~cursor:
+        (Frame_presenter.Visible_at
+           { row = input_row; column = input_column })
+      ~rows ~cols buf
     end
 
-(** Dispatch render based on current surface *)
-let render (state : state) =
+(** Dispatch a normal-height render based on the current surface. *)
+let render_surface (state : state) =
   match state.view with
   | Overview -> render_overview state
   | Keepers Keeper_list -> render_keeper_list state
@@ -1470,3 +1596,23 @@ let render (state : state) =
            | Some goal -> render_planning_detail state goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
+
+let render_terminal_too_small ~rows ~cols =
+  let buf = Buffer.create 64 in
+  Buffer.add_string buf
+    (fit_width
+       (Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
+          Render_schedule.Viewport.minimum_fixed_chrome_rows)
+       cols);
+  Buffer.add_char buf '\n';
+  finish_frame ~surface_key:"terminal-too-small"
+    ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+
+(** Keep every high-chrome surface out of a viewport that cannot contain the
+    largest declared fixed-row budget. Main ignores hidden surface input, and
+    growing the terminal restores the unchanged selected surface. *)
+let render (state : state) =
+  let rows, cols = get_terminal_size () in
+  if Render_schedule.Viewport.requires_compact_frame ~rows
+  then render_terminal_too_small ~rows ~cols
+  else render_surface state

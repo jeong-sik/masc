@@ -301,10 +301,6 @@ impl Plugin for ModePlugin {
             .add_systems(OnExit(ViewerMode::Social), exit_masc_panel)
             .add_systems(OnEnter(ViewerMode::Experiment), enter_masc_panel)
             .add_systems(OnExit(ViewerMode::Experiment), exit_masc_panel)
-            .add_systems(
-                Update,
-                refresh_trpg_widget_status.run_if(in_state(ViewerMode::Trpg)),
-            )
             .add_systems(Update, poll_mode_transition)
             .add_systems(Update, sync_masc_panel_connection_status);
     }
@@ -334,7 +330,6 @@ fn on_enter_home(buffer: Res<ModeTransitionBuffer>) {
         // Bind back-to-home button
         bind_back_button(&doc, &buffer.pending);
         bind_debug_controls(&doc);
-        bind_new_game_controls(&doc);
 
         // Hide loading screen once Bevy is initialized
         if let Some(loading) = doc.get_element_by_id("loading-screen") {
@@ -392,7 +387,6 @@ fn enter_trpg() {
         clear_trpg_dom(&doc);
         bind_debug_controls(&doc);
         bind_view_options(&doc);
-        bind_new_game_controls(&doc);
         let workspace = crate::config::current_workspace_id();
         set_current_workspace_id(&doc, &workspace);
         bind_workspace_controls(&doc);
@@ -1446,7 +1440,6 @@ pub(super) fn set_current_workspace_id(doc: &web_sys::Document, workspace_id: &s
     }
     remember_recent_workspace(&workspace);
     sync_workspace_controls(doc, &workspace);
-    refresh_trpg_ops_snapshots(doc);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1757,21 +1750,6 @@ use workspace_hub::{
     refresh_workspaces_from_server, remember_recent_workspace, sync_workspace_controls,
 };
 
-#[path = "../../../archive/trpg/viewer/trpg_controls.rs"]
-#[cfg(target_arch = "wasm32")]
-mod trpg_controls;
-#[cfg(target_arch = "wasm32")]
-use trpg_controls::{
-    actor_admin_set_status, actor_admin_workspace_id, bind_new_game_controls,
-    refresh_actor_admin_list, refresh_trpg_ops_snapshots,
-};
-
-/// Refresh TRPG widget status counters (narrative, party, history, dedup).
-/// On non-wasm targets this is a no-op; on wasm32 it delegates to `trpg_controls`.
-fn refresh_trpg_widget_status() {
-    #[cfg(target_arch = "wasm32")]
-    trpg_controls::refresh_trpg_widget_status();
-}
 
 #[cfg(target_arch = "wasm32")]
 fn set_element_text(doc: &web_sys::Document, id: &str, text: &str) {

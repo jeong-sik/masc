@@ -5,7 +5,7 @@
    path, line)]; the keeper hands it back verbatim; the annotation must
    land in that codebase's store at that line — retrievable by the
    same repo-scoped read the IDE uses — and never in the orphan store.
-   The probe's actual burial (analyst's annotation filed under its
+   The probe's actual burial (delta's annotation filed under its
    sandbox root, id 528e6fd6-…) is the regression this suite pins shut.
 
    The failure half: a missing codebase and an out-of-tree path are
@@ -60,7 +60,7 @@ let test_owner_probe_round_trip () =
     Agent_observation.reset_for_testing ();
     Ide_bridge.install_agent_observation_sinks ();
     let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
-    let meta = make_meta "analyst" in
+    let meta = make_meta "delta" in
     let raw =
       annotate
         ~config
@@ -78,7 +78,7 @@ let test_owner_probe_round_trip () =
      | _ -> failf "expected ok:true, got %s" raw);
     (* The IDE reads with the same repo-scoped vocabulary it handed out. *)
     let filter : Ide_annotation_types.annotation_filter =
-      { file_path = Some probe_path; keeper_id = Some "analyst"; goal_id = None; task_id = None }
+      { file_path = Some probe_path; keeper_id = Some "delta"; goal_id = None; task_id = None }
     in
     (match
        Ide_annotations.list
@@ -126,7 +126,7 @@ let expect_reject ~needle raw =
 let test_missing_codebase_is_a_typed_reject () =
   with_temp_base_path (fun base_path ->
     let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
-    let meta = make_meta "analyst" in
+    let meta = make_meta "delta" in
     annotate
       ~config
       ~meta
@@ -141,7 +141,7 @@ let test_missing_codebase_is_a_typed_reject () =
 let test_out_of_tree_path_is_a_typed_reject () =
   with_temp_base_path (fun base_path ->
     let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
-    let meta = make_meta "analyst" in
+    let meta = make_meta "delta" in
     annotate
       ~config
       ~meta

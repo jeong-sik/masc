@@ -30,6 +30,15 @@ If the server is using a different base path, pass `--base-path <path>` or expor
 `MASC_BASE_PATH` before launching the TUI. The fallback order is
 `MASC_BASE_PATH` -> `cwd`.
 
+The TUI requires interactive TTY stdin/stdout and a non-`dumb` terminal. It
+coalesces invalidations into 16 ms frame windows, then writes only changed
+viewport rows. Each non-empty paint is sent as one synchronized-output update
+(CSI 2026) so terminals that support the protocol reveal the frame atomically.
+Set `MASC_TUI_SYNC=off` to omit that optional envelope; row-diff correctness
+does not depend on protocol support. Exit signals restore terminal modes and
+cursor state. Job-control suspension (`Ctrl-Z`) restores the shell terminal,
+then `fg` re-enters raw mode and forces a complete repaint.
+
 ## Modes
 
 ### Dashboard Mode (default)
@@ -210,6 +219,7 @@ Dashboard <--Tab--> Keeper List
 - OCaml 5.x
 - Project opam dependencies, including `unix`, `yojson`, `eio`, `uucp`, and
   `uuseg`
-- UTF-8 terminal with ANSI escapes and xterm Unicode-11-compatible cell-width
-  behavior. ttyd `1.7.7-unknown` with its DOM renderer is the measured target;
-  other ANSI terminals may differ for compound emoji cursor placement.
+- Interactive UTF-8 TTY stdin/stdout with ANSI escapes and cursor addressing;
+  `TERM` must not be `dumb`. xterm Unicode-11-compatible cell-width behavior
+  is expected. ttyd `1.7.7-unknown` with its DOM renderer is the measured
+  target; other ANSI terminals may differ for compound emoji cursor placement.

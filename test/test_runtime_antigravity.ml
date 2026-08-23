@@ -440,7 +440,7 @@ let test_duplicate_keys_fail_closed () =
 
 (* A live init event announced request-review. It was not modelled, the parse
    failed, and the resulting protocol error put the official-client session in
-   Recovery_required -- taskmaster, 110 turns in one hour (#28008).
+   Recovery_required -- fixture-keeper, 110 turns in one hour (#28008).
 
    Nothing branches on [permission_mode]: the only read of the field is its own
    parse site. Naming the one member that stalled a keeper leaves the next one
@@ -464,7 +464,7 @@ let test_observed_permission_modes_are_admitted () =
 ;;
 
 (* #28029 opened step_type with [Unrecognized] after Antigravity began emitting
-   "system_message" and taskmaster stopped. #28037 closed it again and named
+   "system_message" and fixture-keeper stopped. #28037 closed it again and named
    [System_message] instead -- which admits the value that already stalled a
    keeper and leaves the next one to stall it again. Nothing branches on
    [System_message]: it appears at its declaration and at the parse site only.

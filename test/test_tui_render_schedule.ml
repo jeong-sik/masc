@@ -139,6 +139,296 @@ let test_interrupted_input_wait_retries_until_deadline () =
     (Schedule.Input_wait.await ~now_ns:(fun () -> !now) ~timeout_ns:(ms 16)
        ~poll:expired_poll)
 
+let test_global_shortcuts_do_not_steal_message_input () =
+  check bool "q quits outside message input" true
+    (Schedule.Input_shortcut.is_quit ~message_mode:false "q");
+  check bool "uppercase q quits outside message input" true
+    (Schedule.Input_shortcut.is_quit ~message_mode:false "Q");
+  check bool "2 opens Keepers outside message input" true
+    (Schedule.Input_shortcut.opens_keepers ~message_mode:false "2");
+  check bool "q remains message text" false
+    (Schedule.Input_shortcut.is_quit ~message_mode:true "q");
+  check bool "2 remains message text" false
+    (Schedule.Input_shortcut.opens_keepers ~message_mode:true "2");
+  check bool "unrelated key is not a shortcut" false
+    (Schedule.Input_shortcut.opens_keepers ~message_mode:false "x")
+
+let test_compact_viewport_uses_largest_fixed_chrome_budget () =
+  check int "minimum fixed chrome height" 14
+    Schedule.Viewport.minimum_fixed_chrome_rows;
+  check bool "thirteen rows use the compact frame" true
+    (Schedule.Viewport.requires_compact_frame ~rows:13);
+  check bool "fourteen rows restore the selected surface" false
+    (Schedule.Viewport.requires_compact_frame ~rows:14);
+  check bool "normal terminals keep the selected surface" false
+    (Schedule.Viewport.requires_compact_frame ~rows:30)
+
+let overview_frame_rows ~has_cluster
+    (allocation : Schedule.overview_allocation) =
+  10
+  + (if has_cluster then 1 else 0)
+  + allocation.attention_rows
+  + allocation.task_error_rows
+  + allocation.task_rows
+
+let test_overview_rows_share_one_viewport_budget () =
+  let max_data =
+    Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
+  in
+  check int "14-row attention allocation" 2 max_data.attention_rows;
+  check int "14-row task allocation" 1 max_data.task_rows;
+  check int "14-row error allocation" 0 max_data.task_error_rows;
+  check int "14-row frame is exact" 14
+    (overview_frame_rows ~has_cluster:true max_data);
+  let task_error =
+    Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:true
+  in
+  check int "task error keeps its reserved row" 1
+    task_error.task_error_rows;
+  check int "task error precedes ordinary task rows" 0 task_error.task_rows;
+  check int "task error frame is exact" 14
+    (overview_frame_rows ~has_cluster:true task_error);
+  let full =
+    Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
+      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
+  in
+  check int "full viewport restores attention cap" 6 full.attention_rows;
+  check int "full viewport restores task cap" 5 full.task_rows;
+  let events_only =
+    Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
+      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+  in
+  check int "events size the shared panel" 6 events_only.attention_rows;
+  check int "events preserve full task rows" 5 events_only.task_rows;
+  let mixed_panel =
+    Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
+      ~attention_count:2 ~event_count:4 ~task_count:5 ~has_task_error:false
+  in
+  check int "the longer panel column determines shared rows" 4
+    mixed_panel.attention_rows;
+  check int "mixed panel counts preserve full task rows" 5 mixed_panel.task_rows;
+  let compact_events_only =
+    Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
+      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+  in
+  check int "compact events use remaining panel rows" 2
+    compact_events_only.attention_rows;
+  check int "compact events preserve one task row" 1
+    compact_events_only.task_rows;
+  for terminal_rows = 14 to 40 do
+    List.iter
+      (fun has_cluster ->
+        for attention_count = 0 to 8 do
+          for event_count = 0 to 8 do
+            for task_count = 0 to 7 do
+              List.iter
+                (fun has_task_error ->
+                  let allocation =
+                    Schedule.allocate_overview ~terminal_rows ~has_cluster
+                      ~attention_count ~event_count ~task_count ~has_task_error
+                  in
+                  let total = overview_frame_rows ~has_cluster allocation in
+                  if total > terminal_rows then
+                    failf
+                      "overview exceeds viewport: rows=%d cluster=%b attention=%d events=%d tasks=%d error=%b total=%d"
+                      terminal_rows has_cluster attention_count event_count
+                      task_count has_task_error total;
+                  if
+                    allocation.attention_rows < 0
+                    || allocation.task_error_rows < 0
+                    || allocation.task_rows < 0
+                  then
+                    failf "overview allocation became negative at rows=%d"
+                      terminal_rows)
+                [ false; true ]
+            done
+          done
+        done)
+      [ false; true ]
+  done
+
+let board_read_frame_rows ~comment_count
+    (allocation : Schedule.board_read_allocation) =
+  8
+  + (if comment_count > 0 then 2 else 0)
+  + allocation.body_rows
+  + allocation.comment_rows
+
+let test_board_read_rows_reserve_comments_and_footer () =
+  let crowded =
+    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:10
+      ~comment_count:5
+  in
+  check int "14-row board keeps one body row" 1 crowded.body_rows;
+  check int "14-row board fits three comments" 3 crowded.comment_rows;
+  check int "14-row board frame is exact" 14
+    (board_read_frame_rows ~comment_count:5 crowded);
+  let comments_only =
+    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:0
+      ~comment_count:5
+  in
+  check int "empty body consumes no semantic row" 0 comments_only.body_rows;
+  check int "empty body frees a fourth comment row" 4
+    comments_only.comment_rows;
+  let no_comments =
+    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:10
+      ~comment_count:0
+  in
+  check int "comment-free board uses the full body viewport" 6
+    no_comments.body_rows;
+  let full_comments =
+    Schedule.allocate_board_read ~terminal_rows:16 ~body_line_count:10
+      ~comment_count:5
+  in
+  check int "16-row board restores comment cap" 5
+    full_comments.comment_rows;
+  for terminal_rows = 14 to 40 do
+    for body_line_count = 0 to 10 do
+      for comment_count = 0 to 10 do
+        let allocation =
+          Schedule.allocate_board_read ~terminal_rows ~body_line_count
+            ~comment_count
+        in
+        let total = board_read_frame_rows ~comment_count allocation in
+        if total <> terminal_rows then
+          failf
+            "board-read does not fill viewport: rows=%d body=%d comments=%d total=%d"
+            terminal_rows body_line_count comment_count total;
+        if body_line_count > 0 && allocation.body_rows < 1 then
+          failf "board-read hid a nonempty body at rows=%d comments=%d"
+            terminal_rows comment_count;
+        if
+          allocation.comment_rows < 0
+          || allocation.comment_rows > min 5 comment_count
+        then
+          failf "board-read comment allocation escaped its cap";
+        let last =
+          Schedule.project_board_read_scroll ~body_line_count
+            ~body_rows:allocation.body_rows ~comment_count
+            ~comment_rows:allocation.comment_rows max_int
+        in
+        if last.comment_offset + allocation.comment_rows <> comment_count then
+          failf
+            "board-read cannot reach the last comment: rows=%d body=%d comments=%d"
+            terminal_rows body_line_count comment_count;
+        if
+          body_line_count > allocation.body_rows
+          && last.body_offset + allocation.body_rows <> body_line_count
+        then
+          failf "board-read cannot reach the last body row"
+      done
+    done
+  done
+
+let test_board_read_scroll_reaches_hidden_comments () =
+  let allocation =
+    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:1
+      ~comment_count:5
+  in
+  let first =
+    Schedule.project_board_read_scroll ~body_line_count:1
+      ~body_rows:allocation.body_rows ~comment_count:5
+      ~comment_rows:allocation.comment_rows 0
+  in
+  check int "initial body offset" 0 first.body_offset;
+  check int "initial comment offset" 0 first.comment_offset;
+  let last =
+    Schedule.project_board_read_scroll ~body_line_count:1
+      ~body_rows:allocation.body_rows ~comment_count:5
+      ~comment_rows:allocation.comment_rows 99
+  in
+  check int "overscroll normalizes to the combined maximum" 2
+    last.normalized_scroll;
+  check int "one-line body remains visible" 0 last.body_offset;
+  check int "last comment becomes visible" 2 last.comment_offset;
+  let long_body =
+    Schedule.project_board_read_scroll ~body_line_count:10 ~body_rows:1
+      ~comment_count:5 ~comment_rows:3 10
+  in
+  check int "body scroll is consumed first" 9 long_body.body_offset;
+  check int "remaining scroll advances comments" 1
+    long_body.comment_offset;
+  let negative =
+    Schedule.project_board_read_scroll ~body_line_count:10 ~body_rows:1
+      ~comment_count:5 ~comment_rows:3 (-1)
+  in
+  check int "negative scroll normalizes to zero" 0
+    negative.normalized_scroll
+
+let test_keeper_detail_scroll_normalizes_across_bounds () =
+  let normalize = Schedule.normalize_keeper_detail_scroll in
+  let bottom = normalize ~line_count:29 ~content_height:14 max_int in
+  check int "overscroll reaches the exact bottom" 15 bottom;
+  let resized = normalize ~line_count:29 ~content_height:15 bottom in
+  check int "larger viewport clamps the persisted bottom" 14 resized;
+  check int "one upward action reveals the previous row" 13
+    (max 0 (resized - 1));
+  let measured = normalize ~line_count:31 ~content_height:15 max_int in
+  check int "measured context adds two scroll positions" 16 measured;
+  check int "content shrink clamps to its new bottom" 14
+    (normalize ~line_count:29 ~content_height:15 measured);
+  check int "content growth preserves the current offset" 14
+    (normalize ~line_count:31 ~content_height:15 resized);
+  check int "negative raw state normalizes to zero" 0
+    (normalize ~line_count:29 ~content_height:15 (-1));
+  check int "fully visible content cannot scroll" 0
+    (normalize ~line_count:10 ~content_height:15 max_int)
+
+let test_overview_event_window_follows_and_preserves_anchor () =
+  let project = Schedule.project_overview_event_window in
+  let bottom = project ~event_count:6 ~visible_rows:2 max_int in
+  check int "overscroll reaches oldest retained pair" 4 bottom.oew_offset;
+  check int "oldest range begins at five" 5 bottom.oew_first_position;
+  check int "oldest range ends at six" 6 bottom.oew_last_position;
+  let newer = project ~event_count:6 ~visible_rows:2 3 in
+  check int "one upward action moves one row" 3 newer.oew_offset;
+  check int "one upward range begins at four" 4 newer.oew_first_position;
+  check int "one upward range ends at five" 5 newer.oew_last_position;
+  check int "older input saturates at the bottom" 4
+    (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
+       bottom.oew_offset);
+  check int "newer input moves from the bounded bottom" 3
+    (Schedule.scroll_overview_events_newer ~event_count:6 ~visible_rows:2
+       (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
+          bottom.oew_offset));
+  let expanded = project ~event_count:6 ~visible_rows:6 bottom.oew_offset in
+  check int "larger viewport clamps to newest" 0 expanded.oew_offset;
+  check int "expanded range starts at one" 1 expanded.oew_first_position;
+  check int "expanded range shows all events" 6 expanded.oew_last_position;
+  let anchored_scroll =
+    Schedule.overview_event_offset_after_prepend ~retained_count:7
+      bottom.oew_offset
+  in
+  let anchored = project ~event_count:7 ~visible_rows:2 anchored_scroll in
+  check int "prepend advances a manual anchor" 5 anchored.oew_offset;
+  check int "anchored range starts at six" 6 anchored.oew_first_position;
+  check int "anchored range retains the old tail" 7 anchored.oew_last_position;
+  check int "newest-following offset stays at zero" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:7 0);
+  check int "negative raw anchor normalizes to zero" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:7 (-1));
+  check int "retention cap bounds pathological anchor" 10
+    (Schedule.overview_event_offset_after_prepend ~retained_count:11 max_int);
+  let shrunk = project ~event_count:1 ~visible_rows:2 bottom.oew_offset in
+  check int "content shrink clamps to newest" 0 shrunk.oew_offset;
+  check int "single event starts at one" 1 shrunk.oew_first_position;
+  check int "single event ends at one" 1 shrunk.oew_last_position;
+  let empty = project ~event_count:0 ~visible_rows:2 max_int in
+  check int "empty events have zero offset" 0 empty.oew_offset;
+  check int "empty events have no first position" 0 empty.oew_first_position;
+  check int "empty events have no last position" 0 empty.oew_last_position;
+  let hidden = project ~event_count:1 ~visible_rows:0 1 in
+  check int "zero-row window retains a bounded offset" 1 hidden.oew_offset;
+  check int "zero-row window has no first position" 0 hidden.oew_first_position;
+  check int "zero-row window has no last position" 0 hidden.oew_last_position;
+  check int "zero-row older input saturates without overflow" max_int
+    (Schedule.scroll_overview_events_older ~event_count:max_int ~visible_rows:0
+       max_int);
+  check int "negative retained count cannot overflow" 0
+    (Schedule.overview_event_offset_after_prepend ~retained_count:min_int 1)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -160,5 +450,19 @@ let () =
             test_render_widths_are_total
         ; test_case "interrupted input waits retry" `Quick
             test_interrupted_input_wait_retries_until_deadline
+        ; test_case "global shortcuts preserve message input" `Quick
+            test_global_shortcuts_do_not_steal_message_input
+        ; test_case "compact viewport follows fixed chrome budget" `Quick
+            test_compact_viewport_uses_largest_fixed_chrome_budget
+        ; test_case "overview rows share one viewport budget" `Quick
+            test_overview_rows_share_one_viewport_budget
+        ; test_case "board read reserves comments and footer" `Quick
+            test_board_read_rows_reserve_comments_and_footer
+        ; test_case "board read reaches hidden comments" `Quick
+            test_board_read_scroll_reaches_hidden_comments
+        ; test_case "keeper detail scroll follows current bounds" `Quick
+            test_keeper_detail_scroll_normalizes_across_bounds
+        ; test_case "overview events follow and preserve manual anchor" `Quick
+            test_overview_event_window_follows_and_preserves_anchor
         ] )
     ]

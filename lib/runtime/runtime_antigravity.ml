@@ -88,8 +88,8 @@ type usage =
 
 (* Nothing in this tree branches on [permission_mode]: the only read of the
    field is its own parse site. It was closed, and the one member the CLI added
-   ended a turn, parked the official-client session, and stopped the keeper --
-   taskmaster, 110 turns in one hour (#28008). Adding that member leaves the
+   ended a turn, parked the official-client session, and stopped a live Keeper
+   after 110 turns in one hour (#28008). Adding that member leaves the
    next one to do it again, so an unseen mode is carried rather than rejected.
    [step_type] took the same route in #28027. *)
 type permission_mode =
@@ -278,7 +278,7 @@ let parse_step_state stage value =
    we have not seen carries no decision we could get wrong -- but rejecting it
    ends the turn and parks the session, which blocks every later turn for that
    Keeper. Live 2026-08-10: Antigravity began emitting "system_message" and
-   taskmaster stopped (#28027).
+   the affected Keeper stopped (#28027).
 
    #28029 opened this with [Unrecognized]; #28037 closed it again and named
    [System_message] instead. Naming the member that stalled a keeper leaves the

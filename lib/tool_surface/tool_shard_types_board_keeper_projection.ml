@@ -6,6 +6,15 @@
 
 open Tool_shard_types_enum_mirrors
 
+(* One description, two schemas. Both [masc_board_comment] and
+   [masc_board_vote] name the same post id, so the text lives once; a copy
+   per schema is a description slot that can drift from its twin. *)
+let post_id_description =
+  "Required exact board post ID (format: p-xxxx). Get it from \
+   masc_board_list, masc_board_search, masc_board_post_get, or visible board \
+   activity context."
+;;
+
 let schemas : Masc_domain.tool_schema list =
   [ { name = "masc_board_post"
     ; description =
@@ -146,7 +155,7 @@ let schemas : Masc_domain.tool_schema list =
                      (board_tool_post.ml handle_post_list) already
                      reads [compact] (default true), but the keeper surface
                      omitted it, so a keeper could never request full output
-                     and qa-king's [compact] arg was rejected as an
+                     and a live Keeper's [compact] arg was rejected as an
                      unsupported field. additionalProperties stays false —
                      unknown fields remain fail-closed. *)
                   ( "compact"
@@ -211,9 +220,7 @@ let schemas : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Required exact board post ID (format: p-xxxx). Get it \
-                             from masc_board_list, masc_board_search, \
-                             masc_board_post_get, or visible board activity context." )
+                            post_id_description )
                       ] )
                 ; ( "content"
                   , `Assoc
@@ -226,10 +233,10 @@ let schemas : Masc_domain.tool_schema list =
                       ; "pattern", `String comment_id_pattern
                       ; ( "description"
                         , `String
-                            "Optional comment ID to reply under (format: c-<32 lowercase \
-                             hex>, as returned by masc_board_post_get or a prior \
-                             masc_board_comment), threading this comment beneath another \
-                             Keeper's instead of flat on the post." )
+                            "Optional comment ID to reply under (from \
+                             masc_board_post_get or a prior masc_board_comment), \
+                             threading this comment beneath another Keeper's instead \
+                             of flat on the post." )
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]
@@ -252,9 +259,7 @@ let schemas : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Required exact board post ID (format: p-xxxx). Get it \
-                             from masc_board_list, masc_board_search, \
-                             masc_board_post_get, or visible board activity context." )
+                            post_id_description )
                       ] )
                 ; (* Issue #8506: derive from local mirror that tracks
            [Board_votes.valid_vote_direction_strings]. *)

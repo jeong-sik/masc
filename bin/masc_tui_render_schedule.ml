@@ -78,6 +78,52 @@ let nonnegative_width width = max 0 width
 let keeper_context_bar_width ~inner_width =
   nonnegative_width (min 30 (inner_width - 40))
 
+let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
+  let line_count = max 0 line_count in
+  let content_height = max 0 content_height in
+  let maximum_scroll = max 0 (line_count - content_height) in
+  max 0 (min scroll maximum_scroll)
+
+type overview_event_window = {
+  oew_offset : int;
+  oew_first_position : int;
+  oew_last_position : int;
+}
+
+let project_overview_event_window ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let maximum_offset = max 0 (event_count - visible_rows) in
+  let oew_offset = max 0 (min scroll maximum_offset) in
+  let visible_count = min visible_rows (event_count - oew_offset) in
+  let oew_first_position = if visible_count = 0 then 0 else oew_offset + 1 in
+  let oew_last_position = if visible_count = 0 then 0 else oew_offset + visible_count in
+  { oew_offset; oew_first_position; oew_last_position }
+
+let scroll_overview_events_older ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  let next_offset =
+    if current.oew_offset >= event_count then current.oew_offset
+    else current.oew_offset + 1
+  in
+  (project_overview_event_window ~event_count ~visible_rows
+     next_offset).oew_offset
+
+let scroll_overview_events_newer ~event_count ~visible_rows scroll =
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  (project_overview_event_window ~event_count ~visible_rows
+     (current.oew_offset - 1)).oew_offset
+
+let overview_event_offset_after_prepend ~retained_count scroll =
+  let retained_count = max 0 retained_count in
+  let maximum_offset = if retained_count = 0 then 0 else retained_count - 1 in
+  if scroll <= 0 || maximum_offset = 0 then 0
+  else
+    let bounded = min scroll maximum_offset in
+    if bounded = maximum_offset then maximum_offset else bounded + 1
+
 module Input_wait = struct
   type 'a poll_result =
     | Ready of 'a
@@ -104,6 +150,101 @@ module Input_wait = struct
     in
     loop ()
 end
+
+module Input_shortcut = struct
+  let is_quit ~message_mode key =
+    (not message_mode) && (String.equal key "q" || String.equal key "Q")
+
+  let opens_keepers ~message_mode key =
+    (not message_mode) && String.equal key "2"
+end
+
+module Viewport = struct
+  (* This is the largest fixed-row budget declared by a surface, not a promise
+     that every variable section already accounts for the viewport. *)
+  let minimum_fixed_chrome_rows = 14
+  let requires_compact_frame ~rows = rows < minimum_fixed_chrome_rows
+end
+
+type overview_allocation = {
+  attention_rows : int;
+  task_error_rows : int;
+  task_rows : int;
+}
+
+let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
+    ~task_count ~has_task_error =
+  (* Ten rows are invariant chrome; the cluster/project row is present only
+     after a briefing has loaded. Reserve one row for a nonempty task block,
+     then size the shared Attention / Recent Events panel from either side. *)
+  let fixed_rows = 10 + (if has_cluster then 1 else 0) in
+  let available = max 0 (terminal_rows - fixed_rows) in
+  let desired_panel_rows =
+    min 6 (max 1 (max attention_count event_count))
+  in
+  let desired_task_error_rows = if has_task_error then 1 else 0 in
+  let desired_task_rows =
+    if task_count <= 0 then
+      if has_task_error then 0 else 1
+    else
+      min (if has_task_error then 4 else 5) task_count
+  in
+  let desired_task_block_rows =
+    desired_task_error_rows + desired_task_rows
+  in
+  let reserved_task_rows = min 1 desired_task_block_rows in
+  let attention_rows =
+    min desired_panel_rows (max 0 (available - reserved_task_rows))
+  in
+  let task_block_rows =
+    min desired_task_block_rows (max 0 (available - attention_rows))
+  in
+  let task_error_rows = min desired_task_error_rows task_block_rows in
+  let task_rows =
+    min desired_task_rows (max 0 (task_block_rows - task_error_rows))
+  in
+  { attention_rows; task_error_rows; task_rows }
+
+type board_read_allocation = {
+  body_rows : int;
+  comment_rows : int;
+}
+
+let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
+  (* Eight rows are invariant chrome. A visible Comments section adds its
+     divider and heading; keep one body row when the post has body text, then
+     give comments their existing five-row cap. *)
+  let comment_count = max 0 comment_count in
+  let comment_chrome_rows = if comment_count > 0 then 2 else 0 in
+  let available = max 0 (terminal_rows - 8 - comment_chrome_rows) in
+  let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
+  let comment_rows =
+    min (min 5 comment_count) (max 0 (available - minimum_body_rows))
+  in
+  let body_rows = max 0 (available - comment_rows) in
+  { body_rows; comment_rows }
+
+type board_read_scroll = {
+  normalized_scroll : int;
+  body_offset : int;
+  comment_offset : int;
+}
+
+let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
+    ~comment_rows scroll =
+  let body_line_count = max 0 body_line_count in
+  let body_rows = max 0 body_rows in
+  let comment_count = max 0 comment_count in
+  let comment_rows = max 0 comment_rows in
+  let maximum_body_offset = max 0 (body_line_count - body_rows) in
+  let maximum_comment_offset = max 0 (comment_count - comment_rows) in
+  let maximum_scroll = maximum_body_offset + maximum_comment_offset in
+  let normalized_scroll = max 0 (min scroll maximum_scroll) in
+  let body_offset = min normalized_scroll maximum_body_offset in
+  let comment_offset =
+    min maximum_comment_offset (normalized_scroll - body_offset)
+  in
+  { normalized_scroll; body_offset; comment_offset }
 
 module Terminal_size_cache = struct
   type t = {

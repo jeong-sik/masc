@@ -98,7 +98,7 @@ let test_snapshot_redacts_base_secret_values () =
   let base_secret = "base.secret!" in
   write_file (Filename.concat (Filename.concat base_root "env") "GH_TOKEN")
     (base_secret ^ "\n");
-  let redaction = R.snapshot ~base_path:base ~keeper_name:"idealist" in
+  let redaction = R.snapshot ~base_path:base ~keeper_name:"fixture-keeper" in
   let redacted = R.redact_text redaction ("token=" ^ base_secret) in
   not_contains "base env exact value hidden" redacted base_secret;
   contains "redaction marker present" redacted "[REDACTED]"

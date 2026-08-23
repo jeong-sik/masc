@@ -108,15 +108,15 @@ let claim_present ~claim_window ~keeper =
 
    Rows come back oldest-first, so taking the first matching row reported
    task-a — the claim the keeper had already superseded. Measured live before
-   the fix: keeper [analyst] reported task-305 while it had claimed task-306. *)
+   the fix: keeper [delta] reported task-305 while it had claimed task-306. *)
 let test_reports_the_latest_claim () =
-  log_claim ~keeper:"analyst" ~task_id:"task-a" ~goal_id:"goal-a";
-  log_claim ~keeper:"analyst" ~task_id:"task-b" ~goal_id:"goal-b";
+  log_claim ~keeper:"delta" ~task_id:"task-a" ~goal_id:"goal-a";
+  log_claim ~keeper:"delta" ~task_id:"task-b" ~goal_id:"goal-b";
   let claim_window = Server_dashboard_http_composite_claims.read_claim_window () in
   Alcotest.(check (option string))
     "the superseding claim is the one reported"
     (Some "task-b")
-    (claimed_task_id ~claim_window ~keeper:"analyst")
+    (claimed_task_id ~claim_window ~keeper:"delta")
 ;;
 
 (* Why the defect stayed invisible on a busy keeper.
@@ -131,14 +131,14 @@ let test_ring_trim_hides_the_older_claim () =
   let rows_per_keeper =
     Server_dashboard_http_composite_claims.claim_rows_per_keeper
   in
-  log_claim ~keeper:"rondo" ~task_id:"task-old" ~goal_id:"goal-old";
-  log_noise ~keeper:"rondo" ~n:rows_per_keeper;
-  log_claim ~keeper:"rondo" ~task_id:"task-new" ~goal_id:"goal-new";
+  log_claim ~keeper:"beta" ~task_id:"task-old" ~goal_id:"goal-old";
+  log_noise ~keeper:"beta" ~n:rows_per_keeper;
+  log_claim ~keeper:"beta" ~task_id:"task-new" ~goal_id:"goal-new";
   let claim_window = Server_dashboard_http_composite_claims.read_claim_window () in
   Alcotest.(check (option string))
     "a trimmed older claim cannot be reported"
     (Some "task-new")
-    (claimed_task_id ~claim_window ~keeper:"rondo")
+    (claimed_task_id ~claim_window ~keeper:"beta")
 ;;
 
 (* The N+1 property: the window is fleet-wide, so one read answers for every

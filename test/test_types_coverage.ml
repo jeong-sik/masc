@@ -915,7 +915,7 @@ let test_agent_credential_of_yojson_role_string_admin () =
 let test_agent_credential_of_yojson_role_string_worker () =
   let json =
     current_agent_credential_json
-      ~agent_name:"nick0cave"
+      ~agent_name:"theta0"
       ~token:"t"
       ~role:"worker"
       ~created_at:"2026-04-23T08:07:00Z"

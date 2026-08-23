@@ -245,6 +245,11 @@
   unix))
 
 (library
+ (name masc_tui_frame_presenter)
+ (wrapped false)
+ (modules masc_tui_frame_presenter))
+
+(library
  (name masc_tui_metrics_tail)
  (wrapped false)
  (modules masc_tui_metrics_tail)
@@ -267,6 +272,32 @@
  (wrapped false)
  (modules masc_tui_render_schedule))
 
+(library
+ (name masc_tui_board_selection)
+ (wrapped false)
+ (modules masc_tui_board_selection))
+
+(library
+ (name masc_tui_planning_selection)
+ (wrapped false)
+ (modules masc_tui_planning_selection))
+
+(library
+ (name masc_tui_keeper_selection)
+ (wrapped false)
+ (modules masc_tui_keeper_selection))
+
+(library
+ (name masc_tui_board_detail)
+ (wrapped false)
+ (modules masc_tui_board_detail))
+
+(library
+ (name masc_tui_terminal_write_repair)
+ (wrapped false)
+ (modules masc_tui_terminal_write_repair)
+ (libraries masc_tui_render_schedule unix))
+
 (executable
  (name masc_tui)
  (modules
@@ -281,13 +312,19 @@
  (libraries
   masc
   masc_tui_context_state
+  masc_tui_frame_presenter
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_recovery
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_observation_layout
   masc_tui_operator_projection
+  masc_tui_board_detail
+  masc_tui_board_selection
+  masc_tui_keeper_selection
+  masc_tui_planning_selection
   masc_tui_render_schedule
+  masc_tui_terminal_write_repair
   masc.dashboard
   masc.server
   masc.config

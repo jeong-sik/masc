@@ -1994,21 +1994,6 @@ let add_routes ~sw ~clock router =
            request
            reqd
        | None ->
-       match
-         Keeper_event_queue_operator.pending_get_route
-           (Http.Request.path request)
-       with
-       | Some keeper_name ->
-         with_token_permission_auth
-           ~permission:Keeper_event_queue_operator.operator_permission
-           (fun state _agent_name _req reqd ->
-             Keeper_event_queue_operator.handle_get
-               state
-               request
-               reqd
-               ~keeper_name)
-           request reqd
-       | None ->
          (match Keeper_api.keeper_get_permission (Http.Request.path request) with
           | Some permission ->
            with_token_permission_auth ~permission

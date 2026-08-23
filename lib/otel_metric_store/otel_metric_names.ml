@@ -59,7 +59,7 @@
      rate(masc_keeper_turn_latency_bucket_total{bucket="600-1200s"}[5m])
    directly surfaces slow-turn keepers without needing the JSONL
    ledger.  20-minute turns from provider_timeout exhaustion
-   (#9933, observed 1,204,542 ms = 20 min on taskmaster
+   (#9933, observed 1,204,542 ms = 20 min on a live Keeper
    2026-04-24) appear in the [over_1200s] bucket and operators can
    alert on its rate.  Existing [masc_llm_inference_duration_seconds]
    histogram is labelled by [model] only (per-LLM-call latency); this
@@ -232,8 +232,8 @@ let metric_tool_keeper_cache_ttl_parse_failures =
    view of allowed sandbox roots (for example [(roots=[<list>])]
    and [(sandbox roots: [<list>])]) to the LLM.  Combined with
    the keeper identity drift documented in the issue (turn 433:
-   contract emitted [masc-improver/Docker] while the resolver
-   enumerated [analyst]'s sandbox), the error became a
+   contract emitted a stale Keeper/sandbox pair while the resolver
+   enumerated another Keeper's sandbox), the error became a
    side-channel oracle for sibling sandboxes.
 
    The leak lives strictly in the user-visible string; the

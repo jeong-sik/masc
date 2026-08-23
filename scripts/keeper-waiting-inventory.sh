@@ -282,6 +282,7 @@ build_preflight_report() {
               and ($row.keeper_name == null or nonempty_string($row.keeper_name))
               and nonempty_string($row.source)
               and nonempty_string($row.waiting_on)
+              and nonempty_string($row.what)
               and nonempty_string($row.wake_producer)
               and ($row | has("since"))
               and nullable_number($row.since)

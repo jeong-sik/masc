@@ -15,20 +15,20 @@ let test_dashboard_worker_permissions () =
 ;;
 
 let test_exact_routes () =
-  (match Api.get_route "/api/v1/keepers/sangsu/chat/operations" with
+  (match Api.get_route "/api/v1/keepers/alpha/chat/operations" with
    | Some (Api.Operation_list { keeper_name }) ->
-     check string "list keeper" "sangsu" keeper_name
+     check string "list keeper" "alpha" keeper_name
    | Some _ | None -> fail "operation list route did not match");
-  (match Api.get_route "/api/v1/keepers/sangsu/chat/operations/kmsg-1" with
+  (match Api.get_route "/api/v1/keepers/alpha/chat/operations/kmsg-1" with
    | Some (Api.Operation_exact { keeper_name; raw_operation_id }) ->
-     check string "exact keeper" "sangsu" keeper_name;
+     check string "exact keeper" "alpha" keeper_name;
      check string "exact operation" "kmsg-1" raw_operation_id
    | Some _ | None -> fail "exact operation route did not match");
   List.iter
     (fun (action, expected) ->
        match
          Api.mutation_route
-           ("/api/v1/keepers/sangsu/chat/operations/kmsg-1/" ^ action)
+           ("/api/v1/keepers/alpha/chat/operations/kmsg-1/" ^ action)
        with
        | Some { Api.mutation; _ } ->
          check bool "mutation kind" true (mutation = expected)
@@ -44,8 +44,8 @@ let test_unknown_routes_do_not_match () =
          true
          (Option.is_none (Api.get_route path)
           && Option.is_none (Api.mutation_route path)))
-    [ "/api/v1/keepers/sangsu/chat/operations/kmsg-1/retry"
-    ; "/api/v1/keepers/sangsu/chat/tasks/kmsg-1"
+    [ "/api/v1/keepers/alpha/chat/operations/kmsg-1/retry"
+    ; "/api/v1/keepers/alpha/chat/tasks/kmsg-1"
     ]
 ;;
 

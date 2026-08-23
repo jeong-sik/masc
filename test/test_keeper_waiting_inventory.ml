@@ -236,6 +236,8 @@ let test_event_queue_pending_is_visible () =
      | pending_row :: _ ->
        check string "pending wake producer" "keeper_supervisor"
          (json_string_member "wake_producer" pending_row);
+       check string "operator sentence names the bootstrap wake" "기동 직후 첫 턴"
+         (json_string_member "what" pending_row);
        let detail = U.member "detail" pending_row in
        check string "public row retains typed payload label" "bootstrap"
          (json_string_member "payload_kind" detail);
@@ -285,15 +287,17 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   let keeper_name = "waiting-inventory-kinds" in
   ensure_keeper config keeper_name;
   let message =
-    stimulus ~post_id:"workspace-message:wmsg-1" ~arrived_at:100.0
-      (Keeper_event_queue.Workspace_message
-         ({ wmsg_request_id = "wmsg-1"; wmsg_from = "nick0cave" }
-          : Keeper_event_queue.workspace_message))
+    { (stimulus ~post_id:"workspace-message:wmsg-1" ~arrived_at:100.0
+         (Keeper_event_queue.Workspace_message
+            ({ wmsg_request_id = "wmsg-1"; wmsg_from = "alpha" }
+             : Keeper_event_queue.workspace_message)))
+      with urgency = Keeper_event_queue.Immediate
+    }
   in
   let cancelled =
     stimulus ~post_id:"task-cancelled:T-1" ~arrived_at:101.0
       (Keeper_event_queue.Task_cancelled
-         ({ tc_task_id = "T-1"; tc_cancelled_by = "sangsu"; tc_reason = None }
+         ({ tc_task_id = "T-1"; tc_cancelled_by = "alpha"; tc_reason = None }
           : Keeper_event_queue.task_cancellation))
   in
   let rejected =
@@ -331,23 +335,37 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
     | Some keeper -> keeper
     | None -> fail "keeper row missing"
   in
-  let detail_of post_id =
+  let row_of post_id =
     U.(keeper |> member "waiting_on" |> to_list)
     |> List.find_opt (fun row ->
       String.equal post_id U.(row |> member "detail" |> member "post_id" |> to_string))
     |> function
-    | Some row -> U.member "detail" row
+    | Some row -> row
     | None -> failf "queue row missing for %s" post_id
   in
+  let detail_of post_id = U.member "detail" (row_of post_id) in
+  let what_of post_id = json_string_member "what" (row_of post_id) in
+  check string "workspace message sentence names the sender and urgency"
+    "alpha가 보낸 메시지 (즉시)"
+    (what_of message.Keeper_event_queue.post_id);
+  check string "cancellation sentence names the canceller and task"
+    "alpha가 작업 T-1 취소"
+    (what_of cancelled.Keeper_event_queue.post_id);
+  check string "rejection sentence names the task"
+    "작업 T-2 완료 증거 거절됨"
+    (what_of rejected.Keeper_event_queue.post_id);
+  check string "board sentence names the author, not the content"
+    "operator의 새 글"
+    (what_of board.Keeper_event_queue.post_id);
   let message_detail = detail_of message.Keeper_event_queue.post_id in
-  check string "workspace message sender" "nick0cave"
+  check string "workspace message sender" "alpha"
     (json_string_member "message_from" message_detail);
   check string "workspace message request id" "wmsg-1"
     (json_string_member "message_request_id" message_detail);
   let cancelled_detail = detail_of cancelled.Keeper_event_queue.post_id in
   check string "cancelled task id" "T-1"
     (json_string_member "cancelled_task_id" cancelled_detail);
-  check string "cancelled by" "sangsu" (json_string_member "cancelled_by" cancelled_detail);
+  check string "cancelled by" "alpha" (json_string_member "cancelled_by" cancelled_detail);
   check bool "absent cancellation reason stays absent" true
     (U.member "cancelled_reason" cancelled_detail = `Null);
   let rejected_detail = detail_of rejected.Keeper_event_queue.post_id in
@@ -557,7 +575,9 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
         check string "keeper next action" "wait_until_due"
           (json_string_member "next_action" row);
         check string "keeper schedule id" "sched-owned"
-          U.(row |> member "detail" |> member "schedule_id" |> to_string)
+          U.(row |> member "detail" |> member "schedule_id" |> to_string);
+        check string "schedule sentence names the schedule" "예약 실행 · sched-owned"
+          (json_string_member "what" row)
       | rows -> failf "expected one keeper schedule row, got %d" (List.length rows)));
   match U.(json |> member "global_waiting_on" |> to_list) with
   | [ row ] ->
@@ -650,6 +670,8 @@ let test_corrupt_schedule_ledger_is_read_error () =
   | [ row ] ->
     check string "source" "read_error" (json_string_member "source" row);
     check string "waiting_on" "schedule_store" (json_string_member "waiting_on" row);
+    check string "read error sentence names the store" "대기 기록 읽기 실패 · schedule_store"
+      (json_string_member "what" row);
     check string "wake producer" "read_model_reader"
       (json_string_member "wake_producer" row);
     check string "next action" "repair_schedule_ledger"

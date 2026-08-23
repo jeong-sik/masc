@@ -74,7 +74,7 @@ let test_read_state_drops_legacy_active_agent_objects () =
                 [
                   `Assoc [ ("name", `String "codex-swift-fox") ];
                   `String "gemini-brave-bear";
-                  `Assoc [ ("agent_name", `String "keeper-sangsu-agent") ];
+                  `Assoc [ ("agent_name", `String "keeper-alpha-agent") ];
                   `Assoc [ ("id", `String "ignored") ];
                 ] );
           ]
@@ -128,111 +128,47 @@ let test_read_state_filters_invalid_active_agent_entries () =
         [ "gemini-brave-bear" ]
         state.active_agents)
 
-let test_agent_of_yojson_accepts_numeric_last_seen () =
-  let json =
-    `Assoc
-      [
-        ("name", `String "keeper-sangsu-agent");
-        ("agent_type", `String "keeper");
-        ("status", `String "active");
-        ("capabilities", `List []);
-        ("current_task", `Null);
-        ("session_bound_at", `String "2026-03-26T00:00:00Z");
-        ("last_seen", `Float 1711411200.0);
-      ]
-  in
-  match Masc_domain.agent_of_yojson json with
-  | Ok agent ->
-      check string "agent parsed" "keeper-sangsu-agent" agent.name;
-      check bool "last_seen normalized to ISO" true
-        (String.length agent.last_seen > 0 && String.contains agent.last_seen 'T')
-  | Error msg -> fail ("expected numeric last_seen compatibility: " ^ msg)
+let agent_fields_without_last_seen =
+  [
+    ("name", `String "keeper-orphan");
+    ("agent_type", `String "keeper");
+    ("status", `String "active");
+    ("capabilities", `List []);
+    ("current_task", `Null);
+    ("session_bound_at", `String "2026-03-26T00:00:00Z");
+  ]
 
-let test_agent_of_yojson_bootstraps_null_last_seen_from_session_bound_at () =
-  (* #7947 Layer 2: null last_seen must be repaired from session_bound_at rather than
-     dropping the whole agent record (which loses current_task/meta). *)
-  let json =
-    `Assoc
-      [
-        ("name", `String "gemini-cool-whale");
-        ("agent_type", `String "gemini");
-        ("status", `String "busy");
-        ("capabilities", `List []);
-        ("current_task", `String "task-208");
-        ("session_bound_at", `String "2026-04-15T03:00:00Z");
-        ("last_seen", `Null);
-      ]
-  in
+let expect_agent_decode_error ~label json =
   match Masc_domain.agent_of_yojson json with
-  | Ok agent ->
-      check string "agent parsed" "gemini-cool-whale" agent.name;
-      check (option string) "current_task preserved"
-        (Some "task-208") agent.current_task;
-      check string "last_seen bootstrapped from session_bound_at"
-        "2026-04-15T03:00:00Z" agent.last_seen
-  | Error msg ->
-      fail ("null last_seen should bootstrap from session_bound_at: " ^ msg)
+  | Ok agent -> fail (label ^ " must not decode, got agent " ^ agent.name)
+  | Error _ -> ()
 
-let test_agent_of_yojson_annotates_invalid_last_seen () =
-  (* #7947 Layer 1: when repair is not possible, the error message must
-     include the actual offending value so operators can diagnose the
-     schema drift instead of seeing only the field path. *)
-  let json =
-    `Assoc
-      [
-        ("name", `String "gemini-cool-whale");
-        ("agent_type", `String "gemini");
-        ("status", `String "busy");
-        ("capabilities", `List []);
-        ("current_task", `Null);
-        ("session_bound_at", `Bool true);
-        ("last_seen", `Bool false);
-      ]
-  in
-  match Masc_domain.agent_of_yojson json with
-  | Ok _ -> fail "bool last_seen should not succeed without a usable session_bound_at"
-  | Error msg ->
-      let contains needle =
-        let n = String.length needle in
-        let h = String.length msg in
-        let rec loop i =
-          if i + n > h then false
-          else if String.sub msg i n = needle then true
-          else loop (i + 1)
-        in
-        loop 0
-      in
-      check bool "error mentions last_seen value" true
-        (contains "last_seen=")
+let test_agent_of_yojson_rejects_numeric_last_seen () =
+  expect_agent_decode_error ~label:"float last_seen"
+    (`Assoc (("last_seen", `Float 1711411200.0) :: agent_fields_without_last_seen));
+  expect_agent_decode_error ~label:"int last_seen"
+    (`Assoc (("last_seen", `Int 1711411200) :: agent_fields_without_last_seen))
 
-let test_agent_of_yojson_missing_last_seen_falls_back_to_now () =
-  (* #9751: when last_seen is entirely absent AND session_bound_at is not a usable
-     string, fall back to a current-wall-clock timestamp rather than
-     failing the whole record. last_seen is a liveness marker, not
-     identity-critical. *)
-  let json =
-    `Assoc
-      [
-        ("name", `String "keeper-orphan");
-        ("agent_type", `String "keeper");
-        ("status", `String "active");
-        ("capabilities", `List []);
-        ("current_task", `Null);
-        (* no session_bound_at, no last_seen *)
-      ]
-  in
-  match Masc_domain.agent_of_yojson json with
-  | Ok agent ->
-      check string "agent parsed without last_seen or session_bound_at"
-        "keeper-orphan" agent.name;
-      check bool "last_seen populated with ISO timestamp" true
-        (String.length agent.last_seen > 0
-         && String.contains agent.last_seen 'T'
-         && String.contains agent.last_seen 'Z')
-  | Error msg ->
-      fail ("missing last_seen+session_bound_at should fall back, not error: " ^ msg)
+let test_agent_of_yojson_rejects_null_last_seen () =
+  expect_agent_decode_error ~label:"null last_seen"
+    (`Assoc (("last_seen", `Null) :: agent_fields_without_last_seen))
 
-let test_read_agent_with_repair_rewrites_missing_last_seen () =
+let test_agent_of_yojson_rejects_missing_last_seen () =
+  expect_agent_decode_error ~label:"missing last_seen"
+    (`Assoc agent_fields_without_last_seen)
+
+let test_agent_of_yojson_rejects_missing_session_bound_at () =
+  expect_agent_decode_error ~label:"missing session_bound_at"
+    (`Assoc
+       (("last_seen", `String "2026-03-26T00:00:00Z")
+        :: List.remove_assoc "session_bound_at" agent_fields_without_last_seen))
+
+let raw_agent_file config name =
+  match Safe_ops.read_file_safe (agent_path config name) with
+  | Error error -> fail error
+  | Ok raw -> raw
+
+let test_read_agent_leaves_undecodable_file_untouched () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -241,76 +177,79 @@ let test_read_agent_with_repair_rewrites_missing_last_seen () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:None);
-      let legacy_agent_json =
-        `Assoc
-          [
-            ("name", `String "keeper-orphan");
-            ("agent_type", `String "keeper");
-            ("status", `String "active");
-            ("capabilities", `List []);
-            ("current_task", `Null);
-            ("session_bound_at", `String "2026-03-26T00:00:00Z");
-          ]
+      let written = Yojson.Safe.to_string (`Assoc agent_fields_without_last_seen) in
+      write_text_file (agent_path config "keeper-orphan") written;
+      (match Workspace.read_agent config (agent_path config "keeper-orphan") with
+       | Ok agent -> fail ("missing last_seen must not decode: " ^ agent.name)
+       | Error _ -> ());
+      check string "file bytes unchanged after the failed read" written
+        (raw_agent_file config "keeper-orphan"))
+
+let test_heartbeat_reports_invalid_file_for_numeric_last_seen () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let written =
+        Yojson.Safe.to_string
+          (`Assoc (("last_seen", `Int 1711411200) :: agent_fields_without_last_seen))
       in
+      write_text_file (agent_path config "keeper-orphan") written;
+      (match Workspace.heartbeat config ~agent_name:"keeper-orphan" with
+       | Workspace.Agent_file_invalid name ->
+           check string "heartbeat names the undecodable agent" "keeper-orphan" name
+       | Workspace.Heartbeat_updated _ -> fail "numeric last_seen must not heartbeat"
+       | Workspace.Agent_not_found _ -> fail "the agent file exists");
+      check string "file bytes unchanged after the rejected heartbeat" written
+        (raw_agent_file config "keeper-orphan"))
+
+let agents_drop_count () =
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_persistence_read_drops
+    ~labels:
+      [
+        ("surface", "workspace_agents");
+        ("reason", Safe_ops.persistence_read_drop_reason_entry_load_error);
+      ]
+    ()
+
+let test_listing_drops_and_counts_undecodable_agent () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:None);
+      write_text_file (agent_path config "claude-steady-otter")
+        (Yojson.Safe.to_string
+           (`Assoc
+              [
+                ("name", `String "claude-steady-otter");
+                ("agent_type", `String "claude");
+                ("status", `String "active");
+                ("capabilities", `List []);
+                ("current_task", `Null);
+                ("session_bound_at", `String "2026-03-26T00:00:00Z");
+                ("last_seen", `String "2026-03-26T00:00:00Z");
+              ]));
       write_text_file (agent_path config "keeper-orphan")
-        (Yojson.Safe.to_string legacy_agent_json);
-
-      match Workspace.read_agent_with_repair config (agent_path config "keeper-orphan") with
-      | Error msg -> fail ("missing last_seen should repair: " ^ msg)
-      | Ok agent ->
-          check string "last_seen bootstrapped from session_bound_at"
-            "2026-03-26T00:00:00Z" agent.last_seen;
-          let repaired_json =
-            match Safe_ops.read_file_safe (agent_path config "keeper-orphan") with
-            | Error error -> fail error
-            | Ok raw ->
-                raw
-                |> Backend.Compression.decompress_auto
-                |> Yojson.Safe.from_string
-          in
-          check bool "last_seen rewritten as canonical string" true
-            (match Yojson.Safe.Util.member "last_seen" repaired_json with
-             | `String "2026-03-26T00:00:00Z" -> true
-             | _ -> false))
-
-let test_heartbeat_repairs_legacy_agent_last_seen () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let config = Workspace.default_config base_dir in
-      ignore (Workspace.init config ~agent_name:None);
-      let legacy_agent_json =
-        `Assoc
-          [
-            ("name", `String "keeper-sangsu-agent");
-            ("agent_type", `String "keeper");
-            ("status", `String "active");
-            ("capabilities", `List [ `String "heartbeat" ]);
-            ("current_task", `Null);
-            ("session_bound_at", `String "2026-03-26T00:00:00Z");
-            ("last_seen", `Int 1711411200);
-          ]
+        (Yojson.Safe.to_string
+           (`Assoc (("last_seen", `Float 1711411200.0) :: agent_fields_without_last_seen)));
+      let before = agents_drop_count () in
+      let names =
+        Workspace.get_agents_raw config
+        |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
       in
-      write_text_file (agent_path config "keeper-sangsu-agent")
-        (Yojson.Safe.to_string legacy_agent_json);
-
-      ignore (Workspace.heartbeat config ~agent_name:"keeper-sangsu-agent");
-
-      let repaired_json =
-        match Safe_ops.read_file_safe (agent_path config "keeper-sangsu-agent") with
-        | Error error -> fail error
-        | Ok raw ->
-            raw
-            |> Backend.Compression.decompress_auto
-            |> Yojson.Safe.from_string
-      in
-      check bool "last_seen rewritten as string" true
-        (match Yojson.Safe.Util.member "last_seen" repaired_json with
-         | `String value -> String.length value > 0
-         | _ -> false))
+      check (list string) "only the decodable agent is listed"
+        [ "claude-steady-otter" ] names;
+      check (float 0.0) "the dropped row is counted once" (before +. 1.0)
+        (agents_drop_count ()))
 
 let () =
   run "Workspace_state_recovery"
@@ -323,17 +262,19 @@ let () =
             test_read_state_drops_legacy_active_agent_objects;
           test_case "filters invalid active_agents entries" `Quick
             test_read_state_filters_invalid_active_agent_entries;
-          test_case "agent parser accepts numeric last_seen" `Quick
-            test_agent_of_yojson_accepts_numeric_last_seen;
-          test_case "agent parser bootstraps null last_seen from session_bound_at (#7947)" `Quick
-            test_agent_of_yojson_bootstraps_null_last_seen_from_session_bound_at;
-          test_case "agent parser error annotates invalid last_seen (#7947)" `Quick
-            test_agent_of_yojson_annotates_invalid_last_seen;
-          test_case "agent parser falls back when both last_seen and session_bound_at missing (#9751)" `Quick
-            test_agent_of_yojson_missing_last_seen_falls_back_to_now;
-          test_case "read_agent_with_repair rewrites missing last_seen" `Quick
-            test_read_agent_with_repair_rewrites_missing_last_seen;
-          test_case "heartbeat repairs legacy agent last_seen" `Quick
-            test_heartbeat_repairs_legacy_agent_last_seen;
+          test_case "agent parser rejects numeric last_seen" `Quick
+            test_agent_of_yojson_rejects_numeric_last_seen;
+          test_case "agent parser rejects null last_seen" `Quick
+            test_agent_of_yojson_rejects_null_last_seen;
+          test_case "agent parser rejects missing last_seen" `Quick
+            test_agent_of_yojson_rejects_missing_last_seen;
+          test_case "agent parser rejects missing session_bound_at" `Quick
+            test_agent_of_yojson_rejects_missing_session_bound_at;
+          test_case "read_agent leaves an undecodable file untouched" `Quick
+            test_read_agent_leaves_undecodable_file_untouched;
+          test_case "heartbeat reports Agent_file_invalid for numeric last_seen" `Quick
+            test_heartbeat_reports_invalid_file_for_numeric_last_seen;
+          test_case "listing drops and counts an undecodable agent file" `Quick
+            test_listing_drops_and_counts_undecodable_agent;
         ] );
     ]

@@ -6,7 +6,7 @@
     fields; presentation strings do not participate in routing.
 
     Usage:  masc-trace <base-path> <keeper> <turn_id>
-    Example: masc-trace ~/me nick0cave 5
+    Example: masc-trace ~/me example-keeper 5
 *)
 
 let usage_and_exit () =

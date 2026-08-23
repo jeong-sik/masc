@@ -43,7 +43,7 @@ let audit_record ?decision_kind event =
     ([ ("ts", `Float 1_700_000_000.0)
      ; ("event", `String (Audit.event_to_string event))
      ; ("id", `String "appr-1")
-     ; ("keeper", `String "sangsu")
+     ; ("keeper", `String "alpha")
      ; ("tool", `String "bash")
      ]
     @
@@ -158,7 +158,7 @@ let test_approval_mentioning_rejection_is_not_bad () =
       [ ("ts", `Float 1_700_000_000.0)
       ; ("event", `String (Audit.event_to_string Audit.Resolved))
       ; ("id", `String "appr-2")
-      ; ("keeper", `String "sangsu")
+      ; ("keeper", `String "alpha")
       ; ("tool", `String "bash")
       ; ("decision", `String "approve: proceed after the earlier reject")
       ; ("decision_kind", `String (Audit.decision_kind_to_string Audit.Decision_approve))
@@ -177,7 +177,7 @@ let test_unknown_spelling_says_so () =
       [ ("ts", `Float 1_700_000_000.0)
       ; ("event", `String "auto_approved_always")
       ; ("id", `String "appr-3")
-      ; ("keeper", `String "sangsu")
+      ; ("keeper", `String "alpha")
       ; ("tool", `String "bash")
       ]
   in

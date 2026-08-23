@@ -168,6 +168,14 @@ scope가 결합된 서버 계약이므로 파일시스템이나 briefing을 대�
 
 ### 4.3 Keepers Surface (기존 유지 + 강화)
 
+렌더 출력은 고정 viewport frame을 행 단위로 비교한다. 첫 frame, surface
+전환, SIGWINCH, geometry 변경, 외부 terminal write 뒤에는 전체 repaint하고,
+그 외에는 바뀌거나 사라진 행만 절대 cursor 주소와 `EL2`로 다시 쓴다. 비어
+있지 않은 patch는 한 번의 write/flush로 보내며 CSI 2026은 선택적 atomic
+display envelope일 뿐 correctness 조건이 아니다. 종료 signal과 job-control
+suspend는 cursor/autowrap/termios를 복구하고, resume 시 raw mode 재진입 뒤
+강제 repaint한다.
+
 - List: name, generation, runtime lane, composite phase, goal
 - Detail: identity, live context, runtime lane, runtime stats, behavior, timestamps
 - Logs: strict newest-200 physical-row tail across dated months/rotations; malformed, invalid current-schema, cross-Keeper identity mismatches, and storage failures remain explicit. Valid Turn/Heartbeat rows stay chronological, and context occupancy is not a metrics-ledger field.

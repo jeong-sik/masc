@@ -574,7 +574,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # and orphaned nothing. 529 -> 528: measured on the merge with main after
 # #29515 (2026-08-22).
 # 528 -> 526: measured on the merge with main (PR #29539, 2026-08-22).
-DEAD_EXPORT_BASELINE = 526
+# 526 -> 522: the agent JSON repair path (#29396 A15) removed four more
+# exports (normalize_agent_last_seen, short_json_repr,
+# agent_json_needs_repair, read_agent_with_repair_result).
+# 522 -> 521: dropping the Mcp_server JSON-RPC aliases removed one more
+# export (mcp_server.jsonrpc_request_to_yojson).
+# 521 -> 519: dropping server_routes_http_common.state_switch_opt and
+# state_clock_opt removed two more dead exports.
+DEAD_EXPORT_BASELINE = 519
 
 
 def run_ratchet(count: int) -> int:

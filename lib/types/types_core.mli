@@ -56,8 +56,6 @@ type agent =
 val agent_to_yojson : agent -> Yojson.Safe.t
 val agent_of_yojson : Yojson.Safe.t -> (agent, string) result
 val iso8601_of_unix_seconds : float -> string
-val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
-val short_json_repr : Yojson.Safe.t -> string
 
 (** Actions an *agent* may drive. A completion verdict is not among them; a
     trusted operator or judge caller constructs its authority provenance

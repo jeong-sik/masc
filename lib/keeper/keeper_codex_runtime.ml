@@ -379,9 +379,18 @@ let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Unsupported_server_request _ ->
     Keeper_official_client_session_store.Protocol_failed
   | Runtime_codex_app_server.Subscription_required _
-  | Runtime_codex_app_server.Context_window_exceeded _
   | Runtime_codex_app_server.Turn_failed _ ->
     Keeper_official_client_session_store.Provider_rejected
+  | Runtime_codex_app_server.Context_window_exceeded
+      { tool_effect_attempted; _ } ->
+    (* Same admission rule as the Claude Code runtime: an input the provider
+       proved over capacity must not be auto-replayed next cycle. The Codex
+       error carries only the tool-effect axis, so an observed tool effect
+       fences and everything else is a floor-exhausted rejection. *)
+    Keeper_official_client_session_store.Input_rejected
+      (if tool_effect_attempted
+       then Keeper_official_client_session_store.Effect_fenced
+       else Keeper_official_client_session_store.Bootstrap_floor_exceeded)
   | Runtime_codex_app_server.Stopped_by_host _ ->
     Keeper_official_client_session_store.Protocol_failed
 ;;
@@ -938,6 +947,45 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                recovery_detail))))
 ;;
 
+
+(* RFC claude-code-context-overflow-bounded-restart §6.3, same rule as the
+   Claude Code runtime: the same-run shrink retry is the one re-entry an
+   input rejection admits. [on_shrink_retry] fires only after the sequence
+   verified the typed observation-free overflow, the strictly smaller next
+   capacity, and the retry budget, so consuming the just-written
+   [Input_rejected] recovery with an explicit [Restart_fresh] resolution
+   cannot bypass the fence. A failed resolution is not retried here; the next
+   attempt's claim surfaces the refusal instead. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
+  ()
+  =
+  match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok
+      ( Some
+          ( { Keeper_official_client_session_store.phase = Recovery_required
+                            { failure = Input_rejected Bootstrap_floor_exceeded
+                            ; recovery_id
+                            ; _
+                            }
+            ; runtime_id = stored_runtime_id
+            ; _
+            } as expected ) )
+    when String.equal stored_runtime_id runtime_id ->
+    (match
+       Keeper_official_client_session_store.resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected
+         ~recovery_id
+         ~resolution:Keeper_official_client_session_store.Restart_fresh
+         ~resolved_by:"context-overflow-shrink-retry"
+         ~resolved_at:(Time_compat.now ())
+     with
+     | Ok _ -> ()
+     | Error _ -> ())
+  | Ok _ -> ()
+;;
 let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context
@@ -981,6 +1029,11 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
             ~capacity_bytes)
       ~on_shrink_retry:
         (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
+          resolve_input_rejected_for_shrink_retry
+            ~base_path
+            ~keeper_name
+            ~runtime_id
+            ();
           Log.Keeper.warn
             ~keeper_name
             "Codex typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
@@ -1025,4 +1078,6 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
 module For_testing = struct
   let codex_error_to_core_error = codex_error_to_core_error
   let clamp_reasoning_effort_to_catalog = clamp_reasoning_effort_to_catalog
+
+  let recovery_failure_of_client_error = recovery_failure_of_client_error
 end

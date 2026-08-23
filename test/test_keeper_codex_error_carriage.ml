@@ -75,6 +75,34 @@ let test_every_variant_lands_in_its_class () =
     Codex.Turn_interrupted
     "internal"
 
+(* The durable recovery failure follows the same activity axis as the
+   agent-core carriage above: an overflow the provider proved over capacity
+   becomes [Input_rejected] so the session admission fence holds, everything
+   else keeps its previous class. *)
+let test_context_overflow_maps_to_input_rejected_recovery () =
+  let recovery = Map.recovery_failure_of_client_error in
+  Alcotest.(check bool)
+    "pre-tool overflow is floor-exceeded"
+    (recovery
+       (Codex.Context_window_exceeded
+          { message = "full"; tool_effect_attempted = false })
+     = Masc.Keeper_official_client_session_store.(
+         Input_rejected Bootstrap_floor_exceeded))
+    true;
+  Alcotest.(check bool)
+    "post-tool overflow is effect-fenced"
+    (recovery
+       (Codex.Context_window_exceeded
+          { message = "full"; tool_effect_attempted = true })
+     = Masc.Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true;
+  Alcotest.(check bool)
+    "turn failures stay generic provider rejections"
+    (recovery (Codex.Turn_failed "stream disconnected")
+     = Masc.Keeper_official_client_session_store.Provider_rejected)
+    true
+;;
+
 let () =
   Alcotest.run
     "keeper_codex_error_carriage"
@@ -83,5 +111,9 @@ let () =
             "every variant lands in its class"
             `Quick
             test_every_variant_lands_in_its_class
+        ; Alcotest.test_case
+            "context overflow maps to input-rejected recovery"
+            `Quick
+            test_context_overflow_maps_to_input_rejected_recovery
         ] )
     ]

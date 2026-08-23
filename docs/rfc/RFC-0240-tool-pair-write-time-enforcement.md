@@ -13,6 +13,12 @@ implementation_prs: []
 
 # RFC-0240: Tool-pair invariant enforced at write-time
 
+> **2026-08-23 갱신.** 아래 본문이 근거로 삼은 `Transcript_corruption_reset_required`
+> 래치는 제거됐다. 불완전한 tool transcript 는 이제 다른 실패와 같은 typed route 를
+> 타고 `turn_failures` blocker 로 드러나며, 부팅 시 `Keeper_transcript_tail_recovery`
+> (§2.4) 가 프로세스 사망이 남긴 열린 cycle 을 닫는다. 과거 사실은 evidence 이지
+> scheduling gate 가 아니다. write-time 강제라는 이 RFC 의 본론은 여전히 미구현이다.
+
 Status: Draft · The ToolUse/ToolResult pairing invariant is checked and
 repaired when a checkpoint is *read* or a prompt is *assembled*. This RFC
 moves the check to the *write/append* boundary, rejects malformed

@@ -560,10 +560,7 @@ let meta_of_json json =
     | Ok fields ->
       (match decode_current_meta fields with
        | Error _ as error -> error
-       | Ok meta ->
-         (match Keeper_meta_contract.terminal_latch_pause_violation meta with
-          | None -> Ok meta
-          | Some detail -> invalidf "%s" detail))
+       | Ok meta -> Ok meta)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)

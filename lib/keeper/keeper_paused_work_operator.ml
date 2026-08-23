@@ -261,7 +261,6 @@ let error_class = function
           | Resume.Durable_owner_nonce_changed _
           | Resume.Durable_owner_identity_changed
           | Resume.Durable_owner_not_paused
-          | Resume.Durable_owner_transcript_reset_required
           | Resume.Registry_owner_nonce_changed _
           | Resume.Registry_owner_identity_changed
           | Resume.Registry_owner_not_paused _ )

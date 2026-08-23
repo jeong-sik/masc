@@ -161,7 +161,6 @@ type failed_source_disposition =
   | Preserve_for_deferred_runtime
   | Defer_to_queue_tail
   | Quarantine_source of { detail : string }
-  | Pause_keeper_for_integrity of { detail : string }
 
 val failed_source_disposition :
   Keeper_unified_turn.turn_failure -> failed_source_disposition

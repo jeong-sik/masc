@@ -115,19 +115,13 @@ val record_streaming_cancelled_observation
   -> unit
   -> unit
 
-type source_disposition =
-  | Follow_failure_route
-  | Pause_after_transcript_corruption of { detail : string }
-(** A failed turn normally follows its typed retry/rotate/escalate route —
-    including every provider capacity failure. The automatic
+type source_disposition = Follow_failure_route
+(** Every failed turn follows its typed retry/rotate/escalate route — provider
+    capacity failures and an incomplete tool transcript alike. The automatic
     overflow-compaction recovery that used to branch here was removed (#26546)
     because it had never produced a committed compaction on record. #26545
     bounds conversation history only; whole-request provider fit is tracked in
-    #26551.
-    [Pause_after_transcript_corruption] is terminal for automatic execution:
-    typed transcript admission rejected before provider dispatch, so the
-    heartbeat durably pauses the Keeper and consumes the selected source into an
-    operator-reset-required escalation with no retry successor. *)
+    #26551. *)
 
 type turn_failure =
   { error : Agent_core.Error.t

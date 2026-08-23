@@ -304,19 +304,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
      fail
        "a deterministic-rejection route with no deferred lane must drive \
         Batch_quarantine with the route's detail");
-  (match
-     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-       (Some
-          (failed_outcome
-             ~source_disposition:
-               (Keeper_unified_turn.Pause_after_transcript_corruption
-                  { detail = "corrupt transcript" })
-             ~route:transient_retry_route
-             ~deferred_runtime_lane:None
-             meta))
-   with
-   | Keeper_heartbeat_loop.Batch_no_action -> ()
-   | _ -> fail "transcript-corruption pause must drive Batch_no_action, not ack/defer/quarantine");
   List.iter
     (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
        match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with

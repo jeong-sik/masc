@@ -179,7 +179,7 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
-  then R.Disp_operator_reset_required, R.Reason_transcript_corruption
+  then R.Disp_unknown, R.Reason_transcript_corruption
   else if
     String.equal
       terminal_reason
@@ -312,9 +312,8 @@ let () =
       }
   in
   check
-    "transcript corruption requires operator reset"
-    (transcript_corruption
-     = (R.Disp_operator_reset_required, R.Reason_transcript_corruption));
+    "transcript corruption stays a typed alert, not a pause"
+    (transcript_corruption = (R.Disp_unknown, R.Reason_transcript_corruption));
   check
     "transcript corruption emits operator broadcast"
     (R.needs_operator_broadcast (fst transcript_corruption));
@@ -457,114 +456,6 @@ let () =
 ;;
 
 let () =
-  with_temp_dir "transcript-corruption-pause" (fun base_path ->
-    let config = Masc.Workspace.default_config base_path in
-    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-    let meta =
-      meta_fixture_exn
-        (`Assoc
-          [ "name", `String "corrupted-transcript"
-          ; ( "agent_name"
-            , `String
-                (Masc.Keeper_identity.keeper_agent_name
-                   "corrupted-transcript") )
-          ; "trace_id", `String "trace-corrupted-transcript"
-          ])
-    in
-    write_meta_exn config meta;
-    with_owner_inventory config (fun () ->
-      match
-        Masc.Keeper_owner_registry.apply_meta
-          ~base_path:config.base_path
-          ~keeper_name:meta.name
-          (Masc.Keeper_owner_reducer.Latch_transcript_corruption
-             { trace_id = meta.runtime.trace_id
-             ; generation = meta.runtime.nonce
-             ; updated_at = KMC.now_iso ()
-             })
-      with
-      | Ok (Some _) -> ()
-      | Ok None -> check "transcript corruption pause found durable meta" false
-      | Error error ->
-        check
-          ("transcript corruption pause persisted: "
-           ^ Masc.Keeper_owner_registry.command_error_to_string error)
-          false);
-    let paused = read_meta_exn config meta.name in
-    check "transcript corruption pauses durable keeper" paused.paused;
-    check
-      "transcript corruption persists typed reset-required latch"
-      (match paused.latched_reason with
-       | Some Keeper_latched_reason.Transcript_corruption_reset_required -> true
-       | Some (Keeper_latched_reason.Operator_paused _)
-       | None ->
-         false);
-    let generic_resume = KMC.mark_resumed paused in
-    check
-      "generic resume cannot clear transcript reset-required latch"
-      (generic_resume.paused
-       && generic_resume.latched_reason = paused.latched_reason))
-;;
-
-let () =
-  with_temp_dir "transcript-corruption-pause-identity" (fun base_path ->
-    let config = Masc.Workspace.default_config base_path in
-    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-    let original =
-      meta_fixture_exn
-        (`Assoc
-          [ "name", `String "replaced-transcript-owner"
-          ; ( "agent_name"
-            , `String
-                (Masc.Keeper_identity.keeper_agent_name
-                   "replaced-transcript-owner") )
-          ; "trace_id", `String "trace-replaced-transcript-owner-old"
-          ])
-    in
-    write_meta_exn config original;
-    let current = read_meta_exn config original.name in
-    let replacement_trace =
-      match
-        Keeper_id.Trace_id.of_string
-          "trace-replaced-transcript-owner-new"
-      with
-      | Ok trace_id -> trace_id
-      | Error detail -> failwith detail
-    in
-    let replacement =
-      { current with
-        runtime =
-          { current.runtime with
-            trace_id = replacement_trace
-          ; nonce = current.runtime.nonce + 1
-          }
-      }
-    in
-    write_meta_exn config replacement;
-    with_owner_inventory config (fun () ->
-      match
-        Masc.Keeper_owner_registry.apply_meta
-          ~base_path:config.base_path
-          ~keeper_name:original.name
-          (Masc.Keeper_owner_reducer.Latch_transcript_corruption
-             { trace_id = original.runtime.trace_id
-             ; generation = original.runtime.nonce
-             ; updated_at = KMC.now_iso ()
-             })
-      with
-      | Error _ -> ()
-      | Ok _ -> check "replaced Keeper identity rejects old transcript pause" false);
-    let retained = read_meta_exn config original.name in
-    check
-      "old transcript lane cannot pause replacement"
-      (not retained.paused
-       && Keeper_id.Trace_id.equal
-            retained.runtime.trace_id
-            replacement_trace
-       && retained.runtime.nonce = replacement.runtime.nonce))
-;;
-
-let () =
   let input_required_receipt =
     { base_receipt with
       outcome = `Ok
@@ -630,7 +521,6 @@ let operator_disposition_kinds =
   ; R.Disp_pass_next_model
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
-  ; R.Disp_operator_reset_required
   ; R.Disp_unknown
   ]
 ;;

@@ -1,7 +1,6 @@
 (** Typed persisted lifecycle latch.
 
-    Explicit operator pauses and structural transcript corruption own the
-    durable paused axis. Ordinary
+    Explicit operator pauses own the durable paused axis. Ordinary
     turn/provider/task failures remain observations and cannot manufacture a
     lifecycle state. *)
 
@@ -9,9 +8,7 @@ type operator_actor =
   | Grpc_directive
   | Keeper_down
 
-type t =
-  | Operator_paused of { operator_actor : operator_actor }
-  | Transcript_corruption_reset_required
+type t = Operator_paused of { operator_actor : operator_actor }
 
 let operator_actor_grpc_directive = Grpc_directive
 let operator_actor_keeper_down = Keeper_down
@@ -33,17 +30,14 @@ let equal left right =
   | Operator_paused { operator_actor = Grpc_directive },
     Operator_paused { operator_actor = Grpc_directive }
   | Operator_paused { operator_actor = Keeper_down },
-    Operator_paused { operator_actor = Keeper_down }
-  | Transcript_corruption_reset_required, Transcript_corruption_reset_required ->
+    Operator_paused { operator_actor = Keeper_down } ->
     true
-  | (Operator_paused _ | Transcript_corruption_reset_required), _ ->
-    false
+  | Operator_paused _, Operator_paused _ -> false
 ;;
 
 let hash = function
   | Operator_paused { operator_actor = Grpc_directive } -> 0
   | Operator_paused { operator_actor = Keeper_down } -> 1
-  | Transcript_corruption_reset_required -> 2
 ;;
 
 let pp formatter = function
@@ -52,15 +46,11 @@ let pp formatter = function
       formatter
       "Operator_paused{actor=%s}"
       (operator_actor_to_wire operator_actor)
-  | Transcript_corruption_reset_required ->
-    Format.pp_print_string formatter "Transcript_corruption_reset_required"
 ;;
 
 let to_wire = function
   | Operator_paused { operator_actor } ->
     "operator_paused:actor=" ^ operator_actor_to_wire operator_actor
-  | Transcript_corruption_reset_required ->
-    "transcript_corruption_reset_required"
 ;;
 
 let of_wire = function
@@ -68,8 +58,6 @@ let of_wire = function
     Ok (Operator_paused { operator_actor = Grpc_directive })
   | "operator_paused:actor=keeper_down" ->
     Ok (Operator_paused { operator_actor = Keeper_down })
-  | "transcript_corruption_reset_required" ->
-    Ok Transcript_corruption_reset_required
   | wire ->
     Error
       (Printf.sprintf
@@ -84,8 +72,6 @@ module Stable = struct
         [ "kind", `String "operator_paused"
         ; "actor", `String (operator_actor_to_wire operator_actor)
         ]
-    | Transcript_corruption_reset_required ->
-      `Assoc [ "kind", `String "transcript_corruption_reset_required" ]
   ;;
 
   let of_yojson = function
@@ -94,8 +80,6 @@ module Stable = struct
       Result.map
         (fun operator_actor -> Operator_paused { operator_actor })
         (operator_actor_of_wire actor)
-    | `Assoc [ "kind", `String "transcript_corruption_reset_required" ] ->
-      Ok Transcript_corruption_reset_required
     | json ->
       Error
         (Printf.sprintf

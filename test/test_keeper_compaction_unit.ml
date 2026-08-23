@@ -499,34 +499,6 @@ let test_provider_admission_quarantines_malformed_overlap () =
 ;;
 
 
-(* Resume-time latch re-check. The latch says the transcript was broken when it
-   was written; these pin what it is still worth now. Same three outcomes the
-   close_open_tail contract already draws, read through the resume path. *)
-
-module R = Masc.Keeper_paused_work_resume_transaction
-
-let test_classify_keeps_latch_for_unparseable_history () =
-  let orphan = [ message T.Tool [ result "call-missing" ] ] in
-  match R.classify_transcript orphan with
-  | R.Transcript_unrecoverable -> ()
-  | _ -> Alcotest.fail "an orphan tool result must keep latching"
-
-let test_classify_clears_latch_for_dispatchable_history () =
-  let closed =
-    [ message T.Assistant [ use "call-a" ]; message T.Tool [ result "call-a" ] ]
-  in
-  match R.classify_transcript closed with
-  | R.Transcript_already_dispatchable -> ()
-  | _ -> Alcotest.fail "a closed history must clear the latch untouched"
-
-let test_classify_closes_open_tail_before_clearing () =
-  let open_tail = [ message T.Assistant [ use "call-a" ] ] in
-  match R.classify_transcript open_tail with
-  | R.Transcript_closed_open_tail messages ->
-    (match U.validate_provider_transcript messages with
-     | Ok () -> ()
-     | Error _ -> Alcotest.fail "returned messages must be dispatchable")
-  | _ -> Alcotest.fail "an open ToolUse tail is recoverable, not a dead latch"
 
 let () =
   Alcotest.run "keeper_compaction_unit"
@@ -588,13 +560,5 @@ let () =
             test_close_open_tail_preserves_structural_error
         ; Alcotest.test_case "close_open_tail never fabricates success" `Quick
             test_close_open_tail_never_fabricates_success
-        ] )
-    ; ( "resume_latch_recheck"
-      , [ Alcotest.test_case "unparseable history keeps latching" `Quick
-            test_classify_keeps_latch_for_unparseable_history
-        ; Alcotest.test_case "dispatchable history clears the latch" `Quick
-            test_classify_clears_latch_for_dispatchable_history
-        ; Alcotest.test_case "open tail is closed before clearing" `Quick
-            test_classify_closes_open_tail_before_clearing
         ] )
     ]

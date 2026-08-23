@@ -542,10 +542,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
 
 let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config persisted.name in
-  match Keeper_meta_contract.terminal_latch_pause_violation persisted with
-  | Some detail -> Error ("Keeper metadata invariant violation: " ^ detail)
-  | None ->
-    persist_snapshot ~ownership_root:config.Workspace.base_path path persisted
+  persist_snapshot ~ownership_root:config.Workspace.base_path path persisted
 ;;
 
 let remove_snapshot config ~name =

@@ -479,6 +479,29 @@ let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojso
       (Printf.sprintf "/api/v1/board/%s?format=flat"
          (percent_encode_path_segment post_id))
 
+(** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
+    The server sorts active-first by due time and caps rows at its own limit,
+    so the path alone is the whole request. *)
+let fetch_schedules ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/scheduled-automation"
+
+(** POST /api/v1/tools/masc_schedule_cancel. The payload is the tool's own
+    argument contract, so validation is the tool's, not duplicated here.
+    [cancelled_by_kind] is omitted: the tool defaults it to human operator,
+    which is what a terminal operator is. The reason is a fixed audit phrase --
+    the arm display already named which schedule the second press cancels. *)
+let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
+    : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      [ ("schedule_id", `String schedule_id)
+      ; ("cancelled_by_id", `String default_agent_name)
+      ; ("reason", `String "cancelled from the TUI")
+      ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
     for a screenful's worth of history rather than the whole ring. *)
 let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :

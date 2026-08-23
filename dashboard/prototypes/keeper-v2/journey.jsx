@@ -20,7 +20,7 @@ const JOURNEY = {
       { turn: 41, stimuli: [
           { kind: 'workspace_message', from: 'nick0cave', urgency: 'immediate', what: 'nick0cave가 보낸 메시지' },
           { kind: 'workspace_message', from: 'sangsu', urgency: 'normal', what: 'sangsu가 보낸 메시지' },
-          { kind: 'task_assigned', from: 'masc', urgency: 'normal', what: 'T-3880 배정' },
+          { kind: 'board_signal', from: 'masc', urgency: 'normal', what: 'T-3880 배정' },
         ], evidence: { health: 'healthy', staleReason: null, traceId: 'tr_9a41c0', keeperTurnId: 41, maxAgentCoreTurnCount: 24, providerTerminalStatus: 'succeeded', providerTerminalExceptionKind: null, providerAttemptStartedCount: 3, providerAttemptFinishedCount: 3, eventBusCorrelatedCount: 18, contextCompactedCount: 0, contextCompactStartedCount: 0, memoryInjectedCount: 4, memoryFlushedCount: 1 },
         entries: [
           { id: 'e1', kind: 'thinking', at: 0, dur: null, status: 'unknown', source: 'trajectory', summary: '검토한 항목 중 T-3880 만 실제 수정이 필요하다고 판단', redacted: false },
@@ -31,7 +31,7 @@ const JOURNEY = {
           { id: 'e6', kind: 'tool_call', at: 21000, dur: 900, status: 'gate_rejected', source: 'tool_call_log', tool: 'masc_shell', plannedIndex: 3, batchIndex: 0, batchSize: 1, mode: 'serial', summary: 'dune build @runtest', gateReason: '쓰기 위험이 있어 운영자 승인 대기로 전환됨' },
         ] },
       { turn: 40, stimuli: [
-          { kind: 'keeper_wake', from: 'schedule', urgency: 'normal', what: '예약 실행 · board sweep' },
+          { kind: 'schedule_due', from: 'schedule', urgency: 'normal', what: '예약 실행 · board sweep' },
         ], evidence: { health: 'healthy', staleReason: null, traceId: 'tr_9a3f88', keeperTurnId: 40, maxAgentCoreTurnCount: 24, providerTerminalStatus: 'succeeded', providerTerminalExceptionKind: null, providerAttemptStartedCount: 2, providerAttemptFinishedCount: 2, eventBusCorrelatedCount: 11, contextCompactedCount: 1, contextCompactStartedCount: 1, memoryInjectedCount: 2, memoryFlushedCount: 2 },
         entries: [
           { id: 'f1', kind: 'thinking', at: 0, dur: null, status: 'unknown', source: 'trajectory', summary: '이전 턴 실패 원인부터 다시 읽는다', redacted: false },
@@ -50,7 +50,7 @@ const JOURNEY = {
   nick0cave: {
     turns: [
       { turn: 12, stimuli: [
-          { kind: 'chat_message', from: 'operator', urgency: 'immediate', what: '운영자 요청' },
+          { kind: 'hitl_resolved', from: 'operator', urgency: 'immediate', what: '운영자 승인 해소' },
           { kind: 'workspace_message', from: 'qa-king', urgency: 'normal', what: '큐에이킹이 보낸 메시지' },
         ], evidence: { health: 'healthy', staleReason: null, traceId: 'tr_2b7101', keeperTurnId: 12, maxAgentCoreTurnCount: 24, providerTerminalStatus: 'succeeded', providerTerminalExceptionKind: null, providerAttemptStartedCount: 1, providerAttemptFinishedCount: 1, eventBusCorrelatedCount: 9, contextCompactedCount: 2, contextCompactStartedCount: 2, memoryInjectedCount: 6, memoryFlushedCount: 3 },
         entries: [

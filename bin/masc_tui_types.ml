@@ -35,7 +35,12 @@ type keeper_runtime = Tui_decode.keeper_runtime
 type log_entry = Tui_decode.log_entry
 
 type msg_role =
-  | Message_user
+  | Message_user of string
+      (** A row addressed to the keeper, carrying the name to draw beside it.
+          ["you"] for what this pane sent; otherwise whoever the server named,
+          with the surface it arrived on. The role alone used to be the label,
+          which is why an agent's broadcast and the operator's own line were
+          indistinguishable. *)
   | Message_keeper
   | Message_status
   | Message_error

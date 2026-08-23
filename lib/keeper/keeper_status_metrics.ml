@@ -182,7 +182,7 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
       | Yojson.Json_error detail ->
           report_metrics_summary_read_drop
             ~reason:
-              Safe_ops.persistence_read_drop_reason_entry_load_error
+              Safe_ops.persistence_read_drop_reason_json_syntax_error
             ~detail;
           acc
       | Yojson.Safe.Util.Type_error (detail, _) ->

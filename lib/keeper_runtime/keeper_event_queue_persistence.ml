@@ -75,7 +75,13 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v16.json"
+(* v17: #29598 dropped owner_nonce from the turn-attempt-terminal operation
+   id, so a v16 snapshot written by the previous binary carries ids this
+   binary no longer generates ("turn-attempt-terminal:1:16:..." against
+   "turn-attempt-terminal:16:..."). Replay detection matches on that id, so
+   reading the old snapshot would let one source-terminal apply twice. Fresh
+   state on a new filename, per the #29553 precedent — no compat reader. *)
+let snapshot_filename = "event-queue-v17.json"
 let transition_wal_filename = "event-queue-transitions-v6.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
@@ -224,14 +230,20 @@ let schema_field = function
 ;;
 
 type primary_snapshot =
-  | Primary_missing
+  | Primary_absent
+  | Primary_unreadable of string
+      (** The file is there and this binary cannot decode it. Boot treats this
+          exactly like [Primary_absent] — see [fail_open] below — but the health
+          probe has to tell the two apart, because an unreadable queue and an
+          empty queue look identical from the outside and only one of them
+          means stimuli were lost. *)
   | Primary_current of State.t
 
 let read_primary_current_unlocked owner =
   let path = snapshot_path_of_owner owner in
   match read_json_if_present path with
   | Error _ as error -> error
-  | Ok None -> Ok Primary_missing
+  | Ok None -> Ok Primary_absent
   | Ok (Some json) ->
     (* Fail open. A snapshot this binary cannot decode is an absent snapshot:
        the queue starts empty and the WAL replays on top, which is the same
@@ -246,7 +258,7 @@ let read_primary_current_unlocked owner =
          (pending stimuli and the disposition ledger in it are lost): %s"
         path
         detail;
-      Ok Primary_missing
+      Ok (Primary_unreadable detail)
     in
     (match schema_field json with
      | Error message -> fail_open message
@@ -452,13 +464,40 @@ let replay_transition_wal_read_only_unlocked ?(wal_only = false) owner state =
     state
 ;;
 
-let load_state_unlocked owner =
+let load_state_unlocked_with_primary_detail owner =
+  let from_empty detail =
+    Result.map
+      (fun state -> state, detail)
+      (replay_transition_wal_unlocked ~wal_only:true owner State.empty)
+  in
   match read_primary_unlocked owner with
   | Error _ as error -> error
   | Ok (Primary_current state) ->
-    replay_transition_wal_unlocked owner state
-  | Ok Primary_missing ->
-    replay_transition_wal_unlocked ~wal_only:true owner State.empty
+    Result.map (fun state -> state, None) (replay_transition_wal_unlocked owner state)
+  | Ok Primary_absent -> from_empty None
+  | Ok (Primary_unreadable detail) -> from_empty (Some detail)
+;;
+
+let load_state_unlocked owner =
+  Result.map fst (load_state_unlocked_with_primary_detail owner)
+;;
+
+let load_state_result_with_primary_detail ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         load_state_unlocked_with_primary_detail owner)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue state load raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -485,9 +524,10 @@ let load_existing_state_result ~base_path ~keeper_name =
          match read_primary_unlocked owner with
          | Error _ as error -> error
          | Ok (Primary_current state) -> replay_transition_wal_unlocked owner state
-         | Ok Primary_missing when durable_state_exists_unlocked owner ->
+         | Ok (Primary_absent | Primary_unreadable _)
+           when durable_state_exists_unlocked owner ->
            replay_transition_wal_unlocked ~wal_only:true owner State.empty
-         | Ok Primary_missing ->
+         | Ok (Primary_absent | Primary_unreadable _) ->
            Error
              (Printf.sprintf
                 "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
@@ -510,7 +550,7 @@ let read_state_read_only_unlocked ~require_existing owner =
   | Error _ as error -> error
   | Ok (Primary_current state) ->
     replay_transition_wal_read_only_unlocked owner state
-  | Ok Primary_missing
+  | Ok (Primary_absent | Primary_unreadable _)
     when require_existing && not (durable_state_exists_unlocked owner) ->
     Error
       (Printf.sprintf
@@ -518,7 +558,7 @@ let read_state_read_only_unlocked ~require_existing owner =
          (keeper_name_of_owner owner)
          (snapshot_path_of_owner owner)
          (transition_wal_path_of_owner owner))
-  | Ok Primary_missing ->
+  | Ok (Primary_absent | Primary_unreadable _) ->
     replay_transition_wal_read_only_unlocked
       ~wal_only:true
       owner
@@ -663,8 +703,14 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
 ;;
 
 let load_with_read_errors ~projection ~base_path ~keeper_name =
-  match load_state_result ~base_path ~keeper_name with
-  | Ok state -> { pending = projection state; read_errors = [] }
+  match load_state_result_with_primary_detail ~base_path ~keeper_name with
+  | Ok (state, None) -> { pending = projection state; read_errors = [] }
+  | Ok (state, Some detail) ->
+    (* The keeper booted on an empty queue and kept running; what it lost is
+       still a read error, and the fleet summary is where an operator sees it. *)
+    { pending = projection state
+    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name detail
+    }
   | Error message ->
     { pending = projection State.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message

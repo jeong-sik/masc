@@ -404,6 +404,21 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'agent_core_unrecognized_stop_reason',
   'agent_core_guardrail_violation',
   'agent_core_tripwire_violation',
+  // Emitted by `blocker_class_to_string` in lib/keeper/keeper_meta_contract.ml
+  // and previously discarded here: `asKeeperRuntimeBlockerClass` answers null
+  // for anything absent, so eleven real classes arrived and were dropped.
+  // `test_blocker_class_mirror` fails if the server gains another one.
+  'agent_core_input_required',
+  'capacity_backpressure',
+  'gate_replay_repair_required',
+  'incomplete_tool_transcript',
+  'internal_bridge_exception',
+  'internal_contract_rejected',
+  'internal_unhandled_exception',
+  'provider_attempt_effect_fenced',
+  'receipt_persistence_failed',
+  'terminal_effect_failed',
+  'tool_correction_lost',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]

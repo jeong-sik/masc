@@ -170,6 +170,7 @@ type t = Store.t
 let create = Store.create
 let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
+let cut_replay_log = Store.cut_replay_log
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
 
 let notify_changed () =

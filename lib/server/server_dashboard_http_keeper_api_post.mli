@@ -130,8 +130,8 @@ val handle_keeper_directive_post :
   Httpun.Reqd.t ->
   string ->
   unit
-(** A resume body requires [owner_nonce] and a stable
-    [operator_operation_id]; raw action-only resume is rejected. *)
+(** A resume body requires a stable [operator_operation_id]; raw
+    action-only resume is rejected. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
@@ -143,7 +143,7 @@ val handle_keeper_bulk_directive_post :
   string ->
   unit
 (** Pause/wakeup accept a [names] list. Resume accepts a [targets] list whose
-    entries carry [name], [owner_nonce], and [operator_operation_id]. *)
+    entries carry [name] and [operator_operation_id]. *)
 
 module For_testing : sig
   val github_login_stream_headers : string -> Httpun.Headers.t

@@ -90,9 +90,9 @@ let test_load_records_malformed_row_drops () =
     (fun () ->
       let keeper_name = "keeper-chat-drop" in
       let path = chat_path ~base_dir ~keeper_name in
-      let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+      let syntax_error = Safe_ops.persistence_read_drop_reason_json_syntax_error in
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
-      let before_entry_error = drop_value entry_error in
+      let before_syntax_error = drop_value syntax_error in
       let before_invalid_payload = drop_value invalid_payload in
       write_file path
         (String.concat "\n"
@@ -120,9 +120,9 @@ let test_load_records_malformed_row_drops () =
       Alcotest.(check (list string)) "content order"
         [ "hello"; "world" ]
         (List.map (fun (msg : K.chat_message) -> msg.content) messages);
-      Alcotest.(check (float 0.001)) "malformed json increments entry error"
+      Alcotest.(check (float 0.001)) "malformed json increments json syntax error"
         1.0
-        (drop_value entry_error -. before_entry_error);
+        (drop_value syntax_error -. before_syntax_error);
       Alcotest.(check (float 0.001)) "missing content increments invalid payload"
         1.0
         (drop_value invalid_payload -. before_invalid_payload))

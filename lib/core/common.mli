@@ -106,3 +106,8 @@ val max_process_capture_tail_bytes : int
     {!max_tool_output_bytes}). Otherwise returns the first [max_bytes]
     characters followed by a machine-readable truncation suffix that
     records the original length and [total_count]. *)
+
+val safe_filename : string -> string
+(** Fold a value into one path component: lowercase, keep [a-z0-9._-], and
+    escape anything else as [_XX]. Every layer that turns a name into a file
+    name goes through this, so a name cannot mean two files. *)

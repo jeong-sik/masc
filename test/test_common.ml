@@ -71,6 +71,27 @@ let test_protect_preserves_exception () =
   in
   check (option string) "main exception preserved" (Some "main") raised
 
+let test_safe_filename_neutralizes_separators () =
+  (* A name carrying path syntax must not reach the filesystem as path syntax.
+     Auth built credential paths by concatenating the raw agent name, so this
+     is the property that layer was missing. *)
+  let escaped = Common.safe_filename "../../etc/passwd" in
+  (* [.] stays legal — it belongs in file names. What must not survive is the
+     separator, because without it the whole thing is one path component and
+     [Filename.concat] cannot be walked out of. *)
+  check bool "no separator survives" false (String.contains escaped '/');
+  check string "escapes to one component" ".._2f.._2fetc_2fpasswd" escaped
+
+let test_safe_filename_is_identity_on_live_names () =
+  (* The names actually on disk already satisfy the rule, so routing auth
+     through this does not orphan an existing credential file. *)
+  List.iter
+    (fun name -> check string name name (Common.safe_filename name))
+    [ "codex-mcp-client"; "dashboard-admin-deft-cobra"; "keeper-base-agent" ]
+
+let test_safe_filename_folds_case () =
+  check string "uppercase folds" "keeper-base" (Common.safe_filename "Keeper-Base")
+
 let () =
   run "Common" [
     "finalizer_guard", [
@@ -78,5 +99,10 @@ let () =
       test_case "finalizer error no raise" `Quick test_protect_finally_error_no_raise;
       test_case "finalizer error raise" `Quick test_protect_finally_error_raise;
       test_case "preserve main exception" `Quick test_protect_preserves_exception;
+    ];
+    "safe_filename", [
+      test_case "neutralizes separators" `Quick test_safe_filename_neutralizes_separators;
+      test_case "identity on live names" `Quick test_safe_filename_is_identity_on_live_names;
+      test_case "folds case" `Quick test_safe_filename_folds_case;
     ];
   ]

@@ -643,7 +643,11 @@ let adapter_loop_with_transport
             final_message_blocks ~content:delivered_text
               ~event_blocks:(List.rev acc_blocks)
           in
-          if String.length acc_text > 0 || List.length blocks > 0
+          (* [delivered_text] is what goes out — the accumulated text plus the
+             tool trail. Asking about [acc_text] asked about a different value:
+             a tool-only turn has no assistant text but does have a trail, and
+             settled Error while the turn layer settled Delivered (#26406). *)
+          if String.length delivered_text > 0 || List.length blocks > 0
           then
             let result =
               match streaming_transport, message_id with

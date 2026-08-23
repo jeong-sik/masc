@@ -246,6 +246,8 @@ type state = {
   mutable live_context_error: string option;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
+  mutable transport: Tui_decode.transport_health option;
+  mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
@@ -309,6 +311,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   live_context_error = None;
   overview = None;
   overview_error = None;
+  transport = None;
+  transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
   approval_flow = Masc_tui_operator_projection.Flow.initial;

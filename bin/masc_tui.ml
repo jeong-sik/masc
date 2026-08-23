@@ -284,6 +284,7 @@ type approval_observation = {
 
 type http_surface_results = {
   http_overview: (overview_snapshot, string) result;
+  http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
   http_board: (board_post list, string) result;
   http_planning: (planning_snapshot, string) result;
@@ -996,6 +997,17 @@ let remember_surface_error state ~surface ~current_error ~set_error err =
     add_event state "error"
       (Printf.sprintf "%s data unreliable: %s" surface err)
 
+let apply_transport_load state = function
+  | Ok transport ->
+      state.transport <- Some transport;
+      state.transport_error <- None
+  | Error err ->
+      state.transport <- None;
+      remember_surface_error state ~surface:"transport health"
+        ~current_error:state.transport_error
+        ~set_error:(fun value -> state.transport_error <- value)
+        err
+
 let apply_overview_load state = function
   | Ok overview ->
       state.overview <- Some overview;
@@ -1130,8 +1142,13 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation =
+let load_http_surfaces ~host ~port ~approval_generation ~wants_transport =
   let http_overview = load_overview ~host ~port in
+  (* Only the Overview row shows this, so a refresh on another surface does not
+     spend a request on it. [None] leaves whatever the last read observed. *)
+  let http_transport =
+    if wants_transport then Some (load_transport_health ~host ~port) else None
+  in
   let http_approvals =
     Option.map
       (fun ao_generation ->
@@ -1140,10 +1157,11 @@ let load_http_surfaces ~host ~port ~approval_generation =
   in
   let http_board = load_board_list ~host ~port in
   let http_planning = load_planning ~host ~port in
-  { http_overview; http_approvals; http_board; http_planning }
+  { http_overview; http_transport; http_approvals; http_board; http_planning }
 
 let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
+  Option.iter (apply_transport_load state) results.http_transport;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_board_list_load state results.http_board;
   apply_planning_load state results.http_planning;
@@ -1178,11 +1196,16 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       (match state.connection_status with
        | Connected | Degraded -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
+    let wants_transport =
+      match state.view with
+      | Overview -> true
+      | Keepers _ | Board | Approvals | Planning -> false
+    in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation))
+             (load_http_surfaces ~host ~port ~approval_generation ~wants_transport))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -1199,7 +1222,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation))
+               (load_http_surfaces ~host ~port ~approval_generation ~wants_transport))
   end
 
 let board_detail_request_still_current state request =

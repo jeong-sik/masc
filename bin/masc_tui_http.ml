@@ -148,6 +148,11 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/briefing"
 
+(** Fetch /api/v1/dashboard/transport-health (delivery-path summary). *)
+let fetch_transport_health ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/transport-health"
+
 (** Fetch the actor-scoped operator summary that owns pending confirmations. *)
 let fetch_operator_snapshot ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

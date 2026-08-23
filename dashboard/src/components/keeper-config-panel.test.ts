@@ -879,6 +879,7 @@ vi.mock('../api/keeper', () => ({
 }))
 
 vi.mock('../store', () => ({
+  keepers: storeMocks.keepers,
   refreshKeeperRuntimeStatus: mocks.refreshKeeperRuntimeStatus,
 }))
 
@@ -899,6 +900,13 @@ const githubIdentityMocks = vi.hoisted(() => ({
     checked_at_unix: 1786000000,
   })),
   streamKeeperGithubLogin: vi.fn(async () => undefined),
+}))
+
+// The panel reads the fleet-roster row (koreanName / sandbox_target /
+// created_at) for its top bar and identity tab. A plain value holder is enough:
+// tests assign `storeMocks.keepers.value = [...]` before render.
+const storeMocks = vi.hoisted(() => ({
+  keepers: { value: [] as Array<Record<string, unknown>> },
 }))
 
 vi.mock('../api/dashboard-keeper-github', () => ({
@@ -952,6 +960,7 @@ describe('KeeperConfigPanel', () => {
     mocks.wakeKeeper.mockClear()
     githubIdentityMocks.fetchKeeperGithubIdentity.mockClear()
     githubIdentityMocks.streamKeeperGithubLogin.mockClear()
+    storeMocks.keepers.value = []
   })
 
   afterEach(() => {
@@ -1586,6 +1595,152 @@ describe('KeeperConfigPanel', () => {
     if (saveButton) {
       expect(saveButton.disabled).toBe(true)
     }
+  })
+})
+
+// keeper-v2 design vocabulary (prototypes/keeper-v2/keeper-config.jsx +
+// organisms-5.jsx parity): top-bar kr/sandbox badges, avatar block, 표시 이름
+// field, 파생 사실, fallback chain, kcf-dead removal notes, kcf-paths editor,
+// set-link navigation. Every assertion reads a live signal — the roster row
+// (storeMocks.keepers) or the loaded KeeperConfig — never a static mock.
+describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    resetKeeperConfig()
+    resetRuntimeCatalog()
+    mocks.fetchKeeperConfig.mockClear()
+    mocks.fetchRuntimeProviders.mockClear()
+    storeMocks.keepers.value = []
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    resetKeeperConfig()
+    storeMocks.keepers.value = []
+  })
+
+  it('renders koreanName + sandbox badges in the top bar from the roster row', async () => {
+    storeMocks.keepers.value = [{
+      name: 'keeper-sangsu',
+      koreanName: '상수',
+      sandbox_target: '/workspace/keepers/keeper-sangsu',
+      created_at: '2026-01-04T00:00:00Z',
+    }]
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    expect(container.querySelector('.kcf-top-kr')?.textContent).toBe('상수')
+    const sandbox = container.querySelector('.kcf-top-sandbox')
+    expect(sandbox?.textContent).toContain('/workspace/keepers/keeper-sangsu')
+  })
+
+  it('omits kr/sandbox badges when the roster row has none', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    expect(container.querySelector('.kcf-top-kr')).toBeNull()
+    expect(container.querySelector('.kcf-top-sandbox')).toBeNull()
+  })
+
+  it('identity tab renders the avatar block, read-only 표시 이름 field, and 파생 사실', async () => {
+    storeMocks.keepers.value = [{
+      name: 'keeper-sangsu',
+      koreanName: '상수',
+      sandbox_target: '/workspace/keepers/keeper-sangsu',
+      created_at: '2026-01-04T00:00:00Z',
+    }]
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    // Avatar: sigil preview is live (kSlot/kSigil derivation); the portrait
+    // picker renders disabled with the design's 기획 badge (no avatar API).
+    const upload = container.querySelector('.kav-portraits .kav-por.kav-upload') as HTMLButtonElement | null
+    expect(upload).toBeTruthy()
+    expect(upload?.disabled).toBe(true)
+    expect(container.querySelector('.kav .kcf-plan')?.textContent).toContain('기획')
+
+    // 표시 이름: real display name, read-only (no rename writer).
+    const nameInput = container.querySelector('.kcf-idrow .kcf-field input.kcf-input') as HTMLInputElement | null
+    expect(nameInput).toBeTruthy()
+    expect(nameInput?.readOnly).toBe(true)
+    expect(nameInput?.value).toBe('상수')
+
+    // 파생 사실: sandbox target + creation time + runtime profile, all live.
+    const facts = container.querySelector('.kcf-facts')
+    expect(facts?.textContent).toContain('/workspace/keepers/keeper-sangsu')
+    expect(facts?.textContent).toContain('2026-01-04T00:00:00Z')
+    expect(container.textContent).toContain('tier-group.keeper_unified')
+  })
+
+  it('policy tab carries the kcf-dead removal notes for deleted gates and handoff', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+
+    const dead = container.querySelectorAll('.kcf-dead')
+    expect(dead.length).toBe(2)
+    expect(container.textContent).toContain('ratio / message / token 게이트')
+    expect(container.textContent).toContain('Handoff_triggered')
+  })
+
+  it('runtime tab renders the fallback candidate chain from runtime_options', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+
+    const items = Array.from(container.querySelectorAll('.kcf-chain-item')).map(el => el.textContent)
+    expect(items).toEqual(['tier-group.keeper_unified', 'tier.resilient_breaker'])
+  })
+
+  it('access tab edits allowed_paths through the design kcf-paths block with the effective line', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+
+    const textarea = container.querySelector('.kcf-paths textarea.kcf-text') as HTMLTextAreaElement | null
+    expect(textarea).toBeTruthy()
+    expect(textarea?.value).toBe('/tmp/workspace')
+    expect(container.querySelector('.kcf-path-eff')?.textContent).toContain('/tmp/workspace')
+  })
+
+  it('hooks tab links external-effect calls to the Gate queue via set-link', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '훅')
+    await flush()
+
+    const link = container.querySelector('.kc-inh-note .set-link')
+    expect(link?.textContent).toContain('Gate 큐')
+  })
+
+  it('prompt tab routes global prompt editing through the design set-link', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '프롬프트')
+    await flush()
+
+    const link = container.querySelector('[data-testid="kcf-prompt-global-edit-link"]')
+    expect(link?.classList.contains('set-link')).toBe(true)
   })
 })
 

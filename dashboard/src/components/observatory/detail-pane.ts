@@ -1,8 +1,10 @@
-// Observatory detail pane (RFC-MASC-006 Phase 2d)
+// Observatory detail pane — keeper-v2 monitor-more design (.ob-detail).
 //
-// Click drill-down: when a track marker is clicked, detailSelection updates
-// and this pane renders the raw TelemetryEntry alongside key metadata
-// (source, timestamp, keeper, outcome).  Close button clears selection.
+// One dashed strip under the readout: an .ia-k label plus either the dim
+// hint (nothing picked) or .ob-detail-body with the selection badge, title,
+// keeper and time. Click drill-down is persistent (detail-selection-store);
+// the close button clears it. The meta grid and raw-JSON details below the
+// design's single row are live-only extras, kept full-width inside the strip.
 
 import { html } from 'htm/preact'
 import type { TelemetryEntry } from '../../api/dashboard'
@@ -20,18 +22,12 @@ function selectionTitle(selection: DetailSelection): string {
   return eventType ? `${source}:${eventType}` : source
 }
 
-function outcomeTag(entry: TelemetryEntry): { label: string; tone: 'ok' | 'bad' | 'neutral' } | null {
+function outcomeTag(entry: TelemetryEntry): { label: string; tone: 'ok' | 'bad' } | null {
   if (entry.success === true) return { label: 'success', tone: 'ok' }
   if (entry.success === false) return { label: 'failure', tone: 'bad' }
   const err = entry.error
   if (err != null && err !== '') return { label: 'error', tone: 'bad' }
   return null
-}
-
-function toneClass(tone: 'ok' | 'bad' | 'neutral'): string {
-  if (tone === 'ok') return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
-  if (tone === 'bad') return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
-  return 'bg-[var(--color-bg-elevated)] text-text-dim border-card-border'
 }
 
 function keeperOf(entry: TelemetryEntry): string | null {
@@ -59,34 +55,38 @@ function formatJson(entry: TelemetryEntry): string {
 
 export function DetailPane() {
   const selection = detailSelection.value
-  if (selection === null) return null
+
+  if (selection === null) {
+    return html`
+      <div class="ob-detail" role="region" aria-label="선택 항목 상세">
+        <span class="ia-k">Detail pane</span>
+        <span class="dim">이벤트 마커를 클릭하면 상세가 여기에 열립니다.</span>
+      </div>
+    `
+  }
 
   const outcome = outcomeTag(selection.entry)
   const keeper = keeperOf(selection.entry)
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : null
 
   return html`
-    <div class="v2-monitoring-detail rounded-[var(--r-1)] border border-[var(--accent-30)] bg-bg-0/60 shadow-[var(--shadow-1)]" role="region" aria-label="선택 항목 상세">
-      <div class="flex items-center justify-between border-b border-card-border px-3 py-2">
-        <div class="flex items-center gap-2">
-          <span class="text-3xs uppercase tracking-[var(--track-caps)] text-accent-fg font-semibold">상세</span>
-          <span class="text-xs font-semibold text-text-strong">${selectionTitle(selection)}</span>
-          ${outcome ? html`
-            <span class="rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-mono ${toneClass(outcome.tone)}">
-              ${outcome.label}
-            </span>
-          ` : null}
-        </div>
+    <div class="ob-detail" role="region" aria-label="선택 항목 상세">
+      <span class="ia-k">Detail pane</span>
+      <div class="ob-detail-body">
+        ${outcome ? html`<span class="ai-b ${outcome.tone}">${outcome.label}</span>` : null}
+        <span class="mono">${selectionTitle(selection)}</span>
+        ${keeper ? html`<span class="mono">${keeper}</span>` : null}
+        <span class="dim">${new Date(selection.ts).toLocaleString()}</span>
         <button
           type="button"
-          class="v2-monitoring-action rounded-[var(--r-1)] px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--color-bg-elevated)]"
+          class="ia-filter"
           onClick=${clearSelection}
           aria-label="상세 패널 닫기"
         >
           ✕
         </button>
       </div>
-      <div class="grid grid-cols-1 gap-1.5 px-3 py-2 md:grid-cols-2">
+      <div class="w-full grid grid-cols-1 gap-1.5 md:grid-cols-2">
         <${MetaRow} label="시각" value=${new Date(selection.ts).toLocaleString()} />
         ${selection.bucketCount > 1 ? html`
           <${MetaRow} label="bucket" value=${`${selection.bucketCount} events`} />
@@ -100,8 +100,8 @@ export function DetailPane() {
           <${MetaRow} label="operation" value=${selection.entry.operation_id} />
         ` : null}
       </div>
-      <details class="v2-monitoring-detail border-t border-card-border">
-        <summary class="cursor-pointer px-3 py-1.5 text-2xs text-text-dim hover:text-text-strong">
+      <details class="w-full">
+        <summary class="cursor-pointer py-1.5 text-2xs text-text-dim hover:text-text-strong">
           raw entry (JSON)
         </summary>
         <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--color-bg-elevated)]/30">${formatJson(selection.entry)}</pre>

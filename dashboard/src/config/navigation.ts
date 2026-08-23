@@ -58,6 +58,7 @@ type SurfaceSectionId =
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
+  | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -352,6 +353,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Observatory',
       description: 'Activity and runtime evidence.',
       params: { section: 'observatory' },
+    },
+    {
+      id: 'lanes',
+      label: 'Lane · Queue',
+      description: 'Keeper 실행 타임라인과 대기 큐.',
+      params: { section: 'lanes' },
     },
     {
       id: 'transport-health',

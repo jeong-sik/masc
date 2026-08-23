@@ -777,74 +777,12 @@
   border-top: 1px solid var(--color-border-default);
 }
 
-/* ── Link unfurl card ────────────────────────────────────────── */
-.chat-block-linkcard {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: var(--color-bg-surface);
-  padding: 10px 12px;
-  text-decoration: none;
-  transition: background var(--t-fast), border-color var(--t-fast);
-}
-
-.chat-block-linkcard:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-strong);
-}
-
-.chat-block-linkcard-fav {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-1);
-  background: var(--color-bg-panel-alt);
-  color: var(--color-fg-muted);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semi);
-  flex-shrink: 0;
-}
-
-.chat-block-linkcard-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.chat-block-linkcard-title {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semi);
-  color: var(--color-fg-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-block-linkcard-desc {
-  font-size: var(--fs-2xs);
-  color: var(--color-fg-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.chat-block-linkcard-meta {
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  color: var(--color-fg-muted);
-}
-
-.chat-block-linkcard-go {
-  color: var(--color-fg-muted);
-  font-size: var(--fs-sm);
-}
+/* ── Link unfurl card ──────────────────────────────────────────
+   Keeper-v2 design vocabulary (.linkcard / -fav / -body / -title / -desc /
+   -meta / -go) — skin vendored in keeper-v2/v2.css. The old
+   .chat-block-linkcard* rules were dropped when primitives.ts renamed onto the
+   design's classes (2026-08-23); .chat-block-linkcard-unsafe is a style-less
+   hook marking a refused href. */
 
 /* ── Broadcast card ──────────────────────────────────────────── */
 .chat-block-broadcast {

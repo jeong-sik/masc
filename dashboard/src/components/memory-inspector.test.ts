@@ -220,15 +220,18 @@ describe('MemoryInspector current snapshot', () => {
     ])
     expect(rows.map(row => row.classList.contains('removed'))).toEqual([false, false, true])
 
-    // one meta line: insertion age only (absolute instant in the title); no
-    // constant "현재" label, no per-row reason line
+    // one meta line: TTL chip from the live `current` flag + insertion age
+    // (absolute instant in the title); no per-row reason line
     const retained = rows[0] as HTMLElement
-    expect(retained.querySelectorAll('*').length).toBe(5)
-    const age = retained.querySelector('.mem-store-meta span') as HTMLElement
+    expect(retained.querySelectorAll('*').length).toBe(6)
+    expect(retained.querySelector('.mem-ttl.current')?.textContent).toBe('유효')
+    const age = retained.querySelector('.mem-store-meta span[title]') as HTMLElement
     expect(age.textContent).toMatch(/^저장 /)
     expect(age.getAttribute('title')).toMatch(/^20\d\d/)
-    expect(retained.querySelector('.mem-store-meta')?.textContent).toBe(age.textContent)
-    expect((rows[1] as HTMLElement).querySelectorAll('*').length).toBe(6)
+    expect(retained.querySelector('.mem-store-meta')?.textContent).toBe(`유효${age.textContent}`)
+    expect((rows[1] as HTMLElement).querySelectorAll('*').length).toBe(7)
+    expect((rows[1] as HTMLElement).querySelector('.mem-ttl.current')?.textContent).toBe('유효')
+    expect((rows[2] as HTMLElement).querySelector('.mem-ttl.expired')?.textContent).toBe('만료')
 
     // the delta lives in the store list; each claim is rendered once
     const headers = [...container.querySelectorAll('.turn-sec h4')].map(h => h.textContent ?? '')
@@ -242,8 +245,9 @@ describe('MemoryInspector current snapshot', () => {
     expect(container.textContent?.split('이번 revision에 새로 들어온 기억').length).toBe(2)
 
     // whole-section element count for this fixture (measured): head 4 +
-    // filters 6 + list 1 + rows 6/7/7 (each row counts itself)
-    expect(section.querySelectorAll('*').length).toBe(31)
+    // filters 6 + list 1 + rows 7/8/8 (each row counts itself; +1 per row
+    // for the TTL chip)
+    expect(section.querySelectorAll('*').length).toBe(34)
   })
 
   it('filters the store by category chip and by the latest delta', async () => {

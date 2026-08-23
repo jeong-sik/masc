@@ -92,8 +92,11 @@ vi.mock('./tool-quality-panel', () => ({
 vi.mock('./gate-monitor', () => ({
   GateMonitor: () => html`<div data-testid="gate-monitor">GateMonitor</div>`,
 }))
-vi.mock('./keeper-reactivity-monitor', () => ({
-  KeeperReactivityMonitor: () => html`<div data-testid="keeper-reactivity-monitor">KeeperReactivityMonitor</div>`,
+vi.mock('./tool-monitor/tool-monitor-operations', () => ({
+  ToolMonitorOperationsBoard: () => html`<div data-testid="tool-monitor-operations-board">ToolMonitorOperationsBoard</div>`,
+}))
+vi.mock('./tool-monitor/tool-monitor-reactivity', () => ({
+  ToolMonitorReactivityBoard: () => html`<div data-testid="tool-monitor-reactivity-board">ToolMonitorReactivityBoard</div>`,
 }))
 
 // Import after mocks are in place.
@@ -127,16 +130,77 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByTestId('fleet-command-strip')).toBeTruthy()
     expect(screen.getByText('Keeper Fleet')).toBeTruthy()
     expect(screen.getByText('런타임 unknown')).toBeTruthy()
-    expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
-    expect(screen.getByText('Keeper tool readiness')).toBeTruthy()
-    expect(screen.getAllByText('m:board_post').length).toBeGreaterThan(0)
-    expect(screen.getByText('Full quality table')).toBeTruthy()
+    expect(screen.getByTestId('tool-monitor-operations-board')).toBeTruthy()
     expect(screen.queryByTestId('telemetry-unified')).toBeNull()
     expect(screen.queryByTestId('tool-quality-panel')).toBeNull()
     expect(screen.queryByTestId('fleet-telemetry-panel')).toBeNull()
     expect(screen.queryByTestId('gate-monitor')).toBeNull()
   })
 
+  it('renders runtime fleet and contract blocker drilldown on the operations board', () => {
+    storeMock.shellRuntimeResolution.value = {
+      status: 'ready',
+      warnings: [],
+      fleet_safety: {
+        keeper_fibers: 8,
+        paused_keepers: 3,
+        keeper_reaction_ledger: null,
+        paused_keepers_health: {
+          count: 3,
+          names: ['analyst', 'base', 'sangsu'],
+          durable_count: 3,
+          durable_names: ['analyst', 'base', 'sangsu'],
+          autoboot_enabled_count: 3,
+          autoboot_enabled_names: ['analyst', 'base', 'sangsu'],
+          read_error_count: 0,
+          read_errors: [],
+          details: [{
+            name: 'analyst',
+            autoboot_enabled: true,
+            pause_kind: 'operator_paused',
+            paused_elapsed_sec: 12,
+            last_blocker: null,
+            missing_pause_root_cause: false,
+          }],
+        },
+        keeper_fleet_safety: {
+          schema: 'masc.keeper_fleet_operator.v1',
+          status: 'degraded',
+          reason: null,
+          blocker: 'reaction_capacity_below_target',
+          blocked_keeper_count: 1,
+          blocked_keepers: [{
+            keeper_name: 'capacity-missing',
+            agent_name: null,
+            task_id: null,
+            task_status: null,
+            reason: 'phase_failing',
+            action: 'repair_failing_keeper',
+            operator_action_type: null,
+            operator_tool_name: null,
+            operator_action_confirm_required: null,
+          }],
+          running_keeper_fiber_count: 8,
+          executable_keeper_fiber_count: 13,
+          target_reaction_capacity_count: 17,
+          reaction_capacity_shortfall_count: 4,
+          operator_action_required: true,
+          reaction_capacity_below_target: true,
+        },
+      },
+    }
+
+    render(html`<${FleetHealthPanel} />`)
+
+    expect(screen.getByTestId('fleet-command-strip')).toBeTruthy()
+    expect(screen.getByText('런타임 가동')).toBeTruthy()
+    expect(screen.getByText('capacity 13/17')).toBeTruthy()
+    expect(screen.getByText('일시정지 3')).toBeTruthy()
+    // The blocker drilldown itself moved to ToolMonitorOperationsBoard; its
+    // rendering from the same fleet_safety sample is covered in
+    // tool-monitor/tool-monitor-operations.test.ts.
+    expect(screen.getByTestId('tool-monitor-operations-board')).toBeTruthy()
+  })
 
   it('marks the runtime health pill as warn when runtime.status is not ready', () => {
     storeMock.shellRuntimeResolution.value = {
@@ -152,6 +216,8 @@ describe('FleetHealthPanel', () => {
           status: 'ok',
           reason: null,
           blocker: null,
+          blocked_keeper_count: 0,
+          blocked_keepers: [],
           running_keeper_fiber_count: 8,
           executable_keeper_fiber_count: 8,
           target_reaction_capacity_count: 8,
@@ -246,11 +312,11 @@ describe('FleetHealthPanel', () => {
     expect(location.hash).not.toContain('view=')
   })
 
-  it('renders KeeperReactivityMonitor for view=keeper-health', () => {
+  it('renders the reactivity board for view=keeper-health', () => {
     setRoute('keeper-health')
     render(html`<${FleetHealthPanel} />`)
 
-    expect(screen.getByTestId('keeper-reactivity-monitor')).toBeTruthy()
+    expect(screen.getByTestId('tool-monitor-reactivity-board')).toBeTruthy()
     expect(screen.queryByTestId('telemetry-unified')).toBeNull()
     expect(screen.queryByTestId('tool-quality-panel')).toBeNull()
   })
@@ -259,7 +325,7 @@ describe('FleetHealthPanel', () => {
     setRoute('nonexistent')
     render(html`<${FleetHealthPanel} />`)
 
-    expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
+    expect(screen.getByTestId('tool-monitor-operations-board')).toBeTruthy()
   })
 
   it('keeps the default operations board visible when tool quality fetch fails', () => {
@@ -268,8 +334,7 @@ describe('FleetHealthPanel', () => {
 
     render(html`<${FleetHealthPanel} />`)
 
-    expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
-    expect(screen.getByText('500 Internal Server Error')).toBeTruthy()
+    expect(screen.getByTestId('tool-monitor-operations-board')).toBeTruthy()
     expect(screen.getAllByText('Tool Quality').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Gate').length).toBeGreaterThan(0)
   })
@@ -280,9 +345,7 @@ describe('FleetHealthPanel', () => {
 
     render(html`<${FleetHealthPanel} />`)
 
-    expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
-    expect(screen.getByText('refreshing')).toBeTruthy()
-    expect(screen.getByText('No tool observations.')).toBeTruthy()
+    expect(screen.getByTestId('tool-monitor-operations-board')).toBeTruthy()
     expect(screen.getAllByText('Tool Quality').length).toBeGreaterThan(0)
   })
 })

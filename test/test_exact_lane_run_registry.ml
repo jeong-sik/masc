@@ -326,24 +326,32 @@ let v5_registration_row =
 let v4_registration_row =
   {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
 
+(* Replay discards runs still marked running (run_registry_core.ml:405 --
+   exact-output fibers do not survive a restart), so a registration row on its
+   own leaves nothing to read back and an accepted row is indistinguishable
+   from a rejected one. Pairing each registration with this completion keeps
+   the run in the replayed state, where the two differ. *)
+let completion_row =
+  {|{"event":"complete","id":"exact-board-attention-pin","completion":{"outcome":"succeeded","elapsed_s":1.0,"output":{},"selected_slot":null}}|}
+
 let test_store_version_pins_the_registration_shape () =
-  let replay_single row =
+  let replay_actor row =
     let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
-    Fs_compat.save_file path (row ^ "\n");
+    Fs_compat.save_file path (row ^ "\n" ^ completion_row ^ "\n");
     let replayed = R.replay path in
-    let status =
+    let actor =
       R.get replayed ~run_id:"exact-board-attention-pin"
-      |> Option.map (fun run -> R.status_label run.R.status)
+      |> Option.map (fun run -> run.R.actor)
     in
     remove_if_exists path;
-    status
+    actor
   in
   check string "the row shape below belongs to this store version"
     "exact-lane-runs-v5.jsonl" R.storage_filename;
-  check (option string) "a v5 registration row replays as a running run"
-    (Some "running") (replay_single v5_registration_row);
+  check (option string) "a v5 registration row decodes and its actor reads back"
+    (Some "keeper-a") (replay_actor v5_registration_row);
   check (option string) "the field v4 carried and v5 removed is rejected, not ignored"
-    None (replay_single v4_registration_row)
+    None (replay_actor v4_registration_row)
 ;;
 
 (* The retained-run bound exists to serve the internal-agents monitor, which

@@ -635,7 +635,7 @@ let execute_cut =
 let cut_run_registries_cmd =
   let doc =
     "report run-registry rows the current decoders refuse; --execute rewrites \
-     the stores without them"
+     the stores without them (run with the server stopped)"
   in
   Cmd.v
     (Cmd.info "cut-run-registries" ~doc)

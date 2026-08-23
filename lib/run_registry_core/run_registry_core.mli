@@ -105,7 +105,11 @@ module Make (Payload : Payload) : sig
       without this the store keeps them and its retention bound stops
       applying. [execute:false] measures and reports without writing. A file
       whose last line is unterminated is never rewritten — [rewritten] is
-      [false] and the report still carries the counts. *)
+      [false] and the report still carries the counts.
+
+      Run this only while no server holds the store. The rewrite replaces the
+      inode, and a running server keeps appending through the writer it opened
+      before — those appends land in the unlinked file. *)
 end
 
 (** Single-owner lifecycle for a process-wide registry. The first installation

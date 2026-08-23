@@ -414,6 +414,7 @@ type async_msg =
       string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
       string * float * (Keeper_chat_history.page, string) result
+  | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
@@ -569,6 +570,27 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 (* Fetch the page before [before]. One at a time: msg_older_loading gates the
    caller, so scrolling fast cannot open a request per keypress and land the
    pages out of order. *)
+(* Load the verification queue. Its own fiber, like every other surface fetch:
+   the pane stays responsive and a slow server costs the list rather than the
+   keypress that asked for it. *)
+let launch_verification_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_verification ~host ~port ~limit:200 with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Verification_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -1648,16 +1670,9 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       (match state.connection_status with
        | Connected | Degraded -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
-    let wants_transport =
-      match state.view with
-      | Overview -> true
-      | Keepers _ | Board | Approvals | Planning | System_logs -> false
-    in
-    let wants_keeper_roster =
-      match state.view with
-      | Keepers _ -> true
-      | Overview | Board | Approvals | Planning | System_logs -> false
-    in
+    let needs = Masc_tui_types.surface_needs state.view in
+    let wants_transport = needs.needs_transport in
+    let wants_keeper_roster = needs.needs_keeper_roster in
     let run_refresh () =
       try
         enqueue_async mailbox
@@ -2406,6 +2421,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The transcript is left as it was and the session rows stay: a
              failed load must not be the reason the pane goes blank. *)
           state.msg_loaded_error <- Some detail)
+  | Verification_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.verification <- Some snapshot;
+          state.verification_error <- None
+      | Error detail ->
+          (* The previous list stays: a failed reload must not make the queue
+             look empty, which reads as "nothing is waiting". *)
+          state.verification_error <- Some detail)
   | Keeper_chat_older_loaded (keeper_name, before, result) ->
       state.msg_older_loading <- false;
       (* A page that arrived for a keeper the pane has since left, or after a
@@ -2755,6 +2779,8 @@ let main () =
                      launch_keeper_history_load state ~mailbox:async_messages
                        ~keeper_name
                  | None -> ())
+            | Verification ->
+                launch_verification_load state ~mailbox:async_messages
             | Overview | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -2767,7 +2793,13 @@ let main () =
                 state.pending_approval_action <- None;
                 state.view <- Board
             | Board -> state.view <- Planning
-            | Planning -> state.view <- System_logs
+            | Planning ->
+                (* Loaded on arrival: the queue is what the surface is, so
+                   showing it empty until a refresh would read as "nothing is
+                   waiting". *)
+                launch_verification_load state ~mailbox:async_messages;
+                state.view <- Verification
+            | Verification -> state.view <- System_logs
             | System_logs -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
@@ -2821,7 +2853,7 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Keepers Keeper_list | Approvals | System_logs -> ())
+            | Keepers Keeper_list | Approvals | Verification | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -2882,6 +2914,8 @@ let main () =
                       ~visible_rows:row_budget.attention_rows
                       state.overview_event_scroll
                 end
+            | Verification ->
+                state.verification_scroll <- state.verification_scroll + 1
             | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
@@ -2943,6 +2977,9 @@ let main () =
                       ~visible_rows:row_budget.attention_rows
                       state.overview_event_scroll
                 end
+            | Verification ->
+                if state.verification_scroll > 0 then
+                  state.verification_scroll <- state.verification_scroll - 1
             | System_logs ->
                 if state.system_logs_scroll > 0 then
                   state.system_logs_scroll <- state.system_logs_scroll - 1
@@ -2996,7 +3033,7 @@ let main () =
                       | None -> ())
                  | Planning_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | System_logs -> ())
+            | Approvals | Verification | System_logs -> ())
        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
@@ -3005,7 +3042,7 @@ let main () =
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
             | Overview | Keepers _ | Board | Approvals | Planning
-            | System_logs -> ())
+            | Verification | System_logs -> ())
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
@@ -3023,7 +3060,7 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | System_logs -> ())
+            | Board | Approvals | Planning | Verification | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from detail only. Opening detail is the act that names the
               target: on the roster the cursor moves by itself when a refresh
@@ -3042,7 +3079,7 @@ let main () =
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | System_logs -> ())
+            | Board | Approvals | Planning | Verification | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -3062,14 +3099,14 @@ let main () =
                       "No lifecycle action applies to this keeper yet"
                 | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | System_logs -> ())
+            | Board | Approvals | Planning | Verification | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | System_logs -> ())
+            | Board | Approvals | Planning | Verification | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -3087,7 +3124,7 @@ let main () =
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Planning | System_logs -> ())
+            | Approvals | Planning | Verification | System_logs -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -3119,6 +3156,11 @@ let main () =
                   start_board_post_refresh state ~host ~port ~post_id
                     ~mailbox:async_messages
               | Board_list | Board_compose -> ())
+         | Verification ->
+             (* The queue moves while an operator watches it -- a task settles,
+                another arrives. Refreshed on the same tick as the surfaces
+                above rather than only on a keypress. *)
+             launch_verification_load state ~mailbox:async_messages
          | Overview | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;

@@ -110,6 +110,30 @@ type system_log_snapshot = {
   sys_latest_seq : int;
 }
 
+(** One task waiting on a verdict, as the verification surface lists it. *)
+type verification_request = {
+  vr_request_id : string;
+  vr_task_id : string;
+  vr_task_title : string;
+  vr_kind : string;  (** What is being asked for, e.g. a review or a proof. *)
+  vr_summary : string;
+  vr_next_action : string option;
+      (** What would move it forward, when the server can say. *)
+  vr_submitted_by : string;
+  vr_created_at : string;
+  vr_required_artifacts : string list;
+  vr_submitted_evidence : string list;
+  vr_evidence_error : string option;
+      (** Why the submitted evidence could not be read, when it could not.
+          Kept apart from the list so an empty list means "none submitted"
+          rather than "none readable". *)
+}
+
+type verification_snapshot = {
+  vs_requests : verification_request list;
+  vs_total : int;  (** Requests the server holds, not the number returned. *)
+}
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
@@ -224,6 +248,9 @@ type transport_health = {
 
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
+
+val decode_verification_snapshot :
+  Yojson.Safe.t -> (verification_snapshot, string) result
 
 val decode_system_log_snapshot :
   Yojson.Safe.t -> (system_log_snapshot, string) result

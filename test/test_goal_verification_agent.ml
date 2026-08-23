@@ -446,6 +446,60 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
   | _ -> fail "the ledger must hold the proven verdict"
 ;;
 
+(* Regression: the Goal proof root holds every producer, and the per-producer
+   checkout scan stops on its reported-checkout budget (32) when walked across
+   all of them. That stop is an [Error], so building the surface failed and the
+   lane deferred without ever reaching the evaluator — every Goal review, on
+   any workspace with enough checkouts. Observed live on a 38-producer
+   workspace: "checkout budget exhausted (budget 32)", 0.85s, evaluator never
+   reached (2026-08-23).
+
+   This builds more checkouts than that budget and requires a verdict. *)
+let test_goal_proof_surface_survives_a_crowded_playground () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Goal beside many producers" in
+  let checkouts = 40 in
+  for index = 0 to checkouts - 1 do
+    let producer = Printf.sprintf "producer-%02d" index in
+    let root = ensure_producer_playground config producer in
+    let checkout = Filename.concat root "repo" in
+    (try Unix.mkdir checkout 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    try Unix.mkdir (Filename.concat checkout ".git") 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  done;
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let reached = ref false in
+  let layout_seen = ref [] in
+  let reviewer =
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_
+        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
+      (match lookup with
+       | AR.No_lookup_surface -> fail "the crowded root produced no lookup surface"
+       | AR.Lookup_tools { root_layout; _ } -> layout_seen := root_layout);
+      reached := true;
+      on_tool_result
+        ~input:
+          (`Assoc
+            [ "verdict", `String "REJECT"
+            ; "reason", `String "no measurement of the declared metric was found"
+            ])
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
+      Ok (Some (AR.Reject "no measurement of the declared metric was found"))
+  in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer
+    (fun () -> drain config);
+  check bool "the evaluator was reached rather than deferred" true !reached;
+  check bool "every producer is listed, none dropped by a cap" true
+    (List.length !layout_seen >= checkouts);
+  check string "the review produced a verdict" "executing"
+    (stored_phase config goal_id)
+;;
+
 (* (b) A refuted proof returns the goal to Executing; the reason is preserved
    in the ledger and in goal_events.jsonl. *)
 let test_refuted_proof_returns_to_executing () =
@@ -716,6 +770,8 @@ let () =
             test_goal_proof_reads_the_workspace_playground
         ; test_case "a refuted goal can request proof again and pass" `Quick
             test_refuted_goal_can_request_proof_again_and_pass
+        ; test_case "goal proof surface survives a crowded playground" `Quick
+            test_goal_proof_surface_survives_a_crowded_playground
         ; test_case "refuted proof returns to executing with reason" `Quick
             test_refuted_proof_returns_to_executing
         ] )

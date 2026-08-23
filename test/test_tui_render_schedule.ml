@@ -170,6 +170,7 @@ let overview_frame_rows ~has_cluster
   + allocation.attention_rows
   + allocation.task_error_rows
   + allocation.task_rows
+  + allocation.filler_rows
 
 let test_overview_rows_share_one_viewport_budget () =
   let max_data =
@@ -255,6 +256,58 @@ let board_read_frame_rows ~comment_count
   + (if comment_count > 0 then 2 else 0)
   + allocation.body_rows
   + allocation.comment_rows
+
+(* The frame is exactly as tall as the terminal, at every size and whatever
+   the data. Short of it, the surface stops partway down the screen and leaves
+   the footer stranded in the middle; over it, the terminal scrolls and the top
+   of the frame is lost. *)
+let test_overview_frame_always_fills_the_terminal () =
+  List.iter
+    (fun has_cluster ->
+       List.iter
+         (fun (attention_count, event_count, task_count, has_task_error) ->
+            for terminal_rows = 14 to 80 do
+              let allocation =
+                Schedule.allocate_overview ~terminal_rows ~has_cluster
+                  ~attention_count ~event_count ~task_count ~has_task_error
+              in
+              check int
+                (Printf.sprintf "rows %d cluster %b data %d/%d/%d/%b"
+                   terminal_rows has_cluster attention_count event_count
+                   task_count has_task_error)
+                terminal_rows
+                (overview_frame_rows ~has_cluster allocation)
+            done)
+         [ (0, 0, 0, false)
+         ; (0, 0, 0, true)
+         ; (6, 0, 5, false)
+         ; (0, 6, 5, false)
+         ; (40, 40, 40, true)
+         ; (1, 1, 1, false)
+         ])
+    [ true; false ]
+
+(* A long attention list must not take the whole viewport: the backlog is the
+   other half of what this surface answers. *)
+let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
+  let crowded =
+    Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
+      ~attention_count:80 ~event_count:0 ~task_count:20 ~has_task_error:false
+  in
+  check bool "tasks survive a long attention list" true (crowded.task_rows > 0);
+  check bool "attention still takes the larger share" true
+    (crowded.attention_rows > crowded.task_rows)
+
+(* Both blocks are bounded by their own item counts, so a tall terminal shows
+   everything there is and pads the rest rather than cropping at a constant. *)
+let test_overview_blocks_grow_to_their_item_counts () =
+  let roomy =
+    Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
+      ~attention_count:9 ~event_count:0 ~task_count:12 ~has_task_error:false
+  in
+  check int "every attention item is drawn" 9 roomy.attention_rows;
+  check int "every task is drawn" 12 roomy.task_rows;
+  check bool "the remainder becomes filler" true (roomy.filler_rows > 0)
 
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
@@ -529,6 +582,12 @@ let () =
             test_compact_viewport_uses_largest_fixed_chrome_budget
         ; test_case "overview rows share one viewport budget" `Quick
             test_overview_rows_share_one_viewport_budget
+        ; test_case "overview frame always fills the terminal" `Quick
+            test_overview_frame_always_fills_the_terminal
+        ; test_case "overview tasks keep a share of a tall viewport" `Quick
+            test_overview_task_block_keeps_a_share_of_a_tall_viewport
+        ; test_case "overview blocks grow to their item counts" `Quick
+            test_overview_blocks_grow_to_their_item_counts
         ; test_case "board read reserves comments and footer" `Quick
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick

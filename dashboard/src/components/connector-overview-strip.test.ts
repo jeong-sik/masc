@@ -19,6 +19,7 @@ import {
   formatOfflineConnectorLabel,
   deriveTileNotice,
 } from './connector-overview-strip'
+import { KNOWN_CONNECTOR_IDS, IN_PROCESS_CONNECTOR_IDS, isInProcessConnector } from './connector-constants'
 import type { GateConnectorInfo } from '../api/gate'
 
 const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
@@ -89,6 +90,7 @@ describe('ConnectorOverviewStrip', () => {
     render(
       html`<${ConnectorOverviewStrip}
         connectors=${[
+          mkConnector({ connector_id: 'imessage', available: true }),
           mkConnector({ connector_id: 'discord', available: true }),
           mkConnector({ connector_id: 'slack', available: true }),
         ]}
@@ -98,9 +100,12 @@ describe('ConnectorOverviewStrip', () => {
     )
     const startBtn = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
     const stopBtn = container.querySelector('[data-testid="bulk-action-stop"]') as HTMLButtonElement
-    // 2 of 4 are up → 2 down → Start All shows (2). 2 up → Stop All (2).
-    expect(startBtn.textContent).toContain('(2)')
-    expect(stopBtn.textContent).toContain('(2)')
+    // Two of the four connectors run in the server process and have no
+    // sidecar to count, so the bulk buttons see imessage and telegram only:
+    // imessage is up, telegram is absent. discord and slack are up and are
+    // still not in the Stop All total.
+    expect(startBtn.textContent).toContain('(1)')
+    expect(stopBtn.textContent).toContain('(1)')
   })
 
   it('Start All disabled when all sidecars are already up', () => {
@@ -393,25 +398,25 @@ describe('stripMemory pure helpers', () => {
 
 describe('tilePrimaryActionView (pure)', () => {
   it('sidecar down, not inflight → Start (emerald), not busy', () => {
-    expect(tilePrimaryActionView(false, false)).toEqual({
+    expect(tilePrimaryActionView(false, false, true)).toEqual({
       label: '▶ Start', tone: 'start', busy: false,
     })
   })
 
   it('sidecar down, inflight → 시작 중... (start tone, busy)', () => {
-    expect(tilePrimaryActionView(false, true)).toEqual({
+    expect(tilePrimaryActionView(false, true, true)).toEqual({
       label: '시작 중...', tone: 'start', busy: true,
     })
   })
 
   it('sidecar up, not inflight → Stop (rose), not busy', () => {
-    expect(tilePrimaryActionView(true, false)).toEqual({
+    expect(tilePrimaryActionView(true, false, true)).toEqual({
       label: '■ Stop', tone: 'stop', busy: false,
     })
   })
 
   it('sidecar up, inflight → 정지 중... (stop tone, busy)', () => {
-    expect(tilePrimaryActionView(true, true)).toEqual({
+    expect(tilePrimaryActionView(true, true, true)).toEqual({
       label: '정지 중...', tone: 'stop', busy: true,
     })
   })
@@ -433,12 +438,12 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
   it('renders a Start button (emerald) for a down sidecar', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'discord', available: false })]}
+        connectors=${[mkConnector({ connector_id: 'imessage', available: false })]}
         keeperCount=${0}
       />`,
       container,
     )
-    const btn = container.querySelector('[data-tile-primary-action="discord"]') as HTMLButtonElement
+    const btn = container.querySelector('[data-tile-primary-action="imessage"]') as HTMLButtonElement
     expect(btn).toBeTruthy()
     expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('start')
     expect(btn.textContent?.trim()).toBe('▶ Start')
@@ -448,12 +453,12 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
   it('renders a Stop button (bad) for an up sidecar', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'discord', available: true })]}
+        connectors=${[mkConnector({ connector_id: 'imessage', available: true })]}
         keeperCount=${0}
       />`,
       container,
     )
-    const btn = container.querySelector('[data-tile-primary-action="discord"]') as HTMLButtonElement
+    const btn = container.querySelector('[data-tile-primary-action="imessage"]') as HTMLButtonElement
     expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('stop')
     expect(btn.textContent?.trim()).toBe('■ Stop')
     expect(btn.className).toContain('var(--bad-light)')
@@ -462,19 +467,20 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
   it('aria-label names the connector + action (screen-reader parity)', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'slack', available: false })]}
+        connectors=${[mkConnector({ connector_id: 'telegram', available: false })]}
         keeperCount=${0}
       />`,
       container,
     )
-    const btn = container.querySelector('[data-tile-primary-action="slack"]')!
-    expect(btn.getAttribute('aria-label')).toBe('slack sidecar 시작')
+    const btn = container.querySelector('[data-tile-primary-action="telegram"]')!
+    expect(btn.getAttribute('aria-label')).toBe('telegram sidecar 시작')
   })
 
-  it('every known tile gets a primary action button (no missing rows)', () => {
-    // Regression guard: adding a 5th bridge must not leave three tiles
-    // with buttons and one tile without (asymmetric view that would
-    // be hard to spot visually).
+  it('every sidecar tile gets a primary action button, and no in-process tile does', () => {
+    // Adding a fifth bridge must not leave some sidecar tiles with buttons
+    // and others without. The in-process tiles are the deliberate absence:
+    // /api/v1/sidecar/{start,stop} answers 400 for them (#29513), so a
+    // button there spends the operator's click on a toast.
     render(
       html`<${ConnectorOverviewStrip}
         connectors=${[]}
@@ -482,7 +488,27 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
       />`,
       container,
     )
-    expect(container.querySelectorAll('[data-tile-primary-action]').length).toBeGreaterThanOrEqual(4)
+    const withButton = Array.from(
+      container.querySelectorAll('[data-tile-primary-action]'),
+    ).map(el => el.getAttribute('data-tile-primary-action'))
+    const expected = KNOWN_CONNECTOR_IDS.filter(id => !isInProcessConnector(id))
+    expect(withButton.sort()).toEqual([...expected].sort())
+    for (const id of IN_PROCESS_CONNECTOR_IDS) {
+      expect(container.querySelector(`[data-tile-primary-action="${id}"]`)).toBeNull()
+    }
+  })
+
+  it('an in-process tile keeps its process pill but it does not call the sidecar route', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: true })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const pill = container.querySelector('[data-rail-pill="process"]')
+    expect(pill).toBeTruthy()
+    expect(pill?.getAttribute('title')).toContain('따로 시작·정지하지 않습니다')
   })
 })
 

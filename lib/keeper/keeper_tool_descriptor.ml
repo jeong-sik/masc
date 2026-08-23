@@ -1440,81 +1440,6 @@ let artifact_read_output_schema =
       ]
 ;;
 
-(* Producer: Tool_agent_timeline.build_timeline. [detail] on an event and
-   the [retention] body are heterogeneous and stay undeclared. *)
-let agent_timeline_output_schema =
-  object_output_schema
-    ~properties:
-      [ "dashboard_surface", `Assoc [ "type", `String "string" ]
-      ; "source", `Assoc [ "type", `String "string" ]
-      ; "retention", `Assoc [ "type", `String "object" ]
-      ; "generated_at_iso", `Assoc [ "type", `String "string" ]
-      ; "agent", `Assoc [ "type", `String "string" ]
-      ; ( "period"
-        , object_output_schema
-            ~properties:
-              [ "from", `Assoc [ "type", `String "string" ]
-              ; "to", `Assoc [ "type", `String "string" ]
-              ]
-            ~required:[ "from"; "to" ] )
-      ; ( "events"
-        , `Assoc
-            [ "type", `String "array"
-            ; ( "items"
-              , `Assoc
-                  [ "type", `String "object"
-                  ; ( "properties"
-                    , `Assoc
-                        [ "ts", `Assoc [ "type", `String "string" ]
-                        ; "type", `Assoc [ "type", `String "string" ]
-                        ] )
-                  ; ( "required"
-                    , `List [ `String "ts"; `String "type" ] )
-                  ; "additionalProperties", `Bool true
-                  ] )
-            ] )
-      ; ( "summary"
-        , object_output_schema
-            ~properties:
-              [ "tasks_completed", `Assoc [ "type", `String "integer" ]
-              ; "tasks_claimed", `Assoc [ "type", `String "integer" ]
-              ; "messages_sent", `Assoc [ "type", `String "integer" ]
-              ; "tool_calls", `Assoc [ "type", `String "integer" ]
-              ; "chat_messages", `Assoc [ "type", `String "integer" ]
-              ; "turns_completed", `Assoc [ "type", `String "integer" ]
-              ; "total_input_tokens", `Assoc [ "type", `String "integer" ]
-              ; "total_output_tokens", `Assoc [ "type", `String "integer" ]
-              ; "total_cost_usd", `Assoc [ "type", `String "number" ]
-              ; ( "active_duration_minutes"
-                , `Assoc [ "type", `String "number" ] )
-              ; "total_events", `Assoc [ "type", `String "integer" ]
-              ]
-            ~required:
-              [ "tasks_completed"
-              ; "tasks_claimed"
-              ; "messages_sent"
-              ; "tool_calls"
-              ; "chat_messages"
-              ; "turns_completed"
-              ; "total_input_tokens"
-              ; "total_output_tokens"
-              ; "total_cost_usd"
-              ; "active_duration_minutes"
-              ; "total_events"
-              ] )
-      ]
-    ~required:
-      [ "dashboard_surface"
-      ; "source"
-      ; "retention"
-      ; "generated_at_iso"
-      ; "agent"
-      ; "period"
-      ; "events"
-      ; "summary"
-      ]
-;;
-
 (* Producer: Workspace_goals.handle_goal_list over Goal_store.goal_to_yojson
    and rollup_to_yojson, with the RFC-0387 verification ledger
    (Goal_verification.record_to_yojson) joined per goal as [verification].
@@ -1683,39 +1608,6 @@ let agent_fitness_output_schema =
             ] )
       ]
     ~required:[ "count"; "agents" ]
-;;
-
-(* Producer: Tool_agent.handle_agent_card. [agent] is object-or-null and
-   stays undeclared, so the object keeps [additionalProperties] open. *)
-let agent_card_output_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ "schema", `Assoc [ "type", `String "string" ]
-          ; "name", `Assoc [ "type", `String "string" ]
-          ; "description", `Assoc [ "type", `String "string" ]
-          ; "action", `Assoc [ "type", `String "string" ]
-          ; "requested_by", `Assoc [ "type", `String "string" ]
-          ; "base_path", `Assoc [ "type", `String "string" ]
-          ; "workspace_path", `Assoc [ "type", `String "string" ]
-          ; "agent_count", `Assoc [ "type", `String "integer" ]
-          ] )
-    ; ( "required"
-      , `List
-          (List.map
-             (fun name -> `String name)
-             [ "schema"
-             ; "name"
-             ; "description"
-             ; "action"
-             ; "requested_by"
-             ; "base_path"
-             ; "workspace_path"
-             ; "agent_count"
-             ]) )
-    ; "additionalProperties", `Bool true
-    ]
 ;;
 
 let masc_board_descriptor board_name =
@@ -2434,8 +2326,12 @@ let internal_descriptors : t list =
         ~ordinary_execution_mode:Concurrent
         "card" "masc_agent_card"
         ~readonly:true
-     |> with_eval_tags [ "agent_profile_lookup" ]
-     |> with_composable_output (Json_output { schema = agent_card_output_schema }))
+     (* No composable output: #29681 took this off the model surface, and a
+        composable schema only means "a Keeper plan may reference this node's
+        output" -- every reader of the field is in keeper_tool_plan*. A tool
+        the model cannot name is never a plan node, so the schema described a
+        reference nobody can write. *)
+     |> with_eval_tags [ "agent_profile_lookup" ])
   ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
        "fitness" "masc_agent_fitness"
        ~readonly:true
@@ -2515,9 +2411,9 @@ let internal_descriptors : t list =
   ; (masc_agent_timeline_descriptor ~keeper_model_projection:Operator_only
        ~ordinary_execution_mode:Concurrent
        "masc_agent_timeline"
-       "Read agent timeline events." ~readonly:true
-     |> with_composable_output
-          (Json_output { schema = agent_timeline_output_schema }))
+       (* No composable output, for the same reason as masc_agent_card above:
+          off the model surface since #29681, so no plan can name it. *)
+       "Read agent timeline events." ~readonly:true)
   (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions

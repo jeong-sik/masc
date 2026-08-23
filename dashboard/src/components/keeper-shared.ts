@@ -993,6 +993,7 @@ export function KeeperConversationPanel({
           variant="messenger"
           size="primary"
           groupToolCalls=${true}
+          showSourceBadge=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
           toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
@@ -1098,6 +1099,7 @@ export function KeeperConversationPanel({
             variant="messenger"
             size="default"
             groupToolCalls=${true}
+            showSourceBadge=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
             toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}

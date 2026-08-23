@@ -268,28 +268,10 @@ function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
         }
       }
       break
-    case 'dashboard':
-      return {
-        url: '#',
-        label: 'Dashboard',
-        icon: '💻',
-        title: compactKeyValues([
-          ['surface', 'dashboard'],
-          ['session_id', surface.session_id],
-        ]),
-      }
-    case 'agent':
-      // Names the surface, not the author. The agent surface used to carry
-      // only the viewed keeper's own traffic, so '(Self)' held; keeper
-      // broadcasts are now projected into every other keeper's transcript
-      // with the same surface, and there '(Self)' names the wrong keeper.
-      // The speaker chip beside this badge already identifies the author.
-      return {
-        url: '#',
-        label: 'Agent',
-        icon: '🤖',
-        title: 'surface=agent',
-      }
+    // dashboard / agent / broadcast / webhook rows carry no link or
+    // coordinates beyond what the origin badge (sourceBadgeInfo) already
+    // shows, so they render no meta chip — the chip lane is for surfaces
+    // with a destination (deep link) or an address to inspect.
     case 'gate':
       {
         const label = surface.label || 'connector'
@@ -460,20 +442,62 @@ function avatarMonogram(entry: KeeperConversationEntry): string {
   return label.slice(0, 2).toUpperCase()
 }
 
-// C2: badge non-obvious message provenance. The standalone's .src-badge marks
-// external CHANNELS (discord/slack/imessage) which the live keeper transport
-// does not have — its `source` is a *semantic* origin instead. So we badge the
-// origins that are easy to mistake for a plain user/assistant turn
-// (world-state injection, internal prompt, tool result, system) and leave the
-// two ordinary cases (direct_user / direct_assistant) unbadged.
-const SOURCE_BADGE: Partial<Record<KeeperConversationSource, { label: string; cls: string }>> = {
+// C2: badge message provenance (#29461). Two axes feed one badge slot:
+// 1. Semantic origins that are easy to mistake for a plain turn keep
+//    their badge (world-state injection, internal prompt, tool result,
+//    system) — they win because the surface says where a row travelled,
+//    not what it is.
+// 2. Every other row derives its badge from the typed origin the wire
+//    already carries: entry.surface.kind × the row's speaker fields.
+//    Dashboard rows are the operator's own input (live stores carry
+//    owner authority on every dashboard user row), agent rows name the
+//    sending keeper, broadcast rows mark workspace fleet fanout, and
+//    connector rows name the connector. No surface, no badge — origin
+//    is never guessed from content.
+interface SourceBadgeInfo {
+  label: string
+  cls: string
+  title?: string
+}
+const SEMANTIC_SOURCE_BADGE: Partial<Record<KeeperConversationSource, SourceBadgeInfo>> = {
   world_state_prompt: { label: '월드', cls: 'world' },
   internal_assistant: { label: '내부', cls: 'internal' },
   tool_result: { label: '도구', cls: 'tool' },
   system: { label: '시스템', cls: 'system' },
 }
-function sourceBadgeInfo(entry: KeeperConversationEntry): { label: string; cls: string } | null {
-  return SOURCE_BADGE[entry.source] ?? null
+function surfaceBadgeTitle(entry: KeeperConversationEntry): string {
+  return compactKeyValues([
+    ['surface', entry.surface?.kind],
+    ['speaker_name', entry.speakerName],
+    ['speaker_id', entry.speakerId],
+    ['speaker_authority', entry.speakerAuthority],
+    ['external_message_id', entry.externalMessageId],
+  ])
+}
+function sourceBadgeInfo(entry: KeeperConversationEntry): SourceBadgeInfo | null {
+  const semantic = SEMANTIC_SOURCE_BADGE[entry.source]
+  if (semantic) return semantic
+  const surface = entry.surface
+  if (!surface) return null
+  const title = surfaceBadgeTitle(entry)
+  switch (surface.kind) {
+    case 'dashboard':
+      return { label: '사람', cls: 'origin-dashboard', title }
+    case 'broadcast':
+      return { label: '브로드캐스트', cls: 'origin-broadcast', title }
+    case 'discord':
+      return { label: 'Discord', cls: 'origin-discord', title }
+    case 'slack':
+      return { label: 'Slack', cls: 'origin-slack', title }
+    case 'agent': {
+      const speaker = entry.speakerName?.trim() || entry.speakerId?.trim() || ''
+      return { label: speaker || 'keeper', cls: 'origin-agent', title }
+    }
+    case 'webhook':
+      return { label: surface.source?.trim() || 'Webhook', cls: 'origin-webhook', title }
+    case 'gate':
+      return { label: surface.label?.trim() || 'Gate', cls: 'origin-gate', title }
+  }
 }
 
 type StreamContractBadgeInfo = {
@@ -2790,7 +2814,10 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                       ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
                       : null}
                     ${sourceBadge
-                      ? html`<span class=${`kw-src-badge ${sourceBadge.cls}`}>${sourceBadge.label}</span>`
+                      ? html`<span
+                          class=${`kw-src-badge ${sourceBadge.cls}`}
+                          title=${sourceBadge.title || undefined}
+                        >${sourceBadge.label}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`

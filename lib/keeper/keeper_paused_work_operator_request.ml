@@ -56,8 +56,7 @@ let parse_resume = function
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
-    Ok (Resume_owner Resume.{ owner_nonce; operator_operation_id })
+    Ok (Resume_owner Resume.{ operator_operation_id })
   | _ -> Error "resume_owner request fields are not exact"
 ;;
 
@@ -78,13 +77,11 @@ let parse_cancel_pending = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* reason = nonblank "reason" reason in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
       (Cancel_pending
          Cancellation.
            { source
            ; source_incarnation
-           ; owner_nonce
            ; operator_operation_id
            ; reason
            })
@@ -111,7 +108,6 @@ let parse_transfer = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* to_keeper = nonblank "to_keeper" to_keeper in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     let* target_generation = nonnegative_int "target_generation" target_generation in
     Ok
       (Transfer_owner
@@ -153,7 +149,6 @@ let parse_source_terminal = function
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
       (Ack_source_terminal
          Source_terminal.

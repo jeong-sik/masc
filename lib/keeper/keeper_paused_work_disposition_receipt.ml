@@ -235,7 +235,6 @@ let transfer_owner_of_yojson = function
          { from_keeper
          ; to_keeper
          ; target_trace_id
-         ; target_generation
          ; source
          ; source_incarnation
          ; continuation_binding

@@ -33,7 +33,6 @@ type t =
   keeper_name : string;
   agent_name : string option;
   trace_id : string;
-  generation : int option;
   keeper_turn_id : int option;
   agent_core_turn_count : int option;
   logical_seq : int option;
@@ -48,7 +47,6 @@ type turn_context =
   manifest_keeper_name : string;
   manifest_agent_name : string option;
   manifest_trace_id : string;
-  manifest_generation : int option;
   manifest_keeper_turn_id : int option;
 }
 val retention_days : unit -> int option

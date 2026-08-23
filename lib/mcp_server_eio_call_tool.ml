@@ -335,7 +335,6 @@ let record_runtime_mcp_keeper_trajectory
       ?agent_name:ctx.agent_name
       ?trace_id:ctx.trace_id
       ?session_id:ctx.session_id
-      ?generation:ctx.generation
       ?keeper_turn_id:ctx.keeper_turn_id
       ?task_id:ctx.task_id
       ?sandbox_profile:ctx.sandbox_profile
@@ -423,7 +422,6 @@ let record_runtime_mcp_keeper_tool_trace
     ~execution_id
     ?trace_id:ctx.trace_id
     ?session_id:ctx.session_id
-    ?generation:ctx.generation
     ?turn:ctx.turn
     ?keeper_turn_id:ctx.keeper_turn_id
     ?task_id:ctx.task_id

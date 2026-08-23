@@ -248,9 +248,7 @@ let checkpoint_load_error_to_string = function
 ;;
 
 let checkpoint_ref_create_error_to_string = function
-  | Keeper_checkpoint_ref.Negative_generation value ->
-    Printf.sprintf "negative generation %d" value
-  | Negative_turn_count value ->
+  | Keeper_checkpoint_ref.Negative_turn_count value ->
     Printf.sprintf "negative turn count %d" value
   | Invalid_sha256 value ->
     Printf.sprintf "invalid checkpoint sha256 %S" value

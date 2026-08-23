@@ -147,7 +147,6 @@ let append_metrics_snapshot
          ~result
          ~latency_ms
          ~turn_cost
-         ~turn_generation:lifecycle.KEC.turn_generation
          ~channel
          ~checkpoint_bytes:lifecycle.checkpoint_bytes
          ~message_count:lifecycle.message_count

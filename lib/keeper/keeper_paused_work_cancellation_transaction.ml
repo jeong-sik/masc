@@ -82,7 +82,6 @@ let cancellation_of_pending_request (request : pending_request) :
   =
   { source = request.source
   ; source_incarnation = request.source_incarnation
-  ; owner_nonce = request.owner_nonce
   ; operator_operation_id = request.operator_operation_id
   ; reason = request.reason
   }
@@ -96,7 +95,7 @@ let replay_committed ~base_path ~keeper_name replay =
     |> Result.map_error (fun detail -> Queue_replay_failed detail)
 ;;
 
-let validate_durable_owner config ~keeper_name ~expected_generation =
+let validate_durable_owner config ~keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
   | Error detail -> Error (Durable_meta_read_failed detail)
   | Ok None -> Error Durable_meta_missing
@@ -110,47 +109,36 @@ let validate_durable_owner config ~keeper_name ~expected_generation =
      | Keeper_lifecycle_admission.Paused _ -> Ok meta)
 ;;
 
-let validate_registry_owner ~base_path ~keeper_name ~expected_generation =
+let validate_registry_owner ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Ok ()
   | Some entry
     when (not entry.meta.paused) || entry.phase <> Keeper_state_machine.Paused ->
     Error (Registry_owner_not_paused entry.phase)
-  | Some entry when entry.meta.runtime.nonce <> expected_generation ->
-    Error
-      (Registry_owner_nonce_changed
-         { expected = expected_generation
-         ; actual = entry.meta.runtime.nonce
-         })
   | Some _ -> Ok ()
 ;;
 
-let run config ~keeper_name ~owner_nonce commit =
+let run config ~keeper_name commit =
   let base_path = config.Workspace.base_path in
   match
     validate_durable_owner
       config
       ~keeper_name
-      ~expected_generation:owner_nonce
   with
   | Error _ as error -> error
   | Ok durable_meta ->
     (match
-       validate_registry_owner
-         ~base_path
-         ~keeper_name
-         ~expected_generation:owner_nonce
+       validate_registry_owner ~base_path ~keeper_name
      with
      | Error _ as error -> error
      | Ok () ->
-       commit durable_meta.runtime.nonce
+       commit ()
        |> Result.map_error (fun detail -> Queue_commit_failed detail))
 ;;
 
 let cancel_with_lifecycle
       config
       ~keeper_name
-      ~owner_nonce
       ~replay
       ~commit
   =
@@ -167,7 +155,6 @@ let cancel_with_lifecycle
       Keeper_lifecycle_reservation.acquire
         ~base_path
         ~keeper_name
-        ~expected_generation:owner_nonce
         ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
     with
     | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
@@ -181,7 +168,7 @@ let cancel_with_lifecycle
          | Ok None ->
            finish
              token
-             (run config ~keeper_name ~owner_nonce commit)
+             (run config ~keeper_name commit)
        with
        | exn ->
          let release = Keeper_lifecycle_reservation.release token in
@@ -221,7 +208,6 @@ let cancel_pending config ~keeper_name request =
   cancel_with_lifecycle
     config
     ~keeper_name
-    ~owner_nonce:request.owner_nonce
     ~replay:
       (Keeper_event_queue_state.accepted_pending_cancellation_replay cancellation)
     ~commit:(fun current_owner_nonce ->

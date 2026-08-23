@@ -262,7 +262,6 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
                    ; keeper_name = current.name
                    ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
                    ; trace_id = durable_meta.runtime.trace_id
-                   ; generation = durable_meta.runtime.nonce
                    ; actor = request.actor
                    ; cleanup_intent = request.cleanup_intent
                    ; turn_disposition
@@ -349,7 +348,6 @@ let prepare_dormant
                    ; keeper_name = durable_meta.name
                    ; lane_ownership = Dormant_meta
                    ; trace_id = durable_meta.runtime.trace_id
-                   ; generation = durable_meta.runtime.nonce
                    ; actor = request.actor
                    ; cleanup_intent = request.cleanup_intent
                    ; turn_disposition = No_inflight_turn

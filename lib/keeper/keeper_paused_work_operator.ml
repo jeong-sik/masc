@@ -258,10 +258,8 @@ let error_class = function
       { cause =
           ( Resume.Reservation_conflict _
           | Resume.Receipt_conflict _
-          | Resume.Durable_owner_nonce_changed _
           | Resume.Durable_owner_identity_changed
           | Resume.Durable_owner_not_paused
-          | Resume.Registry_owner_nonce_changed _
           | Resume.Registry_owner_identity_changed
           | Resume.Registry_owner_not_paused _ )
       ; _
@@ -271,9 +269,8 @@ let error_class = function
       (Cancellation.Failed
         { cause =
             ( Cancellation.Durable_owner_not_paused
-            | Cancellation.Durable_owner_nonce_changed _
             | Cancellation.Registry_owner_not_paused _
-            | Cancellation.Registry_owner_nonce_changed _ )
+            )
         ; _
         })
   | Transfer_rejected

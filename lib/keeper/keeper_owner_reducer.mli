@@ -58,7 +58,6 @@ type identity_handoff =
   ; agent_name : string
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
-  ; generation : int
   ; updated_at : string
   }
 
@@ -103,7 +102,6 @@ type meta_command =
   | Repair_trace_generation of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list
-      ; generation : int
       ; updated_at : string
       }
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
@@ -129,7 +127,6 @@ type meta_command =
       }
   | Record_compaction_commit of
       { trace_id : Keeper_id.Trace_id.t
-      ; generation : int
       ; commit_count : int
       ; at : float
       ; before_bytes : int

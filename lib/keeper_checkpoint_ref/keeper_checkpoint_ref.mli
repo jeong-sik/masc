@@ -6,7 +6,6 @@ type t = private
   }
 
 type create_error =
-  | Negative_generation of int
   | Negative_turn_count of int
   | Invalid_sha256 of string
 

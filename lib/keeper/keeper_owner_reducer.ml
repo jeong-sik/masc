@@ -611,7 +611,6 @@ let apply_existing (state : state) meta command =
       { meta.runtime with
         trace_id = handoff.trace_id
       ; trace_history = handoff.trace_history
-      ; nonce = handoff.generation
       }
     in
     Ok
@@ -628,7 +627,6 @@ let apply_existing (state : state) meta command =
       { meta.runtime with
         trace_id = repair.trace_id
       ; trace_history = repair.trace_history
-      ; nonce = repair.generation
       }
     in
     Ok (with_meta state { meta with runtime; updated_at = repair.updated_at })
@@ -660,11 +658,9 @@ let apply_existing (state : state) meta command =
     let runtime = { meta.runtime with last_blocker = blocker } in
     Ok (with_meta state { meta with runtime; updated_at })
   | Record_compaction_commit
-      { trace_id; generation; commit_count; at; before_bytes; after_bytes; updated_at }
+      { trace_id; commit_count; at; before_bytes; after_bytes; updated_at }
     ->
-    if
-      not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
-      || not (Int.equal meta.runtime.nonce generation)
+    if not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
     then Error Identity_mismatch
     else if commit_count < 0
     then Error (Invalid_delta "compaction commit count is negative")

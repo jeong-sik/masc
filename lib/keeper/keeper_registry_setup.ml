@@ -25,9 +25,8 @@ let registry_entry_validation_error_to_string = function
   | Healthy -> "registry entry is healthy"
   | Lifecycle_transaction_reserved owner ->
     Printf.sprintf
-      "registry mutation reserved by lifecycle transaction owner=%s expected_generation=%d"
+      "registry mutation reserved by lifecycle transaction owner=%s"
       owner.owner_id
-      owner.expected_generation
   | Meta_validation_failed { reason } ->
       Printf.sprintf "registry entry meta validation failed: %s" reason
   | Required_field_missing { field } ->

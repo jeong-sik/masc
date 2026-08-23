@@ -1,7 +1,6 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
   }
@@ -18,10 +17,6 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Source_queue_validation_failed of string
   | Committed_ack_failed of string
@@ -66,9 +61,8 @@ let failure_to_string = function
     "Ack_source_terminal receipt read failed: " ^ detail
   | Receipt_conflict receipt ->
     Printf.sprintf
-      "Ack_source_terminal operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
+      "Ack_source_terminal operation ID conflicts with keeper=%s requested_at=%.17g"
       receipt.keeper_name
-      receipt.expected_generation
       receipt.requested_at
   | Receipt_write_failed detail ->
     "Ack_source_terminal receipt write failed: " ^ detail
@@ -78,11 +72,6 @@ let failure_to_string = function
     "Ack_source_terminal durable Keeper metadata is missing"
   | Durable_owner_not_paused ->
     "Ack_source_terminal requires a paused Keeper"
-  | Durable_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Ack_source_terminal generation changed: expected %d, actual %d"
-      expected
-      actual
   | Durable_owner_identity_changed ->
     "Ack_source_terminal trace identity changed"
   | Source_queue_validation_failed detail ->
@@ -102,9 +91,7 @@ let error_to_string error =
 ;;
 
 let validate_request request =
-  if request.owner_nonce < 0
-  then Error "owner generation must not be negative"
-  else if Int64.compare request.source_incarnation 0L < 0
+  if Int64.compare request.source_incarnation 0L < 0
   then Error "source incarnation must not be negative"
   else if String.equal (String.trim request.source.post_id) ""
   then Error "source post id must not be empty"
@@ -170,7 +157,6 @@ let receipt_matches_request ~keeper_name request receipt =
   | Error _ -> false
   | Ok operation ->
     String.equal receipt.keeper_name keeper_name
-    && Int.equal receipt.expected_generation request.owner_nonce
     && String.equal receipt.operator_operation_id request.operator_operation_id
     && operation.source = request.source
     && Int64.equal operation.source_incarnation request.source_incarnation
@@ -190,7 +176,6 @@ let create_receipt config ~keeper_name request =
   Ok
     ({ keeper_name
      ; expected_trace_id = meta.runtime.trace_id
-     ; expected_generation = request.owner_nonce
      ; operator_operation_id = request.operator_operation_id
      ; requested_at = Time_compat.now ()
      ; operation =
@@ -205,7 +190,6 @@ let project_receipt config receipt =
   let source_terminal : Keeper_registry_event_queue.accepted_source_terminal =
     { source = operation.source
     ; source_incarnation = operation.source_incarnation
-    ; owner_nonce = receipt.Keeper_paused_work_disposition_receipt.expected_generation
     ; operator_operation_id = receipt.operator_operation_id
     ; source_receipt = operation.source_receipt
     }
@@ -228,14 +212,7 @@ let project_receipt config receipt =
   | None ->
     let* current = read_meta config receipt.keeper_name in
     let* () =
-      if not (Int.equal current.runtime.nonce receipt.expected_generation)
-      then
-        Error
-          (Durable_owner_nonce_changed
-             { expected = receipt.expected_generation
-             ; actual = current.runtime.nonce
-             })
-      else if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
+      if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
       then Error Durable_owner_identity_changed
       else Ok ()
     in

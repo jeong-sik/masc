@@ -538,7 +538,6 @@ let assemble_hooks
                   ~prompt_fingerprint:prompt_metrics.fingerprint
                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  ~generation
                   ~turn
                   ~keeper_turn_id
                   ?task_id:

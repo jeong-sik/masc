@@ -565,16 +565,6 @@ let cancel_pending_accepted
   | Ok None ->
     let* () = validate_accepted_cancellation cancellation in
     let* () =
-      if Int.equal current_owner_nonce cancellation.owner_nonce
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "accepted cancellation owner generation changed: expected %d, current %d"
-             cancellation.owner_nonce
-             current_owner_nonce)
-    in
-    let* () =
       validate_pending_selection
         ~selection:
           { source = cancellation.source
@@ -636,16 +626,6 @@ let transfer_pending_accepted
   | Ok (Some receipt) -> Ok (state, Transition_already_applied receipt)
   | Ok None ->
     let* () = validate_accepted_transfer transfer in
-    let* () =
-      if Int.equal current_owner_nonce transfer.owner_nonce
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "accepted transfer owner generation changed: expected %d, current %d"
-             transfer.owner_nonce
-             current_owner_nonce)
-    in
     let* () =
       validate_pending_selection
         ~selection:

@@ -333,7 +333,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("name", `String meta.name);
           ("agent_name", `String meta.agent_name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("generation", `Int meta.runtime.nonce);
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);

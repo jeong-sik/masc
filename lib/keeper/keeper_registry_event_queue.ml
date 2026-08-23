@@ -29,7 +29,6 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -455,10 +454,6 @@ type transfer_target_error =
       }
   | Transfer_target_metadata_read_failed of string
   | Transfer_target_metadata_absent
-  | Transfer_target_generation_changed of
-      { expected : int
-      ; actual : int
-      }
   | Transfer_target_trace_changed
 
 let transfer_target_error_to_string = function
@@ -470,11 +465,6 @@ let transfer_target_error_to_string = function
   | Transfer_target_metadata_read_failed detail ->
     "target Keeper metadata read failed: " ^ detail
   | Transfer_target_metadata_absent -> "target Keeper metadata is absent"
-  | Transfer_target_generation_changed { expected; actual } ->
-    Printf.sprintf
-      "target Keeper generation changed: expected=%d actual=%d"
-      expected
-      actual
   | Transfer_target_trace_changed -> "target Keeper trace identity changed"
 ;;
 
@@ -532,11 +522,6 @@ let project_accepted_transfer_durable_result
       match Keeper_meta_store.read_meta config name with
     | Error detail -> Error (Transfer_target_metadata_read_failed detail)
     | Ok None -> Error Transfer_target_metadata_absent
-    | Ok (Some meta)
-      when not (Int.equal meta.runtime.nonce transfer.target_generation) ->
-      Error
-        (Transfer_target_generation_changed
-           { expected = transfer.target_generation; actual = meta.runtime.nonce })
     | Ok (Some meta)
       when not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id) ->
       Error Transfer_target_trace_changed

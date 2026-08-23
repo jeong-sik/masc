@@ -91,9 +91,8 @@ let failure_to_string = function
   | Receipt_read_failed detail -> "Transfer_owner receipt read failed: " ^ detail
   | Receipt_conflict receipt ->
     Printf.sprintf
-      "Transfer_owner operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
+      "Transfer_owner operation ID conflicts with keeper=%s requested_at=%.17g"
       receipt.keeper_name
-      receipt.expected_generation
       receipt.requested_at
   | Receipt_write_failed detail -> "Transfer_owner receipt write failed: " ^ detail
   | Durable_meta_read_failed { keeper_name; detail } ->
@@ -188,13 +187,7 @@ let validate_source_owner request (meta : Keeper_meta_contract.keeper_meta) =
 ;;
 
 let validate_target_owner request (meta : Keeper_meta_contract.keeper_meta) =
-  if not (Int.equal meta.runtime.nonce request.target_generation)
-  then
-    Error
-      (Target_owner_nonce_changed
-         { expected = request.target_generation; actual = meta.runtime.nonce })
-  else
-    match
+  match
       Keeper_lifecycle_admission.state
         ~paused:meta.paused
         ~latched_reason:meta.latched_reason
@@ -371,10 +364,6 @@ let target_enqueue ?intake_token config receipt transfer =
     Ok Already_present
   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error (Committed_projection_failed { stage = Target_enqueue; detail })
-  | Keeper_registry_event_queue.Transfer_projection_target_unavailable
-      (Keeper_registry_event_queue.Transfer_target_generation_changed
-         { expected; actual }) ->
-    Error (Target_owner_nonce_changed { expected; actual })
   | Keeper_registry_event_queue.Transfer_projection_target_unavailable
       Keeper_registry_event_queue.Transfer_target_trace_changed ->
     Error Target_owner_identity_changed

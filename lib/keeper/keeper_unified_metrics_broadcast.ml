@@ -18,7 +18,6 @@ let broadcast_compaction
       (`Assoc
         [ "type", `String "keeper_compaction"
         ; "name", `String name
-        ; "generation", `Int recovery.turn_generation
         ; "outcome", `String "applied_checkpoint"
         ; "trigger", `String (Compaction_trigger.to_label recovery.trigger)
         ; "trigger_detail", Compaction_trigger.to_detail_json recovery.trigger

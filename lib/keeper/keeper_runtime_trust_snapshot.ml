@@ -14,7 +14,6 @@ module Snapshot_cache = struct
   type key =
     { base_path : string
     ; keeper_name : string
-    ; generation : int
     ; last_turn_ts : float
     ; approval_queue_revision : int
     }

@@ -142,13 +142,12 @@ let emit_turn_end_safely ~keeper_name () =
         keeper_name
         (Printexc.to_string e)
 
-let runtime_manifest_context ~keeper_name ~agent_name ~trace_id ~generation
+let runtime_manifest_context ~keeper_name ~agent_name ~trace_id
     ~keeper_turn_id : Keeper_runtime_manifest.turn_context =
   {
     manifest_keeper_name = keeper_name;
     manifest_agent_name = Some agent_name;
     manifest_trace_id = trace_id;
-    manifest_generation = Some generation;
     manifest_keeper_turn_id = Some keeper_turn_id;
   }
 

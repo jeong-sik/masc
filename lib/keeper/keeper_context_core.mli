@@ -150,7 +150,6 @@ end
 
 (** {1 AGENT_CORE checkpoint inspection} *)
 
-val checkpoint_generation : Agent_core.Checkpoint.t -> fallback:int -> int
 
 (** Project an AGENT_CORE checkpoint to a working context without rewriting its
     messages. *)

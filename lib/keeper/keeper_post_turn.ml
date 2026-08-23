@@ -85,20 +85,15 @@ let checkpoint_load_error_detail = function
 let checkpoint_identity_error_detail = function
   | Keeper_checkpoint_store.Session_id_invalid detail ->
     "invalid session id: " ^ detail
-  | Generation_missing -> "checkpoint generation is missing"
-  | Generation_not_integer -> "checkpoint generation is not an integer"
-  | Ref_create_failed (Keeper_checkpoint_ref.Negative_generation generation) ->
-    Printf.sprintf "negative checkpoint generation: %d" generation
-  | Ref_create_failed (Negative_turn_count turn_count) ->
+  | Ref_create_failed (Keeper_checkpoint_ref.Negative_turn_count turn_count) ->
     Printf.sprintf "negative checkpoint turn count: %d" turn_count
   | Ref_create_failed (Invalid_sha256 digest) ->
     Printf.sprintf "invalid checkpoint SHA-256: %s" digest
 
 let checkpoint_ref_detail (reference : Keeper_checkpoint_ref.t) =
   Printf.sprintf
-    "trace_id=%s generation=%d turn_count=%d sha256=%s"
+    "trace_id=%s turn_count=%d sha256=%s"
     (Keeper_id.Trace_id.to_string reference.trace_id)
-    reference.generation
     reference.turn_count
     reference.sha256
 
@@ -148,9 +143,8 @@ let compaction_recovery_error_to_string = function
     ^ Keeper_compact_policy.compaction_rejection_to_string reason
   | No_compaction { source; reason } ->
     Printf.sprintf
-      "no compaction for trace_id=%s generation=%d turn_count=%d sha256=%s: %s"
+      "no compaction for trace_id=%s turn_count=%d sha256=%s: %s"
       (Keeper_id.Trace_id.to_string source.trace_id)
-      source.generation
       source.turn_count
       source.sha256
       (Keeper_compaction_outcome.no_compaction_reason_to_string reason)

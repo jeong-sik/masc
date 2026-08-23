@@ -187,6 +187,13 @@ let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojso
       (Printf.sprintf "/api/v1/board/%s?format=flat"
          (percent_encode_path_segment post_id))
 
+(** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
+    for a screenful's worth of history rather than the whole ring. *)
+let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
+
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/planning"

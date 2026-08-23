@@ -1528,6 +1528,100 @@ let render_keeper_message (state : state) =
       ~rows ~cols buf
     end
 
+(* One colour per level so an operator scanning the column sees severity before
+   reading the text. A level this build does not name keeps its own text and
+   renders unstyled rather than borrowing another level's colour. *)
+let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
+  | System_debug -> Ansi.dim
+  | System_info -> Ansi.reset
+  | System_warn -> Ansi.yellow
+  | System_error -> Ansi.red
+  | System_level_unknown _ -> Ansi.reset
+
+let render_system_logs (state : state) =
+  let rows, cols = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let entries =
+    match state.system_logs with None -> [] | Some s -> s.sys_entries
+  in
+  let total_entries = List.length entries in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.system_logs with
+    | None ->
+        Printf.sprintf " MASC System Logs  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        (* [total] counts what the ring has seen, not what this page holds.
+           Showing both keeps "300 of 774273" from reading as "300 exist". *)
+        Printf.sprintf " MASC System Logs (%d of %d, seq %d)  %s  %s"
+          total_entries snapshot.sys_total snapshot.sys_latest_seq timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-8s %-5s %-16s %-12s %s" "Time" "Level" "Module" "Keeper"
+      "Message"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.system_logs_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.system_logs_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total_entries - content_height) in
+  let scroll = max 0 (min state.system_logs_scroll max_scroll) in
+  state.system_logs_scroll <- scroll;
+  if total_entries = 0 then begin
+    let empty =
+      match state.system_logs_error with
+      | Some _ -> "  (load failed; the count above is not a reading)"
+      | None -> "  (no entries)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt entries idx with
+      | None -> box_empty buf cols
+      | Some e ->
+          let keeper =
+            match e.sl_keeper with None -> "-" | Some name -> name
+          in
+          let line =
+            Printf.sprintf "  %-8s %-5s %-16s %-12s %s"
+              (Terminal_text.clock_timestamp e.sl_ts)
+              (Masc.Tui_decode.system_log_level_label e.sl_level)
+              (Terminal_text.single_line e.sl_module)
+              (Terminal_text.single_line keeper)
+              (Terminal_text.single_line e.sl_message)
+          in
+          box_line_styled buf cols ~style:(system_log_level_style e.sl_level) line
+    done;
+  if total_entries > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d entries, scroll %d]" total_entries scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_frame ~surface_key:"system-logs" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -1552,6 +1646,7 @@ let render_surface (state : state) =
            | Some goal -> render_planning_detail state goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
+  | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in

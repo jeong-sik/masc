@@ -326,47 +326,45 @@ let test_system_llm_retry_disposition_is_typed () =
          Alcotest.fail "non-retryable or unclassified deferral must await action")
     [ Some false; None ]
 
-(* The backlog scan is a level read: any unrelated submission re-scans every
-   awaiting Task. A settled key must survive that scan so the same review does
-   not re-run on identical input (measured: task-443, 45 attempts in 5h), and
-   must drop out the moment the producer moves — a new verification_id is a
-   different key, so it is never held back. *)
-let test_settled_reviews_survive_rescan_until_the_producer_moves () =
+(* One submission must review that submission. The backlog read stays whole —
+   the daemon still needs fresh task state — but the scope decides which awaiting
+   entries it acts on, so an unrelated submit no longer re-reviews every other
+   awaiting Task (task-443, 2026-08-23: 45 attempts in 5h on the same input). *)
+let test_scan_scope_limits_a_submission_to_its_own_verification () =
   let module For_testing = Masc.Completion_authority_agent.For_testing in
   let key task_id verification_id : For_testing.review_key =
     { task_id; verification_id }
   in
   let stuck = key "task-443" "vrf-1" in
-  let other = key "task-465" "vrf-9" in
-  let settled = [ stuck; other ] in
-  let names ks =
+  let fresh = key "task-465" "vrf-9" in
+  let entries = [ stuck, "producer-a"; fresh, "producer-b" ] in
+  let names selected =
     List.map
-      (fun (k : For_testing.review_key) -> k.task_id ^ "/" ^ k.verification_id)
-      ks
+      (fun ((k : For_testing.review_key), _) -> k.task_id ^ "/" ^ k.verification_id)
+      selected
   in
-  (* Still awaiting under the same verification_id: stays suppressed. *)
   Alcotest.(check (list string))
-    "an unchanged awaiting verification stays settled"
-    [ "task-443/vrf-1" ]
-    (names (For_testing.retain_settled ~awaiting:[ stuck ] settled));
-  (* Re-submitted: the new verification_id is a different key, so the old entry
-     is dropped and the fresh one is not in the settled list to begin with. *)
+    "a named target reviews only itself"
+    [ "task-465/vrf-9" ]
+    (names (For_testing.entries_in_scope ~scope:(For_testing.Targets [ fresh ]) entries));
   Alcotest.(check (list string))
-    "a re-submission is never suppressed"
+    "boot recovery still reads everything"
+    [ "task-443/vrf-1"; "task-465/vrf-9" ]
+    (names (For_testing.entries_in_scope ~scope:For_testing.Whole_backlog entries));
+  (* A re-submission carries a new verification_id, so it is a different key and
+     is admitted; the stale key matches nothing and drops out on its own. *)
+  Alcotest.(check (list string))
+    "a stale target admits nothing"
     []
     (names
-       (For_testing.retain_settled ~awaiting:[ key "task-443" "vrf-2" ] settled));
-  (* Task advanced out of AwaitingVerification, or left the backlog. *)
+       (For_testing.entries_in_scope
+          ~scope:(For_testing.Targets [ key "task-443" "vrf-0" ])
+          entries));
   Alcotest.(check (list string))
-    "an advanced task drops out"
+    "an empty target list reviews nothing"
     []
-    (names (For_testing.retain_settled ~awaiting:[] settled));
-  (* Suppression is per key, never per task: one stuck verification must not
-     hide a different task's pending review. *)
-  Alcotest.(check (list string))
-    "other tasks are unaffected"
-    [ "task-465/vrf-9" ]
-    (names (For_testing.retain_settled ~awaiting:[ other ] settled))
+    (names (For_testing.entries_in_scope ~scope:(For_testing.Targets []) entries))
+
 
 let test_system_llm_review_notes_are_metadata_only () =
   let request : V.verification_request =
@@ -2486,8 +2484,8 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM retry disposition is typed" `Quick
         test_system_llm_retry_disposition_is_typed;
-      Alcotest.test_case "settled reviews survive a backlog rescan" `Quick
-        test_settled_reviews_survive_rescan_until_the_producer_moves;
+      Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
+        test_scan_scope_limits_a_submission_to_its_own_verification;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick
         test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "unreadable evidence uses structured current contract" `Quick

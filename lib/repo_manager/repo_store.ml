@@ -199,7 +199,39 @@ let load_all ~base_path =
                   | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
                     Error (Printf.sprintf "repository.%s must be a table" id))
             in
-            loop [] fields
+            (* Two records naming the same upstream is not a preference the
+               loader can resolve: they clone to different directory names, so
+               a keeper reaching one by id and another by path basename ends up
+               in different checkouts of the same repository. That is what
+               produced the cwd_not_directory failures in #21837. Rejecting at
+               load makes the operator collapse them; the [aliases] field is
+               not the answer, since routing an alias would hide the duplicate
+               instead of removing it. *)
+            let reject_duplicate_upstream repos =
+              let seen = Hashtbl.create 16 in
+              let rec check = function
+                | [] -> Ok repos
+                | (repo : Repo_manager_types.repository) :: rest ->
+                  (match Agent_observation.canonical_url_of_remote repo.url with
+                   | None -> check rest
+                   | Some canonical ->
+                     (match Hashtbl.find_opt seen canonical with
+                      | Some earlier ->
+                        Error
+                          (Printf.sprintf
+                             "repositories.toml: repository.%s and repository.%s both \
+                              point at %s. One upstream admits one record; merge them \
+                              and reprovision the checkouts to a single directory name."
+                             earlier
+                             repo.id
+                             canonical)
+                      | None ->
+                        Hashtbl.add seen canonical repo.id;
+                        check rest))
+              in
+              check repos
+            in
+            Result.bind (loop [] fields) reject_duplicate_upstream
             | Some (Otoml.TomlString _ | Otoml.TomlInteger _
                    | Otoml.TomlFloat _ | Otoml.TomlBoolean _
                    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _

@@ -15,6 +15,7 @@
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries
+  masc.agent_observation
   masc.config
   masc.config_dir_resolver
   masc.fs_compat

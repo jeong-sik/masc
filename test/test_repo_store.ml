@@ -41,6 +41,47 @@ let sample_repo id =
     updated_at = Int64.of_int 1700000100;
   }
 
+(* Two records for one upstream clone to two directory names, so a keeper
+   reaching the repository by id lands in a different checkout than one
+   reaching it by path basename. That is what produced the cwd_not_directory
+   failures in #21837, and the [aliases] field cannot fix it — routing an alias
+   hides the duplicate instead of removing it. *)
+let test_load_all_rejects_two_records_for_one_upstream () =
+  with_temp_base_path (fun base_path ->
+    let first = { (sample_repo "masc") with url = "https://github.com/o/r" } in
+    let second = { (sample_repo "masc-mcp") with url = "git@github.com:o/r.git" } in
+    match Repo_store.save_all ~base_path [ first; second ] with
+    | Error msg -> Alcotest.failf "save_all failed: %s" msg
+    | Ok () ->
+      (match Repo_store.load_all ~base_path with
+       | Ok repos ->
+         Alcotest.failf
+           "two records for one upstream loaded as %d repositories"
+           (List.length repos)
+       | Error msg ->
+         Alcotest.(check bool)
+           "the error names both records"
+           true
+           (let has needle =
+              let n = String.length needle and h = String.length msg in
+              let rec scan i = i + n <= h && (String.sub msg i n = needle || scan (i + 1)) in
+              scan 0
+            in
+            has "repository.masc" && has "repository.masc-mcp")))
+;;
+
+let test_load_all_accepts_distinct_upstreams () =
+  with_temp_base_path (fun base_path ->
+    let first = { (sample_repo "alpha") with url = "https://github.com/o/alpha" } in
+    let second = { (sample_repo "beta") with url = "https://github.com/o/beta" } in
+    match Repo_store.save_all ~base_path [ first; second ] with
+    | Error msg -> Alcotest.failf "save_all failed: %s" msg
+    | Ok () ->
+      (match Repo_store.load_all ~base_path with
+       | Ok repos -> Alcotest.(check int) "both load" 2 (List.length repos)
+       | Error msg -> Alcotest.failf "distinct upstreams rejected: %s" msg))
+;;
+
 let write_file path content =
   let oc = open_out path in
   Fun.protect
@@ -948,5 +989,12 @@ let () =
           Alcotest.test_case "path_prefix at repo root" `Quick test_find_repo_by_path_prefix_root;
           Alcotest.test_case "catalog errors are preserved" `Quick
             test_lookup_preserves_catalog_error;
+        ] );
+      ( "upstream identity",
+        [
+          Alcotest.test_case "two records for one upstream are rejected" `Quick
+            test_load_all_rejects_two_records_for_one_upstream;
+          Alcotest.test_case "distinct upstreams both load" `Quick
+            test_load_all_accepts_distinct_upstreams;
         ] );
     ]

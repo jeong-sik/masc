@@ -1,3 +1,5 @@
+module Shell_gate = Masc_exec_command_gate.Shell_command_gate
+
 (* Where a stage's standard streams attach. Reading and writing admit
    different shapes -- a source cannot be truncated, a sink cannot be read --
    so they are separate types. One shared type would have to carry a field
@@ -76,6 +78,8 @@ type validation_error =
     }
   | Script_unreadable of Masc_exec.Parsed.reason_aborted
   | Script_outside_the_subset of Masc_exec.Parsed.reason_too_complex
+  | Script_nested_pipeline
+  | Script_rejected_by_the_gate of string
   | Redirect_fd_unknown of {
       fd : int;
       target : int;
@@ -441,16 +445,20 @@ let source_of_fields ~path fields =
       (String.concat "/" (List.filter named program_fields))
   | true, false ->
     let* script = optional_string ~path fields "script" in
-    let script = Option.value script ~default:"" in
-    if String.trim script = ""
-    then result_errorf "%s.script is empty" path
-    else if named "then"
-    then
-      result_errorf
-        "%s.then belongs to the staged form; a script writes && and || \
-         itself"
-        path
-    else Ok (Script script)
+    (* [named "script"] is what put us in this arm, so the field is present;
+       a default here would turn "not a string" into an empty script. *)
+    (match script with
+     | None -> result_errorf "%s.script must be a string" path
+     | Some script ->
+       if String.trim script = ""
+       then result_errorf "%s.script is empty" path
+       else if named "then"
+       then
+         result_errorf
+           "%s.then belongs to the staged form; a script writes && and || \
+            itself"
+           path
+       else Ok (Script script))
   | false, _ ->
     let* program = program_of_fields ~path fields in
     let* next = optional_next ~path fields in
@@ -754,17 +762,31 @@ let rec stamp_context ~sandbox ~cwd ~env (ir : Masc_exec.Shell_ir.t) =
       }
 ;;
 
+(* Through the gate, not around it. [Bash.parse_string] ownership sits inside
+   the command-gate library on purpose -- its own interface says so, and a
+   ratchet counts the caller files -- so the shell form crosses the same
+   boundary a shell frontend would. [gate_raw] has carried this entrypoint,
+   with tests, and had no production caller until now. *)
 let script_to_shell_ir ~sandbox ~cwd ~env script =
-  match Masc_exec_bash_parser.Bash.parse_string script with
-  | Masc_exec.Parsed.Parsed ir -> Ok (stamp_context ~sandbox ~cwd ~env ir)
-  | Masc_exec.Parsed.Parse_error { token; expected; _ } ->
-    Error (Script_not_a_command_line { token; expected })
-  | Masc_exec.Parsed.Parse_aborted reason -> Error (Script_unreadable reason)
+  let gate_sandbox = { Shell_gate.target = sandbox } in
+  let syntax_policy =
+    { Shell_gate.redirect_allowed = true; allow_pipes = true }
+  in
+  match Shell_gate.gate_raw ~text:script ~syntax_policy ~sandbox:gate_sandbox () with
+  | Shell_gate.Allow { ast; _ } -> Ok (stamp_context ~sandbox ~cwd ~env ast)
+  | Shell_gate.Reject { diagnostic; _ } ->
+    Error (Script_rejected_by_the_gate diagnostic)
+  | Shell_gate.Cannot_parse { reason = Shell_gate.Parse_error } ->
+    Error (Script_not_a_command_line { token = ""; expected = [] })
+  | Shell_gate.Cannot_parse { reason = Shell_gate.Parse_aborted reason } ->
+    Error (Script_unreadable reason)
   (* Carried, not flattened: [reason_too_complex] is the value the corpus tap
      counts to decide which construct the subset takes next, and a script
      hidden inside [argv:["bash";"-c";...]] is counted as nothing at all. *)
-  | Masc_exec.Parsed.Too_complex reason ->
+  | Shell_gate.Too_complex { reason = Shell_gate.Unsupported_construct reason } ->
     Error (Script_outside_the_subset reason)
+  | Shell_gate.Too_complex { reason = Shell_gate.Unsupported_nested_pipeline } ->
+    Error (Script_nested_pipeline)
 ;;
 
 let to_shell_ir_unvalidated
@@ -911,4 +933,11 @@ let pp_validation_error ppf = function
        | `Background -> "a background job"
        | `Redirect -> "a redirection"
        | `Unknown_construct name -> name)
+  | Script_nested_pipeline ->
+    Format.fprintf
+      ppf
+      "script nests a pipeline inside a pipeline; write the stages in one \
+       pipeline instead."
+  | Script_rejected_by_the_gate diagnostic ->
+    Format.fprintf ppf "script was refused: %s" diagnostic
 ;;

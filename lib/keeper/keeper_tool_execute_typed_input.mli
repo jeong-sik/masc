@@ -131,6 +131,8 @@ type validation_error =
     }
   | Script_unreadable of Masc_exec.Parsed.reason_aborted
   | Script_outside_the_subset of Masc_exec.Parsed.reason_too_complex
+  | Script_nested_pipeline
+  | Script_rejected_by_the_gate of string
   | Redirect_fd_unknown of {
       fd : int;
       target : int;

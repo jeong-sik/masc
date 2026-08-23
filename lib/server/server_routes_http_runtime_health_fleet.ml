@@ -152,7 +152,6 @@ let keeper_board_event_collection_health_json () =
       ; "status_reasons", `List []
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
-      ; "failed_keeper_count", `Int 0
       ; "failure_count", `Int 0
       ; "failures", `List []
       ]

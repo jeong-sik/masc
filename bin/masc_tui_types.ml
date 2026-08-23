@@ -386,12 +386,20 @@ type state = {
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
-  (* The new-post draft and its send arm. The arm is the operator's explicit
+  (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
-     send-or-discard and no other key can send. *)
+     send-or-discard and no other key can send. [board_compose_reply_to]
+     names what a sent draft answers -- [None] publishes a new post,
+     [Some post_id] adds a comment to that post -- so one pane covers both
+     writes and the payload alone decides which. *)
   mutable board_draft: Buffer.t;
   mutable board_compose_armed: bool;
+  mutable board_compose_reply_to: string option;
   mutable board_post_error: string option;
+  (* A vote armed for a second keypress: which post, and up or down. The
+     cursor can move between the two presses, so the post id is captured at
+     arm time and a press on a different row re-arms for that row. *)
+  mutable board_vote_armed: (string * bool) option;
   mutable planning: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
@@ -559,7 +567,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   board_mode = Board_list;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
+  board_compose_reply_to = None;
   board_post_error = None;
+  board_vote_armed = None;
   planning = None;
   planning_error = None;
   planning_cursor = 0;

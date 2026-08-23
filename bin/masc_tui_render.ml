@@ -797,24 +797,32 @@ let board_kind_mark = function
   | None -> " "
 ;;
 
-(** Render the Board surface (list view). *)
-(** The new-post draft. The commit-message convention is stated on screen
-    rather than assumed: first line is the title, the rest is the body. A
-    draft taller than the viewport shows its tail, where the caret is -- the
-    operator is always writing at the bottom. *)
+(** The draft pane. For a new post the commit-message convention is stated
+    on screen rather than assumed: first line is the title, the rest is the
+    body. A reply sends the whole draft as one comment, so its hint drops
+    the title convention. A draft taller than the viewport shows its tail,
+    where the caret is -- the operator is always writing at the bottom. *)
 let render_board_compose (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  let header = Printf.sprintf " MASC Board  %s[new post]%s  %s"
-    Ansi.cyan Ansi.reset
+  let kind_line =
+    match state.board_compose_reply_to with
+    | Some post_id ->
+        Printf.sprintf "  comment on %s  Enter: new line"
+          (fit_width (Terminal_text.single_line post_id) 16)
+    | None -> "  first line: title   rest: body   Enter: new line"
+  in
+  let header = Printf.sprintf " MASC Board  %s[%s]%s  %s"
+    Ansi.cyan
+    (match state.board_compose_reply_to with
+     | Some _ -> "reply" | None -> "new post")
+    Ansi.reset
     (connection_badge state.connection_status)
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  box_line buf cols
-    (Ansi.dim ^ "  first line: title   rest: body   Enter: new line"
-    ^ Ansi.reset);
+  box_line buf cols (Ansi.dim ^ kind_line ^ Ansi.reset);
   (match state.board_post_error with
    | Some err ->
        box_line buf cols
@@ -937,7 +945,7 @@ let render_board_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  r:refresh  Tab:next  | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
@@ -1044,7 +1052,7 @@ let render_board_read (state : state) (list_post : board_post) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
   finish_surface state ~surface_key:"board-read" ~rows:terminal_rows

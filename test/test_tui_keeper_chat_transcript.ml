@@ -3,7 +3,15 @@ open Alcotest
 module Live = Masc_tui_keeper_chat_live
 module Transcript = Masc_tui_keeper_chat_transcript
 
-let fresh () = Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-1"
+(* A stated instant rather than the wall clock: the progress row carries the
+   turn age, and a test that read the real clock could not name it. *)
+let origin = 1_000_000.
+
+let fresh () =
+  Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-1"
+    ~started_at:origin
+
+let rows ?(now = origin) t = Transcript.status_rows ~now t
 
 let feed t deltas = List.iter (Transcript.apply t) deltas
 
@@ -182,14 +190,35 @@ let test_control_bytes_never_reach_the_pane () =
   check bool "no escape survives in a tool row" false
     (List.exists has_escape (Transcript.tool_rows t));
   check bool "no escape survives in a status row" false
-    (List.exists (fun (_, text) -> has_escape text) (Transcript.status_rows t))
+    (List.exists (fun (_, text) -> has_escape text) (rows t))
+
+let test_progress_row_carries_the_turn_age () =
+  let t = fresh () in
+  (* Aged before RUN_STARTED too: a request that never reaches the run is the
+     shape that hid a 63-minute hang (masc #29229). *)
+  (match rows ~now:(origin +. 12.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check bool "a turn that has not started yet still reports its age" true
+         (contains ~needle:"12s" text)
+   | got -> failf "expected a progress row, got %d rows" (List.length got));
+  feed t [ Live.Run_started ];
+  (match rows ~now:(origin +. 90.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check bool "past a minute the age reads as minutes and seconds" true
+         (contains ~needle:"1m30s" text)
+   | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (* A clock that moved backwards says nothing rather than a negative age. *)
+  match rows ~now:(origin -. 5.) t with
+  | (Transcript.Progress, text) :: _ ->
+      check string "a backwards clock drops the age" "working" text
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
 
 (* The prompt. It is the one row an operator has to act on, so what matters is
    that it appears, that it says how to answer, and that it goes away on every
    path -- a prompt left up asks again for a call already decided. *)
 
 let approval_rows t =
-  Transcript.status_rows t
+  rows t
   |> List.filter_map (fun (kind, text) ->
          if kind = Transcript.Attention then Some text else None)
 
@@ -223,7 +252,7 @@ let test_a_held_turn_does_not_say_it_is_working () =
     [ Live.Run_started
     ; requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
     ];
-  match Transcript.status_rows t with
+  match rows t with
   | (Transcript.Progress, text) :: _ ->
       (* "working" would read as a slow tool rather than a question waiting on
          screen for someone. *)
@@ -306,18 +335,18 @@ let test_status_rows_grow_only_with_what_they_report () =
   let t = fresh () in
   check (list string) "a turn in flight reports how it is going and nothing else"
     [ "progress" ]
-    (Transcript.status_rows t |> List.map (fun (kind, _) -> kind_to_string kind));
+    (rows t |> List.map (fun (kind, _) -> kind_to_string kind));
   Transcript.note_interrupt t (Transcript.Signal_sent { turn_id = None });
   check int "an interrupt adds one row" 2
-    (List.length (Transcript.status_rows t));
+    (List.length (rows t));
   Transcript.apply t (Live.Undecodable "invalid JSON: x");
   check int "an unreadable line adds one more" 3
-    (List.length (Transcript.status_rows t))
+    (List.length (rows t))
 
 let test_progress_row_reports_a_context_checkpoint () =
   let t = fresh () in
   feed t [ Live.Run_started; Live.Checkpoint ];
-  match Transcript.status_rows t with
+  match rows t with
   | (Transcript.Progress, text) :: _ ->
       (* A turn that carried on past a context limit looks the same as a stall
          from the outside, so the row has to distinguish them. *)
@@ -328,12 +357,16 @@ let test_progress_row_reports_a_context_checkpoint () =
 let test_progress_row_counts_the_tool_calls () =
   let t = fresh () in
   feed t [ Live.Run_started ];
-  (match Transcript.status_rows t with
+  (match rows t with
    | (Transcript.Progress, text) :: _ ->
-       check string "a turn with no calls just says it is working" "working" text
+       (* Its own concern only. The row also carries the turn age, and
+          matching the whole string here would tie tool-call counting to
+          the age format. *)
+       check bool "a turn with no calls does not mention them" false
+         (contains ~needle:"tool call" text)
    | rows -> failf "expected a progress row, got %d rows" (List.length rows));
   feed t read_file_call;
-  match Transcript.status_rows t with
+  match rows t with
   | (Transcript.Progress, text) :: _ ->
       check bool "once it calls tools the row counts them" true
         (contains ~needle:"1 tool call" text)
@@ -343,7 +376,7 @@ let test_interrupt_row_does_not_claim_the_turn_stopped () =
   let t = fresh () in
   Transcript.note_interrupt t (Transcript.Signal_sent { turn_id = Some 12 });
   match
-    Transcript.status_rows t
+    rows t
     |> List.filter (fun (kind, _) -> kind = Transcript.Attention)
   with
   | [ (_, text) ] ->
@@ -363,7 +396,7 @@ let test_a_declined_interrupt_carries_the_reason () =
   Transcript.note_interrupt t
     (Transcript.Signal_declined "no_in_flight_turn");
   match
-    Transcript.status_rows t
+    rows t
     |> List.filter (fun (kind, _) -> kind = Transcript.Attention)
   with
   | [ (_, text) ] ->
@@ -443,6 +476,8 @@ let () =
             test_a_declined_interrupt_carries_the_reason
         ; test_case "tool rows mark how far each call got" `Quick
             test_tool_rows_mark_how_far_each_call_got
+        ; test_case "the progress row carries the turn age" `Quick
+            test_progress_row_carries_the_turn_age
         ] )
     ; ( "phase"
       , [ test_case "failure and finish are distinct" `Quick

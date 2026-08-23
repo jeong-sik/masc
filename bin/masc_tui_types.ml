@@ -668,7 +668,13 @@ let keeper_message_status_rows (state : state) =
   + (match state.msg_live with
      | None -> 0
      | Some live ->
-         List.length (Masc_tui_keeper_chat_transcript.status_rows live))
+         (* Same call the drawing makes, so the budget cannot count a
+            different number of rows than the pane draws. The age in the
+            progress row changes the text, never the row count, so the
+            two clock reads cannot disagree on the number. *)
+         List.length
+           (Masc_tui_keeper_chat_transcript.status_rows
+              ~now:(Unix.gettimeofday ()) live))
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_scroll > 0 then 1 else 0)

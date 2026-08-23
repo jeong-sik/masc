@@ -124,15 +124,34 @@ let read_key ?(timeout = 0.1) reader () : string option =
       match take_input_byte reader ~timeout with
       | None -> None
       | Some '\027' -> (
-          (* Escape sequence: try to read [ and then the code. *)
+          (* CSI: parameter bytes, then one final byte in 0x40-0x7E. Reading to
+             the final byte is what keeps a parameterised key from leaving its
+             tail in the stream -- Page Up is ESC [ 5 ~, and stopping at the 5
+             left the ~ to be typed as text. *)
           match take_input_byte reader ~timeout:0.05 with
-          | Some '[' -> (
-              match take_input_byte reader ~timeout:0.05 with
-              | Some 'A' -> Some "up"
-              | Some 'B' -> Some "down"
-              | Some 'Z' -> Some "shift-tab"
-              | Some _ -> Some "unknown-esc"
-              | None -> Some "esc")
+          | Some '[' ->
+              let parameters = Buffer.create 4 in
+              let rec read_csi () =
+                match take_input_byte reader ~timeout:0.05 with
+                | None -> None
+                | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E
+                  -> Some (Buffer.contents parameters, byte)
+                | Some byte ->
+                    Buffer.add_char parameters byte;
+                    if Buffer.length parameters > 16 then None else read_csi ()
+              in
+              (match read_csi () with
+               | None -> Some "esc"
+               | Some ("", 'A') -> Some "up"
+               | Some ("", 'B') -> Some "down"
+               | Some ("", 'H') -> Some "home"
+               | Some ("", 'F') -> Some "end"
+               | Some ("", 'Z') -> Some "shift-tab"
+               | Some ("1", '~') -> Some "home"
+               | Some ("4", '~') -> Some "end"
+               | Some ("5", '~') -> Some "pageup"
+               | Some ("6", '~') -> Some "pagedown"
+               | Some (_, _) -> Some "unknown-esc")
           | Some _ | None -> Some "esc")
       | Some byte -> (
           match Masc_tui_message_layout.utf8_scalar_byte_length byte with
@@ -221,6 +240,14 @@ let consume_dispatched_message_draft state request =
 
 (** Handle local editing keys for message mode. Network submission is injected
     so the input path never owns a blocking HTTP effect. *)
+(* One page of the transcript. Measured from the terminal rather than fixed,
+   so the jump is a screenful on every window; a page smaller than the pane
+   would leave rows the reader has to catch with the arrow keys anyway. *)
+let keeper_message_page_rows state =
+  let rows, _cols = get_terminal_size () in
+  let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
+  max 1 (rows - chrome - keeper_message_status_rows state)
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(retry_message : unit -> unit) (key : string) : bool =
   match key with
@@ -257,6 +284,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | "down" ->
     state.msg_scroll <- max 0 (state.msg_scroll - 1);
+    true
+  | "pageup" ->
+    (* A keeper's turn is many rows, so one row per press walks back through a
+       single message. A page is the unit the reader actually moves in. *)
+    state.msg_scroll <- state.msg_scroll + keeper_message_page_rows state;
+    true
+  | "pagedown" ->
+    state.msg_scroll <-
+      max 0 (state.msg_scroll - keeper_message_page_rows state);
+    true
+  | "end" ->
+    state.msg_scroll <- 0;
     true
   | "\127" | "\b" ->
     let new_content =

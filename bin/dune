@@ -314,6 +314,12 @@
  (modules masc_tui_planning_selection))
 
 (library
+ (name masc_tui_markdown)
+ (wrapped false)
+ (modules masc_tui_markdown)
+ (libraries masc_tui_message_layout))
+
+(library
  (name masc_tui_composer)
  (wrapped false)
  (modules masc_tui_composer)
@@ -364,6 +370,7 @@
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_keeper_control
+  masc_tui_markdown
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_observation_layout

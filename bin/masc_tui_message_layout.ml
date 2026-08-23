@@ -299,16 +299,22 @@ let wrap_words ~max_cells text =
   in
   loop [] "" (String.split_on_char ' ' text)
 
-let rows_of_entry ~inner_width entry =
+let rows_of_entry ?markdown ~inner_width entry =
   let metadata, _, _ =
     Printf.sprintf "[%s] %s %s" entry.timestamp entry.role_label
       entry.request_label
     |> fun text -> cell_prefix text inner_width
   in
   let body_width = max 4 (inner_width - 2) in
+  (* Keepers write markdown. Rendering it is the caller's to supply, so this
+     module keeps no terminal vocabulary; without it the body is wrapped as the
+     plain text it always was. *)
   let body_chunks =
-    entry.body |> String.split_on_char '\n'
-    |> List.concat_map (split_cells ~max_cells:body_width)
+    match markdown with
+    | Some render -> render ~width:body_width entry.body
+    | None ->
+        entry.body |> String.split_on_char '\n'
+        |> List.concat_map (split_cells ~max_cells:body_width)
   in
   let body_chunks =
     let rec drop_empty = function
@@ -325,14 +331,14 @@ let rows_of_entry ~inner_width entry =
   in
   { style = entry.style; text = metadata } :: body_rows
 
-let visible_rows ~inner_width ~height entries =
+let visible_rows ?markdown ~inner_width ~height entries =
   let inner_width = max 1 inner_width in
   let height = max 0 height in
   let rec collect remaining selected = function
     | [] -> selected
     | _ when remaining = 0 -> selected
     | entry :: older ->
-        let rows = rows_of_entry ~inner_width entry in
+        let rows = rows_of_entry ?markdown ~inner_width entry in
         let chosen =
           if List.length rows <= remaining then rows
           else if selected = [] then
@@ -346,21 +352,22 @@ let visible_rows ~inner_width ~height entries =
   in
   collect height [] (List.rev entries)
 
-let total_rows ~inner_width entries =
+let total_rows ?markdown ~inner_width entries =
   let inner_width = max 1 inner_width in
   List.fold_left
-    (fun total entry -> total + List.length (rows_of_entry ~inner_width entry))
+    (fun total entry ->
+       total + List.length (rows_of_entry ?markdown ~inner_width entry))
     0 entries
 
-let max_scroll ~inner_width ~height entries =
-  max 0 (total_rows ~inner_width entries - max 1 height)
+let max_scroll ?markdown ~inner_width ~height entries =
+  max 0 (total_rows ?markdown ~inner_width entries - max 1 height)
 
-let scrolled_rows ~inner_width ~height ~from_bottom entries =
-  if from_bottom <= 0 then visible_rows ~inner_width ~height entries
+let scrolled_rows ?markdown ~inner_width ~height ~from_bottom entries =
+  if from_bottom <= 0 then visible_rows ?markdown ~inner_width ~height entries
   else begin
     let inner_width = max 1 inner_width in
     let height = max 0 height in
-    let all = List.concat_map (rows_of_entry ~inner_width) entries in
+    let all = List.concat_map (rows_of_entry ?markdown ~inner_width) entries in
     let bottom = max 0 (List.length all - from_bottom) in
     let first = max 0 (bottom - height) in
     List.filteri (fun index _ -> index >= first && index < bottom) all

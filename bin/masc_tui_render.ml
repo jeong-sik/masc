@@ -13,6 +13,7 @@ module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
+module Markdown = Masc_tui_markdown
 module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Status = Masc.Keeper_status_runtime
@@ -30,6 +31,28 @@ let finish_frame ~surface_key ~cursor ~rows ~cols buf :
     cursor;
     lines = frame_lines buf;
   }
+
+(* Terminal dress for the markdown a keeper writes. The marker is the noise:
+   a backticked identifier should read as the identifier, and a fenced diff
+   should keep the alignment that made it worth fencing. Colours stay inside
+   the palette the renderer already uses, so a chat row is still recognisably
+   one of this TUI's rows. *)
+let chat_markdown_palette : Markdown.palette =
+  { strong = (Ansi.bold, Ansi.reset)
+  ; emphasis = (Ansi.dim, Ansi.reset)
+  ; code = (Ansi.cyan, Ansi.reset)
+  ; heading = (Ansi.bold ^ Ansi.white, Ansi.reset)
+  ; quote = (Ansi.dim, Ansi.reset)
+  ; link_text = (Ansi.blue, Ansi.reset)
+  ; link_target = (Ansi.dim, Ansi.reset)
+  ; rule = (Ansi.gray, Ansi.reset)
+  ; bullet = "\xe2\x80\xa2"
+  ; code_gutter = "\xe2\x94\x82 "
+  ; quote_gutter = "\xe2\x96\x8f "
+  }
+
+let chat_markdown ~width body =
+  Markdown.render ~palette:chat_markdown_palette ~width body
 
 (* The composer row every surface carries on its last terminal line.
 
@@ -1748,11 +1771,13 @@ let render_keeper_message (state : state) =
        under a scroll position that was legal before it. *)
     let scroll =
       min state.msg_scroll
-        (Message_layout.max_scroll ~inner_width ~height:history_height
+        (Message_layout.max_scroll ~markdown:chat_markdown ~inner_width
+           ~height:history_height
            layout_entries)
     in
     let visible_rows =
-      Message_layout.scrolled_rows ~inner_width ~height:history_height
+      Message_layout.scrolled_rows ~markdown:chat_markdown ~inner_width
+        ~height:history_height
         ~from_bottom:scroll layout_entries
     in
 

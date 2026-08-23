@@ -252,7 +252,8 @@ type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_active_agents: int;
+  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_incident_count: int;
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;

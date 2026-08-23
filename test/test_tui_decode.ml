@@ -298,14 +298,25 @@ let test_keeper_calls_require_the_envelope () =
              ])))
 
 let test_timestamp_slices_are_sanitized_after_selection () =
-  Alcotest.(check string) "normal clock timestamp" "04:05:06"
-    (Tui_decode.clock_timestamp_for_terminal "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "normal clock timestamp, in the zone asked for"
+    "04:05:06"
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+       "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "the row clock follows the terminal's zone"
+    "13:05:06"
+    (Tui_decode.clock_timestamp_for_terminal
+       ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
+       "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "fractional seconds and offsets read the same clock"
+    "04:05:06"
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+       "2026-08-22T13:05:06.250+09:00");
   Alcotest.(check string) "empty short timestamp" "(never)"
     (Tui_decode.short_timestamp_for_terminal "");
   Alcotest.(check string)
     "clock slice cannot expose a UTF-8 continuation as raw C1"
     "\\x9B31mOWNE"
-    (Tui_decode.clock_timestamp_for_terminal
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "0123456789Û31mOWNED!!");
   Alcotest.(check string)
     "short timestamp cannot leave a split UTF-8 lead byte"

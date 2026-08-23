@@ -309,9 +309,14 @@ let render_overview (state : state) =
           | Some snapshot, None -> string_of_int snapshot.aps_visible_count
           | None, _ | Some _, Some _ -> "?"
         in
-        Printf.sprintf "  Health: %s%s%s  Agents: %d  Approvals: %s  Incidents: %d"
-          health_color health_label Ansi.reset
-          o.ov_active_agents approval_count o.ov_incident_count
+        (* Keepers and MCP clients are counted apart: a row reading
+           "Agents: 2" over a runtime with ten keepers named the wrong
+           population. *)
+        Printf.sprintf
+          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s  \
+           Incidents: %d"
+          health_color health_label Ansi.reset o.ov_keepers o.ov_mcp_agents
+          approval_count o.ov_incident_count
   in
   box_line buf cols summary_line;
 

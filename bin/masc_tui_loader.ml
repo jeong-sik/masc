@@ -519,6 +519,7 @@ let load_overview ~(host : string) ~(port : int) :
         decode_attention_items items
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
+      let* keeper_briefs = optional_list_field json "keeper_briefs" in
       let* top_attention =
         let fallback =
           match incidents with
@@ -539,19 +540,21 @@ let load_overview ~(host : string) ~(port : int) :
       in
       let* ov_cluster = required_string_field summary "cluster" in
       let* ov_project = required_string_field summary "project" in
-      let* ov_active_agents =
-        int_field_or summary "active_agents" ~default:(List.length agent_briefs)
-      in
-      let* ov_incident_count =
-        int_field_or summary "incident_count" ~default:(List.length incidents)
-      in
+      (* Counted from the lists the briefing carries. The summary object
+         holds workspace_health, cluster, and project and nothing else --
+         [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
+         a count read from there was a default dressed as a reading. *)
+      let ov_keepers = List.length keeper_briefs in
+      let ov_mcp_agents = List.length agent_briefs in
+      let ov_incident_count = List.length incidents in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
         {
           ov_workspace_health;
           ov_cluster;
           ov_project;
-          ov_active_agents;
+          ov_keepers;
+          ov_mcp_agents;
           ov_incident_count;
           ov_attention_items = incidents @ attention_queue @ attention_items;
           ov_top_attention = top_attention;

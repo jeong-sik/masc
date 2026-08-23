@@ -1018,6 +1018,27 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
       []
       (List.sort String.compare clamped)
 
+(* The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
+   models and all 36 came back carrying thinking while nothing declared it, so
+   every one logged Thinking_returned_but_declared_unsupported (#28457). Two of
+   those three models have since left the catalog entirely; this is the one
+   that remains, and the declaration is what stops the drift from returning
+   the moment a runtime binds it again. *)
+let test_kimi_for_coding_declares_the_reasoning_it_returns () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"kimi_code"
+      ~model_id:"kimi-for-coding"
+  with
+  | None -> fail "kimi-for-coding missing from the deployment catalog"
+  | Some caps ->
+    check bool "declares reasoning" true
+      caps.Llm_provider.Capabilities.supports_reasoning;
+    check bool "declares extended thinking" true
+      caps.Llm_provider.Capabilities.supports_extended_thinking
+
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -3989,6 +4010,8 @@ let () =
             test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "kimi-for-coding declares the reasoning it returns" `Quick
+            test_kimi_for_coding_declares_the_reasoning_it_returns;
           test_case "repo-runtime-toml-declares-no-clamped-max-context" `Quick
             test_repo_runtime_toml_declares_no_clamped_max_context;
           test_case

@@ -250,7 +250,22 @@ let keeper_message_page_rows state =
   max 1 (rows - chrome - keeper_message_status_rows state)
 
 let handle_message_key (state : state) ~(submit_message : string -> unit)
-    ~(retry_message : unit -> unit) (key : string) : bool =
+    ~(retry_message : unit -> unit)
+    ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
+    (key : string) : bool =
+  (* y and n answer a held call, and only while one is held -- otherwise they
+     are letters someone is typing. The prompt on screen is what makes them
+     mean anything, so it is also what decides whether they are taken. *)
+  match state.msg_live, key with
+  | Some live, ("y" | "Y" | "n" | "N")
+    when Option.is_some (Keeper_chat_transcript.awaiting_approval live) -> (
+      match Keeper_chat_transcript.awaiting_approval live with
+      | Some awaiting ->
+          answer_approval ~tool_call_id:awaiting.Keeper_chat_transcript.call_id
+            ~allow:(String.lowercase_ascii key = "y");
+          true
+      | None -> true)
+  | _ ->
   match key with
   | "esc" ->
     save_message_draft state;
@@ -388,6 +403,8 @@ type async_msg =
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
       string * (Keeper_chat_history.decoded, string) result
+  | Keeper_chat_approval_answered of
+      Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
   | Keeper_chat_cleanup_done of Keeper_chat.request * (unit, string) result
@@ -508,6 +525,35 @@ let settle_live_turn state (request : Keeper_chat.request) =
 (* Load the keeper's durable transcript. Runs on its own fiber: the pane stays
    responsive, and a slow or unreachable server costs the scrollback rather than
    the keypress that asked for it. *)
+(* Answer the call the keeper is held at. Runs on its own fiber: the pane stays
+   responsive, and a slow server costs the answer rather than the keypress. *)
+let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
+    ~tool_call_id ~allow =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let keeper_name = request.Keeper_chat.keeper_name in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+          ~tool_call_id ~allow
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Keeper_chat_approval_answered (request, tool_call_id, allow, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_chat_approval_answered
+           (request, tool_call_id, allow, Error "Eio switch is unavailable"))
+
 let launch_keeper_history_load state ~mailbox ~keeper_name =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -1958,6 +2004,7 @@ let handle_composer_key state ~base_path ~mailbox key =
         handle_message_key state
           ~submit_message:(fun _ -> ())
           ~retry_message:(fun () -> ())
+          ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           key
       in
       true
@@ -2048,6 +2095,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       append_chat_history state request Message_status detail
+  | Keeper_chat_approval_answered (request, tool_call_id, allow, result) ->
+      let text =
+        match result with
+        | Ok true ->
+            Printf.sprintf "%s %s"
+              (if allow then "allowed" else "denied")
+              (Keeper_chat.compact_request_id tool_call_id)
+        | Ok false ->
+            (* The wait was gone: it timed out, or something answered it
+               first. Said plainly rather than shown as taken, so an operator
+               is not told a call was allowed when nothing was listening. *)
+            Printf.sprintf
+              "too late for %s; the call was no longer waiting"
+              (Keeper_chat.compact_request_id tool_call_id)
+        | Error detail -> "could not answer the held call: " ^ detail
+      in
+      append_chat_history state request
+        (match result with Ok true -> Message_status | _ -> Message_error)
+        text
   | Keeper_chat_interrupt_done (request, result) ->
       (match state.msg_live with
        | Some live
@@ -2428,6 +2494,16 @@ let main () =
                  ~retry_message:(fun () ->
                    retry_keeper_message state ~base_path
                      ~mailbox:async_messages)
+                 ~answer_approval:(fun ~tool_call_id ~allow ->
+                   match state.msg_inflight with
+                   | Some request ->
+                       launch_keeper_approval state ~mailbox:async_messages
+                         request ~tool_call_id ~allow
+                   | None ->
+                       (* No request in flight means no turn to answer for.
+                          The prompt belongs to a turn, so this is
+                          unreachable while one is shown. *)
+                       ())
                  k
              in
              ()

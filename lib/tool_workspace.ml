@@ -409,11 +409,11 @@ let status_summary_string (ctx : context) =
 let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
   match Snapshot_protocol.if_revision args with
   | Error message ->
-    Tool_result.make_err
+    error_result_typed
       ~tool_name
-      ~class_:Tool_result.Policy_rejection
       ~start_time
-      ~data:(`String message)
+      ~failure_class:Tool_result.Policy_rejection
+      ~code:Validation_error
       message
   | Ok if_revision ->
   let task_list_name =
@@ -421,11 +421,10 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
   in
   (match status_summary_string ctx with
    | Error message ->
-     Tool_result.make_err
+     error_result_typed
        ~tool_name
-       ~class_:Tool_result.Runtime_failure
        ~start_time
-       ~data:(`Assoc [ "error", `String "status_unavailable"; "detail", `String message ])
+       ~code:Internal_error
        message
    | Ok (snapshot, recovered_from) ->
      let revision =

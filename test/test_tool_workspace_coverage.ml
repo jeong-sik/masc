@@ -370,7 +370,12 @@ let () =
     | Some result ->
       assert (Tool_result.is_failed result);
       assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
-      assert_contains (Tool_result.message result) "status snapshot unavailable"
+      assert_contains (Tool_result.message result) "status snapshot unavailable";
+      (match Tool_result.data result with
+       | `Assoc fields ->
+         assert (List.mem_assoc "error_code" fields);
+         assert (List.mem_assoc "message" fields)
+       | _ -> failwith "expected assoc data envelope")
     | None -> failwith "dispatch returned None")
 ;;
 

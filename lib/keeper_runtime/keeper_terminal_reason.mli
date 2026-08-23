@@ -125,10 +125,8 @@ val wire_api_error_timeout : string
 val wire_api_error_network : string
 
 (** The [provider_error_*] codes both the producer and the classifier name.
-    Producer-only codes reach the classifier through
-    {!wire_provider_error_prefix} and are not listed individually. *)
-val wire_provider_error_prefix : string
-
+    Producer-only codes are matched by the shared [provider_error_] prefix
+    inside this module and are not listed individually. *)
 val wire_provider_error_auth : string
 val wire_provider_error_authorization : string
 val wire_provider_error_invalid_config_prefix : string

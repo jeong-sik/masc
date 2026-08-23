@@ -302,6 +302,31 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .sort((a, b) => a.localeCompare(b))
 }
 
+export type McpToolGroup = {
+  readonly category: string
+  readonly names: readonly string[]
+}
+
+// Group the exposed public-MCP inventory by the registry's own category so the
+// list renders the design's tool-group rows (settings.jsx:410-422, .set-tg-*)
+// from live data. The group id is the registry category; the kind tag is
+// 'masc' because every tool on the public_mcp surface is a server-side tool —
+// the design's 'local'/guard/opt-in kinds belong to tool_policy.toml groups,
+// which the runtime does not read (no live signal, not rendered).
+export function mcpExposedToolGroups(items: readonly DashboardToolInventoryItem[]): McpToolGroup[] {
+  const byCategory = new Map<string, string[]>()
+  for (const item of items) {
+    if (!item.surfaces.includes(MCP_PUBLIC_SURFACE)) continue
+    const category = item.category.trim() || 'general'
+    const names = byCategory.get(category) ?? []
+    names.push(item.name)
+    byCategory.set(category, names)
+  }
+  return [...byCategory.entries()]
+    .map(([category, names]) => ({ category, names: names.sort((a, b) => a.localeCompare(b)) }))
+    .sort((a, b) => a.category.localeCompare(b.category))
+}
+
 // System-log row: [time, level, identity, message, status, isTool]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
 // polls. Status is derived from the entry level only (error→fail, warn→warn,
@@ -1155,7 +1180,7 @@ export function SettingsSurface() {
     : undefined
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
-  const [mcpTools, setMcpTools] = useState<string[]>([])
+  const [mcpToolGroups, setMcpToolGroups] = useState<McpToolGroup[]>([])
   const [mcpToolsStatus, setMcpToolsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [mcpToolsError, setMcpToolsError] = useState('')
   const [mcpCheck, setMcpCheck] = useState<{ status: 'idle' | 'checking' | 'ok' | 'error'; message: string }>({
@@ -1171,13 +1196,12 @@ export function SettingsSurface() {
       try {
         const resp = await fetchDashboardTools()
         if (!active) return
-        const names = mcpExposedToolNames(resp.tool_inventory?.tools ?? [])
-        setMcpTools(names)
+        setMcpToolGroups(mcpExposedToolGroups(resp.tool_inventory?.tools ?? []))
         setMcpToolsStatus('ready')
       } catch (err) {
         if (!active) return
         // No fabricated empty inventory on failure.
-        setMcpTools([])
+        setMcpToolGroups([])
         setMcpToolsStatus('error')
         const message = err instanceof Error ? err.message : String(err)
         setMcpToolsError(`도구 inventory를 불러오지 못했습니다: ${message}`)
@@ -1380,6 +1404,11 @@ export function SettingsSurface() {
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
+  // Configured runtime lanes with their ordered candidate chains — the live
+  // counterpart of the design's failover section (runtime-editor.jsx:191-229,
+  // .rt-fo-*). Read-only: the routing PATCH writer covers default +
+  // media_failover only, so no reorder/add/remove controls are rendered.
+  const runtimeLanes = runtimeResolved?.lanes ?? []
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
   const runtimeRoutingDisabled = runtimeRoutingStatus === 'saving' || runtimeResolvedStatus !== 'ready'
   const runtimeResolution = shellRuntimeResolution.value
@@ -1397,7 +1426,8 @@ export function SettingsSurface() {
         ? { mode: 'mixed' as const, label: 'config unavailable' }
         : baseSectionState
   const mcpEndpoint = mcpEndpointFromConfig(dashboardConfig)
-  const mcpToolCountLabel = mcpToolsStatus === 'ready' ? String(mcpTools.length) : '—'
+  const mcpToolCount = mcpToolGroups.reduce((sum, group) => sum + group.names.length, 0)
+  const mcpToolCountLabel = mcpToolsStatus === 'ready' ? String(mcpToolCount) : '—'
   const mcpUrlEntry = configEntry(dashboardConfig, 'MASC_URL')
   const httpBaseUrlEntry = configEntry(dashboardConfig, 'MASC_HTTP_BASE_URL')
   const basePathEntry = configEntry(dashboardConfig, 'MASC_BASE_PATH')
@@ -1479,6 +1509,9 @@ export function SettingsSurface() {
                   <span class="set-truth-source">POST /mcp · Accept: application/json, text/event-stream</span>
                 </div>
               <//>
+              <div class="set-mcp-detail mono" data-testid="settings-mcp-transport-detail">
+                POST ${mcpEndpoint} · Content-Type: application/json · Authorization: Bearer ••••
+              </div>
               <${SetRow} label="Server check" hint="Calls masc_status through the same MCP client used by dashboard actions">
                 <div class="set-mcp-check">
                   <button
@@ -1498,10 +1531,22 @@ export function SettingsSurface() {
                 ? html`<div class="set-hint" data-testid="mcp-tools-loading">MCP 도구 inventory를 불러오는 중...</div>`
                 : mcpToolsStatus === 'error'
                   ? html`<div class="set-err" data-testid="mcp-tools-error">${mcpToolsError}</div>`
-                  : mcpTools.length === 0
+                  : mcpToolGroups.length === 0
                     ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
-                    : html`<div class="set-tg-tools" data-testid="mcp-tools-list">
-                      ${mcpTools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
+                    : html`<div data-testid="mcp-tools-list">
+                      ${mcpToolGroups.map(group => html`
+                        <div key=${group.category} class="set-tg-row" data-testid="mcp-tool-group">
+                          <div class="set-tg-l">
+                            <div class="set-tg-head">
+                              <span class="set-tg-id mono">${group.category}</span>
+                              <span class="set-tg-kind masc">masc</span>
+                            </div>
+                            <div class="set-tg-tools">
+                              ${group.names.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
+                            </div>
+                          </div>
+                        </div>
+                      `)}
                     </div>`}
             `}
 
@@ -1559,15 +1604,15 @@ export function SettingsSurface() {
                     : html`
                       <${SetRow} label="Default runtime" hint="[runtime].default">
                         ${defaultRuntimeId
-                          ? html`<span class="mono" data-testid="runtime-default-readonly">${defaultRuntimeId}</span>`
+                          ? html`<span class="set-ro mono" data-testid="runtime-default-readonly">${defaultRuntimeId}</span>`
                           : html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`}
                       <//>
                     `}
                   <${SetRow} label="Default model" hint="Resolved model API name">
-                    <span class="mono" data-testid="runtime-default-model">${runtimeResolved?.default_runtime?.model ?? '—'}</span>
+                    <span class="set-ro mono" data-testid="runtime-default-model">${runtimeResolved?.default_runtime?.model ?? '—'}</span>
                   <//>
                   <${SetRow} label="Default context" hint="Resolved context window">
-                    <span class="mono" data-testid="runtime-default-context">
+                    <span class="set-ro mono" data-testid="runtime-default-context">
                       ${formatRuntimeContext(runtimeResolved?.default_runtime?.effective_max_context ?? null)}
                     </span>
                     ${runtimeResolved?.default_runtime?.max_context_source
@@ -1639,6 +1684,42 @@ export function SettingsSurface() {
                         : null}
                   </div>
                 </div>
+
+                ${runtimeLanes.length > 0
+                  ? html`
+                    <div class="settings-runtime-section" data-testid="runtime-lanes-section">
+                      <div class="set-sub-h">Runtime lanes (${runtimeLanes.length})</div>
+                      <div class="set-hint" style=${{ marginBottom: '8px' }}>
+                        lane 별 후보 체인 — resolved runtime projection 읽기 전용. 후보 순서 writer는 아직 없으므로 편집 컨트롤은 렌더하지 않습니다.
+                      </div>
+                      ${runtimeLanes.map(lane => html`
+                        <div key=${lane.id} class="rt-fo" data-testid=${`runtime-lane-${lane.id}`}>
+                          <div class="rt-fo-h">
+                            <span class="rt-fo-lane">${lane.id}</span>
+                            <span class="rt-fo-lane-id mono">[runtime].${lane.id}</span>
+                          </div>
+                          <div class="rt-fo-chain">
+                            ${lane.runtime_ids.map((runtimeId, index) => html`
+                              <div key=${runtimeId} class=${`rt-fo-cand ${index === 0 ? 'head' : ''}`}>
+                                <span class="rt-fo-rank mono">${index === 0 ? '1차' : `${index + 1}`}</span>
+                                <span class="rt-fo-id mono">${runtimeId}</span>
+                              </div>
+                            `)}
+                          </div>
+                          ${lane.preferred_candidate !== null
+                            ? html`
+                              <div class="rt-fo-foot">
+                                <span class="set-hint mono" data-testid=${`runtime-lane-${lane.id}-sticky`}>
+                                  sticky → ${lane.preferred_candidate} (TTL 내 마지막 성공 후보)
+                                </span>
+                              </div>
+                            `
+                            : null}
+                        </div>
+                      `)}
+                    </div>
+                  `
+                  : null}
               </div>
             `}
 

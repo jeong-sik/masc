@@ -390,7 +390,7 @@ describe('App v2 header chrome', () => {
   it('keeps the command palette chunk out of the initial dashboard render', () => {
     renderApp()
 
-    expect(container.querySelector('ninja-keys')).toBeNull()
+    expect(container.querySelector('.cmdk-backdrop')).toBeNull()
   })
 })
 

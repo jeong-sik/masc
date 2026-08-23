@@ -143,8 +143,11 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [models.deepseek-v4-flash]
+# Mirrors the AGENT_CORE catalog window. Kept in step by the
+# repo-runtime-toml-declares-no-clamped-max-context gate: a value above the
+# catalog's is clamped away and only reads as authoritative (#28738).
+max-context = 1000000
 api-name = "deepseek-v4-flash"
-max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
@@ -244,8 +247,13 @@ wizard-default = true
 max-request-body-bytes = 262144
 
 [models.glm-5-turbo]
+# Mirrors the AGENT_CORE catalog window. Was 203000, above the catalog's
+# 200000, so the resolver clamped it away and the declaration only read as
+# authoritative — #28737 cited it as this model's window while the number in
+# effect was the catalog's (#28738). Kept in step by the
+# repo-runtime-toml-declares-no-clamped-max-context gate.
+max-context = 200000
 api-name = "GLM-5-Turbo"
-max-context = 203000
 tools-support = true
 thinking-support = true
 # Keep long-running keeper turns on non-preserved reasoning by default. AGENT_CORE owns
@@ -255,7 +263,10 @@ preserve-thinking = false
 streaming = true
 
 [models.glm-5-turbo.capabilities]
-max-output-tokens = 131072
+# Catalog says 128000. 131072 is 128 * 1024, which is how the two came to
+# disagree; the catalog wins because it is what the adapter reads whenever the
+# model is in it (#28738).
+max-output-tokens = 128000
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-response-format-json = true
@@ -263,8 +274,8 @@ supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
 # 262144 was inherited from [glm-coding.glm-4-7-coding], where it is justified
-# by that model's smaller serving window. This model declares max-context =
-# 203000 above, and the ceiling has to be read against that: measured on a live
+# by that model's smaller serving window. This model's window is 200000 tokens
+# and the ceiling has to be read against that: measured on a live
 # 2026-08-14 request, 195,485 B carried 54,615 tokens, so 262144 B is about
 # 73,000 tokens — a third of what the model accepts.
 #

@@ -1502,12 +1502,6 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
-let provider_id_of_runtime_id (id : string) : string option =
-  match get_runtime_by_id id with
-  | Some rt -> Some rt.provider.id
-  | None -> None
-;;
-
 (* Reads the scope frozen at materialization ({!of_binding}); no
    environment access here, so a post-load env change cannot re-select the
    credential alias out from under the recorded window. *)

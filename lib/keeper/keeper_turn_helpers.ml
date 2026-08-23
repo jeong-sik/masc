@@ -56,26 +56,6 @@ let report_keeper_cycle_side_effect_issue
   | `Error -> Log.Keeper.error "%s: %s" keeper_name message
 ;;
 
-let dispatch_keeper_phase_event_checked
-      ~(config : Workspace.config)
-      ~(keeper_name : string)
-      ~(side_effect : string)
-      (event : Keeper_state_machine.event)
-  : unit
-  =
-  match Keeper_registry.dispatch_event ~base_path:config.base_path keeper_name event with
-  | Ok _ -> ()
-  | Error err ->
-    report_keeper_cycle_side_effect_issue
-      ~config
-      ~keeper_name
-      ~side_effect
-      (Printf.sprintf
-         "phase dispatch %s failed: %s"
-         (Keeper_state_machine.event_to_string event)
-         (Keeper_state_machine.transition_error_to_string err))
-;;
-
 let finalize_trajectory_acc
       ~(config : Workspace.config)
       ~(keeper_name : string)
@@ -184,7 +164,6 @@ let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
 let record_pre_dispatch_terminal_observation
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
-      ~(generation : int)
       ~(runtime_id : string)
       ~(outcome : Keeper_execution_receipt.outcome_kind)
       ~(terminal_reason_code : string)
@@ -207,7 +186,7 @@ let record_pre_dispatch_terminal_observation
   let started_at = now_iso () in
   let masc_root = Workspace.masc_root_dir config in
   let trajectory_acc =
-    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation ()
+    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ()
   in
   finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc trajectory_outcome;
   let ended_at = now_iso () in
@@ -215,7 +194,6 @@ let record_pre_dispatch_terminal_observation
     { keeper_name = meta.name
     ; agent_name = meta.agent_name
     ; trace_id
-    ; generation
     ; turn_count =
         (match keeper_turn_id with
          | Some _ -> keeper_turn_id
@@ -264,7 +242,7 @@ let record_pre_dispatch_terminal_observation
       | None -> Keeper_execution_receipt.outcome_kind_to_string outcome
     in
     Keeper_runtime_manifest.make ~ts:ended_at ~keeper_name:meta.name
-      ~agent_name:meta.agent_name ~trace_id ~generation ?keeper_turn_id ~event
+      ~agent_name:meta.agent_name ~trace_id ?keeper_turn_id ~event
       ~runtime_id:runtime_id_string ~status ?decision ~receipt_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

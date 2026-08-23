@@ -24,12 +24,6 @@ let assoc_string_opt key fields =
   | Some (`String value) when String.trim value <> "" -> Some value
   | _ -> None
 
-let assoc_json_opt key fields =
-  match List.assoc_opt key fields with
-  | Some `Null | None -> None
-  | Some value -> Some value
-
-
 let take = List.take
 
 let goal_ids_of_json json =
@@ -456,12 +450,6 @@ let pending_approval_json_with_reader
                 Float.compare
                   (Safe_ops.json_float ~default:0.0 "requested_at" right)
                   (Safe_ops.json_float ~default:0.0 "requested_at" left)))
-
-let pending_approval_json ~(base_path : string) ~(keeper_name : string) =
-  pending_approval_json_with_reader
-    ~read_pending:
-      Keeper_approval_queue.list_pending_dashboard_json_for_workspace
-    ~base_path ~keeper_name
 
 let sort_timeline_events events =
   List.sort

@@ -80,11 +80,6 @@ val dispatch_status_to_string : dispatch_status -> string
 
 val signals_dir : Workspace_utils.config -> string
 
-val wake_signal_to_yojson : wake_signal -> Yojson.Safe.t
-(** Durable encoding of an emitted wake signal. {!tick} appends exactly this
-    to the signal store, so it is the wire shape a consumer decodes and the
-    shape a wire-contract test asserts against — not an internal helper. *)
-
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
 val tick :

@@ -20,7 +20,6 @@ type cache_entry = {
 (** {1 Paths} *)
 
 val cache_dir : Workspace_utils.config -> string
-val ensure_cache_dir : Workspace_utils.config -> unit
 val sanitize_key : string -> string
 val cache_filename : string -> string
 

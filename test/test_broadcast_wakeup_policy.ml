@@ -80,11 +80,6 @@ let configure_mention_targets config name mention_targets =
       ~base_path:config.Workspace.base_path
   in
   mkdir_p keepers_dir;
-  let keeper_dir = Filename.concat keepers_dir name in
-  mkdir_p keeper_dir;
-  write_file
-    (Filename.concat keeper_dir "AGENT.md")
-    "You are a focused test Keeper.\n";
   let path = Filename.concat keepers_dir (name ^ ".toml") in
   let rendered_targets =
     mention_targets
@@ -94,7 +89,7 @@ let configure_mention_targets config name mention_targets =
   write_file
     path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"local\"\nmention_targets = [%s]\n"
+       "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"local\"\nmention_targets = [%s]\n"
        rendered_targets)
 ;;
 

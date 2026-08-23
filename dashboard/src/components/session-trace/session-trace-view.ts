@@ -159,10 +159,9 @@ interface SessionTraceViewProps {
   agentName: string
   isKeeper: boolean
   keeperStatus?: string
-  keeperGeneration?: number
 }
 
-export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGeneration }: SessionTraceViewProps) {
+export function SessionTraceView({ agentName, isKeeper, keeperStatus }: SessionTraceViewProps) {
   const listRef = useRef<HTMLDivElement>(null)
 
   // Load on first mount. Clean up only when agentName changes (overlay closes).
@@ -222,9 +221,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
     const isOffline = keeperStatus && isOfflineStatus(keeperStatus)
     const msg = isOffline
       ? '오프라인 — 기동 시 기록 시작'
-      : (keeperGeneration ?? 0) === 0
-        ? '미기동 — 활동 기록 없음'
-        : '현재 세대에서 기록된 활동 없음'
+      : '기록된 활동 없음'
     return html`
       <div class="py-4">
         <${EmptyState} message=${msg} compact />

@@ -9,7 +9,6 @@
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -17,11 +16,9 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -34,7 +31,6 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -109,7 +105,6 @@ val ack_pending_result :
 val cancel_pending_accepted_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   cancellation:accepted_cancellation ->
   (transition_result, string) result
@@ -120,7 +115,6 @@ val transfer_pending_accepted_result :
   ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
   (transition_result, transfer_pending_error) result
@@ -134,7 +128,6 @@ val transfer_pending_accepted_result :
 val ack_pending_source_terminal_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   acked_at:float ->
   source_terminal:accepted_source_terminal ->
   (source_ack_result, string) result
@@ -145,7 +138,6 @@ val ack_pending_source_terminal_result :
 val terminalize_pending_turn_attempt_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
@@ -157,7 +149,6 @@ val terminalize_pending_turn_attempt_result :
 val terminalize_pending_turn_completed_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   (source_ack_result, string) result
@@ -220,10 +211,6 @@ type transfer_target_error =
       }
   | Transfer_target_metadata_read_failed of string
   | Transfer_target_metadata_absent
-  | Transfer_target_generation_changed of
-      { expected : int
-      ; actual : int
-      }
   | Transfer_target_trace_changed
 
 val transfer_target_error_to_string : transfer_target_error -> string

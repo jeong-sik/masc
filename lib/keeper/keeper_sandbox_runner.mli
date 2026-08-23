@@ -174,12 +174,6 @@ val uses_backend :
   cwd:string ->
   bool
 
-val route_for :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  route
-
 val route_label : route -> string
 
 val route_via :

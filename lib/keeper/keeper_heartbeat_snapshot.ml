@@ -44,7 +44,6 @@ let write_heartbeat_snapshot
         ; "name", `String meta_current.name
         ; "agent_name", `String meta_current.agent_name
         ; "trace_id", `String (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
-        ; "generation", `Int meta_current.runtime.nonce
         ; ( "message_count"
           , Json_util.option_to_yojson (fun count -> `Int count) message_count )
         ; "handoff", `Assoc [ "performed", `Bool false ]
@@ -57,7 +56,6 @@ let write_heartbeat_snapshot
          `Assoc
            [ "type", `String "keeper_heartbeat"
            ; "name", `String meta_current.name
-           ; "generation", `Int meta_current.runtime.nonce
            ; "ts_unix", `Float now_ts
            ]
        in

@@ -263,12 +263,6 @@ val reconcile_desired_once :
     [observed_state], honours backoff, and either invokes
     [start_process] or returns a [Reconcile_noop] reason. *)
 
-val reconcile_preview :
-  ?now:string ->
-  ?previous_attempt:attempt_record ->
-  desired_record -> observed_state -> string
-(** Dry-run preview suitable for a dashboard tooltip. *)
-
 val attempt_fields :
   attempt_record option -> (string * Yojson.Safe.t) list
 (** Render attempt fields as JSON-friendly assoc list (possibly empty). *)

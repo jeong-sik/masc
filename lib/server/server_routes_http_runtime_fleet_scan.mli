@@ -4,15 +4,11 @@ type paused_keeper_scan = {
   details : Yojson.Safe.t list;
   read_errors : (string * string) list;
 }
-val empty_paused_keeper_scan : paused_keeper_scan
 val sorted_unique_strings : String.t list -> String.t list
 val effective_autoboot_enabled :
   Workspace.config ->
   string ->
   Keeper_meta_contract.keeper_meta -> bool
-val pause_elapsed_sec :
-  float ->
-  Keeper_meta_contract.keeper_meta -> float option
 type pause_kind = Keeper_activation_readiness.pause_kind =
   | Active
   | Operator_paused
@@ -20,12 +16,6 @@ type pause_kind = Keeper_activation_readiness.pause_kind =
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
 val pause_kind_to_wire : pause_kind -> string
-val paused_keeper_detail_json :
-  now:float ->
-  name:string ->
-  autoboot_enabled:bool ->
-  Keeper_meta_contract.keeper_meta ->
-  [> `Assoc of (string * Yojson.Safe.t) list ]
 val registry_paused_keeper_names : unit -> String.t list
 val durable_paused_keeper_scan :
   Workspace.config -> paused_keeper_scan
@@ -60,19 +50,10 @@ type keeper_identity_drift_scan = {
   configured_without_meta_names : string list;
   meta_without_config_names : string list;
 }
-val sort_paused_keeper_details :
-  ([> `Assoc of (string * [> `String of String.t ]) list ] as 'a) list ->
-  'a list
 val keeper_fleet_meta_scan :
   ?include_paused_details:bool ->
   Workspace.config -> keeper_fleet_meta_scan
-val configured_keeper_is_materializable : Workspace.config -> string -> bool
-val keeper_identity_drift_scan : Workspace.config -> keeper_identity_drift_scan
-val keeper_identity_drift_health_json_of_scan :
-  keeper_identity_drift_scan -> Yojson.Safe.t
 val keeper_identity_drift_health_json : Workspace.config -> Yojson.Safe.t
-val autoboot_enabled_keeper_scan :
-  Workspace.config -> autoboot_keeper_scan
 type keeper_phase_counts = {
   running : int;
   failing : int;

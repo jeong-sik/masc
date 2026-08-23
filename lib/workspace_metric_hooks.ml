@@ -309,7 +309,7 @@ let install () =
     let lookup_schemas, lookup_dispatch =
       match (lookup : Task.Anti_rationalization.lookup_surface) with
       | No_lookup_surface -> [], None
-      | Lookup_tools { schemas; dispatch; scope = _ } -> schemas, Some dispatch
+      | Lookup_tools { schemas; dispatch; _ } -> schemas, Some dispatch
     in
     (* The verdict tool and the lookup tools share one dispatch entry point, so
        the name decides which surface answers. A name belonging to neither is an

@@ -160,7 +160,6 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
   let staged, receipt =
     match
       State.terminalize_pending_turn_attempt
-        ~current_owner_nonce:7
         ~applied_at:2.0
         ~selection
         ~detail:""
@@ -194,7 +193,6 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
   in
   (match
      State.terminalize_pending_turn_attempt
-       ~current_owner_nonce:7
        ~applied_at:3.0
        ~selection
        ~detail:"different diagnostic"
@@ -220,7 +218,6 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
   let next_selection = select requeued in
   (match
      State.terminalize_pending_turn_attempt
-       ~current_owner_nonce:7
        ~applied_at:4.0
        ~selection:next_selection
        ~detail:"later attempt"
@@ -251,7 +248,6 @@ let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
   let staged, receipt =
     match
       State.terminalize_pending_turn_completed
-        ~current_owner_nonce:7
         ~applied_at:2.0
         ~selection
         initial
@@ -277,7 +273,6 @@ let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
   in
   (match
      State.terminalize_pending_turn_completed
-       ~current_owner_nonce:7
        ~applied_at:3.0
        ~selection
        projected
@@ -292,7 +287,6 @@ let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
      Alcotest.fail "completed turn was applied twice");
   (match
      State.terminalize_pending_turn_attempt
-       ~current_owner_nonce:7
        ~applied_at:4.0
        ~selection
        ~detail:"late contradictory failure"
@@ -317,7 +311,6 @@ let test_projected_disposition_ledger_replays_older_operation () =
            initial
          |> require_some "select cancellation source")
           .admitted_revision
-    ; owner_nonce = 7
     ; operator_operation_id = "cancel-operation"
     ; reason = "operator cancelled"
     }
@@ -325,7 +318,6 @@ let test_projected_disposition_ledger_replays_older_operation () =
   let staged_cancel, cancel_receipt =
     match
       State.cancel_pending_accepted
-        ~current_owner_nonce:7
         ~applied_at:3.0
         ~cancellation
         initial
@@ -349,18 +341,15 @@ let test_projected_disposition_ledger_replays_older_operation () =
            projected_cancel
          |> require_some "select transfer source")
           .admitted_revision
-    ; owner_nonce = 7
     ; operator_operation_id = "transfer-operation"
     ; from_keeper = "source-keeper"
     ; to_keeper = "target-keeper"
-    ; target_generation = 8
     ; target_trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "target-trace"
     }
   in
   let staged_transfer, transfer_receipt =
     match
       State.transfer_pending_accepted
-        ~current_owner_nonce:7
         ~applied_at:4.0
         ~transfer
         projected_cancel
@@ -399,7 +388,6 @@ let test_projected_disposition_ledger_replays_older_operation () =
      Alcotest.fail "older operation disappeared from durable disposition lookup");
   (match
      State.cancel_pending_accepted
-       ~current_owner_nonce:7
        ~applied_at:5.0
        ~cancellation
        reloaded
@@ -630,7 +618,6 @@ let test_durable_turn_attempt_terminal_restart () =
     Persistence.terminalize_pending_turn_attempt_result
       ~base_path
       ~keeper_name
-      ~current_owner_nonce:7
       ~applied_at:3.0
       ~selection
       ~detail:""
@@ -663,7 +650,6 @@ let test_durable_turn_attempt_terminal_restart () =
        Persistence.terminalize_pending_turn_attempt_result
          ~base_path
          ~keeper_name
-         ~current_owner_nonce:7
          ~applied_at:4.0
          ~selection
          ~detail:"replayed after projection"
@@ -691,7 +677,6 @@ let test_durable_turn_attempt_terminal_restart () =
        Persistence.terminalize_pending_turn_attempt_result
          ~base_path
          ~keeper_name
-         ~current_owner_nonce:7
          ~applied_at:4.5
          ~selection
          ~detail:"stale in-flight attempt"
@@ -715,7 +700,6 @@ let test_durable_turn_attempt_terminal_restart () =
        Persistence.terminalize_pending_turn_attempt_result
          ~base_path
          ~keeper_name
-         ~current_owner_nonce:7
          ~applied_at:5.0
          ~selection:later_selection
          ~detail:"later attempt"
@@ -773,7 +757,6 @@ let test_durable_inflight_selection_rejects_reinserted_source () =
        Persistence.terminalize_pending_turn_attempt_result
          ~base_path
          ~keeper_name
-         ~current_owner_nonce:7
          ~applied_at:3.0
          ~selection:stale_selection
          ~detail:"old in-flight turn"
@@ -815,7 +798,6 @@ let test_durable_completed_turn_projects_reaction_ack () =
         Persistence.terminalize_pending_turn_completed_result
           ~base_path
           ~keeper_name
-          ~current_owner_nonce:7
           ~applied_at:3.0
           ~selection
           ()
@@ -889,7 +871,6 @@ let test_owner_terminalizes_consecutive_turns_without_projection_gap () =
         Registry_event_queue.terminalize_pending_turn_completed_result
           ~base_path
           keeper_name
-          ~current_owner_nonce:7
           ~applied_at
           ~selection
       with

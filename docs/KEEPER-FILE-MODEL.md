@@ -8,15 +8,14 @@ config root:
   keepers/
     <name>.toml
     <name>/
-      AGENT.md
 ```
 
 `<config-root>` is `MASC_CONFIG_DIR` when explicitly set. Otherwise it is
 `<base-path>/.masc/config`.
 
-## `keepers/<name>/AGENT.md`
+## `keepers/<name>.toml` — `keeper.instructions`
 
-`AGENT.md` is the Keeper's complete individual prompt. Its full UTF-8 content
+`keeper.instructions` is the Keeper's complete individual prompt. Its full UTF-8 content
 is loaded into `keeper_meta.instructions` and included in autonomous turns.
 
 The file is mandatory whenever `keepers/<name>.toml` exists. Missing, empty,
@@ -61,7 +60,7 @@ Any other TOML key fails closed as `unknown keeper TOML keys`.
 
 Runtime assignment lives only in `runtime.toml` under
 `[runtime.assignments]`. Tool definitions do not live in Keeper files. agent core
-supplies the current tool schemas separately for each turn, so `AGENT.md`
+supplies the current tool schemas separately for each turn, so the prompt
 should describe behavior and boundaries without copying a tool catalog.
 
 An official Codex subscription runtime declares a CLI transport and no
@@ -109,7 +108,7 @@ supplying `enable_thinking` at that boundary fails before dispatch.
 `masc_keeper_up` accepts `name` and, for first creation or an explicit prompt
 update, `instructions`. Persistence writes operational values to
 `keepers/<name>.toml` and writes the prompt atomically to
-`keepers/<name>/AGENT.md`.
+`keepers/<name>.toml`.
 
 ```text
 masc_keeper_up(

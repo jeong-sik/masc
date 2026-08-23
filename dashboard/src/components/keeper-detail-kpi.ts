@@ -126,11 +126,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="flex flex-col gap-3 mb-5 v2-monitoring-surface">
       <${KpiSection} title="정체성">
-        <div class="grid grid-cols-3 gap-2">
-          <${StatTile}
-            label="세대"
-            value=${String(keeper.generation ?? '-')}
-          />
+        <div class="grid grid-cols-2 gap-2">
           <${StatTile}
             label="턴"
             value=${String(keeper.turn_count ?? '-')}

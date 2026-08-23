@@ -241,14 +241,6 @@ let observe_ws_message_bytes_sent n =
     bytes
 ;;
 
-let observe_ws_message_bytes_recv n =
-  let bytes = float_of_int (max 0 n) in
-  Otel_metric_store.observe_histogram
-    Otel_metric_store.metric_ws_message_bytes
-    ~labels:[ "direction", "recv" ]
-    bytes
-;;
-
 let inc_grpc_bytes_sent ~bytes =
   if bytes > 0
   then

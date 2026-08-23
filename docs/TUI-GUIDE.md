@@ -56,6 +56,7 @@ decides whether launching one is worth it.
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
+| System Logs | unavailable | `GET /api/v1/dashboard/logs` |
 
 An unreachable server is reported, not hidden. The header shows
 `[disconnected]`, the surface prints the failing call, and each failed load
@@ -280,13 +281,37 @@ Goals with backlog rollups.
 The cursor tracks goal identity in visible order, so a refresh that reorders
 goals keeps the same goal selected.
 
+### System Logs
+
+The server's log ring, the same source the dashboard `logs` tab reads.
+
+```
+ MASC System Logs (300 of 774273, seq 774272)  03:09:37  [connected]
+   Time     Level Module           Keeper       Message
+   03:09:21 INFO  Discord          system       presence update: idle
+   03:09:18 WARN  Keeper           alpha        turn budget exceeded, deferring
+   03:08:57 ERROR Board            system       board post write failed: ...
+  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: 8935
+```
+
+The header counts two different things. `300` is what this page holds; `774273`
+is what the ring has seen. A page count on its own would read as "that is all
+there is".
+
+Levels are coloured: `ERROR` red, `WARN` yellow, `DEBUG` dim. A level the
+server emits that this build does not name keeps its own text and renders
+unstyled, so it shows up as itself rather than as an ordinary line.
+
+When the load fails the previous page stays on screen under a red line saying
+so. The count above it is then stale, not a fresh reading.
+
 ## Keybindings
 
 Global, outside message input:
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Next surface: Overview -> Keepers -> Approvals -> Board -> Planning -> Overview |
+| `Tab` | Next surface: Overview -> Keepers -> Approvals -> Board -> Planning -> System Logs -> Overview |
 | `2` | Jump to Keepers from anywhere |
 | `r` | Force refresh |
 | `q` | Quit |
@@ -297,6 +322,7 @@ Per surface:
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
 | `j` / `k` | Keepers, Approvals, Board, Planning | Move cursor |
+| `j` / `k` | System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |

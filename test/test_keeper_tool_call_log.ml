@@ -508,7 +508,6 @@ let test_turn_context_fields_stored () =
       ~prompt_fingerprint:"prompt-fp-k"
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
-      ~generation:3
       ~turn:7
       ~keeper_turn_id:7
       ~task_id:"task-runtime-trust"
@@ -532,7 +531,6 @@ let test_turn_context_fields_stored () =
       ?thinking_budget:tctx.thinking_budget
       ?prompt_fingerprint:tctx.prompt_fingerprint
       ?trace_id:tctx.trace_id ?session_id:tctx.session_id
-      ?generation:tctx.generation
       ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
       ?task_id:tctx.task_id
       ?sandbox_profile:tctx.sandbox_profile
@@ -565,8 +563,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "session_id field"
       (Some "trace-k")
       (Safe_ops.json_string_opt "session_id" entry);
-    Alcotest.(check int) "generation field" 3
-      (Safe_ops.json_int ~default:0 "generation" entry);
     Alcotest.(check int) "turn field" 7
       (Safe_ops.json_int ~default:0 "turn" entry);
     Alcotest.(check int) "keeper_turn_id field" 7
@@ -592,8 +588,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "runtime_contract agent"
       (Some "keeper-k-agent")
       (Safe_ops.json_string_opt "agent_name" runtime_contract);
-    Alcotest.(check int) "runtime_contract generation" 3
-      (Safe_ops.json_int ~default:0 "generation" runtime_contract);
     Alcotest.(check (list string)) "runtime_contract allowed_paths"
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(

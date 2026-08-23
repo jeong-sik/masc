@@ -16,7 +16,6 @@ type source_kind =
 type source =
   { kind : source_kind
   ; trace_id : string
-  ; generation : int
   }
 
 type change =
@@ -109,12 +108,6 @@ val read_journal_tail :
   -> keeper_id:string
   -> limit:int
   -> (journal_entry, string) result list
-
-(** Wire projection of one decoded line. The two constructors project to
-    different shapes rather than one shape with null fields: a committed pass
-    has a revision and a failed one does not, and a reader that has to check a
-    null to tell them apart will eventually forget to. *)
-val decoded_journal_entry_to_json : journal_entry -> Yojson.Safe.t
 
 (** Wire projection of one line as read, including the ones this build could
     not decode. An undecodable line keeps its position and carries its reason,

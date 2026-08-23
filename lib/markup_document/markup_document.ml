@@ -22,13 +22,6 @@ let trees signals =
 let parse_html source =
   source |> Markup.string |> Markup.parse_html |> Markup.signals |> trees
 
-let parse_xml source =
-  source
-  |> Markup.string
-  |> Markup.parse_xml ~context:`Document ~entity:Markup.xhtml_entity
-  |> Markup.signals
-  |> trees
-
 let rec text_content = function
   | Text value -> value
   | Element { children; _ } ->

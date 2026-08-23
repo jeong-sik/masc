@@ -1,9 +1,7 @@
 (** Receipt-first [Resume_owner] transaction for a paused Keeper lane. *)
 
 type request =
-  { owner_nonce : int
-  ; operator_operation_id : string
-  }
+  { operator_operation_id : string }
 
 type projection_stage =
   | Durable_meta
@@ -18,17 +16,9 @@ type failure =
   | Receipt_write_failed of string
   | Durable_meta_read_failed of string
   | Durable_meta_missing
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
   | Registry_owner_missing
-  | Registry_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Registry_owner_identity_changed
   | Registry_owner_not_paused of Keeper_state_machine.phase
   | Projection_failed of

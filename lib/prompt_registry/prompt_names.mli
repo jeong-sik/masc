@@ -16,12 +16,15 @@ val verification : string
 (** Task completion review against the submitted evidence snapshot. *)
 
 val goal_verification_proof : string
-(** Goal completion proof review (RFC-0387 B3): does the linked-task rollup
-    prove the declared success criterion? *)
+
+val goal_verification_lookup : string
+(** The read-only surface the Goal proof judge holds, described to it. A
+    surface the judge is never told about is a surface it never uses. *)
+(** Goal completion proof review (RFC-0387 B3): did the goal's declared
+    metric reach its declared target value? *)
 
 val verification_lookup_none : string
 val verification_lookup_producer_tree : string
-val verification_lookup_producer_forest : string
 val verification_contract : string
 val verification_required_evidence : string
 val keeper_observation_recovered_current_task : string

@@ -99,13 +99,6 @@ exception
     ; violation : turn_phase_transition_spec_violation
     }
 
-val turn_phase_transition_violation_message
-  :  where:string
-  -> from:packed_turn_phase
-  -> to_:packed_turn_phase
-  -> violation:turn_phase_transition_spec_violation
-  -> string
-
 val raise_turn_phase_transition_violation
   :  where:string
   -> from:packed_turn_phase

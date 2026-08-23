@@ -46,7 +46,7 @@ type event =
   | Compaction_completed
   | Compaction_failed of { reason : string; }
   | Handoff_started
-  | Handoff_completed of { new_trace_id : string; generation : int; }
+  | Handoff_completed of { new_trace_id : string; }
   | Handoff_failed of { reason : string; }
   | Operator_pause
   | Operator_resume

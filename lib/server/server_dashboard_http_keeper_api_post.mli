@@ -47,7 +47,6 @@ val agent_core_checkpoint_summary_json :
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  fallback_generation:int ->
   Agent_core.Checkpoint.t ->
   Yojson.Safe.t
 val keeper_checkpoint_inventory_json :
@@ -156,8 +155,8 @@ module For_testing : sig
     unit
 
   val parse_resume_request :
-    Yojson.Safe.t -> (int * string, string) result
+    Yojson.Safe.t -> (string, string) result
 
   val parse_bulk_resume_requests :
-    Yojson.Safe.t -> ((string * int * string) list, string) result
+    Yojson.Safe.t -> ((string * string) list, string) result
 end

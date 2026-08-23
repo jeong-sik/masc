@@ -8,13 +8,6 @@
 
     Keeper output is not bounded by a MASC request-token budget. *)
 
-val profile_load_error :
-     keeper_name:string
-  -> Keeper_types_profile.keeper_toml_load_error
-  -> Agent_core.Error.t
-(** Project a typed keeper-profile load failure into the public agent-core error
-    channel without recovering meaning from the rendered detail string. *)
-
 val load_profile_defaults :
      base_path:string
   -> keeper_name:string

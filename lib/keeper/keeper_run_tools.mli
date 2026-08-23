@@ -90,7 +90,6 @@ val prepare_agent_setup
   -> shared_context:Agent_core.Context.t
   -> context_injector:Agent_core.Hooks.context_injector
   -> start_turn_count:int
-  -> generation:int
   -> keeper_turn_id:int
   -> turn_kind:Turn_record.turn_kind
   -> runtime_id:string

@@ -1,8 +1,6 @@
-(** Every section [Task.Anti_rationalization.build_prompt] computes must be
-    rendered by every template it renders into.
+(** Every section a review prompt computes must be rendered by the template it
+    renders into.
 
-    [build_prompt] hands one variable list to three templates: task
-    verification, Goal criterion review, and Goal proof review.
     [Prompt_registry.render_template] rejects a variable the template needs and
     the caller did not supply, but a variable the caller supplies and the
     template does not use is dropped without a word. So a computed section can
@@ -11,10 +9,11 @@
 
     That is not hypothetical. [lookup_section] carries the only description the
     evaluator gets of the filesystem tools it holds: which root they resolve
-    against, and — for a Goal proof spanning several performers — that a
-    producer argument is required at all. Both Goal templates received it and
-    rendered neither, so the Goal verifier held read tools it was never told
-    about (masc #29254 built that forest surface; #29250 found the drop). *)
+    against. A template that received it and rendered nothing left the verifier
+    holding read tools it was never told about (masc #29250).
+
+    Task and Goal render different templates from different variables. Each is
+    checked against its own lane here; neither can shrink the other's prompt. *)
 
 open Alcotest
 module AR = Masc.Task.Anti_rationalization
@@ -23,15 +22,6 @@ let prompt_dir () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root -> Filename.concat root "config/prompts"
   | None -> Filename.concat (Sys.getcwd ()) "config/prompts"
-;;
-
-(* The templates [build_prompt] renders into. Kept as a literal list so adding
-   a fourth review prompt without adding it here is a visible omission rather
-   than a silently unchecked template. *)
-let review_prompt_keys =
-  [ Prompt_names.verification
-  ; Prompt_names.goal_verification_proof
-  ]
 ;;
 
 (* A value distinctive enough that finding it in the rendered prompt proves the
@@ -49,71 +39,53 @@ let request : AR.review_request =
   }
 ;;
 
-let rendered_with_lookup key =
-  let lookup =
-    AR.Lookup_tools
-      { schemas =
-          [ { Types_core.name = "tool_read_file"
-            ; description = "read"
-            ; input_schema = `Assoc []
-            }
-          ]
-      ; dispatch = (fun ~name:_ ~args:_ -> Ok "")
-      ; scope = AR.Producer_tree
-      ; root_layout = [ marker "root_layout" ]
-      }
-  in
-  match AR.build_prompt ~lookup ~prompt_name:key request with
-  | Ok text -> text
-  | Error detail -> failf "%s: prompt render failed: %s" key detail
+let init () =
+  Prompt_registry.set_markdown_dir (prompt_dir ());
+  Masc.Prompt_defaults.init ()
 ;;
 
-let test_lookup_section_reaches_every_review_prompt () =
-  Prompt_registry.set_markdown_dir (prompt_dir ());
-  Masc.Prompt_defaults.init ();
-  List.iter
-    (fun key ->
-       let text = rendered_with_lookup key in
-       check
-         bool
-         (key ^ ": the lookup section is rendered")
-         true
-         (Astring.String.is_infix ~affix:"<live_lookup>" text);
-       check
-         bool
-         (key ^ ": the root listing inside it is rendered")
-         true
-         (Astring.String.is_infix ~affix:(marker "root_layout") text))
-    review_prompt_keys
+let schemas =
+  [ { Types_core.name = "tool_read_file"; description = "read"; input_schema = `Assoc [] } ]
+;;
+
+let dispatch ~name:_ ~args:_ = Ok ""
+
+let rendered_with_lookup () =
+  let lookup =
+    AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] }
+  in
+  match AR.build_prompt ~lookup request with
+  | Ok text -> text
+  | Error detail -> failf "task prompt render failed: %s" detail
+;;
+
+let test_lookup_section_reaches_the_task_prompt () =
+  init ();
+  let text = rendered_with_lookup () in
+  check bool "the lookup section is rendered" true
+    (Astring.String.is_infix ~affix:"<live_lookup>" text);
+  check bool "the root listing inside it is rendered" true
+    (Astring.String.is_infix ~affix:(marker "root_layout") text)
+;;
+
+let test_supplied_evidence_refs_reach_the_task_prompt () =
+  init ();
+  check bool "the submitted evidence refs are rendered" true
+    (Astring.String.is_infix ~affix:(marker "evidence_refs") (rendered_with_lookup ()))
 ;;
 
 (* Every section template the code can select must exist and render. A section
-   that cannot render is now an error rather than an empty string, so a renamed
-   or deleted template stops the review instead of quietly shrinking its
-   prompt — but only if something exercises each branch. *)
+   that cannot render is an error rather than an empty string, so a renamed or
+   deleted template stops the review instead of quietly shrinking its prompt —
+   but only if something exercises each branch. *)
 let test_every_section_template_renders () =
-  Prompt_registry.set_markdown_dir (prompt_dir ());
-  Masc.Prompt_defaults.init ();
-  let schemas =
-    [ { Types_core.name = "tool_read_file"; description = "read"; input_schema = `Assoc [] } ]
-  in
-  let dispatch ~name:_ ~args:_ = Ok "" in
+  init ();
   let cases =
-    [ ( "no lookup surface"
-      , AR.No_lookup_surface
-      , "You have no tool that opens anything else" )
-    ; ( "one producer tree"
-      , AR.Lookup_tools
-          { schemas; dispatch; scope = AR.Producer_tree; root_layout = [ "repos/masc" ] }
-      , "pointed at the producer's sandbox root" )
-    ; ( "a producer forest"
-      , AR.Lookup_tools
-          { schemas
-          ; dispatch
-          ; scope = AR.Producer_forest { producers = [ "keeper-a"; "keeper-b" ] }
-          ; root_layout = [ "keeper-a: repos/masc" ]
-          }
-      , "closed producer set is: keeper-a, keeper-b" )
+    [ "no lookup surface", AR.No_lookup_surface,
+      "You have no tool that opens anything else"
+    ; "one producer tree",
+      AR.Lookup_tools { schemas; dispatch; root_layout = [ "repos/masc" ] },
+      "pointed at the producer's sandbox root"
     ]
   in
   List.iter
@@ -123,7 +95,6 @@ let test_every_section_template_renders () =
            ~lookup
            ~completion_contract:[ marker "contract_item" ]
            ~required_evidence:[ marker "evidence_item" ]
-           ~prompt_name:Prompt_names.verification
            request
        with
        | Error detail -> failf "%s: prompt render failed: %s" label detail
@@ -137,21 +108,48 @@ let test_every_section_template_renders () =
     cases
 ;;
 
-let test_supplied_evidence_refs_reach_every_review_prompt () =
-  Prompt_registry.set_markdown_dir (prompt_dir ());
-  Masc.Prompt_defaults.init ();
-  List.iter
-    (fun key ->
-       let text = rendered_with_lookup key in
-       check
-         bool
-         (key ^ ": the submitted evidence refs are rendered")
-         true
-         (Astring.String.is_infix ~affix:(marker "evidence_refs") text))
-    (* The criterion review judges a Goal record rather than submitted
-       evidence, so it is the one template that legitimately does not carry
-       evidence refs. *)
-    [ Prompt_names.verification; Prompt_names.goal_verification_proof ]
+(* The Goal proof template renders the goal's own declaration and the surface
+   the judge holds. A variable it stops placing would leave the judge asked to
+   compare a metric it was never shown, or holding read tools nobody described
+   to it. *)
+let test_goal_proof_prompt_renders_its_variables () =
+  init ();
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.goal_verification_proof
+      [ "goal_title", marker "goal_title"
+      ; "metric", marker "metric"
+      ; "target_value", marker "target_value"
+      ; "lookup_section", marker "lookup_section"
+      ]
+  with
+  | Error detail -> failf "goal proof prompt render failed: %s" detail
+  | Ok text ->
+    List.iter
+      (fun name ->
+         check bool (name ^ " is rendered") true
+           (Astring.String.is_infix ~affix:(marker name) text))
+      [ "goal_title"; "metric"; "target_value"; "lookup_section" ]
+;;
+
+(* The Goal lookup template describes the tools and the root they resolve
+   against. It is the Goal's own: the task template's prose names a producer
+   sandbox and a submitter, neither of which a Goal has. *)
+let test_goal_lookup_template_renders_the_surface () =
+  init ();
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.goal_verification_lookup
+      [ "lookup_tools", marker "lookup_tools"
+      ; "lookup_root_layout", marker "root_layout"
+      ]
+  with
+  | Error detail -> failf "goal lookup prompt render failed: %s" detail
+  | Ok text ->
+    check bool "the tools are named" true
+      (Astring.String.is_infix ~affix:(marker "lookup_tools") text);
+    check bool "the root listing is placed" true
+      (Astring.String.is_infix ~affix:(marker "root_layout") text)
 ;;
 
 let () =
@@ -159,17 +157,25 @@ let () =
     "review_prompt_sections"
     [ ( "sections reach the model"
       , [ test_case
-            "lookup_section is rendered by every review prompt"
+            "lookup_section is rendered by the task review prompt"
             `Quick
-            test_lookup_section_reaches_every_review_prompt
+            test_lookup_section_reaches_the_task_prompt
         ; test_case
             "evidence_refs is rendered where evidence is judged"
             `Quick
-            test_supplied_evidence_refs_reach_every_review_prompt
+            test_supplied_evidence_refs_reach_the_task_prompt
         ; test_case
             "every section template renders"
             `Quick
             test_every_section_template_renders
+        ; test_case
+            "the goal proof prompt renders its variables"
+            `Quick
+            test_goal_proof_prompt_renders_its_variables
+        ; test_case
+            "the goal lookup template renders the surface"
+            `Quick
+            test_goal_lookup_template_renders_the_surface
         ] )
     ]
 ;;

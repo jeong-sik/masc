@@ -41,7 +41,6 @@ type exact_write_outcome =
 type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -49,11 +48,9 @@ type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
 type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -66,7 +63,6 @@ type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -234,7 +230,6 @@ val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   cancellation:accepted_cancellation ->
   unit ->
@@ -247,7 +242,6 @@ val transfer_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
   unit ->
@@ -259,7 +253,6 @@ val ack_pending_source_terminal_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   acked_at:float ->
   source_terminal:accepted_source_terminal ->
   unit ->
@@ -271,7 +264,6 @@ val terminalize_pending_turn_attempt_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
@@ -285,7 +277,6 @@ val terminalize_pending_turn_completed_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   unit ->
@@ -373,16 +364,6 @@ val project_accepted_transfer_guarded_result :
     exact accepted transfer is not already durable. A replay therefore
     converges after target identity rotation, while a first projection cannot
     create state for an absent or replaced Keeper. *)
-
-val project_accepted_transfer_result :
-  after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  transfer:accepted_transfer ->
-  (transfer_projection_result, string) result
-(** Atomically persist target-side transfer accounting with the exact enqueue.
-    The accounting survives target consumption and makes later receipt replay
-    return [Transfer_already_projected] without a second target effect. *)
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit

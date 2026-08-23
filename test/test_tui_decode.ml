@@ -81,7 +81,7 @@ let test_active_tasks_of_domain_filters_and_sorts () =
     (List.map (fun (task : Tui_decode.task) -> task.id) active)
 
 let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
-    ?(current_task_id = None) ?(blocker_detail = "queue full") () =
+    ?(current_task_id = None) () =
   let optional_field key = function
     | Some value -> [ (key, value) ]
     | None -> []
@@ -89,7 +89,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
   let fixture =
     `Assoc
       ([ ("name", `String "keeper-main")
-       ; ("generation", `Int 2)
        ; ("paused", `Bool paused)
        ; ("total_turns", `Int 4)
        ; ("total_tokens", `Int 120)
@@ -103,10 +102,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
        ; ("mention_reactive_turn_count", `Int 1)
        ; ("noop_turn_count", `Int 4)
        ; ("last_proactive_outcome", `String "tool_use")
-       ; ( "last_blocker"
-         , Keeper_meta_contract.(
-             blocker_info_of_class ~detail:blocker_detail Capacity_backpressure
-             |> blocker_info_to_json) )
        ; ("created_at", `String "2026-08-20T01:02:03Z")
        ; ("updated_at", `String "2026-08-21T04:05:06Z")
        ]
@@ -126,7 +121,6 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check string) "name" "keeper-main" keeper.k_name;
       Alcotest.(check bool) "trace identity is projected" true
         (String.trim keeper.k_trace_id <> "");
-      Alcotest.(check int) "generation" 2 keeper.k_generation;
       Alcotest.(check bool) "paused" true keeper.k_paused;
       Alcotest.(check (option string)) "current task" (Some "task-42")
         keeper.k_current_task_id;
@@ -148,9 +142,6 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check int) "no-op turns" 4 keeper.k_noop_turn_count;
       Alcotest.(check string) "last outcome" "tool_use"
         keeper.k_last_proactive_outcome;
-      Alcotest.(check (option string)) "last blocker"
-        (Some "capacity_backpressure: queue full")
-        keeper.k_last_blocker;
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"
         keeper.k_created_at;
       Alcotest.(check string) "updated at" "2026-08-21T04:05:06Z"
@@ -247,25 +238,6 @@ let test_timestamp_slices_are_sanitized_after_selection () =
     "0\\x1B]2;Xab"
     (Tui_decode.clock_timestamp_for_terminal
        "2026-08-22T0\027]2;Xabcd")
-
-let test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe () =
-  let detail = "queue\027]8;;https://attacker.invalid\007owned\027]8;;\007" in
-  match Tui_decode.decode_keeper (current_keeper_json ~blocker_detail:detail ()) with
-  | Error error -> Alcotest.fail error
-  | Ok keeper ->
-    Alcotest.(check bool)
-      "typed decode retains the raw diagnostic"
-      true
-      (Option.exists (fun raw -> String.contains raw '\027') keeper.k_last_blocker);
-    let rendered = Tui_decode.keeper_blocker_for_terminal keeper in
-    Alcotest.(check bool)
-      "terminal projection contains no ESC byte"
-      false
-      (String.contains rendered '\027');
-    Alcotest.(check bool)
-      "terminal projection exposes escaped control evidence"
-      true
-      (String_util.contains_substring rendered "\\x1B]8;;")
 
 let test_decode_keeper_rejects_retired_fields () =
   List.iter
@@ -365,6 +337,80 @@ let test_decode_planning_snapshot_rejects_running_alias () =
        (Tui_decode.decode_planning_snapshot
           (planning_snapshot_json ~running_key:"running" ())))
 
+(* The shape the server actually sent while a keeper was failing to start,
+   trimmed to the fields the TUI reads. *)
+let fleet_safety_json ?(missing = true) () =
+  `Assoc
+    [ ( "keeper_fleet_safety"
+      , `Assoc
+          ([ "status", `String "degraded"
+           ; "blocker", `String "reaction_capacity_below_target"
+           ; "operator_action_required", `Bool true
+           ; "bootable_keeper_count", `Int 10
+           ; "running_keeper_fiber_count", `Int 9
+           ; "executable_keeper_fiber_count", `Int 9
+           ; "failing_keeper_fiber_count", `Int 0
+           ; "recovering_keeper_fiber_count", `Int 0
+           ; "paused_keeper_count", `Int 0
+           ; "target_reaction_capacity_count", `Int 10
+           ; "reaction_capacity_shortfall_count", `Int 1
+           ; "active_task_owner_without_executable_fiber_count", `Int 1
+           ; "completion_authority_pending_task_count", `Int 1
+           ]
+           @ [ ( "bootable_keeper_names"
+               , `List
+                   (List.map
+                      (fun n -> `String n)
+                      (if missing
+                       then [ "analyst"; "kidsnote"; "sangsu" ]
+                       else [ "analyst"; "kidsnote" ])) )
+             ; ( "executable_keeper_names"
+               , `List [ `String "analyst"; `String "kidsnote" ] )
+             ]) )
+    ]
+
+let test_decode_fleet_safety_carries_both_name_lists () =
+  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check string) "status" "degraded" fleet.fs_status;
+      Alcotest.(check (option string)) "blocker"
+        (Some "reaction_capacity_below_target") fleet.fs_blocker;
+      Alcotest.(check bool) "operator must act" true
+        fleet.fs_operator_action_required;
+      Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
+      Alcotest.(check int) "running" 9 fleet.fs_running_count;
+      Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
+      Alcotest.(check int) "task owner without fiber" 1
+        fleet.fs_active_task_owner_without_fiber_count;
+      (* The reader takes the difference; the server does not precompute it. *)
+      Alcotest.(check (list string)) "keepers that should run"
+        [ "analyst"; "kidsnote"; "sangsu" ] fleet.fs_bootable_names;
+      Alcotest.(check (list string)) "keepers that do run"
+        [ "analyst"; "kidsnote" ] fleet.fs_executable_names;
+      Alcotest.(check (list string)) "the difference names the missing keeper"
+        [ "sangsu" ]
+        (List.filter
+           (fun n -> not (List.mem n fleet.fs_executable_names))
+           fleet.fs_bootable_names)
+
+(* A fleet where every bootable keeper runs leaves the difference empty. *)
+let test_decode_fleet_safety_with_nothing_missing () =
+  match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check (list string)) "nothing missing" []
+        (List.filter
+           (fun n -> not (List.mem n fleet.fs_executable_names))
+           fleet.fs_bootable_names)
+
+(* A body without the section is refused rather than read as a healthy fleet.
+   Rendering "ok" for "the server did not say" is how a blocked keeper stays
+   invisible, which is the state this reading exists to end. *)
+let test_decode_fleet_safety_rejects_a_body_without_the_section () =
+  Alcotest.(check bool) "missing section is an error" true
+    (Result.is_error (Tui_decode.decode_fleet_safety (`Assoc [ "status", `String "ok" ])))
+
 let metrics_common_fields ~kind ~channel =
   [ "schema", `String Keeper_metrics_record.schema
   ; "record_kind", `String kind
@@ -374,7 +420,6 @@ let metrics_common_fields ~kind ~channel =
   ; "name", `String "keeper-main"
   ; "agent_name", `String "codex"
   ; "trace_id", `String "trace-current"
-  ; "generation", `Int 4
   ]
 
 type usage_fixture =
@@ -913,8 +958,122 @@ let test_bounded_parent_depth_stops_on_cycle () =
   in
   Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
+let system_log_entry_json ?(level = "INFO") ?(keeper = `String "system") () =
+  `Assoc
+    [ ("seq", `Int 774272)
+    ; ("ts", `String "2026-08-23T03:09:21Z")
+    ; ("level", `String level)
+    ; ("source", `String "structured")
+    ; ("module", `String "Discord")
+    ; ("keeper_name", keeper)
+    ; ("turn_id", `Null)
+    ; ("message", `String "presence update: idle")
+    ; ("details", `Null)
+    ; ("category", `Null)
+    ]
+
+let system_log_snapshot_json entries =
+  `Assoc
+    [ ("entries", `List entries)
+    ; ("total", `Int 774273)
+    ; ("latest_seq", `Int 774272)
+    ; ("returned", `Int (List.length entries))
+    ]
+
+let test_decode_system_log_snapshot_reads_the_live_shape () =
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ system_log_entry_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "total is the ring count, not the page" 774273
+        snapshot.Tui_decode.sys_total;
+      Alcotest.(check int) "latest seq" 774272 snapshot.Tui_decode.sys_latest_seq;
+      (match snapshot.Tui_decode.sys_entries with
+       | [ entry ] ->
+           Alcotest.(check string) "module" "Discord"
+             entry.Tui_decode.sl_module;
+           Alcotest.(check (option string)) "keeper" (Some "system")
+             entry.Tui_decode.sl_keeper;
+           Alcotest.(check string) "level label" "INFO "
+             (Tui_decode.system_log_level_label entry.Tui_decode.sl_level)
+       | entries ->
+           Alcotest.failf "expected one entry, got %d" (List.length entries))
+
+let test_decode_system_log_accepts_both_warn_spellings () =
+  let label spelling =
+    match
+      Tui_decode.decode_system_log_snapshot
+        (system_log_snapshot_json [ system_log_entry_json ~level:spelling () ])
+    with
+    | Error err -> Alcotest.failf "decode failed for %s: %s" spelling err
+    | Ok { Tui_decode.sys_entries = [ e ]; _ } ->
+        Tui_decode.system_log_level_label e.Tui_decode.sl_level
+    | Ok _ -> Alcotest.fail "expected one entry"
+  in
+  Alcotest.(check string) "warn" "WARN " (label "WARN");
+  Alcotest.(check string) "warning" "WARN " (label "warning")
+
+let test_decode_system_log_keeps_an_unnamed_level_as_itself () =
+  (* Folding an unknown level into Info would render a level this build does
+     not know as an ordinary line. *)
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ system_log_entry_json ~level:"TRACE" () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok { Tui_decode.sys_entries = [ e ]; _ } -> (
+      match e.Tui_decode.sl_level with
+      | Tui_decode.System_level_unknown raw ->
+          Alcotest.(check string) "raw level survives" "TRACE" raw;
+          Alcotest.(check string) "label is padded to the column width" "TRACE"
+            (Tui_decode.system_log_level_label e.Tui_decode.sl_level)
+      | _ -> Alcotest.fail "TRACE was folded into a named level")
+  | Ok _ -> Alcotest.fail "expected one entry"
+
+let test_decode_system_log_null_keeper_is_absent_not_empty () =
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ system_log_entry_json ~keeper:`Null () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok { Tui_decode.sys_entries = [ e ]; _ } ->
+      Alcotest.(check (option string)) "absent keeper" None
+        e.Tui_decode.sl_keeper
+  | Ok _ -> Alcotest.fail "expected one entry"
+
+let test_decode_system_log_requires_the_message () =
+  let without_message =
+    `Assoc
+      [ ("seq", `Int 1)
+      ; ("ts", `String "2026-08-23T03:09:21Z")
+      ; ("level", `String "INFO")
+      ; ("module", `String "Discord")
+      ]
+  in
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json [ without_message ])
+  with
+  | Ok _ -> Alcotest.fail "a line with no message decoded"
+  | Error _ -> ()
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_system_logs",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_system_log_snapshot_reads_the_live_shape;
+        Alcotest.test_case "warn and warning are one level" `Quick
+          test_decode_system_log_accepts_both_warn_spellings;
+        Alcotest.test_case "an unnamed level stays itself" `Quick
+          test_decode_system_log_keeps_an_unnamed_level_as_itself;
+        Alcotest.test_case "null keeper is absent" `Quick
+          test_decode_system_log_null_keeper_is_absent_not_empty;
+        Alcotest.test_case "message is required" `Quick
+          test_decode_system_log_requires_the_message;
+      ] );
     ( "decode_agent",
       [
         Alcotest.test_case "success" `Quick test_decode_agent_success;
@@ -950,6 +1109,15 @@ let () =
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
       ] );
+    ( "decode_fleet_safety",
+      [
+        Alcotest.test_case "carries both name lists" `Quick
+          test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "a full fleet leaves the difference empty" `Quick
+          test_decode_fleet_safety_with_nothing_missing;
+        Alcotest.test_case "a body without the section is refused" `Quick
+          test_decode_fleet_safety_rejects_a_body_without_the_section;
+      ] );
     ( "terminal_text",
       [ Alcotest.test_case "escapes control sequences" `Quick
           test_terminal_text_escapes_control_sequences
@@ -961,8 +1129,6 @@ let () =
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
-      ; Alcotest.test_case "keeper blocker keeps raw and renders safe" `Quick
-          test_keeper_blocker_terminal_boundary_keeps_raw_and_renders_safe
       ] );
     ( "parse_log_entry",
       [

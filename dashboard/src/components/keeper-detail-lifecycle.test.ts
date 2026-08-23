@@ -24,7 +24,7 @@ describe('KeeperLifecycleButtons', () => {
     runKeeperAction.mockReset()
   })
 
-  it('resumes an offline paused keeper with its durable owner generation', () => {
+  it('resumes an offline paused keeper', () => {
     const keeper = {
       name: 'lane-smith',
       status: 'offline',
@@ -41,6 +41,6 @@ describe('KeeperLifecycleButtons', () => {
     fireEvent.click(getByRole('button', { name: '재개하기' }))
 
     expect(queryByText('기동하기')).toBeNull()
-    expect(runKeeperAction).toHaveBeenCalledWith('lane-smith', 'resume', 1275)
+    expect(runKeeperAction).toHaveBeenCalledWith('lane-smith', 'resume')
   })
 })

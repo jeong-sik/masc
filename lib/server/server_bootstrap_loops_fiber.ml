@@ -43,11 +43,3 @@ let filteri_with_fair_yield f xs =
     xs
 ;;
 
-let iteri_with_fair_yield f xs =
-  let meter = Eio_guard.create_yield_meter ~interval:1 () in
-  List.iteri
-    (fun idx item ->
-       f idx item;
-       Eio_guard.yield_step meter)
-    xs
-;;

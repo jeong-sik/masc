@@ -125,4 +125,3 @@ val to_string : t -> string
 val of_string : string -> t option
 val pp : Stdlib.Format.formatter -> t -> unit
 val is_masc : t -> bool
-val is_board : t -> bool

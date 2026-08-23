@@ -241,7 +241,6 @@ let base_receipt : R.t =
   { keeper_name = "test-keeper"
   ; agent_name = "test-agent"
   ; trace_id = "trace-1"
-  ; generation = 1
   ; turn_count = Some 1
   ; agent_core_turn_count = None
   ; current_task_id = None

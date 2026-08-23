@@ -22,12 +22,6 @@ type accept_rejection =
 
 val accept_rejection_kind_to_string : accept_rejection_kind -> string
 
-(** Operator-facing accept rejection reason for a response that failed the
-    keeper progress contract. The reason reports response shape and counts only;
-    it never includes hidden thinking text. Returns [None] when the built-in
-    keeper progress contract would accept the response. *)
-val response_accept_rejection : Agent_core.Types.api_response -> accept_rejection option
-
 (** Format an accept rejection reason for a runtime attempt. When the built-in
     keeper progress contract would accept the response, the returned reason is
     tagged as a caller-specific predicate rejection instead of no-progress. *)

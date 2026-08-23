@@ -819,9 +819,60 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
 
+  (* Fleet reading — what the roster below cannot say.
+
+     The rows are one per running keeper, so a keeper the fleet wanted and
+     could not start is simply absent from them. These lines carry the
+     server's own count of that gap and name the keepers behind it. *)
+  (match state.fleet_safety, state.fleet_safety_error with
+   | _, Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  fleet: " ^ fit_width err (cols - 12) ^ Ansi.reset)
+   | None, None -> ()
+   | Some fleet, None ->
+       let tone =
+         if fleet.fs_operator_action_required then Ansi.red
+         else if String.equal fleet.fs_status "ok" then Ansi.green
+         else Ansi.yellow
+       in
+       let blocker =
+         match fleet.fs_blocker with None -> "" | Some b -> "  blocker: " ^ b
+       in
+       box_line buf cols
+         (Printf.sprintf "%s  fleet %s   running %d/%d   capacity %d/%d%s%s"
+            tone fleet.fs_status
+            fleet.fs_running_count fleet.fs_bootable_count
+            (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
+            fleet.fs_target_reaction_capacity blocker Ansi.reset);
+       let counts =
+         [ ("paused", fleet.fs_paused_count)
+         ; ("failing", fleet.fs_failing_count)
+         ; ("recovering", fleet.fs_recovering_count)
+         ; ("task owner without fiber", fleet.fs_active_task_owner_without_fiber_count)
+         ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
+         ]
+         |> List.filter (fun (_, n) -> n > 0)
+         |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n)
+       in
+       if counts <> [] then
+         box_line buf cols
+           (Ansi.dim ^ "  " ^ String.concat "   " counts ^ Ansi.reset);
+       (* Which keepers are missing is the subtraction, done here rather than
+          read from a field: the server reports what should run and what does,
+          and the difference is this reader's to take. *)
+       let missing =
+         List.filter
+           (fun name -> not (List.mem name fleet.fs_executable_names))
+           fleet.fs_bootable_names
+       in
+       if missing <> [] then
+         box_line buf cols
+           (Printf.sprintf "%s  not running: %s%s" Ansi.red
+              (String.concat ", " missing) Ansi.reset));
+
   (* Column headers *)
-  let col_header = Printf.sprintf "  %s  %-20s %5s  %-8s %10s  %s"
-    " " "Name" "Gen" "Paused" "Turns" "Current Task" in
+  let col_header = Printf.sprintf "  %s  %-20s  %-8s %10s  %s"
+    " " "Name" "Paused" "Turns" "Current Task" in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.dim (fit_width col_header (cols - 4)) Ansi.reset
@@ -892,20 +943,17 @@ let render_keeper_list (state : state) =
         let name_col =
           Printf.sprintf "%-20s" (Terminal_text.single_line k.k_name)
         in
-        let gen_col = Printf.sprintf "%5d" k.k_generation in
         let turns_col = Printf.sprintf "%10d" k.k_total_turns in
         let line_content =
           if is_selected then
             Ansi.reverse ^ ">" ^ Ansi.reset
             ^ "  " ^ Ansi.bold ^ name_col ^ Ansi.reset
-            ^ " " ^ gen_col
             ^ "  " ^ paused_str
             ^ " " ^ turns_col
             ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
           else
             " "
             ^ "  " ^ name_col
-            ^ " " ^ gen_col
             ^ "  " ^ paused_str
             ^ " " ^ turns_col
             ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
@@ -962,7 +1010,6 @@ let render_keeper_detail (state : state) =
     (* Identity section *)
     add_section "Identity";
     add_row "Name:" (Terminal_text.single_line k.k_name);
-    add_row "Generation:" (string_of_int k.k_generation);
     add_row "Paused:"
       (if k.k_paused then Ansi.yellow ^ "yes" ^ Ansi.reset
        else Ansi.dim ^ "no" ^ Ansi.reset);
@@ -972,7 +1019,6 @@ let render_keeper_detail (state : state) =
     add_section "Current Work";
     add_row "Task:"
       (Terminal_text.single_line_or ~default:"-" k.k_current_task_id);
-    add_row "Last Blocker:" (Tui_decode.keeper_blocker_for_terminal k);
     add_empty ();
 
     (* Live Context section (Phase 2) *)
@@ -1528,6 +1574,100 @@ let render_keeper_message (state : state) =
       ~rows ~cols buf
     end
 
+(* One colour per level so an operator scanning the column sees severity before
+   reading the text. A level this build does not name keeps its own text and
+   renders unstyled rather than borrowing another level's colour. *)
+let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
+  | System_debug -> Ansi.dim
+  | System_info -> Ansi.reset
+  | System_warn -> Ansi.yellow
+  | System_error -> Ansi.red
+  | System_level_unknown _ -> Ansi.reset
+
+let render_system_logs (state : state) =
+  let rows, cols = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let entries =
+    match state.system_logs with None -> [] | Some s -> s.sys_entries
+  in
+  let total_entries = List.length entries in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.system_logs with
+    | None ->
+        Printf.sprintf " MASC System Logs  (not loaded)  %s  %s" timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        (* [total] counts what the ring has seen, not what this page holds.
+           Showing both keeps "300 of 774273" from reading as "300 exist". *)
+        Printf.sprintf " MASC System Logs (%d of %d, seq %d)  %s  %s"
+          total_entries snapshot.sys_total snapshot.sys_latest_seq timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-8s %-5s %-16s %-12s %s" "Time" "Level" "Module" "Keeper"
+      "Message"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.system_logs_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.system_logs_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total_entries - content_height) in
+  let scroll = max 0 (min state.system_logs_scroll max_scroll) in
+  state.system_logs_scroll <- scroll;
+  if total_entries = 0 then begin
+    let empty =
+      match state.system_logs_error with
+      | Some _ -> "  (load failed; the count above is not a reading)"
+      | None -> "  (no entries)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt entries idx with
+      | None -> box_empty buf cols
+      | Some e ->
+          let keeper =
+            match e.sl_keeper with None -> "-" | Some name -> name
+          in
+          let line =
+            Printf.sprintf "  %-8s %-5s %-16s %-12s %s"
+              (Terminal_text.clock_timestamp e.sl_ts)
+              (Masc.Tui_decode.system_log_level_label e.sl_level)
+              (Terminal_text.single_line e.sl_module)
+              (Terminal_text.single_line keeper)
+              (Terminal_text.single_line e.sl_message)
+          in
+          box_line_styled buf cols ~style:(system_log_level_style e.sl_level) line
+    done;
+  if total_entries > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d entries, scroll %d]" total_entries scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_frame ~surface_key:"system-logs" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
+
 (** Dispatch a normal-height render based on the current surface. *)
 let render_surface (state : state) =
   match state.view with
@@ -1552,6 +1692,7 @@ let render_surface (state : state) =
            | Some goal -> render_planning_detail state goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
+  | System_logs -> render_system_logs state
 
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in

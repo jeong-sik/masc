@@ -196,10 +196,6 @@ val new_session : id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
     inserts the result into {!sessions} under
     {!with_sessions_rw}. *)
 
-val is_session_closed : ws_session -> bool
-(** [true] once the session has been closed locally or the httpun-ws writer
-    has shut down.  Safe to call from any fiber. *)
-
 val record_pong : ws_session -> unit
 (** Refresh [last_pong_at] on a received pong; the single liveness signal read
     by {!heartbeat_should_close} (#21509). *)

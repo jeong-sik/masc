@@ -43,13 +43,3 @@ type resolution =
        with a diagnostic. Never silently default to [OpenAI_compat]. *)
 val resolve : string -> resolution
 
-(** Extract just the {!Provider_config.provider_kind} for a spec, if
-    known. Returns [None] for [Unknown]. Useful for call sites that
-    only need the kind and not the split model id. *)
-val kind_of_spec :
-  string -> Llm_provider.Provider_config.provider_kind option
-
-val uses_anthropic_caching_for_kind :
-  Llm_provider.Provider_config.provider_kind -> bool
-
-val uses_anthropic_caching_for_spec : string -> bool option

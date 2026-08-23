@@ -919,7 +919,6 @@ let start_keepalive
            ?intake_token
            ~base_path:ctx.config.base_path
            ~keeper_name:m.name
-           ~expected_generation:0
            ~register:(fun token intake_token ->
              match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
              | Some current -> Error (`Already_registered current)
@@ -1401,9 +1400,3 @@ let stop_keepalive_and_await ~base_path name =
     Keeper_joined { lane_exit; terminal }
 ;;
 
-(** Stop all running keepers. Used in test cleanup to prevent orphaned
-    keepalive loops from blocking process exit. *)
-let stop_all_keepalives () =
-  Keeper_registry.all ()
-  |> List.iter (fun (entry : Keeper_registry.registry_entry) -> stop_keepalive entry.name)
-;;

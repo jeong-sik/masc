@@ -455,7 +455,7 @@ let run_keeper_invocation_turn_admitted_inner
           ~masc_root
           ~keeper_name:meta.name
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~generation:meta.runtime.nonce ()
+          ()
       in
       Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
       (match
@@ -647,7 +647,6 @@ let run_keeper_invocation_turn_admitted_inner
 		                              Keeper_turn_helpers.record_pre_dispatch_terminal_observation
 		                                ~config:ctx.config
 		                                ~meta
-		                                ~generation:meta.runtime.nonce
 		                                ~runtime_id:retry.next_runtime
 		                                ~outcome:`Error
 		                                ~terminal_reason_code:
@@ -696,7 +695,6 @@ let run_keeper_invocation_turn_admitted_inner
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation
-		                                ~generation:meta.runtime.nonce
 		                                ?on_event
 		                                ?on_tool_result_ready
 		                                ~trajectory_acc

@@ -77,11 +77,6 @@ let owned_active_tasks_for_meta ~config ~meta =
   owned_active_tasks_snapshot_for_meta ~config ~meta
   |> Result.map (fun snapshot -> snapshot.tasks)
 
-let owned_active_tasks_for_meta_strict ~(config : Workspace.config)
-    ~(meta : Keeper_meta_contract.keeper_meta) =
-  owned_active_tasks_for_meta ~config ~meta
-;;
-
 let owned_active_tasks_snapshot_for_meta_strict ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   owned_active_tasks_snapshot_for_meta ~config ~meta

@@ -27,7 +27,6 @@ type exact_write_outcome =
 type accepted_cancellation = State.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -35,11 +34,9 @@ type accepted_cancellation = State.accepted_cancellation =
 type accepted_transfer = State.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -52,7 +49,6 @@ type source_terminal_receipt = State.source_terminal_receipt =
 type accepted_source_terminal = State.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -932,26 +928,6 @@ let project_accepted_transfer_guarded_result
          | Ok () -> Ok (next, Transfer_projection_result result)))
 ;;
 
-let project_accepted_transfer_result
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  =
-  let projection =
-    project_accepted_transfer_guarded_result
-      ~authorize_first_projection:(fun () -> (Ok () : (unit, string) result))
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  in
-  Result.bind projection (function
-    | Transfer_projection_result result -> Ok result
-    | First_projection_rejected _ ->
-      Error "unguarded transfer projection rejected its unconditional authority")
-;;
-
 let update_result ?after_commit ~base_path ~keeper_name f =
   update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
 ;;
@@ -1112,7 +1088,6 @@ let cancel_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~applied_at
       ~cancellation
       ()
@@ -1129,7 +1104,6 @@ let cancel_pending_accepted_result
              owner
              ~after_commit
              (State.cancel_pending_accepted
-                ~current_owner_nonce
                 ~applied_at
                 ~cancellation)
              state
@@ -1148,7 +1122,6 @@ let transfer_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
       ()
@@ -1165,7 +1138,6 @@ let transfer_pending_accepted_result
              owner
              ~after_commit
              (State.transfer_pending_accepted
-                ~current_owner_nonce
                 ~applied_at
                 ~transfer)
              state
@@ -1184,7 +1156,6 @@ let ack_pending_source_terminal_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~acked_at
       ~source_terminal
       ()
@@ -1201,7 +1172,6 @@ let ack_pending_source_terminal_result
              owner
              ~after_commit
              (State.ack_pending_source_terminal
-                ~current_owner_nonce
                 ~applied_at:acked_at
                 ~source_terminal)
              state
@@ -1251,7 +1221,6 @@ let terminalize_pending_turn_attempt_result
       ?after_commit
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~detail
@@ -1263,7 +1232,6 @@ let terminalize_pending_turn_attempt_result
     ~keeper_name
     ~transition:
       (State.terminalize_pending_turn_attempt
-         ~current_owner_nonce
          ~applied_at
          ~selection
          ~detail)
@@ -1274,7 +1242,6 @@ let terminalize_pending_turn_completed_result
       ?after_commit
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ()
@@ -1285,7 +1252,6 @@ let terminalize_pending_turn_completed_result
     ~keeper_name
     ~transition:
       (State.terminalize_pending_turn_completed
-         ~current_owner_nonce
          ~applied_at
          ~selection)
     ()

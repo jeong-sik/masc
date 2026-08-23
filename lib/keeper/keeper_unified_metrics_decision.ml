@@ -116,7 +116,6 @@ let append_decision_record
         ("ts_unix", `Float now_ts);
         ("audience", `String "internal_human_only");
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-        ("generation", `Int meta.runtime.nonce);
         ("turn_id", `Int turn_id);
         ("keeper_name", `String meta.name);
         ("agent_name", `String meta.agent_name);

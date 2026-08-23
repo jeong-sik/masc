@@ -15,7 +15,6 @@ type task = {
 type keeper = {
   k_name : string;
   k_trace_id : string;
-  k_generation : int;
   k_paused : bool;
   k_current_task_id : string option;
   k_total_turns : int;
@@ -30,7 +29,6 @@ type keeper = {
   k_mention_reactive_turn_count : int;
   k_noop_turn_count : int;
   k_last_proactive_outcome : string;
-  k_last_blocker : string option;
   k_created_at : string;
   k_updated_at : string;
 }
@@ -51,9 +49,6 @@ val clock_timestamp_for_terminal : string -> string
     present, then sanitize the result. The final sanitizer makes arbitrary
     external timestamp bytes safe even when the byte slice splits UTF-8. *)
 
-val keeper_blocker_for_terminal : keeper -> string
-(** Terminal-boundary projection for the raw typed blocker stored in
-    {!type-keeper}. Missing blockers render as [-]. *)
 
 type planning_goal = {
   pg_id : string;
@@ -86,6 +81,62 @@ type planning_snapshot = {
   pl_backlog : planning_backlog;
   pl_generated_at : string;
 }
+
+(** One line of the server's system log, as {!val:decode_system_log_snapshot}
+    reads it from [GET /api/v1/dashboard/logs]. *)
+
+type system_log_level =
+  | System_debug
+  | System_info
+  | System_warn
+  | System_error
+  | System_level_unknown of string
+      (** A level the server emits that this vocabulary does not name. Kept as
+          written rather than folded into an existing level, so a new level is
+          visible instead of silently rendering as one of these. *)
+
+type system_log_entry = {
+  sl_seq : int;
+  sl_ts : string;
+  sl_level : system_log_level;
+  sl_module : string;
+  sl_keeper : string option;
+  sl_message : string;
+}
+
+type system_log_snapshot = {
+  sys_entries : system_log_entry list;  (** newest last, as the server returns *)
+  sys_total : int;  (** lines the ring has seen, not lines returned *)
+  sys_latest_seq : int;
+}
+
+type fleet_safety = {
+  fs_status : string;
+  fs_blocker : string option;
+  fs_operator_action_required : bool;
+  fs_bootable_count : int;
+  fs_running_count : int;
+  fs_executable_count : int;
+  fs_failing_count : int;
+  fs_recovering_count : int;
+  fs_paused_count : int;
+  fs_target_reaction_capacity : int;
+  fs_reaction_capacity_shortfall : int;
+  fs_bootable_names : string list;
+  fs_executable_names : string list;
+  fs_active_task_owner_without_fiber_count : int;
+  fs_completion_authority_pending_count : int;
+}
+(** The operator reading of the keeper fleet, as [/health?full=1] reports it.
+
+    Every count here answers "how many keepers are not doing what the fleet
+    intends", which is the question the keeper list cannot answer: that list
+    holds one row per running keeper, so a keeper that failed to start is
+    absent rather than shown as failed.
+
+    The two name lists are carried raw. Which keepers are missing is
+    [bootable] minus [executable] — a subtraction the reader does, not a
+    field the server precomputes. *)
 
 type log_kind =
   | Log_turn
@@ -147,8 +198,20 @@ type transport_health = {
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
 
+val decode_system_log_snapshot :
+  Yojson.Safe.t -> (system_log_snapshot, string) result
+
+val system_log_level_label : system_log_level -> string
+(** Fixed-width label for the level column. *)
+
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result
+
+val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+(** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
+    A body without the section is an error rather than an empty reading: an
+    absent section and a healthy fleet are different facts, and rendering the
+    second for the first is how a blocked keeper stays invisible. *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :
@@ -157,7 +220,6 @@ val decode_context_observation :
   (context_observation, string) result
 val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
-val http_status_error : status_code:int -> body:string -> string
 val decode_json_response_body :
   allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
@@ -165,7 +227,6 @@ val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result
 val required_int_field : Yojson.Safe.t -> string -> (int, string) result
 val int_field_or : Yojson.Safe.t -> string -> default:int -> (int, string) result
-val required_display_field : Yojson.Safe.t -> string -> (string, string) result
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result

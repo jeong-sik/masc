@@ -28,7 +28,6 @@ val run
   -> ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> keeper_name:string
-  -> expected_generation:int
   -> register:
        (Keeper_lifecycle_reservation.token ->
         Keeper_shutdown_intake_fence.intake_token ->

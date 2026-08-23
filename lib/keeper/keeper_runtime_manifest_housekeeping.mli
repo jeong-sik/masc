@@ -33,7 +33,6 @@ type t =
   keeper_name : string;
   agent_name : string option;
   trace_id : string;
-  generation : int option;
   keeper_turn_id : int option;
   agent_core_turn_count : int option;
   logical_seq : int option;
@@ -48,19 +47,11 @@ type turn_context =
   manifest_keeper_name : string;
   manifest_agent_name : string option;
   manifest_trace_id : string;
-  manifest_generation : int option;
   manifest_keeper_turn_id : int option;
 }
 val retention_days : unit -> int option
-val prune_mu : Mutex.t
-val last_prune_day_by_base_dir : (string, string) Hashtbl.t
-val today_key : unit -> string
-val is_runtime_manifest_file : String.t -> bool
-val prune_old_trace_files : base_dir:string -> days:int -> int
 val maybe_prune_retention : base_dir:string -> unit
 val mandatory_clock_refs_for_event : event_kind -> string list
-val clock_refs_has_keys :
-  String.t list -> [> `Assoc of (String.t * 'a) list ] -> bool
 val validate_manifest_completeness : t -> (unit, string) result
 val is_finished_turn : t list -> bool
 val is_complete_turn : t list -> bool

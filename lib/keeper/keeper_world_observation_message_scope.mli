@@ -18,8 +18,6 @@ val is_self_author
     with {!Keeper_identity.Keeper_id.equal} — the single source of truth
     for "is this author one of us?". *)
 
-val is_keeper_authored_message : string -> bool
-
 type pending_kind =
   | Mention
   | Scope

@@ -11,10 +11,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_execution
 
-(** [stimulus_urgency_to_string u] returns the Otel_metric_store / log label
-    for [u] ([immediate] / [normal] / [low]). *)
-val stimulus_urgency_to_string : Keeper_event_queue.urgency -> string
-
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
     continuity summary. [Error unavailable] reports a failed board read

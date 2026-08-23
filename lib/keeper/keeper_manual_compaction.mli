@@ -65,8 +65,6 @@ val run_under_admission
     No nested admission or release occurs. *)
 
 val failure_to_string : failure -> string
-val observe_manifest : keeper_name:string -> (unit, string) result -> unit
-
 module For_testing : sig
   val checkpoint_installation_auxiliary_to_json :
     Keeper_checkpoint_store.checkpoint_installation_auxiliary ->

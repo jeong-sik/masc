@@ -403,7 +403,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "last_compaction_decision": "initialized",
         "last_autonomous_action_at": "",
         "message_scope_ack_id": None,
-        "last_blocker": None,
         "last_runtime_attempt": None,
         "paused": False,
         "latched_reason": None,
@@ -1760,7 +1759,7 @@ def assert_overview_event_rows(
     )
 
     send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
-    send_and_wait(process, master_fd, output, b"\t\t\t\t", b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\t\t\t\t\t", b"MASC Overview")
 
     overview = resize_and_wait(
         process,
@@ -1828,7 +1827,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        b"\t\t\t\t",
+        b"\t\t\t\t\t",
         b"Recent Events 5-6/6",
     )
     resize_and_wait(
@@ -2329,6 +2328,7 @@ def board_detail_authority_interaction(
 
             late_list.release.set()
             send_and_wait(process, master_fd, output, b"\t", b"MASC Planning")
+            send_and_wait(process, master_fd, output, b"\t", b"MASC System Logs")
             send_and_wait(process, master_fd, output, b"\t", b"late-list-applied")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")

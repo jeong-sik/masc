@@ -107,8 +107,6 @@ type reconciliation_report =
 val mention_outbox_quarantine_reason_to_string :
   mention_outbox_quarantine_reason -> string
 
-val message_schema_rejection_to_string : message_schema_rejection -> string
-
 (** Reject any retained workspace message row that predates the current
     request-id + mention-delivery schema. Startup calls this synchronously
     before installing Keeper delivery, so the documented pre-deploy purge is

@@ -245,8 +245,6 @@ let of_meta meta =
   { ok; ready_for_unclaimed_backlog = ok; autonomous_activation }
 ;;
 
-let ready_for_unclaimed_backlog meta = (of_meta meta).ready_for_unclaimed_backlog
-
 ;;
 
 let autonomous_activation_to_yojson (activation : autonomous_activation) =

@@ -15,7 +15,6 @@ let min_tail_bytes = 1_000
    the decoder cannot admit values that overflow the downstream products. *)
 let max_tail_bytes = Common.max_tool_output_bytes
 let metrics_lines_per_turn = 10
-let min_metrics_scan_lines = 400
 let max_tail_turns = max_tail_bytes / metrics_lines_per_turn
 let max_tail_messages = max_tail_bytes
 

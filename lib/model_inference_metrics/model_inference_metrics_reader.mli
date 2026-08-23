@@ -2,20 +2,12 @@
 
 open Model_inference_metrics_entry
 
-val read_all_decisions : base_path:string -> since_unix:float -> raw_entry list
-val read_cost_entries :
-  base_path:string ->
-  since_unix:float ->
-  (raw_entry list * cost_read_diagnostics, Dated_jsonl.read_error) result
-
 val read_all_entries :
   base_path:string -> since_unix:float -> raw_entry list * cost_read_result
 val usage_signal_present : raw_entry -> bool
 (** Input, output, cache-read, cache-creation, and reasoning token counters are
     usage evidence. A billing-only [cost_usd] value is not. *)
 val telemetry_signal_present : raw_entry -> bool
-val usage_reported_effective : raw_entry -> bool
-val telemetry_reported_effective : raw_entry -> bool
 val coverage_reason_of_entry : raw_entry -> string option
 val coverage_stage_of_entry : raw_entry -> string option
 

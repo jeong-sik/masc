@@ -871,28 +871,3 @@ let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path keeper_name event
 
-let dispatch_keepalive_event_with_audit
-      ~(ctx : _ context)
-      ~(keeper_name : string)
-      ~events_fired
-      ~selected_event
-      event
-  =
-  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    (match Keeper_registry.dispatch_event_with_audit_and_log
-       ~base_path:ctx.config.base_path
-       ~events_fired
-       ~selected_event
-       keeper_name
-       event
-     with
-     | Ok _ -> ()
-     | Error err ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string KeepaliveSignalFailures)
-           ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
-           ();
-         Log.Keeper.warn
-           "%s: keepalive late-event dispatch rejected: %s"
-           keeper_name
-           (Keeper_state_machine.transition_error_to_string err))

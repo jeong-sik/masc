@@ -132,7 +132,6 @@ let test_shutdown_rejection_precedes_all_creation_writes () =
   let runtime_config_before = read_file runtime_path in
   let runtime_assignment_before = Runtime.runtime_id_for_keeper keeper_name in
   let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
-  let agent_path = Filename.concat (Filename.concat keepers_dir keeper_name) "AGENT.md" in
   let operation_id = Operation_id.generate () in
   (match
      Fence.begin_shutdown
@@ -180,7 +179,6 @@ let test_shutdown_rejection_precedes_all_creation_writes () =
          trace_entries_before
          (sorted_dir_entries trace_root);
        check bool "keeper TOML is absent" false (Sys.file_exists toml_path);
-       check bool "keeper instructions are absent" false (Sys.file_exists agent_path);
        (match Store.read_meta config keeper_name with
         | Ok None -> ()
         | Ok (Some _) -> fail "runtime metadata was created before admission"

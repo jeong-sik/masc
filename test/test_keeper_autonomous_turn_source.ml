@@ -112,13 +112,12 @@ let run_ref ~path ~worker_run_id ~start_seq =
   }
 ;;
 
-let write_turn_record config ~absolute_turn ~generation ~turn_kind ~raw_trace_run_ref =
+let write_turn_record config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
   Keeper_turn_record_writer.write
     ~model_input_window:None
     ~config
     ~keeper_name
     ~agent_name
-    ~generation
     ~turn_kind
     ~trace_id
     ~absolute_turn
@@ -175,7 +174,7 @@ let test_projects_exact_run_outcome_and_activity () =
   let selected = run_lines ~worker_run_id:"run-selected" ~start_seq:5 ~base_ts:2000.
       ~prompt:Keeper_unified_prompt.autonomous_wake_marker ~final_text:"selected outcome" in
   write_lines path (first @ selected);
-  write_turn_record config ~absolute_turn:41 ~generation:9
+  write_turn_record config ~absolute_turn:41 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"run-selected" ~start_seq:5));
   match Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () with
@@ -208,7 +207,7 @@ let test_direct_marker_spoof_is_excluded () =
   write_lines path
     (run_lines ~worker_run_id:"run-direct" ~start_seq:1 ~base_ts:3000.
        ~prompt:Keeper_unified_prompt.autonomous_wake_marker ~final_text:"spoof");
-  write_turn_record config ~absolute_turn:42 ~generation:9
+  write_turn_record config ~absolute_turn:42 
     ~turn_kind:Turn_record.Direct
     ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"run-direct" ~start_seq:1));
   Alcotest.(check int) "producer-owned kind excludes direct marker spoof" 0
@@ -221,7 +220,7 @@ let test_missing_or_outside_trace_is_skipped () =
   write_lines outside
     (run_lines ~worker_run_id:"run-outside" ~start_seq:1 ~base_ts:4000.
        ~prompt:"ignored" ~final_text:"must not leak");
-  write_turn_record config ~absolute_turn:43 ~generation:9
+  write_turn_record config ~absolute_turn:43 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some (run_ref ~path:outside ~worker_run_id:"run-outside" ~start_seq:1));
   Alcotest.(check int) "path outside keeper trace store is rejected" 0
@@ -250,7 +249,7 @@ let test_mismatched_raw_trace_runtime_identity_is_skipped () =
          ~value:(`String "agent_core-other-runtime")
   in
   write_lines path records;
-  write_turn_record config ~absolute_turn:44 ~generation:9
+  write_turn_record config ~absolute_turn:44 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:
       (Some (run_ref ~path ~worker_run_id:"run-mismatch" ~start_seq:1));
@@ -268,7 +267,7 @@ let test_mismatched_raw_trace_session_identity_is_skipped () =
          ~value:(`String "trace-other-9999")
   in
   write_lines path records;
-  write_turn_record config ~absolute_turn:45 ~generation:9
+  write_turn_record config ~absolute_turn:45 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:
       (Some (run_ref ~path ~worker_run_id:"run-mismatch" ~start_seq:1));
@@ -283,7 +282,7 @@ let test_since_and_limit_use_current_records () =
     let worker_run_id = "run-" ^ string_of_int index in
     write_lines path
       (run_lines ~worker_run_id ~start_seq:1 ~base_ts ~prompt:"ignored" ~final_text:text);
-    write_turn_record config ~absolute_turn:index ~generation:9
+    write_turn_record config ~absolute_turn:index 
       ~turn_kind:Turn_record.Autonomous
       ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id ~start_seq:1))
   in
@@ -322,7 +321,7 @@ let test_committed_autonomous_turn_invalidates_live_chat () =
             (Keeper_autonomous_turn_source.load_recent
                ~config ~keeper_name ()))
     ();
-  write_turn_record config ~absolute_turn:46 ~generation:9
+  write_turn_record config ~absolute_turn:46 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:
       (Some (run_ref ~path ~worker_run_id ~start_seq:1));
@@ -350,7 +349,7 @@ let test_direct_turn_does_not_duplicate_chat_invalidation () =
       let frame = ev.Sse.ext_frame in
       if keeper_chat_appended_for keeper_name frame then incr invalidations)
     ();
-  write_turn_record config ~absolute_turn:47 ~generation:9
+  write_turn_record config ~absolute_turn:47 
     ~turn_kind:Turn_record.Direct ~raw_trace_run_ref:None;
   Alcotest.(check int) "direct chat path owns its invalidation" 0 !invalidations
 ;;
@@ -495,7 +494,7 @@ let test_dashboard_history_autonomous_rows_carry_id () =
     (run_lines ~worker_run_id ~start_seq:1 ~base_ts:7000.
        ~prompt:Keeper_unified_prompt.autonomous_wake_marker
        ~final_text:"visible in history");
-  write_turn_record config ~absolute_turn:48 ~generation:9
+  write_turn_record config ~absolute_turn:48 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id ~start_seq:1));
   match

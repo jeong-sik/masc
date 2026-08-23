@@ -293,7 +293,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
     | Some value -> value
     | None -> fail (label ^ ": missing value")
   in
-  let make_meta ~name ~trace_id ~nonce =
+  let make_meta ~name ~trace_id =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
@@ -303,7 +303,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
           ])
     with
     | Error detail -> failf "meta fixture %s: %s" name detail
-    | Ok meta -> { meta with runtime = { meta.runtime with nonce } }
+    | Ok meta -> meta
   in
   let base_path = config.Workspace.base_path in
   let cancel_keeper = "event-source-ref-cancel-source" in
@@ -311,15 +311,12 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   let target_keeper = "event-source-ref-target" in
   let cancel_meta =
     make_meta ~name:cancel_keeper ~trace_id:"event-source-ref-cancel-trace"
-      ~nonce:41
   in
   let transfer_meta =
     make_meta ~name:transfer_keeper ~trace_id:"event-source-ref-transfer-trace"
-      ~nonce:42
   in
   let target_meta =
     make_meta ~name:target_keeper ~trace_id:"event-source-ref-target-trace"
-      ~nonce:43
   in
   let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
     { post_id; urgency = Normal; arrived_at; payload = Bootstrap }
@@ -1495,10 +1492,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
           ; "trace_id", `String "execution-trust-narrow-trace"
           ])
     with
-    | Ok meta ->
-      { meta with
-        runtime = { meta.runtime with nonce = 17 }
-      }
+    | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error
   in
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
@@ -2252,15 +2246,9 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   in
   let keepers_dir = Filename.concat config_root "keepers" in
   mkdir_p keepers_dir;
-  List.iter
-    (fun name ->
-      let agent_dir = Filename.concat keepers_dir name in
-      mkdir_p agent_dir;
-      write_file (Filename.concat agent_dir "AGENT.md") ("Keeper " ^ name))
-    [ "base"; "alpha"; "beta" ];
   write_file
     (Filename.concat keepers_dir "base.toml")
-    "[keeper]\nautoboot_enabled = false\n";
+    "[keeper]\nautoboot_enabled = false\ninstructions = \"Keeper base\"\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
     "[keeper]\nautoboot_enabled = true\n";
@@ -2799,7 +2787,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "keeper_id", `String ("k-" ^ keeper_name)
            ; "status", `String "active"
            ; "keepalive_running", `Bool false
-           ; "generation", `Int 1
            ; "turn_count", `Int 1
            ; "autonomous_turn_count", `Int 1
            ; "autonomous_action_count", `Int 1
@@ -3014,7 +3001,7 @@ let prepare_config_sync_keeper ~sw config name =
       ; proactive = { enabled = false }
         (* keeper_turn_up_config_persistence.persist requires instructions
            from somewhere -- explicit instructions_arg, an existing
-           AGENT.md, or here -- before it will materialize a keeper.toml.
+           keeper.toml -- before it will materialize a keeper.
            None of the three config-sync fixtures below supply the first
            two, so this stands in for "keeper already has instructions
            from its meta / prior lifecycle" the way a real config-sync

@@ -33,5 +33,3 @@ val of_json : Yojson.Safe.t -> t option
     the no-progress detector and the unified-metrics substantive check. *)
 val is_nonprogress : t option -> bool
 
-(** Remove [typed_outcome] field from JSON before returning to LLM. *)
-val strip_from_json : Yojson.Safe.t -> Yojson.Safe.t

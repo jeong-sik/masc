@@ -10,9 +10,6 @@ val keeper_name_of_agent_alias : string -> string option
     [keeper_x-agent]). [None] when the name is not an alias or the
     embedded keeper name is not a portable identifier. *)
 
-val keeper_agent_affixes : (string * string) list
-(** The accepted (prefix, suffix) spellings, canonical order. *)
-
 val strip_keeper_prefix : string -> string option
 (** ["keeper-<rest>"] -> [Some rest]; [None] otherwise. *)
 

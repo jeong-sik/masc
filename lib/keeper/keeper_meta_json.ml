@@ -26,7 +26,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; Multimodal_policy, `String (multimodal_policy_to_string m.multimodal_policy)
     ; Trace_history, `List (List.map (fun s -> `String s) rt.trace_history)
-    ; Generation, `Int rt.nonce
     ; Last_handoff_ts, `Float rt.last_handoff_ts
     ; Created_at, `String m.created_at
     ; Updated_at, `String m.updated_at
@@ -68,10 +67,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; ( Message_scope_ack_id
       , match rt.message_scope_ack_id with
         | Some id -> `String id
-        | None -> `Null )
-    ; ( Last_blocker
-      , match rt.last_blocker with
-        | Some info -> blocker_info_to_json info
         | None -> `Null )
     ; ( Last_runtime_attempt
       , match rt.last_runtime_attempt with

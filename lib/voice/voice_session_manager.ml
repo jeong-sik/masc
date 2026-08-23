@@ -334,9 +334,6 @@ let list_sessions t =
   with_lock t (fun () ->
     Hashtbl.fold (fun _ session acc -> session :: acc) t.sessions [])
 
-let has_session t ~agent_id =
-  with_lock t (fun () -> Hashtbl.mem t.sessions agent_id)
-
 let session_count t =
   with_lock t (fun () -> Hashtbl.length t.sessions)
 

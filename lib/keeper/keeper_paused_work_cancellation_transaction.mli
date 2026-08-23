@@ -8,7 +8,6 @@
 type pending_request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -17,15 +16,7 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Registry_owner_not_paused of Keeper_state_machine.phase
-  | Registry_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Queue_replay_failed of string
   | Queue_commit_failed of string
 

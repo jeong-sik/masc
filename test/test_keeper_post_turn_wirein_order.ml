@@ -221,7 +221,6 @@ let persist_checkpoint_source_exn
       ~session
       ~agent_name:meta.agent_name
       ~ctx:context
-      ~generation:1
   with
   | Error detail ->
     failf
@@ -444,10 +443,6 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
            "terminal evidence retains checkpoint turn"
            expected_source.turn_count
            source.turn_count;
-         check int
-           "terminal evidence retains checkpoint generation"
-           expected_source.generation
-           source.generation;
          check string
            "terminal evidence retains checkpoint digest"
            expected_source.sha256
@@ -521,10 +516,6 @@ let test_irreducible_window_is_source_bound_no_compaction () =
            "terminal evidence retains checkpoint turn"
            expected_source.turn_count
            source.turn_count;
-         check int
-           "terminal evidence retains checkpoint generation"
-           expected_source.generation
-           source.generation;
          check string
            "terminal evidence retains checkpoint digest"
            expected_source.sha256
@@ -702,7 +693,6 @@ let test_prepare_commit_source_cas () =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:context
-            ~generation:1
         with
         | Ok _ -> ()
         | Error detail ->
@@ -884,7 +874,6 @@ let test_post_install_cancellation_returns_committed_failure () =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:context
-            ~generation:1
         with
         | Ok _ -> ()
         | Error detail ->

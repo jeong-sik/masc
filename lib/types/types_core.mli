@@ -164,9 +164,6 @@ type task_reclaim_policy =
 
 val task_reclaim_policy_to_string : task_reclaim_policy -> string
 val task_reclaim_policy_of_string : string -> (task_reclaim_policy, string) result
-val task_reclaim_policy_to_yojson : task_reclaim_policy -> Yojson.Safe.t
-val task_reclaim_policy_of_yojson : Yojson.Safe.t -> (task_reclaim_policy, string) result
-
 type task_handoff_context =
   { summary : string [@default ""]
   ; reason : string option [@default None]

@@ -144,7 +144,6 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
          `Assoc
            [ "type", `String "keeper_heartbeat"
            ; "name", `String meta.name
-           ; "generation", `Int meta.runtime.nonce
            ; "ts_unix", `Float now_ts
            ; "phase", `String "turn_running"
            ; "in_turn", `Bool true

@@ -8,7 +8,6 @@
     persistence codec, and tests share one source. *)
 val wire_field_claim : string
 val wire_field_category : string
-val wire_field_first_seen : string
 val wire_field_memory_id : string
 val wire_field_reason : string
 

@@ -23,7 +23,6 @@ type field =
   | Trace_id
   | Multimodal_policy
   | Trace_history
-  | Generation
   | Last_handoff_ts
   | Created_at
   | Updated_at
@@ -60,7 +59,6 @@ type field =
   | Mention_reactive_turn_count
   | Noop_turn_count
   | Message_scope_ack_id
-  | Last_blocker
   | Last_runtime_attempt
   | Paused
   | Latched_reason
@@ -77,7 +75,6 @@ let all_fields =
   ; Trace_id
   ; Multimodal_policy
   ; Trace_history
-  ; Generation
   ; Last_handoff_ts
   ; Created_at
   ; Updated_at
@@ -114,7 +111,6 @@ let all_fields =
   ; Mention_reactive_turn_count
   ; Noop_turn_count
   ; Message_scope_ack_id
-  ; Last_blocker
   ; Last_runtime_attempt
   ; Paused
   ; Latched_reason
@@ -132,7 +128,6 @@ let field_name = function
   | Trace_id -> "trace_id"
   | Multimodal_policy -> "multimodal_policy"
   | Trace_history -> "trace_history"
-  | Generation -> "generation"
   | Last_handoff_ts -> "last_handoff_ts"
   | Created_at -> "created_at"
   | Updated_at -> "updated_at"
@@ -169,7 +164,6 @@ let field_name = function
   | Mention_reactive_turn_count -> "mention_reactive_turn_count"
   | Noop_turn_count -> "noop_turn_count"
   | Message_scope_ack_id -> "message_scope_ack_id"
-  | Last_blocker -> "last_blocker"
   | Last_runtime_attempt -> "last_runtime_attempt"
   | Paused -> "paused"
   | Latched_reason -> "latched_reason"

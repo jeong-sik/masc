@@ -124,89 +124,6 @@ let create_goal ctx title =
   in
   json_state created [ "goal_id" ]
 ;;
-
-let producer_playground (config : Workspace.config) producer =
-  ensure_producer_playground config producer
-;;
-
-(* The linked-task rollup is the evidence the judge reads and the performers
-   are the trees it may open. Tests that drive a proof verdict give it one; they
-   do not all need an artifact to read. *)
-let link_bare_task config ~goal_id =
-  let producer = "proof-producer" in
-  ignore (ensure_producer_playground config producer);
-  let created =
-    match
-      Workspace.add_task_with_result config ~goal_id ~created_by:producer
-        ~title:"Linked proof task" ~priority:1 ~description:"proof evidence"
-    with
-    | Ok created -> created
-    | Error error ->
-      fail ("add linked task: " ^ Workspace.add_task_error_to_string error)
-  in
-  (match
-     Workspace.claim_task_r config ~agent_name:producer ~task_id:created.task_id ()
-   with
-   | Ok _ -> ()
-   | Error error -> fail (Masc_domain.masc_error_to_string error));
-  created.task_id
-;;
-
-let add_linked_task_with_evidence config ~goal_id ~producer ~evidence_ref =
-  let created =
-    match
-      Workspace.add_task_with_result
-        config
-        ~goal_id
-        ~created_by:producer
-        ~title:"Linked proof task"
-        ~priority:1
-        ~description:"Produce the Goal proof artifact"
-    with
-    | Ok created -> created
-    | Error error ->
-      fail
-        ("add linked task: " ^ Workspace.add_task_error_to_string error)
-  in
-  (match Workspace.claim_task_r config ~agent_name:producer ~task_id:created.task_id () with
-   | Ok _ -> ()
-   | Error error -> fail (Masc_domain.masc_error_to_string error));
-  let handoff_context : Masc_domain.task_handoff_context =
-    { summary = "proof artifact is ready"
-    ; reason = None
-    ; next_step = None
-    ; failure_mode = None
-    ; reclaim_policy = None
-    ; evidence_refs = [ evidence_ref ]
-    ; updated_at = None
-    ; updated_by = Some producer
-    }
-  in
-  (match
-     Workspace.transition_task_r
-       config
-       ~agent_name:producer
-       ~task_id:created.task_id
-       ~action:Masc_domain.Start
-       ()
-   with
-   | Ok _ -> ()
-   | Error error -> fail (Masc_domain.masc_error_to_string error));
-  (match
-     Workspace.transition_task_r
-       config
-       ~agent_name:producer
-       ~task_id:created.task_id
-       ~action:Masc_domain.Submit_for_verification
-       ~notes:"artifact ready for Goal verification"
-       ~handoff_context
-       ()
-   with
-   | Ok _ -> ()
-   | Error error -> fail (Masc_domain.masc_error_to_string error));
-  created.task_id
-;;
-
 let transition ctx goal_id ?note ?evidence action =
   let args =
     [ "goal_id", `String goal_id; "action", `String action ]
@@ -302,67 +219,6 @@ let recording_reviewer calls behaviors =
       Error (Agent_core.Error.Internal ("unexpected evaluator slot " ^ evaluator_runtime))
 ;;
 
-let inspecting_goal_reviewer ~producer ~file_name ~expected ~forest_reads =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_
-      ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-    let report reason =
-      let input =
-        `Assoc [ "verdict", `String "APPROVE"; "reason", `String reason ]
-      in
-      on_tool_result
-        ~input
-        (Tool_result.ok
-           ~tool_name:"report_review_verdict"
-           ~start_time:0.0
-           "recorded");
-      Ok (Some AR.Approve)
-    in
-    match lookup with
-    (* The creation-time criterion review gets no tree: it judges the declared
-       success condition, and at creation nobody has produced anything for it.
-       A Goal names no responsible keeper, so there is no single producer whose
-       tree could stand in. *)
-    | AR.No_lookup_surface -> report "criterion is measurable"
-    | AR.Lookup_tools { scope = AR.Producer_tree; _ } ->
-      fail
-        "Goal review was handed a single-producer tree; a Goal has no single \
-         producer"
-    | AR.Lookup_tools
-        { schemas
-        ; dispatch
-        ; scope = AR.Producer_forest { producers }
-        } ->
-      check (list string) "closed producer set" [ producer ] producers;
-      check bool "rollup identifies the evidence producer" true
-        (String_util.contains_substring
-           prompt
-           (Printf.sprintf "\"producer\": \"%s\"" producer));
-      check bool "forest read tool is advertised" true
-        (List.exists
-           (fun (schema : Masc_domain.tool_schema) ->
-              String.equal schema.name "verification_read_file")
-           schemas);
-      let input =
-        `Assoc
-          [ "producer", `String producer
-          ; "file_path", `String file_name
-          ]
-      in
-      (match dispatch ~name:"verification_read_file" ~args:input with
-       | Error detail -> fail ("Goal proof lookup failed: " ^ detail)
-       | Ok output ->
-         check bool "Goal verifier read the linked producer artifact" true
-           (String_util.contains_substring output expected);
-         forest_reads := !forest_reads + 1;
-         on_tool_result
-           ~input
-           (Tool_result.ok
-              ~tool_name:"verification_read_file"
-              ~start_time:0.0
-              output));
-      report "linked producer artifact was inspected"
-;;
-
 let with_lane_and_reviewer ~slots ~reviewer f =
   let saved_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn in
   let saved_reviewer = Atomic.get AR.run_llm_reviewer_fn in
@@ -390,7 +246,6 @@ let test_proof_pending_drains_to_completed () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Provable goal" in
-  ignore (link_bare_task config ~goal_id);
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   check string "the durable request stands" "proof_pending"
@@ -428,68 +283,75 @@ let test_proof_pending_drains_to_completed () =
   | _ -> fail "ledger must hold the proven verdict"
 ;;
 
-let test_goal_proof_reads_linked_task_producer_artifact () =
+(* The judge holds a read surface rooted at the shared playground, and it is
+   built from the workspace alone. This goal has no linked Task and no
+   producer of its own: the measurement is simply a file somebody wrote under
+   the playground, and the judge reaches it by path. *)
+let test_goal_proof_reads_the_workspace_playground () =
   with_workspace
   @@ fun config ->
   let ctx = workspace_ctx config in
-  let goal_id = create_goal ctx "Artifact-inspected goal" in
-  let producer = "builder" in
-  let file_name = "artifacts/goal-proof.txt" in
-  let playground = producer_playground config producer in
-  let artifact_path = Filename.concat playground file_name in
-  let artifact_dir = Filename.dirname artifact_path in
-  if not (Sys.file_exists artifact_dir) then Unix.mkdir artifact_dir 0o755;
-  Out_channel.with_open_text artifact_path (fun channel ->
-    output_string channel "three services verified by isolated run\n");
-  ignore
-    (with_verification_persistence (fun () ->
-       add_linked_task_with_evidence
-         config
-         ~goal_id
-         ~producer
-         ~evidence_ref:("artifact:" ^ file_name)));
+  let goal_id = create_goal ctx "Measured goal" in
+  let playground = ensure_producer_playground config "some-keeper" in
+  let artifact = Filename.concat playground "measurement.txt" in
+  Out_channel.with_open_text artifact (fun channel ->
+    output_string channel "pass rate: 100%\n");
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
-  let forest_reads = ref 0 in
+  let reads = ref 0 in
+  let reviewer =
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_
+        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
+      match lookup with
+      | AR.No_lookup_surface ->
+        fail "the Goal proof judge was handed no lookup surface"
+      | AR.Lookup_tools { schemas; dispatch; root_layout } ->
+        check bool "the read tool is advertised" true
+          (List.exists
+             (fun (schema : Masc_domain.tool_schema) ->
+                String.equal schema.name "tool_read_file")
+             schemas);
+        check bool "the web tool is advertised" true
+          (List.exists
+             (fun (schema : Masc_domain.tool_schema) ->
+                String.equal schema.name "masc_web_fetch")
+             schemas);
+        check bool "the prompt names the tools the judge holds" true
+          (String_util.contains_substring prompt "tool_read_file");
+        check bool "the prompt lists the root the tools resolve against" true
+          (List.exists
+             (fun entry -> String_util.contains_substring prompt entry)
+             root_layout);
+        let path = Filename.concat "some-keeper" "measurement.txt" in
+        let read =
+          dispatch
+            ~name:"tool_read_file"
+            ~args:(`Assoc [ "file_path", `String path ])
+        in
+        (match read with
+         | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
+         | Ok output ->
+           reads := !reads + 1;
+           check bool "the judge read the measurement itself" true
+             (String_util.contains_substring output "pass rate: 100%"));
+        let input =
+          `Assoc
+            [ "verdict", `String "APPROVE"
+            ; "reason", `String "measured pass rate 100% reaches the target"
+            ]
+        in
+        on_tool_result
+          ~input
+          (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
+             "recorded");
+        Ok (Some AR.Approve)
+  in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
-    ~reviewer:
-      (inspecting_goal_reviewer
-         ~producer
-         ~file_name
-         ~expected:"three services verified"
-         ~forest_reads)
+    ~reviewer
     (fun () -> drain config);
-  check int "the proof review performed one linked-tree read" 1 !forest_reads;
-  check string "inspected proof completed the Goal" "completed"
-    (stored_phase config goal_id);
-  let proof_runs =
-    Goal_verification_run_registry.list_runs
-      (Goal_verification_run_registry.global ())
-    |> List.filter (fun run ->
-      String.equal run.Goal_verification_run_registry.goal_id goal_id
-      &&
-      match run.review_kind with
-      | Goal_verification_run_registry.Proof -> true)
-  in
-  match proof_runs with
-  | [ { Goal_verification_run_registry.run_id
-      ; status =
-          Goal_verification_run_registry.Completed
-            { outcome = Goal_verification_run_registry.Committed; tools; _ }
-      ; _
-      } ] ->
-    (match (ledger_record config goal_id).completion with
-     | Goal_verification.Proof_proven verdict ->
-       check string "ledger verdict joins the exact Dashboard run" run_id
-         verdict.Goal_verification.verification_run_id
-     | _ -> fail "Goal proof ledger did not retain a proven verdict");
-    check bool "Dashboard run retains the artifact read" true
-      (List.exists
-         (fun (tool : Verification_run_registry.tool_observation) ->
-            String.equal tool.tool_name "verification_read_file")
-         tools)
-  | _ -> fail "Goal proof run was not durably projected as committed"
+  check int "the judge performed one read" 1 !reads;
+  check string "the measured goal completed" "completed" (stored_phase config goal_id)
 ;;
 
 (* (b) A refuted proof returns the goal to Executing; the reason is preserved
@@ -499,7 +361,6 @@ let test_refuted_proof_returns_to_executing () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Refutable goal" in
-  ignore (link_bare_task config ~goal_id);
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
     ~reviewer:
@@ -514,18 +375,18 @@ let test_refuted_proof_returns_to_executing () =
     ~reviewer:
       (recording_reviewer
          (ref [])
-         [ "verifier-a", Stub_reject "rollup shows 1 of 3 services verified" ])
+         [ "verifier-a", Stub_reject "no measurement of the declared metric was found" ])
     (fun () -> drain config);
   check string "back to executing" "executing" (stored_phase config goal_id);
   (match (ledger_record config goal_id).completion with
    | Goal_verification.Proof_refuted
        { Goal_verification.outcome = Goal_verification.Refuted { reason }; _ } ->
      check string "the refutation reason is preserved"
-       "rollup shows 1 of 3 services verified" reason
+       "no measurement of the declared metric was found" reason
    | _ -> fail "ledger must hold the refuted verdict");
   let events = goal_events_text config in
   check bool "the refutation reason reaches goal_events.jsonl" true
-    (String_util.contains_substring events "rollup shows 1 of 3 services verified")
+    (String_util.contains_substring events "no measurement of the declared metric was found")
 ;;
 
 (* (c) A pending criterion check drains to a viable verdict — phase-neutral,
@@ -572,7 +433,6 @@ let test_malformed_reply_fails_over_to_the_next_slot () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Failover goal" in
-  ignore (link_bare_task config ~goal_id);
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let calls = ref [] in
@@ -645,7 +505,6 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Wedged goal" in
-  ignore (link_bare_task config ~goal_id);
   (* Simulate the crash window: the phase is Verifying but the ledger never
      recorded the proof request. *)
   (match
@@ -761,10 +620,8 @@ let () =
     [ ( "drain"
       , [ test_case "proof pending drains to completed" `Quick
             test_proof_pending_drains_to_completed
-        ; test_case
-            "Goal proof reads linked Task producer artifact"
-            `Quick
-            test_goal_proof_reads_linked_task_producer_artifact
+        ; test_case "goal proof reads the workspace playground" `Quick
+            test_goal_proof_reads_the_workspace_playground
         ; test_case "refuted proof returns to executing with reason" `Quick
             test_refuted_proof_returns_to_executing
         ] )

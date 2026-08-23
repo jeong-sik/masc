@@ -28,8 +28,7 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 // by the backend rollup, so this component can treat the numbers as
 // internally consistent — no client-side reconciliation needed.
 
-export function OutcomesLedger({ keeper, outcomes }: {
-  keeper: Keeper
+export function OutcomesLedger({ outcomes }: {
   outcomes: NonNullable<Keeper['outcomes']>
 }) {
   const { successes, failures, validation, observed_turns } = outcomes
@@ -107,7 +106,6 @@ export function OutcomesLedger({ keeper, outcomes }: {
           <${MutedSpan}>supervisor 이력</${MutedSpan}>
         </div>
         <div class="flex flex-wrap gap-1.5 text-2xs">
-          <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
           <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]' : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'}`}>크래시 ${failures.crashes}회</span>
           <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)]' : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'}`}>재시작 ${failures.restarts}회</span>
           ${failures.consecutive_fail_current > 0 ? html`

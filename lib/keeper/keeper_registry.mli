@@ -382,9 +382,6 @@ val set_last_error_exact : registry_entry -> string -> exact_update_result
 val exact_update_succeeded :
   registry_entry -> site:string -> exact_update_result -> bool
 
-(** Set or clear the gRPC close callback. *)
-val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
-
 (** Check if a keeper is in Running state. *)
 val is_running : base_path:string -> string -> bool
 

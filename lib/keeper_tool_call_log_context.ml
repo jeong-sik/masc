@@ -15,7 +15,6 @@ type turn_context =
   ; prompt_fingerprint : string option
   ; trace_id : string option
   ; session_id : string option
-  ; generation : int option
   ; turn : int option
   ; keeper_turn_id : int option
   ; task_id : string option
@@ -36,7 +35,6 @@ let empty_turn_context =
   ; prompt_fingerprint = None
   ; trace_id = None
   ; session_id = None
-  ; generation = None
   ; turn = None
   ; keeper_turn_id = None
   ; task_id = None
@@ -63,7 +61,6 @@ let set_turn_context
       ?prompt_fingerprint
       ?trace_id
       ?session_id
-      ?generation
       ?turn
       ?keeper_turn_id
       ?task_id
@@ -84,7 +81,6 @@ let set_turn_context
      ; prompt_fingerprint
      ; trace_id
      ; session_id
-     ; generation
      ; turn
      ; keeper_turn_id
      ; task_id
@@ -121,7 +117,6 @@ let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
     ?agent_name:ctx.agent_name
     ?trace_id:ctx.trace_id
     ?session_id:ctx.session_id
-    ?generation:ctx.generation
     ?keeper_turn_id:ctx.keeper_turn_id
     ?task_id:ctx.task_id
     ?sandbox_profile:ctx.sandbox_profile

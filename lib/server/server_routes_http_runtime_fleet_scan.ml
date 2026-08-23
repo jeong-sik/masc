@@ -38,20 +38,12 @@ let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     (meta : Keeper_meta_contract.keeper_meta) =
   let elapsed = pause_elapsed_sec now meta in
-  let last_blocker = meta.runtime.last_blocker in
   `Assoc [
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
     ("pause_kind", `String (pause_kind_to_wire (pause_kind meta)));
     ("paused_elapsed_sec", Json_util.float_opt_to_json elapsed);
-    ( "last_blocker"
-    , match last_blocker with
-      | Some info -> Keeper_meta_contract.blocker_info_to_json info
-      | None -> `Null );
-    ( "missing_pause_root_cause"
-    , `Bool
-        (Option.is_none meta.latched_reason
-         && Option.is_none meta.runtime.last_blocker) );
+    ("missing_pause_root_cause", `Bool (Option.is_none meta.latched_reason));
   ]
 
 let registry_paused_keeper_names () =

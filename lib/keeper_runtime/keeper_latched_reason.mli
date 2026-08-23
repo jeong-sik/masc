@@ -18,8 +18,6 @@ val pp : Format.formatter -> t -> unit
 
 val operator_actor_grpc_directive : operator_actor
 val operator_actor_keeper_down : operator_actor
-val operator_actor_to_wire : operator_actor -> string
-
 module Stable : sig
   val to_yojson : t -> Yojson.Safe.t
   val of_yojson : Yojson.Safe.t -> (t, string) result

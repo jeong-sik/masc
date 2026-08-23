@@ -299,6 +299,3 @@ let is_masc = function
   | Masc _ -> true
 ;;
 
-let is_board = function
-  | Masc m -> Masc.is_board m
-;;

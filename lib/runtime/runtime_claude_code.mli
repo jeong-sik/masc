@@ -39,8 +39,6 @@ type rate_limit_status =
   | Allowed_warning
   | Rejected
 
-val rate_limit_status_to_string : rate_limit_status -> string
-
 type rate_limit =
   { status : rate_limit_status
   ; rate_limit_type : string option

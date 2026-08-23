@@ -76,16 +76,6 @@ val project_root_of_base_path : string -> string
     root is derived by this function everywhere rather than re-derived beside
     it. *)
 
-val read_regular_file_prefix :
-  ownership_root:string ->
-  string ->
-  (string * int * bool, evidence_read_failure) result
-(** Read a bounded UTF-8 prefix of an owned regular file, returning
-    [(content, file_size, truncated)]. This is the reader that materializes an
-    [artifact:] evidence reference. {!Verification_authority_tools} reuses it so
-    a live read and its snapshot cannot disagree about the same file: one byte
-    cap, one policy for a multi-byte sequence cut by that cap, one failure
-    vocabulary. *)
 (** The reference shapes this store can read, decided without touching the
     filesystem. *)
 type reference_form =

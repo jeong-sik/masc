@@ -20,7 +20,6 @@ type post_turn_lifecycle =
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
-  ; turn_generation : int
   ; checkpoint_bytes : int
   ; message_count : int
   }
@@ -32,7 +31,6 @@ type compaction_recovery =
   ; checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
-  ; turn_generation : int
   ; commit_count : int
   } [@@warning "-69"]
 

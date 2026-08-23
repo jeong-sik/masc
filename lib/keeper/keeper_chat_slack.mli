@@ -68,11 +68,6 @@ val link_block_json :
 val image_block_json : url:string -> caption:string option -> Yojson.Safe.t
 (** Block Kit image block; [caption] becomes the redacted [alt_text]. *)
 
-val section_block_json : text:string -> Yojson.Safe.t
-(** Plain Block Kit mrkdwn section for notices that carry no URL (e.g. an
-    attachment whose stored metadata failed the typed decode). The text is
-    redacted, mrkdwn-escaped, and truncated like every other builder. *)
-
 val adapter_loop :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   token:string ->

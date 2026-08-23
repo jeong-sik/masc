@@ -1139,7 +1139,7 @@ let test_agent_core_interleaving_matches_masc_receipt_and_progress_facts () =
            let turn = 7 in
            let acc =
              Trajectory.create_accumulator ~masc_root:base_dir ~keeper_name
-               ~trace_id ~generation:0 ()
+               ~trace_id ()
            in
            Keeper_agent_run_thinking_trajectory.persist_response_content
              ~keeper_name ~trajectory_acc:(Some acc) ~turn

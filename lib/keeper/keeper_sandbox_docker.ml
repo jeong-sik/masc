@@ -319,22 +319,6 @@ let docker_run_argv
   @ [ image; "bash"; "-l"; "-s" ]
 ;;
 
-let optional_ro_mount ~host ~container =
-  if host = ""
-  then []
-  else if not (Sys.file_exists host)
-  then
-    (* Log the skipped mount so operators can distinguish "mount
-       deliberately omitted" from "mount expected but path missing"
-       when debugging container-internal file access failures. *)
-    ( Log.Keeper.debug
-        "optional_ro_mount skipped: host path %S does not exist (container=%S)"
-        host
-        container
-    ; [] )
-  else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
-;;
-
 let sandbox_error_json ~(config : Workspace.config) ~(meta : keeper_meta) message =
   Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
   error_json message

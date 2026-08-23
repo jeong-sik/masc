@@ -27,7 +27,7 @@ let fact ?(claim = "claim") () :
 ;;
 
 let source kind =
-  { Current.kind; trace_id = "trace"; generation = 7 }
+  { Current.kind; trace_id = "trace" }
 ;;
 
 let replace

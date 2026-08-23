@@ -145,6 +145,4 @@ let pause_info config =
    Cannot re-export here — broadcast depends on next_seq, which would
    create a circular dep workspace_state <-> workspace_broadcast. *)
 
-let parse_iso_time_opt = Workspace_resilience.Time.parse_iso8601_opt
-
 let take = List.take

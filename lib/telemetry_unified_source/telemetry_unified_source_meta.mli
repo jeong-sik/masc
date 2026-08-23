@@ -15,8 +15,6 @@ type read_result = {
 val fixed_store_dir : masc_root:string -> base_path:string -> source -> string option
 val source_freshness_slo_s : ?keeper_keepalive_interval_s:float -> source -> float
 val source_producer : source -> string
-val source_dashboard_surface : source -> string
-val source_durable_store : masc_root:string -> base_path:string -> source -> string
 val source_metadata_fields :
   ?keeper_keepalive_interval_s:float ->
   base_path:string ->

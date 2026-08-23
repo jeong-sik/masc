@@ -112,9 +112,6 @@ val external_message_ref_to_json : external_message_ref -> Yojson.Safe.t
 val external_message_ref_of_json :
   Yojson.Safe.t -> (external_message_ref, string) result
 
-val actor_to_json : actor -> Yojson.Safe.t
-val actor_of_json : Yojson.Safe.t -> (actor, string) result
-
 val item_to_json : item -> Yojson.Safe.t
 val item_of_json : Yojson.Safe.t -> (item, string) result
 
@@ -174,9 +171,6 @@ val mark_quarantined :
     event queue by a terminal turn failure. Call this wherever the queue entry
     is terminalized as failed: the queue side and this log are separate writes,
     and skipping it leaves the row pending with nothing left to drain it. *)
-
-val load_events_result :
-  base_path:string -> keeper_name:string -> (event list, string) result
 
 val load_events : base_path:string -> keeper_name:string -> event list
 

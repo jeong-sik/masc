@@ -24,7 +24,6 @@ type phase_gate_outcome =
 val decide_and_record
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
-  -> generation:int
   -> keeper_turn_id:int
   -> append_phase_gate_decision:
        (Keeper_unified_turn_phase_plan.turn_plan

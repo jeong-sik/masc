@@ -237,40 +237,6 @@ let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
   `Assoc fields
 ;;
 
-let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
-  match json with
-  | `Null -> None
-  | `Assoc fields ->
-    let klass =
-      match List.assoc_opt "klass" fields with
-      | Some (`String s) -> blocker_class_of_serialized_string s
-      | Some (`Assoc kfields) ->
-        (match List.assoc_opt "name" kfields with
-         | Some (`String "runtime_exhausted") ->
-           let reason =
-             match List.assoc_opt "reason" kfields with
-             | Some r ->
-               (match runtime_exhaustion_reason_of_json r with
-                | Some r -> r
-                | None -> Other_detail "runtime_exhausted")
-             | None -> Other_detail "runtime_exhausted"
-           in
-           Some (Runtime_exhausted reason)
-         | Some (`String s) -> blocker_class_of_serialized_string s
-         | _ -> None)
-      | _ -> None
-    in
-    (match klass with
-     | None -> None
-     | Some klass ->
-       let detail = match List.assoc_opt "detail" fields with
-         | Some (`String s) -> s
-         | _ -> ""
-       in
-       Some { klass; detail })
-  | _ -> None
-;;
-
 type runtime_attempt_record =
   { provider_id : string
   ; http_status : int option
@@ -284,22 +250,6 @@ let runtime_attempt_outcome_to_json = function
     `Assoc [ "kind", `String "failure"; "message", `String message ]
 ;;
 
-let runtime_attempt_outcome_of_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String "success") -> Some `Success
-     | Some (`String "failure") ->
-       (match List.assoc_opt "message" fields with
-        | Some (`String message) -> Some (`Failure message)
-        (* DET-OK: retired attempt rows encoded failure without a message;
-           keep the lossy historical record instead of dropping it. *)
-        | _ -> Some (`Failure ""))
-     | _ -> None)
-  | `String "success" -> Some `Success
-  | `String "failure" -> Some (`Failure "")
-  | _ -> None
-;;
-
 let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Safe.t =
   `Assoc
     [ "provider_id", `String record.provider_id
@@ -310,41 +260,6 @@ let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Sa
     ; "outcome", runtime_attempt_outcome_to_json record.outcome
     ; "timestamp", `Float record.timestamp
     ]
-;;
-
-let runtime_attempt_record_of_json (json : Yojson.Safe.t)
-  : runtime_attempt_record option
-  =
-  match json with
-  | `Null -> None
-  | `Assoc fields ->
-    let provider_id =
-      match List.assoc_opt "provider_id" fields with
-      | Some (`String value) -> Some value
-      | _ -> None
-    in
-    let http_status =
-      match List.assoc_opt "http_status" fields with
-      | Some (`Int status) -> Some status
-      | Some `Null | None -> None
-      | _ -> None
-    in
-    let outcome =
-      match List.assoc_opt "outcome" fields with
-      | Some value -> runtime_attempt_outcome_of_json value
-      | None -> None
-    in
-    let timestamp =
-      match List.assoc_opt "timestamp" fields with
-      | Some (`Float value) -> Some value
-      | Some (`Int value) -> Some (float_of_int value)
-      | _ -> None
-    in
-    (match provider_id, outcome, timestamp with
-     | Some provider_id, Some outcome, Some timestamp ->
-       Some { provider_id; http_status; outcome; timestamp }
-     | _ -> None)
-  | _ -> None
 ;;
 
 type usage_metrics =
@@ -384,7 +299,6 @@ type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
   ; proactive_rt : proactive_runtime
-  ; nonce : int
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
@@ -396,7 +310,6 @@ type agent_runtime_state =
   ; board_reactive_turn_count : int
   ; mention_reactive_turn_count : int
   ; noop_turn_count : int
-  ; last_blocker : blocker_info option
   ; last_runtime_attempt : runtime_attempt_record option
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
@@ -455,7 +368,6 @@ let mark_resumed (m : keeper_meta) : keeper_meta =
   { m with
     paused = false
   ; latched_reason = None
-  ; runtime = { m.runtime with last_blocker = None }
   }
 ;;
 
@@ -678,8 +590,3 @@ let map_compaction_rt (f : compaction_runtime -> compaction_runtime) (m : keeper
   { m with runtime = { m.runtime with compaction_rt = f m.runtime.compaction_rt } }
 ;;
 
-let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_meta)
-  : keeper_meta
-  =
-  { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
-;;

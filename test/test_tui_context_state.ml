@@ -7,7 +7,6 @@ let keeper =
   Decode.
     { k_name = "keeper-main";
       k_trace_id = "trace-current";
-      k_generation = 4;
       k_paused = false;
       k_current_task_id = None;
       k_total_turns = 0;
@@ -22,7 +21,6 @@ let keeper =
       k_mention_reactive_turn_count = 0;
       k_noop_turn_count = 0;
       k_last_proactive_outcome = "never";
-      k_last_blocker = None;
       k_created_at = "2026-08-21T00:00:00Z";
       k_updated_at = "2026-08-21T00:00:00Z";
     }

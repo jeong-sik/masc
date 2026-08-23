@@ -17,7 +17,6 @@ type task = {
 type keeper = {
   k_name : string;
   k_trace_id : string;
-  k_generation : int;
   k_paused : bool;
   k_current_task_id : string option;
   k_total_turns : int;
@@ -32,7 +31,6 @@ type keeper = {
   k_mention_reactive_turn_count : int;
   k_noop_turn_count : int;
   k_last_proactive_outcome : string;
-  k_last_blocker : string option;
   k_created_at : string;
   k_updated_at : string;
 }
@@ -67,6 +65,24 @@ type planning_snapshot = {
   pl_rollup : planning_rollup;
   pl_backlog : planning_backlog;
   pl_generated_at : string;
+}
+
+type fleet_safety = {
+  fs_status : string;
+  fs_blocker : string option;
+  fs_operator_action_required : bool;
+  fs_bootable_count : int;
+  fs_running_count : int;
+  fs_executable_count : int;
+  fs_failing_count : int;
+  fs_recovering_count : int;
+  fs_paused_count : int;
+  fs_target_reaction_capacity : int;
+  fs_reaction_capacity_shortfall : int;
+  fs_bootable_names : string list;
+  fs_executable_names : string list;
+  fs_active_task_owner_without_fiber_count : int;
+  fs_completion_authority_pending_count : int;
 }
 
 type log_kind =
@@ -238,12 +254,6 @@ let decode_task json =
   let* task = Masc_domain.task_of_yojson json in
   Ok (task_of_domain task)
 
-let blocker_summary (blocker : Keeper_meta_contract.blocker_info) =
-  let label = Keeper_meta_contract.blocker_class_to_string blocker.klass in
-  match String.trim blocker.detail with
-  | "" -> label
-  | detail -> label ^ ": " ^ detail
-
 let sanitize_terminal_text text =
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
@@ -339,12 +349,6 @@ let clock_timestamp_for_terminal text =
     (if String.length text >= 19 then String.sub text 11 8 else text)
 ;;
 
-let keeper_blocker_for_terminal keeper =
-  match keeper.k_last_blocker with
-  | None -> "-"
-  | Some blocker -> sanitize_terminal_text blocker
-;;
-
 let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   let runtime = meta.runtime in
   let usage = runtime.usage in
@@ -357,7 +361,6 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   {
     k_name = meta.name;
     k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
-    k_generation = runtime.nonce;
     k_paused = meta.paused;
     k_current_task_id =
       Option.map Keeper_id.Task_id.to_string meta.current_task_id;
@@ -375,7 +378,6 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     k_last_proactive_outcome =
       Keeper_meta_contract.proactive_cycle_outcome_to_string
         proactive.last_outcome;
-    k_last_blocker = Option.map blocker_summary runtime.last_blocker;
     k_created_at = meta.created_at;
     k_updated_at = meta.updated_at;
   }
@@ -473,7 +475,6 @@ let decode_log_entry json =
   let* _name = require_string_field json "name" in
   let* _agent_name = require_string_field json "agent_name" in
   let* _trace_id = require_string_field json "trace_id" in
-  let* _generation = require_int_field json "generation" in
   match kind with
   | Keeper_metrics_record.Heartbeat ->
       if not (String.equal raw_channel "heartbeat") then
@@ -906,6 +907,72 @@ let decode_planning_backlog json =
   let* pb_cancelled = required_int_field json "cancelled" in
   Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
 
+type system_log_level =
+  | System_debug
+  | System_info
+  | System_warn
+  | System_error
+  | System_level_unknown of string
+
+type system_log_entry = {
+  sl_seq : int;
+  sl_ts : string;
+  sl_level : system_log_level;
+  sl_module : string;
+  sl_keeper : string option;
+  sl_message : string;
+}
+
+type system_log_snapshot = {
+  sys_entries : system_log_entry list;
+  sys_total : int;
+  sys_latest_seq : int;
+}
+
+(* The server accepts "warn" and "warning" for one level and writes levels in
+   upper case. An unrecognised spelling keeps its text instead of becoming
+   Info, so a level added on the server shows up here as itself. *)
+let system_log_level_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "debug" -> System_debug
+  | "info" -> System_info
+  | "warn" | "warning" -> System_warn
+  | "error" -> System_error
+  | _ -> System_level_unknown raw
+
+let system_log_level_label = function
+  | System_debug -> "DEBUG"
+  | System_info -> "INFO "
+  | System_warn -> "WARN "
+  | System_error -> "ERROR"
+  | System_level_unknown raw ->
+      let raw = String.trim raw in
+      if String.length raw >= 5 then String.sub raw 0 5
+      else raw ^ String.make (5 - String.length raw) ' '
+
+let decode_system_log_entry json =
+  let* sl_seq = required_int_field json "seq" in
+  let* sl_ts = required_string_field json "ts" in
+  let* level_raw = required_string_field json "level" in
+  let* sl_module = required_string_field json "module" in
+  let* sl_message = required_string_field json "message" in
+  let* sl_keeper = optional_string_field json "keeper_name" in
+  Ok
+    { sl_seq
+    ; sl_ts
+    ; sl_level = system_log_level_of_string level_raw
+    ; sl_module
+    ; sl_keeper
+    ; sl_message
+    }
+
+let decode_system_log_snapshot json =
+  let* entries_json = required_list_field json "entries" in
+  let* sys_entries = decode_list "entries" decode_system_log_entry entries_json in
+  let* sys_total = required_int_field json "total" in
+  let* sys_latest_seq = required_int_field json "latest_seq" in
+  Ok { sys_entries; sys_total; sys_latest_seq }
+
 let decode_planning_snapshot json =
   let* goals_json = required_list_field json "goals" in
   let* pl_goals = decode_list "goals" decode_planning_goal goals_json in
@@ -915,6 +982,75 @@ let decode_planning_snapshot json =
   let* pl_backlog = decode_planning_backlog backlog_json in
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
+
+let decode_string_name_list json key =
+  let* items = optional_list_field json key in
+  decode_list key
+    (fun item ->
+       match item with
+       | `String value -> Ok value
+       | bad -> field_type_error key "a string" bad)
+    items
+
+(* The counts are read with a default rather than required: the server adds
+   fields to this section over time, and a TUI that refuses the whole reading
+   because one counter is new would hide the fleet exactly when it changed.
+   The three that name the fleet's own verdict -- status, blocker, and whether
+   an operator has to act -- are required, because a reading without them says
+   nothing. *)
+let decode_fleet_safety json =
+  let* section = required_object_field json "keeper_fleet_safety" in
+  let* fs_status = required_string_field section "status" in
+  let* fs_blocker = optional_string_field section "blocker" in
+  let* fs_operator_action_required =
+    match member "operator_action_required" section with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "operator_action_required" "a bool or null" bad
+  in
+  let* fs_bootable_count = int_field_or section "bootable_keeper_count" ~default:0 in
+  let* fs_running_count = int_field_or section "running_keeper_fiber_count" ~default:0 in
+  let* fs_executable_count =
+    int_field_or section "executable_keeper_fiber_count" ~default:0
+  in
+  let* fs_failing_count = int_field_or section "failing_keeper_fiber_count" ~default:0 in
+  let* fs_recovering_count =
+    int_field_or section "recovering_keeper_fiber_count" ~default:0
+  in
+  let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
+  let* fs_target_reaction_capacity =
+    int_field_or section "target_reaction_capacity_count" ~default:0
+  in
+  let* fs_reaction_capacity_shortfall =
+    int_field_or section "reaction_capacity_shortfall_count" ~default:0
+  in
+  let* fs_bootable_names = decode_string_name_list section "bootable_keeper_names" in
+  let* fs_executable_names =
+    decode_string_name_list section "executable_keeper_names"
+  in
+  let* fs_active_task_owner_without_fiber_count =
+    int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
+  in
+  let* fs_completion_authority_pending_count =
+    int_field_or section "completion_authority_pending_task_count" ~default:0
+  in
+  Ok
+    { fs_status
+    ; fs_blocker
+    ; fs_operator_action_required
+    ; fs_bootable_count
+    ; fs_running_count
+    ; fs_executable_count
+    ; fs_failing_count
+    ; fs_recovering_count
+    ; fs_paused_count
+    ; fs_target_reaction_capacity
+    ; fs_reaction_capacity_shortfall
+    ; fs_bootable_names
+    ; fs_executable_names
+    ; fs_active_task_owner_without_fiber_count
+    ; fs_completion_authority_pending_count
+    }
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =

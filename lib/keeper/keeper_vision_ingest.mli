@@ -21,9 +21,6 @@ type mode =
   | Eager  (** site 1: run the vision sub-call now, embed the reading *)
   | Store_only  (** site 2: store + handle-only placeholder, no provider call *)
 
-val extraction_query : string
-(** The fixed exhaustive extraction query used by [Eager] (RFC §2.3-eager). *)
-
 val eager_read_eviction_reason_of_outcome
   :  Keeper_vision_tool.vision_outcome
   -> string option

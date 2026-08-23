@@ -13,7 +13,6 @@ type field =
   | Trace_id
   | Multimodal_policy
   | Trace_history
-  | Generation
   | Last_handoff_ts
   | Created_at
   | Updated_at
@@ -50,7 +49,6 @@ type field =
   | Mention_reactive_turn_count
   | Noop_turn_count
   | Message_scope_ack_id
-  | Last_blocker
   | Last_runtime_attempt
   | Paused
   | Latched_reason

@@ -2,6 +2,7 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
+    "goal_verification.lookup.md",
     "goal_verification.proof.md",
     "judge.board.md",
     "judge.effect.md",
@@ -14,7 +15,6 @@
     "verification.md",
     "verification.contract.md",
     "verification.lookup.none.md",
-    "verification.lookup.producer_forest.md",
     "verification.lookup.producer_tree.md",
     "verification.required_evidence.md"
   ]

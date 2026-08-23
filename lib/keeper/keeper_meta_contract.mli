@@ -211,11 +211,6 @@ val blocker_info_to_json : blocker_info -> Yojson.Safe.t
     a structured object so the inner [runtime_exhaustion_reason] is
     preserved across read/write cycles. *)
 
-val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
-(** Parses the JSON shape emitted by {!blocker_info_to_json}.
-    Returns [None] for [`Null] or any value whose [klass] field is
-    absent / not recognisable. *)
-
 (** {1 Runtime attempt provenance} *)
 
 type runtime_attempt_record = {
@@ -231,16 +226,12 @@ type runtime_attempt_record = {
 val runtime_attempt_record_to_json :
   runtime_attempt_record -> Yojson.Safe.t
 
-val runtime_attempt_record_of_json :
-  Yojson.Safe.t -> runtime_attempt_record option
-
 (** {1 Agent runtime state record} *)
 
 type agent_runtime_state = {
   usage : usage_metrics;
   compaction_rt : compaction_runtime;
   proactive_rt : proactive_runtime;
-  nonce : int;
   trace_id : Keeper_id.Trace_id.t;
   trace_history : string list;
   last_handoff_ts : float;
@@ -252,7 +243,6 @@ type agent_runtime_state = {
   board_reactive_turn_count : int;
   mention_reactive_turn_count : int;
   noop_turn_count : int;
-  last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
@@ -308,7 +298,7 @@ type keeper_meta = {
 }
 
 (** Sanctioned generic unpause transform. Clears ordinary/operator/dead
-    latches with the pause bit and [runtime.last_blocker]. A
+    latches with the pause bit. A
     [Transcript_corruption_reset_required] latch is returned unchanged, so
     generic resume cannot replay a poisoned checkpoint. *)
 val mark_resumed : keeper_meta -> keeper_meta
@@ -393,8 +383,3 @@ val map_compaction_rt :
   keeper_meta
 (** Nested update of [m.runtime.compaction_rt]. *)
 
-val map_proactive_rt :
-  (proactive_runtime -> proactive_runtime) ->
-  keeper_meta ->
-  keeper_meta
-(** Nested update of [m.runtime.proactive_rt]. *)

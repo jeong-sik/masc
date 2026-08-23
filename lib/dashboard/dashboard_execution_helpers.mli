@@ -94,7 +94,6 @@ val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
-val execution_tool_preview_limit : int
 val cap_string_list : ?limit:int -> string list -> string list
 
 (** {1 Health predicates} *)

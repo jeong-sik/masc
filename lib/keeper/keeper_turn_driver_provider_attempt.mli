@@ -8,9 +8,6 @@ type provider_attempt_provenance =
   ; provider_source_runtime : string option
   }
 
-val provider_attempt_provenance_fields :
-  provider_attempt_provenance -> (string * Yojson.Safe.t) list
-
 type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
   ; started_is_last : bool

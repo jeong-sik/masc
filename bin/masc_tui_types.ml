@@ -159,6 +159,9 @@ type overview_snapshot = {
 
 (** Planning projections from [Tui_decode], which owns the current wire
     contract and its behavioral decoder tests. *)
+type system_log_snapshot = Tui_decode.system_log_snapshot
+type system_log_entry = Tui_decode.system_log_entry
+
 type planning_goal = Tui_decode.planning_goal
   = {
   pg_id: string;
@@ -185,6 +188,25 @@ type planning_backlog = Tui_decode.planning_backlog
   pb_running: int;
   pb_done: int;
   pb_cancelled: int;
+}
+
+type fleet_safety = Tui_decode.fleet_safety
+  = {
+  fs_status: string;
+  fs_blocker: string option;
+  fs_operator_action_required: bool;
+  fs_bootable_count: int;
+  fs_running_count: int;
+  fs_executable_count: int;
+  fs_failing_count: int;
+  fs_recovering_count: int;
+  fs_paused_count: int;
+  fs_target_reaction_capacity: int;
+  fs_reaction_capacity_shortfall: int;
+  fs_bootable_names: string list;
+  fs_executable_names: string list;
+  fs_active_task_owner_without_fiber_count: int;
+  fs_completion_authority_pending_count: int;
 }
 
 type planning_snapshot = Tui_decode.planning_snapshot
@@ -225,6 +247,7 @@ type surface =
   | Board
   | Approvals
   | Planning
+  | System_logs
 
 (** Dashboard state *)
 type state = {
@@ -235,6 +258,11 @@ type state = {
   mutable overview_event_scroll: int;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* The keeper list holds one row per running keeper, so a keeper that failed
+     to start is absent from it rather than shown as failed. This carries the
+     fleet's own reading of what is missing. *)
+  mutable fleet_safety: fleet_safety option;
+  mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable last_refresh: float;
   mutable view: surface;
@@ -265,6 +293,9 @@ type state = {
   mutable planning_cursor: int;
   mutable planning_scroll: int;
   mutable planning_mode: planning_mode;
+  mutable system_logs: system_log_snapshot option;
+  mutable system_logs_error: string option;
+  mutable system_logs_scroll: int;
   mutable msg_input: Buffer.t;
   mutable msg_target_keeper_name: string option;
   mutable msg_drafts: (string * string) list;
@@ -300,6 +331,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   overview_event_scroll = 0;
   keepers = [];
   keepers_error = None;
+  fleet_safety = None;
+  fleet_safety_error = None;
   connection_status = Disconnected;
   last_refresh = 0.0;
   view = Overview;
@@ -329,6 +362,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   planning_cursor = 0;
   planning_scroll = 0;
   planning_mode = Planning_list;
+  system_logs = None;
+  system_logs_error = None;
+  system_logs_scroll = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;
   msg_drafts = [];

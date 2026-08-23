@@ -311,7 +311,6 @@ let streaming_cancellation_source_to_fsm = function
 let record_streaming_cancelled_observation
       ~(config : Workspace.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
-      ~(run_generation : int)
       ~(runtime_id : string)
       ~(keeper_turn_id : int)
       ()
@@ -340,7 +339,6 @@ let record_streaming_cancelled_observation
   Keeper_turn_helpers.record_pre_dispatch_terminal_observation
     ~config
     ~meta:run_meta
-    ~generation:run_generation
     ~runtime_id
     ~outcome:`Cancelled
     ~terminal_reason_code

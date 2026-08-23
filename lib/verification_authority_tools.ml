@@ -28,16 +28,6 @@ and producer_scope =
   | Keeper_producer of Keeper_meta_contract.keeper_meta
   | Workspace_producer
 
-type forest_tool =
-  | Forest_read_file
-  | Forest_search_files
-  | Forest_web_fetch
-
-type forest =
-  { bindings : (string * t) list
-  ; forest_tools : (forest_tool * Types_core.tool_schema) list
-  }
-
 let descriptor_of_tool tool =
   match Keeper_tool_descriptor.descriptors_for_internal (tool_name tool) with
   | [ descriptor ] -> Ok (tool, descriptor)
@@ -103,6 +93,31 @@ let create ~config ~producer =
     Env_config_core.strip_trailing_slashes ownership_root
   in
   Ok { ownership_root; config; producer_scope; tools }
+;;
+
+(* The Goal proof surface. A Goal names no producer: it is a shared intent
+   that any Keeper may advance, so there is no owned tree to bind the tools
+   to. The root is the shared playground prefix — one fixed workspace
+   location, the same for every Goal, derived from nothing the Goal happens
+   to be linked to. Every producer's tree sits under it, so a measurement
+   written anywhere in the workspace is reachable.
+
+   [tool_search_files] is absent. Its containment runs through a Keeper's
+   sandbox meta and this surface has no Keeper identity; reimplementing that
+   jail here would be a second containment boundary to keep correct. The
+   judge navigates from [root_layout] instead, which names the producers and
+   the checkouts under them. *)
+let create_goal_proof ~(config : Workspace.config) =
+  let open Result.Syntax in
+  let* tools = resolve_tools [ Read_file; Web_fetch ] in
+  let project_root =
+    Workspace_verification_store.project_root_of_base_path config.base_path
+  in
+  let ownership_root =
+    Env_config_core.strip_trailing_slashes
+      (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
+  in
+  Ok { ownership_root; config; producer_scope = Workspace_producer; tools }
 ;;
 
 (* The listing answers one question for the evaluator: where do the paths the
@@ -308,243 +323,4 @@ let dispatch t ~name ~args =
          ~argument
          ~outcome:(match result with Ok _ -> Resolved | Error _ -> Rejected);
        result)
-;;
-
-(* ================================================================ *)
-(* Multi-producer Goal proof surface                                *)
-(* ================================================================ *)
-
-let forest_tool_name = function
-  | Forest_read_file -> "verification_read_file"
-  | Forest_search_files -> "verification_search_files"
-  | Forest_web_fetch -> tool_name Web_fetch
-;;
-
-let source_tool = function
-  | Forest_read_file -> Read_file
-  | Forest_search_files -> Search_files
-  | Forest_web_fetch -> Web_fetch
-;;
-
-let surface_has_tool surface tool =
-  List.exists (fun (candidate, _) -> candidate = tool) surface.tools
-;;
-
-let eligible_bindings bindings forest_tool =
-  let tool = source_tool forest_tool in
-  List.filter (fun (_, surface) -> surface_has_tool surface tool) bindings
-;;
-
-let replace_assoc key value fields =
-  (key, value) :: List.filter (fun (candidate, _) -> not (String.equal key candidate)) fields
-;;
-
-let producer_scoped_input_schema ~producers = function
-  | `Assoc fields ->
-    let open Result.Syntax in
-    let* properties =
-      match List.assoc_opt "properties" fields with
-      | Some (`Assoc properties) -> Ok properties
-      | Some other ->
-        Error
-          (Printf.sprintf
-             "verification tool descriptor properties must be an object, got %s"
-             (Json_util.excerpt other))
-      | None -> Error "verification tool descriptor has no properties"
-    in
-    let* required =
-      match List.assoc_opt "required" fields with
-      | Some (`List required) -> Ok required
-      | Some other ->
-        Error
-          (Printf.sprintf
-             "verification tool descriptor required must be an array, got %s"
-             (Json_util.excerpt other))
-      | None -> Ok []
-    in
-    let producer_schema =
-      `Assoc
-        [ "type", `String "string"
-        ; "enum", `List (List.map (fun producer -> `String producer) producers)
-        ; ( "description"
-          , `String
-              "Exact linked-Task producer whose owned tree this read targets" )
-        ]
-    in
-    let properties = replace_assoc "producer" producer_schema properties in
-    let required =
-      `String "producer"
-      :: List.filter
-           (function
-             | `String name -> not (String.equal name "producer")
-             | _ -> true)
-           required
-    in
-    Ok
-      (`Assoc
-         (fields
-          |> replace_assoc "properties" (`Assoc properties)
-          |> replace_assoc "required" (`List required)))
-  | other ->
-    Error
-      (Printf.sprintf
-         "verification tool descriptor input schema must be an object, got %s"
-         (Json_util.excerpt other))
-;;
-
-let forest_schema bindings forest_tool =
-  let open Result.Syntax in
-  let tool = source_tool forest_tool in
-  let* _, descriptor = descriptor_of_tool tool in
-  let eligible = eligible_bindings bindings forest_tool in
-  let producers = List.map fst eligible in
-  let* input_schema =
-    match forest_tool with
-    | Forest_web_fetch -> Ok descriptor.input_schema
-    | Forest_read_file | Forest_search_files ->
-      producer_scoped_input_schema ~producers descriptor.input_schema
-  in
-  Ok
-    { Types_core.name = forest_tool_name forest_tool
-    ; description =
-        (match forest_tool with
-         | Forest_read_file ->
-           "Read a file from one exact linked-Task producer tree. "
-           ^ descriptor.description
-         | Forest_search_files ->
-           "Search files in one exact linked-Task producer tree. "
-           ^ descriptor.description
-         | Forest_web_fetch -> descriptor.description)
-    ; input_schema
-    }
-;;
-
-let rec create_bindings ~config = function
-  | [] -> Ok []
-  | producer :: rest ->
-    let open Result.Syntax in
-    let* surface = create ~config ~producer in
-    let* bindings = create_bindings ~config rest in
-    Ok ((producer, surface) :: bindings)
-;;
-
-let create_forest ~config ~producers =
-  let open Result.Syntax in
-  let producers = List.sort_uniq String.compare producers in
-  let* () =
-    match List.find_opt (fun producer -> String.equal (String.trim producer) "") producers with
-    | Some _ -> Error "verification producer identity must not be blank"
-    | None -> Ok ()
-  in
-  let* bindings =
-    match producers with
-    | [] -> Error "verification producer forest must not be empty"
-    | _ -> create_bindings ~config producers
-  in
-  let forest_tool_kinds =
-    [ Forest_read_file ]
-    @ (match eligible_bindings bindings Forest_search_files with
-       | [] -> []
-       | _ -> [ Forest_search_files ])
-    @ [ Forest_web_fetch ]
-  in
-  let rec build = function
-    | [] -> Ok []
-    | forest_tool :: rest ->
-      let* schema = forest_schema bindings forest_tool in
-      let* schemas = build rest in
-      Ok ((forest_tool, schema) :: schemas)
-  in
-  let* forest_tools = build forest_tool_kinds in
-  Ok { bindings; forest_tools }
-;;
-
-(* A forest has one root per producer, so every line has to name the producer
-   it belongs to. [root_layout] is already bounded per producer; applying a
-   second global prefix cap lets a noisy first producer erase every later
-   producer and turns omission into false evidence. *)
-
-let forest_root_layout forest =
-  let render_producer producer entries =
-    let entries = match entries with [] -> [ "root is empty" ] | _ -> entries in
-    List.map
-      (fun entry -> "  " ^ producer ^ ": " ^ String.trim entry)
-      entries
-  in
-  let rec collect acc = function
-    | [] -> Ok (List.rev acc |> List.concat)
-    | (producer, tools) :: rest ->
-      (match root_layout tools with
-       | Error detail -> Error (Printf.sprintf "producer %s: %s" producer detail)
-       | Ok entries -> collect (render_producer producer entries :: acc) rest)
-  in
-  collect [] forest.bindings
-;;
-
-let forest_schemas forest = List.map snd forest.forest_tools
-
-let forest_tool_of_name forest name =
-  forest.forest_tools
-  |> List.find_opt (fun (tool, _) -> String.equal (forest_tool_name tool) name)
-  |> Option.map fst
-;;
-
-let select_producer forest forest_tool args =
-  match args with
-  | `Assoc fields ->
-    (match List.assoc_opt "producer" fields with
-     | Some (`String producer) ->
-       let eligible = eligible_bindings forest.bindings forest_tool in
-       (match List.assoc_opt producer eligible with
-        | Some surface ->
-          Ok
-            ( surface
-            , `Assoc
-                (List.filter
-                   (fun (name, _) -> not (String.equal name "producer"))
-                   fields) )
-        | None ->
-          Error
-            (Printf.sprintf
-               "producer %s is not admitted for %s; admitted producers: %s"
-               producer
-               (forest_tool_name forest_tool)
-               (String.concat ", " (List.map fst eligible))))
-     | Some other ->
-       Error
-         (Printf.sprintf
-            "producer must be a string, got %s"
-            (Json_util.excerpt other))
-     | None -> Error "producer is required")
-  | other ->
-    Error
-      (Printf.sprintf
-         "%s input must be an object, got %s"
-         (forest_tool_name forest_tool)
-         (Json_util.excerpt other))
-;;
-
-let dispatch_forest forest ~name ~args =
-  match forest_tool_of_name forest name with
-  | None ->
-    Error
-      (Printf.sprintf
-         "unknown tool %s; this Goal review offers %s"
-         name
-         (forest.forest_tools
-          |> List.map (fun (tool, _) -> forest_tool_name tool)
-          |> String.concat ", "))
-  | Some Forest_web_fetch ->
-    (match forest.bindings with
-     | (_, surface) :: _ -> dispatch surface ~name:(tool_name Web_fetch) ~args
-     | [] -> Error "verification producer forest is empty")
-  | Some (Forest_read_file as forest_tool)
-  | Some (Forest_search_files as forest_tool) ->
-    (match select_producer forest forest_tool args with
-     | Error _ as error -> error
-     | Ok (surface, forwarded_args) ->
-       dispatch
-         surface
-         ~name:(tool_name (source_tool forest_tool))
-         ~args:forwarded_args)
 ;;

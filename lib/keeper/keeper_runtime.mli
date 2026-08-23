@@ -100,15 +100,6 @@ val canonicalize_if_keeper : Workspace.config -> string -> string
     redirect path stops being load-bearing. (PR-3b1, AuthIdentityFSM
     invariant I1 IdentityBindsToken.) *)
 
-val apply_default : 'a option -> 'a -> 'a
-(** [apply_default opt default] returns [v] when [opt = Some v], else
-    [default]. *)
-
-val apply_default_opt : 'a option -> 'a option -> 'a option
-(** [apply_default_opt primary fallback] returns [primary] when it is
-    [Some], else [fallback]. *)
-
-
 val effective_declarative_runtime_id :
   Keeper_types_profile.keeper_profile_defaults ->
   Keeper_meta_contract.keeper_meta -> string
@@ -128,17 +119,6 @@ val load_or_materialize_boot_meta :
     surfaces whether the meta was materialised from defaults. *)
 
 (** {1 Supervisor sweep state} *)
-
-val supervisor_sweep_running : string -> bool
-(** [true] when a supervisor sweep is currently registered for the
-    keeper. *)
-
-val stop_supervisor_sweep : string -> unit
-(** Stop and forget the supervisor sweep for [keeper_name]; idempotent. *)
-
-val update_supervisor_sweep_interval : string -> float -> bool
-(** Adjust the sweep interval for an active sweep.  Returns [false] when
-    the keeper has no active sweep. *)
 
 val start_supervisor_sweep :
   [> float Eio.Time.clock_ty ] Keeper_types_profile.context -> unit

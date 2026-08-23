@@ -233,16 +233,13 @@ let test_keeper_msg_startup_recovery_settles_disk_only_running_request () =
 
 (* The example keeper must satisfy the fail-closed profile contract
    (#24144/#24226): a TOML without inline instructions requires a non-empty
-   keepers/<name>/AGENT.md, and a keeper whose profile fails to load is
+   keeper.instructions, and a keeper whose profile fails to load is
    excluded from autoboot/bootable targets entirely — which silently removed
    "example" from every blocked-target expectation below (#28485 layer 2). *)
 let write_example_keeper config =
   write_file
     (Filename.concat config "keepers/example.toml")
-    "[keeper]\nautoboot_enabled = true\n";
-  let example_dir = Filename.concat (Filename.concat config "keepers") "example" in
-  mkdir_p example_dir;
-  write_file (Filename.concat example_dir "AGENT.md") "example instructions\n"
+    "[keeper]\nautoboot_enabled = true\ninstructions = \"example instructions\"\n"
 
 let make_config_root root =
   let config = Filename.concat root "config" in
@@ -451,23 +448,20 @@ let test_model_catalog_configuration_delegates_to_agent_core_ambient () =
   in
   Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result)
 
-(* Instructions live in [keepers/<name>/AGENT.md], not in the TOML: the loader
-   rejects [keeper.instructions] as an unknown key, and a rejected document
-   leaves the whole profile unloaded. *)
+(* Instructions live in [keeper.instructions]; the TOML is the whole setup. *)
 let write_keeper_instructions keepers_dir name body =
-  let dir = Filename.concat keepers_dir name in
-  mkdir_p dir;
-  write_file (Filename.concat dir "AGENT.md") body
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    (Printf.sprintf "[keeper]\ninstructions = %S\n" body)
 
 let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
   let keepers_dir = Filename.concat config_root "keepers" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
-       "[keeper]\nautoboot_enabled = %b\nsandbox_profile = \"local\"\n"
-       autoboot_enabled);
-  write_keeper_instructions keepers_dir name
-    (Printf.sprintf "instructions-%s\n" name)
+       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = %b\nsandbox_profile = \"local\"\n"
+       name
+       autoboot_enabled)
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -483,10 +477,10 @@ let write_basepath_keeper_toml base_path name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
 {|[keeper]
+instructions = "example"
 proactive_enabled = false
 autoboot_enabled = true
-|};
-  write_keeper_instructions keepers_dir name "example\n"
+|}
 let find_free_port_from start =
   let rec loop attempts port =
     if attempts <= 0 then
@@ -1745,7 +1739,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     write_config_root_keeper_toml config_root "mad-improver";
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
-      "[keeper]\nautoboot_enabled = false\n";
+      "[keeper]\ninstructions = \"test keeper\"\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -1863,21 +1857,11 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
         Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let timeout_paused =
-          { (make_keeper_meta
-               ~name:"timeout-without-policy"
-               ~trace_id:"trace-timeout-without-policy"
-               ~paused:true
-               ())
-            with
-            runtime =
-              { (make_keeper_meta ()).runtime with
-                last_blocker =
-                  Some
-                    (Keeper_meta_contract.blocker_info_of_class
-                       ~detail:"turn_timeout"
-                       Keeper_meta_contract.Stale_turn_timeout);
-              };
-          }
+          make_keeper_meta
+            ~name:"timeout-without-policy"
+            ~trace_id:"trace-timeout-without-policy"
+            ~paused:true
+            ()
         in
         write_keeper_meta_exn config timeout_paused;
         let request = Httpun.Request.create `GET "/health" in
@@ -1892,9 +1876,7 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
                row |> member "name" |> to_string = "timeout-without-policy")
         in
         Alcotest.(check string) "pause kind" "unclassified_paused"
-          (detail |> member "pause_kind" |> to_string);
-        Alcotest.(check string) "last blocker class" "stale_turn_timeout"
-          (detail |> member "last_blocker" |> member "klass" |> to_string)))
+          (detail |> member "pause_kind" |> to_string)))
 
 let test_health_json_reports_dormant_task_owner_as_advisory () =
   with_temp_dir "health-active-task-owner-without-fiber" (fun dir ->
@@ -3568,7 +3550,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
         ; keeper_name = fenced_keeper.name
         ; lane_ownership = Keeper_shutdown_types.Dormant_meta
         ; trace_id = fenced_keeper.runtime.trace_id
-        ; generation = fenced_keeper.runtime.nonce
         ; actor = "startup-test"
         ; cleanup_intent =
             { reason = Keeper_shutdown_types.Operator_stop_retain_meta

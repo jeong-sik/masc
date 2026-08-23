@@ -245,10 +245,6 @@ let stop_containers ?keeper_name ~scope ~(config : Workspace.config)
     ~timeout_sec
     ()
 
-let stop_managed_containers ?keeper_name ~(config : Workspace.config)
-    ~(timeout_sec : float) () =
-  stop_containers ?keeper_name ~scope:Stop_managed ~config ~timeout_sec ()
-
 let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
   Keeper_sandbox_runtime.cleanup_stale_containers
     ~base_path:config.base_path

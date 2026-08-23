@@ -9,9 +9,6 @@ type caller =
   | Fusion_judge
   | Fusion_panel
 
-(** Stable observation label for the closed caller vocabulary. *)
-val caller_key : caller -> string
-
 (** Run a generic AGENT_CORE operation without imposing a MASC wall-clock budget.
     A genuine inner [Eio.Time.Timeout] becomes a typed agent-core timeout;
     [Eio.Cancel.Cancelled] is always re-raised with its backtrace. When the

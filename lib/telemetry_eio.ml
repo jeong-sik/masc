@@ -206,12 +206,6 @@ let read_all_events ?fs:_ config : event_record list =
   let store = get_telemetry_store config in
   Dated_jsonl.filter_map_recent store 100_000 ~f:parse_event_record
 
-let read_recent_events ?fs:_ config ~limit : event_record list =
-  if limit <= 0 then []
-  else
-    let store = get_telemetry_store config in
-    Dated_jsonl.filter_map_recent store limit ~f:parse_event_record
-
 (* ── Tool usage summary cache ──────────────────────────────────────
    The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
    surfaces every 30 s. Each surface calls [summarize_tool_usage] on
@@ -493,9 +487,6 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
           let context = String.concat " " context_parts in
           track ?fs config
             (Error_occurred { code = trimmed_kind; message; context })
-
-let track_tool_assigned ?fs config ~agent_id ~profile ~tool_count ~assignment_id () =
-  track ?fs config (Tool_assigned { agent_id; profile; tool_count; assignment_id })
 
 (** Prune telemetry entries older than [max_age_days] days.
     Replaces the old rotate function; date-split makes rewriting unnecessary. *)

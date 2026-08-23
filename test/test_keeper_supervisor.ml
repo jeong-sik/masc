@@ -45,12 +45,11 @@ let aq_resolve ~base_path ~id ~decision =
 
 let supervisor_agent_name = Sup.supervisor_agent_name
 
-let with_launch_token ~base_path ~keeper_name ~expected_generation f =
+let with_launch_token ~base_path ~keeper_name f =
   match
     Lifecycle_reservation.acquire
       ~base_path
       ~keeper_name
-      ~expected_generation
       ~purpose:Lifecycle_reservation.Keepalive_launch
   with
   | Error (Lifecycle_reservation.Already_reserved owner) ->
@@ -174,7 +173,6 @@ let with_config_dir f =
 let write_keeper_toml config_dir ~name =
   let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
   mkdir_p profile_dir;
-  write_file (Filename.concat profile_dir "AGENT.md") ("# " ^ name ^ "\n");
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -189,7 +187,6 @@ sandbox_profile = "local"
 let write_keeper_toml_with_instructions config_dir ~name ~instructions =
   let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
   mkdir_p profile_dir;
-  write_file (Filename.concat profile_dir "AGENT.md") (instructions ^ "\n");
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -204,15 +201,13 @@ instructions = "%s"
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
 
 let write_empty_keeper_toml config_dir ~name =
-  let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
-  mkdir_p profile_dir;
-  write_file (Filename.concat profile_dir "AGENT.md") ("# " ^ name ^ "\n");
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
        {|
 [keeper]
 name = "%s"
+instructions = "test keeper"
 sandbox_profile = "local"
 proactive_enabled = false
 |}
@@ -1230,15 +1225,6 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
           base with
           paused = true;
           autoboot_enabled = true;
-          runtime =
-            {
-              base.runtime with
-              last_blocker =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"provider turn timed out"
-                     Keeper_meta_contract.Stale_turn_timeout);
-            };
         }
       in
       (match Keeper_meta_store.replace_snapshot config meta with
@@ -1279,9 +1265,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
         | Ok None -> fail "expected persisted keeper meta"
         | Error err -> fail err
       in
-      check bool "sweep does not reinterpret pause" true persisted_meta.paused;
-      check bool "blocker remains diagnostic evidence" true
-        (Option.is_some persisted_meta.runtime.last_blocker))
+      check bool "sweep does not reinterpret pause" true persisted_meta.paused)
 
 let test_sweep_reports_pending_hitl_approval () =
   Eio_main.run @@ fun env ->
@@ -1603,7 +1587,6 @@ let test_supervised_stop_joins_board_attention_worker () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:reg.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber
@@ -1677,7 +1660,6 @@ let test_supervised_stop_drains_librarian_before_terminal () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:reg.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber
@@ -1809,7 +1791,6 @@ let test_launch_fork_rejection_does_not_announce_running () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:reg.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber
@@ -1869,7 +1850,6 @@ let test_fork_rejection_preserves_replacement_lane () =
       with_launch_token
         ~base_path:config.base_path
         ~keeper_name:name
-        ~expected_generation:rejected.transition_seq
         (fun lifecycle_token ->
            match
              Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
@@ -2081,79 +2061,6 @@ let test_non_storm_crashed_restarts_normally () =
 
 (* Failure observations remain durable across lane unregister/restart without
    changing the Keeper's operator-controlled lifecycle state. *)
-let test_persisted_blocker_survives_unregister () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let name = "failure-blocker-keeper" in
-      let meta = make_meta name in
-      let meta =
-        {
-          meta with
-          runtime =
-            {
-              meta.runtime with
-              last_blocker = Some (Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Keeper_meta_contract.Stale_turn_timeout);
-            };
-        }
-      in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
-      resolve_done_for_test reg (`Crashed "observed failure");
-      Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
-      Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Stale_termination_storm { count = 5 }));
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      sweep_and_recover_no_materialize ctx;
-      
-      (* Check if blocker is persisted *)
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           (match m.runtime.last_blocker with
-            | Some b ->
-                check string "meta.runtime.last_blocker" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
-            | None -> fail "expected blocker after storm pause");
-       | Ok None -> fail "meta missing after storm pause"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      
-      (* Unregister the keeper *)
-      Reg.For_testing.unregister ~base_path:config.base_path name;
-      
-      (* Read again and verify *)
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           (match m.runtime.last_blocker with
-            | Some b ->
-                check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
-            | None -> fail "expected blocker after unregister")
-       | Ok None -> fail "meta missing after unregister"
-       | Error err -> fail ("read_meta failed: " ^ err)))
-
 let test_active_librarian_abort_defers_then_retries_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2216,7 +2123,6 @@ let test_active_librarian_abort_defers_then_retries_restart () =
          Launch_transaction.run
            ~base_path:config.base_path
            ~keeper_name:name
-           ~expected_generation:previous.transition_seq
            ~register:(fun token intake_token ->
              Reg.register_restarting_for_lifecycle
                ~intake_token
@@ -2355,7 +2261,6 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
           Launch_transaction.run
             ~base_path:config.base_path
             ~keeper_name:name
-            ~expected_generation:crashed.transition_seq
             ~register:(register_restart ~base_path:config.base_path ~name ~meta)
             ~rollback:(Launch_transaction.Restore_previous crashed)
             (fun _intake_token _token _replacement ->
@@ -2378,7 +2283,6 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
          Launch_transaction.run
            ~base_path:config.base_path
            ~keeper_name:name
-           ~expected_generation:crashed.transition_seq
            ~register:(register_restart ~base_path:config.base_path ~name ~meta)
            ~rollback:(Launch_transaction.Restore_previous crashed)
            (fun _intake_token _token replacement -> replacement)
@@ -2422,7 +2326,6 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
                  (Launch_transaction.run
                     ~base_path:config.base_path
                     ~keeper_name:name
-                    ~expected_generation:crashed.transition_seq
                     ~register:
                       (register_restart ~base_path:config.base_path ~name ~meta)
                     ~rollback:(Launch_transaction.Restore_previous crashed)
@@ -2493,7 +2396,6 @@ let test_register_cancellation_rolls_back_restart_transaction () =
                  (Launch_transaction.run
                     ~base_path:config.base_path
                     ~keeper_name:name
-                    ~expected_generation:crashed.transition_seq
                     ~register:(fun token intake_token ->
                       match
                         register_restart
@@ -2560,7 +2462,6 @@ let test_started_launch_exception_retains_registered_lane () =
           Launch_transaction.run
             ~base_path:config.base_path
             ~keeper_name:name
-            ~expected_generation:crashed.transition_seq
             ~register:(register_restart ~base_path:config.base_path ~name ~meta)
             ~rollback:(Launch_transaction.Restore_previous crashed)
             (fun _intake_token _token replacement ->
@@ -2608,7 +2509,6 @@ let test_offline_launch_exception_retains_retryable_lane () =
          Launch_transaction.run
            ~base_path:config.base_path
            ~keeper_name:name
-           ~expected_generation:offline.transition_seq
            ~register:(fun _token _intake_token -> Ok offline)
            ~rollback:Launch_transaction.Retain_registered
            launch
@@ -2674,7 +2574,6 @@ let test_restart_intake_epoch_survives_shutdown_overlap () =
            Launch_transaction.run
              ~base_path:config.base_path
              ~keeper_name:name
-             ~expected_generation:crashed.transition_seq
              ~register:(fun token intake_token ->
                match
                  register_restart
@@ -2848,9 +2747,5 @@ let () =
         test_idle_duration_never_stops_keeper;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
         test_non_storm_crashed_restarts_normally;
-    ];
-    "failure_observation", [
-      test_case "persisted blocker survives unregister" `Quick
-        test_persisted_blocker_survives_unregister;
     ];
   ]

@@ -35,15 +35,6 @@ type parsed_args =
 
 (** Project an [`Assoc] member at [key]; [None] for non-objects or
     missing keys. *)
-(** [true] iff [key] exists in the assoc and its value is not
-    [`Null]. *)
-val json_non_null_member_present : string -> Yojson.Safe.t -> bool
-
-(** Parse an optional string-list field at [key]; uses
-    [normalize_name_list]. *)
-val parse_present_string_list_opt :
-  Yojson.Safe.t -> string -> (string list option, string) result
-
 (** Parse the explicit context override. Missing is [(false, None)]; null or
     zero explicitly clears it; positive integers are preserved exactly. *)
 val parse_max_context_override :
@@ -92,10 +83,6 @@ val resolve_network_mode :
   sandbox_profile:sandbox_profile ->
   fallback:network_mode option ->
   network_mode
-
-(** Reject globs ([*?\[\]]) and traversal segments ([./..]) in
-    sandbox allowed-path entries. *)
-val sandbox_allowed_path_has_forbidden_segments : string -> bool
 
 (** Validate allowed_paths without changing behavior by sandbox backend. *)
 val validate_sandbox_settings :

@@ -9,6 +9,7 @@ let judge_board = "judge.board"
 let judge_effect = "judge.effect"
 let verification = "verification"
 let goal_verification_proof = "goal_verification.proof"
+let goal_verification_lookup = "goal_verification.lookup"
 
 (* Review sections rendered as their own templates and injected into the review
    prompt. They live as files so the prose is editable and overridable through
@@ -17,7 +18,6 @@ let goal_verification_proof = "goal_verification.proof"
    no review prose of its own. *)
 let verification_lookup_none = "verification.lookup.none"
 let verification_lookup_producer_tree = "verification.lookup.producer_tree"
-let verification_lookup_producer_forest = "verification.lookup.producer_forest"
 let verification_contract = "verification.contract"
 let verification_required_evidence = "verification.required_evidence"
 

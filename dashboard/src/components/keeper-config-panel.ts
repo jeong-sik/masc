@@ -1709,7 +1709,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         action === 'pause'
           ? await pauseKeeper(keeperName)
           : action === 'resume'
-            ? await resumeKeeper(keeperName, c.metrics.generation)
+            ? await resumeKeeper(keeperName)
             : await wakeKeeper(keeperName)
       if (!result.ok) {
         throw new Error(result.error || `${action} directive failed`)

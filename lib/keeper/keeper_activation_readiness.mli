@@ -61,10 +61,6 @@ type t =
 
 val of_meta : Keeper_meta_contract.keeper_meta -> t
 
-val ready_for_unclaimed_backlog : Keeper_meta_contract.keeper_meta -> bool
-
-val autonomous_blocker_to_wire : autonomous_blocker -> string
-
 val owner_runtime_of_registry_entry :
   Keeper_registry.registry_entry option -> owner_runtime
 (** Observe the live registry without deriving executability from phase or

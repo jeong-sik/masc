@@ -14,7 +14,6 @@ module Snapshot_cache = struct
   type key =
     { base_path : string
     ; keeper_name : string
-    ; generation : int
     ; last_turn_ts : float
     ; approval_queue_revision : int
     }
@@ -30,7 +29,6 @@ module Snapshot_cache = struct
     let equal left right =
       String.equal left.base_path right.base_path
       && String.equal left.keeper_name right.keeper_name
-      && Int.equal left.generation right.generation
       && Float.equal left.last_turn_ts right.last_turn_ts
       && Int.equal left.approval_queue_revision right.approval_queue_revision
     ;;
@@ -41,7 +39,6 @@ module Snapshot_cache = struct
       Hashtbl.hash
         ( key.base_path
         , key.keeper_name
-        , key.generation
         , key.last_turn_ts
         , key.approval_queue_revision )
     ;;
@@ -1011,7 +1008,6 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   in
   `Assoc
     ([ ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-     ; ("generation", `Int meta.runtime.nonce)
      ; ( "turn_id"
        , match
            latest_turn_id ~registry_entry:raw.registry_entry
@@ -1080,7 +1076,6 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let cache_key =
     { Snapshot_cache.base_path = config.base_path
     ; keeper_name = meta.name
-    ; generation = meta.runtime.nonce
     ; last_turn_ts = meta.runtime.usage.last_turn_ts
     ; approval_queue_revision =
         Keeper_approval_queue.store_revision_for_workspace

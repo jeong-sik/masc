@@ -37,7 +37,6 @@ type trajectory = {
   scenario_id : string option;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
@@ -77,10 +76,8 @@ type trajectory_line =
 
 (** {1 JSON serialization} *)
 
-val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
-val default_result_truncation : int
 val entry_to_json :
   ?result_max_len:int ->
   ?runtime_contract:Yojson.Safe.t ->
@@ -89,12 +86,6 @@ val entry_to_json :
   Yojson.Safe.t
 
 val tool_call_entry_of_json : Yojson.Safe.t -> tool_call_entry option
-(** Decode one persisted JSONL row back into a [tool_call_entry].
-    Returns [None] for non-entry rows (summary/thinking), malformed JSON,
-    and rows carrying no readable gate object -- that last case used to
-    decode as [Pass], a verdict the row never recorded. Exposed for
-    RFC-0233 consumers that join rows on [execution_id]. *)
-val withheld_thinking_entry_to_json : withheld_thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
@@ -168,7 +159,6 @@ type accumulator = {
   mutable turn : int;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
@@ -181,7 +171,7 @@ type accumulator = {
 val create_accumulator :
   ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> unit -> accumulator
+  unit -> accumulator
 
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit

@@ -1138,7 +1138,7 @@ let test_redirect_file_absolute_path_emits_ir () =
        Alcotest.(check string)
          "stdout file target path"
          "/tmp/out.log"
-         (Masc_exec.Path_scope.raw target)
+         (Masc_exec.Path_scope.raw (Masc_exec.Redirect_scope.target_as_written target))
      | _ -> Alcotest.fail "expected fd=1 Write to /tmp/out.log")
   | Error err ->
     Alcotest.failf "should validate, got %a" Execute_input.pp_validation_error err
@@ -1173,7 +1173,7 @@ let test_redirect_stderr_discard_equivalent_to_dev_null_redirect () =
        Alcotest.(check string)
          "discard_stderr targets /dev/null"
          "/dev/null"
-         (Masc_exec.Path_scope.raw target)
+         (Masc_exec.Path_scope.raw (Masc_exec.Redirect_scope.target_as_written target))
      | _ -> Alcotest.fail "expected fd=2 Write to /dev/null")
   | Error err ->
     Alcotest.failf "should validate, got %a" Execute_input.pp_validation_error err

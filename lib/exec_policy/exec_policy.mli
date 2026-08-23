@@ -19,8 +19,6 @@ type parse_mode = Strict | Tool_execute
 val parse_string_to_ir :
   mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
 
-val validate_command : Masc_exec.Shell_ir.t -> (unit, block_reason) result
-
 val validate_command_tool_execute :
   ?allow_pipes:bool ->
   Masc_exec.Shell_ir.t ->

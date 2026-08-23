@@ -164,7 +164,7 @@ let test_parse_autonomous_wake_prompt () =
     (`String (String.make bound 'a'));
   check_error "one byte over the bound" (`String (String.make (bound + 1) 'a'))
 
-(* Unlike [with_test_context], persist writes keeper TOML + AGENT.md under the
+(* Unlike [with_test_context], persist writes the keeper TOML under the
    base, so cleanup must be recursive. *)
 let with_persisting_context f =
   let base = Filename.temp_file "keeper-turn-up-persist-" "" in

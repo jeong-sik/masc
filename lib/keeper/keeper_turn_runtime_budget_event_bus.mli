@@ -18,4 +18,3 @@ val merge_turn_event_bus_summary
 
 val add_payload_kind : string list -> string -> string list
 
-val merge_payload_kinds : string list -> string list -> string list

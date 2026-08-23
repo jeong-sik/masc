@@ -27,12 +27,6 @@ val keeper_event_queue_health_json :
   unit ->
   Yojson.Safe.t
 
-val keeper_fleet_runtime_resolution_base_fields :
-  ?meta_scan:Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan ->
-  ?include_reaction_ledger:bool ->
-  unit ->
-  (string * Yojson.Safe.t) list
-
 val fd_accountant_snapshot_json : unit -> Yojson.Safe.t
 
 val runtime_truth_json :

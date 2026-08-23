@@ -393,7 +393,26 @@ let handle_tool_execute_typed
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
-        match Keeper_tool_execute_typed_input.to_shell_ir ~sandbox:dispatch_sandbox input with
+        (* A Docker stage writes redirect paths as the container sees them.
+           The two roots below are what turns one of those into a path this
+           process can open, and they hold only inside the shared mount. On
+           the host the command's namespace is already this one. *)
+        let redirect_namespace =
+          match dispatch_sandbox with
+          | Masc_exec.Sandbox_target.Host ->
+            Keeper_tool_execute_typed_input.Command_filesystem
+          | Masc_exec.Sandbox_target.Docker _ ->
+            Keeper_tool_execute_typed_input.Bound_mount
+              { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+              ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
+              }
+        in
+        match
+          Keeper_tool_execute_typed_input.to_shell_ir
+            ~sandbox:dispatch_sandbox
+            ~namespace:redirect_namespace
+            input
+        with
         | Error e ->
           let fields =
             [ "typed", `Bool true; "cmd", `String cmd ]

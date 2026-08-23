@@ -43,11 +43,6 @@ val claim_task_r :
 
 (** {1 Release/reclaim helpers} *)
 
-val release_handoff_texts : Masc_domain.task_handoff_context option -> string list
-
-val release_reclaim_policy :
-  Masc_domain.task_handoff_context option -> Masc_domain.task_reclaim_policy option
-
 val derive_release_do_not_reclaim_reason :
   Masc_domain.task -> Masc_domain.task_handoff_context option -> string option
 

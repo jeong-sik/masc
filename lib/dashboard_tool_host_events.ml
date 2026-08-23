@@ -150,10 +150,3 @@ type assignment_snapshot = {
   assignment_id : string;
 }
 
-let record_assignment ?fs config (snapshot : assignment_snapshot) =
-  Telemetry_eio.track_tool_assigned ?fs config
-    ~agent_id:snapshot.agent_name
-    ~profile:snapshot.profile
-    ~tool_count:snapshot.tool_count
-    ~assignment_id:snapshot.assignment_id
-    ()

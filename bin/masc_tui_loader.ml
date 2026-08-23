@@ -162,7 +162,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Board | Approvals | Planning -> None
+    | Overview | Board | Approvals | Planning | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -445,9 +445,25 @@ let load_overview ~(host : string) ~(port : int) :
           ov_generated_at;
         }
 
+(** Load the system log page from /api/v1/dashboard/logs *)
+let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
+    (system_log_snapshot, string) result =
+  match fetch_dashboard_logs ~host ~port ~limit with
+  | Error err -> Error ("system logs load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_system_log_snapshot json
+
 (** Load planning snapshot from /api/v1/dashboard/planning *)
 let load_planning ~(host : string) ~(port : int) :
     (planning_snapshot, string) result =
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
   | Ok json -> Tui_decode.decode_planning_snapshot json
+
+(* The fleet reading answers what the keeper list cannot: a keeper that never
+   started has no row, so the roster shows nine keepers whether the tenth is
+   absent by design or blocked. *)
+let load_fleet_safety ~(host : string) ~(port : int) :
+    (Tui_decode.fleet_safety, string) result =
+  match fetch_fleet_safety ~host ~port with
+  | Error err -> Error ("fleet safety load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fleet_safety json

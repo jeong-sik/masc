@@ -68,11 +68,6 @@ val require_payload_field :
     Exported so the action handlers in {!Operator_control} state the
     requirement once instead of repeating the match at each site. *)
 
-val canonical_action_type : string -> string
-(** [canonical_action_type t] is the remaining parser seam for
-    action-type normalization. Historical aliases are intentionally no
-    longer accepted here; callers must use canonical action types. *)
-
 val generate_confirm_token :
   clock:_ Eio.Time.clock -> Workspace.config -> (string, string) result
 (** [generate_confirm_token ~clock config] returns a 36-char token

@@ -13,12 +13,8 @@ let agent_core_checkpoint_summary_json
       ~(snapshot_id : string)
       ~(path : string)
       ~(is_current : bool)
-      ~(fallback_generation : int)
       (checkpoint : Agent_core.Checkpoint.t)
   =
-  let generation =
-    Keeper_context_core.checkpoint_generation checkpoint ~fallback:fallback_generation
-  in
   let messages = checkpoint.messages in
   `Assoc
     [ "snapshot_id", `String snapshot_id
@@ -27,7 +23,6 @@ let agent_core_checkpoint_summary_json
     ; "status", `String "available"
     ; "path", `String path
     ; "created_at", `Float checkpoint.created_at
-    ; "generation", `Int generation
     ; "message_count", `Int (List.length messages)
     ; ( "system_prompt_present"
       , `Bool
@@ -125,7 +120,6 @@ let inventory_json (config : Workspace.config) (name : string)
           ~snapshot_id:(Filename.basename current_path)
           ~path:current_path
           ~is_current:true
-          ~fallback_generation:meta.runtime.nonce
           checkpoint
         |> fun json -> Some json, current_history_snapshot_id, "available", `Null
       | Error error ->
@@ -155,7 +149,6 @@ let inventory_json (config : Workspace.config) (name : string)
                    ~snapshot_id
                    ~path
                    ~is_current:false
-                   ~fallback_generation:meta.runtime.nonce
                    checkpoint
                  :: available
                , failures )
@@ -248,9 +241,7 @@ let checkpoint_load_error_to_string = function
 ;;
 
 let checkpoint_ref_create_error_to_string = function
-  | Keeper_checkpoint_ref.Negative_generation value ->
-    Printf.sprintf "negative generation %d" value
-  | Negative_turn_count value ->
+  | Keeper_checkpoint_ref.Negative_turn_count value ->
     Printf.sprintf "negative turn count %d" value
   | Invalid_sha256 value ->
     Printf.sprintf "invalid checkpoint sha256 %S" value
@@ -259,8 +250,6 @@ let checkpoint_ref_create_error_to_string = function
 let checkpoint_identity_error_to_string = function
   | Keeper_checkpoint_store.Session_id_invalid detail ->
     "invalid session id: " ^ detail
-  | Generation_missing -> "checkpoint generation missing"
-  | Generation_not_integer -> "checkpoint generation is not an integer"
   | Ref_create_failed error -> checkpoint_ref_create_error_to_string error
 ;;
 

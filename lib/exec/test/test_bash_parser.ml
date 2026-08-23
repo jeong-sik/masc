@@ -108,7 +108,7 @@ let test_general_redirect_parsed () =
     assert (s.args = [ Shell_ir.Lit ("hi", Shell_ir.default_meta) ]);
     (match s.redirects with
      | [ Redirect_scope.File { fd = 1; target; mode = Redirect_scope.Write } ] ->
-       assert (Path_scope.raw target = "/tmp/out")
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/tmp/out")
      | _ -> assert false)
   | _ -> assert false
 
@@ -117,7 +117,7 @@ let test_redirect_append_parsed () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.redirects with
      | [ Redirect_scope.File { fd = 1; target; mode = Redirect_scope.Append } ] ->
-       assert (Path_scope.raw target = "/tmp/out")
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/tmp/out")
      | _ -> assert false)
   | _ -> assert false
 
@@ -126,7 +126,7 @@ let test_input_redirect_parsed () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.redirects with
      | [ Redirect_scope.File { fd = 0; target; mode = Redirect_scope.Read } ] ->
-       assert (Path_scope.raw target = "/etc/hosts")
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/etc/hosts")
      | _ -> assert false)
   | _ -> assert false
 
@@ -143,7 +143,7 @@ let test_dev_null_redirect_parsed () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.redirects with
      | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
-       assert (Path_scope.raw target = "/dev/null")
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
      | _ -> assert false)
   | _ -> assert false
 
@@ -152,7 +152,7 @@ let test_spaced_dev_null_redirect_parsed () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.redirects with
      | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
-       assert (Path_scope.raw target = "/dev/null")
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
      | _ -> assert false)
   | _ -> assert false
 
@@ -161,7 +161,7 @@ let test_quoted_dev_null_redirect_parsed () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.redirects with
      | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
-       assert (Path_scope.raw target = "/dev/null")
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
      | _ -> assert false)
   | _ -> assert false
 
@@ -172,7 +172,7 @@ let test_pipeline_dev_null_redirect_preserved () =
     assert (Exec_program.to_string s2.bin = "head");
     (match s1.redirects, s2.redirects with
      | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ], [] ->
-       assert (Path_scope.raw target = "/dev/null")
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
      | _ -> assert false)
   | _ -> assert false
 

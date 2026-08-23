@@ -91,7 +91,6 @@ let make_runtime_hooks () : Agent_core.Hooks.hooks =
     ~config
     ~meta_ref
     ~turn_ctx_cell
-    ~generation:0
     ~trace_id:"introspection-trace"
     ~keeper_turn_id:1
     ~on_after_turn_ordinal:ignore

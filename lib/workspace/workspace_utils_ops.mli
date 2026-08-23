@@ -45,11 +45,6 @@ val mkdir_p : string -> unit
 
 (** {1 JSON I/O — local filesystem} *)
 
-(** Read a JSON file from disk with permissive error handling:
-    blank/empty files are returned as [`Assoc []]; parse / read
-    failures log a WARN and return [`Assoc []]. *)
-val read_json_local : string -> Yojson.Safe.t
-
 (** Result-returning variant that surfaces the raw error message. *)
 val read_json_local_result : string -> (Yojson.Safe.t, string) result
 
@@ -96,7 +91,6 @@ type write_json_commit = { mirror_error : string option }
 val write_json_commit_result :
   config -> string -> Yojson.Safe.t -> (write_json_commit, string) result
 
-val write_text_local : string -> string -> (unit, string) result
 val write_text : config -> string -> string -> unit
 val delete_path : config -> string -> unit
 val path_exists : config -> string -> bool
@@ -125,11 +119,6 @@ val read_agent :
 
 (** {1 Locking} *)
 
-val sleep_lock_retry : ?clock:_ Eio.Time.clock -> float -> unit
-
-(** Per-domain RNG key for backoff jitter. *)
-val backoff_rng_key : Random.State.t Domain.DLS.key
-
 (** Full-jitter backoff: returns a sleep duration uniformly
     distributed in [[0, delay]]. *)
 val backoff_with_jitter : float -> float
@@ -145,27 +134,9 @@ val with_distributed_lock :
   (unit -> 'a) ->
   'a
 
-(** Result-returning variant of [with_distributed_lock].  Exhausted
-    acquisition is returned as retryable [System_error.IoError] instead
-    of raising. *)
-val with_distributed_lock_r :
-  ?clock:_ Eio.Time.clock ->
-  config ->
-  string ->
-  (unit -> 'a) ->
-  ('a, masc_error) result
-
-val with_file_lock_impl :
-  ?clock:_ Eio.Time.clock ->
-  config -> string -> (unit -> 'a) -> 'a
-
 (** Cooperative file lock (Eio mutex for in-process, distributed
     lock for FileSystem backend); uses [Eio_context.get_clock_opt]. *)
 val with_file_lock : config -> string -> (unit -> 'a) -> 'a
-
-val with_file_lock_r_impl :
-  ?clock:_ Eio.Time.clock ->
-  config -> string -> (unit -> 'a) -> ('a, masc_error) result
 
 val with_file_lock_r :
   config -> string -> (unit -> 'a) -> ('a, masc_error) result

@@ -58,9 +58,6 @@ val update_activity :
 (** Get session *)
 val get_session : registry -> agent_name:string -> session option
 
-(** Get all sessions *)
-val get_sessions : registry -> session AgentMap.t
-
 (** {1 Rate Limiting} *)
 
 (** Create an empty rate tracker. *)
@@ -112,9 +109,6 @@ val wait_for_message :
   Yojson.Safe.t option
 
 (** {1 Status & Diagnostics} *)
-
-(** Return names of agents idle longer than [threshold] seconds. *)
-val get_inactive_agents : registry -> threshold:float -> string list
 
 (** Return all agent statuses as JSON objects. *)
 val get_agent_statuses : registry -> Yojson.Safe.t list

@@ -182,7 +182,6 @@ val decision_source_to_string : decision_source -> string
 val decision_source_of_string : string -> decision_source option
 val authorization_source_to_string : authorization_source -> string
 val authorization_source_of_string : string -> authorization_source option
-val string_opt_of_json : Yojson.Safe.t -> string option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t
 

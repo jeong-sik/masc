@@ -181,25 +181,3 @@ let canonical_tool_name name =
   | Miss -> name
 ;;
 
-let canonical_tool_name_observed name =
-  let stripped = strip_transport_prefix name in
-  match runtime_decision name with
-  | Route_hit { internal } ->
-    Keeper_tool_route_telemetry.record_route_outcome
-      ~tool:stripped
-      ~routed_to:internal
-      ~result:"ok";
-    internal
-  | Already_internal { canonical } ->
-    Keeper_tool_route_telemetry.record_route_outcome
-      ~tool:canonical
-      ~routed_to:canonical
-      ~result:"ok";
-    canonical
-  | Miss ->
-    Keeper_tool_route_telemetry.record_route_outcome
-      ~tool:name
-      ~routed_to:"none"
-      ~result:"miss";
-    name
-;;

@@ -30,8 +30,5 @@ type autonomous_admission =
 
 val admit_autonomous : state -> autonomous_admission
 
-(** Stable boundary projections.  Execution decisions must pattern-match on
-    the typed values above rather than compare these strings. *)
-val paused_latch_to_wire : paused_latch -> string
 val state_to_wire : state -> string
 val autonomous_denial_to_wire : autonomous_denial -> string

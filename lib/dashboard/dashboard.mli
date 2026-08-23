@@ -38,8 +38,6 @@ type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
 
 val scope_to_string : scope -> string
 val valid_scope_strings : string list
-val scope_of_string_opt : string -> scope option
-
 (** {1 Formatting} *)
 
 val format_section : section -> string

@@ -18,8 +18,7 @@ let resume_operator_pause
   match old.paused, old.latched_reason with
   | true, (None | Some (Keeper_latched_reason.Operator_paused _)) ->
     let request : Keeper_paused_work_resume_transaction.request =
-      { owner_nonce = old.runtime.nonce
-      ; operator_operation_id =
+      { operator_operation_id =
           Random_id.prefixed ~prefix:"keeper-up-resume-" ~bytes:16
       }
     in

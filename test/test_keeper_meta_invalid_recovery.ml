@@ -200,7 +200,10 @@ let test_scan_warns_on_state_transitions_only () =
   let first_episode =
     warns (entries_about name (keeper_entries_since base_seq))
   in
-  check int "first failure is logged" 2 (List.length first_episode);
+  (* #29610 fail-open: the unreadable meta is treated as absent and the loss
+     is named in a single WARN from the reader; the keepalive scan itself no
+     longer adds a second one. *)
+  check int "first failure is logged" 1 (List.length first_episode);
   (* Repeated scans of the same (path, failure-reason) state are silent. *)
   let repeat_seq = latest_seq () in
   ignore (Keeper_meta_store.keepalive_keeper_names config);
@@ -222,32 +225,36 @@ let test_scan_warns_on_state_transitions_only () =
   check int "recovery is logged once" 1 (List.length (infos recovery_entries));
   (* A later identical failure is a new state (the previous one cleared), so
      it is logged again — dedupe is state-based, not a time-based rate
-     limiter that would still be suppressing it. *)
+     limiter that would still be suppressing it. #29610 fail-open: the reader
+     emits one WARN naming the loss, as on the first episode. *)
   ignore (write_corrupted_meta config name ~field:"generation" ~value:(`Int 0));
   let relapse_seq = latest_seq () in
   ignore (Keeper_meta_store.keepalive_keeper_names config);
   check
     int
     "identical failure after recovery logs again"
-    2
+    1
     (List.length (warns (entries_about name (keeper_entries_since relapse_seq))))
 ;;
 
-let test_non_enumerated_corruption_fails_loud () =
+let test_non_enumerated_corruption_fails_open_as_absent () =
   with_temp_workspace @@ fun config ->
-  let name = "meta-fail-loud-canary" in
+  let name = "meta-fail-open-canary" in
   write_keeper_toml config name;
   let path = write_corrupted_meta config name ~field:"generation" ~value:(`Int 0) in
   let before = Masc_test_deps.read_file path in
+  let base_seq = latest_seq () in
+  (* #29610 fail-open: an unreadable meta is an absent meta, not a dead
+     keeper. The read returns Ok(None) and the loss is named in a single
+     WARN; the file is left untouched so the evidence survives. *)
   (match Keeper_meta_store.read_meta config name with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "non-enumerated corruption was silently accepted as a valid meta"
    | Error detail ->
-     check
-       bool
-       "non-enumerated corruption still requires reset"
-       true
-       (Astring.String.is_infix ~affix:"runtime reset required" detail)
-   | Ok _ -> fail "non-enumerated corruption was silently accepted");
-  check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
+     failf "non-enumerated corruption must be absent, not a fatal error: %s" detail);
+  check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path);
+  let episode = warns (entries_about name (keeper_entries_since base_seq)) in
+  check int "unreadable meta loss is named in one WARN" 1 (List.length episode)
 ;;
 
 let test_recognized_misspelling_repairs_to_canonical_spelling () =
@@ -317,9 +324,9 @@ let () =
             `Quick
             test_scan_warns_on_state_transitions_only
         ; test_case
-            "non-enumerated corruption still fails loud"
+            "non-enumerated corruption fails open as absent"
             `Quick
-            test_non_enumerated_corruption_fails_loud
+            test_non_enumerated_corruption_fails_open_as_absent
         ] )
     ]
 ;;

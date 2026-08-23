@@ -505,6 +505,52 @@ let test_h2_oauth_route_and_authority_lifetime () =
    token leg deterministically fails without a bearer token and the decision
    falls to the same-origin leg.  If the strict default ever flips, these
    deny cases must fail loudly — that is a security posture change. *)
+(* H1 and H2 return the same 401, the same typed code and the same bearer
+   challenge, and used to return different CORS headers: H1 reflected
+   get_origin, which answers "*" with no Origin present, while H2 ran the
+   origin through admission and emitted only vary: Origin (#28166). One
+   function answers for both now, and admission is what it reads. *)
+let auth_error_cors ~headers =
+  let request =
+    Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/api/v1/keepers"
+  in
+  match
+    Server_request_authority.classify_http1_request
+      ~trust_policy:request_trust_policy
+      request
+  with
+  | Server_request_authority.Single authority ->
+    Server_request_authority.with_current authority (fun () ->
+      Server_auth.auth_error_cors_headers request)
+  | Server_request_authority.Missing
+  | Server_request_authority.Multiple
+  | Server_request_authority.Malformed
+  | Server_request_authority.Untrusted -> fail "expected valid authority"
+;;
+
+let test_auth_error_cors_reads_admission_not_the_raw_origin () =
+  let vary_only = [ ("vary", "Origin") ] in
+  check (list (pair string string))
+    "no Origin header: vary only, never a wildcard reflection"
+    vary_only
+    (auth_error_cors ~headers:[ ("host", "127.0.0.1:8935") ]);
+  check (list (pair string string))
+    "rejected cross origin: vary only"
+    vary_only
+    (auth_error_cors
+       ~headers:[ ("host", "127.0.0.1:8935"); ("origin", "https://evil.example") ]);
+  check (list (pair string string))
+    "malformed Origin does not raise out of the error responder"
+    vary_only
+    (auth_error_cors ~headers:[ ("host", "127.0.0.1:8935"); ("origin", "not a url") ]);
+  let same_origin =
+    auth_error_cors
+      ~headers:[ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+  in
+  check bool "same origin is reflected" true
+    (List.mem ("access-control-allow-origin", "http://127.0.0.1:8935") same_origin)
+;;
+
 let ws_absent_base_path () =
   Filename.concat
     (Filename.get_temp_dir_name ())
@@ -691,6 +737,8 @@ let () =
             test_transport_guarded_paths_are_not_public_read;
           test_case "H1/H2 read gate wiring parity" `Quick
             test_h1_h2_read_gate_wiring_parity;
+          test_case "auth-error CORS reads admission, not the raw Origin" `Quick
+            test_auth_error_cors_reads_admission_not_the_raw_origin;
         ] );
       ( "ws-upgrade-admission",
         [

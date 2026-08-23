@@ -856,14 +856,31 @@ let auth_error_headers ~(status : Httpun.Status.t) ~cors =
   | `Unauthorized -> ("www-authenticate", "Bearer") :: cors
   | _ -> cors
 
+(* One CORS answer for an auth error, whichever protocol asked.
+
+   H1 used to reflect [get_origin], which answers "*" when the request carries
+   no Origin and raises on a malformed one; H2 has always run the origin
+   through admission and emitted only [vary: Origin] when nothing was admitted.
+   Same 401, same typed code, same bearer challenge, different CORS headers
+   (#28166). Admission is the answer that holds: a 401 is not the place to hand
+   an unadmitted origin permission to read the response, and a malformed Origin
+   header should not raise out of the error responder. *)
+let auth_error_cors_headers request =
+  match Server_request_authority.current () with
+  | None -> [ "vary", "Origin" ]
+  | Some request_authority ->
+    (match public_read_cors_origin_opt ~request_authority request with
+     | Some origin -> cors_headers origin
+     | None -> [ "vary", "Origin" ])
+;;
+
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
-  let origin = get_origin request in
   let body = auth_error_json err in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
-       :: auth_error_headers ~status ~cors:(cors_headers origin))
+       :: auth_error_headers ~status ~cors:(auth_error_cors_headers request))
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body

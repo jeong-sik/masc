@@ -98,7 +98,13 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
         h2_reqd
         (auth_error_json err)
         ~status:(status :> H2.Status.t)
-        ~extra_headers:(auth_error_headers ~status ~cors)
+        (* One policy for both protocols (#28166). Same result as the [cors]
+           computed above for this request; naming it here keeps H1 and H2
+           reading the same function. *)
+        ~extra_headers:
+          (auth_error_headers
+             ~status
+             ~cors:(auth_error_cors_headers httpun_request))
     in
     let mcp_auth_error_body failure =
       Server_mcp_transport_http_respond.error_body

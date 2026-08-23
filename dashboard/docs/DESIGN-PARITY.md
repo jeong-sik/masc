@@ -233,9 +233,14 @@ diagnostics. Nothing is drifting there; the design simply does not draw them.
 
 The prototype's monitor carries a 실행 슬롯 · 대기 section. There is no `lanes`
 route in `config/navigation.ts` and no `dl-` class in `src` — `lanes.css` is
-vendored for a surface that does not exist here. Lab's 감사 무결성 is the same
-shape. These are the component gap, not the skin gap, and
-`DESIGN-COMPONENT-PARITY.md` carries them.
+vendored for a surface that does not exist here. These are the component gap,
+not the skin gap, and `DESIGN-COMPONENT-PARITY.md` carries them.
+
+Lab's 감사 무결성 used to sit here too. It is gone from the prototype
+(2026-08-23): the resilience subsystem whose hash-chain verify it drew was
+removed in #28170, so the panel showed a subsystem that no longer exists —
+hardcoded "활성" included — and would resurface as a component gap on every
+re-sync. Removed with the Lab tab and the `lab-audit` parity view.
 
 ### Not vendored at all
 

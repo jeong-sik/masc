@@ -12,7 +12,7 @@ const { useState: useStateLab, useEffect: useEffectLab, useRef: useRefLab } = Re
 
 const LAB_SECS = [
   ['tools', '도구'], ['harness', '세이프티 하네스'], ['performance', '성능'],
-  ['memory', '키퍼 메모리 상태'], ['audit', '감사 무결성'],
+  ['memory', '키퍼 메모리 상태'],
 ];
 
 /* ── 도구 ─────────────────────────────────────────────────────────────── */
@@ -436,7 +436,6 @@ function LabSurface() {
       {sec === 'harness' && <LabHarness />}
       {sec === 'performance' && <LabPerf />}
       {sec === 'memory' && <LabMemoryHealth />}
-      {sec === 'audit' && window.AuditIntegrityPanel && <window.AuditIntegrityPanel />}
     </div>
   );
 }

@@ -45,9 +45,11 @@ let ( let* ) = Result.bind
    either name and wedged 97 of 98 live receipts that way.
 
    One constant, so a bump cannot land in the schema string and miss the
-   directory. [test_keeper_paused_work_disposition_receipt] pins a full
-   current-shape receipt against it: change the shape without changing this,
-   and the test fails. *)
+   directory. Nothing forces the bump itself: a fixture pin was tried here and
+   removed, because removing a field and deleting the matching fixture line
+   passes it with the version unmoved, and because CI on this repo has started
+   after the merge it was meant to gate (#27715). What catches a shape change
+   today is the behavioural suite around it, which builds real receipts. *)
 let store_version = "v7"
 let schema = "masc.keeper.paused-work-disposition." ^ store_version
 let store_dirname = "paused-work-dispositions-" ^ store_version

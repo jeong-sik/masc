@@ -275,7 +275,8 @@ default = 20
   in
   let load contents =
     match Tool_definition_toml.load ~name:"masc_example_order" ~contents with
-    | Ok schema -> Yojson.Safe.to_string schema.Masc_domain.input_schema
+    | Ok { Tool_definition_toml.schema; _ } ->
+      Yojson.Safe.to_string schema.Masc_domain.input_schema
     | Error message -> failf "expected a schema, got error: %s" message
   in
   check string "description last"

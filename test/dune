@@ -494,6 +494,8 @@
   test_agent_observation_bridge
   test_enum_mirror_sync
   test_tool_definition_toml
+  test_board_tool_toml_parity
+  test_tool_definition_toml
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http

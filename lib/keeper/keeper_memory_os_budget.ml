@@ -20,8 +20,7 @@ let recorded_at fact = Masc_domain.iso8601_of_unix_seconds fact.first_seen
 
 let render_fact fact =
   Printf.sprintf
-    "- [memory_id=%s category=%s recorded=%s] %s"
-    (memory_id fact)
+    "- [category=%s recorded=%s] %s"
     (category_to_string fact.category)
     (recorded_at fact)
     fact.claim
@@ -31,20 +30,18 @@ let render_facts facts =
   facts |> List.map render_fact |> String.concat "\n"
 ;;
 
-let memory_id_bytes = String.length "sha256:" + (Digestif.SHA256.digest_size * 2)
-
 let saturated_add left right =
   if left > Int.max_int - right then Int.max_int else left + right
 ;;
 
-(* Count the exact rendered shape without hashing identities or allocating the
-   combined payload. [memory_id] is always sha256 plus a fixed-width hex digest. *)
+(* Count the exact rendered shape without allocating the combined payload.
+   No identity is rendered: the digest was decoration for the Keeper (no
+   tool consumes it) and a stale-copy contamination source for the Librarian
+   (masc#29558), which now selects through per-pass surrogate ids. *)
 let rendered_bytes facts =
   let line_bytes fact =
     0
-    |> saturated_add (String.length "- [memory_id=")
-    |> saturated_add memory_id_bytes
-    |> saturated_add (String.length " category=")
+    |> saturated_add (String.length "- [category=")
     |> saturated_add (String.length (category_to_string fact.category))
     |> saturated_add (String.length " recorded=")
     |> saturated_add (String.length (recorded_at fact))

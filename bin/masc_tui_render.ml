@@ -1038,6 +1038,41 @@ let planning_phase_color = function
   | Goal_phase.Completed -> Ansi.green
   | Goal_phase.Dropped -> Ansi.gray
 
+(* Where the goal stands with the completion judge, in one column. The phase
+   reads [executing] both for a goal nobody asked about and for one the judge
+   refused; without this the two are the same row. Idle is a blank rather than
+   a glyph — most goals have never been asked, and a mark on all of them would
+   carry no information. *)
+let planning_proof_mark = function
+  | Tui_decode.Proof_idle -> " "
+  | Tui_decode.Proof_pending -> Ansi.yellow ^ "\xe2\x80\xa6" ^ Ansi.reset
+  | Tui_decode.Proof_proven _ -> Ansi.green ^ "\xe2\x9c\x93" ^ Ansi.reset
+  | Tui_decode.Proof_refuted _ -> Ansi.red ^ "\xe2\x9c\x97" ^ Ansi.reset
+  | Tui_decode.Proof_unreadable _ -> Ansi.yellow ^ "!" ^ Ansi.reset
+;;
+
+(* The line under the list, for the goal the cursor is on. A verdict without its
+   reason is a colour and nothing else; the reason is what the judge produced
+   and the only thing that says what to do next. *)
+let planning_proof_detail (goal : planning_goal) =
+  match goal.pg_proof with
+  | Tui_decode.Proof_proven None -> Some (Ansi.green, "proven")
+  | Tui_decode.Proof_proven (Some evidence) -> Some (Ansi.green, "proven: " ^ evidence)
+  | Tui_decode.Proof_refuted None -> Some (Ansi.red, "refused")
+  | Tui_decode.Proof_refuted (Some reason) -> Some (Ansi.red, "refused: " ^ reason)
+  | Tui_decode.Proof_pending -> Some (Ansi.yellow, "waiting for the completion judge")
+  | Tui_decode.Proof_unreadable None ->
+      Some (Ansi.yellow, "verification ledger unreadable")
+  | Tui_decode.Proof_unreadable (Some detail) ->
+      Some (Ansi.yellow, "verification ledger unreadable: " ^ detail)
+  | Tui_decode.Proof_idle ->
+      (* Nothing from the judge. A keeper's own note is the next best thing the
+         row has to say, and it is what the operator wrote there to be read. *)
+      Option.map
+        (fun note -> (Ansi.dim, "note: " ^ note))
+        (Terminal_text.optional_single_line goal.pg_last_review_note)
+;;
+
 (** Render the Planning surface (list view). *)
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1103,7 +1138,8 @@ let render_planning_list (state : state) =
            box_empty buf cols
          done
        end else begin
-         let content_height = rows - 12 in
+         (* One row is reserved below the list for the selected goal's verdict. *)
+         let content_height = rows - 13 in
          let scroll_offset =
            if state.planning_cursor >= content_height then
              state.planning_cursor - content_height + 1
@@ -1125,10 +1161,11 @@ let render_planning_list (state : state) =
               | None -> ""
             in
              let line =
-               Printf.sprintf "%s%s%s[%s]%s P%d  %s%s"
+               Printf.sprintf "%s%s%s[%s]%s %s P%d  %s%s"
                  indent branch status_color
                  (fit_width status_label 8)
                  Ansi.reset
+                 (planning_proof_mark g.pg_proof)
                  g.pg_priority
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
@@ -1145,7 +1182,15 @@ let render_planning_list (state : state) =
              box_line buf cols content
            end else
              box_empty buf cols
-         done
+         done;
+         match List.nth_opt goals state.planning_cursor with
+         | None -> box_empty buf cols
+         | Some selected ->
+             (match planning_proof_detail selected with
+              | None -> box_empty buf cols
+              | Some (colour, text) ->
+                  box_line buf cols
+                    (colour ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset))
        end);
 
   box_bottom buf cols;

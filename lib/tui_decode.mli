@@ -50,6 +50,27 @@ val clock_timestamp_for_terminal : string -> string
     external timestamp bytes safe even when the byte slice splits UTF-8. *)
 
 
+(** Where a goal stands with the completion judge.
+
+    The phase says [executing] both for a goal nobody has reviewed and for one
+    the judge refused with a reason. Those are different situations, and the
+    reason is the whole product of the verification lane — a judge that states
+    what it measured and how it compared is no use if the reason stops at the
+    wire. *)
+type goal_proof =
+  | Proof_idle  (** No verdict on the ledger: nothing has been asked of it. *)
+  | Proof_pending  (** A completion request is durable and the judge has not answered. *)
+  | Proof_proven of string option
+      (** Approved. [Some] is what the judge measured; [None] is a verdict
+          recorded without text, which is a different fact from an empty
+          measurement and is drawn as such. *)
+  | Proof_refuted of string option  (** Refused; [Some] is why. *)
+  | Proof_unreadable of string option
+      (** The ledger did not decode, or named a state this build does not know.
+          Distinct from {!Proof_idle}: an unreadable store is not the same fact
+          as an unreviewed goal, and showing it as "not reviewed" would
+          disguise corruption as quiet. *)
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -58,6 +79,10 @@ type planning_goal = {
   pg_due_date : string option;
   pg_metric : string option;
   pg_target_value : string option;
+  pg_proof : goal_proof;
+  pg_last_review_note : string option;
+      (** What a keeper or operator wrote at the last transition. Free text,
+          unlike {!pg_proof}, which is the judge's. *)
 }
 
 type planning_rollup = {

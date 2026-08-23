@@ -51,6 +51,13 @@ type keeper_runtime = {
   kr_runtime_id : string;
 }
 
+type goal_proof =
+  | Proof_idle
+  | Proof_pending
+  | Proof_proven of string option
+  | Proof_refuted of string option
+  | Proof_unreadable of string option
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -59,6 +66,8 @@ type planning_goal = {
   pg_due_date : string option;
   pg_metric : string option;
   pg_target_value : string option;
+  pg_proof : goal_proof;
+  pg_last_review_note : string option;
 }
 
 type planning_rollup = {
@@ -909,6 +918,48 @@ let decode_list label decode items =
   in
   loop 0 [] items
 
+(* The ledger row the server joins onto each goal. Two shapes reach here: the
+   record, whose [completion] names the state, and [ledger_error_to_yojson],
+   which puts ["ledger_error"] at the top with a [detail]. Read leniently — this
+   is a projection for a pane and a shape it cannot read must not cost the
+   operator the goal list — but every branch says something different, so an
+   unreadable ledger never renders as an unreviewed goal.
+
+   The text comes from [evidence] before [reason]: an approval carries its text
+   in [evidence] and leaves [reason] null, while a refusal fills both with the
+   same string. *)
+let decode_goal_proof json =
+  let string_at container key =
+    match member key container with
+    | `String value when String.trim value <> "" -> Some (String.trim value)
+    | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
+    | `Null ->
+      None
+  in
+  let verdict_text completion =
+    let verdict = member "verdict" completion in
+    match string_at verdict "evidence" with
+    | Some _ as text -> text
+    | None -> string_at verdict "reason"
+  in
+  match json with
+  | `Assoc _ ->
+    (match string_at json "state" with
+     | Some "ledger_error" -> Proof_unreadable (string_at json "detail")
+     | Some other -> Proof_unreadable (Some other)
+     | None ->
+       let completion = member "completion" json in
+       (match string_at completion "state" with
+        | Some "proof_proven" -> Proof_proven (verdict_text completion)
+        | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
+        | Some "proof_pending" -> Proof_pending
+        | Some "idle" -> Proof_idle
+        | Some other -> Proof_unreadable (Some other)
+        | None -> Proof_idle))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Proof_idle
+;;
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
@@ -922,6 +973,8 @@ let decode_planning_goal json =
   let* pg_due_date = optional_string_field json "due_date" in
   let* pg_metric = optional_string_field json "metric" in
   let* pg_target_value = optional_string_field json "target_value" in
+  let* pg_last_review_note = optional_string_field json "last_review_note" in
+  let pg_proof = decode_goal_proof (member "verification" json) in
   Ok
     {
       pg_id;
@@ -931,6 +984,8 @@ let decode_planning_goal json =
       pg_due_date;
       pg_metric;
       pg_target_value;
+      pg_proof;
+      pg_last_review_note;
     }
 
 let decode_planning_rollup json =

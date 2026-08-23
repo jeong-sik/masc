@@ -83,6 +83,42 @@ let validate_current_wal ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+(* The two rejection classes call for different operator action, so each
+   verdict carries a single-token [class=] label: cmdliner re-wraps the error
+   text at the terminal margin and can split a phrase across lines, a token
+   survives intact. *)
+let validate_current_meta path =
+  Masc.Keeper_meta_store.validate_current_meta_file_result path
+  |> Result.map_error (function
+    | Masc.Keeper_meta_store.Unreadable detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta is unreadable class=unreadable_json path=%s \
+            (on boot the runtime refuses this keeper instead of \
+            re-materialising it; restore the file from backup): %s"
+           path
+           detail)
+    | Masc.Keeper_meta_store.Not_current detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta production validation rejected \
+            class=not_current_schema path=%s (on boot the runtime reads this \
+            meta as absent and re-materialises the keeper from its \
+            declaration, losing the accumulated counters and the task \
+            binding; strip retired fields or fill missing ones): %s"
+           path
+           detail))
+;;
+
+(* The gate prints this next to its verdict so the operator can tell a
+   freshly built helper from an older installed one. [binary_commit] is the
+   SHA the Dune build rule embeds; a helper built outside a checkout has none. *)
+let print_build_commit () =
+  match (Masc.Build_identity.current ()).Masc.Build_identity.binary_commit with
+  | Some commit -> Printf.printf "%s\n%!" commit
+  | None -> Printf.printf "unstamped\n%!"
+;;
+
 let validate_schedule_ledger path =
   try
     let json = Yojson.Safe.from_file path in
@@ -531,6 +567,26 @@ let validate_current_wal_cmd =
          $ current_queue_keeper_name))
 ;;
 
+let current_meta_file =
+  let doc = "Validate one persisted Keeper meta against the current closed schema." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"KEEPER_META" ~doc)
+;;
+
+let validate_current_meta_cmd =
+  let doc = "validate one keeper meta with the production decoder" in
+  Cmd.v
+    (Cmd.info "validate-current-meta" ~doc)
+    Term.(
+      ret
+        (const (fun path -> cmdliner_result (validate_current_meta path))
+           $ current_meta_file))
+;;
+
+let build_commit_cmd =
+  let doc = "print the git commit stamped into this helper at build time" in
+  Cmd.v (Cmd.info "build-commit" ~doc) Term.(const print_build_commit $ const ())
+;;
+
 let schedule_ledger_file =
   let doc = "Validate one current schedule ledger." in
   Arg.(required & pos 0 (some file) None & info [] ~docv:"SCHEDULE_LEDGER" ~doc)
@@ -792,6 +848,8 @@ let () =
           ; verify_lease_owner_cmd
           ; validate_current_queue_cmd
           ; validate_current_wal_cmd
+          ; validate_current_meta_cmd
+          ; build_commit_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ; cut_run_registries_cmd

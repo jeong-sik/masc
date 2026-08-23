@@ -16,14 +16,6 @@ let get_payload args =
   Json_util.get_object args "payload" |> Option.value ~default:(`Assoc [])
 ;;
 
-let merge_json_objects left right =
-  match left, right with
-  | `Assoc left_fields, `Assoc right_fields -> `Assoc (left_fields @ right_fields)
-  | `Assoc left_fields, _ -> `Assoc left_fields
-  | _, `Assoc right_fields -> `Assoc right_fields
-  | _, _ -> `Assoc []
-;;
-
 (* remote_confirm_ttl_seconds + context helpers
    extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
 let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds

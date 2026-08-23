@@ -989,7 +989,6 @@ let execution_trust_row_of_dashboard_row row =
     ; ("pipeline_stage", field "pipeline_stage")
     ; ("status", field "status")
     ; ("trace_id", field "trace_id")
-    ; ("generation", field "generation")
     ; ("current_task_id", field "current_task_id")
     ; ("trust", field "trust")
     ]

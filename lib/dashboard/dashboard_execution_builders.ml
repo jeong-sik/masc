@@ -241,7 +241,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let autonomous_turn_count = int_field_default "autonomous_turn_count" keeper in
   let noop_turn_count = int_field_default "noop_turn_count" keeper in
   let turn_count = int_field_default "turn_count" keeper in
-  let generation = int_field_default "generation" keeper in
   (* Operator observation publishes a pause override in the same [status] field as
      the surface status, so this classifies the published vocabulary rather than
      the surface subset. A paused keeper is neither offline nor running: it is
@@ -309,8 +308,8 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             (Exec_healthy, Tone_ok, "정상 동작 중")
   in
   let continuity =
-    Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d"
-      generation turn_count autonomous_turn_count autonomous_action_count
+    Printf.sprintf "Turns %d · Auto turns %d · Tool actions %d"
+      turn_count autonomous_turn_count autonomous_action_count
   in
   let focus =
     match String_util.trim_nonempty (string_field "current_task_id" keeper) with
@@ -350,7 +349,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
            ("focus", `String focus);
            ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
            ("last_autonomous_action_at", Json_util.string_opt_to_json last_signal_at);
-           ("generation", member_assoc "generation" keeper);
            ("turn_count", member_assoc "turn_count" keeper);
            ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
            ("context_metrics_unavailable", context_metrics_unavailable);

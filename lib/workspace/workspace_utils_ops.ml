@@ -46,21 +46,7 @@ let sanitize_html str =
 let sanitize_agent_name = sanitize_html
 let sanitize_message = sanitize_html
 
-let safe_filename name =
-  let buf = Buffer.create (String.length name * 3) in
-  String.iter (fun c ->
-    let c_lower = Char.lowercase_ascii c in
-    let valid =
-      (c_lower >= 'a' && c_lower <= 'z') ||
-      (c_lower >= '0' && c_lower <= '9') ||
-      c_lower = '.' || c_lower = '_' || c_lower = '-'
-    in
-    if valid then
-      Buffer.add_char buf c_lower
-    else
-      Printf.bprintf buf "_%02x" (Char.code c)
-  ) name;
-  Buffer.contents buf
+let safe_filename = Common.safe_filename
 
 (* ============================================ *)
 (* Result-returning validators                  *)

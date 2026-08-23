@@ -1299,22 +1299,6 @@ let test_negative_priority () =
 (* Security Tests (v2.1) - XSS Prevention                       *)
 (* ============================================================ *)
 
-let test_xss_in_message () =
-  with_test_env (fun config ->
-    ignore (Workspace.bind_session config ~agent_name:"tester" ~capabilities:[] ());
-    let xss_payload = "<script>alert('xss')</script>" in
-    let result =
-      Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"tester" ~content:xss_payload
-      |> Result.get_ok
-    in
-    (* Check that raw script tags are not in the result *)
-    let has_raw_script =
-      str_contains result.rendered "<script>"
-      || str_contains result.rendered "</script>"
-    in
-    Alcotest.(check bool) "xss sanitized" false has_raw_script
-  )
-
 let test_xss_in_agent_name () =
   with_test_env (fun config ->
     let xss_name = "<img src=x onerror=alert('xss')>" in
@@ -1343,10 +1327,10 @@ let test_xss_in_message_type () =
       | Some message -> message.msg_type
       | None -> Alcotest.fail "broadcast message not found"
     in
-    Alcotest.(check bool) "msg_type raw script removed" false
-      (str_contains msg_type "<script>" || str_contains msg_type "</script>");
-    Alcotest.(check bool) "msg_type escaped" true
-      (str_contains msg_type "&lt;script&gt;")
+    (* #29736 stopped escaping at the store, so the type comes back as the
+       caller wrote it. [test_broadcast_stores_raw_text] pins the same contract
+       for the content; the type has no coverage there, so it is pinned here. *)
+    Alcotest.(check string) "msg_type is stored as written" xss_msg_type msg_type
   )
 
 (* === Board Admin Tests === *)
@@ -2563,7 +2547,6 @@ let () =
 
     (* === Security Tests (v2.1) === *)
     "security", [
-      Alcotest.test_case "xss in message" `Quick test_xss_in_message;
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
       Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
     ];

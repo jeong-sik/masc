@@ -52,15 +52,15 @@ describe('NavRailV2 schedule item', () => {
     render(html`<${NavRailV2} badges=${{ approvals: unavailable }} mobile=${true} />`, container)
 
     const approval = Array.from(container.querySelectorAll('.nav-item'))
-      .find(el => el.textContent?.includes('승인'))
+      .find(el => el.textContent?.includes('Gate'))
     const badge = approval?.querySelector('.nav-badge')
     expect(badge?.textContent).toBe('!')
     expect(badge?.getAttribute('data-severity')).toBe('bad')
     expect(badge?.getAttribute('title')).toContain(unavailable.operator_detail)
   })
 
-  // Rail order + group breaks mirror the 2026-07 keeper-v2 standalone export.
-  it('renders the v2 export rail order with Monitor after Keepers', () => {
+  // Rail order + group breaks mirror the keeper-v2 prototype (shell.jsx #29046).
+  it('renders the prototype rail order including the 명령·Lab group', () => {
     render(html`<${NavRailV2} />`, container)
 
     const rail = container.querySelector('.v2-nav')
@@ -74,9 +74,10 @@ describe('NavRailV2 schedule item', () => {
       'brand',
       '개요', '|',
       'Keepers', '레지스트리', 'Monitor', '|',
-      '작업', '승인', '예약', '|',
+      '작업', 'Gate', '예약', '|',
       '보드', 'Fusion', '로그', '|',
-      'IDE', '커넥터',
+      'IDE', '커넥터', '|',
+      '명령', 'Lab',
       'spacer',
       '설정',
     ])

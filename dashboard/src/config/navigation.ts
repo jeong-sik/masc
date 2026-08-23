@@ -111,12 +111,12 @@ export interface DashboardSectionNavItem {
   hidden?: boolean
 }
 
-// Order mirrors the 2026-07 keeper-v2 standalone export's rail: 개요 · Keepers ·
-// Monitor · 작업 · 승인 · 예약 · 보드 · Fusion · 로그 · IDE · 커넥터 · 설정.
-// That export restored Monitor to the primary rail and moved Logs before IDE,
-// so the earlier #21525 operator-restored-Logs deviation is now the design
-// itself. Settings stays pinned in the rail footer, so it renders outside the
-// main list even though it closes this set.
+// Order mirrors the keeper-v2 prototype rail (shell.jsx, #29046): 개요 ·
+// Keepers · 레지스트리 · Monitor · 작업 · Gate · 예약 · 보드 · Fusion · 로그 ·
+// IDE · 커넥터 · 명령 · Lab · 설정. The prototype's rail is the design SSOT the
+// parity probes measure; the older 2026-07 standalone export predates its
+// 명령/Lab group. Settings stays pinned in the rail footer, so it renders
+// outside the main list even though it closes this set.
 const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
   'keepers',
@@ -130,6 +130,8 @@ const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'logs',
   'code',
   'connectors',
+  'command',
+  'lab',
   'settings',
 ]
 

@@ -367,10 +367,6 @@ let test_inventory_exposes_exact_durable_fences () =
         "inventory trace fence"
         "trace-paused-work-inventory"
         (json |> member "owner" |> member "trace_id" |> to_string);
-      Alcotest.(check int)
-        "inventory generation fence"
-        17
-        (json |> member "owner" |> member "generation" |> to_int);
       Alcotest.(check int64)
         "inventory revision fence"
         (State.revision state)

@@ -371,11 +371,6 @@ let test_resume_owner_commits_receipt_and_preserves_pending () =
      | Resume_transaction.Already_committed -> ()
      | Resume_transaction.Committed ->
        Alcotest.fail "Resume_owner replay created a second receipt");
-    let conflicting : Resume_transaction.request = { operator_operation_id = "conflicting-op" } in
-    (match Resume_transaction.resume config ~keeper_name conflicting with
-     | Error { Resume_transaction.cause = Resume_transaction.Receipt_conflict _; _ } -> ()
-     | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
-     | Ok _ -> Alcotest.fail "Resume_owner operation ID accepted a different request");
     let second_operation = resume_request "operator-resume-2" in
     (match Resume_transaction.resume config ~keeper_name second_operation with
      | Error

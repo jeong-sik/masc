@@ -785,10 +785,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "runtime contract agent"
         (Masc.Keeper_identity.keeper_agent_name keeper_name)
         (runtime_contract |> U.member "agent_name" |> U.to_string);
-      check bool "runtime contract has generation" true
-        (match runtime_contract |> U.member "generation" with
-         | `Int _ -> true
-         | _ -> false);
       check string "runtime contract sandbox profile"
         (row |> U.member "sandbox_profile" |> U.to_string)
         (runtime_contract |> U.member "sandbox_profile" |> U.to_string);

@@ -742,7 +742,6 @@ let of_json json =
       Keeper_id.Trace_id.of_string trace_id_wire
       |> Result.map_error (fun e -> Decode_error e)
     in
-    let* generation = int "generation" json in
     let* actor = string "actor" json in
     let* cleanup_json = assoc "cleanup_intent" json in
     let* reason_json = assoc "reason" cleanup_json in

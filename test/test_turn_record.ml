@@ -364,7 +364,6 @@ let test_codec_requires_current_observation_fields () =
           (Astring.String.is_infix ~affix:field message))
     [ "turn_ref"
     ; "agent_name"
-    ; "generation"
     ; "turn_kind"
     ; "raw_trace_run_ref"
     ; "input_components"

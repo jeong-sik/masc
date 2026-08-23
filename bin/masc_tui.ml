@@ -3172,8 +3172,10 @@ let main () =
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
        | Some "G" when state.view = Acting ->
-           (* Clamped to the last page when the frame is drawn. *)
-           state.acting_scroll <- max_int
+           (* Past the end on purpose; the frame clamps it to the last page.
+              The held count rather than max_int, because an event arriving
+              before that frame adds one to it. *)
+           state.acting_scroll <- List.length state.acting
        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)

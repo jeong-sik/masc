@@ -3507,39 +3507,41 @@ let render_acting (state : state) =
   let traces =
     List.map (fun keeper -> (keeper.k_name, keeper.k_trace_id)) state.keepers
   in
-  (* Visible rows, newest first. The duration lookup walks the events older
-     than the completion, which in a newest-first list is the tail after it. *)
+  (* Visible entries, newest first, paired with the events older than each
+     -- in a newest-first list, the tail after it -- so a completed call on
+     the page can look up its start. Rows are built only for the page: the
+     pairing walks the older events, and doing it for a thousand held
+     entries on every frame is work the screen never shows. *)
   let visible =
     let rec walk acc = function
       | [] -> List.rev acc
       | entry :: older ->
-          let event = entry.ae_event in
-          if Acting.visible state.acting_filter event then
-            let duration_ms =
-              match event with
-              | Masc_tui_observer.Agent_core
-                  ({ Masc_tui_observer.kind = Masc_tui_observer.Tool_completed; _ }
-                   as completed) ->
-                  Acting.duration_of_completion
-                    ~before:(List.map (fun e -> e.ae_event) older)
-                    completed
-              | Masc_tui_observer.Agent_core _
-              | Masc_tui_observer.Keeper_heartbeat _
-              | Masc_tui_observer.Keeper_tool_call _
-              | Masc_tui_observer.Keeper_turn_complete _
-              | Masc_tui_observer.Keeper_composite_changed _
-              | Masc_tui_observer.Keeper_chat_appended _
-              | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
-                  None
-            in
-            let row = Acting.row_of_event ~duration_ms event in
-            walk
-              ({ row with Acting.keeper = Acting.keeper_of_event ~traces event }
-               :: acc)
-              older
+          if Acting.visible state.acting_filter entry.ae_event then
+            walk ((entry, older) :: acc) older
           else walk acc older
     in
     walk [] state.acting
+  in
+  let row_of (entry, older) =
+    let event = entry.ae_event in
+    let duration_ms =
+      match event with
+      | Masc_tui_observer.Agent_core
+          ({ Masc_tui_observer.kind = Masc_tui_observer.Tool_completed; _ } as
+           completed) ->
+          Acting.duration_of_completion
+            ~before:(List.map (fun e -> e.ae_event) older)
+            completed
+      | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
+      | Masc_tui_observer.Keeper_tool_call _
+      | Masc_tui_observer.Keeper_turn_complete _
+      | Masc_tui_observer.Keeper_composite_changed _
+      | Masc_tui_observer.Keeper_chat_appended _ | Masc_tui_observer.Snapshot _
+      | Masc_tui_observer.Other _ ->
+          None
+    in
+    let row = Acting.row_of_event ~duration_ms event in
+    { row with Acting.keeper = Acting.keeper_of_event ~traces event }
   in
   let shown = List.length visible in
   let feed =
@@ -3583,7 +3585,9 @@ let render_acting (state : state) =
   in
   box_line_styled buf cols ~style:Ansi.dim col_hdr;
   box_divider buf cols;
-  let chrome_rows = 9 in
+  (* The page indicator has a row of its own whether or not it is drawn, so a
+     list that overflows does not push the help line off the bottom. *)
+  let chrome_rows = 10 in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.acting_scroll max_scroll) in
@@ -3607,7 +3611,7 @@ let render_acting (state : state) =
   else
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match List.nth_opt visible idx with
+      match Option.map row_of (List.nth_opt visible idx) with
       | None -> box_empty buf cols
       | Some row ->
           let style =
@@ -3637,7 +3641,8 @@ let render_acting (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
-      (Printf.sprintf "[%d rows, scroll %d]" shown scroll);
+      (Printf.sprintf "[%d rows, scroll %d]" shown scroll)
+  else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
     (Printf.sprintf

@@ -17,8 +17,6 @@ type pause_kind = Keeper_activation_readiness.pause_kind =
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
 val pause_kind_to_wire : pause_kind -> string
 val registry_paused_keeper_names : unit -> String.t list
-val durable_paused_keeper_scan :
-  Workspace.config -> paused_keeper_scan
 val paused_keepers_health_json_of_scan :
   registry_paused_names:String.t list ->
   paused_keeper_scan ->

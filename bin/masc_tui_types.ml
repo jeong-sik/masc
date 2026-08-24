@@ -839,6 +839,33 @@ let composer_extra_rows (state : state) =
   in
   max 0 (List.length lines - 1)
 
+(** A scroll a frame had to hold inside what it could show.
+
+    {!scrolled_surface} answers this before the frame is built, for the
+    surfaces whose rows the state can count. The rest count rows the drawing
+    formats -- lines of a task's notes, of a board post, of a keeper's detail
+    -- so the bound is not knowable until the frame exists. Those frames say
+    which value they used and the loop stores it, which is not the same as the
+    drawing reaching back into the state it is drawing from: the drawing is a
+    function of the state again, and every write lives on one side of it. *)
+type clamped_scroll =
+  | Overview_events of int
+  | Task_detail of int
+  | Board_read of int
+  | Keeper_detail of int
+  | Keeper_calls of int
+  | Autonomy of int
+  | Acting of int
+
+let apply_clamped_scroll (state : state) = function
+  | Overview_events value -> state.overview_event_scroll <- value
+  | Task_detail value -> state.task_detail_scroll <- value
+  | Board_read value -> state.board_scroll <- value
+  | Keeper_detail value -> state.detail_scroll <- value
+  | Keeper_calls value -> state.keeper_calls_scroll <- value
+  | Autonomy value -> state.autonomy_scroll <- value
+  | Acting value -> state.acting_scroll <- value
+
 let scrolled_surface (state : state) : surface -> scrolled option =
   let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
   function

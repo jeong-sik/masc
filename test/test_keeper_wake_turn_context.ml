@@ -206,6 +206,80 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
   in
   user
 
+(* --- Own Recent Actions: arguments ride on refusals --- *)
+
+let action_turn turn_id calls : Masc.Keeper_own_recent_actions.turn =
+  { turn_id; calls }
+;;
+
+let call ~tool ~input ~outcome : Masc.Keeper_own_recent_actions.call =
+  { Masc.Keeper_own_recent_actions.tool; input; outcome }
+;;
+
+let own_recent_actions_section body =
+  let marker = "### Your Recent Actions" in
+  match Astring.String.find_sub ~sub:marker body with
+  | None -> ""
+  | Some start ->
+    let rest = String.sub body start (String.length body - start) in
+    (match Astring.String.find_sub ~sub:"\n###" rest with
+     | None -> rest
+     | Some stop -> String.sub rest 0 stop)
+;;
+
+(* The live shape that starved keeper [analyst] on 2026-08-23: turns whose
+   successful calls carry large argument objects. 1,312 successes carried
+   538,743 bytes against 20 refusals carrying 6,417. *)
+let test_successful_call_arguments_are_not_replayed () =
+  let big = String.make 4000 'x' in
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        [ action_turn
+            360
+            (List.init 20 (fun i ->
+               call
+                 ~tool:"keeper_tool_execute"
+                 ~input:(Printf.sprintf "{\"i\":%d,\"payload\":\"%s\"}" i big)
+                 ~outcome:Masc.Keeper_own_recent_actions.Ok_call))
+        ]
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "the calls are still listed" true
+    (Option.is_some
+       (Astring.String.find_sub ~sub:"[turn 360] keeper_tool_execute -> ok" section));
+  check bool
+    (Printf.sprintf "no argument body is replayed (section is %d bytes)"
+       (String.length section))
+    true
+    (Option.is_none (Astring.String.find_sub ~sub:big section))
+;;
+
+let test_refused_call_keeps_its_arguments () =
+  let payload = "{\"task_id\":\"task-471\",\"note\":\"needs-approval\"}" in
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        [ action_turn
+            361
+            [ call
+                ~tool:"keeper_task_done"
+                ~input:payload
+                ~outcome:(Masc.Keeper_own_recent_actions.Failed_call (Some "not verified"))
+            ]
+        ]
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "the refused call keeps what was sent" true
+    (Option.is_some (Astring.String.find_sub ~sub:payload section));
+  check bool "and says why it was refused" true
+    (Option.is_some (Astring.String.find_sub ~sub:"REJECTED: not verified" section))
+;;
+
 (* --- 1. Current Task layer --- *)
 
 let test_current_task_section_renders () =
@@ -653,6 +727,13 @@ let () =
             test_submitted_task_heading_does_not_claim_a_hold;
           test_case "an in-progress task is still called held" `Quick
             test_in_progress_task_heading_still_says_held;
+        ] );
+      ( "own recent actions carry arguments on refusals",
+        [
+          test_case "a successful call replays no argument body" `Quick
+            test_successful_call_arguments_are_not_replayed;
+          test_case "a refused call keeps what was sent" `Quick
+            test_refused_call_keeps_its_arguments;
         ] );
       ( "goal titles",
         [

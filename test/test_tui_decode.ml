@@ -425,9 +425,22 @@ let test_planning_goal_separates_unreadable_from_unreviewed () =
      with
      | Tui_decode.Proof_unreadable _ -> true
      | _ -> false);
-  Alcotest.check Alcotest.bool "no verification at all is idle" true
+  (* The server attaches this block to every goal -- the default record when
+     there is no ledger row, the ledger_error marker when the store will not
+     decode. A goal that arrives without one is a wire this build cannot read,
+     and reading it as "nobody asked" is the same disguise the server's own
+     note refuses to put on. *)
+  Alcotest.check Alcotest.bool "no verification block at all is not idle" true
     (match (decoded_proof ()).Tui_decode.pg_proof with
-     | Tui_decode.Proof_idle -> true
+     | Tui_decode.Proof_unreadable _ -> true
+     | _ -> false);
+  Alcotest.check Alcotest.bool "and neither is a block with no completion state"
+    true
+    (match
+       (decoded_proof ~verification:(`Assoc [ "completion", `Assoc [] ]) ())
+         .Tui_decode.pg_proof
+     with
+     | Tui_decode.Proof_unreadable _ -> true
      | _ -> false)
 ;;
 
@@ -1427,6 +1440,147 @@ let harness_snapshot_json verdicts =
     ; ("calibration", `Assoc [])
     ]
 
+(* ── Autonomy feature-proof report ── *)
+
+let feature_proof_json ?(id = "autonomous_tool_use") ?(status = "warn")
+    ?(observed = [ "alice" ]) ?(missing = [ "bob" ]) ?(read_errors = []) () =
+  `Assoc
+    [ ("id", `String id)
+    ; ("label", `String "autonomous tool use")
+    ; ("status", `String status)
+    ; ("summary", `String "1/2 keepers called a tool on an autonomous turn")
+    ; ( "keeper_evidence"
+      , `Assoc
+          [ ("keeper_count", `Int 2)
+          ; ("meta_count", `Int 2)
+          ; ( "observed_keepers"
+            , `List (List.map (fun k -> `String k) observed) )
+          ; ("missing_keepers", `List (List.map (fun k -> `String k) missing))
+          ; ( "read_errors"
+            , `List
+                (List.map
+                   (fun k ->
+                     `Assoc
+                       [ ("keeper", `String k)
+                       ; ("error", `String "meta.json is not readable")
+                       ])
+                   read_errors) )
+          ] )
+    ; ("evidence_refs", `List [])
+    ; ("next_action", `String "Let the runtime run an autonomous cycle.")
+    ]
+
+let autonomy_json ?(status = "warn") ?(pass_count = 1) ?(gap_count = 1)
+    ?(window_hours = `Null) features =
+  `Assoc
+    [ ("generated_at", `String "2026-08-24T00:00:00Z")
+    ; ("status", `String status)
+    ; ( "summary"
+      , `Assoc
+          [ ("status", `String status)
+          ; ("feature_count", `Int (List.length features))
+          ; ("pass_count", `Int pass_count)
+          ; ("warn_count", `Int gap_count)
+          ; ("fail_count", `Int 0)
+          ; ("gap_count", `Int gap_count)
+          ; ("keeper_count", `Int 2)
+          ; ("window_hours", window_hours)
+          ] )
+    ; ("features", `List features)
+    ; ("evidence_refs", `List [])
+    ]
+
+let test_decode_autonomy_reads_the_live_shape () =
+  match
+    Tui_decode.decode_autonomy_snapshot
+      (autonomy_json [ feature_proof_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "features proven" 1
+        snapshot.Tui_decode.au_pass_count;
+      Alcotest.(check int) "features still open" 1
+        snapshot.Tui_decode.au_gap_count;
+      Alcotest.(check int) "keepers the report covered" 2
+        snapshot.Tui_decode.au_keeper_count;
+      Alcotest.(check (option (float 0.01)))
+        "no window was asked for" None snapshot.Tui_decode.au_window_hours;
+      (match snapshot.Tui_decode.au_features with
+       | [ f ] ->
+           Alcotest.(check (list string))
+             "keepers with evidence" [ "alice" ] f.Tui_decode.fp_observed;
+           Alcotest.(check (list string))
+             "keepers without it" [ "bob" ] f.Tui_decode.fp_missing;
+           Alcotest.(check string) "what would close the gap"
+             "Let the runtime run an autonomous cycle."
+             f.Tui_decode.fp_next_action
+       | fs -> Alcotest.failf "expected one feature, got %d" (List.length fs))
+
+let test_decode_autonomy_keeps_read_errors_apart_from_missing () =
+  (* A keeper that never exercised the feature and a keeper whose record would
+     not open are different problems. Folding the second into the first blames
+     the keeper for a read failure and hides that the report is partly blind. *)
+  match
+    Tui_decode.decode_autonomy_snapshot
+      (autonomy_json
+         [ feature_proof_json ~missing:[ "bob" ] ~read_errors:[ "carol" ] () ])
+  with
+  | Ok { Tui_decode.au_features = [ f ]; _ } ->
+      Alcotest.(check (list string))
+        "missing stays missing" [ "bob" ] f.Tui_decode.fp_missing;
+      Alcotest.(check (list string))
+        "and the unreadable one is named separately" [ "carol" ]
+        f.Tui_decode.fp_read_errors
+  | Ok _ -> Alcotest.fail "expected one feature"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_autonomy_unknown_status_is_a_gap () =
+  (* The whole screen answers "is this proven". A status word this build was
+     not taught means it cannot tell, and the safe reading of "I do not know"
+     is not "yes" -- so it must not decode into the passing member. *)
+  match
+    Tui_decode.decode_autonomy_snapshot
+      (autonomy_json [ feature_proof_json ~status:"degraded" () ])
+  with
+  | Ok { Tui_decode.au_features = [ f ]; _ } ->
+      (match f.Tui_decode.fp_status with
+       | Tui_decode.Fp_unreadable raw ->
+           Alcotest.(check string) "the word is kept as written" "degraded" raw
+       | Tui_decode.Fp_pass | Tui_decode.Fp_warn | Tui_decode.Fp_fail ->
+           Alcotest.fail "an unknown status decoded into a known one");
+      Alcotest.(check bool) "and it counts as a gap" true
+        (Tui_decode.feature_proof_is_gap f.Tui_decode.fp_status)
+  | Ok _ -> Alcotest.fail "expected one feature"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_autonomy_missing_evidence_block_is_an_error () =
+  (* A feature row with no keeper evidence is a malformed report, not a
+     feature nobody has exercised. Defaulting it to an empty roster would draw
+     "0/0" and read as a clean screen. *)
+  let broken =
+    `Assoc
+      [ ("id", `String "runtime_liveness")
+      ; ("label", `String "runtime liveness")
+      ; ("status", `String "pass")
+      ; ("summary", `String "all keepers up")
+      ; ("next_action", `String "nothing")
+      ]
+  in
+  match Tui_decode.decode_autonomy_snapshot (autonomy_json [ broken ]) with
+  | Ok _ -> Alcotest.fail "a report with no keeper evidence decoded"
+  | Error _ -> ()
+
+let test_autonomy_window_hours_survives () =
+  match
+    Tui_decode.decode_autonomy_snapshot
+      (autonomy_json ~window_hours:(`Float 24.0) [ feature_proof_json () ])
+  with
+  | Ok snapshot ->
+      Alcotest.(check (option (float 0.01)))
+        "the window the report used" (Some 24.0)
+        snapshot.Tui_decode.au_window_hours
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
 let test_decode_harness_snapshot_reads_the_live_shape () =
   match
     Tui_decode.decode_harness_snapshot
@@ -1651,6 +1805,19 @@ let () =
           test_decode_harness_keeps_the_fallback_reason;
         Alcotest.test_case "an empty harness is a reading" `Quick
           test_decode_harness_with_no_verdicts_is_not_an_error;
+      ] );
+    ( "decode_autonomy",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_autonomy_reads_the_live_shape;
+        Alcotest.test_case "an unreadable record is not a missing keeper"
+          `Quick test_decode_autonomy_keeps_read_errors_apart_from_missing;
+        Alcotest.test_case "an unknown status counts as a gap" `Quick
+          test_decode_autonomy_unknown_status_is_a_gap;
+        Alcotest.test_case "a report with no keeper evidence is an error"
+          `Quick test_decode_autonomy_missing_evidence_block_is_an_error;
+        Alcotest.test_case "the window the report used survives" `Quick
+          test_autonomy_window_hours_survives;
       ] );
     ( "decode_verification",
       [

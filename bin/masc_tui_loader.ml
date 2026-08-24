@@ -166,8 +166,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Board | Approvals | Planning | Verification | Harness
-    | Repositories | Connectors | Tools | System_logs -> None
+    | Overview | Board | Approvals | Planning | Schedules | Verification
+    | Harness | Repositories | Connectors | Tools | Autonomy | System_logs ->
+        None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -365,6 +366,88 @@ let decode_board_comment json =
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
 
+let decode_schedule_row json =
+  let* sch_schedule_id = required_string_field json "schedule_id" in
+  let* sch_status = required_string_field json "status" in
+  let* sch_source = required_string_field json "source" in
+  let* sch_due_at_iso = optional_string_field json "due_at_iso" in
+  let* sch_recurrence_summary =
+    required_string_field json "recurrence_summary"
+  in
+  let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_summary = optional_string_field json "payload_summary" in
+  Ok
+    { sch_schedule_id
+    ; sch_status
+    ; sch_source
+    ; sch_due_at_iso
+    ; sch_recurrence_summary
+    ; sch_payload_target
+    ; sch_payload_summary
+    }
+
+let decode_schedule_rows json_list =
+  decode_list "requests" decode_schedule_row json_list
+
+(* The snapshot keeps the server's ok/unknown split: on a store read failure
+   the route reports [status = "unknown"] with a null [request_count] and an
+   empty row list, and the pane must not draw that as "no schedules". *)
+let decode_schedule_snapshot json =
+  let* scs_status = required_string_field json "status" in
+  let* scs_read_error =
+    optional_string_field json "schedule_store_read_error"
+  in
+  let* scs_request_count =
+    match Yojson.Safe.Util.member "request_count" json with
+    | `Int value -> Ok (Some value)
+    | `Null -> Ok None
+    | other ->
+        Error
+          (Printf.sprintf "schedules request_count must be an integer: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* scs_truncated =
+    match Yojson.Safe.Util.member "truncated" json with
+    | `Bool value -> Ok value
+    | other ->
+        Error
+          (Printf.sprintf "schedules truncated must be a boolean: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* scs_next_due_iso =
+    match Yojson.Safe.Util.member "fsm" json with
+    | `Assoc fields ->
+        (match List.assoc_opt "next_due_at_iso" fields with
+         | Some (`String value) -> Ok (Some value)
+         | Some `Null | None -> Ok None
+         | Some other ->
+             Error
+               (Printf.sprintf
+                  "schedules fsm next_due_at_iso must be a string: %s"
+                  (Yojson.Safe.to_string other)))
+    | other ->
+        Error
+          (Printf.sprintf "schedules fsm must be an object: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* rows = required_list_field json "requests" in
+  let* scs_rows = decode_schedule_rows rows in
+  Ok
+    { scs_status
+    ; scs_read_error
+    ; scs_request_count
+    ; scs_truncated
+    ; scs_next_due_iso
+    ; scs_rows
+    }
+
+(** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)
+let load_schedules ~(host : string) ~(port : int) :
+    (schedule_snapshot, string) result =
+  match fetch_schedules ~host ~port with
+  | Error err -> Error ("schedule load failed: " ^ err)
+  | Ok json -> decode_schedule_snapshot json
+
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int) :
     (board_post list, string) result =
@@ -499,6 +582,14 @@ let load_harness ~(host : string) ~(port : int) :
   match fetch_harness_health ~host ~port with
   | Error err -> Error ("harness load failed: " ^ err)
   | Ok json -> Tui_decode.decode_harness_snapshot json
+
+(** Load the autonomy feature-proof report from
+    /api/v1/dashboard/keeper-feature-proof *)
+let load_autonomy ~(host : string) ~(port : int) :
+    (Tui_decode.autonomy_snapshot, string) result =
+  match fetch_keeper_feature_proof ~host ~port with
+  | Error err -> Error ("autonomy load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_autonomy_snapshot json
 
 (** Load the verification queue from /api/v1/verification/requests *)
 let load_verification ~(host : string) ~(port : int) ~(limit : int) :

@@ -955,9 +955,14 @@ let decode_goal_proof json =
         | Some "proof_pending" -> Proof_pending
         | Some "idle" -> Proof_idle
         | Some other -> Proof_unreadable (Some other)
-        | None -> Proof_idle))
+        (* The server never leaves this out: a goal with no ledger row gets
+           the default record and a store that will not decode gets the
+           ledger_error marker, precisely so corruption is not dressed up as
+           "not verified yet". Reading an absent state as idle would put that
+           disguise back on this side of the wire. *)
+        | None -> Proof_unreadable (Some "no completion state on the goal")))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-    Proof_idle
+    Proof_unreadable (Some "no verification block on the goal")
 ;;
 
 let decode_planning_goal json =
@@ -1135,6 +1140,35 @@ type verification_snapshot = {
   vs_total : int;
 }
 
+type feature_proof_status =
+  | Fp_pass
+  | Fp_warn
+  | Fp_fail
+  | Fp_unreadable of string
+
+type feature_proof = {
+  fp_id : string;
+  fp_label : string;
+  fp_status : feature_proof_status;
+  fp_summary : string;
+  fp_next_action : string;
+  fp_keeper_count : int;
+  fp_observed : string list;
+  fp_missing : string list;
+  fp_read_errors : string list;
+}
+
+type autonomy_snapshot = {
+  au_generated_at : string;
+  au_status : feature_proof_status;
+  au_features : feature_proof list;
+  au_feature_count : int;
+  au_pass_count : int;
+  au_gap_count : int;
+  au_keeper_count : int;
+  au_window_hours : float option;
+}
+
 let decode_string_name_list json key =
   let* items = optional_list_field json key in
   decode_list key
@@ -1281,6 +1315,77 @@ let decode_verification_snapshot json =
   in
   let* vs_total = required_int_field json "total" in
   Ok { vs_requests; vs_total }
+
+let feature_proof_status_of_string = function
+  | "pass" -> Fp_pass
+  | "warn" -> Fp_warn
+  | "fail" -> Fp_fail
+  | other -> Fp_unreadable other
+
+let feature_proof_status_label = function
+  | Fp_pass -> "PASS"
+  | Fp_warn -> "WARN"
+  | Fp_fail -> "FAIL"
+  | Fp_unreadable _ -> "????"
+
+let feature_proof_is_gap = function
+  | Fp_pass -> false
+  | Fp_warn | Fp_fail | Fp_unreadable _ -> true
+
+(* The server reports a read failure as an object naming the keeper it could
+   not open. Only the name is carried: the surface says which keeper has no
+   readable record, and the error text belongs to the log, not to a column. *)
+let decode_read_error_keeper json = required_string_field json "keeper"
+
+let decode_feature_proof json =
+  let* fp_id = required_string_field json "id" in
+  let* fp_label = required_string_field json "label" in
+  let* status_raw = required_string_field json "status" in
+  let* fp_summary = required_string_field json "summary" in
+  let* fp_next_action = required_string_field json "next_action" in
+  let* evidence = required_object_field json "keeper_evidence" in
+  let* fp_keeper_count = required_int_field evidence "keeper_count" in
+  let* fp_observed = decode_string_name_list evidence "observed_keepers" in
+  let* fp_missing = decode_string_name_list evidence "missing_keepers" in
+  let* read_errors_json = required_list_field evidence "read_errors" in
+  let* fp_read_errors =
+    decode_list "read_errors" decode_read_error_keeper read_errors_json
+  in
+  Ok
+    { fp_id
+    ; fp_label
+    ; fp_status = feature_proof_status_of_string status_raw
+    ; fp_summary
+    ; fp_next_action
+    ; fp_keeper_count
+    ; fp_observed
+    ; fp_missing
+    ; fp_read_errors
+    }
+
+let decode_autonomy_snapshot json =
+  let* au_generated_at = required_string_field json "generated_at" in
+  let* summary = required_object_field json "summary" in
+  let* status_raw = required_string_field summary "status" in
+  let* au_feature_count = required_int_field summary "feature_count" in
+  let* au_pass_count = required_int_field summary "pass_count" in
+  let* au_gap_count = required_int_field summary "gap_count" in
+  let* au_keeper_count = required_int_field summary "keeper_count" in
+  let* au_window_hours = required_nullable_float_field summary "window_hours" in
+  let* features_json = required_list_field json "features" in
+  let* au_features =
+    decode_list "features" decode_feature_proof features_json
+  in
+  Ok
+    { au_generated_at
+    ; au_status = feature_proof_status_of_string status_raw
+    ; au_features
+    ; au_feature_count
+    ; au_pass_count
+    ; au_gap_count
+    ; au_keeper_count
+    ; au_window_hours
+    }
 
 let decode_system_log_snapshot json =
   let* entries_json = required_list_field json "entries" in

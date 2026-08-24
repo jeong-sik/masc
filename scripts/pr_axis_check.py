@@ -246,6 +246,67 @@ def merge_commit_already_in_base(
     return status in ("ahead", "identical")
 
 
+_TREE_BLOBS_CACHE: Dict[str, Optional[Dict[str, str]]] = {}
+
+
+def _tree_blobs(commit_sha: str, owner: str, repo: str) -> Optional[Dict[str, str]]:
+    """Map every blob path in a commit's tree to its blob SHA.
+
+    Returns None when the tree is unreachable or GitHub truncated it, so the
+    caller falls back to the conservative path instead of comparing a partial
+    tree against a whole one.
+    """
+    cached = _TREE_BLOBS_CACHE.get(commit_sha)
+    if cached is not None or commit_sha in _TREE_BLOBS_CACHE:
+        return cached
+    resp = _run_gh(
+        [f"/repos/{owner}/{repo}/git/trees/{commit_sha}?recursive=1"],
+        allow_not_found=True,
+    )
+    blobs: Optional[Dict[str, str]] = None
+    if isinstance(resp, dict) and not resp.get("truncated"):
+        blobs = {
+            entry["path"]: entry["sha"]
+            for entry in resp.get("tree", [])
+            if isinstance(entry, dict)
+            and entry.get("type") == "blob"
+            and entry.get("path")
+            and entry.get("sha")
+        }
+    _TREE_BLOBS_CACHE[commit_sha] = blobs
+    return blobs
+
+
+def merged_delta_is_present_in_base(
+    merged_files: Set[str],
+    merge_commit_sha: str,
+    pr_base_sha: str,
+    owner: str,
+    repo: str,
+) -> bool:
+    """Check whether a merged PR's result already stands in the PR base.
+
+    A force-restack rewrites commits, so the original merge commit stops being
+    an ancestor even though the same delta is present. Compare content instead
+    of ancestry: every path the merged PR touched must carry the same blob SHA
+    in the base as it does at the merge commit. A path absent from both trees
+    matches too, which is how a merged deletion reads.
+
+    Content equality is stricter than patch equivalence. A base that changed
+    those files further returns False and the overlap analysis runs, which is
+    the conservative direction.
+    """
+    if not merged_files:
+        return False
+    merged_tree = _tree_blobs(merge_commit_sha, owner, repo)
+    base_tree = _tree_blobs(pr_base_sha, owner, repo)
+    if merged_tree is None or base_tree is None:
+        return False
+    return all(
+        merged_tree.get(path) == base_tree.get(path) for path in merged_files
+    )
+
+
 def _payload_preview(payload: Any) -> str:
     rendered = json.dumps(payload, sort_keys=True)
     if len(rendered) > 1000:
@@ -398,6 +459,17 @@ def check_pr_axis_stale(
             if merge_commit and merge_commit_already_in_base(
                 merge_commit, pr_base_sha, owner, repo
             ):
+                continue
+            # A restacked parent gives the same delta new SHAs, so ancestry
+            # says absent while the content is already there (#29377).
+            if merge_commit and merged_delta_is_present_in_base(
+                merged_files, merge_commit, pr_base_sha, owner, repo
+            ):
+                print(
+                    f"axis: #{merged_num} delta already present in base "
+                    f"{pr_base_sha[:12]} by content; skipping overlap analysis",
+                    file=sys.stderr,
+                )
                 continue
 
         # Determine risk type and confidence
@@ -606,6 +678,42 @@ def self_test() -> int:
     )
     assert merged_pr_in_scope(None, "trunk"), "missing base ref stays in scope"
     print("self-test: per-base staleness scope incl. stacked siblings (PASS)")
+
+    # Content containment (#29377). Seed the tree cache so the cases stay
+    # offline; a restack rewrites SHAs but leaves the same blobs behind.
+    saved_cache = dict(_TREE_BLOBS_CACHE)
+    try:
+        _TREE_BLOBS_CACHE.clear()
+        _TREE_BLOBS_CACHE["merge-sha"] = {"lib/dune": "blob-a", "lib/x.ml": "blob-b"}
+        _TREE_BLOBS_CACHE["restacked-base"] = {
+            "lib/dune": "blob-a",
+            "lib/x.ml": "blob-b",
+            "lib/unrelated.ml": "blob-c",
+        }
+        _TREE_BLOBS_CACHE["diverged-base"] = {"lib/dune": "blob-a", "lib/x.ml": "blob-z"}
+        _TREE_BLOBS_CACHE["deleted-base"] = {"lib/dune": "blob-a"}
+        _TREE_BLOBS_CACHE["truncated"] = None
+        touched = {"lib/dune", "lib/x.ml"}
+
+        assert merged_delta_is_present_in_base(
+            touched, "merge-sha", "restacked-base", "o", "r"
+        ), "a restacked base carrying the same blobs contains the delta"
+        assert not merged_delta_is_present_in_base(
+            touched, "merge-sha", "diverged-base", "o", "r"
+        ), "a base that changed a touched file must fall through to overlap analysis"
+        assert not merged_delta_is_present_in_base(
+            touched, "merge-sha", "truncated", "o", "r"
+        ), "a truncated tree proves nothing"
+        assert not merged_delta_is_present_in_base(
+            set(), "merge-sha", "restacked-base", "o", "r"
+        ), "an empty file set proves nothing"
+        assert merged_delta_is_present_in_base(
+            {"lib/x.ml"}, "deleted-base", "deleted-base", "o", "r"
+        ), "a path missing from both trees is a merged deletion, not a difference"
+        print("self-test: restacked delta recognised by content (PASS)")
+    finally:
+        _TREE_BLOBS_CACHE.clear()
+        _TREE_BLOBS_CACHE.update(saved_cache)
 
     print("pr_axis_check self-test: all structural cases passed")
     return 0

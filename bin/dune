@@ -193,6 +193,9 @@
   masc.fusion_core
   masc.run_registry_core
   masc.masc_core
+  masc.config_dir_resolver
+  masc.board_handlers
+  fs_compat
   cmdliner
   unix
   yojson))
@@ -372,6 +375,7 @@
  (package masc)
  (libraries
   masc
+  masc.auth
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity

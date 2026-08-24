@@ -302,6 +302,11 @@ export function useCopilotDock() {
 
 export type CopilotDockApi = ReturnType<typeof useCopilotDock>
 
+/** Toggle the chat dock from outside the shell hook tree (command palette). */
+export function toggleCopilotDock(): void {
+  dockOpen.value = { ...dockOpen.value, open: !dockOpen.value.open }
+}
+
 export function useCopilotDockShortcuts(dock: CopilotDockApi): void {
   useEffect(() => {
     const disposers: Array<() => void> = []

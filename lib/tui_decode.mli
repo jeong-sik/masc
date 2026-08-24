@@ -135,11 +135,6 @@ type system_log_snapshot = {
   sys_latest_seq : int;
 }
 
-(** One task waiting on a verdict, as the verification surface lists it. *)
-(** One verdict the harness recorded: which gate ran on which task, what it
-    decided, and which evaluator decided it. *)
-(** A repository the workspace tracks. *)
-(** A connector the gate can deliver through. *)
 (** A registered tool, as the inventory lists it. *)
 type tool_entry = {
   tl_name : string;
@@ -155,6 +150,7 @@ type tool_snapshot = {
   ts_count : int;
 }
 
+(** A connector the gate can deliver through. *)
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -173,6 +169,7 @@ type connector_snapshot = {
   cs_active : int;  (** How many the server counted as available. *)
 }
 
+(** A repository the workspace tracks. *)
 type repository = {
   rp_name : string;
   rp_local_path : string;
@@ -187,6 +184,8 @@ type repository_snapshot = {
   rs_total : int;
 }
 
+(** One verdict the harness recorded: which gate ran on which task, what it
+    decided, and which evaluator decided it. *)
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -205,6 +204,7 @@ type harness_snapshot = {
   hs_verdicts : harness_verdict list;  (** newest first, as the server sends *)
 }
 
+(** One task waiting on a verdict, as the verification surface lists it. *)
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
@@ -226,6 +226,45 @@ type verification_request = {
 type verification_snapshot = {
   vs_requests : verification_request list;
   vs_total : int;  (** Requests the server holds, not the number returned. *)
+}
+
+type feature_proof_status =
+  | Fp_pass
+  | Fp_warn
+  | Fp_fail
+  | Fp_unreadable of string
+      (** A status word this build was not taught. Kept rather than folded
+          into a neighbour: the operator asked whether the feature is proven,
+          and "I cannot read the answer" is not "yes". It counts as a gap. *)
+
+type feature_proof = {
+  fp_id : string;
+  fp_label : string;
+  fp_status : feature_proof_status;
+  fp_summary : string;  (** The server's one-line reading, e.g. "3/9 keepers". *)
+  fp_next_action : string;  (** What would turn the gap into evidence. *)
+  fp_keeper_count : int;
+  fp_observed : string list;  (** Keepers with behaviour evidence for it. *)
+  fp_missing : string list;  (** Keepers with none. *)
+  fp_read_errors : string list;
+      (** Keepers whose evidence could not be read at all. Kept apart from
+          [fp_missing]: a keeper that failed to exercise the feature and a
+          keeper whose record would not open are different problems, and
+          counting the second as the first blames the keeper for a read
+          failure. *)
+}
+
+type autonomy_snapshot = {
+  au_generated_at : string;
+  au_status : feature_proof_status;  (** The worst status among the features. *)
+  au_features : feature_proof list;
+  au_feature_count : int;
+  au_pass_count : int;
+  au_gap_count : int;  (** Features the server counted as warn or fail. *)
+  au_keeper_count : int;
+  au_window_hours : float option;
+      (** The window the report was computed over, when it was given one.
+          [None] means the report looked at everything it holds. *)
 }
 
 type keeper_runtime = {
@@ -357,6 +396,19 @@ val decode_harness_snapshot :
 
 val decode_verification_snapshot :
   Yojson.Safe.t -> (verification_snapshot, string) result
+
+val decode_autonomy_snapshot :
+  Yojson.Safe.t -> (autonomy_snapshot, string) result
+(** Reads [GET /api/v1/dashboard/keeper-feature-proof]: which autonomy
+    features have current behaviour evidence and which still need it. *)
+
+val feature_proof_status_label : feature_proof_status -> string
+(** Fixed-width label for the status column. *)
+
+val feature_proof_is_gap : feature_proof_status -> bool
+(** Whether the status leaves the feature unproven. An unreadable status
+    counts as a gap, so a status word this build does not know can never be
+    drawn as evidence that the feature works. *)
 
 val decode_system_log_snapshot :
   Yojson.Safe.t -> (system_log_snapshot, string) result

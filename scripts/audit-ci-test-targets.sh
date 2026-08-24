@@ -132,7 +132,7 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # stanzas gated on MASC_E2E_TESTS, 1 plain executable), test_fusion_wake
 # times out in CI (#29064), and the remainder is unmeasured. The declared
 # count also includes those 5 non-test aliases.
-UNWIRED_BASELINE=159
+UNWIRED_BASELINE=38
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

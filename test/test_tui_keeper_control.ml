@@ -315,6 +315,36 @@ let test_short_roster_reads_unknown_not_offline () =
     (Control.status_label r);
   check_actions "no action on an unread keeper" [] (Control.available r)
 
+(* A refusal is two situations. Only one of them is fixed by providing a
+   token, and the roster line used to give that advice for both. *)
+let test_refusal_distinguishes_absent_from_rejected () =
+  let has needle line = String_util.string_contains_substring ~needle line in
+  let absent =
+    Control.roster_failure_message ~credential_sent:false
+      Control.Roster_unauthorized
+  in
+  let rejected =
+    Control.roster_failure_message ~credential_sent:true
+      Control.Roster_unauthorized
+  in
+  Alcotest.(check bool) "no bearer asks for one" true (has "need an operator token" absent);
+  Alcotest.(check bool) "no bearer is not called rejected" false (has "rejected" absent);
+  Alcotest.(check bool) "a sent bearer is reported rejected" true (has "rejected" rejected);
+  Alcotest.(check bool) "a sent bearer is not asked for again" false
+    (has "need an operator token" rejected);
+  (* The other failures say nothing about credentials either way. *)
+  List.iter
+    (fun credential_sent ->
+      let line =
+        Control.roster_failure_message ~credential_sent
+          (Control.Roster_unreachable "connection refused")
+      in
+      Alcotest.(check bool) "an unreachable route keeps its own detail" true
+        (has "connection refused" line);
+      Alcotest.(check bool) "an unreachable route blames no credential" false
+        (has "token" line))
+    [ true; false ]
+
 let test_truncated_roster_is_partial () =
   match
     Control.roster_of_reading ~rows:[ runtime "analyst" ] ~truncated:true
@@ -525,6 +555,10 @@ let () =
             test_non_resume_directive_omits_the_operation_id
         ; Alcotest.test_case "operation id is per attempt" `Quick
             test_operation_id_is_per_attempt
+        ] )
+    ; ( "refusal"
+      , [ Alcotest.test_case "absent and rejected credentials read apart" `Quick
+            test_refusal_distinguishes_absent_from_rejected
         ] )
     ; ( "roster completeness"
       , [ Alcotest.test_case "a roster short of its total is partial" `Quick

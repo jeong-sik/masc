@@ -245,9 +245,40 @@ let input_cursor_row ~terminal_rows ~history_height ~status_rows =
   let candidate = 5 + max 0 history_height + max 0 status_rows in
   min last_row (max 1 candidate)
 
+(* The chat pane draws the composer's first line with this prefix and wraps
+   continuation lines to the same width, so the caret column is measured from
+   the prefix the pane actually renders — not from a hand-copied constant that
+   drifts the moment the prefix changes. *)
+let chat_input_prompt_prefix = "  > "
+
+let chat_input_prompt_cells = display_width chat_input_prompt_prefix
+
+(* The pane draws its rows inside the box, which spends its border and the
+   space after it before any content starts. *)
+let chat_input_box_cells = 2
+
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in
-  min last_column (7 + display_width input)
+  (* Three things sit left of the caret: the box, the prompt, and what was
+     typed -- and the caret goes one cell past the last of them. Deriving this
+     from the prompt alone put it on the prompt's own ">" instead of after the
+     text, because the constant it replaced was all three added up rather than
+     the prompt's width. *)
+  min last_column
+    (chat_input_box_cells + chat_input_prompt_cells + display_width input + 1)
+
+(* Metadata rows read down the pane as a column: [timestamp] speaker request.
+   Speakers vary in width, so every role label is padded to one fixed column
+   and a too-long speaker truncates with an ellipsis rather than pushing the
+   column out for everyone else. *)
+let chat_role_label_column = 16
+
+let align_role_label label =
+  let cells = display_width label in
+  if cells > chat_role_label_column then
+    let prefix, _, _ = cell_prefix label (chat_role_label_column - 1) in
+    prefix ^ "…"
+  else label ^ String.make (chat_role_label_column - cells) ' '
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows

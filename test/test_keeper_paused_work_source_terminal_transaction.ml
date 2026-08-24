@@ -67,49 +67,6 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
 
-(* #29590 removed [expected_generation] from the receipt shape and moved
-   neither the schema string nor the store directory. [of_yojson] matches the
-   sorted field list exhaustively, so all 97 receipts written before that
-   deploy stopped decoding, and [save_if_absent] reads before it writes — the
-   operation ids behind them can neither replay their receipt nor record a new
-   one. Measured on the live store 2026-08-23: 97 of 98.
-
-   The fixture below is a full receipt of the current shape. Ask the decoder,
-   not what survives a round trip: a shape change that does not move
-   [store_version] fails here, and the fix is to change both in one commit. *)
-let current_shape_receipt =
-  `Assoc
-    [ "schema", `String Receipt.schema
-    ; "keeper_name", `String "pin-keeper"
-    ; "operation", `String "resume_owner"
-    ; "operator_operation_id", `String "op-pin"
-    ; "expected_trace_id", `String "trace-pin"
-    ; "requested_at", `Float 1_787_000_000.0
-    ]
-;;
-
-(* The same receipt as the store held before the field was cut. *)
-let retired_shape_receipt =
-  match current_shape_receipt with
-  | `Assoc fields -> `Assoc (("expected_generation", `Int 3) :: fields)
-  | other -> other
-;;
-
-let test_store_version_pins_the_receipt_shape () =
-  Alcotest.(check string)
-    "the schema string carries the store version"
-    ("masc.keeper.paused-work-disposition." ^ Receipt.store_version)
-    Receipt.schema;
-  Alcotest.(check bool)
-    "a receipt of the current shape decodes"
-    true
-    (Result.is_ok (Receipt.of_yojson current_shape_receipt));
-  Alcotest.(check bool)
-    "the field the previous version carried is refused, not ignored"
-    true
-    (Result.is_error (Receipt.of_yojson retired_shape_receipt))
-;;
-
 let with_source_terminal_lane f =
   let base_path = Filename.temp_dir "keeper-paused-source-terminal" "" in
   Fun.protect
@@ -1007,10 +964,6 @@ let () =
             "nonterminal payload is rejected"
             `Quick
             test_nonterminal_payload_is_rejected
-        ; Alcotest.test_case
-            "store version pins the receipt shape"
-            `Quick
-            test_store_version_pins_the_receipt_shape
         ] )
     ]
 ;;

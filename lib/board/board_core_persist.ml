@@ -856,6 +856,13 @@ let update_post_with_outcome
     match snapshot_result with
     | Error _ as e -> e
     | Ok (updated, posts_jsonl) ->
-      with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-      Ok updated
+      (* The rewrite carries the edit and the post's updated_at, and a keeper
+         board cursor advances on updated_at. Discarding the failure here
+         reported an edit that a restart would not show, and moved no cursor
+         to say so (#26168). The result variant is right here. *)
+      (match
+         with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl)
+       with
+       | Error _ as e -> e
+       | Ok () -> Ok updated)
 ;;

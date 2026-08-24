@@ -651,6 +651,255 @@ let tool_blob_maintenance_cmd =
          $ delete_previous_candidates))
 ;;
 
+(* Every durable store this gate can read, in one list.
+
+   The shell gate reads a store by knowing its layout: it runs [find] for a
+   glob and calls a per-file subcommand. That works while one command covers
+   one store, and it is why five stores are covered and the rest are not --
+   each new one is a new subcommand and a new [find]. The path conventions
+   already live in OCaml (a keeper's memory snapshot is a suffix on a
+   configured id, a disposition receipt sits under a sha256 of the keeper
+   name), so the enumeration belongs where the convention is.
+
+   Adding a store here is adding a row.
+
+   [on_refusal] says what the runtime does with a row it cannot read. That is
+   the part an operator needs at 3am and it differs per store: some refuse the
+   whole file and stop the keeper, some drop the row and never say so. It is
+   stated per row rather than inferred, because it is a property of the
+   consumer and not of the decoder.
+
+   Every scan runs the production decoder. A fixture cannot go stale here
+   because there is no fixture -- these are the rows on disk, read by the
+   binary about to serve them. *)
+type store_report =
+  { rows : int
+  ; refused : int
+  ; first_refusal : string option
+  }
+
+type store_scan =
+  { store : string
+  ; on_refusal : string
+  ; scan : base_path:string -> (store_report, string) result
+  }
+
+let empty_report = { rows = 0; refused = 0; first_refusal = None }
+
+let count_row report = function
+  | Ok () -> { report with rows = report.rows + 1 }
+  | Error detail ->
+    { rows = report.rows + 1
+    ; refused = report.refused + 1
+    ; first_refusal =
+        (match report.first_refusal with
+         | Some _ as kept -> kept
+         | None -> Some detail)
+    }
+;;
+
+let scan_files ~paths ~decode =
+  List.fold_left
+    (fun report path ->
+       match Fs_compat.load_file path with
+       | exception exn ->
+         count_row report (Error (path ^ ": " ^ Printexc.to_string exn))
+       | contents ->
+         count_row
+           report
+           (decode ~path contents |> Result.map_error (fun d -> path ^ ": " ^ d)))
+    empty_report
+    paths
+;;
+
+let scan_jsonl ~path ~decode =
+  if not (Fs_compat.file_exists path)
+  then empty_report
+  else
+    Fs_compat.load_jsonl path
+    |> List.fold_left (fun report json -> count_row report (decode json)) empty_report
+;;
+
+let files_under dir ~keep =
+  match Sys.readdir dir with
+  | exception Sys_error _ -> []
+  | entries ->
+    Array.to_list entries
+    |> List.filter keep
+    |> List.sort String.compare
+    |> List.map (Filename.concat dir)
+;;
+
+let keeper_meta_store =
+  { store = "keeper meta"
+  ; on_refusal =
+      "the runtime reads the meta as absent and re-materialises the keeper \
+       from its declaration, losing accumulated counters and the task binding"
+  ; scan =
+      (fun ~base_path ->
+         let dir =
+           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+         in
+         Ok
+           (scan_files
+              ~paths:
+                (files_under dir ~keep:(fun name ->
+                   Filename.check_suffix name ".json"))
+              ~decode:(fun ~path _ ->
+                Masc.Keeper_meta_store.validate_current_meta_file_result path
+                |> Result.map (fun _ -> ())
+                |> Result.map_error (function
+                  | Masc.Keeper_meta_store.Unreadable detail
+                  | Masc.Keeper_meta_store.Not_current detail -> detail))))
+  }
+;;
+
+let memory_os_current_store =
+  { store = "memory OS current snapshot"
+  ; on_refusal =
+      "recall injection, the librarian and keeper_memory_write all fail for \
+       that keeper, and neither writer repairs it because both read first"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Config_dir_resolver.keepers_dir_for_base_path ~base_path
+         in
+         Ok
+           (Masc.Keeper_memory_os_current.list_keeper_ids_for_keepers_dir
+              ~keepers_dir
+            |> List.fold_left
+                 (fun report keeper_id ->
+                    match
+                      Masc.Keeper_memory_os_current.read_for_keepers_dir
+                        ~keepers_dir
+                        ~keeper_id
+                    with
+                    | Ok None -> report
+                    | Ok (Some _) -> count_row report (Ok ())
+                    | Error detail ->
+                      count_row report (Error (keeper_id ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
+let disposition_receipt_store =
+  { store = "paused-work disposition receipts"
+  ; on_refusal =
+      "the operation id neither replays its receipt nor records a new one, \
+       because save_if_absent reads before it writes"
+  ; scan =
+      (fun ~base_path ->
+         let root =
+           Filename.concat
+             (Common.masc_dir_from_base_path ~base_path)
+             ("paused-work-dispositions-"
+              ^ Masc.Keeper_paused_work_disposition_receipt.store_version)
+         in
+         let receipts =
+           files_under root ~keep:(fun name ->
+             String.starts_with ~prefix:"keeper-" name)
+           |> List.concat_map (fun keeper_dir ->
+             files_under keeper_dir ~keep:(fun name ->
+               String.starts_with ~prefix:"operation-" name
+               && Filename.check_suffix name ".json"))
+         in
+         Ok
+           (scan_files ~paths:receipts ~decode:(fun ~path:_ contents ->
+              match Yojson.Safe.from_string contents with
+              | exception Yojson.Json_error detail -> Error detail
+              | json ->
+                Masc.Keeper_paused_work_disposition_receipt.of_yojson json
+                |> Result.map (fun _ -> ()))))
+  }
+;;
+
+let board_posts_store =
+  { store = "board posts"
+  ; on_refusal =
+      "the loader drops the row without a log or a counter, and the next \
+       full-snapshot write removes it from disk"
+  ; scan =
+      (fun ~base_path ->
+         let path =
+           Filename.concat
+             (Common.masc_dir_from_base_path ~base_path)
+             "board_posts.jsonl"
+         in
+         Ok
+           (scan_jsonl ~path ~decode:(fun json ->
+              match Masc_board_handlers.Board_votes_json.post_of_yojson json with
+              | Some _ -> Ok ()
+              | None -> Error "post rejected by the current field set")))
+  }
+;;
+
+let durable_stores =
+  [ keeper_meta_store
+  ; memory_os_current_store
+  ; disposition_receipt_store
+  ; board_posts_store
+  ]
+;;
+
+let validate_stores base_path =
+  let reports =
+    List.map
+      (fun store -> store, store.scan ~base_path)
+      durable_stores
+  in
+  List.iter
+    (fun (store, result) ->
+       match result with
+       | Error detail -> Printf.printf "%s scan_failed=%s\n%!" store.store detail
+       | Ok report ->
+         Printf.printf
+           "%s rows=%d refused=%d\n%!"
+           store.store
+           report.rows
+           report.refused;
+         (match report.first_refusal with
+          | None -> ()
+          | Some detail ->
+            Printf.printf "  first refusal: %s\n%!" detail;
+            Printf.printf "  on refusal: %s\n%!" store.on_refusal))
+    reports;
+  let refused =
+    List.fold_left
+      (fun total (_, result) ->
+         match result with
+         | Ok report -> total + report.refused
+         | Error _ -> total)
+      0
+      reports
+  in
+  let failed_scans =
+    List.filter_map
+      (fun (store, result) ->
+         match result with
+         | Error _ -> Some store.store
+         | Ok _ -> None)
+      reports
+  in
+  if failed_scans <> []
+  then errorf "store scan failed: %s" (String.concat ", " failed_scans)
+  else if refused = 0
+  then Ok ()
+  else
+    errorf
+      "%d stored row(s) the runtime about to serve them cannot read"
+      refused
+;;
+
+let validate_stores_cmd =
+  let doc =
+    "read every durable store this gate knows with the production decoders \
+     and report the rows the runtime could not read"
+  in
+  Cmd.v
+    (Cmd.info "validate-stores" ~doc)
+    Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
+;;
+
 (* A hard-cut field leaves rows no current decoder can read. [replay] refuses
    to compact while such a row is on disk and the row only leaves through
    compaction, so the store keeps it and its retention bound stops applying —
@@ -853,5 +1102,6 @@ let () =
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ; cut_run_registries_cmd
+          ; validate_stores_cmd
           ]))
 ;;

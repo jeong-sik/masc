@@ -432,6 +432,20 @@ val max_prompt_bytes_of_runtime_id : string -> int option
 (** Declared [max-prompt-bytes] for the model bound to this runtime id, or
     [None] when the model declares none. *)
 
+val declared_input_byte_ceiling_of_runtime_id : string -> int option
+(** The smaller of the two byte ceilings a runtime declares over its model
+    input: the model's [max-prompt-bytes] and the binding's
+    [max-request-body-bytes]. Which one a given path enforces differs —
+    [Keeper_antigravity_runtime] projects against the first, the generic
+    driver against the second through {!validate_request_body_cap} — so a
+    caller that must fit inside whatever this runtime enforces satisfies both.
+    [None] when neither is declared, which is the same answer those paths give
+    such a runtime.
+
+    The two count different things (prompt bytes against whole-request bytes),
+    so this is a ceiling for something known to be one part of the input, not
+    a budget for the input itself. *)
+
 val top_p_of_runtime_id : string -> float option
 (** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when the runtime is not configured or no explicit value is

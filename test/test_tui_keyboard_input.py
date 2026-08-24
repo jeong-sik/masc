@@ -123,6 +123,52 @@ def assert_workspace_payload_is_inert(output: bytearray) -> None:
         )
 
 
+# A needle is either literal bytes or a compiled pattern. Patterns exist so an
+# assertion can name what it means -- "this row is highlighted" -- without also
+# pinning the column widths around it. #29777 widened the Board row by one
+# column and every literal that had baked the old gutter into itself stopped
+# matching, which reads as "the selection broke" rather than "the row moved".
+def find_needle(
+    haystack: bytes | bytearray,
+    needle: bytes | re.Pattern[bytes],
+    start: int = 0,
+) -> int:
+    if isinstance(needle, bytes):
+        return haystack.find(needle, start)
+    found = needle.search(bytes(haystack), start)
+    return found.start() if found else -1
+
+
+def end_of_needle(
+    haystack: bytes | bytearray,
+    needle: bytes | re.Pattern[bytes],
+    start: int = 0,
+) -> int:
+    if isinstance(needle, bytes):
+        return haystack.find(needle, start) + len(needle)
+    found = needle.search(bytes(haystack), start)
+    assert found is not None
+    return found.end()
+
+
+def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
+    """A screen header, matched across the emphasis that closes the title.
+
+    The words naming the screen carry the emphasis, so the reset that ends it
+    sits between the name and the counts after it. Spelling a header as one
+    literal asserted that those bytes are adjacent, which is a fact about
+    styling rather than about what the screen is showing.
+    """
+    return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
+
+
+def selected_row(post_id: bytes) -> re.Pattern[bytes]:
+    """The highlighted list row for `post_id`, whatever sits in the gutter."""
+    return re.compile(
+        rb"\x1b\[7m>\x1b\[0m(?:\x1b\[[0-9;]*m|[ \xc2\xb7@?])*" + re.escape(post_id)
+    )
+
+
 def read_available(master_fd: int, output: bytearray) -> None:
     while True:
         try:
@@ -148,7 +194,7 @@ def wait_for_output(
     timeout: float,
 ) -> None:
     deadline = time.monotonic() + timeout
-    while needle not in output[start:]:
+    while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
@@ -169,7 +215,7 @@ def send_and_wait(
     start = len(output)
     os.write(master_fd, data)
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
-    needle_end = output.find(needle, start) + len(needle)
+    needle_end = end_of_needle(output, needle, start)
     wait_for_output(
         process,
         master_fd,
@@ -180,6 +226,52 @@ def send_and_wait(
     )
     frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
     return bytes(output[start:frame_end])
+
+
+# How many screens the Tab cycle holds is a property of the code under test,
+# not of this test. Spelling it as a literal run of tabs made every screen
+# added to the cycle silently retarget these assertions: #29768 added five
+# screens, and the five tabs that used to close the loop stopped at the first
+# new one, so the assertion timed out on a needle that was never going to
+# arrive.
+#
+# Walking one press at a time asserts what the assertions meant -- this screen
+# is reachable by tabbing -- and survives the cycle changing length. Adjacency
+# is still asserted directly by the single-tab calls elsewhere; this helper is
+# only for the calls that were closing a loop.
+#
+# The bound is a liveness guard, not the cycle length: it has to exceed the
+# cycle so a reachable screen is always found, and it reports the screen it
+# never reached instead of leaving a bare needle timeout behind.
+TAB_CYCLE_BOUND = 24
+
+
+def tab_until(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    needle: bytes,
+) -> bytes:
+    for _ in range(TAB_CYCLE_BOUND):
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"\t")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=start,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, start) + len(FRAME_END)
+        frame = bytes(output[start:frame_end])
+        if needle in frame:
+            return frame
+    raise AssertionError(
+        f"tabbed {TAB_CYCLE_BOUND} times without reaching {needle!r}; "
+        f"last frame: {bytes(output[-1500:])!r}"
+    )
 
 
 def release_and_wait_for_frame(
@@ -193,7 +285,7 @@ def release_and_wait_for_frame(
     start = len(output)
     response.release.set()
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
-    needle_end = output.find(needle, start) + len(needle)
+    needle_end = end_of_needle(output, needle, start)
     wait_for_output(
         process,
         master_fd,
@@ -206,8 +298,10 @@ def release_and_wait_for_frame(
     return bytes(output[start:frame_end])
 
 
-def frame_containing(segment: bytes, needle: bytes) -> bytes:
-    needle_offset = segment.find(needle)
+def frame_containing(
+    segment: bytes, needle: bytes | re.Pattern[bytes]
+) -> bytes:
+    needle_offset = find_needle(segment, needle)
     frame_start = segment.rfind(FRAME_START, 0, needle_offset + 1)
     frame_end = segment.find(FRAME_END, needle_offset)
     if needle_offset < 0 or frame_start < 0 or frame_end < 0:
@@ -967,6 +1061,15 @@ def run_terminal_scenario(
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
+                        # The environment is inherited, so whether the TUI finds
+                        # a bearer was decided by whoever ran the test. Without
+                        # one it posts a seventh event saying so, the events
+                        # pane takes the row for it, and the task the Overview
+                        # budget assertions look for falls off the bottom --
+                        # which passes on a developer's shell and fails in CI.
+                        # The harness decides this, like it decides the port and
+                        # the terminal.
+                        "MASC_TOKEN": "masc-tui-keyboard-regression-token",
                     }
                 )
                 process = subprocess.Popen(
@@ -1387,7 +1490,7 @@ def keeper_selection_identity_interaction(
     missing = send_and_wait(process, master_fd, output, b"r", b"29454")
     missing_plain = CSI_RE.sub(b"", missing)
     failures = []
-    if b"MASC Keepers (1)" not in missing_plain:
+    if find_needle(missing_plain, screen_header(b"MASC Keepers", b" (1)")) < 0:
         failures.append("missing beta detail did not return to MASC Keepers (1)")
     if b"Keeper: alpha" in missing_plain:
         failures.append("missing beta detail silently retargeted to Keeper: alpha")
@@ -1497,9 +1600,9 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             master_fd,
             output,
             b"\x1b",
-            b"MASC Keepers (1)",
+            screen_header(b"MASC Keepers", b" (1)"),
         )
-        keepers_frame = frame_containing(keepers, b"MASC Keepers (1)")
+        keepers_frame = frame_containing(keepers, screen_header(b"MASC Keepers", b" (1)"))
         if b"Keeper: alpha" in CSI_RE.sub(b"", keepers_frame):
             raise AssertionError(
                 f"Esc opened alpha detail after beta disappeared: {keepers!r}"
@@ -1753,6 +1856,63 @@ def assert_row_budgeted_surfaces(
     os.write(master_fd, b"q")
 
 
+EVENT_RANGE_RE = re.compile(rb"Recent Events (\d+)-(\d+)/(\d+)")
+
+
+def event_total(frame: bytes, where: str) -> int:
+    """How many events the pane says it holds, read from the screen.
+
+    The count is not fixed by the fixture: it includes events the TUI raises
+    itself, and a runner that surfaces one more load error than a laptop reads
+    a different number. Every range below is built from this so the scenario
+    asserts scroll positions -- which is its subject -- rather than a list
+    length it does not control.
+    """
+    match = EVENT_RANGE_RE.search(frame)
+    if match is None:
+        raise AssertionError(f"{where} drew no event range: {frame!r}")
+    return int(match.group(3))
+
+
+def event_range(first: int, last: int, total: int) -> bytes:
+    return f"Recent Events {first}-{last}/{total}".encode()
+
+
+def newest_window(height: int, total: int) -> bytes:
+    """The window resting against the newest event."""
+    return event_range(1, min(height, total), total)
+
+
+def oldest_window(height: int, total: int) -> bytes:
+    """The window resting against the oldest event."""
+    return event_range(max(1, total - height + 1), total, total)
+
+
+def assert_event_window_at_newest(frame: bytes, where: str) -> None:
+    """The event window sits at the newest end of the list.
+
+    This is what growing the viewport is supposed to restore, and it is the
+    first number that says so. The total is deliberately unread: it counts
+    events the TUI raises itself, so a runner that surfaces one more load
+    error than this laptop reads a different number for reasons the scenario
+    is not about. Pinning the literal "1-6/6" failed on CI at "1-6/7" -- the
+    window was exactly where it belonged.
+    """
+    match = EVENT_RANGE_RE.search(frame)
+    if match is None:
+        raise AssertionError(f"{where} drew no event range: {frame!r}")
+    first, last, total = (int(g) for g in match.groups())
+    if first != 1:
+        raise AssertionError(
+            f"{where} did not return to the newest event: "
+            f"range {first}-{last}/{total}: {frame!r}"
+        )
+    if not 1 <= last <= total:
+        raise AssertionError(
+            f"{where} drew an impossible range {first}-{last}/{total}: {frame!r}"
+        )
+
+
 def assert_overview_event_rows(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1784,7 +1944,7 @@ def assert_overview_event_rows(
     )
 
     send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
-    send_and_wait(process, master_fd, output, b"\t\t\t\t\t", b"MASC Overview")
+    tab_until(process, master_fd, output, b"MASC Overview")
 
     # The smallest viewport that still fits the whole Overview budget. It grew
     # by one row when the composer took the terminal's last line, so this is
@@ -1803,8 +1963,7 @@ def assert_overview_event_rows(
     for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
-    if b"Recent Events 1-6/6" not in overview:
-        raise AssertionError(f"23-row Overview omitted its event range: {overview!r}")
+    assert_event_window_at_newest(overview, "23-row Overview")
     if overview.count(b"Manual refresh") != 5:
         raise AssertionError(
             f"22-row Overview did not show all five refresh events: {overview!r}"
@@ -1823,7 +1982,8 @@ def assert_overview_event_rows(
     for expected in (b"Manual refresh", b"task-1", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"Recent Events 1-2/6" not in overview:
+    total = event_total(overview, "14-row Overview")
+    if newest_window(2, total) not in overview:
         raise AssertionError(f"14-row Overview omitted its event range: {overview!r}")
     if overview.count(b"Manual refresh") != 2:
         raise AssertionError(
@@ -1841,24 +2001,18 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=99,
-        needle=b"Recent Events 5-6/6",
+        needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
     if b"TUI started" not in oldest:
         raise AssertionError(f"Overview could not reach its oldest event: {oldest!r}")
 
-    send_and_wait(process, master_fd, output, b"jk", b"Recent Events 4-5/6")
-    send_and_wait(process, master_fd, output, b"j", b"Recent Events 5-6/6")
+    send_and_wait(process, master_fd, output, b"jk", event_range(total - 2, total - 1, total))
+    send_and_wait(process, master_fd, output, b"j", oldest_window(2, total))
 
     send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-    send_and_wait(
-        process,
-        master_fd,
-        output,
-        b"\t\t\t\t\t",
-        b"Recent Events 5-6/6",
-    )
+    tab_until(process, master_fd, output, oldest_window(2, total))
     resize_and_wait(
         process,
         master_fd,
@@ -1887,7 +2041,7 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=100,
-        needle=b"Recent Events 5-6/6",
+        needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -1902,7 +2056,7 @@ def assert_overview_event_rows(
         output,
         rows=22,
         columns=100,
-        needle=b"Recent Events 1-6/6",
+        needle=b"Recent Events 1-",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -1915,33 +2069,33 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=100,
-        needle=b"Recent Events 1-2/6",
+        needle=newest_window(2, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
     scroll_to_oldest()
-    send_and_wait(process, master_fd, output, b"r", b"Recent Events 6-7/7")
+    send_and_wait(process, master_fd, output, b"r", oldest_window(2, total + 1))
     anchored = resize_and_wait(
         process,
         master_fd,
         output,
         rows=14,
         columns=99,
-        needle=b"Recent Events 6-7/7",
+        needle=oldest_window(2, total + 1),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
     if b"TUI started" not in anchored or anchored.count(b"Manual refresh") != 1:
         raise AssertionError(f"event prepend changed the manual anchor: {anchored!r}")
 
-    send_and_wait(process, master_fd, output, b"k", b"Recent Events 5-6/7")
+    send_and_wait(process, master_fd, output, b"k", event_range(total - 1, total, total + 1))
     newer = resize_and_wait(
         process,
         master_fd,
         output,
         rows=14,
         columns=100,
-        needle=b"Recent Events 5-6/7",
+        needle=event_range(total - 1, total, total + 1),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -1979,7 +2133,9 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             b"\t",
-            b"MASC Approvals (3/3, hidden 0, actor masc-tui)",
+            screen_header(
+                b"MASC Approvals", b" (3/3, hidden 0, actor masc-tui)"
+            ),
         )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
         selected_plain = CSI_RE.sub(b"", selected)
@@ -1996,11 +2152,15 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             b"r",
-            b"MASC Approvals (4/4, hidden 0, actor masc-tui)",
+            screen_header(
+                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+            ),
         )
         refreshed_frame = frame_containing(
             refreshed,
-            b"MASC Approvals (4/4, hidden 0, actor masc-tui)",
+            screen_header(
+                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+            ),
         )
         refreshed_plain = CSI_RE.sub(b"", refreshed_frame)
         if not re.search(
@@ -2021,11 +2181,24 @@ def approval_selection_identity_interaction(
 
 
 def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
+    """The goal named by [title] is the row the cursor is on.
+
+    Anchored on the gutter marker and the title, with the columns between them
+    left unread. Those columns carry a phase label, a proof mark and a priority,
+    and each is its own contract with its own tests; pinning their exact shape
+    here made this assertion fail whenever one of them changed. It did:
+    #29786 put a proof mark between the phase and the priority, and this regex
+    had required whitespace there.
+    """
     plain = CSI_RE.sub(b"", frame)
-    selected_row = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][ \t]+P1[ \t]+" + re.escape(title)
+    # What sits between the status bracket and the priority is the renderer's
+    # business: #29786 put a proof mark there and this assertion, which only
+    # means "this goal is the selected row", started failing as a shape
+    # mismatch.
+    selected = re.compile(
+        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]*?P1[ \t]+" + re.escape(title)
     )
-    if selected_row.search(plain) is None:
+    if selected.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")
 
 
@@ -2046,7 +2219,7 @@ def open_loaded_planning(
     )
     send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Board (0)")
+    send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (0)"))
     send_and_wait(process, master_fd, output, b"\t", b"plan-alpha-29424")
 
 
@@ -2195,15 +2368,15 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
 
         send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
         send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Board (3)")
-        selected_b = b"\x1b[7m>\x1b[0m   post-b"
-        selected_a = b"\x1b[7m>\x1b[0m   post-a"
-        selected_new = b"\x1b[7m>\x1b[0m   post-new"
+        send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (3)"))
+        selected_b = selected_row(b"post-b")
+        selected_a = selected_row(b"post-a")
+        selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
         send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
 
-        board = send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (3)")
-        if selected_b not in board or selected_a in board:
+        board = send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)"))
+        if not selected_b.search(board) or selected_a.search(board):
             raise AssertionError(
                 f"Board detail return changed the selected post: {board!r}"
             )
@@ -2220,7 +2393,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
             },
         )
         board = send_and_wait(process, master_fd, output, b"r", b"post-new")
-        if selected_b not in board or selected_new in board:
+        if not selected_b.search(board) or selected_new.search(board):
             raise AssertionError(
                 f"Board list refresh changed the selected post: {board!r}"
             )
@@ -2255,7 +2428,7 @@ def open_loaded_board(
         master_fd,
         output,
         b"\t",
-        f"MASC Board ({post_count})".encode(),
+        screen_header(b"MASC Board", f" ({post_count})".encode()),
     )
 
 
@@ -2271,13 +2444,13 @@ def board_detail_isolation_interaction(b_failure: GatedHttpResponse) -> Interact
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             send_and_wait(process, master_fd, output, b"\r", b"a-only-comment")
-            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board (2)")
+            send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (2)"))
             send_and_wait(
                 process,
                 master_fd,
                 output,
                 b"j",
-                b"\x1b[7m>\x1b[0m   post-b",
+                selected_row(b"post-b"),
             )
 
             loading = send_and_wait(process, master_fd, output, b"\r", b"list-body-b")
@@ -2357,7 +2530,7 @@ def board_detail_authority_interaction(
 
             late_list.release.set()
             send_and_wait(process, master_fd, output, b"\t", b"MASC Planning")
-            send_and_wait(process, master_fd, output, b"\t", b"MASC System Logs")
+            tab_until(process, master_fd, output, b"MASC System Logs")
             send_and_wait(process, master_fd, output, b"\t", b"late-list-applied")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
@@ -2374,7 +2547,7 @@ def board_detail_authority_interaction(
                 )
 
             board_list = send_and_wait(
-                process, master_fd, output, b"\x1b", b"MASC Board (3)"
+                process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)")
             )
             if b"post-c" not in board_list:
                 raise AssertionError(
@@ -2409,7 +2582,7 @@ def board_missing_target_interaction(
                 master_fd,
                 output,
                 b"j",
-                b"\x1b[7m>\x1b[0m   post-b",
+                selected_row(b"post-b"),
             )
             send_and_wait(process, master_fd, output, b"\r", b"b-initial-comment")
 
@@ -2419,16 +2592,16 @@ def board_missing_target_interaction(
             )
             fixtures["/api/v1/board/post-b?format=flat"] = late_b
             board_update = send_and_wait(
-                process, master_fd, output, b"r", b"MASC Board (1)"
+                process, master_fd, output, b"r", screen_header(b"MASC Board", b" (1)")
             )
-            board = frame_containing(board_update, b"MASC Board (1)")
+            board = frame_containing(board_update, screen_header(b"MASC Board", b" (1)"))
             if not late_b.requested.wait(timeout=3.0):
                 raise AssertionError("late Board B request did not reach its fixture")
             for expected in (
-                b"\x1b[7m>\x1b[0m   post-a",
+                selected_row(b"post-a"),
                 b"Enter:read",
             ):
-                if expected not in board:
+                if find_needle(board, expected) < 0:
                     raise AssertionError(
                         f"missing Board target did not restore list mode: {board!r}"
                     )
@@ -2605,6 +2778,89 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def autonomous_turn_history_fixture() -> HttpResponse:
+    """One transcript row the way an autonomous turn persists it.
+
+    Blank ``content`` and a ``trace`` block behind it: on one live keeper 32
+    of 183 assistant rows looked like this, and every one drew as a timestamp
+    over an empty line.
+    """
+
+    return (
+        200,
+        [
+            {
+                "id": "autonomous:trace-1787333555531-00020#54",
+                "role": "assistant",
+                "content": "",
+                "ts": 1787348490.3,
+                "autonomous_turn": {"turn_id": "trace-1787333555531-00020#54"},
+                "blocks": [
+                    {
+                        "t": "trace",
+                        "trace": [
+                            {"kind": "think", "text": "", "content_withheld": True},
+                            {
+                                "kind": "tool",
+                                "name": "masc_task_history",
+                                "status": "ok",
+                                "dur": "32ms",
+                            },
+                            {"kind": "think", "text": "", "content_withheld": True},
+                            {
+                                "kind": "tool",
+                                "name": "tool_execute",
+                                "status": "err",
+                                "dur": "1.2s",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+
+
+def autonomous_turn_history_interaction() -> Interaction:
+    """The chat pane draws what an autonomous turn did, not a blank line."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+        pane_start = len(output)
+        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+        # The transcript is fetched on a background fiber once the pane opens,
+        # so the rows land in a later frame than the header.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"masc_task_history",
+            start=pane_start,
+            timeout=5.0,
+        )
+        pane = bytes(output[pane_start:])
+        for needle, what in (
+            (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
+            ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
+            ("\u2717 tool_execute \u00b7 1.2s".encode(), "the failed call"),
+        ):
+            if needle not in pane:
+                raise AssertionError(
+                    f"Autonomous turn history did not draw {what}: {pane!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def composer_newline_interaction(requests: HttpRequests) -> Interaction:
     """Ctrl-J opens a line; Return sends.
 
@@ -2682,6 +2938,14 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=utf8_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Autonomous turn history",
+        interact=autonomous_turn_history_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
     )
     composer_requests: HttpRequests = []
     run_terminal_scenario(

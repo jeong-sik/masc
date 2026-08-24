@@ -42,6 +42,21 @@ let persist_raw_token ~base_path ~agent_name raw_token =
   Auth.save_private_text_file path raw_token;
   path
 
+(* The read side of [persist_raw_token]. A client that logged in already has
+   its bearer in the workspace it opens; without this it can only be handed the
+   value again through the environment, which is the one channel that does not
+   survive opening a new shell. Both sides derive the path from
+   [token_file_path], so a rename cannot leave a reader looking in the old
+   place. *)
+let read_persisted_token ~base_path ~agent_name =
+  let path = token_file_path ~base_path ~agent_name in
+  match In_channel.with_open_bin path In_channel.input_all with
+  | contents ->
+      (match String.trim contents with
+       | "" -> None
+       | token -> Some token)
+  | exception Sys_error _ -> None
+
 let ensure_required_bearer_auth ~base_path ~agent_name ~role =
   let cfg = Auth.load_auth_config base_path in
   if cfg.enabled && cfg.require_token then

@@ -1973,6 +1973,34 @@ def oldest_window(height: int, total: int) -> bytes:
     return event_range(max(1, total - height + 1), total, total)
 
 
+# Rows the Overview's event panel may take, mirroring
+# Render_schedule.overview_panel_row_cap.
+OVERVIEW_PANEL_ROW_CAP = 6
+
+
+def event_range_span(frame: bytes, where: str) -> int:
+    """How many event rows the panel is drawing, read off its own range line."""
+    match = EVENT_RANGE_RE.search(frame)
+    if match is None:
+        raise AssertionError(f"{where} drew no event range: {frame!r}")
+    first, last, _total = (int(g) for g in match.groups())
+    return last - first + 1
+
+
+def clamped_window(visible: int, scroll: int, total: int) -> bytes:
+    """The range the panel draws for [scroll], mirroring
+    Render_schedule.project_overview_event_window.
+
+    The offset is clamped to total - visible, so a scroll made in a short
+    viewport survives into a tall one only as far as the taller panel allows.
+    Where the list is no longer than the panel that clamp is 0 and every
+    window is the newest one -- which is why pinning "1-2" here held while
+    the TUI raised exactly six events and stopped when it raised more.
+    """
+    offset = max(0, min(scroll, total - visible))
+    return event_range(offset + 1, offset + min(visible, total - offset), total)
+
+
 def assert_event_window_at_newest(frame: bytes, where: str) -> None:
     """The event window sits at the newest end of the list.
 
@@ -2005,14 +2033,20 @@ def assert_overview_event_rows(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    def scroll_to_oldest() -> None:
-        for first in range(2, 6):
+    def scroll_to_oldest(total: int, window: int = 2) -> None:
+        """Press j until the window rests against the oldest event.
+
+        How many presses that takes follows the event total, which the TUI
+        raises itself. Four presses against a literal "/6" held only while
+        the startup event count happened to equal the panel.
+        """
+        for first in range(2, total - window + 2):
             send_and_wait(
                 process,
                 master_fd,
                 output,
                 b"j",
-                f"Recent Events {first}-{first + 1}/6".encode(),
+                event_range(first, first + window - 1, total),
             )
 
     wait_for_output(process, master_fd, output, b"TUI started", start=0, timeout=10.0)
@@ -2045,13 +2079,18 @@ def assert_overview_event_rows(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
+    # "Manual refresh" and not "TUI started": nothing has scrolled yet, so the
+    # panel rests on the newest events and the oldest one need not be drawn.
+    # That it was drawn held only while the total equalled the panel's rows.
+    for expected in (b"Manual refresh", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
     assert_event_window_at_newest(overview, "23-row Overview")
-    if overview.count(b"Manual refresh") != 5:
+    span = event_range_span(overview, "23-row Overview")
+    if span != OVERVIEW_PANEL_ROW_CAP:
         raise AssertionError(
-            f"22-row Overview did not show all five refresh events: {overview!r}"
+            f"23-row Overview drew {span} event rows, not the "
+            f"{OVERVIEW_PANEL_ROW_CAP} it has room for: {overview!r}"
         )
 
     overview = resize_and_wait(
@@ -2070,16 +2109,18 @@ def assert_overview_event_rows(
     total = event_total(overview, "14-row Overview")
     if newest_window(2, total) not in overview:
         raise AssertionError(f"14-row Overview omitted its event range: {overview!r}")
-    if overview.count(b"Manual refresh") != 2:
+    span = event_range_span(overview, "14-row Overview")
+    if span != 2:
         raise AssertionError(
-            f"14-row Overview did not cap the shared panel at two events: {overview!r}"
+            f"14-row Overview drew {span} event rows, not the two it has room "
+            f"for: {overview!r}"
         )
     if b"TUI started" in overview or b"task-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
     if "└".encode() not in overview:
         raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
 
-    scroll_to_oldest()
+    scroll_to_oldest(total)
     oldest = resize_and_wait(
         process,
         master_fd,
@@ -2141,7 +2182,7 @@ def assert_overview_event_rows(
         output,
         rows=22,
         columns=100,
-        needle=b"Recent Events 1-",
+        needle=clamped_window(OVERVIEW_PANEL_ROW_CAP, total, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -2154,11 +2195,11 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=100,
-        needle=newest_window(2, total),
+        needle=clamped_window(2, max(0, total - OVERVIEW_PANEL_ROW_CAP), total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    scroll_to_oldest()
+    scroll_to_oldest(total)
     send_and_wait(process, master_fd, output, b"r", oldest_window(2, total + 1))
     anchored = resize_and_wait(
         process,

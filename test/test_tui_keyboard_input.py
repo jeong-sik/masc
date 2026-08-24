@@ -2896,7 +2896,9 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
         loaded = release_and_wait_for_frame(
             process, master_fd, output, gate, b"(nothing waiting on a verdict)"
         )
-        if b"MASC Verification (0 of 0)" not in loaded:
+        # The title and the count are asserted apart: a style reset may sit
+        # between them once surface titles carry their own styling.
+        if b"MASC Verification" not in loaded or b"(0 of 0)" not in loaded:
             raise AssertionError(
                 f"Verification header did not report the read: {loaded!r}"
             )

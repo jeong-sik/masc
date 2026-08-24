@@ -421,10 +421,23 @@ sending. One line stands in its place:
    > [pasted 400 line(s), 3489 bytes → pasted-20260825-0211-01a034c1.txt]
 ```
 
-The text is kept beside the draft and goes back in where that line stands when
-the message is sent, so the Keeper receives what was pasted. `Ctrl-U` drops
-both. Switching Keepers puts the text back into the draft first, so a saved
-draft never holds a placeholder whose text has gone.
+When the message is sent, the text is written into the Keeper's own directory
+and the placeholder becomes a line naming that file. A Keeper reads paths
+relative to its sandbox root and refuses anything outside it - `/tmp` comes
+back as `path_outside_sandbox` - so the file goes into the root
+`Keeper_sandbox_config` reports for that Keeper's profile
+(`.masc/playground/<name>/`, or `.masc/playground/docker/<name>/` for a Docker
+Keeper) and the message names it bare.
+
+A Keeper that has never run has no directory, and one is not created for it -
+that would be this surface deciding something about the Keeper's own space.
+Nor is a failed write hidden: both cases put the pasted text into the message
+instead and say so in Recent Events. A paste that arrives as a large message
+is worse than one read off disk; a paste that arrives as neither is the thing
+this must not do.
+
+`Ctrl-U` drops both. Switching Keepers puts the text back into the draft
+first, so a saved draft never holds a placeholder whose text has gone.
 
 Line breaks arrive as CR, LF, or CRLF depending on the terminal and on what
 was copied; all three become one LF in the draft. Everything else that is not

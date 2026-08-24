@@ -397,39 +397,121 @@ let save_message_draft state =
         if String.equal text "" then other_drafts
         else (keeper_name, text) :: other_drafts
 
-(* Put a spilled paste back where its placeholder stands.
+(* Put the pasted text back into the draft where its placeholder stands.
 
-   The draft holds one line saying what was pasted; the keeper is sent the
-   text. Substituting here, on the one path every send goes through, is what
-   keeps the two from drifting: a placeholder that reached a keeper would be a
-   message about a paste instead of the paste.
+   Used when the draft is put away -- a saved draft has to stand on its own,
+   and a placeholder whose text went with the composer would be sent as a
+   sentence about a paste instead of the paste.
 
    The spill is dropped whether or not its line was still there. An operator
    who deleted the placeholder meant to drop the paste, and a spill that
    outlived the draft would attach itself to the next message. *)
-let restore_spilled_paste state text =
+let materialise_spilled_paste state text =
   match state.msg_spill with
   | None -> text
   | Some spill ->
       state.msg_spill <- None;
-      let placeholder = Masc_tui_paste_spill.draft_line spill in
-      let placeholder_length = String.length placeholder in
-      let text_length = String.length text in
-      let rec find start =
-        if start + placeholder_length > text_length then None
-        else if
-          String.equal (String.sub text start placeholder_length) placeholder
-        then Some start
-        else find (start + 1)
+      Option.value ~default:text
+        (Masc_tui_paste_spill.substituted spill
+           ~replacement:spill.Masc_tui_paste_spill.text text)
+
+(* Where a keeper can read a file this process writes.
+
+   [Keeper_sandbox_config.host_root_abs_of_agent] is the same answer the
+   server gives: it reads the keeper's own TOML for the sandbox profile and
+   returns the backend-scoped root -- [.masc/playground/<name>/] for a local
+   keeper and [.masc/playground/docker/<name>/] for a Docker one. Working the
+   path out here instead would be this process copying a layout the server
+   owns, and the two roots differ by a directory that is easy to get right
+   once and wrong afterwards.
+
+   [None] when the root cannot be named or does not exist. A keeper that has
+   never run has no playground, and creating one from outside would be this
+   process deciding something about the keeper's own space. *)
+let keeper_readable_dir ~base_path ~keeper_name =
+  match
+    Keeper_sandbox_config.host_root_abs_of_agent ~base_path
+      ~agent_name:keeper_name
+  with
+  (* [sandbox_profile_of_agent] raises on a keeper TOML it cannot read, and
+     [Sys.is_directory] raises on a path that went away between the two
+     calls. Neither is a reason to lose the paste -- the caller falls back to
+     sending the text. *)
+  | exception _ -> None
+  | dir -> (
+      match Sys.file_exists dir && Sys.is_directory dir with
+      | true -> Some dir
+      | false -> None
+      | exception Sys_error _ -> None)
+
+let write_file path contents =
+  match open_out_bin path with
+  | exception Sys_error detail -> Error detail
+  | channel -> (
+      match
+        Fun.protect
+          ~finally:(fun () -> close_out_noerr channel)
+          (fun () -> output_string channel contents)
+      with
+      | () -> Ok ()
+      | exception Sys_error detail -> Error detail)
+
+(* Hand a spilled paste to the keeper as a file it can read, and put a line
+   naming that file where the placeholder stands.
+
+   Measured before it was built: a keeper reads paths relative to its own
+   sandbox root and refuses anything outside it, so [/tmp] comes back as
+   [path_outside_sandbox] and a workspace-relative path is simply not found.
+   The file goes into the root and the message names it bare.
+
+   Every failure falls back to sending the text itself. A paste that reached
+   the keeper as a large message is worse than one it can read off disk; a
+   paste that reached it as neither is the thing this must not do. *)
+let place_spilled_paste state ~base_path ~keeper_name text =
+  match state.msg_spill with
+  | None -> text
+  | Some spill -> (
+      state.msg_spill <- None;
+      let inline () =
+        Option.value ~default:text
+          (Masc_tui_paste_spill.substituted spill
+             ~replacement:spill.Masc_tui_paste_spill.text text)
       in
-      (match find 0 with
-       | None -> text
-       | Some at ->
-           String.sub text 0 at
-           ^ spill.Masc_tui_paste_spill.text
-           ^ String.sub text
-               (at + placeholder_length)
-               (text_length - at - placeholder_length))
+      match Masc_tui_paste_spill.substituted spill
+              ~replacement:(Masc_tui_paste_spill.message_line spill) text
+      with
+      | None ->
+          (* The placeholder is gone: the operator deleted it, and there is
+             nothing to hand the keeper. *)
+          text
+      | Some pointed -> (
+          match keeper_readable_dir ~base_path ~keeper_name with
+          | None ->
+              add_event state "system"
+                (Printf.sprintf
+                   "%s has no workspace on disk; sending the pasted text in \
+                    the message instead"
+                   (Keeper_chat.terminal_safe_text keeper_name));
+              inline ()
+          | Some dir -> (
+              let path =
+                Filename.concat dir spill.Masc_tui_paste_spill.file_name
+              in
+              match write_file path spill.Masc_tui_paste_spill.text with
+              | Error detail ->
+                  add_event state "error"
+                    (Printf.sprintf
+                       "Could not write the pasted text for %s (%s); sending \
+                        it in the message instead"
+                       (Keeper_chat.terminal_safe_text keeper_name) detail);
+                  inline ()
+              | Ok () ->
+                  add_event state "system"
+                    (Printf.sprintf "Wrote %s (%d bytes) into %s's workspace"
+                       spill.Masc_tui_paste_spill.file_name
+                       spill.Masc_tui_paste_spill.bytes
+                       (Keeper_chat.terminal_safe_text keeper_name));
+                  pointed)))
 
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
     keeper_name =
@@ -437,7 +519,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
      lives with the composer; a saved draft has to stand on its own, and a
      placeholder without its text would reach the keeper as a sentence about a
      paste instead of the paste. *)
-  (let materialised = restore_spilled_paste state (Buffer.contents state.msg_input) in
+  (let materialised = materialise_spilled_paste state (Buffer.contents state.msg_input) in
    Buffer.clear state.msg_input;
    Buffer.add_string state.msg_input materialised);
   save_message_draft state;
@@ -2016,8 +2098,7 @@ let queue_keeper_message state ~keeper_name text =
    longer registered. What used to sit above them — a prepared fence, an
    unverified outcome, a blocked recovery, each with its own Ctrl-R — is gone
    with the fence that produced them. *)
-let start_keeper_message ?keeper_name state ~mailbox text =
-  let text = restore_spilled_paste state text in
+let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   match
     match keeper_name with
     | Some _ -> keeper_name
@@ -2032,6 +2113,11 @@ let start_keeper_message ?keeper_name state ~mailbox text =
         (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
            (Keeper_chat.terminal_safe_text target))
   | Some target -> (
+      (* Now that the keeper is known, a spilled paste can be written where
+         that keeper can read it. Above this point there is no answer to
+         "whose workspace", and a file in the wrong one is a message pointing
+         at nothing. *)
+      let text = place_spilled_paste state ~base_path ~keeper_name:target text in
       (* Read through [send_disposition] rather than the state directly: the
          footer answers the same question the same way, and the two drifting
          apart is what put "Enter:blocked" on a screen that also said
@@ -2056,7 +2142,7 @@ let start_keeper_message ?keeper_name state ~mailbox text =
                    request.Keeper_chat.request_id waiting)))
 ;;
 
-let drain_queued_message state ~mailbox =
+let drain_queued_message state ~base_path ~mailbox =
   (* Send everything that can go now, oldest first, skipping lines whose own
      keeper still has a turn running. Sending sets that keeper's in-flight, so
      the next pass will not pick it again and the walk terminates.
@@ -2078,7 +2164,7 @@ let drain_queued_message state ~mailbox =
         if keeper_available_for_new_message state keeper_name
         then (
           state.msg_queued <- rest;
-          start_keeper_message ~keeper_name state ~mailbox text;
+          start_keeper_message ~keeper_name state ~base_path ~mailbox text;
           next ())
         else (
           (* The keeper this was written to is no longer registered. Sending it
@@ -2283,7 +2369,7 @@ let close_image state =
       state.image_open <- None;
       write_to_terminal Masc_tui_graphics.delete_all
 
-let send_operator_text ?keeper_name state ~mailbox text =
+let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
     match keeper_name with
     | Some _ as named -> named
@@ -2292,7 +2378,7 @@ let send_operator_text ?keeper_name state ~mailbox text =
   let notice = chat_notice state ~keeper_name:target in
   match Masc_tui_command.parse text with
   | Masc_tui_command.Say _ ->
-      start_keeper_message ?keeper_name state ~mailbox text
+      start_keeper_message ?keeper_name state ~base_path ~mailbox text
   | Masc_tui_command.Task_missing_title ->
       add_event state "error" "/task needs a title on the same line"
   | Masc_tui_command.View_image_missing_path ->
@@ -3554,7 +3640,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)
            ());
-      send_operator_text state ~mailbox text;
+      send_operator_text state ~base_path ~mailbox text;
       true
   | Composer.Edit ->
       let _handled =
@@ -3693,7 +3779,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       state.roster_search <- None;
       state.msg_scroll <- 0;
       state.view <- Keepers Keeper_message;
-      start_keeper_message ~keeper_name:keeper state ~mailbox
+      start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
         (Masc_tui_command.task_message ~task_id ~title ~body)
   | Task_dispatch_failed { keeper; detail; original } ->
       (* The operator's words come back to the input so nothing typed is
@@ -3952,7 +4038,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       in
       if applied then load_from_masc_dir state base_path;
       (* The turn settled, so "next" has arrived for whatever was waiting. *)
-      drain_queued_message state ~mailbox
+      drain_queued_message state ~base_path ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
       (* Identity-guarded: a late chunk from a superseded turn must not draw
          into the one now running. *)
@@ -5014,7 +5100,8 @@ let main () =
                let _handled =
                  handle_message_key state
                    ~submit_message:
-                     (send_operator_text state ~mailbox:async_messages)
+                     (send_operator_text state ~base_path
+                        ~mailbox:async_messages)
                    ~answer_approval:(fun ~tool_call_id ~allow ->
                      match
                        Option.bind state.msg_live (fun live ->

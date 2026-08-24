@@ -40,3 +40,10 @@ val message_line : t -> string
 (** What goes to the keeper in place of the text: the file name, what is in
     it, and where to look. The keeper reads paths relative to its own
     directory, so the name is given bare and said to be there. *)
+
+val substituted : t -> replacement:string -> string -> string option
+(** Put [replacement] where {!draft_line} stands in the draft.
+
+    [None] when the line is not there. An operator who deleted the placeholder
+    meant to drop the paste, and putting it back somewhere of this function's
+    choosing would send text they had removed. *)

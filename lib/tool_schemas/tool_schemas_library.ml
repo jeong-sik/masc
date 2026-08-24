@@ -1,8 +1,6 @@
 (** Tool_schemas_library — SSOT for library tool schemas. *)
 
-open Masc_domain
 
-let valid_source_strings = [ "direct_experience"; "research"; "experiment"; "observation" ]
 
 type operation =
   | List_documents
@@ -25,85 +23,16 @@ let operation_id = function
 
 let definitions : definition list = [
   (* masc_library_list *)
-  { operation = List_documents; read_only = true; schema = {
-    name = "masc_library_list";
-    description = "List all documents in the agent knowledge library with title, source, author, created date, and tags. \
-Use when browsing available knowledge or checking if a topic is already documented. \
-Pair with masc_library_read to fetch a specific document or masc_library_search to query by content.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  } };
+  { operation = List_documents; read_only = true; schema = Tool_schemas_library_toml.list };
 
   (* masc_library_read *)
-  { operation = Read_document; read_only = true; schema = {
-    name = "masc_library_read";
-    description = "Read a specific library document by topic name or partial match. \
-Use when you need the full content of a known knowledge document. \
-After masc_library_list or masc_library_search to find the topic name.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("topic", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Topic name or partial match (e.g., 'eio-mutex')");
-        ]);
-      ]);
-      ("required", `List [`String "topic"]);
-    ];
-  } };
+  { operation = Read_document; read_only = true; schema = Tool_schemas_library_toml.read };
 
   (* masc_library_add *)
-  { operation = Add_document; read_only = false; schema = {
-    name = "masc_library_add";
-    description = "Add a new document to the agent knowledge library. \
-Use when recording a new finding, experiment result, or pattern that other agents should know about.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("title", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Document title");
-        ]);
-        ("source", `Assoc [
-          ("type", `String "string");
-          ("description",
-           `String
-             ("Source type: direct_experience, research, experiment, observation"));
-          ("enum",
-           `List (List.map (fun s -> `String s) valid_source_strings));
-        ]);
-        ("tags", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "List of tags");
-        ]);
-        ("content", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Document body content (markdown)");
-        ]);
-      ]);
-      ("required", `List [`String "title"; `String "source"; `String "content"]);
-    ];
-  } };
+  { operation = Add_document; read_only = false; schema = Tool_schemas_library_toml.add };
 
   (* masc_library_search *)
-  { operation = Search_documents; read_only = true; schema = {
-    name = "masc_library_search";
-    description = "Search the agent knowledge library by content keywords or tags. \
-Use when looking for documents on a specific topic without knowing the exact title. \
-Pair with masc_library_read to fetch matching documents in full.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("query", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Search query; empty or missing returns a workflow error");
-        ]);
-      ]);
-    ];
-  } };
+  { operation = Search_documents; read_only = true; schema = Tool_schemas_library_toml.search };
 ]
 
 let schemas = List.map (fun definition -> definition.schema) definitions

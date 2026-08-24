@@ -391,6 +391,7 @@ type surface =
   | Harness
   | Fusion
   | Repositories
+  | Changes
   | Connectors
   | Runtime
   | Config
@@ -414,6 +415,7 @@ let surface_ring : (surface * string) list =
     (Harness, "Harness");
     (Fusion, "Fusion");
     (Repositories, "Repos");
+    (Changes, "Changes");
     (Connectors, "Connectors");
     (Runtime, "Runtime");
     (Config, "Config");
@@ -488,7 +490,7 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Lanes | Approvals | Schedules | Verification | Harness | Fusion
-  | Repositories | Connectors | Runtime | Config | Resources | Tools ->
+  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -705,6 +707,15 @@ type state = {
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
+  (* The keeper whose changes the Changes surface is showing, and what it
+     answered. The name is held separately from the snapshot because a
+     surface that has asked and not yet heard back is a different state from
+     one that has never asked, and the scroll belongs to the list on screen
+     rather than to the keeper. *)
+  mutable changes_keeper: string option;
+  mutable changes: Tui_decode.file_change_snapshot option;
+  mutable changes_error: string option;
+  mutable changes_scroll: int;
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
@@ -1001,6 +1012,10 @@ let create_state ~workspace ~port ~refresh_interval = {
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;
+  changes_keeper = None;
+  changes = None;
+  changes_error = None;
+  changes_scroll = 0;
   harness = None;
   harness_error = None;
   harness_scroll = 0;
@@ -1164,6 +1179,11 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         (match state.repositories with
          | None -> 0
          | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Changes ->
+      listing ~error:state.changes_error
+        (match state.changes with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.fcs_changes)
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with

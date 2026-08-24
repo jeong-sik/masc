@@ -200,7 +200,7 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
-            | Schedules | Verification | Harness | Fusion | Repositories
+            | Schedules | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
                 "  (2 then m to answer)"
           in
@@ -4044,6 +4044,148 @@ let render_repositories (state : state) =
     (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
 
+(* The files a keeper wrote, read back out of the tool-call log.
+
+   The durable chat transcript keeps a rendered line per tool call and drops
+   the arguments, so once a turn ends there is nowhere on this surface to see
+   what an Edit replaced. This row is where that is: the address the file has
+   in any checkout, the turn and task it belonged to, and enough of the new
+   text to recognise it by. Pressing the open key hands the selected row to
+   the operator's editor. *)
+let change_row_address (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_location with
+  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
+      Printf.sprintf "%s:%s" repo_id relative_path
+  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> bundle_path
+  | Masc.Tui_decode.Fc_at_absolute_path { path } -> path
+
+(* One line of what the change put there. An edit shows the text it wrote
+   rather than the text it removed: the question a reader has is what the file
+   says now. A write shows its size, because the whole body is never one row
+   and a truncated first line of a new file says less than its length. *)
+let change_row_summary (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_kind with
+  | Masc.Tui_decode.Fc_edited { after; _ } ->
+      Terminal_text.single_line after
+  | Masc.Tui_decode.Fc_written { content } ->
+      Printf.sprintf "(wrote %d bytes)" (String.length content)
+
+let render_changes (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let changes =
+    match state.changes with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.fcs_changes
+  in
+  let shown = List.length changes in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let whose =
+    match state.changes_keeper with
+    | None -> "(no keeper selected)"
+    | Some name -> Terminal_text.single_line name
+  in
+  let header =
+    match state.changes with
+    | None ->
+        Printf.sprintf "%s %s  (not loaded)  %s  %s"
+          (screen_title " MASC Changes") whose timestamp
+          (connection_badge state.connection_status)
+    | Some s ->
+        (* The window and the call count are stated because the list alone
+           does not say what was looked at: no changes in a window and no
+           calls in a window are different facts. *)
+        Printf.sprintf "%s %s (%d in %.0fh of %d calls)  %s  %s"
+          (screen_title " MASC Changes") whose shown
+          s.Masc.Tui_decode.fcs_window_hours s.Masc.Tui_decode.fcs_calls_in_window
+          timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  let col_hdr = Printf.sprintf "  %-6s %-10s %-44s %s" "Turn" "Task" "File" "What" in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.changes_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Theme.bad
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  (* Changes the log could not carry are said out loud. A list that showed
+     only what it had would tell an operator the turn wrote less than it did. *)
+  let budget_note =
+    match state.changes with
+    | Some s when s.Masc.Tui_decode.fcs_over_budget > 0 ->
+        Some
+          (Printf.sprintf
+             "  %d change(s) outgrew the tool-call log's inline budget; their text is not on disk"
+             s.Masc.Tui_decode.fcs_over_budget)
+    | Some _ | None -> None
+  in
+  (match budget_note with
+   | None -> ()
+   | Some note ->
+       box_line_styled buf cols ~style:Ansi.dim note;
+       box_divider buf cols);
+  let chrome_rows =
+    7
+    + (if Option.is_some state.changes_error then 2 else 0)
+    + (if Option.is_some budget_note then 2 else 0)
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.changes_scroll max_scroll) in
+  if shown = 0 then begin
+    let empty =
+      match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (pick a keeper on the Keepers surface, then press r)"
+      | Page_empty -> "  (this keeper wrote no files in the window)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt changes idx with
+      | None -> box_empty buf cols
+      | Some change ->
+          let line =
+            Printf.sprintf "  %-6s %-10s %-44s %s"
+              (Option.fold ~none:"-" ~some:string_of_int
+                 change.Masc.Tui_decode.fc_turn)
+              (Terminal_text.single_line
+                 (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
+              (Terminal_text.single_line (change_row_address change))
+              (change_row_summary change)
+          in
+          (* A call that failed still changed what the keeper tried to do, and
+             it is the row an operator is looking for. Dim marks it as an
+             attempt rather than hiding it. *)
+          let style =
+            if change.Masc.Tui_decode.fc_succeeded then Ansi.reset else Ansi.dim
+          in
+          let marker = if idx = scroll then ">" else " " in
+          box_line_styled buf cols ~style (marker ^ String.sub line 1 (String.length line - 1))
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~hints:"j/k:scroll  o:open in editor  r:refresh  Tab:next  q:quit");
+  finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+
 (* Where the gate can deliver.
 
    Configured and reachable are separate columns because they call for
@@ -5200,6 +5342,7 @@ let render_surface (state : state) =
        | Fusion_list -> render_fusion_list state
        | Fusion_detail run_id -> render_fusion_detail state run_id)
   | Repositories -> render_repositories state
+  | Changes -> render_changes state
   | Connectors -> render_connectors state
   | Runtime -> render_runtime state
   | Config -> render_config state

@@ -693,6 +693,12 @@ type async_msg =
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
+  (* Carries the keeper it was asked about. The surface can be pointed at a
+     different keeper while a load is in flight, and an answer that did not
+     say whose it was would be filed under whoever is selected when it
+     lands. *)
+  | File_changes_loaded of
+      string * (Masc.Tui_decode.file_change_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -1350,6 +1356,98 @@ let launch_repositories_load state ~mailbox =
       enqueue_async mailbox
         (Repositories_loaded (Error "Eio switch is unavailable"))
 
+(* Where the change is on this machine.
+
+   All three shapes resolve inside the keeper's own bundle, because that is
+   where the write happened. An operator's checkout of the same repository is
+   a different tree and this surface does not know where it is; naming the
+   keeper's copy is the answer that is true.
+
+   A Docker keeper's bundle is not on this filesystem at all, so the path may
+   not exist. The caller checks before handing it to an editor rather than
+   opening an empty buffer under a real file's name. *)
+let change_absolute_path ~base_path (change : Masc.Tui_decode.file_change) =
+  let bundle =
+    Filename.concat base_path
+      (Playground_paths.bundle_root change.Masc.Tui_decode.fc_keeper)
+  in
+  match change.Masc.Tui_decode.fc_location with
+  | Masc.Tui_decode.Fc_at_absolute_path { path } -> path
+  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> Filename.concat bundle bundle_path
+  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
+      Filename.concat bundle
+        (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
+
+(* Which line to open at.
+
+   The tool call records what was written and not where it landed, so the line
+   is found rather than known: the first line of the text the change wrote is
+   looked up in the file as it stands. That is a match, not a record -- the
+   same line may appear twice, and a later edit may have moved or removed it --
+   so a miss falls back to the top of the file rather than to a guess. Opening
+   at line 1 is visibly the top; opening at a wrong line looks like an answer.
+
+   Only the first line is compared. An edit's text is usually several lines and
+   the later ones are as likely to have changed since. *)
+let change_line ~path (change : Masc.Tui_decode.file_change) =
+  let wrote =
+    match change.Masc.Tui_decode.fc_kind with
+    | Masc.Tui_decode.Fc_edited { after; _ } -> after
+    | Masc.Tui_decode.Fc_written _ -> ""
+  in
+  let needle =
+    String.split_on_char '\n' wrote
+    |> List.map String.trim
+    |> List.find_opt (fun line -> String.length line > 0)
+  in
+  match needle with
+  | None -> 1
+  | Some needle -> (
+      match open_in path with
+      | exception Sys_error _ -> 1
+      | channel ->
+          let contains haystack =
+            let n = String.length needle and h = String.length haystack in
+            let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+            n > 0 && at 0
+          in
+          let rec scan number =
+            match input_line channel with
+            | exception End_of_file -> 1
+            | line -> if contains line then number else scan (number + 1)
+          in
+          Fun.protect
+            ~finally:(fun () -> try close_in channel with Sys_error _ -> ())
+            (fun () -> scan 1))
+
+(* The window the Changes surface asks for. A day is what an operator means
+   by "what has this keeper been doing"; the server's own ceiling is what the
+   read costs, and it clamps anything wider. *)
+let changes_window_hours = 24.0
+
+let launch_file_changes_load state ~mailbox ~keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+          ~window_hours:changes_window_hours
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (File_changes_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
+
 let launch_harness_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -1506,6 +1604,22 @@ let goto_surface state ~mailbox (destination : surface) =
         | Fusion_detail run_id ->
             launch_fusion_detail_load state ~mailbox ~run_id)
    | Repositories -> launch_repositories_load state ~mailbox
+   | Changes -> (
+       (* The surface follows whoever is selected on Keepers. Arriving with a
+          different keeper selected than the one already loaded drops the old
+          rows first: showing one keeper's files under another's name for the
+          length of a request is the confusion this surface exists to end. *)
+       let selected = Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state) in
+       (match selected with
+        | Some name when not (Option.equal String.equal state.changes_keeper (Some name)) ->
+            state.changes_keeper <- Some name;
+            state.changes <- None;
+            state.changes_error <- None;
+            state.changes_scroll <- 0
+        | Some _ | None -> ());
+       match state.changes_keeper with
+       | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
+       | None -> ())
    | Connectors -> launch_connectors_load state ~mailbox
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
@@ -3859,6 +3973,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.repositories <- Some snapshot;
           state.repositories_error <- None
       | Error detail -> state.repositories_error <- Some detail)
+  | File_changes_loaded (keeper_name, result) ->
+      (* An answer for a keeper the surface has since left is not this
+         surface's answer. Dropping it keeps one keeper's files from being
+         drawn under another's name. *)
+      if Option.equal String.equal state.changes_keeper (Some keeper_name) then (
+        match result with
+        | Ok snapshot ->
+            state.changes <- Some snapshot;
+            state.changes_error <- None;
+            state.changes_scroll <- 0
+        | Error detail -> state.changes_error <- Some detail)
   | Lanes_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -4733,6 +4858,12 @@ let main () =
                        ~run_id)
             | Repositories ->
                 launch_repositories_load state ~mailbox:async_messages
+            | Changes -> (
+                match state.changes_keeper with
+                | Some keeper_name ->
+                    launch_file_changes_load state ~mailbox:async_messages
+                      ~keeper_name
+                | None -> ())
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
             | Runtime ->
                 launch_runtime_surface_load state ~mailbox:async_messages
@@ -4834,7 +4965,7 @@ let main () =
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
             | Resources ->
                 state.resource_focus <- false
-            | Verification | Harness | Repositories | Connectors | Runtime
+            | Verification | Harness | Repositories | Changes | Connectors | Runtime
             | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
@@ -4934,6 +5065,10 @@ let main () =
                 state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.repositories_scroll
+            | Changes ->
+                state.changes_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.changes_scroll
             | Connectors ->
                 state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -5064,6 +5199,11 @@ let main () =
                   state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.repositories_scroll
+            | Changes ->
+                if state.changes_scroll > 0 then
+                  state.changes_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.changes_scroll
             | Connectors ->
                 if state.connectors_scroll > 0 then
                   state.connectors_scroll <-
@@ -5207,7 +5347,7 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -5279,8 +5419,61 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools
+            | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
+       | Some "o" when state.view = Changes ->
+           (* Hand the selected change to the operator's editor. The row is
+              the one the list marks, which is the top of the visible page. *)
+           (match state.changes with
+            | None -> add_event state "error" "no changes loaded yet"
+            | Some snapshot -> (
+                match
+                  List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
+                    state.changes_scroll
+                with
+                | None -> add_event state "error" "no change under the cursor"
+                | Some change -> (
+                    let path = change_absolute_path ~base_path change in
+                    if not (Sys.file_exists path) then
+                      (* A Docker keeper's bundle is not on this filesystem.
+                         Saying so beats opening an empty buffer named after a
+                         file that does exist somewhere else. *)
+                      add_event state "error"
+                        ("not on this machine: " ^ path)
+                    else
+                      let line = change_line ~path change in
+                      let target =
+                        { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line }
+                      in
+                      match Masc_tui_editor_jump.route () with
+                      | Masc_tui_editor_jump.No_editor ->
+                          add_event state "error"
+                            "no editor: run this inside Neovim, or set $EDITOR"
+                      | Masc_tui_editor_jump.Remote_neovim { server } -> (
+                          (* The editor is already on screen. Nothing here
+                             gives up the terminal, so this surface keeps
+                             drawing while the buffer opens over there. *)
+                          match
+                            Masc_tui_editor_jump.send_to_neovim ~server target
+                          with
+                          | Ok () ->
+                              add_event state "system"
+                                (Printf.sprintf "opened %s:%d in Neovim" path line)
+                          | Error detail -> add_event state "error" detail)
+                      | Masc_tui_editor_jump.Terminal_handoff { editor } ->
+                          (* No editor to send to, so one is started on this
+                             terminal and this surface stands down until it
+                             exits -- the same handoff the settings round-trip
+                             makes. *)
+                          restore_terminal ();
+                          let command =
+                            Printf.sprintf "%s +%d %s" editor line
+                              (Filename.quote path)
+                          in
+                          let _ : Unix.process_status = Unix.system command in
+                          reenter_terminal ();
+                          add_event state "system"
+                            (Printf.sprintf "closed %s:%d" path line))))
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -5334,7 +5527,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
@@ -5364,7 +5557,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -5387,7 +5580,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -5397,7 +5590,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -5419,7 +5612,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
             -> ())
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
@@ -5432,7 +5625,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
        | Some "b" when state.view = Connectors && not compact_viewport ->
            handle_connector_bind ()
        | Some "u" when state.view = Connectors && not compact_viewport ->
@@ -5444,7 +5637,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it
@@ -5543,6 +5736,10 @@ let main () =
                 watches; the page that answers "why is this keeper awake"
                 holds a reading from when the operator arrived otherwise. *)
              launch_schedules_load state ~mailbox:async_messages
+         (* Changes is not on the timer. The read parses every row in the
+            window's date files -- seconds, not milliseconds -- and the answer
+            only moves when the keeper takes a turn. [r] asks for it. *)
+         | Changes
          | Overview | Acting | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;

@@ -271,13 +271,14 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"
        ~callee:"Yojson.Safe.to_string");
-  (* Seven: [state.workspace], each row's [ov_cluster] / [ov_project], the
-     agent [ai_summary], the event content, and the transport tail's
-     [th_primary_path] / [th_queue_pressure]. Every one arrives from outside
-     the renderer. A failed transport read needs no projection of its own; it
-     reaches the operator through the Recent Events row the surface error
-     already writes. *)
-  check int "overview event text crosses the terminal boundary" 7
+  (* Five: [state.workspace], each row's [ov_cluster] / [ov_project], the
+     agent [ai_summary], and the event content. Every one arrives from outside
+     the renderer as free text. The transport tail used to be counted here
+     too, but #30240 made [th_primary_path] and [th_queue_pressure] closed
+     types, so those two carry no text to sanitize. A failed transport read
+     needs no projection of its own; it reaches the operator through the
+     Recent Events row the surface error already writes. *)
+  check int "overview event text crosses the terminal boundary" 5
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_overview"
@@ -673,9 +674,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"keeper_detail_pane"
        ~callee:"Render_schedule.normalize_keeper_detail_scroll");
+  (* #30210 replaced the byte-at-a-time reader with a buffered refill and
+     renamed the binding; the check kept naming [read_byte_unix], which no
+     longer exists, so it asserted zero calls in a binding that is not there
+     rather than the contract it was written for. *)
   check bool "interrupted input uses the deadline-aware retry contract" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"read_byte_unix"
+       ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
   check int "surface renderers perform no direct stdout writes" 0
@@ -1116,8 +1121,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ov_project"
     ; "ai_summary"
     ; "content"
-    ; "th_primary_path"
-    ; "th_queue_pressure"
+      (* th_primary_path and th_queue_pressure were listed here while they
+         were strings. #30240 made both closed types, so the renderer prints
+         their to_string and there is no untrusted text at that boundary to
+         sanitize. A field that cannot carry arbitrary bytes does not belong
+         on this list. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
   check_fields "render_approvals"
@@ -1154,7 +1162,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
-  check_fields "keeper_detail_pane"
+  (* [String.equal] is a comparison, not a projection: the pane matches a
+     cached stamp against the keeper's name and draws neither. Sanitizing a
+     value before comparing it would change what compares equal. *)
+  check_fields ~non_rendering_calls:[ "String.equal" ] "keeper_detail_pane"
     [ "k_name"
     ; "k_current_task_id"
     ; "live_context_error"

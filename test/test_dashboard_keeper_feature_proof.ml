@@ -104,36 +104,10 @@ let keeper_names feature key =
   |> List.sort compare
 ;;
 
-let duration_tier feature id =
-  feature
-  |> U.member "duration_tiers"
-  |> U.to_list
-  |> List.find_opt (fun tier -> U.member "id" tier |> U.to_string = id)
-  |> function
-  | Some tier -> tier
-  | None -> failf "duration tier %s absent from persistence proof" id
-;;
-
 let append_turn_exchange config keeper_name ts =
   Masc.Keeper_types_support.append_jsonl_line
     (Masc.Keeper_types_support.keeper_decision_log_path config keeper_name)
     (`Assoc [ "channel", `String "turn"; "ts_unix", `Float ts ])
-;;
-
-(* One decision-log row wider than the reader's segment head budget
-   (Dashboard_keeper_decision_log_proof.decision_head_max_bytes, 512 KB). The
-   head scan ends inside this row, so every turn row appended after it sits in
-   an unscanned suffix and the earliest turn is never seen. *)
-let head_budget_overflow_bytes = 600 * 1024
-
-let append_unreadable_head_row config keeper_name ts =
-  Masc.Keeper_types_support.append_jsonl_line
-    (Masc.Keeper_types_support.keeper_decision_log_path config keeper_name)
-    (`Assoc
-        [ "channel", `String "heartbeat"
-        ; "ts_unix", `Float ts
-        ; "detail", `String (String.make head_budget_overflow_bytes 'x')
-        ])
 ;;
 
 let test_stale_keeper_fails_runtime_liveness () =
@@ -355,147 +329,6 @@ let test_scheduled_proactive_reports_unreadable_records () =
     (U.member "status" feature |> U.to_string = "pass")
 ;;
 
-let test_persistence_duration_tiers_use_durable_turn_history () =
-  with_workspace
-  @@ fun config ->
-  seed_keeper config ~name:"four-hours" ~last_turn_ts:(now -. hour_seconds) ();
-  seed_keeper config ~name:"twenty-four-hours" ~last_turn_ts:(now -. hour_seconds) ();
-  append_turn_exchange config "four-hours" (now -. (5.0 *. hour_seconds));
-  append_turn_exchange config "four-hours" (now -. (0.5 *. hour_seconds));
-  append_turn_exchange config "twenty-four-hours" (now -. (24.0 *. hour_seconds));
-  append_turn_exchange config "twenty-four-hours" now;
-  let feature =
-    Feature_proof.json ~config ~now ()
-    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
-  in
-  List.iter
-    (fun id ->
-      let tier = duration_tier feature id in
-      check
-        string
-        (id ^ " tier names its evidence semantics")
-        "durable_turn_span"
-        U.(member "evidence_kind" tier |> to_string);
-      check string (id ^ " tier passes for both keepers") "pass" U.(member "status" tier |> to_string);
-      check int (id ^ " tier observes both keepers") 2 U.(member "observed_count" tier |> to_int))
-    [ "1h"; "2h"; "4h" ];
-  let tier_24h = duration_tier feature "24h" in
-  check string "24h tier stays partial" "warn" U.(member "status" tier_24h |> to_string);
-  check
-    (list string)
-    "24h tier names only the keeper with sufficient durable history"
-    [ "twenty-four-hours" ]
-    (tier_24h |> U.member "observed_keepers" |> U.to_list |> List.map U.to_string)
-;;
-
-let test_persistence_duration_tiers_reject_future_turns () =
-  with_workspace
-  @@ fun config ->
-  seed_keeper config ~name:"future" ~last_turn_ts:(now -. hour_seconds) ();
-  append_turn_exchange config "future" (now -. (25.0 *. hour_seconds));
-  append_turn_exchange config "future" (now +. hour_seconds);
-  let feature =
-    Feature_proof.json ~config ~now ()
-    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
-  in
-  List.iter
-    (fun id ->
-      let tier = duration_tier feature id in
-      check string (id ^ " tier rejects a future latest turn") "fail" U.(member "status" tier |> to_string);
-      check int (id ^ " tier observes no keeper with future evidence") 0 U.(member "observed_count" tier |> to_int))
-    [ "1h"; "2h"; "4h"; "24h" ]
-;;
-
-(* A keeper whose earliest turn row the head scan never reached has not failed
-   to persist turns: the reader stopped first. Reporting it beside keepers that
-   genuinely have no durable span blames a keeper for a reader budget, and the
-   distinction already exists - [first_ts_origin] publishes "scan_exhausted" -
-   so the report was discarding an answer it had. *)
-let test_unreached_history_is_not_a_missing_keeper () =
-  with_workspace
-  @@ fun config ->
-  seed_keeper config ~name:"readable" ~last_turn_ts:(now -. hour_seconds) ();
-  seed_keeper config ~name:"unread" ~last_turn_ts:(now -. hour_seconds) ();
-  append_turn_exchange config "readable" (now -. (25.0 *. hour_seconds));
-  append_turn_exchange config "readable" now;
-  append_unreadable_head_row config "unread" (now -. (30.0 *. hour_seconds));
-  append_turn_exchange config "unread" (now -. (25.0 *. hour_seconds));
-  append_turn_exchange config "unread" now;
-  let feature =
-    Feature_proof.json ~config ~now ()
-    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
-  in
-  check
-    (list string)
-    "the keeper with a readable span is the only one observed"
-    [ "readable" ]
-    (keeper_names feature "observed_keepers");
-  check
-    (list string)
-    "an unreached history is not blamed for the feature"
-    []
-    (keeper_names feature "missing_keepers");
-  check
-    (list string)
-    "an unreached history is named as undetermined"
-    [ "unread" ]
-    (keeper_names feature "undetermined_keepers");
-  check string "one proven and one unknown is partial" "warn" U.(member "status" feature |> to_string);
-  let tier_24h = duration_tier feature "24h" in
-  check int "24h tier counts the unread keeper apart" 1 U.(member "undetermined_count" tier_24h |> to_int);
-  check int "24h tier blames nobody" 0 U.(member "missing_count" tier_24h |> to_int)
-;;
-
-(* Fail says nobody met the span. With every keeper unread the report does not
-   know that, and stating it turns a reader limit into a fleet-wide verdict. *)
-let test_unreached_history_alone_does_not_read_as_failure () =
-  with_workspace
-  @@ fun config ->
-  seed_keeper config ~name:"unread" ~last_turn_ts:(now -. hour_seconds) ();
-  append_unreadable_head_row config "unread" (now -. (30.0 *. hour_seconds));
-  append_turn_exchange config "unread" (now -. (25.0 *. hour_seconds));
-  append_turn_exchange config "unread" now;
-  let feature =
-    Feature_proof.json ~config ~now ()
-    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
-  in
-  check string "an entirely unread fleet is not a failed one" "warn" U.(member "status" feature |> to_string);
-  check
-    (list string)
-    "nothing is observed either"
-    []
-    (keeper_names feature "observed_keepers");
-  check
-    (list string)
-    "and nothing is called missing"
-    []
-    (keeper_names feature "missing_keepers")
-;;
-
-(* Control: a keeper with no turn rows at all is readable and genuinely has no
-   span, so it stays in [missing]. Without this, moving every unproven keeper
-   out of [missing] would look like the same change. *)
-let test_readable_history_without_turns_is_still_missing () =
-  with_workspace
-  @@ fun config ->
-  seed_keeper config ~name:"silent" ~last_turn_ts:(now -. hour_seconds) ();
-  let feature =
-    Feature_proof.json ~config ~now ()
-    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
-  in
-  check
-    (list string)
-    "a readable history with no turns is a missing span"
-    [ "silent" ]
-    (keeper_names feature "missing_keepers");
-  check
-    (list string)
-    "and is not filed as undetermined"
-    []
-    (keeper_names feature "undetermined_keepers");
-  check string "a keeper that never persisted a turn still fails" "fail" U.(member "status" feature |> to_string)
-;;
-
 (* The summary used to be recovered by re-reading the status string out of the
    payload each feature had just written, with anything unrecognised counted as
    a failure. The status is now carried as a value, so this pins the
@@ -571,35 +404,11 @@ let () =
             `Quick
             test_stopped_keeper_fails_board_reactive_autonomy
         ] )
-    ; ( "persistence_duration_tiers"
-      , [ test_case
-            "durable history proves 1h 2h 4h and 24h tiers"
-            `Quick
-            test_persistence_duration_tiers_use_durable_turn_history
-        ; test_case
-            "future timestamps cannot prove a duration tier"
-            `Quick
-            test_persistence_duration_tiers_reject_future_turns
-        ] )
     ; ( "summary_projection"
       , [ test_case
             "summary counts agree with the published feature statuses"
             `Quick
             test_summary_counts_agree_with_published_feature_statuses
-        ] )
-    ; ( "unreached_history_is_not_missing"
-      , [ test_case
-            "an unreached history is undetermined, not missing"
-            `Quick
-            test_unreached_history_is_not_a_missing_keeper
-        ; test_case
-            "an entirely unreached fleet is not a failure"
-            `Quick
-            test_unreached_history_alone_does_not_read_as_failure
-        ; test_case
-            "control: a readable history without turns stays missing"
-            `Quick
-            test_readable_history_without_turns_is_still_missing
         ] )
     ]
 ;;

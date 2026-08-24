@@ -255,16 +255,6 @@
       "evidence": ["turns/continuity-*.json", "turns/context-after-restart.json", "observations/board-post.json"]
     },
     {
-      "id": "RW19",
-      "phase": "persistence_observability",
-      "name": "durable_turn_span_dashboard_projection",
-      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
-      "capabilities": ["Keeper", "Dashboard", "Observability", "Persistence"],
-      "user_story": "Verification 화면이 격리된 5-Keeper fleet의 decision-log durable turn span을 1h, 2h, 4h, 24h tier별 pass, warn, fail 상태와 함께 실제 backend 응답 그대로 표시하며 이를 무중단 uptime으로 과장하지 않는다.",
-      "assertions": ["persistence_tiers_dashboard_projection_observed"],
-      "evidence": ["browser/keeper-persistence-proof.json", "browser/keeper-persistence-proof.png"]
-    },
-    {
       "id": "RW20",
       "phase": "delivery_proof",
       "name": "poc_request_to_executed_artifact",

@@ -233,6 +233,16 @@ val handle_masc_agent_timeline_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
+val handle_masc_spawn_with_outcome
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+(** The four spawn tools, reached through the turn's registry.
+
+    Answers with a refusal outside a turn: there is nowhere for a process to
+    live that a later call could reach, and saying so beats creating a registry
+    nothing else can find. *)
+
 (** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
     cluster handler for [masc_schedule_*] tools. *)
 val handle_masc_schedule_with_outcome

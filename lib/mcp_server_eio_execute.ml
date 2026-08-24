@@ -361,6 +361,11 @@ let execute_tool_eio
                      { Tool_agent_timeline.config; agent_name }
                      ~name
                      ~args:coerced_args
+                 (* Keeper-only for now. A process started at this boundary
+                    would need a switch outliving the request, and the only one
+                    here is the server root -- which owns it for the life of
+                    the server, with no turn to end it. *)
+                 | Mod_spawn -> None
                  | Mod_schedule ->
                    Tool_schedule.dispatch
                      { Tool_schedule.config

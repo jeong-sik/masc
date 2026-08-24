@@ -352,6 +352,8 @@ type keeper_mode =
   | Keeper_logs
   | Keeper_calls
   | Keeper_message
+  | Keeper_runtime_pick
+      (** Choosing a runtime for the keeper under the roster cursor. *)
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
     legal destinations makes a new Keeper sub-view an explicit compiler error
@@ -418,7 +420,11 @@ let surface_needs : surface -> surface_needs = function
      the one that was missed. It loaded its history when it opened and never
      again, so a message that arrived while it was on screen only appeared
      after leaving and coming back. *)
-  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls) ->
+  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls)
+  (* The picker keeps the roster fresh for the same reason the list does: the
+     keeper it is choosing for can leave the roster while it is open. Its
+     catalogue has its own loader, fetched when the picker opens. *)
+  | Keepers Keeper_runtime_pick ->
       { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
   | Keepers Keeper_message ->
       { nothing with
@@ -509,6 +515,14 @@ type state = {
   mutable last_refresh: float;
   mutable view: surface;
   mutable keeper_cursor: int;
+  (* The runtime picker: the keeper it is choosing for, its cursor into the
+     dispatchable catalogue, and the catalogue itself with where every keeper
+     points today. Loaded when the picker opens; absent otherwise. *)
+  mutable runtime_pick_keeper: string option;
+  mutable runtime_pick_cursor: int;
+  mutable runtime_catalog: Tui_decode.runtime_option list;
+  mutable runtime_assignments: Tui_decode.runtime_assignment list;
+  mutable runtime_catalog_error: string option;
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
   mutable keeper_calls_error: string option;
   mutable keeper_calls_scroll: int;
@@ -793,6 +807,11 @@ let create_state ~workspace ~port ~refresh_interval = {
   last_refresh = 0.0;
   view = Overview;
   keeper_cursor = 0;
+  runtime_pick_keeper = None;
+  runtime_pick_cursor = 0;
+  runtime_catalog = [];
+  runtime_assignments = [];
+  runtime_catalog_error = None;
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_scroll = 0;

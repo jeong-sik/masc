@@ -253,7 +253,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
              Keeper_selection.Message_keeper
                { keeper_name; cursor = state.keeper_cursor }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_list | None ->
+    | Some Keeper_list
+    (* The picker rides the list cursor: its own cursor points into the
+       runtime catalogue, not the roster. *)
+    | Some Keeper_runtime_pick
+    | None ->
         Keeper_selection.List_cursor state.keeper_cursor
   in
 
@@ -261,7 +265,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let loaded_keepers, keepers_error = load_keepers base_path in
   let keepers =
     match keepers_error, current_keeper_mode with
-    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls) ->
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
+                   | Keeper_runtime_pick) ->
         (* A partial or failed read cannot prove that the focused Keeper was
            deleted. Keep the last complete roster until a reliable refresh can
            reconcile that identity. Message mode instead uses its explicit
@@ -288,7 +293,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
             state.detail_scroll <- 0;
             state.log_scroll <- 0;
             state.keeper_calls_scroll <- 0
-        | Some Keeper_list | None -> ())
+        (* The picker rides the list cursor, so a reconciled cursor is not a
+           lost focus: it stays open across refreshes. *)
+        | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
    | Keeper_selection.Detail_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_detail
@@ -547,6 +554,15 @@ let load_approvals ~(host : string) ~(port : int) :
   match fetch_operator_snapshot ~host ~port with
   | Error err -> Error ("approvals load failed: " ^ err)
   | Ok json -> Masc_tui_operator_projection.decode_snapshot json
+
+(** Load the runtime catalogue and keeper assignments for the picker. *)
+let load_runtime_resolved ~(host : string) ~(port : int) :
+    ( Tui_decode.runtime_option list * Tui_decode.runtime_assignment list,
+      string )
+    result =
+  match fetch_runtime_resolved ~host ~port with
+  | Error err -> Error ("runtime catalogue load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_runtime_resolved json
 
 (** Load the tool calls keepers are holding, for the Approvals surface. *)
 let load_keeper_tool_approvals ~(host : string) ~(port : int) :

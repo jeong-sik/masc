@@ -492,6 +492,30 @@ val decode_keeper_tool_approvals :
 (** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with
     missing or mistyped fields rather than dropping them. *)
 
+(** One runtime a keeper can be pointed at, from
+    [GET /api/v1/runtime/resolved]. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_is_default : bool;
+}
+
+(** Where one keeper points today. [ra_source] is the server's word:
+    ["default"] rides the fleet default, ["explicit"] was assigned. *)
+type runtime_assignment = {
+  ra_keeper : string;
+  ra_source : string;
+  ra_runtime_id : string option;
+}
+
+val decode_runtime_resolved :
+  Yojson.Safe.t ->
+  (runtime_option list * runtime_assignment list, string) result
+(** Decode the picker's slice of the resolved-runtime document: the runtime
+    catalogue and the keeper assignments, both in server order. *)
+
 type fleet_safety = {
   fs_status : string;
   fs_blocker : string option;

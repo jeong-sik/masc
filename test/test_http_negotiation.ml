@@ -310,15 +310,19 @@ let test_stateless_headers_do_not_emit_session_id () =
 
 (* The transport reads these from Env_config_runtime, not from its own
    Sys.getenv_opt (#28910). Pinned so a local read cannot come back and drift
-   from the value the rest of the server resolves. *)
+   from the value the rest of the server resolves.  Since task-538 the
+   transport reads through the [Re_read] thunks (per-call), so this compares
+   the cached config binding against the thunk the transport actually
+   calls. *)
 let test_sse_guard_knobs_come_from_the_config_module () =
   let module Conn = Server_mcp_transport_http_conn in
   let module Cfg = Env_config_runtime.Sse_connect_guard in
   check (float 0.0) "min reconnect interval" Cfg.reconnect_min_interval_seconds
-    Conn.sse_reconnect_min_interval_s;
+    (Conn.sse_reconnect_min_interval_s ());
   check (float 0.0) "connect window" Cfg.connect_window_seconds
-    Conn.sse_connect_window_s;
-  check int "max in window" Cfg.connect_max_in_window Conn.sse_connect_max_in_window
+    (Conn.sse_connect_window_s ());
+  check int "max in window" Cfg.connect_max_in_window
+    (Conn.sse_connect_max_in_window ())
 ;;
 
 let test_sse_guard_registry_is_shared_with_cleanup_loop () =
@@ -371,8 +375,10 @@ let test_preserve_guard_keeps_ag_ui_cooldown () =
    negative to the default and silently turn "disable" back into
    "default cooldown", with every doc still claiming otherwise.  These
    tests pin the reader itself: the raw value comes through, whatever its
-   sign.  They use the [Re_read] thunks (per-call reads) because the
-   module-level bindings are fixed at process start. *)
+   sign.  They use the [Re_read] thunks, which since task-538 are the same
+   readers the production transport calls — the transport's [sse_*] bindings
+   are these thunks, so a clamp anywhere in the live path turns these
+   checks red too. *)
 let with_env_var name value f =
   let prev = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -415,6 +421,33 @@ let test_sse_guard_zero_and_positive_read_through () =
    the default by the reader.  A [*_nonneg] reader swap turns these three
    checks red while every doc still says "[<= 0] disables". *)
 
+(* task-538: pin the {e production path} end-to-end.  The two tests above
+   pin the reader in isolation; this one drives the transport's real entry
+   point, {!Server_mcp_transport_http.check_sse_connect_guard}, with all
+   three knobs set negative.  A clamp anywhere between the env var and the
+   guard's decision — including a regression back to the cached toplevel
+   bindings fixed at process start — turns this check red: the cached
+   bindings still hold the ambient (positive) value, so the guard would
+   reject a reconnect that the operator asked to allow. *)
+let test_sse_guard_negative_disables_in_production_path () =
+  let module Transport = Server_mcp_transport_http in
+  with_env_var "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "-1" @@ fun () ->
+  with_env_var "MASC_SSE_CONNECT_WINDOW_S" "-0.5" @@ fun () ->
+  with_env_var "MASC_SSE_CONNECT_MAX_IN_WINDOW" "-3" @@ fun () ->
+  let session_id = "sse-guard-negative-disable-e2e" in
+  (* Prime the guard so a second connect would be rejected if any knob
+     still clamped to its positive default. *)
+  (match Transport.check_sse_connect_guard session_id with
+  | Error (reason, wait_s) ->
+      failf "first connect under disabled guard rejected: %s %.3f"
+        (Sse_reject_reason.to_label reason) wait_s
+  | Ok () -> ());
+  match Transport.check_sse_connect_guard session_id with
+  | Error (reason, wait_s) ->
+      failf "disable semantics did not reach the guard: %s %.3f"
+        (Sse_reject_reason.to_label reason) wait_s
+  | Ok () -> ()
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -453,5 +486,7 @@ let () =
           test_sse_guard_negative_disables_not_clamped;
         test_case "zero and positive read through unchanged" `Quick
           test_sse_guard_zero_and_positive_read_through;
+        test_case "negative disable holds in the production guard path" `Quick
+          test_sse_guard_negative_disables_in_production_path;
       ]);
     ]

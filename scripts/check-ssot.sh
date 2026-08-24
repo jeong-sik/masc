@@ -140,6 +140,14 @@ check_rule "R8-tui-status-color" 0 \
   '' \
   bin/masc_tui_render.ml
 
+# SSOT-R9 — conversation-role style is owned beside Theme. The renderer may
+# branch on row kind, but it must not map a role directly to an ANSI style.
+check_rule "R9-tui-chat-theme-owner" 0 \
+  "Chat_theme.origin / Chat_theme.body" \
+  '(Masc_tui_)?Message_layout\.(User|Keeper|Status|Error|Tool|Thinking).*-> (Ansi|Theme)\.' \
+  '' \
+  bin/masc_tui_render.ml
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

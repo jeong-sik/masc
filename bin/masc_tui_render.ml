@@ -100,20 +100,6 @@ let chat_markdown ~width body =
    reverse-video badge gives the source a background that works with the
    terminal's own light or dark palette, while the body keeps its semantic
    Markdown colours. *)
-let chat_origin_style : Message_layout.style -> string = function
-  | Message_layout.User -> Ansi.cyan
-  | Message_layout.Keeper -> Ansi.blue
-  | Message_layout.Status -> Theme.warn
-  | Message_layout.Error -> Theme.bad
-  | Message_layout.Tool -> Ansi.magenta
-  | Message_layout.Thinking -> Ansi.gray
-
-let chat_body_style : Message_layout.style -> string = function
-  | Message_layout.User | Message_layout.Keeper -> Ansi.reset
-  | Message_layout.Status -> Theme.warn
-  | Message_layout.Error -> Theme.bad
-  | Message_layout.Tool | Message_layout.Thinking -> Ansi.dim
-
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
 let folded_thinking_summary body =
@@ -137,7 +123,7 @@ let render_chat_row buf cols (row : Message_layout.row) =
            after the link. *)
         Masc_tui_message_layout.dress_bare_links
           ~open_style:(Ansi.underline ^ Ansi.blue)
-          ~close_style:(Ansi.reset ^ chat_body_style row.style)
+          ~close_style:(Ansi.reset ^ Chat_theme.body row.style)
           rest
       in
       if
@@ -147,10 +133,10 @@ let render_chat_row buf cols (row : Message_layout.row) =
         let rest = String.sub text 2 (String.length text - 2) in
         box_line buf cols
           (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
-             (chat_origin_style row.style) Ansi.reset
-             (chat_body_style row.style) (dress rest) Ansi.reset))
+             (Chat_theme.origin row.style) Ansi.reset
+             (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
-        box_line_styled buf cols ~style:(chat_body_style row.style)
+        box_line_styled buf cols ~style:(Chat_theme.body row.style)
           (dress text)
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:Ansi.dim
@@ -158,7 +144,7 @@ let render_chat_row buf cols (row : Message_layout.row) =
   | Message_layout.Metadata
       (Message_layout.Origin { timestamp; role_label; request_label }) ->
       let badge =
-        Printf.sprintf "%s%s %s %s" (chat_origin_style row.style) Ansi.reverse
+        Printf.sprintf "%s%s %s %s" (Chat_theme.origin row.style) Ansi.reverse
           role_label Ansi.reset
       in
       box_line buf cols

@@ -87,6 +87,28 @@ module Theme = struct
   end
 end
 
+(** One owner for the visual distinction between conversation roles.
+
+    Role and state are different axes: a Keeper message is not a success, and
+    a user message is not merely informational. The renderer asks this module
+    for its badge/gutter and body styles instead of rebuilding that mapping.
+    Both human and Keeper prose deliberately keep the terminal's foreground. *)
+module Chat_theme = struct
+  let origin : Masc_tui_message_layout.style -> string = function
+    | Masc_tui_message_layout.User -> Ansi.cyan
+    | Masc_tui_message_layout.Keeper -> Ansi.blue
+    | Masc_tui_message_layout.Status -> Theme.warn
+    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Tool -> Ansi.magenta
+    | Masc_tui_message_layout.Thinking -> Ansi.gray
+
+  let body : Masc_tui_message_layout.style -> string = function
+    | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset
+    | Masc_tui_message_layout.Status -> Theme.warn
+    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking -> Ansi.dim
+end
+
 (** A screen title.
 
     Emphasis belongs to the words that name the screen, not to the whole header

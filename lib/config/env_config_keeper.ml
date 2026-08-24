@@ -70,6 +70,12 @@ module KeeperSpawn = struct
       turn, small enough that a chatty watcher cannot grow a keeper's memory
       without limit. Floor 4 KiB, because a buffer smaller than a single pipe
       read drops most of what it is handed. *)
+  (* Reading an env var once at module init is a pure computation: no outcome,
+     no failure, no duration. What is worth observing is what the bound costs,
+     and [Spawn_registry] reports that per read as [dropped_before], where a
+     caller can act on it. The marker sits on the line above the binding
+     because the gate reads a two-line window. *)
+  (* TEL-OK *)
   let spawn_output_buffer_bytes =
     Int.max 4096 (get_int_nonneg ~default:1_048_576 "MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES")
   ;;

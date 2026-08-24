@@ -2,6 +2,12 @@ open Alcotest
 
 module History = Masc_tui_keeper_chat_history
 
+(* [call_id] and [tool_name] are fields of both [tool_activity] and
+   [awaiting_approval], and the latter is declared second, so it wins an
+   unannotated lookup. Naming the type once here keeps every access below
+   pointed at the row type the block actually holds. *)
+type activity = Masc_tui_keeper_chat_transcript.tool_activity
+
 let addressed ?(ts = 1.0) ?speaker_name ?surface content =
   `Assoc
     ([ "id", `String "row"
@@ -242,15 +248,15 @@ let test_history_keeps_producer_tool_call_identity () =
       let activities = block.activities in
       check (list (option string)) "producer identities stay in source order"
         [ Some "c1"; Some "c2" ]
-        (List.map (fun activity -> activity.call_id) activities);
+        (List.map (fun (activity : activity) -> activity.call_id) activities);
       check (list string) "the same subject authority names both calls"
         [ "lib/a.ml"; "lib/b.ml" ]
         (List.map
-           (fun activity -> Option.value ~default:"" activity.subject)
+           (fun (activity : activity) -> Option.value ~default:"" activity.subject)
            activities);
       check (list (option string)) "direct rows do not invent durations"
         [ None; None ]
-        (List.map (fun activity -> activity.duration) activities)
+        (List.map (fun (activity : activity) -> activity.duration) activities)
   | rows -> failf "expected one history tool block, got %d rows" (List.length rows)
 
 let test_tool_blocks_separated_by_speech_stay_separate () =
@@ -303,10 +309,10 @@ let test_an_autonomous_turn_draws_what_it_did () =
            let activities = block.activities in
            check (list (option string)) "trace identities stay typed"
              [ Some "trace-1"; Some "trace-2"; Some "trace-3"; None ]
-             (List.map (fun activity -> activity.call_id) activities);
+             (List.map (fun (activity : activity) -> activity.call_id) activities);
            check (list (option string)) "trace durations are not inferred"
              [ Some "32ms"; Some "1200ms"; None; None ]
-             (List.map (fun activity -> activity.duration) activities);
+             (List.map (fun (activity : activity) -> activity.duration) activities);
            let starts_with prefix row =
              String.length row >= String.length prefix
              && String.equal (String.sub row 0 (String.length prefix)) prefix

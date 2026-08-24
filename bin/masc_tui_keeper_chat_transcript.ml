@@ -230,7 +230,10 @@ let pad_to width text =
 let render_activity_rows (activities : tool_activity list) =
   let name_width =
     List.fold_left
-      (fun widest activity ->
+      (* [tool_name] is also a field of [awaiting_approval], and that type is
+         declared later, so an unannotated [activity] resolves to the wrong
+         record. *)
+      (fun widest (activity : tool_activity) ->
         max widest (String.length activity.tool_name))
       0 activities
   in

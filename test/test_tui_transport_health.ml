@@ -18,8 +18,10 @@ let decoded json =
 
 let test_a_listening_transport_reports_its_sessions_and_port () =
   let health = decoded (sample ()) in
-  check string "primary path" "websocket" health.Decode.th_primary_path;
-  check string "queue pressure" "steady" health.Decode.th_queue_pressure;
+  check bool "primary path" true
+    (health.Decode.th_primary_path = Masc.Transport_metrics.Websocket);
+  check bool "queue pressure" true
+    (health.Decode.th_queue_pressure = Masc.Transport_metrics.Steady);
   check int "sse sessions" 3 health.Decode.th_sse_sessions;
   check (option int) "websocket sessions" (Some 1)
     health.Decode.th_websocket_sessions;
@@ -51,7 +53,10 @@ let test_a_missing_section_is_an_error_not_an_empty_summary () =
 let test_a_dropped_event_count_survives_the_decode () =
   let dropping =
     Yojson.Safe.from_string
-      {|{"summary":{"primary_path":"sse","queue_pressure":"backed_up"},
+      (* "backed_up" was never a word this producer emits — the vocabulary is
+         steady / watch / high. While the field was a string the fixture and
+         the assertion agreed with each other and with nothing else. *)
+      {|{"summary":{"primary_path":"sse","queue_pressure":"high"},
          "sse":{"sessions_total":0},
          "websocket":{"listening":false},
          "grpc":{"listening":true,"port":8936,"events_dropped":17}}|}
@@ -59,8 +64,8 @@ let test_a_dropped_event_count_survives_the_decode () =
   let health = decoded dropping in
   check int "dropped events are carried through" 17
     health.Decode.th_events_dropped;
-  check string "a backed up queue is reported as such" "backed_up"
-    health.Decode.th_queue_pressure
+  check bool "a backed up queue is reported as such" true
+    (health.Decode.th_queue_pressure = Masc.Transport_metrics.High)
 
 let () =
   run "transport_health"

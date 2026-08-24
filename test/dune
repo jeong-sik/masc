@@ -2667,7 +2667,7 @@
 (test
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
- (libraries alcotest masc_tui_keeper_chat_history yojson))
+ (libraries alcotest masc_tui_keeper_chat_history masc_tui_keeper_chat_transcript yojson))
 
 (test
  (name test_tui_keeper_chat_queue)

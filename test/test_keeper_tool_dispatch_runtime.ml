@@ -4678,29 +4678,6 @@ value = {}
 |}
 ;;
 
-(* #30220 made skills the only composition source: [make_tools] reads
-   [Keeper_skill_catalog.composition_entries], not a bare catalog. The fixtures
-   here are still composition TOML -- what changed is who carries it to the
-   bundle -- so this wraps one in the skill document that now does. The
-   directory has to match the frontmatter name, which has to match the
-   composition's own name; that is what decides the [keeper_compose_*] tool. *)
-let skill_catalog_of_composition ~name toml =
-  let document =
-    Printf.sprintf
-      "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
-      name
-      name
-      toml
-  in
-  match Masc.Keeper_skill_catalog.of_documents [ name, document ] with
-  | Ok catalog -> catalog
-  | Error error ->
-    failf
-      "composition fixture %S was rejected as a skill: %s"
-      name
-      (Masc.Keeper_skill_catalog.error_to_string error)
-;;
-
 let one_node_terminal_composition =
   {|[[compositions]]
 name = "surface"
@@ -4872,19 +4849,37 @@ pointer = "/output_artifact/_blob/sha256"
     oversized_output
 ;;
 
+(* #30220 made SKILL.md the only composition source: the bundle takes a skill
+   catalog and reads compositions out of each skill's ```toml composition
+   fence. These fixtures are raw composition TOML, so they are wrapped in the
+   document the parser now expects rather than handed to the composition
+   parser directly. The composition name has to equal the skill name, which
+   the catalog enforces. *)
+let skill_catalog_of_composition ~name composition =
+  let document =
+    Printf.sprintf
+      "---\nname: %s\ndescription: %s composition fixture\n---\n\n```toml composition\n%s\n```\n"
+      name name composition
+  in
+  match Masc.Keeper_skill_catalog.of_documents [ name, document ] with
+  | Ok catalog -> catalog
+  | Error error ->
+    fail
+      (Printf.sprintf "skill catalog fixture %S rejected: %s" name
+         (Masc.Keeper_skill_catalog.error_to_string error))
+;;
+
 let test_composition_catalog_materializes_and_executes_first_class_tool () =
   with_exec_fixture "composition-first-class-tool"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let skill_catalog =
-         skill_catalog_of_composition ~name:"clock" one_node_clock_composition
-       in
+       let composition_catalog = skill_catalog_of_composition ~name:"clock" one_node_clock_composition in
        let tools =
          Masc.Keeper_tools_agent_core_bundle.make_tools
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:composition_catalog
            ()
        in
        let tool =
@@ -4946,7 +4941,7 @@ let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
     ~always_allow:true
     "composition-shell-ir-output"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let skill_catalog =
+       let composition_catalog =
          skill_catalog_of_composition ~name:"shell-output" shell_output_composition
        in
        let tools =
@@ -4955,7 +4950,7 @@ let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:composition_catalog
            ()
        in
        let tool =
@@ -5006,18 +5001,14 @@ let test_composition_externalizes_oversized_shell_ir_output () =
        Masc.Keeper_tool_call_log.reset_for_testing ();
        Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
        let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
-       let skill_catalog =
-         skill_catalog_of_composition
-           ~name:"shell-artifact"
-           (shell_artifact_composition ())
-       in
+       let composition_catalog = skill_catalog_of_composition ~name:"shell-artifact" (shell_artifact_composition ()) in
        let tools =
          Masc.Keeper_tools_agent_core_bundle.make_tools
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:composition_catalog
            ~turn_ctx_cell
            ()
        in
@@ -5432,9 +5423,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
            Masc.Sse.unsubscribe_external subscriber_id;
            Masc.Keeper_tool_call_log.reset_for_testing ())
          (fun () ->
-            let skill_catalog =
-              skill_catalog_of_composition ~name:"clock" one_node_clock_composition
-            in
+            let composition_catalog = skill_catalog_of_composition ~name:"clock" one_node_clock_composition in
             let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
             let tool =
               Masc.Keeper_tools_agent_core_bundle.make_tools
@@ -5442,7 +5431,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
                 ~meta
                 ~publication_recovery
                 ~ctx_snapshot:ctx_work
-                ~skill_catalog
+                ~skill_catalog:composition_catalog
                 ~turn_ctx_cell
                 ()
               |> List.find_opt (fun tool ->
@@ -5561,9 +5550,7 @@ let test_composition_telemetry_failure_does_not_change_execution () =
            Masc.Sse.unsubscribe_external subscriber_id;
            Masc.Keeper_tool_call_log.reset_for_testing ())
          (fun () ->
-            let skill_catalog =
-              skill_catalog_of_composition ~name:"clock" one_node_clock_composition
-            in
+            let composition_catalog = skill_catalog_of_composition ~name:"clock" one_node_clock_composition in
             let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
             let tool =
               Masc.Keeper_tools_agent_core_bundle.make_tools
@@ -5571,7 +5558,7 @@ let test_composition_telemetry_failure_does_not_change_execution () =
                 ~meta
                 ~publication_recovery
                 ~ctx_snapshot:ctx_work
-                ~skill_catalog
+                ~skill_catalog:composition_catalog
                 ~turn_ctx_cell
                 ()
               |> List.find_opt (fun tool ->
@@ -5620,16 +5607,14 @@ let test_composition_telemetry_failure_does_not_change_execution () =
 let test_terminal_composition_materializes_terminal_completion () =
   with_exec_fixture "composition-terminal-surface"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let skill_catalog =
-         skill_catalog_of_composition ~name:"surface" one_node_terminal_composition
-       in
+       let composition_catalog = skill_catalog_of_composition ~name:"surface" one_node_terminal_composition in
        let tools =
          Masc.Keeper_tools_agent_core_bundle.make_tools
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:composition_catalog
            ()
        in
        let tool =
@@ -5648,17 +5633,14 @@ let test_terminal_composition_materializes_terminal_completion () =
 let test_composition_plan_failure_exposes_typed_cause () =
   with_exec_fixture "composition-typed-plan-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let skill_catalog =
-         skill_catalog_of_composition ~name:"invalid-clock-input"
-           invalid_clock_input_composition
-       in
+       let composition_catalog = skill_catalog_of_composition ~name:"invalid-clock-input" invalid_clock_input_composition in
        let tool =
          Masc.Keeper_tools_agent_core_bundle.make_tools
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:composition_catalog
            ()
          |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
            String.equal tool.schema.name "keeper_compose_invalid-clock-input")
@@ -5703,16 +5685,14 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
         with
         | Ok _ -> ()
         | Error detail -> fail ("failed to allow composition effect: " ^ detail));
-       let skill_catalog =
-         skill_catalog_of_composition ~name:"write-then-invalid-post" post_effect_terminal_failure_composition
-       in
+       let catalog = skill_catalog_of_composition ~name:"write-then-invalid-post" post_effect_terminal_failure_composition in
        let bundle =
          Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:catalog
            ()
        in
        Fun.protect
@@ -5811,16 +5791,14 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
        (* A directory at the canonical snapshot path forces the writable
           producer to report its exact unknown-effect persistence failure. *)
        Fs_compat.mkdir_p snapshot_path;
-       let skill_catalog =
-         skill_catalog_of_composition ~name:"unknown-write-before-post" unknown_effect_terminal_failure_composition
-       in
+       let catalog = skill_catalog_of_composition ~name:"unknown-write-before-post" unknown_effect_terminal_failure_composition in
        let bundle =
          Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:catalog
            ()
        in
        Fun.protect
@@ -5921,18 +5899,14 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
                 Yojson.Safe.Util.
                   (parse_json output.content |> member "revision" |> to_string))
        in
-       let skill_catalog =
-         skill_catalog_of_composition
-           ~name:"write-then-durable-wait"
-           (write_then_unchanged_board_composition ~revision)
-       in
+       let catalog = skill_catalog_of_composition ~name:"write-then-durable-wait" (write_then_unchanged_board_composition ~revision) in
        let bundle =
          Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:catalog
            ()
        in
        Fun.protect
@@ -6026,16 +6000,14 @@ let test_async_composition_uses_durable_request_status_surface () =
     ~bind_eio_context:true
     "composition-async-durable-status"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let skill_catalog =
-         skill_catalog_of_composition ~name:"clock-background" one_node_async_clock_composition
-       in
+       let catalog = skill_catalog_of_composition ~name:"clock-background" one_node_async_clock_composition in
        let tools =
          Masc.Keeper_tools_agent_core_bundle.make_tools
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog:catalog
            ()
        in
        let async_tool =

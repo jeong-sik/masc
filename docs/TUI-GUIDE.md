@@ -187,6 +187,25 @@ rather than skipped. Rejected rows consume the 200-row window and are never
 backfilled with older data. A current-schema row whose `name` does not match the
 selected keeper is rejected instead of being attributed to it by file location.
 
+### Keeper calls
+
+`t` from the roster or from detail. The keeper's durable tool-call log, the
+newest page of `GET /api/v1/keepers/<name>/tool-calls`: one row per call
+with the finished glyph or `✗` for one that returned an error, the tool,
+its duration, the turn it ran in, and the subject the call is known by -
+the same naming the chat rows use. The header carries the server's own
+freshness verdict (`ok · latest 12s ago`), so a stale page does not read
+as a quiet keeper, and a row naming another keeper is counted and not
+drawn rather than attributed by file position.
+
+```
+ Keeper Calls: rondo (100)  ok · latest 8s ago  02:51:40  [connected]
+   Time     Tool                     Dur      Turn   Subject
+   11:36:57 ✓ Read                   28ms     2143   keeper_owner_reducer.ml
+   11:36:38 ✗ tool_execute           14.5s    2142   dune build
+  j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh  | Port: 8935
+```
+
 ### Keeper message
 
 `m` from detail. Sends to the keeper over `POST /api/v1/keepers/chat/stream`

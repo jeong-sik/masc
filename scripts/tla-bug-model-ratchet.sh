@@ -220,6 +220,12 @@ check() {
           echo "[tla-bug-model-ratchet] DRIFT DOWN: $name current=$current baseline=$baseline" >&2
           echo "  hint: $hint" >&2
           drift=1
+        elif (( current > baseline )); then
+          # The floor is met, so this is not a failure. Saying nothing is how a
+          # baseline goes stale: the value it guards moved and the file kept the
+          # old number, which is what left bug_model_coverage_specs at 98 while
+          # the tree held 47 (#29359).
+          echo "[tla-bug-model-ratchet] IMPROVED: $name current=$current baseline=$baseline — run --regenerate to raise the floor"
         fi
         ;;
       DEC)
@@ -227,6 +233,8 @@ check() {
           echo "[tla-bug-model-ratchet] DRIFT UP: $name current=$current baseline=$baseline" >&2
           echo "  hint: $hint" >&2
           drift=1
+        elif (( current < baseline )); then
+          echo "[tla-bug-model-ratchet] IMPROVED: $name current=$current baseline=$baseline — run --regenerate to lower the ceiling"
         fi
         ;;
     esac

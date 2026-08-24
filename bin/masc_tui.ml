@@ -1722,6 +1722,14 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        | Connected | Degraded -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs = Masc_tui_types.surface_needs state.view in
+    (* The chat pane's history comes down its own generation-guarded path, not
+       in the surface bundle, so the tick asks for it here. Without this the
+       pane read once on open and a message that arrived after that waited for
+       the operator to leave and come back. *)
+    (if needs.Masc_tui_types.needs_keeper_chat then
+       match state.msg_target_keeper_name with
+       | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
+       | None -> ());
 
     let run_refresh () =
       try

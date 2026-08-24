@@ -388,11 +388,36 @@
  (name masc_tui_credential)
  (modules masc_tui_credential))
 
+; Carved out so a test can read it. surface_needs decides what a refresh tick
+; fetches for the surface on screen, and the chat pane having no field there
+; is why it read its history once and never again.
+(library
+ (name masc_tui_types)
+ (wrapped false)
+ (modules masc_tui_types)
+ (libraries
+  masc
+  masc.masc_goal
+  masc.masc_types
+  masc_tui_acting
+  masc_tui_board_detail
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_control
+  masc_tui_keeper_selection
+  masc_tui_message_layout
+  masc_tui_metrics_tail
+  masc_tui_observer
+  masc_tui_operator_projection
+  masc_tui_send_disposition
+  unix
+  yojson))
+
 (executable
  (name masc_tui)
  (modules
   masc_tui
-  masc_tui_types
   masc_tui_ansi
   masc_tui_render
   masc_tui_loader
@@ -403,6 +428,7 @@
   masc
   masc.auth
   masc_tui_credential
+  masc_tui_types
   masc.runtime
   masc_tui_context_state
   masc_tui_frame_presenter

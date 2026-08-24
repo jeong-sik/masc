@@ -3078,7 +3078,7 @@ let render_keeper_message (state : state) =
           if String.equal queued_keeper keeper_name then ""
           else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
         in
-        box_line_styled buf cols ~style:Ansi.dim
+        box_line_styled chat_buf chat_cols ~style:Ansi.dim
           (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
              (Keeper_chat.terminal_safe_text body)))
       (Masc_tui_keeper_chat_queue.waiting state.msg_queued);

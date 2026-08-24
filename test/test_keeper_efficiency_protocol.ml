@@ -79,6 +79,29 @@ let test_unchanged_snapshot_preserves_deferred_disposition () =
   | None -> Alcotest.fail "unchanged deferred response lost its payload"
 ;;
 
+let test_unchanged_snapshot_defers_completed_producer () =
+  let result = Masc.Keeper_tool_execution.success_data (`String "board snapshot") in
+  let response = Masc.Snapshot_protocol.Unchanged { revision = "board:8" } in
+  let projected =
+    Masc.Keeper_tool_board_runtime.For_testing.snapshot_execution_of_response
+      result
+      response
+  in
+  (match projected.disposition with
+   | Tool_result.Deferred () -> ()
+   | Tool_result.Completed () ->
+     Alcotest.fail "unchanged response completed a polling read"
+   | Tool_result.Failed _ ->
+     Alcotest.fail "unchanged response failed a completed producer");
+  match projected.data with
+  | Some data ->
+    check_json
+      "unchanged completed-producer payload"
+      (`Assoc [ "kind", `String "unchanged"; "revision", `String "board:8" ])
+      data
+  | None -> Alcotest.fail "unchanged completed-producer response lost its payload"
+;;
+
 let () =
   Alcotest.run
     "keeper efficiency protocol"
@@ -88,5 +111,9 @@ let () =
             "unchanged preserves deferred disposition"
             `Quick
             test_unchanged_snapshot_preserves_deferred_disposition
+        ; Alcotest.test_case
+            "unchanged defers a completed producer"
+            `Quick
+            test_unchanged_snapshot_defers_completed_producer
         ] ) ]
 ;;

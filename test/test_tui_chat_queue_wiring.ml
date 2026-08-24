@@ -118,7 +118,8 @@ let test_the_pane_draws_the_queue_it_counts () =
    bottom. Nothing failed — the rows were drawn, just into the wrong pane. *)
 let test_the_pane_draws_every_row_into_its_own_buffer () =
   let source =
-    let channel = open_in_bin "bin/masc_tui_render.ml" in
+    let path = Ast_grep.resolve_module_path "bin/masc_tui_render.ml" in
+    let channel = open_in_bin path in
     let length = in_channel_length channel in
     let text = really_input_string channel length in
     close_in channel;

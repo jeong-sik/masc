@@ -55,6 +55,13 @@ type token_lifetime =
             replacement on its next start. A window outside 1..8760
             hours makes {!mint} return an error. *)
 
+val lifetime_of_flags :
+  no_expiry:bool -> expiry_hours:int option -> (token_lifetime, string) result
+(** The lifetime an operator asked for, read off the two command-line flags
+    that can name one. Naming both is an error rather than a precedence rule:
+    whichever flag lost would hand back a credential the operator did not ask
+    for. Naming neither leaves the workspace's own window. *)
+
 (** {1 Login report} *)
 
 type t = {

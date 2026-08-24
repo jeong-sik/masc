@@ -207,6 +207,24 @@ let test_login_rejects_a_window_outside_the_bound () =
     (Result.is_error (mint 8_761));
   check bool "a year exactly still is" true (Result.is_ok (mint 8_760))
 
+(* The two flags that can name a lifetime name different ones, so asking for
+   both is refused rather than resolved by precedence. A precedence rule would
+   quietly hand back the policy the operator did not ask for, and how long a
+   bearer lives is not something to pick for them. *)
+let test_lifetime_flags_refuse_to_pick_for_the_operator () =
+  let asked ~no_expiry ~expiry_hours =
+    Auth_login.lifetime_of_flags ~no_expiry ~expiry_hours
+  in
+  check bool "neither flag leaves the workspace's window" true
+    (asked ~no_expiry:false ~expiry_hours:None = Ok Auth_login.With_expiry);
+  check bool "--no-expiry alone means no expiry" true
+    (asked ~no_expiry:true ~expiry_hours:None = Ok Auth_login.Long_lived);
+  check bool "--expiry-hours alone names the window" true
+    (asked ~no_expiry:false ~expiry_hours:(Some 720)
+     = Ok (Auth_login.Expires_in_hours 720));
+  check bool "both together is refused, not resolved" true
+    (Result.is_error (asked ~no_expiry:true ~expiry_hours:(Some 720)))
+
 let test_login_url_uses_uri_components () =
   with_temp_dir "auth-login-uri" @@ fun base_path ->
   match
@@ -258,6 +276,8 @@ let () =
             test_login_with_expiry_uses_caller_env_var;
           test_case "long-lived honors caller env var + no expires_at"
             `Quick test_login_long_lived_passes_env_var_through;
+          test_case "naming both lifetimes is refused" `Quick
+            test_lifetime_flags_refuse_to_pick_for_the_operator;
           test_case "a named window outlives the config window" `Quick
             test_login_expires_in_hours_outlives_the_config_window;
           test_case "a window outside the bound is refused, not raised" `Quick

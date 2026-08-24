@@ -474,6 +474,15 @@ let login_no_expiry =
   in
   Arg.(value & flag & info ["no-expiry"] ~doc)
 
+let login_expiry_hours =
+  let doc =
+    "Mint a token that expires this many hours from now, whatever window \
+     the workspace itself uses. For a client that outlives an operator \
+     session but should still lose its bearer eventually. Accepts 1..8760; \
+     cannot be combined with --no-expiry."
+  in
+  Arg.(value & opt (some int) None & info ["expiry-hours"] ~docv:"HOURS" ~doc)
+
 (** Graceful shutdown exception.
 
     Raised from the main [Switch.run] fiber after shutdown phases complete.
@@ -853,10 +862,12 @@ let run_cmd_exit host port base_path =
   Cmd.Exit.ok
 
 let login_cmd_exit base_path host port agent role client_env no_expiry
-    as_json as_shell =
-  let token_lifetime : Auth_login.token_lifetime =
-    if no_expiry then Long_lived else With_expiry
-  in
+    expiry_hours as_json as_shell =
+  match Auth_login.lifetime_of_flags ~no_expiry ~expiry_hours with
+  | Error message ->
+      Printf.eprintf "login failed: %s\n" message;
+      1
+  | Ok token_lifetime -> (
   match
     Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role
       ~token_env_var:client_env ~token_lifetime ()
@@ -874,7 +885,7 @@ let login_cmd_exit base_path host port agent role client_env no_expiry
           Auth_login.render_text report
       in
       print_endline output;
-      0
+      0)
 
 let login_cmd =
   let doc =
@@ -887,8 +898,8 @@ let login_cmd =
   Cmd.v info
     Term.(
       const login_cmd_exit $ base_path $ host $ port $ login_agent
-      $ login_role $ login_client_env $ login_no_expiry $ login_json
-      $ login_shell)
+      $ login_role $ login_client_env $ login_no_expiry $ login_expiry_hours
+      $ login_json $ login_shell)
 
 let start_cmd =
   let doc =

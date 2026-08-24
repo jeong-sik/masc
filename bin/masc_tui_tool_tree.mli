@@ -25,11 +25,6 @@ val domain_of_tool : string -> string option
     name; [None] for a name no rule claims, which surfaces as [unsorted]
     rather than silently borrowing a neighbour's domain. *)
 
-val family_of : string -> string option
-(** The family a tool name puts it in: everything up to its second underscore.
-    [None] for a name with fewer than three segments, which is a name that
-    groups with nothing. *)
-
 val rows : Masc.Tui_decode.tool_entry list -> row list
 (** Tools in a fixed domain order (board, work, run, keeper ops, keeper
     self, system, unsorted), name order within a domain, with a domain

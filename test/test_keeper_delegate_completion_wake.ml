@@ -246,19 +246,22 @@ let only_a_keeper_is_answered_on_its_queue () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:asker;
     (match Ops.delegate_continuation_channel ~config ~submitted_by:asker with
-     | Some (Keeper_continuation_channel.Keeper { keeper_name }) ->
+     | Error detail -> fail ("Keeper reply channel lookup failed: " ^ detail)
+     | Ok (Some (Keeper_continuation_channel.Keeper { keeper_name })) ->
        check string "a Keeper is answered on its own queue" asker keeper_name
-     | Some other ->
+     | Ok (Some other) ->
        fail
          ("a Keeper must be answered on its own queue, got "
           ^ Keeper_continuation_channel.kind_label other)
-     | None -> fail "a Keeper must be answered on its own queue");
-    check
-      bool
-      "a caller that owns no queue keeps the channel it is watching"
-      true
-      (Option.is_none
-         (Ops.delegate_continuation_channel ~config ~submitted_by:"operator")))
+     | Ok None -> fail "a Keeper must be answered on its own queue");
+    match Ops.delegate_continuation_channel ~config ~submitted_by:"operator" with
+    | Error detail -> fail ("operator reply channel lookup failed: " ^ detail)
+    | Ok channel ->
+      check
+        bool
+        "a caller that owns no queue keeps the channel it is watching"
+        true
+        (Option.is_none channel))
 ;;
 
 let () =

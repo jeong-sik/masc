@@ -157,16 +157,25 @@ max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
-# 2026-08-24 live probe, ollama.com/v1 chat/completions, both deepseek-v4-flash
-# and its :0731 tag: the endpoint names its own ladder when it rejects an
-# unknown value -- must be "high", "medium", "low", "max", or "none" -- and
-# reasoning_effort = "none" comes back with an empty reasoning field and 2
-# completion tokens where an uncontrolled request returns 54 reasoning
-# characters and 17. The previous "none" claimed the opposite: that this wire
-# carries no thinking control at all. Under that claim the request path had
-# nothing to emit, so the model reasoned on every turn and nothing could stop
-# it. The accepted ladder itself is declared on the catalog row.
-thinking-control-format = "reasoning-effort"
+# "none" here does not mean "no reasoning". With supports-reasoning it declares
+# an inherent-thinking contract: the model reasons on its own and the wire has
+# no toggle, which is what lets a keeper turn carrying enable_thinking=true
+# through admission at all.
+#
+# 2026-08-25: changing it to "reasoning-effort" rejected every turn on this
+# lane. thinking-support = true makes the runtime seed request
+# enable_thinking=true (runtime_inference.ml), and under that dialect an
+# explicit enable is only encodable when a concrete effort accompanies it, so
+# each request died as AcceptRejected(Enable_not_encodable) before dispatch.
+# Measured live: 10 api_error_invalid_request and 0 successes on
+# ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 within one keeper cycle.
+#
+# The endpoint does honour reasoning_effort -- it names its own ladder when it
+# rejects an unknown value ("high", "medium", "low", "max", or "none") -- so
+# the dialect can move here, but only together with a declared effort. "none"
+# additionally needs thinking-support = false, or the enable and the effort
+# contradict each other.
+thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
 # response axis resolves to reading no field and the reasoning is discarded.

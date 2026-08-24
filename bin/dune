@@ -123,6 +123,11 @@
   masc.agent_core.llm_provider))
 
 (executable
+ (name keeper_store_layout_manifest)
+ (modules keeper_store_layout_manifest)
+ (libraries masc.masc_core yojson))
+
+(executable
  (name public_tool_manifest)
  (modules public_tool_manifest)
  (libraries

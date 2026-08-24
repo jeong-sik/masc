@@ -13,6 +13,17 @@
 
 set -euo pipefail
 
+_gate_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_gate_repo_root="$(cd "$_gate_script_dir/.." && pwd)"
+# shellcheck source=lib/keeper-store-layout.sh
+source "$_gate_script_dir/lib/keeper-store-layout.sh"
+
+# The OCaml owner declares these dirnames; naming one it dropped fails here
+# instead of checking a directory that does not exist and passing on the empty
+# result (#27583).
+MANIFEST_STORE_DIR="$(keeper_store_dirname "$_gate_repo_root" runtime-manifests)"
+RECEIPT_STORE_DIR="$(keeper_store_dirname "$_gate_repo_root" execution-receipts)"
+
 default_base_path() {
   if [ -n "${MASC_BASE_PATH:-}" ]; then
     printf '%s\n' "$MASC_BASE_PATH"
@@ -73,8 +84,8 @@ if [[ "$SELF_TEST" = "1" ]]; then
   trace="trace-self-test"
   turn="7"
   keeper_dir="$tmp/.masc/keepers/$keeper"
-  manifest_dir="$keeper_dir/runtime-manifests"
-  receipt_dir="$keeper_dir/execution-receipts/2026-05"
+  manifest_dir="$keeper_dir/$MANIFEST_STORE_DIR"
+  receipt_dir="$keeper_dir/$RECEIPT_STORE_DIR/2026-05"
   checkpoint_dir="$keeper_dir/checkpoints"
   tool_log_dir="$tmp/.masc/tool_calls/2026-05"
   mkdir -p "$manifest_dir" "$receipt_dir" "$checkpoint_dir" "$tool_log_dir"
@@ -109,8 +120,8 @@ if [[ "$SELF_TEST" = "1" ]]; then
   fail_trace="trace-self-test-timeout"
   fail_turn="8"
   fail_keeper_dir="$tmp/.masc/keepers/$fail_keeper"
-  fail_manifest_dir="$fail_keeper_dir/runtime-manifests"
-  fail_receipt_dir="$fail_keeper_dir/execution-receipts/2026-05"
+  fail_manifest_dir="$fail_keeper_dir/$MANIFEST_STORE_DIR"
+  fail_receipt_dir="$fail_keeper_dir/$RECEIPT_STORE_DIR/2026-05"
   mkdir -p "$fail_manifest_dir" "$fail_receipt_dir"
   fail_receipt_path="$fail_receipt_dir/12.jsonl"
   printf '{"schema":"keeper.execution_receipt.v1","keeper_name":"%s","trace_id":"%s","turn_count":%s,"outcome":"error","error_kind":"api_error_timeout","tools_used":[]}\n' \
@@ -139,7 +150,7 @@ esac
 [[ -n "$KEEPER" ]] || fail "--keeper required"
 
 KEEPER_DIR="$BASE_PATH/.masc/keepers/$KEEPER"
-MANIFEST_DIR="$KEEPER_DIR/runtime-manifests"
+MANIFEST_DIR="$KEEPER_DIR/$MANIFEST_STORE_DIR"
 [[ -d "$MANIFEST_DIR" ]] || fail "runtime manifest directory missing: $MANIFEST_DIR"
 
 if [[ -z "$TRACE_ID" ]]; then

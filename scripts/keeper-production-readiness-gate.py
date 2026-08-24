@@ -13,10 +13,26 @@ import argparse
 import json
 import math
 import os
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+from keeper_store_layout import (  # noqa: E402
+    StoreLayoutUnavailable,
+    load_store_layout,
+    store_dirname,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# The OCaml owner declares every keeper runtime store dirname; naming one it
+# dropped raises here instead of reading a directory that does not exist and
+# passing the gate on the empty result (#27583).
+_STORE_LAYOUT = load_store_layout(_REPO_ROOT)
 from typing import Any
 
 
@@ -343,7 +359,7 @@ def discover_manifest_files(
     manifests: list[Path] = []
     wanted_traces = set(trace_ids)
     for keeper_dir in keeper_dirs:
-        manifest_dir = keeper_dir / "runtime-manifests"
+        manifest_dir = keeper_dir / store_dirname(_STORE_LAYOUT, "runtime-manifests")
         if not manifest_dir.is_dir():
             continue
         candidates = sorted(
@@ -636,8 +652,15 @@ def write_fixture_turn(
     status: str = "success",
 ) -> None:
     keeper_dir = base_path / ".masc" / "keepers" / keeper
-    manifest_path = keeper_dir / "runtime-manifests" / f"{trace}.jsonl"
-    receipt_path = keeper_dir / "execution-receipts" / "2026-05" / f"{turn:02d}.jsonl"
+    manifest_path = (
+        keeper_dir / store_dirname(_STORE_LAYOUT, "runtime-manifests") / f"{trace}.jsonl"
+    )
+    receipt_path = (
+        keeper_dir
+        / store_dirname(_STORE_LAYOUT, "execution-receipts")
+        / "2026-05"
+        / f"{turn:02d}.jsonl"
+    )
     checkpoint_path = keeper_dir / "checkpoints" / f"turn-{turn}.json"
     tool_log_path = base_path / ".masc" / "tool_calls" / "2026-05" / f"{turn:02d}.jsonl"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)

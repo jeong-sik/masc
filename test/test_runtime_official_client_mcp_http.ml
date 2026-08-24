@@ -333,7 +333,21 @@ let test_turn_scoped_capability_and_protocol () =
       await_response_acknowledgement (remaining - 1))
   in
   await_response_acknowledgement 1_000;
-  check (list string) "response acknowledgement" [ "5" ] !responses_sent;
+  (* The hook fired, and it fired for the call that ran. Spelling the id as
+     ["5"] recorded that call_id used to be the JSON-RPC request id, which is
+     unique only within one session -- two sessions reused it and every
+     consumer joining on it mixed the two executions up (#25034). The
+     assertion now says what it means: one acknowledgement, for this call. *)
+  let executed_call_id =
+    match !calls with
+    | (_, call_id, _) :: _ -> call_id
+    | [] -> fail "the tool call did not reach the handler"
+  in
+  check (list string) "response acknowledgement" [ executed_call_id ] !responses_sent;
+  check bool
+    "the tool-call identity is not the session-scoped request id"
+    false
+    (String.equal executed_call_id "5");
   check string
     "tool result"
     "MASC_TOOL_OK"

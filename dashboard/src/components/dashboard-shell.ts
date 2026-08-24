@@ -352,24 +352,23 @@ function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
 
 function runtimeProviderFailureChip(probe: DashboardRuntimeProbePayload | null | undefined): DashboardHealthChip | null {
   if (!probe) return null
-  const summary = probe.summary ?? null
-  const providers = probe.providers ?? []
+  const summary = probe.summary
+  const providers = probe.providers
   const failedProviders = providers.filter(provider => provider.reachable === false)
-  const failed = summary?.failed ?? failedProviders.length
+  const failed = summary.failed
   if (failed <= 0) return null
 
   const missingAuth = failedProviders.filter(provider => provider.status === 'missing_auth').length
-  const reachable = summary?.reachable ?? providers.filter(provider => provider.reachable === true).length
-  const probed = summary?.probed ?? providers.filter(provider => provider.reachable !== null && provider.reachable !== undefined).length
-  const skipped = summary?.skipped ?? providers.filter(provider => provider.status === 'skipped_cli').length
+  const reachable = summary.reachable
+  const probed = summary.probed
+  const skipped = summary.skipped
   const label = missingAuth > 0
     ? `Runtime auth missing ${missingAuth}`
     : reachable > 0
       ? `Runtime providers degraded ${reachable}/${Math.max(probed, reachable + failed)}`
       : `Runtime providers unreachable ${failed}`
   const failedDetails = failedProviders.slice(0, 3).map(provider => {
-    const runtimeId = provider.runtime_id ?? provider.provider_id ?? '(unknown runtime)'
-    return `${runtimeId}: ${provider.status ?? 'failed'}`
+    return `${provider.runtime_id}: ${provider.status}`
   })
   const hiddenFailed = Math.max(0, failedProviders.length - failedDetails.length)
   if (hiddenFailed > 0) {
@@ -588,7 +587,7 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
       try {
         const response = await fetchDashboardRuntimeProbe(false, { signal: activeController.signal })
         if (!disposed) {
-          shellRuntimeProviderProbe.value = response.probe ?? null
+          shellRuntimeProviderProbe.value = response.probe
           shellRuntimeProviderProbeError.value = null
         }
       } catch (error) {

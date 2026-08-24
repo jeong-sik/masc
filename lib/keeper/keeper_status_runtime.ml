@@ -52,7 +52,6 @@ let keeper_metric_producer_active ~base_path =
        | Keeper_state_machine.Failing -> Atomic.get entry.cadence_sleeping
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Running
-       | Keeper_state_machine.Overflowed
        | Keeper_state_machine.Compacting
        | Keeper_state_machine.HandingOff
        | Keeper_state_machine.Draining
@@ -474,7 +473,6 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Offline -> "offline"
   | Keeper_state_machine.Running -> "idle"
   | Keeper_state_machine.Failing -> "failing"
-  | Keeper_state_machine.Overflowed -> "overflowed"
   | Keeper_state_machine.Compacting -> "compacting"
   | Keeper_state_machine.HandingOff -> "handoff"
   | Keeper_state_machine.Draining -> "draining"
@@ -491,9 +489,6 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Offline -> "launch_pending_no_fiber"
   | Keeper_state_machine.Running -> "phase_running_idle"
   | Keeper_state_machine.Failing -> "health_or_turn_failure_probe"
-  | Keeper_state_machine.Overflowed ->
-    (* Retired phase (#26546): only historical records can carry it. *)
-    "context_overflow_retired_phase"
   | Keeper_state_machine.Compacting -> "context_compaction_in_progress"
   | Keeper_state_machine.HandingOff -> "generation_handoff_in_progress"
   | Keeper_state_machine.Draining -> "graceful_shutdown_draining"

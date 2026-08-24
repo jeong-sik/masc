@@ -100,21 +100,69 @@ invariant lives in `lower_typed_pipeline`, which that entry point does not use.
 
 ## 3. Design
 
-### 3.1 The fourteen arms are four categories
+### 3.1 A refusal is a rewrite
 
-The arms differ in **what the construct does**, and that decides the disposition.
+An earlier draft of this section sorted the arms into four categories with four
+dispositions. Two of those "refusals" were not refusals. `Needs_a_file` -- the
+answer for a loop -- is not a refusal, it is *`Write` the script, then `Execute`
+the file*: a sequence of calls that already exists. A heredoc is not outside the
+subset either; `input_source` already has the field, and the caller used the
+wrong one.
 
-| category | arms | what it is | disposition |
-|---|---|---|---|
-| **A. argv construction** | `Glob_brace`, `Here_string`, `Heredoc`, `Arith_expansion`, `Cmd_subst` | work a shell does *before* `exec` to compute argv/stdin; none survives into the running process | **the gate performs it** and hands exec a flat argv. Never refused. |
-| **B. process lifetime** | `Background` | not pre-execution; asks for a process that outlives the call | **new tool** (§3.3) |
-| **C. rejected failure semantics** | `Command_separator` (`;`) | "run the next thing regardless" | **refuse, naming `&&` / `\|\|`** |
-| **D. a script, not a command** | `Control_flow`, `Function_def`, `Subshell`, `Proc_subst`, `Logic_op`, `Unsupported_construct`, `Unsupported_nested_pipeline` | a program, not a command line | **refuse, naming the file route** |
+Once those two collapse, every arm turns out to answer the same question:
 
-Two of the four categories stop producing refusals. `reason_too_complex` does not
-grow; it stops being a single bucket with a single answer.
+> **what should this call have been?**
 
-### 3.2 Category A — resolve, do not refuse
+| what arrived | the call it should have been |
+|---|---|
+| `{a,b}.txt` | the expanded argv -- the gate can produce it |
+| heredoc / here-string | `stdin: { literal: "..." }`, a field that already exists |
+| `;` | two calls, or `&&` |
+| `&` | `Spawn` (§3.3) |
+| `$(...)` | two `Execute` calls, the second using the first's stdout |
+| `for` / `if` / function definition | `Write` the script, then `Execute` the file |
+| `<(...)` | write the inner output to a file, pass the path |
+| `*` | already accepted -- but it means something else here (§3.2) |
+
+So `Too_complex` is not a verdict. It is a **rewrite**, and what comes back is
+not a reason but the call the caller should have made:
+
+```ocaml
+type outside_the_subset =
+  | Lower_differently of Masc_exec.Shell_ir.t
+      (* the gate can express this after all; here is the IR *)
+  | Move_to_field of { field : field_name; value : Yojson.Safe.t }
+      (* the schema already has somewhere to put this *)
+  | Call_this_instead of tool_call
+      (* Spawn, or Write-then-Execute: a call the caller can make now *)
+  | Unrepresentable of Masc_exec.Parsed.reason_too_complex
+      (* the only genuine refusal; see below *)
+```
+
+Three consequences follow, and each of them settles a question an earlier draft
+had open.
+
+**The rewrite is the second door, and it costs no waiting.** §2 rules out an
+approval hop because a keeper waiting on another keeper's approval is a
+delegation contract. A rewrite needs no approver: the keeper receives a call it
+can make immediately and makes it. Codex and pi.dev put a human at the end of
+their escalation; this puts the answer in the caller's hands instead.
+
+**The gate must hand the rewrite back rather than apply it silently.** This is
+what §3.2 forces: expanding `*` behind the caller's back changes what runs.
+Returning "you should have called it this way" changes nothing, and the caller
+that sees the corrected call makes it directly next time. A silent fix teaches
+nothing and hides the divergence it created.
+
+**One arm has no rewrite.** `Unknown_construct` is, by definition, a construct
+the parser could not name, so there is no call to suggest. It stays a refusal,
+and it is the only one. `Cannot_parse` is likewise untouched -- text that does
+not parse has no rewrite either, and it is a different verdict.
+
+`reason_too_complex` does not grow. It stops being a bucket with one answer and
+becomes a function from a construct to the call that expresses it.
+
+### 3.2 The rewrite the gate can compute itself
 
 Every arm in A computes an argv or a stdin and then disappears. The gate can do
 that work and stay inside its own boundary:
@@ -143,7 +191,8 @@ that work and stay inside its own boundary:
   - `glob = false` (typed argv literal): untouched, exactly as
     `execute_typed_input.mli` documents today.
 
-  Brace expansion is pure argv construction and joins the rest of category A.
+  Brace expansion builds argv before `exec` and has an obvious rewrite: the
+  expanded argv, handed back as `Lower_differently`.
 - **`Heredoc` / `Here_string`**: these are stdin content, and stdin is already
   typed — `input_source` has `Inherit_input | Empty_input | Read_file`. Add
   `Literal of string`. A heredoc becomes a typed field; no shell is involved.
@@ -153,7 +202,7 @@ that work and stay inside its own boundary:
   and may be declined outright (§6). Depth is bounded by the existing
   `reason_aborted `Depth_limit`.
 
-### 3.3 Category B — a separate tool, because the result shape differs
+### 3.3 The rewrite that names another tool, because the result shape differs
 
 `Exec_dispatch.dispatch_result` is `{ status; stdout; stderr }`: a record that can
 only be filled in once the process is dead. A live process does not fit, and
@@ -193,21 +242,34 @@ Handles are scoped. `Scoped { setup; body }` is `Eio.Switch` with
 `Switch.on_release`, already the codebase idiom, and it answers Codex#26382
 (a cancelled task that kept running and saturated a server) structurally.
 
-### 3.4 Categories C and D — refuse, but name the replacement
+### 3.4 The rewrite that is a different call the caller already has
 
 A refusal that does not say what to do instead has exactly one follow-up move,
-and that move is `sh -c`. Both remaining refusals carry their replacement:
+and that move is `sh -c`. These two arms have a replacement the caller can
+already express, so neither needs to be a refusal at all.
+
+**`;`** carries `Move_to_field`: the separator becomes a connector.
 
 ```ocaml
-type refusal =
-  | Use_a_connector of { found : [ `Semicolon ]; use : [ `And_if | `Or_if ] }
-  | Needs_a_file of { construct : script_construct }
+Move_to_field { field = `Next_conditional; value = `And_then }
+(* or two calls, when the caller really did mean "both, regardless" *)
 ```
 
-`Needs_a_file` is the honest answer for category D: a loop or a function
-definition is a program, and a program belongs in a file that is written through
-the normal write path and executed as a gated argv. That route is fully covered
-by the existing boundary.
+`Shell_ir.connector` omits `;` on purpose -- it means "run the next thing
+whether or not the last one worked" -- and the rewrite says so by naming the
+connector that does not.
+
+**Loops, conditionals, function definitions, subshells** carry
+`Call_this_instead`: a program belongs in a file, written through the normal
+write path and executed as a gated argv.
+
+```ocaml
+Call_this_instead (Write_then_execute { suggested_path; body })
+```
+
+That route is fully covered by the existing boundary, and it is the same answer
+a reviewer would give. Nothing here is new capability; the rewrite only names a
+call the caller already has.
 
 ### 3.5 One door: argv-shaped shells route to the script gate
 
@@ -299,7 +361,7 @@ Steps 1-4 leave `dispatch_result` untouched.
 - **Refusal completeness:** an exhaustive `match` over `reason_too_complex` in
   the disposition function, so a new arm cannot be added without choosing a
   category. No `_ ->` catch-all.
-- **Oracle:** every construct category A now resolves must be differentially
+- **Oracle:** every construct the gate now rewrites must be differentially
   tested against real `bash` output in `shell_ir_oracle`.
 
 ## 6. Verification (closed) & open questions
@@ -317,7 +379,7 @@ Open:
 
 - **Should `Cmd_subst` be resolved at all?** It makes gating effectful, which is
   a property the gate does not otherwise have, for 28 calls. Declining it and
-  moving the arm to category D (write a file) is a defensible answer and the
+  rewriting it as `Call_this_instead` (write a file) is a defensible answer and the
   author leans that way.
 - **Does expansion belong in the gate or between gate and dispatch?** Expansion
   must not run before `apply_policy`, or policy would inspect an unexpanded argv.
@@ -334,7 +396,8 @@ Open:
 - Not a sandbox change. `Sandbox_target` (host/Docker) is unchanged; this RFC is
   about what the gate can represent, not what the OS enforces.
 - No approval or escalation machinery (§4).
-- `Logic_op` and `Unknown_construct` stay in category D until the shadow count
+- `Logic_op` keeps the write-a-file rewrite, and `Unknown_construct` stays the
+  one genuine refusal, until the shadow count
   (step 1) shows what they actually are in production.
 
 ## 8. Workaround self-check (CLAUDE.md bar)
@@ -345,7 +408,8 @@ Open:
 - **String/substring classifier?** No. This RFC *removes* string-shaped
   execution (`sh -c "..."` as opaque argv) and routes it to a parser with a
   closed reason type. No substring matching is added.
-- **N-of-M?** No. §3.1 assigns a disposition to all fourteen arms; §3.7 stages
+- **N-of-M?** No. §3.1 gives all fourteen arms a rewrite, or states why one
+  (`Unknown_construct`) has none; §3.7 stages
   the implementation. Staging order is stated as order, not as coverage.
 - **Catch-all added?** The opposite: §5 requires an exhaustive `match` over
   `reason_too_complex` so a new arm cannot be added without a category.

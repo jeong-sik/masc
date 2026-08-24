@@ -232,6 +232,42 @@ let test_missing_window_keeps_tokens_without_ratio () =
     check bool "max is null without a window" true (field fields "context_max" = `Null))
 ;;
 
+(* The projection writes these fields and Tui_decode reads them, but each side
+   had only its own tests: the producer checked what it emitted and the decoder
+   checked hand-written JSON. A field the producer stopped emitting therefore
+   left both suites green while the Live Context surface fell back to zeros
+   (#29320). Every shape the producer can emit is decoded here. *)
+let decodes fields =
+  Masc.Tui_decode.decode_context_observation
+    ~expected_trace_id:sample_trace
+    (`Assoc fields)
+;;
+
+let test_every_projected_shape_decodes () =
+  with_temp_workspace (fun config ->
+    (* absence: no store at all *)
+    let absent =
+      Projection.context_fields ~config ~keeper_name:"nobody" ~current_trace_id:sample_trace
+    in
+    (match decodes absent with
+     | Ok _ -> ()
+     | Error detail -> failf "typed absence must decode: %s" detail);
+    (* measurement: a record on the current trace *)
+    append_record config (sample_record ());
+    let measured =
+      Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
+    in
+    (match decodes measured with
+     | Ok _ -> ()
+     | Error detail -> failf "measured observation must decode: %s" detail);
+    (* the two shapes are distinguishable, or decoding both proves nothing *)
+    check
+      bool
+      "absence and measurement are different payloads"
+      true
+      (absent <> measured))
+;;
+
 let () =
   run
     "keeper_context_observation_projection"
@@ -251,6 +287,8 @@ let () =
             test_previous_trace_row_is_typed_absent
         ; test_case "missing window keeps tokens without ratio" `Quick
             test_missing_window_keeps_tokens_without_ratio
+        ; test_case "every projected shape decodes" `Quick
+            test_every_projected_shape_decodes
         ] )
     ]
 ;;

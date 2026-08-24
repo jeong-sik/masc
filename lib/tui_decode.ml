@@ -64,7 +64,6 @@ type keeper_lane_phase =
   | Lane_phase_offline
   | Lane_phase_running
   | Lane_phase_failing
-  | Lane_phase_overflowed
   | Lane_phase_compacting
   | Lane_phase_handing_off
   | Lane_phase_draining
@@ -2399,7 +2398,6 @@ let keeper_lane_phase_of_string raw =
       | Keeper_state_machine.Offline -> Lane_phase_offline
       | Keeper_state_machine.Running -> Lane_phase_running
       | Keeper_state_machine.Failing -> Lane_phase_failing
-      | Keeper_state_machine.Overflowed -> Lane_phase_overflowed
       | Keeper_state_machine.Compacting -> Lane_phase_compacting
       | Keeper_state_machine.HandingOff -> Lane_phase_handing_off
       | Keeper_state_machine.Draining -> Lane_phase_draining
@@ -2412,8 +2410,6 @@ let keeper_lane_phase_to_string = function
   | Lane_phase_offline -> keeper_phase_to_string Keeper_state_machine.Offline
   | Lane_phase_running -> keeper_phase_to_string Keeper_state_machine.Running
   | Lane_phase_failing -> keeper_phase_to_string Keeper_state_machine.Failing
-  | Lane_phase_overflowed ->
-      keeper_phase_to_string Keeper_state_machine.Overflowed
   | Lane_phase_compacting ->
       keeper_phase_to_string Keeper_state_machine.Compacting
   | Lane_phase_handing_off ->

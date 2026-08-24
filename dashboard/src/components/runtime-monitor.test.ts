@@ -269,6 +269,7 @@ describe('RuntimeMonitor', () => {
       cache_ttl_sec: 30,
       cache_age_sec: 0,
       cache_hit: false,
+      refresh_state: 'served_stale',
       probe: {
         source: 'runtime.toml',
         status: 'reachable',
@@ -286,18 +287,31 @@ describe('RuntimeMonitor', () => {
           {
             runtime_id: 'runpod_mtp.qwen',
             provider_id: 'runpod_mtp',
+            provider_display_name: 'RunPod MTP',
+            model_id: 'qwen',
             model_api_name: 'Qwen/Qwen3-32B',
+            protocol: 'openai-compatible-http',
+            runtime_kind: 'http',
+            transport: 'http',
+            auth_kind: 'env:RUNPOD_API_KEY',
             status: 'reachable',
             reachable: true,
             http_status: 200,
             latency_ms: 42.5,
             model_count: 1,
+            content_type: 'application/json',
+            downloaded_bytes: 128,
             credential_required: true,
             auth_present: true,
+            endpoint_url: 'https://example.invalid/v1',
             probe_url: 'https://example.invalid/v1/models',
+            error: null,
+            checked_at: '2026-06-06T02:47:31Z',
           },
         ],
         errors: [],
+        observations: ['runtime.toml provider reachability: 1 reachable, 0 failed, 0 skipped'],
+        limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
       },
     })
     container = document.createElement('div')
@@ -422,30 +436,8 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('code-exec')
   })
 
-  it('falls back to provider snapshot model count and auth kind when live probe rows are absent', async () => {
-    apiMocks.fetchDashboardRuntimeProbe.mockResolvedValueOnce({
-      generated_at: '2026-06-06T02:47:31Z',
-      refreshed_at_unix: 1780714051,
-      cache_ttl_sec: 30,
-      cache_age_sec: 0,
-      cache_hit: false,
-      probe: {
-        source: 'runtime.toml',
-        status: 'reachable',
-        checked_at: '2026-06-06T02:47:31Z',
-        probe_ok: true,
-        summary: {
-          runtimes: 1,
-          probed: 0,
-          reachable: 0,
-          failed: 0,
-          skipped: 1,
-          default_runtime_id: 'runpod_mtp.qwen',
-        },
-        providers: [],
-        errors: [],
-      },
-    })
+  it('uses provider snapshot model count and auth kind when the live probe request fails', async () => {
+    apiMocks.fetchDashboardRuntimeProbe.mockRejectedValueOnce(new Error('runtime probe unavailable'))
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,

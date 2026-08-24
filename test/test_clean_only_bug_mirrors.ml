@@ -19,7 +19,6 @@ type derived_phase =
   | Phase_offline
   | Phase_running
   | Phase_failing
-  | Phase_overflowed
   | Phase_compacting
   | Phase_handing_off
   | Phase_draining

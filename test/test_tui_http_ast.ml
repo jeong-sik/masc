@@ -121,8 +121,8 @@ let test_keeper_chat_uses_current_async_contract () =
          >= 1))
     (* [Ansi.move_to] is gone from this binding on purpose: the renderer no
        longer writes a cursor escape inline. It hands the position to
-       [finish_frame ~cursor:(Frame_presenter.Visible_at ...)], and the frame
-       presenter emits the move when it paints. Asserting the old escape here
+       [finish_frame_with_strip ~cursor:...], and the frame presenter emits the
+       move when it paints. Asserting the old escape here
        would pin the pre-differential-frame renderer.
 
        [Message_layout.input_cursor_row] is gone for a related reason: it
@@ -134,7 +134,11 @@ let test_keeper_chat_uses_current_async_contract () =
     ; "frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
-    ; "finish_frame"
+      (* Renamed by #30141, which put a surface strip above every frame.  The
+         assertion is that the renderer still hands its rows to the frame
+         presenter rather than painting them itself, and that is what the new
+         name does. *)
+    ; "finish_frame_with_strip"
     ];
   check bool "message input uses the same viewport gate as rendering" true
     (Ast_grep.count_calls_in_value_binding ~module_path

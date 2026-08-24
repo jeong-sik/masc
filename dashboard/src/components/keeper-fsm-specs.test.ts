@@ -15,7 +15,7 @@ import {
 // arrays you almost certainly need a matching change on the OCaml side and
 // in dashboard/src/api/schemas/keeper-composite.ts.
 const KSM_STATES = [
-  'offline', 'running', 'failing', 'overflowed', 'compacting',
+  'offline', 'running', 'failing', 'compacting',
   'handing_off', 'draining', 'paused', 'stopped', 'crashed',
   'restarting',
 ]
@@ -69,11 +69,11 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toEqual(KMC_STATES)
   })
 
-  it('total node count = 5 parents + 29 children = 34', () => {
+  it('total node count = 5 parents + 28 children = 33', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const childCount = KSM_STATES.length + KTC_STATES.length + KDP_STATES.length
       + KCL_STATES.length + KMC_STATES.length
-    expect(childCount).toBe(29)
+    expect(childCount).toBe(28)
     expect(spec.nodes).toHaveLength(5 + childCount)
   })
 
@@ -101,7 +101,7 @@ describe('buildCompositeFsmSpec', () => {
   })
 
   it('marks the active KSM child as warn for buffer-class phases', () => {
-    for (const phase of ['overflowed', 'compacting', 'handing_off', 'draining', 'paused', 'restarting']) {
+    for (const phase of ['compacting', 'handing_off', 'draining', 'paused', 'restarting']) {
       const spec = buildCompositeFsmSpec({ ...defaultParams, phase })
       expect(spec.nodes.find(n => n.id === `KSM:${phase}`)!.type).toBe('warn')
     }
@@ -176,11 +176,6 @@ describe('buildCompactionSpec', () => {
 
   it('marks the done active stage as active', () => {
     expect(buildCompactionSpec('done').nodes.find(n => n.id === 'done')!.type).toBe('active')
-  })
-
-  it('marks the active stage as err when currentPhase is overflowed', () => {
-    const spec = buildCompactionSpec('accumulating', 'overflowed')
-    expect(spec.nodes.find(n => n.id === 'accumulating')!.type).toBe('err')
   })
 
   it('marks the active stage as err when currentPhase is failing', () => {

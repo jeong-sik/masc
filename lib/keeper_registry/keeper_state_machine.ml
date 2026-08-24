@@ -20,7 +20,6 @@ let is_terminal = function
   | Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining
@@ -73,10 +72,6 @@ let derive_phase (c : conditions) : phase =
   then HandingOff
   else if c.compaction_active
   then Compacting
-  (* [Overflowed] is retired vocabulary (#26546): the automatic
-     overflow-compaction trigger was removed, no condition derives it, and
-     the phase variant remains only so historical durable lifecycle records
-     ("overflowed") still decode. *)
   else if
     (not c.heartbeat_healthy)
     || (not c.turn_healthy)
@@ -157,8 +152,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with compaction_active = true }
   | Operator_clear_requested _ ->
     (* Last resort: context fully dropped by [masc_keeper_clear]. The
-       context payload change is owned by the clear runtime; with the
-       overflow latch retired (#26546) no lifecycle condition changes. *)
+       context payload change is owned by the clear runtime; no lifecycle
+       condition changes. *)
     c
 ;;
 
@@ -210,12 +205,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Operator_compact_requested
          | Operator_clear_requested _ -> event_to_string event)
     ]
-  | Overflowed ->
-    (* Retired phase (#26546): no condition derives [Overflowed] anymore, so
-       this arm is unreachable at runtime. It stays for phase-match
-       exhaustiveness because the variant is preserved to decode historical
-       durable lifecycle records. *)
-    [ lifecycle "overflowed" (event_to_string event) ]
   | Failing -> [ lifecycle "failing" (event_to_string event) ]
   | Paused ->
     let detail =
@@ -254,8 +243,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Offline
      | Running
      | Failing
-     | Overflowed
-     | Compacting
+        | Compacting
      | HandingOff
      | Draining
      | Paused
@@ -302,16 +290,15 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        [ lifecycle "resumed" detail ]
      | Offline
      | Running
-     | Overflowed
-     | Compacting
+        | Compacting
      | HandingOff
      | Draining
      | Stopped
      | Crashed ->
        (* [register] takes Init → Running without traversing this function
           (it uses [register_with_state] directly). For other prevs (e.g.
-          Compacting → Running on auto-compact success, Overflowed →
-          Running similarly), the registry runtime publishes its own
+          Compacting → Running on auto-compact success), the registry
+          runtime publishes its own
           lifecycle event covering the recovery semantics. Intentional
           no-op (matches the pre-refactor catch-all [| _ -> []]). *)
        [])
@@ -343,9 +330,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        arm-enforced beyond the terminal guard — see its arm below for
        the operator escape-hatch rationale.
    Other events have no spec preconditions beyond NotTerminal and are
-   listed explicitly in the final arm.  The overflow-lifecycle preconditions
-   (Context_overflow_detected, Auto_compact_triggered) were retired with
-   their events (#26546).
+   listed explicitly in the final arm.
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
@@ -363,7 +348,8 @@ let check_event_precondition (c : conditions) (ev : event)
   | Operator_compact_requested ->
     (* TLA+ §OperatorCompactRequested.  Operator path differs from
        AutoCompactTriggered: it does NOT require [context_overflow], so
-       an operator can pre-emptively compact a not-yet-overflowed
+       an operator can pre-emptively compact a keeper whose context is not
+       yet near its budget
        keeper.  But the two buffer-op exclusivity preconditions are
        identical — concurrent compaction or handoff entangles ops. *)
     if c.compaction_active
@@ -445,7 +431,6 @@ let apply_event ~current_phase ~conditions ~event ~now =
   | Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining

@@ -71,7 +71,6 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KSM
   Running:      'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   Failing:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Overflowed:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   Compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   HandingOff:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Draining:     'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
@@ -677,7 +676,7 @@ export function pushObservation(
  * and on the current value of
  * each of the six FSM axes so an operator can isolate a single
  * keeper by name, or every keeper currently in a specific state
- * (e.g. `trying`, `Overflowed`, `warning`).
+ * (e.g. `trying`, `Draining`, `warning`).
  *
  * Empty/whitespace query returns the input reference unchanged so
  * useMemo callers keep identity for the non-filtering path and

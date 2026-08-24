@@ -248,8 +248,8 @@ let is_running ~base_path name =
      and [Failing] because a keeper in [Failing] may still complete
      its in-flight turn before the recovery transition; [is_running]
      answers the operator-facing question "is this keeper currently
-     running?" and treats only [Running] as such. The 12 other phases
-     (Offline, Failing, Overflowed, Compacting, HandingOff, Draining,
+     running?" and treats only [Running] as such. The 10 other phases
+     (Offline, Failing, Compacting, HandingOff, Draining,
      Paused, Stopped, Crashed, Restarting) yield [false]
      here. A future phase variant (e.g. a hypothetical [Migrating] or
      [Healing]) would silently inherit [false] under the previous
@@ -265,7 +265,6 @@ let is_running ~base_path name =
       { phase =
           ( Offline
           | Failing
-          | Overflowed
           | Compacting
           | HandingOff
           | Draining
@@ -515,7 +514,7 @@ let fiber_health_of ~base_path name =
      | Stopped ->
        if lane_has_exited entry then Fiber_unknown else Fiber_alive
      | Offline -> Fiber_unknown
-     | Running | Paused | Failing | Overflowed | Compacting | HandingOff | Draining ->
+     | Running | Paused | Failing | Compacting | HandingOff | Draining ->
        (match Eio.Promise.peek entry.done_p with
         | None -> Fiber_alive
         | Some `Stopped ->

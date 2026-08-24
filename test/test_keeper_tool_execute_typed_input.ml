@@ -1548,6 +1548,64 @@ let test_a_program_named_like_cd_still_runs () =
     Alcotest.failf "cdparanoia is a program: %a" Execute_input.pp_validation_error err
 ;;
 
+(* RFC execute-subset-dispositions step 1.  A script inside argv is counted as
+   nothing at all on this path, and these pin that it is now counted. *)
+let host = Masc_exec.Sandbox_target.host ()
+
+let findings_of json =
+  Execute_input.hidden_script_findings ~sandbox:host (parse_json_exn json)
+;;
+
+let test_hidden_script_findings_sees_the_costume () =
+  match
+    findings_of
+      (`Assoc
+          [ "argv", `List [ `String "sh"; `String "-c"; `String "ls {a,b}.txt" ] ])
+  with
+  | [ ("sh", "glob_brace") ] -> ()
+  | other ->
+    Alcotest.failf
+      "expected one sh/glob_brace finding, got [%s]"
+      (String.concat "; " (List.map (fun (s, f) -> s ^ "/" ^ f) other))
+;;
+
+let test_hidden_script_findings_walks_every_stage () =
+  (* Each stage of a pipeline owns its own argv, so a costume in the tail is as
+     invisible as one in the head. *)
+  match
+    findings_of
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc [ "argv", `List [ `String "cat"; `String "f" ] ]
+                ; `Assoc
+                    [ ( "argv"
+                      , `List [ `String "bash"; `String "-c"; `String "sleep 5 &" ] )
+                    ]
+                ] )
+          ])
+  with
+  | [ ("bash", "background") ] -> ()
+  | other ->
+    Alcotest.failf
+      "expected one bash/background finding, got [%s]"
+      (String.concat "; " (List.map (fun (s, f) -> s ^ "/" ^ f) other))
+;;
+
+let test_hidden_script_findings_ignores_what_hides_nothing () =
+  (* An ordinary program is not a costume. *)
+  Alcotest.(check int)
+    "plain argv"
+    0
+    (List.length (findings_of (`Assoc [ "argv", `List [ `String "rg"; `String "x" ] ])));
+  (* A script source already crossed the gate; there is nothing hidden to count,
+     and counting it here would double every script call. *)
+  Alcotest.(check int)
+    "script source"
+    0
+    (List.length (findings_of (`Assoc [ "script", `String "ls {a,b}.txt" ])))
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
@@ -1815,6 +1873,18 @@ let suite =
           "rfc_0198_phaseb_of_json_rejects_discard_and_file"
           `Quick
           test_of_json_rejects_redirect_with_both_discard_and_file
+      ; Alcotest.test_case
+          "hidden_script_findings sees the costume"
+          `Quick
+          test_hidden_script_findings_sees_the_costume
+      ; Alcotest.test_case
+          "hidden_script_findings walks every stage"
+          `Quick
+          test_hidden_script_findings_walks_every_stage
+      ; Alcotest.test_case
+          "hidden_script_findings ignores what hides nothing"
+          `Quick
+          test_hidden_script_findings_ignores_what_hides_nothing
       ])
 ;;
 

@@ -1184,6 +1184,7 @@
   test_tool_metrics_persist
   test_model_inference_metrics
   test_keeper_tool_call_log
+  test_keeper_tool_call_file_change
   test_tool_unified
   test_build_identity
   test_lifecycle
@@ -1326,6 +1327,7 @@
   test_model_inference_metrics
   test_tool_unified
   test_keeper_tool_call_log
+  test_keeper_tool_call_file_change
   test_build_identity
   test_lifecycle
   test_grpc_workspace
@@ -1985,6 +1987,8 @@
 
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
+
+(include stanzas/test_pause_authority_agrees.inc)
 
 (include stanzas/test_keeper_meta_config_not_durable.inc)
 

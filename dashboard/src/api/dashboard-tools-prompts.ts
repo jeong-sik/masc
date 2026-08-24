@@ -6,6 +6,7 @@ import { get, post, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
+import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 
 // --- Tool metrics (P4 Phase 4.5) ---
 
@@ -596,127 +597,17 @@ export interface DashboardFullHealthResponse {
   keeper_event_queue?: DashboardKeeperEventQueueHealth | null
 }
 
-// --- Runtime probe (KV-cache / model load probe) ---
+// --- Runtime provider reachability probe ---
 
-interface DashboardRuntimeProbeLoadedModel {
-  name?: string | null
-  model?: string | null
-  size_vram_bytes?: number | null
-  context_length?: number | null
-  expires_at?: string | null
-}
-
-interface DashboardRuntimeProbeRun {
-  run_index: number
-  http_status?: number | null
-  wall_clock_ms?: number | null
-  total_duration_ms?: number | null
-  load_duration_ms?: number | null
-  prompt_eval_count?: number | null
-  prompt_eval_duration_ms?: number | null
-  prompt_tokens_per_second?: number | null
-  eval_count?: number | null
-  eval_duration_ms?: number | null
-  generation_tokens_per_second?: number | null
-  done?: boolean | null
-  done_reason?: string | null
-  thinking_present?: boolean
-  response_preview?: string | null
-  response_chars?: number | null
-  error?: string | null
-}
-
-interface DashboardRuntimeProbeAssessment {
-  signal?: string | null
-  baseline_run_index?: number | null
-  best_repeat_run_index?: number | null
-  baseline_prompt_eval_duration_ms?: number | null
-  best_repeat_prompt_eval_duration_ms?: number | null
-  prompt_eval_duration_reduction_ratio?: number | null
-  note?: string | null
-  limitation?: string | null
-}
-
-export interface DashboardRuntimeProviderProbe {
-  runtime_id?: string | null
-  provider_id?: string | null
-  provider_display_name?: string | null
-  model_id?: string | null
-  model_api_name?: string | null
-  protocol?: string | null
-  runtime_kind?: string | null
-  transport?: string | null
-  auth_kind?: string | null
-  credential_required?: boolean | null
-  auth_present?: boolean | null
-  status?: string | null
-  reachable?: boolean | null
-  http_status?: number | null
-  latency_ms?: number | null
-  model_count?: number | null
-  content_type?: string | null
-  downloaded_bytes?: number | null
-  endpoint_url?: string | null
-  probe_url?: string | null
-  error?: string | null
-  checked_at?: string | null
-}
-
-export interface DashboardRuntimeProviderProbeSummary {
-  runtimes?: number
-  probed?: number
-  reachable?: number
-  failed?: number
-  skipped?: number
-  default_runtime_id?: string | null
-}
-
-export interface DashboardRuntimeProbePayload {
-  source?: string
-  status?: string | null
-  checked_at?: string | null
-  summary?: DashboardRuntimeProviderProbeSummary | null
-  providers?: DashboardRuntimeProviderProbe[]
-  server_url?: string
-  ps_endpoint?: string
-  generate_endpoint?: string
-  configured_default_model?: string | null
-  requested_model?: string | null
-  effective_model?: string | null
-  probe_runs_requested?: number
-  probe_runs_completed?: number
-  max_tokens?: number
-  keep_alive?: string | null
-  timeout_sec?: number
-  ps_timeout_sec?: number
-  prompt_chars?: number
-  prompt_preview?: string
-  ps_http_status_before?: number | null
-  ps_http_status_after?: number | null
-  loaded_models_before?: DashboardRuntimeProbeLoadedModel[]
-  loaded_models_after?: DashboardRuntimeProbeLoadedModel[]
-  model_loaded_before_probe?: boolean
-  model_loaded_after_probe?: boolean
-  runs?: DashboardRuntimeProbeRun[]
-  kv_cache_assessment?: DashboardRuntimeProbeAssessment | null
-  observations?: string[]
-  errors?: string[]
-  limitations?: string[]
-  probe_ok?: boolean
-}
-
-export interface DashboardRuntimeProbeResponse {
-  generated_at?: string
-  refreshed_at_unix?: number
-  cache_ttl_sec?: number
-  cache_age_sec?: number
-  cache_hit?: boolean
-  // Non-blocking route freshness tag. 'served_stale' / 'warming_up' mean a
-  // background refresh was scheduled and the fresh value arrives on the next
-  // poll — a force=1 ("Live probe") response is not guaranteed to be fresh.
-  refresh_state?: 'fresh' | 'recent' | 'served_stale' | 'warming_up'
-  probe?: DashboardRuntimeProbePayload | null
-}
+export type {
+  DashboardRuntimeProviderProbeStatus,
+  DashboardRuntimeProbeStatus,
+  DashboardRuntimeProbeRefreshState,
+  DashboardRuntimeProviderProbe,
+  DashboardRuntimeProviderProbeSummary,
+  DashboardRuntimeProbePayload,
+  DashboardRuntimeProbeResponse,
+} from './schemas/runtime-probe'
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
@@ -728,7 +619,9 @@ export async function fetchDashboardRuntimeProbe(
 ): Promise<DashboardRuntimeProbeResponse> {
   const query = force ? '?force=1' : ''
   await ensureDevToken()
-  return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
+  const raw = await get<unknown>(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
+  const { parseDashboardRuntimeProbeResponse } = await import('./schemas/runtime-probe')
+  return parseDashboardRuntimeProbeResponse(raw)
 }
 
 export async function fetchDashboardFullHealth(

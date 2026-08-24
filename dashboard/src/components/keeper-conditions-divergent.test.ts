@@ -21,7 +21,6 @@ describe("isOperating", () => {
   it.each([
     ["Running", true],
     ["Failing", true],
-    ["Overflowed", true],
     ["Paused", false],
     ["Stopped", false],
     ["Offline", false],

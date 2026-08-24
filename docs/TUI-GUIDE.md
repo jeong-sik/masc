@@ -75,6 +75,25 @@ lands in Recent Events:
 A count of `0` next to `data unreliable` means the read failed. It does not
 mean the board is empty.
 
+## Navigation
+
+Every surface draws the Tab ring on its top row with the active surface
+highlighted; narrow terminals window the strip around the active entry and
+show how many entries hide past each edge (`‹4`, `5›`).
+
+| Key | Effect |
+|-----|--------|
+| `Tab` / `Shift-Tab` | next / previous surface in the strip's order |
+| `?` | help screen -- every binding, grouped by surface; `j`/`k` scroll, `Esc` closes |
+| `:` | command palette -- type to filter `go <surface>` and `keeper <name>` jumps, `Enter` runs the highlighted one |
+
+Keeper sub-views spell their position as a breadcrumb in the header:
+`Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).
+
+At 110 columns and wider, the keeper detail view keeps a roster pane on its
+left with the cursor marked; keys keep their detail meaning. Narrower
+terminals use the single-pane layout.
+
 ## Surfaces
 
 ### Overview

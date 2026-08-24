@@ -231,7 +231,6 @@ export function isKeeperOperatorTargetable(keeper: KeeperPausedInput & KeeperOff
 const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>([
   'Running',
   'Failing',
-  'Overflowed',
   'Compacting',
   'HandingOff',
   'Draining',
@@ -268,7 +267,6 @@ const RUNNING_HEALTH: ReadonlySet<string> = new Set<string>([
 // Both sites now import from here.
 export const ATTENTION_PHASES: ReadonlySet<string> = new Set<string>([
   'Failing',
-  'Overflowed',
   'Compacting',
   'HandingOff',
   'Draining',

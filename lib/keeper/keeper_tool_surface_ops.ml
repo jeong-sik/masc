@@ -671,19 +671,22 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_res
    membership decides it, not the shape of the name: writing a queue for a
    name no Keeper owns would leave the answer somewhere nobody drains. *)
 let delegate_continuation_channel ~(config : Workspace.config) ~submitted_by =
-  if not (Keeper_registry.is_registered ~base_path:config.base_path submitted_by)
+  (* The blank name leaves here, before the lookup. It is the one input the
+     constructor below refuses, so ruling it out up front is what makes the
+     [Error] arm unreachable -- and a reader can see that in these four lines
+     instead of having to go read what [is_registered] accepts. *)
+  if String.equal (String.trim submitted_by) ""
+  then None
+  else if not (Keeper_registry.is_registered ~base_path:config.base_path submitted_by)
   then None
   else (
     match Keeper_continuation_channel.keeper ~keeper_name:submitted_by with
     | Ok channel -> Some channel
     | Error message ->
-      (* [Result.to_option] here read both answers as [None]: "this name owns
-         no queue", which is the real case above, and "the constructor refused
-         the name", which cannot happen once registry membership is confirmed
-         -- it refuses only a blank one. Collapsing them spelled "no channel"
-         for a Keeper that has one, and by the comment above that is exactly
-         how a reply lands where nobody drains it. The impossible half says so
-         now instead of passing for the ordinary one. *)
+      (* Unreachable: the only refusal is a blank name and that left above.
+         It says so rather than returning [None], which would spell "this
+         Keeper owns no queue" -- and by the comment on this function, that
+         is how a reply lands somewhere nobody drains. *)
       invalid_arg
         (Printf.sprintf
            "keeper delegate: registered Keeper %S has no continuation channel: %s"

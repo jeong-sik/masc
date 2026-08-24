@@ -1033,7 +1033,16 @@ export function applyKeeperStreamEvent(
         }
         return null
       }
-      return `Unsupported Keeper custom event: ${customEventName}`
+      // A name this build does not draw is not a reason to end the reply.
+      // keeper-actions.ts throws on any string returned here, so a server that
+      // adds an event the client has not learned yet stops the stream and the
+      // answer never lands -- which is what KEEPER_TOOL_APPROVAL_REQUESTED did
+      // on 2026-08-24, after #30059 added it on the server and here. The
+      // events this file does draw each return null above; reaching this line
+      // means the frame carried nothing this view renders, so it is dropped
+      // and named once for whoever wires it next.
+      console.debug('keeper stream: no view for custom event', customEventName)
+      return null
     }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)

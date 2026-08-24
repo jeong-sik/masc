@@ -617,7 +617,7 @@ let start_supervisor_sweep ctx =
                  other phases skip (a Stopped/Crashed
                  keeper has no in-memory meta to update; a Compacting
                  or HandingOff keeper is mid-transition and reconcile
-                 would race; Offline / Paused / Failing / Overflowed /
+                 would race; Offline / Paused / Failing /
                  Draining / Restarting are all transient or paused
                  states). A future phase (e.g. Migrating, Healing)
                  would silently skip reconcile under [_ -> ()] without
@@ -639,7 +639,6 @@ let start_supervisor_sweep ctx =
                          e)
               | Keeper_state_machine.Offline
               | Keeper_state_machine.Failing
-              | Keeper_state_machine.Overflowed
               | Keeper_state_machine.Compacting
               | Keeper_state_machine.HandingOff
               | Keeper_state_machine.Draining

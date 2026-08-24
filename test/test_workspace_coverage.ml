@@ -2681,6 +2681,64 @@ let predecessor_of config task_id =
   | None -> Alcotest.fail (Printf.sprintf "%s missing from backlog" task_id)
 ;;
 
+(* ============================================================ *)
+(* task.skills — the value has to survive the write, or the      *)
+(* prompt line that reads it can never appear                    *)
+(* ============================================================ *)
+
+let task_of config task_id =
+  match
+    List.find_opt
+      (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+      (Workspace.read_backlog config).tasks
+  with
+  | Some t -> t
+  | None -> Alcotest.fail (Printf.sprintf "%s missing from backlog" task_id)
+;;
+
+(* Reading the returned record would only prove the argument reached the
+   constructor. The keeper reads the task back off disk, so the assertion has
+   to go through the backlog: a field that serializes to nothing looks exactly
+   like a field that was never set. *)
+let test_skills_survive_the_backlog_round_trip () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"needs a skill"
+        ~priority:3
+        ~description:""
+        ~skills:[ "humanize-korean"; "second-skill" ]
+    with
+    | Error e ->
+      Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      let task = task_of config created.Workspace.task_id in
+      Alcotest.(check (list string))
+        "skills read back in the order they were given"
+        [ "humanize-korean"; "second-skill" ]
+        task.Masc_domain.skills)
+;;
+
+(* The ordinary case. Omitting the argument has to leave the field empty
+   rather than absent-but-different, because [format_task_skills] builds no
+   line at all for an empty list. *)
+let test_a_task_without_skills_reads_back_empty () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"plain"
+        ~priority:3
+        ~description:""
+    with
+    | Error e ->
+      Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      let task = task_of config created.Workspace.task_id in
+      Alcotest.(check (list string)) "no skills" [] task.Masc_domain.skills)
+;;
+
 let test_predecessor_unknown_rejected () =
   with_test_env (fun config ->
     match
@@ -3326,6 +3384,16 @@ let () =
             "decode: missing or corrupt version fails closed"
             `Quick
             test_backlog_version_decode_contract
+        ] )
+    ; ( "task skills"
+      , [ Alcotest.test_case
+            "named skills survive the backlog round trip"
+            `Quick
+            test_skills_survive_the_backlog_round_trip
+        ; Alcotest.test_case
+            "a task without skills reads back empty"
+            `Quick
+            test_a_task_without_skills_reads_back_empty
         ] )
     ; (* === RFC-0323 W2: predecessor_task_id === *)
       ( "predecessor"

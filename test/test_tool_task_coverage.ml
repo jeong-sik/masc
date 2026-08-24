@@ -359,6 +359,40 @@ let () = test "dispatch_unknown_tool" (fun () ->
   assert (Task.Tool.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
 
+(* The tool argument is the only way a task gets skills, and [valid_keys] is
+   fail-closed: before this was listed there, passing it was a hard rejection
+   rather than a no-op. Both halves are checked — the call is accepted, and
+   the value lands on the stored task. *)
+let () = test "add_task accepts skills and stores them" (fun () ->
+  let ctx = make_test_ctx () in
+  let result =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("title", `String "task that names a skill");
+          ("skills", `List [ `String "humanize-korean"; `String "  "; `String " spaced " ]);
+        ])
+  in
+  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
+  match
+    Workspace.get_tasks_raw ctx.Task.Tool.config
+    |> List.find_opt (fun (task : Masc_domain.task) ->
+         String.equal task.title "task that names a skill")
+  with
+  | None -> failwith "the task was not stored"
+  | Some task ->
+    (* A blank entry can never match a directory, and keeping it would put an
+       empty item in the prompt line the keeper reads. Surrounding space is
+       trimmed for the same reason. *)
+    (match task.skills with
+     | [ "humanize-korean"; "spaced" ] -> ()
+     | other ->
+       failwith
+         (Printf.sprintf
+            "expected the two non-blank names, got [%s]"
+            (String.concat "; " other)))
+)
+
 (* Test dispatch add_task *)
 let () = test "dispatch_add_task" (fun () ->
   let ctx = make_test_ctx () in

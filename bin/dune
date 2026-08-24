@@ -335,6 +335,11 @@
  (modules masc_tui_render_schedule))
 
 (library
+ (name masc_tui_footer)
+ (wrapped false)
+ (modules masc_tui_footer))
+
+(library
  (name masc_tui_board_selection)
  (wrapped false)
  (modules masc_tui_board_selection))
@@ -440,6 +445,7 @@
   ;; Tui_decode carries the type through fur_topology, but dune does not open a
   ;; transitive library's module names, so masc_tui lists masc.fusion_core.
   masc.fusion_core
+  masc_tui_footer
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity

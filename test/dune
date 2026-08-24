@@ -2845,6 +2845,11 @@
  (libraries alcotest astring masc yojson))
 
 (test
+ (name test_tui_footer_status_items)
+ (modules test_tui_footer_status_items)
+ (libraries alcotest str masc_tui_footer))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))

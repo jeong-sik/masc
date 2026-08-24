@@ -211,6 +211,10 @@ let awaiting_approval_notice (state : state) =
                (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
                where))
 
+let footer_line ?status (state : state) ~hints =
+  Masc_tui_footer.line ?status ~dim:Ansi.dim ~reset:Ansi.reset ~port:state.port
+    ~hints ()
+
 let composer_line state ~cols =
   let composer = composer_of_state state in
   let prompt = composer_prompt_text composer in
@@ -685,8 +689,12 @@ let render_overview (state : state) =
     if state.task_focus then "j/k:tasks  Enter:detail  esc:events"
     else "j/k:events  t:tasks"
   in
-  Buffer.add_string buf (Printf.sprintf "%s  %s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
-    Ansi.dim overview_hint state.refresh_interval state.port Ansi.reset);
+  Buffer.add_string buf
+    (footer_line state
+       ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
+       ~hints:
+         (Printf.sprintf "%s  q:quit  r:refresh  Tab:next  2:keepers"
+            overview_hint));
 
   finish_surface state ~clamped:(Overview_events event_window.oew_offset) ~surface_key:"overview" ~rows:terminal_rows
       ~cols buf
@@ -1025,9 +1033,7 @@ let render_approvals (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
 
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
@@ -1193,8 +1199,7 @@ let render_board_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next  | Port: %d%s\n"
-    Ansi.dim state.port Ansi.reset);
+  Buffer.add_string buf (footer_line state ~hints:"j/k:move  Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf
@@ -1309,8 +1314,7 @@ let render_board_read (state : state) (list_post : board_post) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next  | Port: %d%s\n"
-    Ansi.dim state.port Ansi.reset);
+  Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next");
 
   finish_surface state ~clamped:(Board_read scroll.normalized_scroll) ~surface_key:"board-read" ~rows:terminal_rows
       ~cols buf
@@ -1493,8 +1497,7 @@ let render_planning_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  r:refresh  Tab:next  | Port: %d%s\n"
-    Ansi.dim state.port Ansi.reset);
+  Buffer.add_string buf (footer_line state ~hints:"j/k:move  Enter:detail  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf
@@ -1571,8 +1574,7 @@ let render_planning_detail (state : state)
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next  | Port: %d%s\n"
-    Ansi.dim state.port Ansi.reset);
+  Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
 
   finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
       ~cols buf
@@ -1739,8 +1741,7 @@ let render_schedules (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  x:cancel  r:refresh  Tab:next  | Port: %d%s\n"
-    Ansi.dim state.port Ansi.reset);
+  Buffer.add_string buf (footer_line state ~hints:"j/k:move  x:cancel  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
       ~cols buf
@@ -2415,9 +2416,7 @@ let render_lanes (state : state) =
       (Printf.sprintf "[%d keepers, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
@@ -3309,8 +3308,7 @@ let render_system_logs (state : state) =
       (Printf.sprintf "[%d entries, scroll %d]" total_entries scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
@@ -3426,8 +3424,7 @@ let render_verification (state : state) =
       (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 (* What the harness decided, most recent first.
@@ -3540,8 +3537,7 @@ let render_harness (state : state) =
       (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 let fusion_run_status_color = function
@@ -3638,9 +3634,7 @@ let render_fusion_list (state : state) =
     done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:move  Enter:detail  r:refresh  Tab:next  q:quit");
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 let fusion_wrapped_block ~width ~indent text =
@@ -3794,9 +3788,10 @@ let render_fusion_detail (state : state) run_id =
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  j/k:scroll (%d/%d)  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
-       Ansi.dim scroll max_scroll state.port Ansi.reset);
+    (footer_line state
+       ~hints:
+         (Printf.sprintf "j/k:scroll (%d/%d)  Esc:back  r:refresh  Tab:next"
+            scroll max_scroll));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
 
@@ -3895,8 +3890,7 @@ let render_repositories (state : state) =
       (Printf.sprintf "[%d repositories, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
 
 (* Where the gate can deliver.
@@ -3994,8 +3988,7 @@ let render_connectors (state : state) =
       (Printf.sprintf "[%d connectors, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
 
 let runtime_refresh_badge refresh_state =
@@ -4263,9 +4256,10 @@ let render_runtime (state : state) =
   in
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  %sj/k:scroll  Tab:next  q:quit  r:live refresh  | Port: %d%s\n"
-       Ansi.dim scroll_hint state.port Ansi.reset);
+    (footer_line state
+       ~hints:
+         (Printf.sprintf "%sj/k:scroll  Tab:next  q:quit  r:live refresh"
+            scroll_hint));
   finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
 
 (* The tools a keeper can reach.
@@ -4396,8 +4390,7 @@ let render_tools (state : state) =
       (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
@@ -4584,9 +4577,7 @@ let render_keeper_calls (state : state) =
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh");
   finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
 (* The runtime's event feed, newest first, for watching every keeper act at
@@ -4748,9 +4739,7 @@ let render_acting (state : state) =
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit");
   finish_surface state ~clamped:(Acting scroll) ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it
@@ -5008,11 +4997,11 @@ let render_palette (state : state) =
     framed_line buf cols (Ansi.dim ^ "  (no match)" ^ Ansi.reset);
   framed_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "%s  %d/%d  Enter:jump  Esc:close  | Port: %d%s\n"
-       Ansi.dim
-       (if total = 0 then 0 else cursor + 1)
-       total state.port Ansi.reset);
+    (footer_line state
+       ~hints:
+         (Printf.sprintf "%d/%d  Enter:jump  Esc:close"
+            (if total = 0 then 0 else cursor + 1)
+            total));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
 
 let render_help (state : state) =
@@ -5057,8 +5046,7 @@ let render_help (state : state) =
   |> List.iter (fun line -> framed_line buf cols line);
   framed_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Esc:close  | Port: %d%s\n" Ansi.dim
-       state.port Ansi.reset);
+    (footer_line state ~hints:"j/k:scroll  Esc:close");
   ignore scroll;
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 

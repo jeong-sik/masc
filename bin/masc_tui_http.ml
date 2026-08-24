@@ -703,6 +703,11 @@ let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/gate/connectors"
 
+(** Fetch the current composite lane snapshot for every registered Keeper. *)
+let fetch_keeper_lanes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/composite"
+
 (** Fetch /api/v1/repositories. *)
 let fetch_repositories ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

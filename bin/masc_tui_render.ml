@@ -166,9 +166,9 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Repositories | Connectors | Tools
-            | System_logs ->
+            | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
+            | Schedules | Verification | Harness | Repositories | Connectors
+            | Tools | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -1999,6 +1999,225 @@ let render_keeper_list (state : state) =
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf
 
+let keeper_lane_phase_style (phase : Tui_decode.keeper_lane_phase) =
+  match phase with
+  | Lane_phase_running -> (Ansi.green, "\xe2\x97\x8f")
+  | Lane_phase_failing | Lane_phase_crashed -> (Ansi.red, "\xc3\x97")
+  | Lane_phase_compacting | Lane_phase_handing_off | Lane_phase_draining
+  | Lane_phase_restarting ->
+      (Ansi.yellow, "\xe2\x97\x90")
+  | Lane_phase_paused -> (Ansi.yellow, "\xe2\x97\x8b")
+  | Lane_phase_offline | Lane_phase_stopped -> (Ansi.gray, "\xc3\x97")
+  | Lane_phase_overflowed | Lane_phase_unknown _ -> (Ansi.yellow, "?")
+
+let keeper_lane_turn_style (phase : Tui_decode.keeper_lane_turn_phase) =
+  match phase with
+  | Lane_turn_executing | Lane_turn_prompting | Lane_turn_routing -> Ansi.cyan
+  | Lane_turn_compacting | Lane_turn_finalizing -> Ansi.yellow
+  | Lane_turn_exhausted -> Ansi.red
+  | Lane_turn_idle -> Ansi.gray
+  | Lane_turn_unknown _ -> Ansi.yellow
+
+let keeper_lane_idle_text seconds =
+  let seconds = max 0 seconds in
+  if seconds < 60 then Printf.sprintf "%ds" seconds
+  else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
+  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
+  else Printf.sprintf "%dd" (seconds / 86400)
+
+let keeper_lane_outcome_text = function
+  | None -> "\xe2\x80\x94"
+  | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
+      let state = Terminal_text.single_line outcome.klo_runtime_state in
+      (match outcome.klo_selected_model with
+       | Some model when String.trim model <> "" ->
+           state ^ " \xc2\xb7 " ^ Terminal_text.single_line model
+       | Some _ | None -> state)
+
+type keeper_lane_columns = {
+  lane_keeper_width : int;
+  lane_phase_width : int;
+  lane_turn_width : int;
+  lane_idle_width : int;
+  lane_outcome_width : int;
+  lane_diagnosis_width : int;
+  lane_show_outcome : bool;
+  lane_show_diagnosis : bool;
+}
+
+(* The four left columns are always present. Outcome appears next; diagnosis
+   is the first column a narrow terminal drops. At 100 columns -- the PTY
+   contract -- all six still have enough room to carry a useful value. *)
+let keeper_lane_columns inner =
+  let lane_phase_width = 11 in
+  let lane_turn_width = 11 in
+  let lane_idle_width = 6 in
+  let lane_show_outcome = inner >= 68 in
+  let lane_show_diagnosis = inner >= 84 in
+  let lane_outcome_width = if lane_show_outcome then 20 else 0 in
+  let fixed_without_keeper =
+    2 + lane_phase_width + lane_turn_width + lane_idle_width + 3
+    + (if lane_show_outcome then 1 + lane_outcome_width else 0)
+    + (if lane_show_diagnosis then 1 else 0)
+  in
+  let available = max 1 (inner - fixed_without_keeper) in
+  let lane_keeper_width =
+    if lane_show_diagnosis then min 18 (max 10 (available / 2))
+    else min 22 available
+  in
+  let lane_diagnosis_width =
+    if lane_show_diagnosis then max 1 (available - lane_keeper_width) else 0
+  in
+  { lane_keeper_width
+  ; lane_phase_width
+  ; lane_turn_width
+  ; lane_idle_width
+  ; lane_outcome_width
+  ; lane_diagnosis_width
+  ; lane_show_outcome
+  ; lane_show_diagnosis
+  }
+
+let keeper_lane_header (columns : keeper_lane_columns) =
+  String.concat ""
+    [ "  "
+    ; fit_width "KEEPER" columns.lane_keeper_width
+    ; " "
+    ; fit_width "PHASE" columns.lane_phase_width
+    ; " "
+    ; fit_width "TURN" columns.lane_turn_width
+    ; " "
+    ; fit_width "IDLE" columns.lane_idle_width
+    ; (if columns.lane_show_outcome then
+         " " ^ fit_width "LAST OUTCOME" columns.lane_outcome_width
+       else "")
+    ; (if columns.lane_show_diagnosis then
+         " " ^ fit_width "DIAGNOSIS" columns.lane_diagnosis_width
+       else "")
+    ]
+
+let keeper_lane_row (columns : keeper_lane_columns)
+    (lane : Tui_decode.keeper_lane) =
+  let phase_color, phase_glyph = keeper_lane_phase_style lane.kl_phase in
+  let phase =
+    phase_color ^ phase_glyph ^ " "
+    ^ fit_width
+        (Terminal_text.single_line
+           (Tui_decode.keeper_lane_phase_to_string lane.kl_phase))
+        (max 1 (columns.lane_phase_width - 2))
+    ^ Ansi.reset
+  in
+  let turn =
+    keeper_lane_turn_style lane.kl_turn_phase
+    ^ fit_width
+        (Terminal_text.single_line
+           (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase))
+        columns.lane_turn_width
+    ^ Ansi.reset
+  in
+  String.concat ""
+    [ "  "
+    ; fit_width (Terminal_text.single_line lane.kl_keeper)
+        columns.lane_keeper_width
+    ; " "
+    ; phase
+    ; " "
+    ; turn
+    ; " "
+    ; Ansi.dim
+    ; fit_width (keeper_lane_idle_text lane.kl_idle_seconds)
+        columns.lane_idle_width
+    ; Ansi.reset
+    ; (if columns.lane_show_outcome then
+         " " ^ Ansi.gray
+         ^ fit_width (keeper_lane_outcome_text lane.kl_last_outcome)
+             columns.lane_outcome_width
+         ^ Ansi.reset
+       else "")
+    ; (if columns.lane_show_diagnosis then
+         " " ^ Ansi.dim
+         ^ fit_width
+             (Terminal_text.single_line_or ~default:"\xe2\x80\x94"
+                lane.kl_diagnosis)
+             columns.lane_diagnosis_width
+         ^ Ansi.reset
+       else "")
+    ]
+
+(** Render one current composite row per Keeper. This is a read-only operator
+    view: the endpoint owns the phase diagnosis and this surface only makes
+    the six facts scannable together. *)
+let render_lanes (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let inner = max 1 (cols - 4) in
+  let buf = Buffer.create 4096 in
+  let lanes =
+    match state.lanes with
+    | None -> []
+    | Some snapshot -> snapshot.Tui_decode.kls_lanes
+  in
+  let shown = List.length lanes in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.lanes with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Lanes") timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        Printf.sprintf "%s (%d keepers)  %s  %s"
+          (screen_title " MASC Lanes") snapshot.kls_count timestamp
+          (connection_badge state.connection_status)
+  in
+  let columns = keeper_lane_columns inner in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:Ansi.dim (keeper_lane_header columns);
+  box_divider buf cols;
+  (match state.lanes_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = listing_chrome ~error:state.lanes_error in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.lanes_scroll max_scroll) in
+  if shown = 0 then begin
+    let empty =
+      match empty_page_of ~snapshot:state.lanes ~error:state.lanes_error with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no keeper lane snapshots)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for index = 0 to content_height - 1 do
+      match List.nth_opt lanes (index + scroll) with
+      | None -> box_empty buf cols
+      | Some lane -> box_line buf cols (keeper_lane_row columns lane)
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d keepers, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
+
 (** Render keeper detail view with live context and scrolling *)
 let render_keeper_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3666,6 +3885,7 @@ let render_surface (state : state) =
   | Keepers Keeper_logs -> render_keeper_logs state
   | Keepers Keeper_calls -> render_keeper_calls state
   | Keepers Keeper_message -> render_keeper_message state
+  | Lanes -> render_lanes state
   | Board ->
       (match state.board_mode with
        | Board_list -> render_board_list state

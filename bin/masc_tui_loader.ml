@@ -223,8 +223,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Acting | Board | Approvals | Planning | Schedules | Verification
-    | Harness | Repositories | Connectors | Tools | System_logs ->
+    | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
+    | Verification | Harness | Repositories | Connectors | Tools | System_logs ->
         None
   in
   let current_navigation =
@@ -651,6 +651,13 @@ let load_connectors ~(host : string) ~(port : int) :
   match fetch_connectors ~host ~port with
   | Error err -> Error ("connector load failed: " ^ err)
   | Ok json -> Tui_decode.decode_connector_snapshot json
+
+(** Load the light Lanes projection from /api/v1/keepers/composite. *)
+let load_keeper_lanes ~(host : string) ~(port : int) :
+    (Tui_decode.keeper_lanes_snapshot, string) result =
+  match fetch_keeper_lanes ~host ~port with
+  | Error err -> Error ("keeper lanes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_lanes_snapshot json
 
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :

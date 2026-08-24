@@ -13,9 +13,9 @@ code_refs:
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
-rotate with `Tab` in this order: Overview, Keepers, Approvals, Board,
-Planning, Schedules, Verification, Harness, Repositories, Connectors, Tools,
-System Logs.
+rotate with `Tab` in this order: Overview, Acting, Keepers, Lanes, Approvals,
+Board, Planning, Schedules, Verification, Harness, Repositories, Connectors,
+Tools, System Logs.
 
 ## Quick Start
 
@@ -53,6 +53,7 @@ decides whether launching one is worth it.
 | Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
 | Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
+| Lanes | unavailable | `GET /api/v1/keepers/composite` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
@@ -194,6 +195,31 @@ actions come from `GET /api/v1/gate/keepers`; an unread live roster is shown as
 `- unread` rather than guessed from metadata. The status glyph is the primary
 colour cue. Phase and model stay neutral so an ordinary row does not turn into
 a strip of competing colours.
+
+### Lanes
+
+The current composite lifecycle and turn-cycle reading for every Keeper. Open
+it with `Tab` immediately after Keepers.
+
+```
+ MASC Lanes (10 keepers)  17:02:53  [connected]
+  KEEPER             PHASE       TURN        IDLE   LAST OUTCOME         DIAGNOSIS
+  taskmaster         ● running   executing   7m     done · deepseek-v4   running_fiber_alive
+  kidsnote           × failing   executing   59m    done                 failing_unhealthy
+```
+
+The rows come from `GET /api/v1/keepers/composite`. `PHASE` is the Keeper
+lifecycle, `TURN` is the current turn step, and `IDLE` is the producer's idle
+duration in seconds rendered as seconds, minutes, hours, or days. `LAST
+OUTCOME` keeps the latest runtime state and model when one exists.
+`DIAGNOSIS` is the condition the producer says determined the lifecycle
+phase. A phase or turn value this TUI does not know is shown verbatim with a
+`?`; it is never changed into a familiar state.
+
+Before the first response the page says `(not loaded yet)`. A successful empty
+response says `(no keeper lane snapshots)`. A failed refresh leaves the prior
+rows on screen, adds the error in red, and says that an empty body is not a
+reading.
 
 ### Keeper detail
 
@@ -498,7 +524,7 @@ Global, outside message input:
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Next surface: Overview -> Acting -> Keepers -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
+| `Tab` | Next surface: Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
 | `2` | Jump to Keepers from anywhere |
 | `r` | Force refresh |
 | `q` | Quit |
@@ -509,7 +535,7 @@ Per surface:
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
 | `j` / `k` | Keepers, Approvals, Board, Planning, Schedules | Move cursor |
-| `j` / `k` | System Logs | Scroll the page |
+| `j` / `k` | Lanes, System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |
@@ -531,9 +557,9 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Keepers -> Approvals -> Board -> Planning -> Schedules
-           -> Verification -> Harness -> Repositories -> Connectors
-           -> Tools -> System Logs -> Overview
+  Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
+           -> Schedules -> Verification -> Harness -> Repositories
+           -> Connectors -> Tools -> System Logs -> Overview
 
 Within a surface:
 

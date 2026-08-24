@@ -51,6 +51,50 @@ type keeper_runtime = {
   kr_phase : keeper_phase;
 }
 
+type keeper_lane_phase =
+  | Lane_phase_offline
+  | Lane_phase_running
+  | Lane_phase_failing
+  | Lane_phase_overflowed
+  | Lane_phase_compacting
+  | Lane_phase_handing_off
+  | Lane_phase_draining
+  | Lane_phase_paused
+  | Lane_phase_stopped
+  | Lane_phase_crashed
+  | Lane_phase_restarting
+  | Lane_phase_unknown of string
+
+type keeper_lane_turn_phase =
+  | Lane_turn_idle
+  | Lane_turn_prompting
+  | Lane_turn_routing
+  | Lane_turn_executing
+  | Lane_turn_compacting
+  | Lane_turn_finalizing
+  | Lane_turn_exhausted
+  | Lane_turn_unknown of string
+
+type keeper_lane_last_outcome = {
+  klo_runtime_state : string;
+  klo_selected_model : string option;
+}
+
+type keeper_lane = {
+  kl_keeper : string;
+  kl_phase : keeper_lane_phase;
+  kl_turn_phase : keeper_lane_turn_phase;
+  kl_idle_seconds : int;
+  kl_last_outcome : keeper_lane_last_outcome option;
+  kl_diagnosis : string option;
+}
+
+type keeper_lanes_snapshot = {
+  kls_generated_at : float;
+  kls_count : int;
+  kls_lanes : keeper_lane list;
+}
+
 type goal_proof =
   | Proof_idle
   | Proof_pending
@@ -1519,6 +1563,111 @@ let decode_keeper_runtime_list json =
   in
   let* total = int_field_or json "total" ~default:(List.length rows) in
   Ok (rows, truncated, total)
+
+let keeper_lane_phase_of_string raw =
+  match keeper_phase_of_string raw with
+  | None -> Lane_phase_unknown raw
+  | Some phase -> (
+      match phase with
+      | Keeper_state_machine.Offline -> Lane_phase_offline
+      | Keeper_state_machine.Running -> Lane_phase_running
+      | Keeper_state_machine.Failing -> Lane_phase_failing
+      | Keeper_state_machine.Overflowed -> Lane_phase_overflowed
+      | Keeper_state_machine.Compacting -> Lane_phase_compacting
+      | Keeper_state_machine.HandingOff -> Lane_phase_handing_off
+      | Keeper_state_machine.Draining -> Lane_phase_draining
+      | Keeper_state_machine.Paused -> Lane_phase_paused
+      | Keeper_state_machine.Stopped -> Lane_phase_stopped
+      | Keeper_state_machine.Crashed -> Lane_phase_crashed
+      | Keeper_state_machine.Restarting -> Lane_phase_restarting)
+
+let keeper_lane_phase_to_string = function
+  | Lane_phase_offline -> keeper_phase_to_string Keeper_state_machine.Offline
+  | Lane_phase_running -> keeper_phase_to_string Keeper_state_machine.Running
+  | Lane_phase_failing -> keeper_phase_to_string Keeper_state_machine.Failing
+  | Lane_phase_overflowed ->
+      keeper_phase_to_string Keeper_state_machine.Overflowed
+  | Lane_phase_compacting ->
+      keeper_phase_to_string Keeper_state_machine.Compacting
+  | Lane_phase_handing_off ->
+      keeper_phase_to_string Keeper_state_machine.HandingOff
+  | Lane_phase_draining -> keeper_phase_to_string Keeper_state_machine.Draining
+  | Lane_phase_paused -> keeper_phase_to_string Keeper_state_machine.Paused
+  | Lane_phase_stopped -> keeper_phase_to_string Keeper_state_machine.Stopped
+  | Lane_phase_crashed -> keeper_phase_to_string Keeper_state_machine.Crashed
+  | Lane_phase_restarting ->
+      keeper_phase_to_string Keeper_state_machine.Restarting
+  | Lane_phase_unknown raw -> raw
+
+let keeper_lane_turn_phase_of_string = function
+  | "idle" -> Lane_turn_idle
+  | "prompting" -> Lane_turn_prompting
+  | "routing" -> Lane_turn_routing
+  | "executing" -> Lane_turn_executing
+  | "compacting" -> Lane_turn_compacting
+  | "finalizing" -> Lane_turn_finalizing
+  | "exhausted" -> Lane_turn_exhausted
+  | raw -> Lane_turn_unknown raw
+
+let keeper_lane_turn_phase_to_string = function
+  | Lane_turn_idle -> "idle"
+  | Lane_turn_prompting -> "prompting"
+  | Lane_turn_routing -> "routing"
+  | Lane_turn_executing -> "executing"
+  | Lane_turn_compacting -> "compacting"
+  | Lane_turn_finalizing -> "finalizing"
+  | Lane_turn_exhausted -> "exhausted"
+  | Lane_turn_unknown raw -> raw
+
+let required_nullable_string_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> missing_field key
+  | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some bad -> field_type_error key "a string or null" bad
+
+let decode_keeper_lane_last_outcome json =
+  let* klo_runtime_state = required_string_field json "runtime_state" in
+  let* klo_selected_model =
+    required_nullable_string_field json "selected_model"
+  in
+  Ok { klo_runtime_state; klo_selected_model }
+
+let decode_keeper_lane json =
+  let* kl_keeper = required_string_field json "keeper" in
+  let* raw_phase = required_string_field json "phase" in
+  let kl_phase = keeper_lane_phase_of_string raw_phase in
+  let* raw_turn_phase = required_string_field json "turn_phase" in
+  let kl_turn_phase = keeper_lane_turn_phase_of_string raw_turn_phase in
+  let* kl_idle_seconds = required_int_field json "idle_seconds" in
+  let* kl_last_outcome =
+    match Json_util.assoc_member_opt "last_outcome" json with
+    | None -> missing_field "last_outcome"
+    | Some `Null -> Ok None
+    | Some (`Assoc _ as outcome) ->
+        let* decoded = decode_keeper_lane_last_outcome outcome in
+        Ok (Some decoded)
+    | Some bad -> field_type_error "last_outcome" "an object or null" bad
+  in
+  let* diagnosis = required_object_field json "phase_diagnosis" in
+  let* kl_diagnosis =
+    required_nullable_string_field diagnosis "determining_condition"
+  in
+  Ok
+    { kl_keeper
+    ; kl_phase
+    ; kl_turn_phase
+    ; kl_idle_seconds
+    ; kl_last_outcome
+    ; kl_diagnosis
+    }
+
+let decode_keeper_lanes_snapshot json =
+  let* kls_generated_at = require_float_field json "generated_at" in
+  let* kls_count = required_int_field json "count" in
+  let* items = required_list_field json "snapshots" in
+  let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
+  Ok { kls_generated_at; kls_count; kls_lanes }
 
 (* The counts are read with a default rather than required: the server adds
    fields to this section over time, and a TUI that refuses the whole reading

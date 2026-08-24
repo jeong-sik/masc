@@ -301,6 +301,67 @@ val decode_keeper_runtime_list :
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph. *)
 
+(** Lifecycle value shown by the Lanes surface. The composite endpoint is an
+    operator projection whose vocabulary can grow before this binary does, so
+    an unknown value remains visible instead of becoming a familiar phase. *)
+type keeper_lane_phase =
+  | Lane_phase_offline
+  | Lane_phase_running
+  | Lane_phase_failing
+  | Lane_phase_overflowed
+  | Lane_phase_compacting
+  | Lane_phase_handing_off
+  | Lane_phase_draining
+  | Lane_phase_paused
+  | Lane_phase_stopped
+  | Lane_phase_crashed
+  | Lane_phase_restarting
+  | Lane_phase_unknown of string
+
+val keeper_lane_phase_to_string : keeper_lane_phase -> string
+
+(** Turn-cycle value shown beside {!keeper_lane_phase}. *)
+type keeper_lane_turn_phase =
+  | Lane_turn_idle
+  | Lane_turn_prompting
+  | Lane_turn_routing
+  | Lane_turn_executing
+  | Lane_turn_compacting
+  | Lane_turn_finalizing
+  | Lane_turn_exhausted
+  | Lane_turn_unknown of string
+
+val keeper_lane_turn_phase_to_string : keeper_lane_turn_phase -> string
+
+type keeper_lane_last_outcome = {
+  klo_runtime_state : string;
+  klo_selected_model : string option;
+}
+
+type keeper_lane = {
+  kl_keeper : string;
+  kl_phase : keeper_lane_phase;
+  kl_turn_phase : keeper_lane_turn_phase;
+  kl_idle_seconds : int;
+  kl_last_outcome : keeper_lane_last_outcome option;
+  kl_diagnosis : string option;
+      (** The producer's determining condition, or [None] when no condition
+          currently determines the phase. *)
+}
+
+type keeper_lanes_snapshot = {
+  kls_generated_at : float;
+  kls_count : int;
+  kls_lanes : keeper_lane list;
+}
+
+val decode_keeper_lanes_snapshot :
+  Yojson.Safe.t -> (keeper_lanes_snapshot, string) result
+(** Decode the fields the Lanes table reads from
+    [GET /api/v1/keepers/composite]. Missing or wrongly typed fields reject
+    the reading; additional producer fields are outside this light
+    projection and do not. *)
+
 type fleet_safety = {
   fs_status : string;
   fs_blocker : string option;

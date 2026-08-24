@@ -368,14 +368,24 @@ let rec content_block_of_json_strict json =
                  })))
     | Some block -> Ok block
     | None ->
-      let open Yojson.Safe.Util in
-      let block_type =
-        json |> member "type" |> to_string_option |> Option.value ~default:"<missing>"
+      (* The option-returning decoder collapses every refusal into [None], and
+         reading the block's own "type" back out of the JSON described the
+         wrong thing: a [tool_use] block with a blank id is refused for the id,
+         not for being an unknown type, and the message said "Unknown content
+         block type: tool_use" about a type the decoder knows perfectly well.
+         The result-returning decoder next to it already names the field it
+         refused, so the reason travels instead of being guessed. *)
+      let detail =
+        match Llm_provider.Api_common.content_block_of_json_result json with
+        | Ok _ ->
+          (* [content_block_of_json] is [content_block_of_json_result] with the
+             error dropped, so the two cannot disagree; this arm exists because
+             the type does not say so. *)
+          "Checkpoint content block was refused without a reason"
+        | Error error ->
+          Llm_provider.Api_common.content_block_decode_error_to_string error
       in
-      Error
-        (Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Unknown content block type: %s" block_type }))
+      Error (Error.Serialization (JsonParseError { detail }))
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
     Error

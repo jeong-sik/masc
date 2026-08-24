@@ -818,21 +818,38 @@ let render_approvals (state : state) =
         state.approval_cursor - content_height + 1
       else 0
     in
+    let now_unix = Unix.gettimeofday () in
     for i = 0 to content_height - 1 do
       let idx = i + scroll_offset in
       if idx < count then begin
-        let a = List.nth approvals idx in
-        let is_selected = idx = state.approval_cursor in
-        let target_id =
-          Terminal_text.single_line_or ~default:"-" a.ap_target_id
-        in
         let line =
-          Printf.sprintf "  %s  %s  %s  %s"
-            (fit_width (Terminal_text.single_line a.ap_actor) 16)
-            (fit_width (Terminal_text.single_line a.ap_action_type) 20)
-            (fit_width (Terminal_text.single_line a.ap_target_type) 16)
-            target_id
+          match List.nth approvals idx with
+          | Operator_row a ->
+              let target_id =
+                Terminal_text.single_line_or ~default:"-" a.ap_target_id
+              in
+              Printf.sprintf "  %s  %s  %s  %s"
+                (fit_width (Terminal_text.single_line a.ap_actor) 16)
+                (fit_width (Terminal_text.single_line a.ap_action_type) 20)
+                (fit_width (Terminal_text.single_line a.ap_target_type) 16)
+                target_id
+          | Keeper_tool_row held ->
+              (* The remaining wait, not the age: this row disappears on its
+                 own when it runs out, and what an operator weighs is how
+                 long they still have. *)
+              let remaining =
+                max 0.
+                  (held.kta_asked_at +. held.kta_timeout_sec -. now_unix)
+              in
+              Printf.sprintf "  %s  %s  %s  %s"
+                (fit_width (Terminal_text.single_line held.kta_keeper) 16)
+                (fit_width
+                   ("tool: " ^ Terminal_text.single_line held.kta_tool)
+                   20)
+                (fit_width (Printf.sprintf "%.0fs left" remaining) 16)
+                (Terminal_text.single_line held.kta_question)
         in
+        let is_selected = idx = state.approval_cursor in
         let content =
           if is_selected then
             Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
@@ -848,37 +865,45 @@ let render_approvals (state : state) =
   box_bottom buf cols;
 
   let detail_line =
-    if state.approval_cursor < count then
-      let a = List.nth approvals state.approval_cursor in
-      if action_inflight then
-        Printf.sprintf "  %sApproval request in progress…%s" Ansi.yellow
+    match List.nth_opt approvals state.approval_cursor with
+    | Some (Operator_row a) -> (
+        if action_inflight then
+          Printf.sprintf "  %sApproval request in progress…%s" Ansi.yellow
+            Ansi.reset
+        else
+          match state.pending_approval_action with
+          | Some { paa_token; paa_decision }
+            when String.equal paa_token a.ap_token ->
+              let key =
+                match paa_decision with
+                | Confirm -> "y"
+                | Deny -> "n"
+              in
+              Printf.sprintf "  %sPress %s again: %s%s" Ansi.yellow key
+                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
+                Ansi.reset
+          | _ ->
+              Printf.sprintf "  %s%s%s"
+                Ansi.dim
+                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
+                Ansi.reset)
+    | Some (Keeper_tool_row held) ->
+        (* One press answers a held call, matching the chat pane's [y]. The
+           question is the whole ask, so it is the row the eye lands on. *)
+        Printf.sprintf "  %s%s  [y] allow  [n] deny%s"
+          Ansi.yellow
+          (fit_width
+             (Terminal_text.single_line held.kta_question)
+             (max 8 (cols - 26)))
           Ansi.reset
-      else
-        match state.pending_approval_action with
-      | Some { paa_token; paa_decision }
-        when String.equal paa_token a.ap_token ->
-          let key =
-            match paa_decision with
-            | Confirm -> "y"
-            | Deny -> "n"
-          in
-          Printf.sprintf "  %sPress %s again: %s%s" Ansi.yellow key
-            (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
-            Ansi.reset
-      | _ ->
-          Printf.sprintf "  %s%s%s"
-            Ansi.dim
-            (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
-            Ansi.reset
-    else
-      ""
+    | None -> ""
   in
   Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
 
   let metadata_line, payload_line =
     match List.nth_opt approvals state.approval_cursor with
     | None -> "", ""
-    | Some approval ->
+    | Some (Operator_row approval) ->
         let expires =
           Terminal_text.single_line_or ~default:"-" approval.ap_expires_at
         in
@@ -892,6 +917,16 @@ let render_approvals (state : state) =
             expires Ansi.reset
         , Printf.sprintf "  %spayload=%s%s" Ansi.dim
             (fit_width payload (max 8 (cols - 12)))
+            Ansi.reset )
+    | Some (Keeper_tool_row held) ->
+        ( Printf.sprintf "  %skeeper=%s  call=%s%s" Ansi.dim
+            (fit_width (Terminal_text.single_line held.kta_keeper) 20)
+            (fit_width (Terminal_text.single_line held.kta_tool_call_id) 28)
+            Ansi.reset
+        , Printf.sprintf "  %sargs=%s%s" Ansi.dim
+            (fit_width
+               (Terminal_text.single_line held.kta_args)
+               (max 8 (cols - 9)))
             Ansi.reset )
   in
   Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);

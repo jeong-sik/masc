@@ -136,6 +136,19 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
+(* One tool call a keeper is holding for an operator's answer, from
+   GET /api/v1/keepers/tool-approvals. [kta_asked_at] is the server clock's
+   epoch reading when the wait opened; the drawing side derives age from it. *)
+type keeper_tool_approval = {
+  kta_keeper : string;
+  kta_tool_call_id : string;
+  kta_tool : string;
+  kta_args : string;
+  kta_question : string;
+  kta_asked_at : float;
+  kta_timeout_sec : float;
+}
+
 type fleet_safety = {
   fs_status : string;
   fs_blocker : string option;
@@ -1675,6 +1688,34 @@ let decode_keeper_lanes_snapshot json =
    The three that name the fleet's own verdict -- status, blocker, and whether
    an operator has to act -- are required, because a reading without them says
    nothing. *)
+let decode_keeper_tool_approval json =
+  let* kta_keeper = required_string_field json "keeper" in
+  let* kta_tool_call_id = required_string_field json "tool_call_id" in
+  let* kta_tool = required_string_field json "tool" in
+  let* kta_args = required_string_field json "args" in
+  let* kta_question = required_string_field json "question" in
+  let* kta_asked_at = require_float_field json "asked_at" in
+  let* kta_timeout_sec = require_float_field json "timeout_sec" in
+  Ok
+    { kta_keeper
+    ; kta_tool_call_id
+    ; kta_tool
+    ; kta_args
+    ; kta_question
+    ; kta_asked_at
+    ; kta_timeout_sec
+    }
+
+let decode_keeper_tool_approvals json =
+  let* items = required_list_field json "pending" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* decoded = decode_keeper_tool_approval item in
+        loop (decoded :: acc) rest
+  in
+  loop [] items
+
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   let* fs_status = required_string_field section "status" in

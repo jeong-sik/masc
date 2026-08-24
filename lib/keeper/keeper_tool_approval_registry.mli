@@ -49,6 +49,9 @@ val await :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   keeper_name:string ->
   tool_call_id:string ->
+  tool_name:string ->
+  args:string ->
+  question:string ->
   timeout_sec:float ->
   outcome
 (** Register a wait and block until it settles.
@@ -56,6 +59,12 @@ val await :
     [timeout_sec] is required. A wait with no bound would park the keeper's
     turn for the life of the process if nobody is watching, and how long an
     operator gets to answer is a policy this module cannot know.
+
+    [tool_name], [args] and [question] describe the ask for {!pending}: a
+    listing of bare call ids gave an operator nothing to decide on, so a wait
+    only visible to the stream that opened it timed out unanswered whenever
+    that stream's watcher was gone (masc#30034). They identify nothing — the
+    wait's identity stays (keeper, call id).
 
     The entry is removed before returning on every path, so a caller that
     raises through [await] — cancellation included — does not leave a waiter
@@ -68,10 +77,18 @@ val settle :
     rather than treating it as success, so an operator is not told a call was
     approved when nothing was listening. *)
 
-(** One wait, for the operator-facing listing. *)
+(** One wait, for the operator-facing listing. The description fields say
+    what is being asked; identity stays (keeper, call id). [asked_at] is the
+    registry clock's reading when the wait opened, so a consumer derives age
+    against the same clock family. *)
 type pending =
   { keeper_name : string
   ; tool_call_id : string
+  ; tool_name : string
+  ; args : string
+  ; question : string
+  ; asked_at : float
+  ; timeout_sec : float
   }
 
 val pending : t -> pending list

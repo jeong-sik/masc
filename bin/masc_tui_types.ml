@@ -516,6 +516,11 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* The tool calls keepers are holding, drawn above the operator actions on
+     the same surface. Live registry state on the server; refreshed with the
+     surface. *)
+  mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
+  mutable keeper_tool_approvals_error: string option;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
@@ -775,6 +780,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  keeper_tool_approvals = [];
+  keeper_tool_approvals_error = None;
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_cursor = 0;
   pending_approval_action = None;
@@ -1012,7 +1019,19 @@ let keeper_message_status_rows (state : state) =
      else 0)
   + composer_extra_rows state
 
-let approval_items (state : state) =
+(* One list under one cursor: the calls keepers are holding first (they run
+   out in [kta_timeout_sec]; the operator actions keep), then the operator
+   actions. The two kinds answer through different routes, so the row is a
+   sum the key handler matches on rather than a shape it infers. *)
+type approval_row =
+  | Keeper_tool_row of Tui_decode.keeper_tool_approval
+  | Operator_row of Masc_tui_operator_projection.approval_item
+
+let operator_approval_items (state : state) =
   match state.approval_snapshot with
   | Some snapshot -> snapshot.aps_items
   | None -> []
+
+let approval_items (state : state) =
+  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
+  @ List.map (fun item -> Operator_row item) (operator_approval_items state)

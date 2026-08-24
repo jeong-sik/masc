@@ -125,6 +125,17 @@ val handle_keeper_tool_approval :
     success, so an operator is not told a call was approved when nothing was
     listening for it. *)
 
+val handle_keeper_tool_approvals_list :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/tool-approvals].
+
+    Projects every held tool call from the shared approval registry:
+    [{pending: [{keeper, tool_call_id, tool, args, question, asked_at,
+    timeout_sec}]}], oldest first. Live registry state only — a wait exists
+    exactly while its turn is parked on it. This is what lets an operator
+    answer a call whose owning stream watcher is gone; without it such a
+    call can only time out (masc#30034). *)
+
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].

@@ -193,7 +193,8 @@ let test_a_held_tool_call_is_an_attention_row () =
         Eio.Fiber.both
           (fun () ->
             ignore
-              (Masc.Keeper_tool_approval_registry.await registry ~clock
+              (Masc.Keeper_tool_approval_registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?"
                  ~keeper_name:"keeper.one" ~tool_call_id:"call-attention"
                  ~timeout_sec:5.0
                : Masc.Keeper_tool_approval_registry.outcome))

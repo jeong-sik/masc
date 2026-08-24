@@ -362,6 +362,24 @@ val decode_keeper_lanes_snapshot :
     the reading; additional producer fields are outside this light
     projection and do not. *)
 
+(** One tool call a keeper is holding for an operator's answer, from
+    [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server
+    clock's epoch reading when the wait opened. *)
+type keeper_tool_approval = {
+  kta_keeper : string;
+  kta_tool_call_id : string;
+  kta_tool : string;
+  kta_args : string;
+  kta_question : string;
+  kta_asked_at : float;
+  kta_timeout_sec : float;
+}
+
+val decode_keeper_tool_approvals :
+  Yojson.Safe.t -> (keeper_tool_approval list, string) result
+(** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with
+    missing or mistyped fields rather than dropping them. *)
+
 type fleet_safety = {
   fs_status : string;
   fs_blocker : string option;

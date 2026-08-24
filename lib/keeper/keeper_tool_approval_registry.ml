@@ -16,13 +16,26 @@ type outcome =
   | Timed_out
   | Displaced
 
+(* What identifies one wait. The ask's description is carried beside it, not
+   in it: two waits are the same wait by (keeper, call id) alone. *)
+type key =
+  { key_keeper_name : string
+  ; key_tool_call_id : string
+  }
+
 type pending =
   { keeper_name : string
   ; tool_call_id : string
+  ; tool_name : string
+  ; args : string
+  ; question : string
+  ; asked_at : float
+  ; timeout_sec : float
   }
 
 type waiter =
-  { key : pending
+  { key : key
+  ; entry : pending
   ; resolve : outcome Eio.Promise.u
   }
 
@@ -42,9 +55,9 @@ let create () = { waiters = []; mutex = Stdlib.Mutex.create () }
 let shared_registry = create ()
 let shared () = shared_registry
 
-let same_key (left : pending) (right : pending) =
-  String.equal left.keeper_name right.keeper_name
-  && String.equal left.tool_call_id right.tool_call_id
+let same_key (left : key) (right : key) =
+  String.equal left.key_keeper_name right.key_keeper_name
+  && String.equal left.key_tool_call_id right.key_tool_call_id
 
 (* Take the waiter for [key] out of the list, returning it. Under the mutex;
    the promise is resolved by the caller outside it, because resolving can
@@ -62,13 +75,24 @@ let take_locked t key =
       t.waiters;
   !taken
 
-let await t ~clock ~keeper_name ~tool_call_id ~timeout_sec =
-  let key = { keeper_name; tool_call_id } in
+let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question
+    ~timeout_sec =
+  let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
+  let entry =
+    { keeper_name
+    ; tool_call_id
+    ; tool_name
+    ; args
+    ; question
+    ; asked_at = Eio.Time.now clock
+    ; timeout_sec
+    }
+  in
   let promise, resolve = Eio.Promise.create () in
   let displaced =
     Stdlib.Mutex.protect t.mutex (fun () ->
         let displaced = take_locked t key in
-        t.waiters <- t.waiters @ [ { key; resolve } ];
+        t.waiters <- t.waiters @ [ { key; entry; resolve } ];
         displaced)
   in
   (* A second wait on the same id means the id is not naming one call. The
@@ -90,7 +114,7 @@ let await t ~clock ~keeper_name ~tool_call_id ~timeout_sec =
           Timed_out))
 
 let settle t ~keeper_name ~tool_call_id decision =
-  let key = { keeper_name; tool_call_id } in
+  let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
   match Stdlib.Mutex.protect t.mutex (fun () -> take_locked t key) with
   | None -> false
   | Some waiter ->
@@ -99,4 +123,4 @@ let settle t ~keeper_name ~tool_call_id decision =
 
 let pending t =
   Stdlib.Mutex.protect t.mutex (fun () ->
-      List.map (fun waiter -> waiter.key) t.waiters)
+      List.map (fun waiter -> waiter.entry) t.waiters)

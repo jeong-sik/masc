@@ -80,16 +80,17 @@ type classification =
       (** Named rather than dropped: a row that should have projected and did
           not would otherwise be indistinguishable from a read. *)
 
-val classify : base_path:string -> Yojson.Safe.t -> classification
-(** [classify ~base_path row] decides what one logged call was.
+val classify : Yojson.Safe.t -> classification
+(** [classify row] decides what one logged call was.
 
     The tool's identity comes from the descriptor its route evidence names, so
     the decision is a match over {!Keeper_tool_descriptor.runtime_handler} and
     not over a display name. A row whose descriptor is unknown to this build
     is {!Unreadable}, not a read.
 
-    [base_path] is the server's base path, needed to resolve the call's
-    bundle-relative target against the playground layout. *)
+    No base path is needed: a call's resolved target is already relative to
+    the keeper's bundle, and where that bundle sits on disk — local or
+    Docker — does not change the address of a file inside it. *)
 
 type tally = {
   changes : t list;  (** In the order the rows came. *)
@@ -102,8 +103,8 @@ type tally = {
   malformed : int;
 }
 
-val classify_all : base_path:string -> Yojson.Safe.t list -> tally
-(** [classify_all ~base_path rows] classifies each row and counts the
+val classify_all : Yojson.Safe.t list -> tally
+(** [classify_all rows] classifies each row and counts the
     outcomes. The counts are returned rather than logged so a caller can put
     them in its own answer. *)
 

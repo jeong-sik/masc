@@ -10,8 +10,6 @@ open Masc
 
 module Change = Keeper_tool_call_file_change
 
-let base_path = "/base"
-
 (* One logged call. Only the fields the projection reads are spelled; a real
    row carries about thirty more, and listing them here would make the test
    about the writer's schema instead of about what the reader needs. *)
@@ -38,7 +36,7 @@ let edit_input ?(replace_all = None) ~before ~after () =
           ; ("new_string", `String after) ] @ optional)
 ;;
 
-let classify row = Change.classify ~base_path row
+let classify row = Change.classify row
 
 let change_of row =
   match classify row with
@@ -223,7 +221,7 @@ let test_classify_all_counts_each_outcome () =
     ; row (`Assoc [ ("file_path", `String "x.ml") ])
     ]
   in
-  let tally = Change.classify_all ~base_path rows in
+  let tally = Change.classify_all rows in
   check int "changes" 1 (List.length tally.Change.changes);
   check int "not file changes" 1 tally.Change.not_file_changes;
   check int "malformed" 1 tally.Change.malformed;
@@ -236,7 +234,7 @@ let test_classify_all_preserves_order () =
     ; row (edit_input ~before:"second" ~after:"2" ())
     ]
   in
-  let changes = (Change.classify_all ~base_path rows).Change.changes in
+  let changes = (Change.classify_all rows).Change.changes in
   let befores =
     List.map
       (fun (c : Change.t) ->

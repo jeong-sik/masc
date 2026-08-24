@@ -124,16 +124,16 @@ let target_path_of_row row =
   | Json_field.Found fields -> required_string (`Assoc fields) "target_path"
 
 (* Where a bundle-relative target sits, decided by the playground layout SSOT
-   rather than by looking for a "repos" segment here. The round trip through
-   an absolute path is deliberate: {!Playground_paths.parse_playground_repo_path}
-   is the documented way to go from a sandbox path to [(repo_id, rel)], and
-   re-deriving the anchor from the relative form would put a second copy of
-   the layout in this module. *)
-let location_of_target ~base_path ~keeper ~target_path =
-  let abs_path =
-    Filename.concat base_path (Playground_paths.bundle_root keeper ^ target_path)
-  in
-  match Playground_paths.parse_playground_repo_path ~base_path ~abs_path with
+   rather than by looking for a "repos" segment here.
+
+   The target is read as the bundle-relative path it is, not rebuilt into an
+   absolute one first. Whether the keeper ran local or in Docker changes where
+   its bundle sits on disk and nothing about the path inside it, so composing
+   an absolute path here would mean picking a sandbox flavour this projection
+   has no reason to know — and picking wrong for the eight Docker calls the
+   log carried over 2026-08-22..24. *)
+let location_of_target ~target_path =
+  match Playground_paths.parse_bundle_relative_repo_path target_path with
   | Some (repo_id, relative_path) -> In_repo { repo_id; relative_path }
   | None -> In_bundle { bundle_path = target_path }
 
@@ -193,7 +193,7 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) input =
          too, instead of letting the new tool fall into a wildcard. *)
       Error (Malformed "handler does not write files")
 
-let classify ~base_path row =
+let classify row =
   match named_tool_of_row row with
   | Not_descriptor_backed -> Not_a_file_change
   | Unknown_descriptor id ->
@@ -232,7 +232,7 @@ let classify ~base_path row =
                             ; turn = optional_int row "turn"
                             ; task_id = optional_string row "task_id"
                             ; execution_id = optional_string row "execution_id"
-                            ; location = location_of_target ~base_path ~keeper ~target_path
+                            ; location = location_of_target ~target_path
                             ; kind
                             ; succeeded =
                                 Option.value ~default:false
@@ -250,11 +250,11 @@ type tally = {
   malformed : int;
 }
 
-let classify_all ~base_path rows =
+let classify_all rows =
   let tally =
     List.fold_left
       (fun tally row ->
-        match classify ~base_path row with
+        match classify row with
         | File_change change -> { tally with changes = change :: tally.changes }
         | Not_a_file_change -> { tally with not_file_changes = tally.not_file_changes + 1 }
         | Unreadable Input_exceeded_log_budget ->

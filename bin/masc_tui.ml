@@ -47,7 +47,9 @@ let synchronized_output_enabled () =
    is about to be cleared, which is the last moment a person can see it. *)
 let redirect_stderr_off_terminal ~base_path =
   match
-    let dir = Filename.concat (Filename.concat base_path ".masc") "logs" in
+    let dir =
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "logs"
+    in
     let path =
       Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
     in

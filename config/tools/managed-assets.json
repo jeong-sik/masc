@@ -2,6 +2,8 @@
   "managed_by": "MASC",
   "schema": "masc.tool-managed-assets.v1",
   "paths": [
+    "masc_add_task.toml",
+    "masc_batch_add_tasks.toml",
     "masc_board_comment.toml",
     "masc_board_comment_vote.toml",
     "masc_board_curation_read.toml",
@@ -23,6 +25,15 @@
     "masc_board_vote.toml",
     "masc_goal_list.toml",
     "masc_goal_transition.toml",
-    "masc_goal_upsert.toml"
+    "masc_goal_upsert.toml",
+    "masc_task_history.toml",
+    "masc_task_set_goal.toml",
+    "masc_tasks.toml",
+    "masc_transition.toml",
+    "masc_update_priority.toml",
+    "tool_edit_file.toml",
+    "tool_read_file.toml",
+    "tool_search_files.toml",
+    "tool_write_file.toml"
   ]
 }

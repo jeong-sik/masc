@@ -432,7 +432,7 @@ let test_repeated_assistant_text_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_assistant_text ~threshold:3
   in
-  (* The sangsu shape: one plan sentence, byte-identical on consecutive model
+  (* The shape: one plan sentence, byte-identical on consecutive model
      turns, while every turn's tool batch kept changing and reporting ok. The
      list is newest-first, one entry per provider turn. *)
   let plan = "I will now inspect the queue and then drain the backlog." in

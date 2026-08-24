@@ -484,6 +484,13 @@ type async_msg =
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
+  | Keeper_tool_approvals_loaded of
+      (Tui_decode.keeper_tool_approval list, string) result
+  | Surface_tool_approval_answered of
+      string * string * bool * (bool, string) result
+      (** keeper, tool call id, allow, and whether a wait was released — the
+          Approvals-surface twin of [Keeper_chat_approval_answered], which
+          needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
   | Keeper_action_done of
       string
@@ -621,6 +628,58 @@ let settle_live_turn state (request : Keeper_chat.request) =
    the keypress that asked for it. *)
 (* Answer the call the keeper is held at. Runs on its own fiber: the pane stays
    responsive, and a slow server costs the answer rather than the keypress. *)
+(* The Approvals-surface twin of [launch_keeper_approval]: same route, no chat
+   request to correlate with, so the outcome lands in Recent Events instead of
+   a pane's transcript. *)
+let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
+    ~allow =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+          ~tool_call_id ~allow
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Surface_tool_approval_answered (keeper_name, tool_call_id, allow, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Surface_tool_approval_answered
+           (keeper_name, tool_call_id, allow, Error "Eio switch is unavailable"))
+
+(* Fetch the held tool calls for the Approvals surface. Its own fiber for the
+   same reason every loader runs on one: a slow server costs the refresh, not
+   the keypress. *)
+let launch_keeper_tool_approvals_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_tool_approvals ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_tool_approvals_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
   let host = Env_config_core.masc_host () in
@@ -1403,9 +1462,19 @@ let apply_overview_load state = function
 
 let apply_approvals_load state = function
   | Ok snapshot ->
+      (* The cursor indexes the merged list; the operator rows sit after the
+         keeper tool rows, so reconciliation by token happens in operator
+         coordinates and the keeper prefix length converts both ways. A
+         cursor on a keeper row is not touched by an operator refresh. *)
+      let keeper_prefix = List.length state.keeper_tool_approvals in
+      let operator_cursor = state.approval_cursor - keeper_prefix in
       let approval_cursor =
-        Approval.reconcile_cursor ~current_items:(approval_items state)
-          ~cursor:state.approval_cursor ~next_items:snapshot.aps_items
+        if operator_cursor < 0 then state.approval_cursor
+        else
+          keeper_prefix
+          + Approval.reconcile_cursor
+              ~current_items:(operator_approval_items state)
+              ~cursor:operator_cursor ~next_items:snapshot.aps_items
       in
       state.approval_snapshot <- Some snapshot;
       state.approvals_error <- None;
@@ -2404,6 +2473,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
+      (* The held-call listing rides the same cadence as the surface that
+         draws it. Fetched only while the surface is up: the waits are
+         short-lived and every other surface would fetch rows it never
+         shows. *)
+      (match state.view with
+       | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | _ -> ());
       open_observer_if_due state ~retry_closed:false
         ~host:(Env_config_core.masc_host ()) ~port:state.port ~mailbox
   | Observer_opened session_id ->
@@ -2666,6 +2742,40 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       append_chat_history state request
         (match result with Ok true -> Message_status | _ -> Message_error)
         text
+  | Keeper_tool_approvals_loaded result ->
+      (match result with
+       | Ok held ->
+           state.keeper_tool_approvals <- held;
+           state.keeper_tool_approvals_error <- None;
+           let count = List.length (approval_items state) in
+           if state.approval_cursor >= count then
+             state.approval_cursor <- max 0 (count - 1)
+       | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Surface_tool_approval_answered (keeper_name, tool_call_id, allow, result) ->
+      (* The listing is stale the moment an answer lands, so the settled call
+         leaves the local list at once rather than waiting for a refresh. *)
+      state.keeper_tool_approvals <-
+        List.filter
+          (fun (held : Tui_decode.keeper_tool_approval) ->
+            not (String.equal held.kta_tool_call_id tool_call_id))
+          state.keeper_tool_approvals;
+      let count = List.length (approval_items state) in
+      if state.approval_cursor >= count then
+        state.approval_cursor <- max 0 (count - 1);
+      add_event state
+        (match result with Ok true -> "system" | _ -> "error")
+        (match result with
+         | Ok true ->
+             Printf.sprintf "%s %s's held call %s"
+               (if allow then "allowed" else "denied")
+               keeper_name
+               (Keeper_chat.compact_request_id tool_call_id)
+         | Ok false ->
+             Printf.sprintf
+               "too late for %s's call %s; it was no longer waiting"
+               keeper_name
+               (Keeper_chat.compact_request_id tool_call_id)
+         | Error detail -> "could not answer the held call: " ^ detail)
   | Keeper_chat_interrupt_done (request, result) ->
       (match state.msg_live with
        | Some live
@@ -3189,18 +3299,31 @@ let main () =
            (match state.view with
             | Approvals ->
                 (match List.nth_opt (approval_items state) state.approval_cursor with
-                 | Some a ->
+                 | Some (Operator_row a) ->
                      handle_approval_decision state a Confirm
                        ~mailbox:async_messages
+                 | Some (Keeper_tool_row held) ->
+                     (* One press, matching the chat pane's [y]: the wait runs
+                        out on a short clock, so the two-press arming the
+                        operator actions use would spend it. *)
+                     launch_surface_tool_approval state
+                       ~mailbox:async_messages
+                       ~keeper_name:held.kta_keeper
+                       ~tool_call_id:held.kta_tool_call_id ~allow:true
                  | None -> ())
             | _ -> ())
        | Some "n" | Some "N" ->
            (match state.view with
             | Approvals ->
                 (match List.nth_opt (approval_items state) state.approval_cursor with
-                 | Some a ->
+                 | Some (Operator_row a) ->
                      handle_approval_decision state a Deny
                        ~mailbox:async_messages
+                 | Some (Keeper_tool_row held) ->
+                     launch_surface_tool_approval state
+                       ~mailbox:async_messages
+                       ~keeper_name:held.kta_keeper
+                       ~tool_call_id:held.kta_tool_call_id ~allow:false
                  | None -> ())
             | _ -> ())
        | Some "r" | Some "R" ->
@@ -3254,7 +3377,13 @@ let main () =
             | Keepers _ ->
                 launch_lanes_load state ~mailbox:async_messages;
                 state.view <- Lanes
-            | Lanes -> state.view <- Approvals
+            | Lanes ->
+                (* Loaded on arrival: a held call is on a short clock, and
+                   showing none until the next periodic refresh reads as
+                   "nothing is waiting". *)
+                launch_keeper_tool_approvals_load state
+                  ~mailbox:async_messages;
+                state.view <- Approvals
             | Approvals ->
                 state.pending_approval_action <- None;
                 state.view <- Board

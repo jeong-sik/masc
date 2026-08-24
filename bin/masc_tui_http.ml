@@ -554,6 +554,11 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
   get_json ~host ~port
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
+(** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
+let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/tool-approvals"
+
 (** POST /api/v1/operator/confirm to approve/deny a pending confirmation. *)
 let operator_confirm_body ~(token : string)
     ~(decision : Masc_tui_operator_projection.approval_decision) =

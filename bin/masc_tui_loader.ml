@@ -548,6 +548,13 @@ let load_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("approvals load failed: " ^ err)
   | Ok json -> Masc_tui_operator_projection.decode_snapshot json
 
+(** Load the tool calls keepers are holding, for the Approvals surface. *)
+let load_keeper_tool_approvals ~(host : string) ~(port : int) :
+    (Tui_decode.keeper_tool_approval list, string) result =
+  match fetch_keeper_tool_approvals ~host ~port with
+  | Error err -> Error ("tool approvals load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_tool_approvals json
+
 (** Load the delivery-path summary from /api/v1/dashboard/transport-health. *)
 let load_transport_health ~(host : string) ~(port : int) :
     (Tui_decode.transport_health, string) result =

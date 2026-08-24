@@ -1982,6 +1982,15 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
          handle_keeper_tool_approval state request reqd) request reqd)
 
+  (* Lists the tool calls keepers are holding, so a wait whose owning stream
+     watcher is gone can still be answered instead of only timing out
+     (masc#30034). Read authority follows the operator snapshot (public
+     read): the listing names what is being asked; answering stays behind
+     the authed POST above. *)
+  |> Http.Router.get "/api/v1/keepers/tool-approvals" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_keeper_tool_approvals_list state request reqd) request reqd)
+
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        match Keeper_chat_operations.mutation_route (Http.Request.path request) with

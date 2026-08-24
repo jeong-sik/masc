@@ -1874,8 +1874,54 @@ let test_decode_system_log_requires_the_message () =
   | Ok _ -> Alcotest.fail "a line with no message decoded"
   | Error _ -> ()
 
+(* GET /api/v1/keepers/tool-approvals — the Approvals surface's held-call
+   rows. A row missing a field is rejected, not dropped: a listing that
+   silently thins is how a held call goes unanswered again (masc#30034). *)
+let keeper_tool_approvals_json =
+  `Assoc
+    [ ( "pending"
+      , `List
+          [ `Assoc
+              [ ("keeper", `String "sangsu")
+              ; ("tool_call_id", `String "call-1")
+              ; ("tool", `String "Execute")
+              ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
+              ; ("question", `String "Run Execute on git status?")
+              ; ("asked_at", `Float 1787555000.)
+              ; ("timeout_sec", `Float 180.)
+              ]
+          ] )
+    ]
+
+let test_decode_keeper_tool_approvals () =
+  match Tui_decode.decode_keeper_tool_approvals keeper_tool_approvals_json with
+  | Error err -> Alcotest.fail err
+  | Ok [ held ] ->
+      Alcotest.(check string) "keeper" "sangsu" held.Tui_decode.kta_keeper;
+      Alcotest.(check string) "call id" "call-1" held.kta_tool_call_id;
+      Alcotest.(check string) "tool" "Execute" held.kta_tool;
+      Alcotest.(check string) "question" "Run Execute on git status?"
+        held.kta_question;
+      Alcotest.(check (float 0.001)) "asked at" 1787555000. held.kta_asked_at;
+      Alcotest.(check (float 0.001)) "budget" 180. held.kta_timeout_sec
+  | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
+
+let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
+  let thin =
+    `Assoc [ ("pending", `List [ `Assoc [ ("keeper", `String "sangsu") ] ]) ]
+  in
+  match Tui_decode.decode_keeper_tool_approvals thin with
+  | Ok _ -> Alcotest.fail "a row with no call id decoded"
+  | Error _ -> ()
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_keeper_tool_approvals",
+      [ Alcotest.test_case "carries the whole ask" `Quick
+          test_decode_keeper_tool_approvals
+      ; Alcotest.test_case "rejects a thin row" `Quick
+          test_decode_keeper_tool_approvals_rejects_a_thin_row
+      ] );
     ( "decode_tools",
       [
         Alcotest.test_case "reads the live shape" `Quick

@@ -161,6 +161,89 @@ let test_strip_suffix_refuses_ambiguous_prefix () =
        "alpha12")
 ;;
 
+let tool_use id name = Types.ToolUse { id; name; input = `Assoc [] }
+
+let admit names blocks =
+  Agent_tools.admit_tool_use_names
+    (Agent_tools.build_index (List.map make_tool names))
+    blocks
+;;
+
+let admitted_names (admission : Agent_tools.tool_use_admission) =
+  List.filter_map
+    (function
+      | Types.ToolUse { name; _ } -> Some name
+      | _ -> None)
+    admission.admitted
+;;
+
+let test_admission_keeps_exact_name () =
+  let admission = admit [ "Execute" ] [ tool_use "t1" "Execute" ] in
+  check (list string) "exact name survives" [ "Execute" ] (admitted_names admission);
+  check int "nothing rejected" 0 admission.rejected
+;;
+
+(* The recovered call must be STORED under the registered name, not merely
+   dispatched under it: the transcript is what the next request replays, so
+   leaving the fused spelling here keeps handing the model the bad example
+   that #29999 stopped short of removing. *)
+let test_admission_stores_recovered_call_under_registered_name () =
+  let admission = admit [ "Execute" ] [ tool_use "t1" "Execute1139645993.1" ] in
+  check (list string) "stored under stem" [ "Execute" ] (admitted_names admission);
+  check int "recovery is not a rejection" 0 admission.rejected
+;;
+
+(* masc#29337 live shape: the tail carries [-] and [e], which suffix recovery
+   refuses by contract, so no registered tool answers this name. *)
+let test_admission_drops_unroutable_name () =
+  let admission = admit [ "Execute" ] [ tool_use "t1" "Execute-1.1111e1111111" ] in
+  check (list string) "call is gone" [] (admitted_names admission);
+  check int "counted once" 1 admission.rejected
+;;
+
+(* Length alone decides nothing: a long all-digit tail is still a call number,
+   so recovery answers it and the transcript stores the stem either way. *)
+let test_admission_recovers_long_digit_tail () =
+  let name = "Execute" ^ String.make 4096 '9' in
+  let admission = admit [ "Execute" ] [ tool_use "t1" name ] in
+  check (list string) "stored under stem" [ "Execute" ] (admitted_names admission);
+  check int "nothing rejected" 0 admission.rejected
+;;
+
+(* The 62,946-byte name measured on 2026-08-24 was digits around an [e], which
+   no registered tool answers. It reached the transcript intact and the turn
+   that carried it cost 862 seconds, so the shape is pinned here. *)
+let test_admission_drops_degenerate_long_name () =
+  let name = "Execute" ^ String.make 2048 '1' ^ "e" ^ String.make 2048 '9' in
+  let admission = admit [ "Execute" ] [ tool_use "t1" name ] in
+  check (list string) "no call survives" [] (admitted_names admission);
+  check int "counted once" 1 admission.rejected
+;;
+
+let test_admission_keeps_non_tool_blocks () =
+  let blocks = [ Types.Text "thinking out loud"; tool_use "t1" "Execute-1.1e1" ] in
+  let admission = admit [ "Execute" ] blocks in
+  check int "one call dropped" 1 admission.rejected;
+  check
+    (list string)
+    "text block untouched"
+    [ "thinking out loud" ]
+    (List.filter_map
+       (function
+         | Types.Text text -> Some text
+         | _ -> None)
+       admission.admitted)
+;;
+
+let test_admission_is_per_call () =
+  let blocks =
+    [ tool_use "t1" "Execute"; tool_use "t2" "Execute-1.1e1"; tool_use "t3" "Grep" ]
+  in
+  let admission = admit [ "Execute"; "Grep" ] blocks in
+  check (list string) "routable calls kept" [ "Execute"; "Grep" ] (admitted_names admission);
+  check int "only the unroutable one dropped" 1 admission.rejected
+;;
+
 let () =
   run
     "Agent_tools_index"
@@ -185,6 +268,27 @@ let () =
             "user tool case variant does not dispatch lowercase neighbor"
             `Quick
             test_user_tool_case_variant_does_not_dispatch_neighbor
+        ] )
+    ; ( "history admission"
+      , [ test_case "exact name survives" `Quick test_admission_keeps_exact_name
+        ; test_case
+            "recovered call is stored under the registered name"
+            `Quick
+            test_admission_stores_recovered_call_under_registered_name
+        ; test_case
+            "unroutable name never reaches history"
+            `Quick
+            test_admission_drops_unroutable_name
+        ; test_case
+            "long digit tail still recovers to the stem"
+            `Quick
+            test_admission_recovers_long_digit_tail
+        ; test_case
+            "degenerate long name never reaches history"
+            `Quick
+            test_admission_drops_degenerate_long_name
+        ; test_case "non-tool blocks pass through" `Quick test_admission_keeps_non_tool_blocks
+        ; test_case "admission is per call" `Quick test_admission_is_per_call
         ] )
     ; ( "suffix recovery"
       , [ test_case

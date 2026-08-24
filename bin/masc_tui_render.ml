@@ -3263,9 +3263,19 @@ let render_tools (state : state) =
       let idx = i + scroll in
       match List.nth_opt tool_rows idx with
       | None -> box_empty buf cols
+      | Some (Tool_tree.Domain { name; count }) ->
+          (* A rule line after the name: the domain is the question the
+             section answers, and a heavier separation than the family's
+             plain bold keeps the three depths readable apart. The rule is a
+             fixed length rather than filling the row -- box_line_styled
+             pads, and a domain heading that shouts across the full width
+             would outrank the surface header above it. *)
+          let rule = "─────────────────────" in
+          box_line_styled buf cols ~style:Ansi.bold
+            (Printf.sprintf " %s (%d) %s" (Terminal_text.single_line name) count rule)
       | Some (Tool_tree.Family { name; count }) ->
           box_line_styled buf cols ~style:Ansi.bold
-            (Printf.sprintf "  %s  (%d)" (Terminal_text.single_line name) count)
+            (Printf.sprintf "    %s  (%d)" (Terminal_text.single_line name) count)
       | Some (Tool_tree.Tool t) ->
           let open Masc.Tui_decode in
           let surfaces =
@@ -3273,10 +3283,11 @@ let render_tools (state : state) =
             | [] -> "none"
             | names -> String.concat ", " names
           in
-          (* Indented under the heading above it, so the name column reads as
-             a tree rather than as a hundred equals. *)
+          (* Indented under the family heading above it, one deeper than the
+             family sits under its domain, so the name column reads as a
+             three-level tree rather than as a hundred equals. *)
           let line =
-            Printf.sprintf "    %-30s %-8s %s"
+            Printf.sprintf "      %-30s %-8s %s"
               (Terminal_text.single_line t.tl_name)
               (if t.tl_direct_call then "yes" else "no")
               (Terminal_text.single_line surfaces)

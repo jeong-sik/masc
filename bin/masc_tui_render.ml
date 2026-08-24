@@ -1576,16 +1576,22 @@ let keeper_status_word (status : Status.control_plane_status option) =
   | Some value -> Status.control_plane_status_to_string value
 
 (* The runtime id is [provider.model], and the provider half repeats inside the
-   model half often enough that printing both costs the column its width. *)
+   model half often enough that printing both costs the column its width. The
+   phase is the fine-grained state-machine reading from GET /api/v1/gate/keepers,
+   shown ahead of the model so an operator scanning the column sees lifecycle
+   state first. *)
 let keeper_runtime_label (runtime : keeper_runtime option) =
   match runtime with
   | None -> "\xe2\x80\x94"
   | Some row -> (
       let raw = Terminal_text.single_line row.kr_runtime_id in
-      match String.index_opt raw '.' with
-      | Some idx when idx + 1 < String.length raw ->
-          String.sub raw (idx + 1) (String.length raw - idx - 1)
-      | Some _ | None -> raw)
+      let model =
+        match String.index_opt raw '.' with
+        | Some idx when idx + 1 < String.length raw ->
+            String.sub raw (idx + 1) (String.length raw - idx - 1)
+        | Some _ | None -> raw
+      in
+      Printf.sprintf "%s %s" (Terminal_text.single_line row.kr_phase) model)
 
 (* Two dispositions an operator needs before stopping anything: whether the
    keeper comes back by itself, and whether it takes turns without being
@@ -1665,7 +1671,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints ?(offers_chat = true) state reading =
+let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -1714,7 +1720,7 @@ let keeper_action_hints ?(offers_chat = true) state reading =
                between surfaces reads as a key that does not exist. *)
           ; (if offers_chat then Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
              else Ansi.dim ^ "c chat" ^ Ansi.reset)
-          ; (if offers_chat then Ansi.dim ^ "esc back" ^ Ansi.reset
+          ; (if offers_back then Ansi.dim ^ "esc back" ^ Ansi.reset
              else Ansi.cyan ^ "enter" ^ Ansi.reset ^ " detail")
           ; Ansi.dim ^ "r refresh" ^ Ansi.reset
           ; Ansi.dim ^ "q quit" ^ Ansi.reset
@@ -1929,7 +1935,7 @@ let render_keeper_list (state : state) =
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
   Buffer.add_string buf
-    (keeper_action_hints ~offers_chat:false state selected_reading ^ "\n");
+    (keeper_action_hints ~offers_back:false state selected_reading ^ "\n");
 
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf

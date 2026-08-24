@@ -3453,14 +3453,12 @@ let main () =
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
-           (* Chat, from detail only. Opening detail is the act that names the
-              target: on the roster the cursor moves by itself when a refresh
-              drops a row, so a keeper that disappears while the operator is
-              reaching for this key would hand the message to whichever keeper
-              slid under the cursor. [c] is an alias for [m] because the footer
-              names the action rather than the mnemonic. *)
+           (* Chat, from the roster as well as from detail, for the same reason
+              logs are reachable from both: the keeper an operator wants to
+              talk to is the one under the cursor. [c] is an alias for [m]
+              because the footer names the action rather than the mnemonic. *)
            (match state.view with
-            | Keepers Keeper_detail
+            | Keepers (Keeper_list | Keeper_detail)
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in

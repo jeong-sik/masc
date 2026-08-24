@@ -187,8 +187,10 @@ let test_flat_tool_surface () =
   let open Yojson.Safe.Util in
   check bool "create schema is closed" false
     (create_schema.input_schema |> member "additionalProperties" |> to_bool);
-  check int "create schema has no mandatory policy field" 0
-    (create_schema.input_schema |> member "required" |> to_list |> List.length);
+  check bool "create schema omits an empty required list" false
+    (match create_schema.input_schema with
+     | `Assoc fields -> List.mem_assoc "required" fields
+     | _ -> fail "create input schema is not an object");
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in

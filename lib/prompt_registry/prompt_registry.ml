@@ -82,15 +82,12 @@ let markdown_body content =
   let _metadata, body = parse_frontmatter content in
   body
 
-(** Parse a bracketed list value like [a, b, c] into string list. *)
+(** Parse a list value like [a, b, c] into string list. Reads through
+    {!Frontmatter.list_field}, which also accepts the unbracketed [a, b, c]
+    the other frontmatter readers used to allow; every asset in the tree
+    writes the bracketed form, so nothing already on disk changes meaning. *)
 let parse_list_value s =
-  let s = String.trim s in
-  if String.length s >= 2 && s.[0] = '[' && s.[String.length s - 1] = ']' then
-    let inner = String.sub s 1 (String.length s - 2) in
-    String.split_on_char ',' inner
-    |> List.map String.trim
-    |> List.filter (fun s -> s <> "")
-  else []
+  Frontmatter.list_field { Frontmatter.fields = [ ("v", s) ]; body = "" } "v"
 
 (** {1 Variable Extraction} *)
 

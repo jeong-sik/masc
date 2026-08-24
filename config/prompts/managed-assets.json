@@ -7,6 +7,7 @@
     "judge.board.md",
     "judge.effect.md",
     "keeper.md",
+    "keeper.current_task.skills.md",
     "keeper.observation.current_task_absent.md",
     "keeper.observation.current_task_absent_in_recovery.md",
     "keeper.observation.current_task_unobservable.md",

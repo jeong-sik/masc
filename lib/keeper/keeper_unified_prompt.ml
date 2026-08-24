@@ -154,6 +154,22 @@ let format_goal_summaries (summaries : goal_summary list) : string =
          | None -> base)
        summaries)
 
+let format_task_skills skills =
+  let skill_names = String.concat ", " skills in
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.keeper_current_task_skills
+      [ "skill_names", skill_names ]
+  with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Misc.error
+      "keeper current-task skills prompt %s did not render, falling back to skill names: %s"
+      Prompt_names.keeper_current_task_skills
+      detail;
+    "- skills=" ^ skill_names
+;;
+
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
@@ -226,11 +242,7 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
   (match task.Masc_domain.skills with
    | [] -> ()
    | skills ->
-       Buffer.add_string buf
-         (Printf.sprintf
-            "- Skills named by this task: %s. Each one is at \
-             .masc/skills/<name>/SKILL.md — read it before you use it.\n"
-            (String.concat ", " skills)));
+       Buffer.add_string buf (format_task_skills skills ^ "\n"));
   Buffer.add_string buf
     "\n";
   Buffer.contents buf

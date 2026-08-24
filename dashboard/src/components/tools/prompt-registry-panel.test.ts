@@ -26,7 +26,6 @@ function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptIte
     category: 'keeper',
     description: 'Keeper system prompt',
     current: '',
-    default: null,
     effective: '',
     file_value: null,
     override_value: null,
@@ -44,7 +43,6 @@ function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptIte
 const HELPER_FIXTURES: DashboardPromptItem[] = [
   makePrompt({ key: 'keeper', category: 'keeper', description: 'k1', source: 'file' }),
   makePrompt({ key: 'keeper.turn', category: 'keeper', description: 'k2', source: 'override' }),
-  makePrompt({ key: 'planner.root', category: 'planner', description: 'p1', source: 'default' }),
   makePrompt({ key: 'planner.step', category: 'planner', description: 'p2', source: 'missing' }),
   makePrompt({
     key: 'supervisor.brief',
@@ -61,7 +59,6 @@ function defaultPromptItems(): DashboardPromptItem[] {
       category: 'keeper',
       description: 'world block',
       current: 'override world',
-      default: 'file world',
       effective: 'override world',
       file_value: 'file world',
       override_value: 'override world',
@@ -76,7 +73,6 @@ function defaultPromptItems(): DashboardPromptItem[] {
       category: 'analysis',
       description: 'dry run block',
       current: 'dry run prompt',
-      default: 'dry run prompt',
       effective: 'dry run prompt',
       file_value: 'dry run prompt',
       override_value: null,
@@ -92,10 +88,9 @@ function defaultPromptItems(): DashboardPromptItem[] {
 describe('promptSourceCounts', () => {
   it('counts each source and total', () => {
     expect(promptSourceCounts(HELPER_FIXTURES)).toEqual({
-      all: 5,
+      all: 4,
       file: 2,
       override: 1,
-      default: 1,
       missing: 1,
     })
   })
@@ -105,7 +100,6 @@ describe('promptSourceCounts', () => {
       all: 0,
       file: 0,
       override: 0,
-      default: 0,
       missing: 0,
     })
   })

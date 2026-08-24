@@ -406,7 +406,11 @@ let consume_dispatched_message_draft state request =
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
   let rows, _cols = get_terminal_size () in
-  let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
+  (* The pane's fixed chrome is 7 rows (render_keeper_message names them);
+     composer growth is already inside [keeper_message_status_rows]. Adding
+     composer_max_rows here counted it twice, and every PgUp jumped four
+     rows short of the screenful the comment promises. *)
+  let chrome = 7 in
   max 1 (rows - chrome - keeper_message_status_rows state)
 
 (* What this pane has of the operator's own lines for the keeper on screen,
@@ -490,9 +494,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
+  let live_is_on_screen live =
+    (* [msg_live] survives leaving the chat, so a prompt for keeper A must
+       not be answered (or interrupted) from keeper B's screen. *)
+    state.msg_target_keeper_name
+    = Some (Keeper_chat_transcript.keeper_name live)
+  in
   match state.msg_live, key with
   | Some live, ("y" | "Y" | "n" | "N")
-    when Option.is_some (Keeper_chat_transcript.awaiting_approval live) -> (
+    when live_is_on_screen live
+         && Option.is_some (Keeper_chat_transcript.awaiting_approval live) -> (
       match Keeper_chat_transcript.awaiting_approval live with
       | Some awaiting ->
           answer_approval ~tool_call_id:awaiting.Keeper_chat_transcript.call_id
@@ -1102,7 +1113,10 @@ let launch_resource_read state ~mailbox ~uri =
               Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
                 ~request_id ~uri
             with
-            | Ok text -> Ok (String.split_on_char '\n' text)
+            | Ok text ->
+                Ok
+                  (String.split_on_char '\n' text
+                   |> List.map Masc.Tui_decode.sanitize_terminal_text)
             | Error _ as error -> error)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1169,6 +1183,7 @@ let launch_github_login state ~mailbox keeper_name =
                              Some [ payload ]
                        else None)
                 |> List.concat
+                |> List.map Masc.Tui_decode.sanitize_terminal_text
                 |> List.filter (fun line -> String.trim line <> "")
               in
               if lines <> [] then
@@ -2537,7 +2552,14 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        in the surface bundle, so the tick asks for it here. Without this the
        pane read once on open and a message that arrived after that waited for
        the operator to leave and come back. *)
-    (if needs.Masc_tui_types.needs_keeper_chat then
+    (if
+       needs.Masc_tui_types.needs_keeper_chat
+       (* Not while reading back: the reload replaces the transcript with the
+          newest window, which throws away every older page the operator
+          fetched and snaps the view to the bottom mid-read. The next tick
+          after scroll returns to 0 catches the pane up. *)
+       && state.msg_scroll = 0
+     then
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
@@ -3098,7 +3120,9 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
       Buffer.add_string state.board_draft new_content;
       true
   | "\t" -> false
-  | s when String.length s = 1 ->
+  | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
+      (* The same printable test the chat draft uses: a Korean scalar is
+         three bytes and one keystroke, and a control byte is neither. *)
       Buffer.add_string state.board_draft s;
       true
   | _ -> true
@@ -3308,6 +3332,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       end
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
+      (* The jump lands on a clean screen: a modal or roster search opened
+         while the dispatch was in flight would otherwise sit over (or
+         zombie under) a surface it was not opened on. *)
+      state.help_open <- false;
+      state.palette_open <- false;
+      state.palette_query <- "";
+      state.palette_cursor <- 0;
+      state.roster_search <- None;
       state.msg_scroll <- 0;
       state.view <- Keepers Keeper_message;
       start_keeper_message ~keeper_name:keeper state ~mailbox
@@ -3425,11 +3457,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.keeper_calls_error <- None
         | Error detail -> state.keeper_calls_error <- Some detail)
   | Keeper_config_view_loaded (keeper_name, result) -> (
-      match result with
-      | Ok lines ->
-          state.keeper_config_view <- Some (keeper_name, lines);
-          state.keeper_config_view_error <- None
-      | Error detail -> state.keeper_config_view_error <- Some detail)
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok lines ->
+            state.keeper_config_view <- Some (keeper_name, lines);
+            state.keeper_config_view_error <- None
+        | Error detail -> state.keeper_config_view_error <- Some detail)
   | Runtime_config_view_loaded result -> (
       match result with
       | Ok view ->
@@ -3439,6 +3477,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Resources_listed result -> (
       match result with
       | Ok rows ->
+          let rows =
+            List.map
+              (fun (uri, name) ->
+                ( Masc.Tui_decode.sanitize_terminal_text uri,
+                  Masc.Tui_decode.sanitize_terminal_text name ))
+              rows
+          in
           state.resources_list <- Some rows;
           state.resources_error <- None;
           state.resources_cursor <-
@@ -3452,11 +3497,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.resource_scroll <- 0
       | Error detail -> state.resource_content_error <- Some detail)
   | Github_identity_view_loaded (keeper_name, result) -> (
-      match result with
-      | Ok lines ->
-          state.github_identity_view <- Some (keeper_name, lines);
-          state.github_identity_view_error <- None
-      | Error detail -> state.github_identity_view_error <- Some detail)
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok lines ->
+            state.github_identity_view <- Some (keeper_name, lines);
+            state.github_identity_view_error <- None
+        | Error detail -> state.github_identity_view_error <- Some detail)
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
          one on screen still lands on its own stamp. *)
@@ -4345,6 +4396,8 @@ let main () =
         (not compact_viewport)
         && (not state.help_open)
         && (not state.palette_open)
+        && Option.is_none state.roster_search
+        && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
         &&
@@ -4356,7 +4409,10 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some k
          when Render_schedule.Input_shortcut.is_quit ~message_mode k
-              && Option.is_none state.roster_search ->
+              && Option.is_none state.roster_search
+              && not
+                   (state.view = Board
+                   && state.board_mode = Board_compose) ->
            raise Break
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the
@@ -4367,18 +4423,24 @@ let main () =
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
-       | Some k when state.help_open ->
+       | Some k when state.help_open && not compact_viewport ->
            (match k with
             | "?" | "esc" ->
                 state.help_open <- false;
                 state.help_scroll <- 0
-            | "j" | "down" -> state.help_scroll <- state.help_scroll + 1
+            | "j" | "down" ->
+                (* Clamped against the real sheet so overshoot does not bank
+                   presses the way unbounded counters did elsewhere. *)
+                let ceiling =
+                  max 0 (List.length (Masc_tui_render.help_lines ()) - 1)
+                in
+                state.help_scroll <- min ceiling (state.help_scroll + 1)
             | "k" | "up" -> state.help_scroll <- max 0 (state.help_scroll - 1)
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
-       | Some k when state.palette_open ->
+       | Some k when state.palette_open && not compact_viewport ->
            let close () =
              state.palette_open <- false;
              state.palette_query <- "";
@@ -4421,7 +4483,8 @@ let main () =
           The list itself never narrows -- see [roster_search] in types. *)
        | Some k
          when state.view = Keepers Keeper_list
-              && Option.is_some state.roster_search ->
+              && Option.is_some state.roster_search
+              && not compact_viewport ->
            let query = Option.value state.roster_search ~default:"" in
            (match k with
             | "esc" -> state.roster_search <- None
@@ -4441,10 +4504,10 @@ let main () =
                 state.roster_search <- Some longer;
                 roster_search_jump state ~query:longer ~after:(-1)
             | _ -> ())
-       | Some "/" when state.view = Keepers Keeper_list ->
+       | Some "/" when state.view = Keepers Keeper_list && not compact_viewport ->
            state.roster_search <- Some ""
        | Some (("[" | "]") as bracket)
-         when state.view = Keepers Keeper_detail ->
+         when state.view = Keepers Keeper_detail && not compact_viewport ->
            (* Tabs inside the detail pane: [ and ] walk the same short list
               the pane's title row draws. Non-Info tabs read over HTTP on
               entry; the stamped keeper name keeps a slow answer from being
@@ -4464,22 +4527,27 @@ let main () =
            state.detail_scroll <- 0;
            (match selected_keeper state, state.detail_tab with
             | Some keeper, Detail_instructions ->
+                state.keeper_config_view <- None;
+                state.keeper_config_view_error <- None;
                 launch_keeper_config_view state ~mailbox:async_messages
                   keeper.k_name
             | Some keeper, Detail_github ->
+                state.github_identity_view <- None;
+                state.github_identity_view_error <- None;
                 launch_github_identity_view state ~mailbox:async_messages
                   keeper.k_name
             | _, Detail_info | None, _ -> ())
        | Some "L"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_github ->
+              && state.detail_tab = Detail_github
+              && not compact_viewport ->
            (match selected_keeper state with
             | Some keeper ->
                 state.github_identity_view <-
                   Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
                 launch_github_login state ~mailbox:async_messages keeper.k_name
             | None -> ())
-       | Some "\r" when state.view = Resources ->
+       | Some "\r" when state.view = Resources && not compact_viewport ->
            (match
               Option.bind state.resources_list (fun rows ->
                   List.nth_opt rows state.resources_cursor)
@@ -4488,9 +4556,9 @@ let main () =
                 state.resource_focus <- true;
                 launch_resource_read state ~mailbox:async_messages ~uri
             | None -> ())
-       | Some "J" when state.view = Resources ->
+       | Some "J" when state.view = Resources && not compact_viewport ->
            state.resource_scroll <- state.resource_scroll + 1
-       | Some "K" when state.view = Resources ->
+       | Some "K" when state.view = Resources && not compact_viewport ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "n"
          when state.view = Keepers Keeper_list
@@ -4573,10 +4641,10 @@ let main () =
               surface cycle keeps working, and quit was answered above. *)
            let _handled = handle_board_compose_key state ~mailbox:async_messages k in
            ()
-       | Some "?" ->
+       | Some "?" when not compact_viewport ->
            state.help_open <- true;
            state.help_scroll <- 0
-       | Some ":" ->
+       | Some ":" when not compact_viewport ->
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
@@ -4710,8 +4778,10 @@ let main () =
                    ignored while the first is unanswered. *)
                 (match state.msg_live with
                  | Some live
-                   when Keeper_chat_transcript.interrupt live
-                        = Keeper_chat_transcript.Not_requested ->
+                   when state.msg_target_keeper_name
+                        = Some (Keeper_chat_transcript.keeper_name live)
+                        && Keeper_chat_transcript.interrupt live
+                           = Keeper_chat_transcript.Not_requested ->
                      (match
                         inflight_by_request_id state
                           (Keeper_chat_transcript.request_id live)
@@ -5070,9 +5140,13 @@ let main () =
                      (match state.detail_tab with
                       | Detail_info -> ()
                       | Detail_instructions ->
+                          state.keeper_config_view <- None;
+                          state.keeper_config_view_error <- None;
                           launch_keeper_config_view state
                             ~mailbox:async_messages k.k_name
                       | Detail_github ->
+                          state.github_identity_view <- None;
+                          state.github_identity_view_error <- None;
                           launch_github_identity_view state
                             ~mailbox:async_messages k.k_name)
                  | None -> ())
@@ -5199,17 +5273,6 @@ let main () =
             | Lanes | Board | Approvals | Planning | Schedules
             | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
-       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
-           (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
-              letters stay navigation-free there. The first press arms, the
-              same press submits; the server owns the phase rules. *)
-           let action =
-             match key with
-             | Some ("c" | "C") -> Goal_phase.Public_action.Request_complete
-             | Some ("x" | "X") -> Goal_phase.Public_action.Drop
-             | _ -> Goal_phase.Public_action.Reopen
-           in
-           handle_goal_action_key state ~mailbox:async_messages ~action
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -5362,8 +5425,10 @@ let main () =
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Connectors | Runtime | Resources | Tools | System_logs -> ())
-       | Some "b" when state.view = Connectors -> handle_connector_bind ()
-       | Some "u" when state.view = Connectors -> handle_connector_unbind ()
+       | Some "b" when state.view = Connectors && not compact_viewport ->
+           handle_connector_bind ()
+       | Some "u" when state.view = Connectors && not compact_viewport ->
+           handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -5397,7 +5462,9 @@ let main () =
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
-        state.pending_approval_action <- None;
+        (* The armed approval survives the tick: the snapshot apply already
+           disarms it when its token leaves the list, so clearing here only
+           made the second press race a two-second clock. *)
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
         let port = state.port in

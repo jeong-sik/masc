@@ -121,26 +121,76 @@ let resources_read_request_body ~request_id ~uri =
   plain_request_body ~request_id ~method_:"resources/read"
     ~params:(`Assoc [ ("uri", `String uri) ])
 
+(* Every data payload on the stream, in order. A Streamable-HTTP server may
+   put notifications ahead of the response, and the colon-no-space spelling
+   is legal SSE, so this reads more than [response_json]'s first line. *)
+let response_candidates body =
+  let data_payloads =
+    String.split_on_char '\n' body
+    |> List.filter_map (fun line ->
+           let line =
+             if String.length line > 0 && line.[String.length line - 1] = '\r'
+             then String.sub line 0 (String.length line - 1)
+             else line
+           in
+           if String.length line >= 5 && String.sub line 0 5 = "data:" then
+             let payload = String.sub line 5 (String.length line - 5) in
+             Some (String.trim payload)
+           else None)
+    |> List.filter_map (fun payload ->
+           match Yojson.Safe.from_string payload with
+           | json -> Some json
+           | exception Yojson.Json_error _ -> None)
+  in
+  match data_payloads with
+  | [] -> (
+      match Yojson.Safe.from_string (String.trim body) with
+      | json -> [ json ]
+      | exception Yojson.Json_error _ -> [])
+  | payloads -> payloads
+
 let result_of_body ~request_id ~label body =
-  let* json = response_json body in
-  match json with
-  | `Assoc fields -> (
-      let answered_id =
-        match List.assoc_opt "id" fields with
-        | Some (`String value) -> value
-        | Some (`Int value) -> string_of_int value
-        | _ -> ""
+  let candidates = response_candidates body in
+  let id_of fields =
+    match List.assoc_opt "id" fields with
+    | Some (`String value) -> Some value
+    | Some (`Int value) -> Some (string_of_int value)
+    | Some `Null -> None
+    | _ -> None
+  in
+  let matching =
+    List.find_map
+      (fun json ->
+        match json with
+        | `Assoc fields when id_of fields = Some request_id -> Some fields
+        | _ -> None)
+      candidates
+  in
+  match matching with
+  | Some fields -> (
+      match List.assoc_opt "error" fields with
+      | Some error -> Error (label ^ " error: " ^ Yojson.Safe.to_string error)
+      | None -> (
+          match List.assoc_opt "result" fields with
+          | Some (`Assoc result) -> Ok result
+          | Some _ | None -> Error (label ^ " answered with no result")))
+  | None -> (
+      (* No frame names our id. A parse-refusal answers with a null id and
+         an error member -- that error is the diagnosis, not the id gate. *)
+      let null_id_error =
+        List.find_map
+          (fun json ->
+            match json with
+            | `Assoc fields when id_of fields = None ->
+                List.assoc_opt "error" fields
+            | _ -> None)
+          candidates
       in
-      if not (String.equal answered_id request_id) then
-        Error (label ^ " answered a different request id")
-      else
-        match List.assoc_opt "error" fields with
-        | Some error -> Error (label ^ " error: " ^ Yojson.Safe.to_string error)
-        | None -> (
-            match List.assoc_opt "result" fields with
-            | Some (`Assoc result) -> Ok result
-            | Some _ | None -> Error (label ^ " answered with no result")))
-  | _ -> Error (label ^ " answer was not an object")
+      match null_id_error with
+      | Some error -> Error (label ^ " error: " ^ Yojson.Safe.to_string error)
+      | None ->
+          if candidates = [] then Error (label ^ " answer was not JSON")
+          else Error (label ^ " answered a different request id"))
 
 let resources_of_body ~request_id body =
   let* result = result_of_body ~request_id ~label:"resources/list" body in
@@ -168,11 +218,24 @@ let resource_text_of_body ~request_id body =
   let* result = result_of_body ~request_id ~label:"resources/read" body in
   match List.assoc_opt "contents" result with
   | Some (`List parts) ->
-      Ok
-        (parts
-         |> List.filter_map (fun part ->
-                match part with
-                | `Assoc fields -> string_field fields "text"
-                | _ -> None)
-         |> String.concat "\n")
+      (* A blob-only part must not read as an empty text file: name it. *)
+      let rendered =
+        List.filter_map
+          (fun part ->
+            match part with
+            | `Assoc fields -> (
+                match string_field fields "text" with
+                | Some text -> Some text
+                | None -> (
+                    match string_field fields "blob" with
+                    | Some blob ->
+                        Some
+                          (Printf.sprintf
+                             "(binary resource \xe2\x80\x94 %d base64 bytes, not rendered)"
+                             (String.length blob))
+                    | None -> None))
+            | _ -> None)
+          parts
+      in
+      Ok (String.concat "\n" rendered)
   | Some _ | None -> Error "resources/read answered with no contents"

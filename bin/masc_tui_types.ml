@@ -1207,6 +1207,12 @@ let keeper_message_status_rows (state : state) =
   + unavailable_target
   + (match state.msg_live with
      | None -> 0
+     | Some live
+       when state.msg_target_keeper_name
+            <> Some (Masc_tui_keeper_chat_transcript.keeper_name live) ->
+         (* Another keeper's live turn draws nothing on this screen, so it
+            must reserve nothing -- the counter mirrors the pane. *)
+         0
      | Some live ->
          (* Same call the drawing makes, so the budget cannot count a
             different number of rows than the pane draws. The age in the

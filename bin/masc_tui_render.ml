@@ -2473,7 +2473,12 @@ let render_lanes (state : state) =
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = listing_chrome ~error:state.lanes_error in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The overflow indicator spends a content row rather than growing the
+     frame past its budget, where the truncation's casualty was the footer. *)
+  let base_height = max 1 (rows - chrome_rows) in
+  let content_height =
+    if shown > base_height then max 1 (base_height - 1) else base_height
+  in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lanes_scroll max_scroll) in
   if shown = 0 then begin
@@ -2694,8 +2699,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Divider *)
     box_divider buf cols;
 
-    (* Content area with scrolling *)
-    let content_height = max 0 (rows - 6) in  (* header + title + divider + bottom + footer + extra *)
+    (* Content area with scrolling. Chrome is 4 rows (top, title, divider,
+       bottom); the indicator, when the content overflows, spends one
+       content row rather than growing the pane, so the pane's height is
+       rows - 1 in both cases and the split's two bottoms stay level. *)
+    let base_height = max 0 (rows - 5) in
+    let content_height =
+      if total_lines > base_height then max 0 (base_height - 1)
+      else base_height
+    in
     let visible_lines = min content_height total_lines in
     let scroll =
       Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
@@ -3149,8 +3161,22 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
+    (* The row [keeper_message_status_rows] reserves for the older-page
+       fetch. Counting it without drawing it floated the footer a row up,
+       and a failed page load was silent -- the one thing it must not be. *)
+    (if state.msg_older_loading then
+       box_line_styled chat_buf chat_cols ~style:Ansi.dim
+         "  (loading older messages\xe2\x80\xa6)"
+     else
+       match state.msg_older_error with
+       | Some detail ->
+           box_line_styled chat_buf chat_cols ~style:Theme.warn
+             ("  older messages could not be loaded: " ^ detail)
+       | None -> ());
     (match state.msg_live with
-     | Some live ->
+     | Some live
+       when state.msg_target_keeper_name
+            = Some (Keeper_chat_transcript.keeper_name live) ->
          List.iter
            (fun (kind, text) ->
              (* The streaming turn is the row the eye waits on: drawn in the
@@ -3167,7 +3193,7 @@ let render_keeper_message (state : state) =
               | Keeper_chat_transcript.Attention ->
                   box_line_styled chat_buf chat_cols ~style:Theme.warn ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
-     | None -> ());
+     | Some _ | None -> ());
     (* What is waiting, in the order it will go. Drawn in full rather than as
        a count: an operator who typed three lines during a turn needs to see
        which three, and a queue that only says "3 waiting" is the same silence
@@ -4966,14 +4992,24 @@ let render_resources (state : state) =
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
-    (match state.resources_error with
-     | Some detail ->
-         framed_line pane_buf pane_cols
-           (Theme.bad ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
-     | None ->
-         if total = 0 then
-           framed_line pane_buf pane_cols
-             (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset));
+    (* The status line spends one of the budgeted rows, not an extra one:
+       an extra row pushed the pane past its height and the frame's last
+       casualty was the footer. *)
+    let status_rows =
+      match state.resources_error with
+      | Some detail ->
+          framed_line pane_buf pane_cols
+            (Theme.bad ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
+          1
+      | None ->
+          if total = 0 then begin
+            framed_line pane_buf pane_cols
+              (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset);
+            1
+          end
+          else 0
+    in
+    let list_rows_budget = max 0 (list_rows_budget - status_rows) in
     let first =
       if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
     in

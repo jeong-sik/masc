@@ -224,7 +224,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Tools
+    | Verification | Harness | Fusion | Repositories | Connectors | Runtime
+    | Config | Resources | Tools
     | System_logs -> None
   in
   let current_navigation =
@@ -801,3 +802,76 @@ let load_keeper_roster ~(host : string) ~(port : int) :
               Error (Masc_tui_keeper_control.Roster_malformed detail)
           | Ok (rows, truncated, total) ->
               Ok (Masc_tui_keeper_control.roster_of_reading ~rows ~truncated ~total)))
+
+(* The two detail-pane tab reads. Lines are built here so the renderer draws
+   what one place formatted; a decode that only feeds a read-only pane keeps
+   the JSON generic instead of growing a typed mirror of the config shape. *)
+let json_block_lines (json : Yojson.Safe.t) =
+  Yojson.Safe.pretty_to_string json |> String.split_on_char '\n'
+
+let load_keeper_config_view ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (string list, string) result =
+  match
+    Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("keeper config load failed: " ^ err)
+  | Ok json ->
+    let member key =
+      match json with
+      | `Assoc fields -> List.assoc_opt key fields
+      | _ -> None
+    in
+    (* The projection nests the prompt facts under [prompt]; the flat
+       spelling was an older shape and stays as a fallback so a downlevel
+       server still answers. *)
+    let prompt_member key =
+      match member "prompt" with
+      | Some (`Assoc fields) -> List.assoc_opt key fields
+      | _ -> member key
+    in
+    let instructions_lines =
+      match prompt_member "instructions" with
+      | Some (`String text) when String.trim text <> "" ->
+        String.split_on_char '\n' text
+      | Some _ | None -> [ "(no instructions declared)" ]
+    in
+    let effective_lines =
+      match prompt_member "effective_system_prompt" with
+      | Some (`String text) when String.trim text <> "" ->
+        String.split_on_char '\n' text
+      | Some _ | None -> [ "(no effective system prompt)" ]
+    in
+    let sources_lines =
+      match member "sources" with
+      | Some value -> json_block_lines value
+      | None -> []
+    in
+    Ok
+      (("# instructions" :: instructions_lines)
+       @ ("" :: "# effective system prompt" :: effective_lines)
+       @ (match sources_lines with
+          | [] -> []
+          | lines -> "" :: "# sources" :: lines))
+
+let load_keeper_github_identity_view ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (string list, string) result =
+  match
+    Masc_tui_http.fetch_keeper_github_identity ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("github identity load failed: " ^ err)
+  | Ok json -> Ok (json_block_lines json)
+
+let load_runtime_config_view ~(host : string) ~(port : int) :
+    (string * string list, string) result =
+  match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
+  | Error err -> Error ("runtime config load failed: " ^ err)
+  | Ok json ->
+    let member key =
+      match json with
+      | `Assoc fields -> List.assoc_opt key fields
+      | _ -> None
+    in
+    (match member "path", member "source_text" with
+     | Some (`String path), Some (`String text) ->
+       Ok (path, String.split_on_char '\n' text)
+     | _ -> Error "runtime config response missing path/source_text")

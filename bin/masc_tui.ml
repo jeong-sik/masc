@@ -3482,6 +3482,19 @@ let request_console_write_repair render_schedule =
 let mouse_tracking_enable = "\x1b[?1006;1000h"
 let mouse_tracking_disable = "\x1b[?1006;1000l"
 
+(* Tracking is what the wheel costs the terminal: with reports on, a drag is a
+   report and the terminal never highlights anything, so there is no way to
+   copy a line off the screen. Ctrl-T hands the mouse back and takes it again.
+   A letter would not do -- in the composer every letter is text. *)
+let mouse_tracking_on = Atomic.make true
+let toggle_mouse_tracking_key = "\020"
+
+let toggle_mouse_tracking () =
+  let on = not (Atomic.get mouse_tracking_on) in
+  Atomic.set mouse_tracking_on on;
+  output_string stdout (if on then mouse_tracking_enable else mouse_tracking_disable);
+  flush stdout
+
 let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
     ~new_term =
   at_exit cleanup;
@@ -3767,6 +3780,7 @@ let main () =
         && (not state.help_open)
         && (not state.palette_open)
         && state.view <> Keepers Keeper_message
+        && key <> Some toggle_mouse_tracking_key
         &&
         match key with
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
@@ -3776,6 +3790,12 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
            raise Break
+       (* Above the modals on purpose: the reason to reach for this is to copy
+          something already on the screen, and the help overlay is one of the
+          screens worth copying from. *)
+       | Some k when String.equal k toggle_mouse_tracking_key ->
+           toggle_mouse_tracking ();
+           Render_schedule.request render_schedule Render_schedule.Force
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)

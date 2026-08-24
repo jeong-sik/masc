@@ -910,7 +910,11 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:main_path ~binding_name:"suspend"
        ~body_callees:[ "Unix.kill" ]
        ~finally_callees:
-         [ "Sys.set_signal"; "Unix.tcsetattr"; "request_full_repaint" ]);
+         [ "Sys.set_signal"
+         ; "Unix.tcsetattr"
+         ; "Frame_presenter.setup"
+         ; "request_full_repaint"
+         ]);
   check int "the local input loop propagates one Break" 1
     (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
        ~module_path:main_path ~binding_name:"run_loop" ~callee:"raise"

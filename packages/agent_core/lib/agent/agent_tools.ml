@@ -101,11 +101,14 @@ let identifier_prefix requested =
    fresh number every turn, so every retry misses again and the model never
    chose the digits). Recovery belongs where the registered names are known:
    [Some registered] when [requested] is exactly one registered name extended
-   by [0-9._] characters alone. Alphabetic tails, unknown stems, and names
-   matching more than one registered prefix all stay [None] — the exact-match
-   answer below is unchanged for them. *)
+   by [0-9.] characters alone — every observed shape was digits and dots, and
+   admitting [_] would let an underscore registered name such as masc_board_*
+   recover a different stem's underscore tail, so an underscore tail stays a
+   reject until a live shape asks for it. Alphabetic tails, unknown stems,
+   and names matching more than one registered prefix all stay [None] — the
+   exact-match answer below is unchanged for them. *)
 let is_call_suffix_char = function
-  | '0' .. '9' | '.' | '_' -> true
+  | '0' .. '9' | '.' -> true
   | _ -> false
 ;;
 
@@ -216,7 +219,7 @@ let resolve_tool_call tool_index name input =
   | None -> (
     (* GLM fuses a call sequence number onto the name; strip it before the
        miss becomes a tool-not-found turn. [strip_registered_suffix] only
-       accepts a sole registered stem with a [0-9._] tail, so a genuine
+       accepts a sole registered stem with a [0-9.] tail, so a genuine
        unknown name still reaches the reject path unchanged. *)
     match strip_registered_suffix ~available:(tool_names_of_index tool_index) name with
     | Some corrected -> corrected, input, find_in_index tool_index corrected

@@ -150,6 +150,21 @@ let test_keeper_paused_work_route_is_admin_exact () =
     false
     (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
 
+let test_keeper_up_route_classifies_and_extracts () =
+  let path = "/api/v1/keepers/fixture-keeper/up" in
+  check bool
+    "up POST route kind"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_up);
+  check string
+    "up keeper name"
+    "fixture-keeper"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_post
+       path
+       Server_dashboard_http_keeper_api.keeper_suffix_up)
+;;
+
 let test_keeper_sensitive_get_permissions_are_exact () =
   let permission path =
     Server_dashboard_http_keeper_api.keeper_get_permission path
@@ -3421,6 +3436,8 @@ let () =
             test_keeper_name_extractors_use_shared_grammar;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
+          test_case "keeper up route classifies and extracts" `Quick
+            test_keeper_up_route_classifies_and_extracts;
           test_case "keeper sensitive GET permissions are exact" `Quick
             test_keeper_sensitive_get_permissions_are_exact;
           test_case "internal exact lane registry is Admin-only" `Quick

@@ -1753,6 +1753,8 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
           ; hint Keeper_control.Shutdown "shutdown"
+          ; Ansi.cyan ^ "e" ^ Ansi.reset ^ " settings"
+          ; Ansi.cyan ^ "a" ^ Ansi.reset ^ " new"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
             (* Dimmed rather than dropped, the same way an unavailable

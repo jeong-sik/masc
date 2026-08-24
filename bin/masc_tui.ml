@@ -2843,6 +2843,78 @@ let main () =
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
   let input_reader = create_input_reader () in
+
+  (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
+     The editor itself is the confirmation step: an exit other than 0
+     leaves the settings untouched, so these flows skip Keeper_control's
+     arming gate. The terminal handshake around the child is the pair
+     [suspend] already runs around Ctrl-Z. *)
+  let reenter_terminal () =
+    Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+    request_full_repaint 0
+  in
+  (* An empty object is the honest starting point for a partial patch: the
+     config route applies only the fields present in the body, and the TUI
+     has no view of the current settings to prefill from -- showing a
+     guessed stem would invite an operator to "keep" a value that is not
+     the one on disk. *)
+  let handle_keeper_settings_edit () =
+    match selected_keeper state with
+    | None -> ()
+    | Some keeper -> (
+      match Masc_tui_editor.editor_command () with
+      | None ->
+        add_event state "error"
+          "no $EDITOR set; export EDITOR to edit keeper settings here"
+      | Some _ -> (
+        match
+          Masc_tui_editor.roundtrip ~restore:restore_terminal
+            ~reenter:reenter_terminal "{\n}\n"
+        with
+        | None -> add_event state "system" (keeper.k_name ^ ": settings unchanged")
+        | Some patch -> (
+          match
+            Masc_tui_http.post_keeper_config ~host ~port
+              ~keeper_name:keeper.k_name ~patch_json:patch
+          with
+          | Ok _ -> add_event state "system" (keeper.k_name ^ ": settings applied")
+          | Error detail -> add_event state "error" detail)))
+  in
+  let handle_keeper_create () =
+    match Masc_tui_editor.editor_command () with
+    | None ->
+      add_event state "error" "no $EDITOR set; export EDITOR to create a keeper here"
+    | Some _ -> (
+      (* The stem names the only two fields a keeper cannot come up without;
+         the name is edited in place and the route name comes from it. *)
+      let stem =
+        "{\n  \"name\": \"new-keeper\",\n  \"instructions\": \"\"\n}\n"
+      in
+      match
+        Masc_tui_editor.roundtrip ~restore:restore_terminal
+          ~reenter:reenter_terminal stem
+      with
+      | None -> add_event state "system" "create cancelled"
+      | Some declaration -> (
+        let declared_name =
+          match Yojson.Safe.from_string declaration with
+          | `Assoc fields -> (
+            match List.assoc_opt "name" fields with
+            | Some (`String value) -> String.trim value
+            | _ -> "")
+          | _ -> ""
+        in
+        if String.length declared_name = 0 then
+          add_event state "error"
+            "declaration needs a non-empty \"name\" string; nothing was created"
+        else
+          match
+            Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
+              ~declaration_json:declaration
+          with
+          | Ok _ -> add_event state "system" (declared_name ^ ": keeper created")
+          | Error detail -> add_event state "error" detail))
+  in
   let run_loop () =
     while true do
       request_console_write_repair render_schedule;
@@ -3529,6 +3601,23 @@ let main () =
             | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs
             -> ())
+       | Some "e" | Some "E" ->
+           (* Settings edit hands the terminal to $EDITOR, so it cannot live
+              inside the keeper-action pipeline: the loop is inside the
+              editor, and the POST happens only after the editor returns. *)
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | System_logs -> ())
+       | Some "a" | Some "A" ->
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it

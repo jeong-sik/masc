@@ -304,6 +304,22 @@ let test_single_long_line_stays_partial_but_advances () =
    a dependency edge from lib/workspace to the tool limits does not exist, so
    pin the relation where both are visible: whatever a live read returns has
    to fit in what the snapshot records. *)
+(* The behavioural case above passes whether the two caps are one value or
+   two literals that happen to agree. #27397 is about the second shape: the
+   doc claimed a shared reader made them inseparable while they were in fact
+   independent. They now come from one place, and this says so. *)
+let test_read_ceiling_and_snapshot_cap_are_one_value () =
+  Alcotest.(check int)
+    "the snapshot cap is the Read ceiling"
+    Tool_shard_limits.read_file_max_max_bytes
+    Workspace_verification_store.verification_evidence_max_bytes;
+  Alcotest.(check bool)
+    "and the default sits under it"
+    true
+    (Tool_shard_limits.read_file_default_max_bytes
+     <= Tool_shard_limits.read_file_max_max_bytes)
+;;
+
 let test_live_read_cannot_outrun_the_evidence_snapshot () =
   setup
   @@ fun ~config ~meta ~playground ->
@@ -406,6 +422,10 @@ let () =
             "a live read cannot outrun the evidence snapshot"
             `Quick
             test_live_read_cannot_outrun_the_evidence_snapshot
+        ; Alcotest.test_case
+            "read ceiling and snapshot cap are one value"
+            `Quick
+            test_read_ceiling_and_snapshot_cap_are_one_value
         ; Alcotest.test_case "zero limit is rejected" `Quick test_zero_limit_is_rejected
         ; Alcotest.test_case
             "offset past EOF returns empty"

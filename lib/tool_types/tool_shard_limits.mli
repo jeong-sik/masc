@@ -23,3 +23,14 @@ val read_file_default_max_bytes_string : string
     so the schema description string can include it without a
     per-schema-render allocation, and so the schema stays a
     structural constant rather than a function call result. *)
+
+val read_file_max_max_bytes : int
+(** Ceiling for an explicit [max_bytes] on [Read]. A caller asking for more is
+    clamped to this. *)
+
+val verification_evidence_max_bytes : int
+(** Byte cap for one evidence artifact in a verification snapshot. Equal to
+    {!read_file_max_max_bytes} by construction, not by coincidence: the
+    completion authority reads files live through [Read] and an operator later
+    reviews the snapshot, so a verdict must not be able to rest on bytes the
+    snapshot did not keep (#27397). *)

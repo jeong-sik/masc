@@ -230,7 +230,7 @@ let pad_to width text =
 let render_activity_rows (activities : tool_activity list) =
   let name_width =
     List.fold_left
-      (fun widest activity ->
+      (fun widest (activity : tool_activity) ->
         max widest (String.length activity.tool_name))
       0 activities
   in

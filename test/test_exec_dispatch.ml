@@ -1041,5 +1041,63 @@ let () =
   | Error _ -> failwith "a literal stdin must not be refused"
 ;;
 
+(* [shell_command_gate.mli] says the facade refuses a nested pipeline so
+   callers need no flatten policy of their own.  That was true of
+   [lower_typed_pipeline], whose input is a [simple list] and cannot nest, and
+   false of [gate_typed], which takes any [Shell_ir.t].  Measured 2026-08-24:
+   [Pipeline [Pipeline [a; b]; c]] handed to [Execute_shell_ir.dispatch] ran.
+   [Unsupported_nested_pipeline] existed, had a tag, and was produced nowhere. *)
+let () =
+  with_eio @@ fun () ->
+  let module Adapter = Keeper_tooling.Execute_shell_ir in
+  let module Gate = Masc_exec_command_gate.Shell_command_gate in
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let stage text =
+    Simple
+      { bin
+      ; args = [ Lit (text, default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  let refusal_tag = function
+    | Adapter.Too_complex reason -> "too_complex:" ^ Adapter.too_complex_reason_tag reason
+    | Adapter.Cannot_parse reason -> "cannot_parse:" ^ Adapter.parse_reason_tag reason
+    | Adapter.Gate_reject diagnostic -> "gate_reject:" ^ diagnostic
+    | Adapter.Path_reject diagnostic -> "path_reject:" ^ diagnostic
+  in
+  let dispatch ir =
+    Adapter.dispatch
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      ir
+  in
+  (match dispatch (Pipeline [ Pipeline [ stage "a"; stage "b" ]; stage "c" ]) with
+   | Error (Adapter.Too_complex Gate.Unsupported_nested_pipeline) -> ()
+   | Error other ->
+     failwith
+       (Printf.sprintf
+          "a nested pipeline must be refused as unsupported_nested_pipeline, got %s"
+          (refusal_tag other))
+   | Ok _ -> failwith "a nested pipeline must not reach dispatch");
+  (* [Pipeline] documents "length >= 2" and the type does not hold it, so the
+     gate is where a one-stage pipeline stops. *)
+  (match dispatch (Pipeline [ stage "alone" ]) with
+   | Error (Adapter.Cannot_parse Gate.Parse_error) -> ()
+   | Error other ->
+     failwith
+       (Printf.sprintf
+          "a one-stage pipeline must be refused as cannot_parse, got %s"
+          (refusal_tag other))
+   | Ok _ -> failwith "a one-stage pipeline must not reach dispatch");
+  (* A flat pipeline is untouched by any of this. *)
+  match dispatch (Pipeline [ stage "a"; stage "b" ]) with
+  | Ok _ -> ()
+  | Error other ->
+    failwith (Printf.sprintf "a flat pipeline must still run, got %s" (refusal_tag other))
+;;
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

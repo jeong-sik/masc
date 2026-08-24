@@ -327,23 +327,6 @@ let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false) ()
   }
 ;;
 
-let property name typ description =
-  name, `Assoc [ "type", `String typ; "description", `String description ]
-;;
-
-(* An empty ["required"] says nothing an absent one does not, and both readers
-   fold them together: llm_provider/types.ml answers [None] and [`Null] with
-   [Ok []], and tool_input_validation.ml treats a non-matching key the same
-   way. Emitting it spends bytes in every turn's tool list to say nothing. *)
-let object_schema ?(required = []) properties =
-  `Assoc
-    ([ "type", `String "object"; "properties", `Assoc properties ]
-     @
-     match required with
-     | [] -> []
-     | _ :: _ -> [ "required", `List (List.map (fun n -> `String n) required) ])
-;;
-
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
 
@@ -946,31 +929,21 @@ let base_schema_input name =
     Canonical_registry, schema.input_schema
   | None -> invalid_arg ("missing base tool schema for " ^ name)
 
-let library_search_schema =
-  object_schema
-    [ property
-        "query"
-        "string"
-        "Search query string; empty or missing returns a workflow error."
-    ]
+(* Declared twice until now: here and in the library shard, whose file is
+   config/tools/keeper_library_*.toml. The parameters agreed to a full stop,
+   but the tool descriptions did not -- this side said "Search the keeper
+   library catalog." while the shard said what the tool returns (titles,
+   relevance scores, snippets) and what to pair it with. The model received
+   the thin one. The shard is now the one declaration. *)
+let shard_library_schema name =
+  match find_schema_opt Tool_shard_types.library_tools name with
+  | Some schema -> schema
+  | None -> failwith (Printf.sprintf "library shard is missing %s" name)
 ;;
 
-let library_read_schema =
-  object_schema
-    ~required:[ "topic" ]
-    [ property
-        "topic"
-        "string"
-        "Exact document topic name from search results or known context."
-    ]
-;;
+let library_search = shard_library_schema "keeper_library_search"
+let library_read = shard_library_schema "keeper_library_read"
 
-(* These three were declared twice: here and in the surface shard, whose file
-   is config/tools/keeper_*.toml. The two copies carried the same shapes and
-   fifteen different sentences, and only the shard declared [before], which
-   keeper_tool_in_process_runtime reads for local-lane pagination -- so the
-   model was handed a schema that hid a parameter it could use. The shard is
-   now the one declaration; the wording that used to be here moved into it. *)
 let shard_surface_schema name =
   match find_schema_opt Tool_shard_types.surface_tools name with
   | Some schema -> schema.Masc_domain.input_schema
@@ -1884,8 +1857,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.library.search"
       ~name:"keeper_library_search"
-      ~description:"Search the keeper library catalog."
-      ~input_schema:library_search_schema
+      ~description:library_search.Masc_domain.description
+      ~input_schema:library_search.Masc_domain.input_schema
       (* Concurrent: directory listing + whole-file reads in
          Tool_library; no shared mutable state on the search path. *)
       ~ordinary_execution_mode:Concurrent
@@ -1896,8 +1869,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.library.read"
       ~name:"keeper_library_read"
-      ~description:"Read a library entry by id."
-      ~input_schema:library_read_schema
+      ~description:library_read.Masc_domain.description
+      ~input_schema:library_read.Masc_domain.input_schema
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read

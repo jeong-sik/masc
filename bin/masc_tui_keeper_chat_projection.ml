@@ -190,7 +190,10 @@ let stream_error_to_string = function
   | Missing_text_end ->
       "Keeper chat run finished without the current text-message terminal"
   | Run_failed { accepted; message; code } ->
-      let phase = if accepted then "accepted Keeper turn failed" else "Keeper chat rejected" in
+      (* "accepted" was in this label to mark the phase, which the other arm
+         already carries: a rejected request never became a turn. Saying it
+         twice spent the row's first words on protocol vocabulary. *)
+      let phase = if accepted then "Keeper turn failed" else "Keeper chat rejected" in
       let code = Option.fold ~none:"" ~some:(Printf.sprintf " (%s)") code in
       Printf.sprintf "%s%s: %s" phase code message
   | Replayed_failed -> "Keeper chat request already has a failed terminal operation"

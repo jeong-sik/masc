@@ -17,9 +17,24 @@ let directory_entries directory =
   Sys.readdir directory |> Array.to_list |> List.sort String.compare
 ;;
 
+(* [Error _] told a reader nothing: 18 of this suite's 19 cases can fail and
+   every one of them printed the same sentence. The variant is closed, so the
+   arm can name which one arrived. *)
+let error_name : Head.error -> string = function
+  | Invalid_leaf detail -> Printf.sprintf "Invalid_leaf %S" detail
+  | Invalid_row detail -> Printf.sprintf "Invalid_row %S" detail
+  | Busy -> "Busy"
+  | Conflict _ -> "Conflict"
+  | Corrupt_lock detail -> Printf.sprintf "Corrupt_lock %S" detail
+  | Corrupt_head detail -> Printf.sprintf "Corrupt_head %S" detail
+  | Unsupported detail -> Printf.sprintf "Unsupported %S" detail
+  | Io_error _ -> "Io_error"
+;;
+
 let require_read label = function
   | Ok snapshot -> snapshot
-  | Error _ -> failf "%s: HEAD read failed" label
+  | Error ({ Head.error; _ } : Head.failure) ->
+      failf "%s: HEAD read failed with %s" label (error_name error)
 ;;
 
 let require_publication label = function

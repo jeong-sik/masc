@@ -673,6 +673,9 @@ type state = {
   mutable board_draft: Buffer.t;
   mutable board_compose_armed: bool;
   mutable board_compose_reply_to: string option;
+  (* One send at a time: the gate a slow server needs so s-s cannot post
+     the same draft twice, and the completion knows it owns the clear. *)
+  mutable board_post_inflight: bool;
   mutable board_post_error: string option;
   (* A vote armed for a second keypress: which post, and up or down. The
      cursor can move between the two presses, so the post id is captured at
@@ -999,6 +1002,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;
+  board_post_inflight = false;
   board_post_error = None;
   board_vote_armed = None;
   planning = None;

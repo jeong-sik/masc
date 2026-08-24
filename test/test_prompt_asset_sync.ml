@@ -101,6 +101,34 @@ let test_runtime_extra_files_are_removed () =
       let (_ : Managed_asset_sync.sync_result) = sync ~prompts_dir:dir in
       check bool "runtime extra removed" false (Sys.file_exists extra))
 
+(* The deletion above is the only thing that happens to a file an operator
+   puts in the runtime directory, and the boot log is the only place it is
+   announced. That log reads [removed], so the two have to be checked
+   together: the case above dropped the result and asserted on the
+   filesystem, which passes just as well when [removed] comes back empty and
+   the operator is told nothing. *)
+let test_an_operator_file_reaches_the_log_line () =
+  with_temp_prompts_dir (fun dir ->
+      let extra = Filename.concat dir "operator.custom.md" in
+      Out_channel.with_open_text extra (fun oc ->
+          Out_channel.output_string oc "local-only\n");
+      let result = sync ~prompts_dir:dir in
+      check (list string) "removed names the operator's file"
+        [ "prompts/operator.custom.md" ] result.Managed_asset_sync.removed;
+      match Managed_asset_sync.removed_line ~label:"prompt" result with
+      | None -> failf "a deleted file produced no log line"
+      | Some line ->
+          let mentions needle =
+            let nl = String.length needle and hl = String.length line in
+            let rec scan i =
+              i + nl <= hl && (String.sub line i nl = needle || scan (i + 1))
+            in
+            scan 0
+          in
+          check bool "the line names the file" true
+            (mentions "operator.custom.md");
+          check bool "and says why it went" true (mentions "manifest"))
+
 (* A readable manifest that lists assets the embedded tree does not carry is
    the crunch-lost-the-tree state: fail closed, delete nothing. *)
 let test_missing_embedded_assets_fail_closed () =
@@ -388,6 +416,8 @@ let () =
             test_overwrites_stale_copy;
           test_case "runtime extra files are removed" `Quick
             test_runtime_extra_files_are_removed;
+          test_case "an operator's file reaches the log line" `Quick
+            test_an_operator_file_reaches_the_log_line;
           test_case "missing embedded assets fail closed" `Quick
             test_missing_embedded_assets_fail_closed;
           test_case "empty manifest with empty set projects exactly" `Quick

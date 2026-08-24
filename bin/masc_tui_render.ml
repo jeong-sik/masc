@@ -3160,9 +3160,11 @@ let render_keeper_message (state : state) =
            others);
     (match state.msg_loaded_error with
      | Some detail ->
+         (* Cause first. The consequence -- this session only -- is the same
+            sentence every time and cost 66 cells before the reader reached the
+            part that differs, which the box then cut. *)
          box_line_styled chat_buf chat_cols ~style:Theme.warn
-           ("  saved conversation could not be loaded; showing this session \
-             only: " ^ detail)
+           ("  " ^ detail ^ " \xe2\x80\x94 showing this session only")
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:Theme.warn
@@ -5442,6 +5444,15 @@ let help_lines () =
             entries
        @ [ "" ])
 
+(* What the help overlay can show right now: the rows its sheet folds to at
+   this width, and the height it draws them in. The key handler bounds its
+   step against this, so a press that the frame cannot spend is not taken. *)
+let help_viewport () =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  ( List.length (Masc_tui_help.sheet ~cols (help_lines ()))
+  , Masc_tui_help.content_height ~rows )
+
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [palette_matches] the Enter key resolves, so
    what is highlighted is what will run. *)
@@ -5497,41 +5508,18 @@ let render_help (state : state) =
     ^ "Esc or ? to close" ^ Ansi.reset);
   framed_divider buf cols;
   let lines = help_lines () in
-  (* Two columns when they fit; the split point keeps groups readable by
-     cutting at the overall middle rather than balancing exact heights. *)
-  let column_width = (cols - 6) / 2 in
-  let rendered_rows =
-    if cols >= 96 then begin
-      let n = List.length lines in
-      let half = (n + 1) / 2 in
-      let left = List.filteri (fun i _ -> i < half) lines in
-      let right = List.filteri (fun i _ -> i >= half) lines in
-      let rec zip l r =
-        match l, r with
-        | [], [] -> []
-        | lh :: lt, [] -> (lh, "") :: zip lt []
-        | [], rh :: rt -> ("", rh) :: zip [] rt
-        | lh :: lt, rh :: rt -> (lh, rh) :: zip lt rt
-      in
-      List.map
-        (fun (l, r) ->
-          Message_layout.fit_width l column_width
-          ^ "  "
-          ^ Message_layout.fit_width r column_width)
-        (zip left right)
-    end
-    else lines
+  let rendered_rows = Masc_tui_help.sheet ~cols lines in
+  let content_height = Masc_tui_help.content_height ~rows in
+  let scroll =
+    Masc_tui_scroll.normalize
+      ~count:(List.length rendered_rows) ~height:content_height state.help_scroll
   in
-  let content_height = max 1 (rows - 5) in
-  let max_scroll = max 0 (List.length rendered_rows - content_height) in
-  let scroll = max 0 (min state.help_scroll max_scroll) in
   rendered_rows
   |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
   |> List.iter (fun line -> framed_line buf cols line);
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~hints:"j/k:scroll  Esc:close");
-  ignore scroll;
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 let render_terminal_too_small ~rows ~cols =

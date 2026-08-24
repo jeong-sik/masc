@@ -491,6 +491,23 @@ let test_reader_unauthenticated () =
        (Chat.protocol_error
           (Chat.Run_failed { accepted = false; message = "bad"; code = None })))
 
+(* The chat surface renders a transport failure as two sentences: the caller's
+   own reading of what it means for the turn, and this one's reading of where it
+   happened. Both used to claim the outcome was unverified, so the line said it
+   twice and pushed the cause -- the only part that changes between failures --
+   to the far end, where the terminal truncated it. *)
+let test_transport_error_names_the_cause_not_the_certainty () =
+  let cause = "Connection Error: Failed connecting to 127.0.0.1: connection refused" in
+  let rendered = Chat.error_to_string (Chat.Transport_error cause) in
+  let has needle = String_util.string_contains_substring ~needle rendered in
+  check bool "the cause survives" true (has cause);
+  check bool "the certainty is not restated here" false (has "unverified");
+  (* [Transport_error] is always [Outcome_unverified], so the caller that
+     renders certainty always speaks -- this one never has to. *)
+  check bool "transport failures are always unverified" true
+    (Chat.error_certainty (Chat.Transport_error cause) = Chat.Outcome_unverified)
+;;
+
 let test_reconciliation_failure_detail () =
   let refused : Chat.error =
     Chat.Http_error
@@ -705,6 +722,8 @@ let () =
         ; test_case "typed error certainty" `Quick test_error_certainty
         ; test_case "unauthenticated reader keeps the operation open" `Quick
             test_reader_unauthenticated
+        ; test_case "transport error names the cause, not the certainty" `Quick
+            test_transport_error_names_the_cause_not_the_certainty
         ; test_case "reconciliation failure detail" `Quick
             test_reconciliation_failure_detail
         ; test_case "operation reconciliation projection" `Quick

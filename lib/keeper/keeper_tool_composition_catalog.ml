@@ -79,7 +79,6 @@ type error =
       { name : string
       ; param : string
       }
-  | Async_composition_with_params of { name : string }
   | Plan_rejected of
       { name : string
       ; error : Plan.error
@@ -561,10 +560,7 @@ let parse_composition ~index value =
                           | Inline ->
                             Ok { name; description; execution; params; plan }
                           | Async ->
-                            (match params with
-                             | _ :: _ ->
-                               Error (Async_composition_with_params { name })
-                             | [] ->
+                            (
                             (match
                                Plan.nodes plan
                                |> List.find_map (fun (node : Plan.node) ->
@@ -674,11 +670,6 @@ let error_to_string = function
       "composition %S declares param %S that no node input references"
       name
       param
-  | Async_composition_with_params { name } ->
-    Printf.sprintf
-      "async composition %S cannot declare params: the durable broker does not \
-       carry invocation input"
-      name
   | Plan_rejected { name; error } ->
     Printf.sprintf "composition %S rejected: %s" name (Keeper_tool_plan.error_to_string error)
 ;;

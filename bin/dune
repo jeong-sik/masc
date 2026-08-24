@@ -349,12 +349,18 @@
  (name masc_tui_observation_layout)
  (wrapped false)
  (modules masc_tui_observation_layout)
- (libraries masc))
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule))
+
+(library
+ (name masc_tui_help)
+ (wrapped false)
+ (modules masc_tui_help)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_footer)
@@ -479,6 +485,7 @@
   ;; transitive library's module names, so masc_tui lists masc.fusion_core.
   masc.fusion_core
   masc_tui_footer
+  masc_tui_help
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity

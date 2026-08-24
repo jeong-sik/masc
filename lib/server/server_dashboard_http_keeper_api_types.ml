@@ -9,6 +9,8 @@ let keeper_suffix_secrets = "/secrets"
 let keeper_suffix_github_identity = "/github-identity"
 let keeper_suffix_github_login = "/github-login"
 let keeper_suffix_boot = "/boot"
+let keeper_suffix_up = "/up"
+let keeper_suffix_compact = "/compact"
 let keeper_suffix_shutdown = "/shutdown"
 let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
@@ -74,6 +76,8 @@ type keeper_post_route_kind =
   | Keeper_post_secrets
   | Keeper_post_github_login
   | Keeper_post_boot
+  | Keeper_post_up
+  | Keeper_post_compact
   | Keeper_post_shutdown
   | Keeper_post_reset
   | Keeper_post_clear
@@ -126,6 +130,8 @@ let classify_keeper_post_route req_path =
     if ends_with keeper_suffix_config then Keeper_post_config
     else if ends_with keeper_suffix_secrets then Keeper_post_secrets
     else if ends_with keeper_suffix_github_login then Keeper_post_github_login
+    else if ends_with keeper_suffix_up then Keeper_post_up
+    else if ends_with keeper_suffix_compact then Keeper_post_compact
     else if ends_with keeper_suffix_boot then Keeper_post_boot
     else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown
     else if ends_with keeper_suffix_reset then Keeper_post_reset

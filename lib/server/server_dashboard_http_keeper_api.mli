@@ -234,3 +234,14 @@ val memory_os_fact_json :
 (** One current fact's read-only dashboard projection. [current] is derived
     from snapshot membership; no retention, score, or legacy kind field is
     serialized. *)
+
+val handle_keeper_tool_post :
+  body_str:string ->
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
+  tool_name:string ->
+  action:String.t ->
+  Mcp_server.server_state ->
+  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Create-or-update ([up]) and force-compaction ([compact]) posts for one
+    keeper; see {!Server_dashboard_http_keeper_api_lifecycle_post}. *)

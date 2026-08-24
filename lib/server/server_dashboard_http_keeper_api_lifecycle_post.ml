@@ -414,3 +414,79 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               log_lifecycle_result Dispatch_none;
               respond_error ~status:`Internal_server_error ~request:req ~ok:false
                 reqd "dispatch returned None")))
+
+(* #29684 — keeper create-or-update ([up]) and force-compaction ([compact])
+   from the terminal. The workspace tools own the argument contracts and the
+   store transitions; this route pipes HTTP into the same
+   [Keeper_tool_surface.dispatch] the lifecycle routes above use, so
+   validation and error text stay identical to the MCP tools. The body is the
+   tool's own arguments minus [name] -- the route names the keeper, the body
+   says what to set -- and the result is the tool's message verbatim. *)
+let handle_keeper_tool_post ~body_str ~sw ~clock ~tool_name ~action state
+    agent_name req reqd =
+  let req_path = Http.Request.path req in
+  let suffix =
+    if String.equal action "up" then keeper_suffix_up
+    else keeper_suffix_compact
+  in
+  let name = extract_keeper_name_for_post req_path suffix in
+  if String.length name = 0 then
+    respond_error ~request:req ~ok:false reqd "keeper name is required"
+  else
+    let workspace_scope = Mcp_server.workspace_scope state in
+    let config = workspace_scope.Mcp_server.config in
+    let keeper_ctx : _ Keeper_tool_surface.context =
+      {
+        config;
+        agent_name;
+        sw;
+        clock;
+        proc_mgr = state.Mcp_server.proc_mgr;
+        net = state.Mcp_server.net;
+        publication_recovery_provider =
+          Mcp_server.publication_recovery_availability_provider state;
+      }
+    in
+    let parsed_fields =
+      (* An empty body is an up with nothing to set -- the tool decides whether
+         that is meaningful -- rather than a differently-shaped request. *)
+      match String.trim body_str with
+      | "" -> Ok []
+      | raw -> (
+          try
+            match Yojson.Safe.from_string raw with
+            | `Assoc fields -> Ok fields
+            | _ -> Error "request body must be a JSON object"
+          with Yojson.Json_error err ->
+            Error (Printf.sprintf "invalid json: %s" err))
+    in
+    match parsed_fields with
+    | Error msg -> respond_error ~request:req ~ok:false reqd msg
+    | Ok fields ->
+        let args =
+          `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
+        in
+        let result =
+          Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args
+        in
+        (match result with
+         | Some result when Tool_result.is_success result ->
+             Http.Response.json_value ~compress:true ~request:req
+               (`Assoc
+                  [ ("ok", `Bool true)
+                  ; ("action", `String action)
+                  ; ("name", `String name)
+                  ; ( "message"
+                    , `String (Tool_result.message result) )
+                  ])
+               reqd
+         | Some result ->
+             Http.Response.json_value ~status:`Bad_request ~request:req
+               (`Assoc
+                  [ ("ok", `Bool false)
+                  ; ("error", `String (Tool_result.message result))
+                  ])
+               reqd
+         | None ->
+             respond_error ~status:`Internal_server_error ~request:req ~ok:false
+               reqd (Printf.sprintf "%s dispatch returned None" tool_name))

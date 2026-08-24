@@ -160,3 +160,16 @@ module For_testing : sig
   val parse_bulk_resume_requests :
     Yojson.Safe.t -> ((string * string) list, string) result
 end
+
+val handle_keeper_tool_post :
+  body_str:string ->
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
+  tool_name:string ->
+  action:String.t ->
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  unit
+(** Re-export of the [up]/[compact] handler for the Keeper_api facade. *)

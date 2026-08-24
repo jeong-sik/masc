@@ -57,7 +57,7 @@ let test_absent_and_paused_reads_paused () =
 let test_live_running_offers_pause () =
   let r = reading ~liveness:(Control.Present (runtime "analyst")) "analyst" in
   check_actions "pause first"
-    [ Control.Pause; Control.Wakeup; Control.Shutdown ]
+    [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Compact ]
     (Control.available r);
   Alcotest.(check (option action_testable))
     "primary is pause" (Some Control.Pause) (Control.primary r);
@@ -377,7 +377,7 @@ let test_partial_roster_still_confirms_what_it_holds () =
   Alcotest.(check string) "the observed keeper is active" "active"
     (Control.status_label present);
   check_actions "and it can be paused"
-    [ Control.Pause; Control.Wakeup; Control.Shutdown ]
+    [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Compact ]
     (Control.available present)
 
 let test_full_roster_is_complete () =

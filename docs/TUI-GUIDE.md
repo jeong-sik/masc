@@ -479,6 +479,7 @@ Per surface:
 | `l` | Keeper detail | Open logs |
 | `m` | Keeper detail | Open message input |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
+| `x` | Keepers (roster, detail) | Compact the keeper's working context (armed: same key again sends) |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |

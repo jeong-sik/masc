@@ -2081,6 +2081,24 @@ let add_routes ~sw ~clock router =
                Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_up"
                  ~action:"boot" state agent_name req reqd
              ) request reqd
+       | Keeper_api.Keeper_post_up ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_tool_post ~body_str ~sw ~clock
+                   ~tool_name:"masc_keeper_up" ~action:"up"
+                   state agent_name req reqd
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_compact ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_tool_post ~body_str ~sw ~clock
+                   ~tool_name:"masc_keeper_compact" ~action:"compact"
+                   state agent_name req reqd
+               )
+             ) request reqd
        | Keeper_api.Keeper_post_shutdown ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->

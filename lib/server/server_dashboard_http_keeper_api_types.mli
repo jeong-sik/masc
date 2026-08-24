@@ -17,6 +17,8 @@ val keeper_suffix_secrets : string
 val keeper_suffix_github_identity : string
 val keeper_suffix_github_login : string
 val keeper_suffix_boot : string
+val keeper_suffix_up : string
+val keeper_suffix_compact : string
 val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
 val keeper_suffix_clear : string
@@ -60,6 +62,8 @@ type keeper_post_route_kind =
   | Keeper_post_secrets
   | Keeper_post_github_login
   | Keeper_post_boot
+  | Keeper_post_up
+  | Keeper_post_compact
   | Keeper_post_shutdown
   | Keeper_post_reset
   | Keeper_post_clear

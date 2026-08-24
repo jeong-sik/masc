@@ -3329,6 +3329,19 @@ let main () =
             | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs
             -> ())
+       | Some "x" | Some "X" ->
+           (* Compact folds the keeper's working context; like shutdown it
+              confirms on the second press. Board/Planning own [x] on their
+              surfaces, keeper detail owns it here. *)
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) ->
+                handle_keeper_action state ~base_path ~mailbox:async_messages
+                  Keeper_control.Compact
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | Autonomy | System_logs
+            -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();

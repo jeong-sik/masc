@@ -1048,6 +1048,9 @@ let handle_keeper_secrets_post state req reqd body_str =
 let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
 
+let handle_keeper_tool_post =
+  Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_tool_post
+
 type plain_keeper_directive =
   | Plain_pause
   | Plain_wakeup

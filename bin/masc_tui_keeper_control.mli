@@ -108,6 +108,7 @@ type action =
   | Boot
   | Shutdown
   | Wakeup
+  | Compact
 
 val action_key : action -> string
 (** The single key that submits the action on the Keepers surface. *)

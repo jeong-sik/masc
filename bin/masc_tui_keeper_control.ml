@@ -119,6 +119,7 @@ type action =
   | Boot
   | Shutdown
   | Wakeup
+  | Compact
 
 (* One key each, and the toggle key submits whichever of pause/resume/boot the
    reading offers. Every letter here is unused by the Keepers surface's other
@@ -129,6 +130,7 @@ let action_key = function
   | Boot -> "p"
   | Shutdown -> "s"
   | Wakeup -> "w"
+  | Compact -> "x"
 
 let action_label = function
   | Pause -> "pause"
@@ -136,6 +138,7 @@ let action_label = function
   | Boot -> "boot"
   | Shutdown -> "shutdown"
   | Wakeup -> "wake"
+  | Compact -> "compact"
 
 let action_gerund = function
   | Pause -> "pausing"
@@ -143,15 +146,20 @@ let action_gerund = function
   | Boot -> "booting"
   | Shutdown -> "shutting down"
   | Wakeup -> "waking"
+  | Compact -> "compacting"
 
 (* Shutdown ends the fiber and latches a durable operator pause, so bringing
    the keeper back is a three-request sequence rather than an undo. The web
    dashboard puts a confirmation in front of it for the same reason
    (dashboard/src/components/keeper-action-panel.ts). Pause, resume, boot and
-   wake each have a single-request inverse and submit on the first press. *)
+   wake each have a single-request inverse and submit on the first press.
+   Compaction folds the keeper's working context, so it confirms like
+   shutdown -- the keeper re-reads its instructions and starts the next turn
+   from a smaller history, which is not a no-op to undo. *)
 let requires_confirmation = function
   | Shutdown -> true
   | Pause | Resume | Boot | Wakeup -> false
+  | Compact -> true
 
 let available reading =
   match reading.liveness with
@@ -160,7 +168,7 @@ let available reading =
   | Present runtime ->
       if not runtime.Decode.kr_keepalive_running then [ Boot ]
       else if reading.paused then [ Resume; Wakeup; Shutdown ]
-      else [ Pause; Wakeup; Shutdown ]
+      else [ Pause; Wakeup; Shutdown; Compact ]
 
 let primary reading =
   match available reading with
@@ -175,12 +183,13 @@ let plan = function
   | Pause -> [ Directive "pause" ]
   | Resume -> [ Directive "resume" ]
   | Wakeup -> [ Directive "wakeup" ]
+  | Compact -> [ Lifecycle "compact" ]
   | Boot -> [ Lifecycle "boot" ]
   | Shutdown -> [ Lifecycle "shutdown" ]
 
 let recovers_from_conflict = function
   | Boot -> Some [ Directive "resume"; Lifecycle "boot" ]
-  | Pause | Resume | Shutdown | Wakeup -> None
+  | Pause | Resume | Shutdown | Wakeup | Compact -> None
 
 type outcome =
   | Accepted of { already_live : bool }

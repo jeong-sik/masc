@@ -55,11 +55,8 @@ val reduce_event :
     accumulator tables.  The tables are mutated; the records they hold
     are replaced, not written through.  Effects (in order):
 
-    + Ensure a [workspace:<workspace_id>] node exists with status [Workspace]
-      and the event's [ts_iso].
     + If [value.actor = Some actor], ensure the entity node with
-      fallback status [Active] and add a [belongs_to] edge to the
-      workspace node.
+      fallback status [Active].
     + If [value.subject = Some subject], same with fallback status
       [Observed].
     + Apply event-kind-specific edges between actor / subject /

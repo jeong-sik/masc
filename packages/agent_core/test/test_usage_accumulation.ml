@@ -124,6 +124,91 @@ let test_single_turn_usage () =
     Alcotest.(check int) "output" 75 st.usage.total_output_tokens)
 ;;
 
+(* ── Anthropic exclusive → inclusive normalisation (#27912) ──────────
+
+   The Messages wire reports input_tokens exclusive of the cache
+   components while api_usage.input_tokens is the inclusive prompt
+   total, so a consumer deriving cache-miss input subtracts the two
+   cache fields from it. Copy an exclusive wire count in verbatim and
+   that subtraction takes the cache tokens off twice: the miss figure
+   goes negative exactly when caching is working.
+
+   The cases below pin the arithmetic and both parses the contract
+   names -- sync response and SSE message_start. The rest of this file
+   mocks the OpenAI shape, whose prompt_tokens is already inclusive,
+   so none of it can see this. *)
+
+let anthropic_response_body ~input_tokens ~cache_creation ~cache_read =
+  Printf.sprintf
+    {|{"id":"msg_1","type":"message","role":"assistant","model":"claude-x","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":%d,"output_tokens":7,"cache_creation_input_tokens":%d,"cache_read_input_tokens":%d}}|}
+    input_tokens
+    cache_creation
+    cache_read
+;;
+
+(* [wire_input] is what the Messages wire called input_tokens, i.e. the
+   regular input a consumer recovers by subtracting the cache components
+   from the inclusive total. Under a verbatim copy that subtraction
+   yields [wire_input - creation - read], which is negative here. *)
+let check_usage label (u : Types.api_usage) ~wire_input ~creation ~read =
+  Alcotest.(check int)
+    (label ^ ": inclusive prompt total")
+    (wire_input + creation + read)
+    u.input_tokens;
+  Alcotest.(check int) (label ^ ": cache creation") creation u.cache_creation_input_tokens;
+  Alcotest.(check int) (label ^ ": cache read") read u.cache_read_input_tokens;
+  Alcotest.(check int)
+    (label ^ ": derived cache-miss input")
+    wire_input
+    (u.input_tokens - u.cache_creation_input_tokens - u.cache_read_input_tokens)
+;;
+
+let test_constructor_adds_cache_components () =
+  let u =
+    Llm_provider.Backend_anthropic.usage_of_wire_counts
+      ~input_tokens:100
+      ~output_tokens:7
+      ~cache_creation_input_tokens:10
+      ~cache_read_input_tokens:20
+  in
+  check_usage "constructor" u ~wire_input:100 ~creation:10 ~read:20
+;;
+
+let test_sync_response_parse_normalises () =
+  let json =
+    Yojson.Safe.from_string
+      (anthropic_response_body ~input_tokens:100 ~cache_creation:10 ~cache_read:20)
+  in
+  let resp = Llm_provider.Backend_anthropic.parse_response json in
+  match resp.usage with
+  | None -> Alcotest.fail "sync response carried no usage"
+  | Some u -> check_usage "sync parse" u ~wire_input:100 ~creation:10 ~read:20
+;;
+
+let test_message_start_parse_normalises () =
+  let data =
+    {|{"type":"message_start","message":{"id":"msg_1","model":"claude-x","usage":{"input_tokens":100,"output_tokens":7,"cache_creation_input_tokens":10,"cache_read_input_tokens":20}}}|}
+  in
+  match Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
+  | Some (MessageStart { usage = Some u; _ }) ->
+    check_usage "message_start" u ~wire_input:100 ~creation:10 ~read:20
+  | Some (MessageStart { usage = None; _ }) ->
+    Alcotest.fail "message_start carried no usage"
+  | Some _ | None -> Alcotest.fail "message_start did not parse"
+;;
+
+let test_uncached_request_is_unchanged () =
+  let json =
+    Yojson.Safe.from_string
+      (anthropic_response_body ~input_tokens:100 ~cache_creation:0 ~cache_read:0)
+  in
+  let resp = Llm_provider.Backend_anthropic.parse_response json in
+  match resp.usage with
+  | None -> Alcotest.fail "sync response carried no usage"
+  | Some u ->
+    Alcotest.(check int) "no cache components, no adjustment" 100 u.input_tokens
+;;
+
 (* ── Suite ───────────────────────────────────────────── *)
 
 let () =
@@ -133,6 +218,24 @@ let () =
     [ ( "accumulation"
       , [ test_case "tokens across turns" `Quick test_tokens_accumulate_across_turns
         ; test_case "single turn usage" `Quick test_single_turn_usage
+        ] )
+    ; ( "anthropic-inclusive-normalisation"
+      , [ test_case
+            "constructor adds cache components"
+            `Quick
+            test_constructor_adds_cache_components
+        ; test_case
+            "sync response parse normalises"
+            `Quick
+            test_sync_response_parse_normalises
+        ; test_case
+            "message_start parse normalises"
+            `Quick
+            test_message_start_parse_normalises
+        ; test_case
+            "uncached request is unchanged"
+            `Quick
+            test_uncached_request_is_unchanged
         ] )
     ]
 ;;

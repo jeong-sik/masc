@@ -576,21 +576,19 @@ export interface Goal {
 
 type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
 
+// Exactly what Keeper_status_runtime.keeper_quiet_reason serializes.
 type KeeperQuietReason =
-  | 'quiet_hours'
-  | 'min_gap'
-  | 'no_recent_activity'
   | 'disabled'
+  | 'not_running'
   | 'startup'
-  | 'model_error'
-  | 'graphql_error'
   | 'never_started'
-  | 'unknown'
 
+// Exactly what Keeper_status_runtime.keeper_next_action_path serializes.
 type KeeperNextActionPath =
-  | 'direct_message'
-  | 'probe'
+  | 'auto_restart'
   | 'recover'
+  | 'probe'
+  | 'direct_message'
 
 type KeeperReplyStatus =
   | 'never'

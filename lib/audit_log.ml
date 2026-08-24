@@ -220,14 +220,6 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let snippet = preview (Yojson.Safe.to_string redacted) in
     Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
 
-(** Lenient wrapper: logs warning and returns option for backward compat *)
-let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
-  match entry_of_json_r json with
-  | Ok entry -> Some entry
-  | Error reason ->
-      Log.Misc.warn "audit_log: entry parse failed: %s" reason;
-      None
-
 (** {1 File Operations} *)
 
 type config = Workspace_utils.config
@@ -383,8 +375,14 @@ let append_entry (config : config) (entry : audit_entry) =
     Format: [aud-<16-hex-ms>-<8-hex-content-hash>] *)
 let audit_entry_id ~timestamp ~agent_id ~action =
   let ms = Int64.of_float (timestamp *. 1000.0) in
-  let hash = Digest.to_hex (Digest.string (agent_id ^ action_to_string action
-                                           ^ Printf.sprintf "%.6f" timestamp)) in
+  (* SHA-256, not Stdlib.Digest (MD5): this suffix is the collision boundary
+     for an audit key, and it is truncated to 32 bits on top (#26720). *)
+  let hash =
+    Digestif.SHA256.(
+      digest_string
+        (agent_id ^ action_to_string action ^ Printf.sprintf "%.6f" timestamp)
+      |> to_hex)
+  in
   Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
 
 (** Map outcome + action to O2 severity string. *)

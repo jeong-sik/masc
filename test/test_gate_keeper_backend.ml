@@ -120,7 +120,7 @@ let translate_agent_core_stream ?base_dir events =
           loop translated.bridge_state
             (List.rev_append translated.chat_events acc) rest
     in
-    loop Keeper_chat_agent_core_stream_bridge.empty_state [] events)
+    loop (Keeper_chat_agent_core_stream_bridge.empty_state ()) [] events)
 
 let translate_agent_core_stream_events ?base_dir events =
   fst (translate_agent_core_stream ?base_dir events)

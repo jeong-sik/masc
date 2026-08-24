@@ -83,8 +83,6 @@ let severity_rank_of_health_level = Health_status.rank
 (* The typed form lives in Keeper_status_runtime, which this library
    cannot reach without inverting the dependency. *)
 (* STR-OK: JSON boundary comparison. *)
-let is_keeper_offline status = List.mem status [ "offline"; "inactive" ]
-
 let is_health_critical = Health_status.requires_operator_action
 
 let is_health_warning health =

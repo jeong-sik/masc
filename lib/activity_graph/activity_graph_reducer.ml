@@ -110,10 +110,14 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
           meta;
         }
 
+(* The graph anchor a broadcast points at. It used to be minted from
+   [event.workspace_id], which every writer set to the literal "default", so
+   the field distinguished nothing and the belongs_to edge it produced said
+   only that every node belongs to the one place. The field is gone; the
+   anchor stays because "broadcast" needs a target (#29396 A14). *)
+let broadcast_anchor_node_id = "workspace:default"
+
 let reduce_event ~nodes ~edges (value : event) =
-  let workspace_node_id = "workspace:" ^ value.workspace_id in
-  ensure_node nodes ~id:workspace_node_id ~kind:"workspace" ~label:value.workspace_id
-    ~status:Workspace ~ts_iso:value.ts_iso ~meta:default_meta;
   let actor_id =
     match value.actor with
     | Some actor ->
@@ -121,8 +125,6 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_entity_node nodes actor ~fallback_status:Active
             ~ts_iso:value.ts_iso ~meta:value.payload
         in
-        ensure_edge edges ~source:id ~target:workspace_node_id ~kind:"belongs_to"
-          ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
   in
@@ -133,8 +135,6 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_entity_node nodes subject ~fallback_status:Observed
             ~ts_iso:value.ts_iso ~meta:value.payload
         in
-        ensure_edge edges ~source:id ~target:workspace_node_id ~kind:"belongs_to"
-          ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
   in
@@ -231,7 +231,11 @@ let reduce_event ~nodes ~edges (value : event) =
   | "message.broadcast" ->
       (match actor_id with
       | Some source ->
-          ensure_edge edges ~source ~target:workspace_node_id ~kind:"broadcasts"
+          ensure_node nodes ~id:broadcast_anchor_node_id ~kind:"workspace"
+            ~label:"default" ~status:Workspace ~ts_iso:value.ts_iso
+            ~meta:default_meta;
+          ensure_edge edges ~source ~target:broadcast_anchor_node_id
+            ~kind:"broadcasts"
             ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
       | None -> ())
   | "message.mentioned" ->

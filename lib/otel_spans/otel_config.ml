@@ -13,13 +13,19 @@
    malformed value warns rather than silently enabling. *)
 let enabled = Env_config_core.get_bool ~default:true "MASC_OTEL_ENABLED"
 
+(* Same reader as [enabled] above. These two used [Sys.getenv_opt], which
+   skips the boot-time config overrides, so MASC_OTEL_ENABLED could be
+   declared in runtime.toml while the endpoint and service name next to it
+   were ignored (#21972 P2-2).
+
+   Still resolved once, at module load. The exporter is installed at boot and
+   [OT.Globals.service_name] is assigned there, so turning these into
+   functions would advertise a runtime knob the exporter does not honour. *)
 let endpoint =
-  let raw =
-    Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT"
-    |> Option.value ~default:Masc_network_defaults.otel_default_url
-  in
-  Masc_network_defaults.normalize_loopback_base_url raw
+  Env_config_core.raw_value_opt "OTEL_EXPORTER_OTLP_ENDPOINT"
+  |> Option.value ~default:Masc_network_defaults.otel_default_url
+  |> Masc_network_defaults.normalize_loopback_base_url
 
 let service_name =
-  Sys.getenv_opt "OTEL_SERVICE_NAME"
+  Env_config_core.raw_value_opt "OTEL_SERVICE_NAME"
   |> Option.value ~default:"masc"

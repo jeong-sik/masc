@@ -192,6 +192,12 @@ module KeeperKeepalive : sig
       value must be finite and strictly positive or configuration loading
       raises {!Env_config_core.Config_error}. *)
 
+  val body_timeout_sec_override_live : unit -> float option
+  (** Re-reads the env var on every call. [body_timeout_sec_override] is this
+      same reader run once at module load; both exist because one surface
+      reports what the process booted with and another resolves what is in
+      effect now. The parse and the clamp live here only. *)
+
   val body_timeout_sec_override : float option
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
       calls. [None] (env unset) leaves the runtime builder wire untouched.
@@ -200,6 +206,10 @@ module KeeperKeepalive : sig
       {!stream_idle_timeout_sec} plus attempt liveness observation.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
+
+  val provider_call_deadline_sec_override_live : unit -> float option
+  (** Live counterpart of [provider_call_deadline_sec_override], same relation
+      as {!body_timeout_sec_override_live}. *)
 
   val provider_call_deadline_sec_override : float option
   (** Total wall-clock deadline for one provider call attempt, independent

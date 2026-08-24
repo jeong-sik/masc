@@ -58,8 +58,6 @@ let masc_tool_help_spec : tool_spec =
   }
 ;;
 
-let dashboard_scope_enum_strings = [ "all"; "current" ]
-
 let masc_dashboard_spec : tool_spec =
   { name = "masc_dashboard"
   ; description =
@@ -68,7 +66,10 @@ let masc_dashboard_spec : tool_spec =
   ; parameters =
       [ { p_name = "scope"
         ; p_type =
-            T_string { enum = Some dashboard_scope_enum_strings; default = Some "current" }
+            T_string
+              { enum = Some dashboard_scope_strings
+              ; default = Some (dashboard_scope_to_string dashboard_scope_default)
+              }
         ; p_description = "Dashboard scope: current or all"
         ; p_required = false
         }

@@ -1187,7 +1187,7 @@ type translated_keeper_stream_event =
   ; chat_events : Keeper_chat_events.keeper_chat_event list
   }
 
-let empty_keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.empty_state
+let empty_keeper_stream_bridge_state () = Keeper_chat_agent_core_stream_bridge.empty_state ()
 let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.translate
 
 (* [user_row_origin] and [submission] are required labelled arguments. Every
@@ -2096,7 +2096,7 @@ let process_single_turn ~user_row_origin ~submission
               (Event_error { message });
             Some (Failed { kind = Stream_projection_failed; detail = message }))
   in
-  match consume_worker_events empty_keeper_stream_bridge_state with
+  match consume_worker_events (empty_keeper_stream_bridge_state ()) with
   | outcome ->
       signal_stream_projection_done ();
       outcome

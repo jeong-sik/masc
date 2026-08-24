@@ -906,3 +906,28 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
     ->
       Error (Printf.sprintf "resources/read returned %d: %s" status body)
   | Ok (_, body) -> Masc_tui_mcp.resource_text_of_body ~request_id body
+
+(** POST /api/v1/keepers/:name/github-login — the device-flow login as the
+    server streams it: gh's own (redacted) output, then an error or the
+    final identity observation. Every chunk reaches [on_chunk] as it
+    arrives; the return says only how the stream ended. *)
+let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(on_chunk : string -> unit) :
+    (unit, string) result =
+  let url =
+    url_of ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/keepers/%s/github-login"
+           (percent_encode_path_segment keeper_name))
+  in
+  let headers =
+    json_headers (("Accept", "text/event-stream") :: auth_headers ())
+  in
+  match
+    Masc_http_client.post_stream ~clock ~idle_timeout_sec:900.0 ~url ~headers
+      ~body:"{}" ~on_chunk ()
+  with
+  | Error detail -> Error detail
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      Error (Printf.sprintf "github-login returned %d: %s" status body)
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()

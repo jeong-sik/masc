@@ -723,6 +723,8 @@ type async_msg =
   | Resources_listed of ((string * string) list, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
+  | Github_login_lines of string * string list
+  | Github_login_finished of string * (unit, string) result
   | Observer_opened of string
   | Observer_received of Masc_tui_observer.decoded list
   | Observer_closed of string
@@ -1048,13 +1050,18 @@ let launch_resources_list state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
+  let session = state.mcp_session in
   let run () =
     let result =
       try
-        match
-          Masc_tui_http.open_mcp_session ~host ~port
-            ~client_version:Runtime_build_version.current
-        with
+        let session_result =
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
+        in
+        match session_result with
         | Error detail -> Error detail
         | Ok session_id ->
             Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
@@ -1077,13 +1084,18 @@ let launch_resource_read state ~mailbox ~uri =
   let host = Env_config_core.masc_host () in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
+  let session = state.mcp_session in
   let run () =
     let result =
       try
-        match
-          Masc_tui_http.open_mcp_session ~host ~port
-            ~client_version:Runtime_build_version.current
-        with
+        let session_result =
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
+        in
+        match session_result with
         | Error detail -> Error detail
         | Ok session_id -> (
             match
@@ -1106,6 +1118,83 @@ let launch_resource_read state ~mailbox ~uri =
   | None ->
       enqueue_async mailbox
         (Resource_read (uri, Error "Eio switch is unavailable"))
+
+(* The device-flow login, streamed. gh prints the one-time code on its
+   own output, which the server forwards redacted; every data line lands
+   in the GitHub tab as it arrives so the operator can read the code and
+   finish in the browser. When the stream ends the tab re-reads the
+   identity observation, which is the fact the login was for. *)
+let launch_github_login state ~mailbox keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    match Eio_context.get_clock_opt () with
+    | None ->
+        enqueue_async mailbox
+          (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
+    | Some clock ->
+        let pending = Buffer.create 256 in
+        let flush_lines () =
+          let text = Buffer.contents pending in
+          match String.rindex_opt text '\n' with
+          | None -> ()
+          | Some last ->
+              let complete = String.sub text 0 last in
+              let rest =
+                String.sub text (last + 1) (String.length text - last - 1)
+              in
+              Buffer.clear pending;
+              Buffer.add_string pending rest;
+              let lines =
+                String.split_on_char '\n' complete
+                |> List.filter_map (fun line ->
+                       let line = String.trim line in
+                       if String.length line > 6
+                          && String.sub line 0 6 = "data: "
+                       then
+                         let payload =
+                           String.sub line 6 (String.length line - 6)
+                         in
+                         match Yojson.Safe.from_string payload with
+                         | `Assoc fields -> (
+                             match List.assoc_opt "text" fields with
+                             | Some (`String text) ->
+                                 Some (String.split_on_char '\n' text)
+                             | _ -> (
+                                 match List.assoc_opt "message" fields with
+                                 | Some (`String message) ->
+                                     Some [ "error: " ^ message ]
+                                 | _ -> Some [ payload ]))
+                         | _ | (exception Yojson.Json_error _) ->
+                             Some [ payload ]
+                       else None)
+                |> List.concat
+                |> List.filter (fun line -> String.trim line <> "")
+              in
+              if lines <> [] then
+                enqueue_async mailbox (Github_login_lines (keeper_name, lines))
+        in
+        let result =
+          try
+            Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
+              ~port ~keeper_name
+              ~on_chunk:(fun chunk ->
+                Buffer.add_string pending chunk;
+                flush_lines ())
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Github_login_finished (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_runtime_config_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -3368,6 +3457,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.github_identity_view <- Some (keeper_name, lines);
           state.github_identity_view_error <- None
       | Error detail -> state.github_identity_view_error <- Some detail)
+  | Github_login_lines (keeper_name, lines) ->
+      (* Append under the stamped view; a login for another keeper than the
+         one on screen still lands on its own stamp. *)
+      let existing =
+        match state.github_identity_view with
+        | Some (stamp, lines_before) when String.equal stamp keeper_name ->
+            lines_before
+        | Some _ | None -> [ "# github login" ]
+      in
+      state.github_identity_view <- Some (keeper_name, existing @ lines);
+      state.github_identity_view_error <- None
+  | Github_login_finished (keeper_name, result) -> (
+      (match result with
+       | Ok () -> add_event state "system" (keeper_name ^ ": github login stream ended")
+       | Error detail ->
+           add_event state "error" (keeper_name ^ ": github login: " ^ detail));
+      launch_github_identity_view state ~mailbox keeper_name)
   | Schedules_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -4364,6 +4470,15 @@ let main () =
                 launch_github_identity_view state ~mailbox:async_messages
                   keeper.k_name
             | _, Detail_info | None, _ -> ())
+       | Some "L"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_github ->
+           (match selected_keeper state with
+            | Some keeper ->
+                state.github_identity_view <-
+                  Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
+                launch_github_login state ~mailbox:async_messages keeper.k_name
+            | None -> ())
        | Some "\r" when state.view = Resources ->
            (match
               Option.bind state.resources_list (fun rows ->
@@ -4947,7 +5062,19 @@ let main () =
                      state.view <- Keepers Keeper_detail;
                      state.detail_scroll <- 0;
                      load_live_context state base_path k;
-                     load_selected_keeper_logs state base_path 200 (Some k)
+                     load_selected_keeper_logs state base_path 200 (Some k);
+                     (* A sticky non-Info tab re-reads for the keeper the
+                        cursor now names; without this the pane shows
+                        "(loading)" forever after a cursor move, because the
+                        stamped answer names the previous keeper. *)
+                     (match state.detail_tab with
+                      | Detail_info -> ()
+                      | Detail_instructions ->
+                          launch_keeper_config_view state
+                            ~mailbox:async_messages k.k_name
+                      | Detail_github ->
+                          launch_github_identity_view state
+                            ~mailbox:async_messages k.k_name)
                  | None -> ())
             | Board ->
                 (match state.board_mode with
@@ -5332,9 +5459,10 @@ let main () =
              (* The file moves under hot-reload edits from other agents. *)
              launch_runtime_config_load state ~mailbox:async_messages
          | Resources ->
-             (* The inventory follows the store; a resource added by a
-                keeper mid-session should appear without a manual reload. *)
-             launch_resources_list state ~mailbox:async_messages
+             (* Loaded on arrival and on r. A tick-cadence relist would open
+                an MCP session every two seconds for an inventory that moves
+                at human speed. *)
+             ()
          | Schedules ->
              (* Rows cross their due time and turn terminal while an operator
                 watches; the page that answers "why is this keeper awake"

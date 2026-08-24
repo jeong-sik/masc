@@ -3013,8 +3013,43 @@ let main () =
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
         | None -> false
       in
+      (* Typing filters the tool list. While the filter is empty the
+         navigation keys (j/k/r/g) keep their meaning, so a filter starts
+         only on a letter they do not use; once one character has landed,
+         every printable scalar feeds the filter -- an operator typing
+         "task" must not be told the "a" moved a cursor. Word keys ("up",
+         "esc") never collide because a key that is not a printable scalar
+         cannot be appended. A reserved key with an empty filter returns
+         [false] and falls through to the dispatch below. *)
+      let tools_filter_handled =
+        state.view = Tools
+        &&
+        match key with
+        | Some "esc" ->
+            state.tools_filter <- "";
+            state.tools_scroll <- 0;
+            true
+        | Some ("\127" | "\b") ->
+            state.tools_filter <-
+              Masc_tui_message_layout.drop_last_utf8_scalar state.tools_filter;
+            state.tools_scroll <- 0;
+            true
+        | Some scalar
+          when Masc_tui_message_layout.is_printable_utf8_scalar scalar ->
+            if
+              String.length state.tools_filter = 0
+              && List.mem scalar [ "j"; "k"; "r"; "g"; "G" ]
+            then false
+            else begin
+              state.tools_filter <- state.tools_filter ^ scalar;
+              state.tools_scroll <- 0;
+              true
+            end
+        | Some _ | None -> false
+      in
       (match key with
        | Some _ when composer_claimed -> ()
+       | Some _ when tools_filter_handled -> ()
        | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
            raise Break
        | Some _ when compact_viewport -> ()

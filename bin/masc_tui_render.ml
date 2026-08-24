@@ -3186,7 +3186,7 @@ let render_tools (state : state) =
     | None -> []
     | Some s -> s.Masc.Tui_decode.ts_tools
   in
-  let tool_rows = Tool_tree.rows tools in
+  let tool_rows = Tool_tree.rows ~filter:state.tools_filter tools in
   let shown = List.length tools in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -3217,6 +3217,15 @@ let render_tools (state : state) =
   in
   box_top buf cols;
   box_line buf cols header;
+  (* The filter line says what is narrowed and how to leave: a filter a
+     reader cannot see narrows the list invisibly, and an operator who does
+     not know [esc] clears it types more letters into a shrinking list. *)
+  if String.length state.tools_filter > 0 then
+    box_line_styled buf cols ~style:Ansi.bold
+      (Printf.sprintf "  filter: %s  (%d of %d; esc clears, backspace edits)"
+         (Terminal_text.single_line state.tools_filter)
+         (Tool_tree.tool_count tool_rows)
+         shown);
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-32s %-8s %s" "Tool" "Direct" "Surfaces"
@@ -3289,7 +3298,8 @@ let render_tools (state : state) =
       (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+    (Printf.sprintf
+       "%s  type-to-filter  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 

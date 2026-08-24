@@ -10,7 +10,22 @@ let family_of name =
   | first :: second :: _ :: _ -> Some (first ^ "_" ^ second)
   | _ -> None
 
-let rows tools =
+(* A filter matches where an operator looks: the name, and the description
+   the row does not show but the tool carries. Case-blind, substring, so
+   [task] gathers the masc_task_* family, the family-less [masc_tasks] and
+   [masc_transition] whose description says task, and keeper_task_* -- the
+   tools spelling scattered, found anyway. *)
+let matches ~filter (tool : Masc.Tui_decode.tool_entry) =
+  let open Masc.Tui_decode in
+  String.length filter = 0
+  || String_util.contains_substring_ci tool.tl_name filter
+     || String_util.contains_substring_ci tool.tl_description filter
+
+let rows ?(filter = "") tools =
+  let tools =
+    if String.length filter = 0 then tools
+    else List.filter (matches ~filter) tools
+  in
   let counts = Hashtbl.create 32 in
   List.iter
     (fun (tool : Masc.Tui_decode.tool_entry) ->

@@ -520,6 +520,7 @@ Per surface:
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
 | `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
+| typing | Tools | Filters the list by name or description while you type. `Esc` clears, `Backspace` edits; `j`/`k`/`r`/`g` stay navigation until the filter has a character |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |

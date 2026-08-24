@@ -14,6 +14,13 @@ let tool ?(surfaces = [ "mcp" ]) ?(direct = false) name : Decode.tool_entry =
   ; tl_direct_call = direct
   }
 
+let tool_with_description name description : Decode.tool_entry =
+  { tl_name = name
+  ; tl_description = description
+  ; tl_surfaces = [ "mcp" ]
+  ; tl_direct_call = false
+  }
+
 let shape rows =
   List.map
     (function
@@ -72,6 +79,45 @@ let test_the_count_says_tools_not_rows () =
   check int "the header should say two" 2 (Tree.tool_count rows)
 ;;
 
+(* A filter matches the name and the description, so it finds what spelling
+   scattered: the family-less task tools surface under the same "task" as the
+   masc_task_* family, and a description's word works when the name does not
+   carry it. *)
+let test_a_filter_gathers_what_spelling_scattered () =
+  (* masc_transition matches through its description, not its name: the
+     fixture gives it one, the way the real declaration does. The lone
+     masc_task survivor carries no heading -- the two-tool family rule holds
+     over what is shown, so a count is never inflated by hidden tools. *)
+  check (list string) "one word, every spelling of it"
+    [ "masc_task_history"; "masc_tasks"; "masc_transition" ]
+    (shape
+       (Tree.rows ~filter:"task"
+          [ tool "masc_board_post"
+          ; tool "masc_task_history"
+          ; tool "masc_tasks"
+          ; tool_with_description "masc_transition" "move a task between states"
+          ]))
+;;
+
+let test_a_filter_matches_the_description_too () =
+  check (list string) "a description word finds the tool"
+    [ "masc_deliver" ]
+    (shape
+       (Tree.rows ~filter:"deliver"
+          [ tool_with_description "masc_deliver" "hand finished work over"
+          ; tool "masc_board_post"
+          ]))
+;;
+
+let test_a_case_blind_filter_and_an_empty_one () =
+  check (list string) "upper case still matches"
+    [ "masc_board_post" ]
+    (shape (Tree.rows ~filter:"BOARD" [ tool "masc_board_post"; tool "masc_gc" ]));
+  check (list string) "empty filter is no filter"
+    [ "masc_board_post"; "masc_gc" ]
+    (shape (Tree.rows ~filter:"" [ tool "masc_board_post"; tool "masc_gc" ]))
+;;
+
 let () =
   run "tui_tool_tree"
     [ ( "families"
@@ -84,6 +130,14 @@ let () =
         ; test_case "the given order is kept" `Quick test_the_given_order_is_kept
         ; test_case "the count says tools, not rows" `Quick
             test_the_count_says_tools_not_rows
+        ] )
+    ; ( "filter"
+      , [ test_case "a filter gathers what spelling scattered" `Quick
+            test_a_filter_gathers_what_spelling_scattered
+        ; test_case "a filter matches the description too" `Quick
+            test_a_filter_matches_the_description_too
+        ; test_case "a case-blind filter and an empty one" `Quick
+            test_a_case_blind_filter_and_an_empty_one
         ] )
     ]
 ;;

@@ -555,6 +555,11 @@ type state = {
   mutable tools_inventory: Tui_decode.tool_snapshot option;
   mutable tools_error: string option;
   mutable tools_scroll: int;
+  (** Typing on the Tools surface narrows it: the empty string is no filter,
+      and any character an operator types lands here. Kept on the surface
+      state (not a mode flag) because "a filter is active" is nothing more
+      than "this string is non-empty". *)
+  mutable tools_filter: string;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
@@ -788,6 +793,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   tools_inventory = None;
   tools_error = None;
   tools_scroll = 0;
+  tools_filter = "";
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;

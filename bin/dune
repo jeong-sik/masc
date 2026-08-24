@@ -342,7 +342,7 @@
  (name masc_tui_tool_tree)
  (wrapped false)
  (modules masc_tui_tool_tree)
- (libraries masc))
+ (libraries masc masc.string_util))
 
 (library
  (name masc_tui_markdown)

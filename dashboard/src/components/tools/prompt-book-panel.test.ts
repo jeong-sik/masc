@@ -9,7 +9,6 @@ function makePrompt(overrides: Partial<DashboardPromptItem> & { key: string }): 
     category: 'keeper',
     description: '',
     current: '',
-    default: null,
     effective: '',
     file_value: null,
     override_value: null,

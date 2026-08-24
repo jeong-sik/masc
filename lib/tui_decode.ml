@@ -1003,6 +1003,27 @@ let sgr_wheel_key (parameters : string) (final : char) : string option =
         else None
     | [] -> None
 
+(** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
+    three raw bytes) into the same key an SGR report produces.
+
+    Terminals that do not implement SGR ([?1006]) still answer the tracking
+    request ([?1000]) in this older shape. Apple Terminal is one, and it is the
+    macOS default: the combined [?1006;1000h] request leaves it reporting X10,
+    so a reader that only understands SGR sees [CSI M], calls the sequence
+    unknown, and leaves the three coordinate bytes in the stream to be typed as
+    text. Live shape 2026-08-24: one wheel notch put three characters in the
+    chat composer.
+
+    Each byte is offset by 32. Wheel-up is button 64 and wheel-down 65, the
+    same numbers SGR uses. Clicks, releases, and drags return [None] — nothing
+    consumes them yet — but the caller must still consume their bytes. *)
+let x10_wheel_key (button : char) : string option =
+  match Char.code button - 32 with
+  | 64 -> Some "wheel-up"
+  | 65 -> Some "wheel-down"
+  | _ -> None
+;;
+
 let missing_field key =
   Error (Printf.sprintf "missing required field '%s'" key)
 

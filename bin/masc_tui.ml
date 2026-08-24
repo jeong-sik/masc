@@ -216,6 +216,23 @@ let read_key ?(timeout = 0.1) reader () : string option =
                    match Masc.Tui_decode.sgr_wheel_key params final with
                    | Some key -> Some key
                    | None -> Some "unknown-esc")
+               (* A bare [CSI M] is the legacy X10 mouse report: three raw
+                  bytes follow and belong to the report, not to the typist.
+                  Terminals that ignore the SGR half of the [?1006;1000h]
+                  request answer in this shape -- Apple Terminal, the macOS
+                  default, is one -- so leaving the bytes unread typed three
+                  characters into the composer on every wheel notch. They are
+                  consumed whether or not the button means anything. *)
+               | Some ("", 'M') ->
+                   let button = take_input_byte reader ~timeout:0.05 in
+                   let _column = take_input_byte reader ~timeout:0.05 in
+                   let _row = take_input_byte reader ~timeout:0.05 in
+                   (match button with
+                    | None -> Some "unknown-esc"
+                    | Some button -> (
+                        match Masc.Tui_decode.x10_wheel_key button with
+                        | Some key -> Some key
+                        | None -> Some "unknown-esc"))
                | Some (_, _) -> Some "unknown-esc")
           | Some _ | None -> Some "esc")
       | Some byte -> (

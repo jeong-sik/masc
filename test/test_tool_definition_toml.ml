@@ -581,6 +581,33 @@ let test_a_nested_required_child_lands_in_its_parents_list () =
     (member (property schema [ "handoff"; "summary" ]) "required" = None)
 ;;
 
+(* An array can bound both ends. keeper_task_done requires at least one
+   evidence ref, and the loader read no lower bound at all before this, so that
+   declaration could not move out of OCaml. *)
+let test_an_array_carries_min_items () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"evidence_refs\"\ntype = \"array\"\n\
+            min_items = 1\nmax_items = 8\n\
+            items = { type = \"string\" }\n")
+  in
+  let refs = property schema [ "evidence_refs" ] in
+  check bool "min_items reaches the array" true (member refs "minItems" = Some (`Int 1));
+  check bool "max_items still reaches it" true (member refs "maxItems" = Some (`Int 8))
+;;
+
+(* min_items on anything but an array is a declaration error, not a key the
+   loader quietly drops. *)
+let test_min_items_is_rejected_off_an_array () =
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t" ^ "[[params]]\nname = \"n\"\ntype = \"string\"\nmin_items = 1\n")
+    "min_items"
+;;
+
 let test_array_items_carry_max_items_and_required () =
   let schema =
     load_ok ~name:"t"
@@ -645,6 +672,11 @@ let () =
             "a nested required child lands in its parent's list"
             `Quick
             test_a_nested_required_child_lands_in_its_parents_list
+        ; test_case "an array carries min_items" `Quick test_an_array_carries_min_items
+        ; test_case
+            "min_items is rejected off an array"
+            `Quick
+            test_min_items_is_rejected_off_an_array
         ; test_case
             "array items carry max_items and required"
             `Quick

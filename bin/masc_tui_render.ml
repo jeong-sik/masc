@@ -81,6 +81,44 @@ let chat_markdown_palette : Markdown.palette =
 let chat_markdown ~width body =
   Markdown.render ~palette:chat_markdown_palette ~width body
 
+(* Conversation colour names the source, not the prose. A keeper can return a
+   page of Markdown; painting every byte green turns syntax, emphasis, links,
+   and ordinary text into one undifferentiated status light. The compact
+   reverse-video badge gives the source a background that works with the
+   terminal's own light or dark palette, while the body keeps its semantic
+   Markdown colours. *)
+let chat_origin_style : Message_layout.style -> string = function
+  | Message_layout.User -> Ansi.cyan
+  | Message_layout.Keeper -> Ansi.blue
+  | Message_layout.Status -> Ansi.yellow
+  | Message_layout.Error -> Ansi.red
+  | Message_layout.Tool -> Ansi.magenta
+  | Message_layout.Thinking -> Ansi.gray
+
+let chat_body_style : Message_layout.style -> string = function
+  | Message_layout.User | Message_layout.Keeper -> Ansi.reset
+  | Message_layout.Status -> Ansi.yellow
+  | Message_layout.Error -> Ansi.red
+  | Message_layout.Tool | Message_layout.Thinking -> Ansi.dim
+
+let render_chat_row buf cols (row : Message_layout.row) =
+  match row.kind with
+  | Message_layout.Body ->
+      box_line_styled buf cols ~style:(chat_body_style row.style) row.text
+  | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
+      box_line_styled buf cols ~style:Ansi.dim
+        (Printf.sprintf "[%s]" timestamp)
+  | Message_layout.Metadata
+      (Message_layout.Origin { timestamp; role_label; request_label }) ->
+      let badge =
+        Printf.sprintf "%s%s %s %s" (chat_origin_style row.style) Ansi.reverse
+          role_label Ansi.reset
+      in
+      box_line buf cols
+        (Printf.sprintf "%s[%s]%s %sFrom%s %s %s%s%s" Ansi.dim timestamp
+           Ansi.reset Ansi.dim Ansi.reset badge Ansi.dim request_label
+           Ansi.reset)
+
 (* The composer row every surface carries on its last terminal line.
 
    The recipient is whichever keeper the roster cursor points at. That cursor
@@ -1595,6 +1633,35 @@ let keeper_runtime_label (runtime : keeper_runtime option) =
         (Tui_decode.keeper_phase_to_string row.kr_phase)
         model)
 
+let keeper_message_identity state keeper_name =
+  match
+    List.find_opt
+      (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+      state.keepers
+  with
+  | None ->
+      Ansi.dim ^ "\xc3\x97 unavailable \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset
+  | Some keeper ->
+      let reading = keeper_reading state keeper in
+      let status = Keeper_control.display_status reading in
+      let runtime =
+        match reading.Keeper_control.liveness with
+        | Keeper_control.Present row -> Some row
+        | Keeper_control.Absent | Keeper_control.Unobserved -> None
+      in
+      let status_color, glyph = keeper_status_glyph status in
+      String.concat ""
+        [ status_color
+        ; glyph
+        ; " "
+        ; keeper_status_word status
+        ; Ansi.reset
+        ; Ansi.dim
+        ; " \xc2\xb7 "
+        ; keeper_runtime_label runtime
+        ; Ansi.reset
+        ]
+
 (* Two dispositions an operator needs before stopping anything: whether the
    keeper comes back by itself, and whether it takes turns without being
    asked. Both are on the roster row. *)
@@ -1715,6 +1782,8 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
           ; hint Keeper_control.Shutdown "shutdown"
+          ; Ansi.cyan ^ "e" ^ Ansi.reset ^ " settings"
+          ; Ansi.cyan ^ "a" ^ Ansi.reset ^ " new"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
             (* Dimmed rather than dropped, the same way an unavailable
@@ -1730,31 +1799,19 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
 
 (* Counted from the same readings the rows are drawn from, so the heading
    cannot disagree with the list under it. *)
+let keeper_roster_status_color = function
+  | "running" | "active" | "busy" | "listening" -> Ansi.green
+  | "inactive" | "paused" -> Ansi.yellow
+  | "offline" | "idle" -> Ansi.gray
+  | _ -> Ansi.dim
+
+(* The tally is [Keeper_control.status_tally], so every word here is a word the
+   status column shows for the same keeper. This function only paints it. *)
 let keeper_roster_summary readings =
-  let tally (live, paused, offline, unknown) reading =
-    match Keeper_control.display_status reading with
-    | None -> (live, paused, offline, unknown + 1)
-    | Some Status.Cp_paused -> (live, paused + 1, offline, unknown)
-    | Some (Status.Cp_surface Status.Surface_offline) ->
-        (live, paused, offline + 1, unknown)
-    | Some
-        (Status.Cp_surface
-           ( Status.Surface_active | Status.Surface_busy
-           | Status.Surface_listening | Status.Surface_idle
-           | Status.Surface_inactive )) ->
-        (live + 1, paused, offline, unknown)
-  in
-  let live, paused, offline, unknown =
-    List.fold_left tally (0, 0, 0, 0) readings
-  in
-  [ (live, "running", Ansi.green)
-  ; (paused, "paused", Ansi.yellow)
-  ; (offline, "offline", Ansi.gray)
-  ; (unknown, "unread", Ansi.dim)
-  ]
-  |> List.filter (fun (count, _, _) -> count > 0)
-  |> List.map (fun (count, label, color) ->
-         Printf.sprintf "%s%d %s%s" color count label Ansi.reset)
+  Keeper_control.status_tally readings
+  |> List.map (fun (label, count) ->
+         Printf.sprintf "%s%d %s%s" (keeper_roster_status_color label) count
+           label Ansi.reset)
 
 (* The two subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
@@ -2278,9 +2335,10 @@ let render_keeper_message (state : state) =
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
-      Printf.sprintf "%s  (port %d)"
+      Printf.sprintf "%s  %s  %s(port %d)%s"
         (screen_title (Printf.sprintf " Message to: %s" display_keeper_name))
-        state.port
+        (keeper_message_identity state keeper_name)
+        Ansi.dim state.port Ansi.reset
     in
     let target_registered =
       keeper_available_for_new_message state keeper_name
@@ -2357,36 +2415,27 @@ let render_keeper_message (state : state) =
              }
               : Message_layout.entry)
           in
-          (* The whole trail, not its last line. Reasoning is the only part of
-             a live turn the durable transcript does not keep, so the pane is
-             the one place it can be read, and one line out of it says what the
-             keeper concluded without saying how it got there. Blank lines are
-             dropped because models emit runs of them; the rest is one entry
-             the layout wraps like any other body. *)
-          let thinking_entry =
-            match Keeper_chat_transcript.thinking_lines live with
-            | [] -> []
-            | lines ->
-                [ entry Message_layout.Thinking "thinking"
-                    (String.concat "\n" lines) ]
+          (* The turn in the order it happened, one entry per stretch. A
+             tool-call round interleaves reasoning, calls and reply text, and
+             drawing them as three pooled blocks read as one wall of text with
+             its calls listed elsewhere. Reasoning is the only part of a live
+             turn the durable transcript does not keep, so the pane is the one
+             place it can be read — the whole trail, not its last line. *)
+          let keeper_label =
+            Keeper_chat.terminal_safe_text
+              (Keeper_chat_transcript.keeper_name live)
           in
-          let tool_entry =
-            match Keeper_chat_transcript.tool_rows live with
-            | [] -> []
-            | rows ->
-                [ entry Message_layout.Tool "tools" (String.concat "\n" rows) ]
-          in
-          let text_entry =
-            match Keeper_chat_transcript.text live with
-            | "" -> []
-            | text ->
-                [ entry Message_layout.Keeper
-                    (Keeper_chat.terminal_safe_text
-                       (Keeper_chat_transcript.keeper_name live))
-                    text
-                ]
-          in
-          thinking_entry @ tool_entry @ text_entry
+          List.map
+            (fun (item : Keeper_chat_transcript.trail_item) ->
+              match item with
+              | Keeper_chat_transcript.Trail_thinking lines ->
+                  entry Message_layout.Thinking "thinking"
+                    (String.concat "\n" lines)
+              | Keeper_chat_transcript.Trail_tools rows ->
+                  entry Message_layout.Tool "tools" (String.concat "\n" rows)
+              | Keeper_chat_transcript.Trail_text text ->
+                  entry Message_layout.Keeper keeper_label text)
+            (Keeper_chat_transcript.trail live)
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in
@@ -2413,17 +2462,7 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (fun (row : Message_layout.row) ->
-          let style =
-            match row.style with
-            | Message_layout.User -> Ansi.cyan
-            | Message_layout.Keeper -> Ansi.green
-            | Message_layout.Status -> Ansi.yellow
-            | Message_layout.Error -> Ansi.red
-            | Message_layout.Tool -> Ansi.dim
-            | Message_layout.Thinking -> Ansi.dim
-          in
-          box_line_styled buf cols ~style row.text)
+        (render_chat_row buf cols)
         visible_rows;
       (* Fill remaining space *)
       for _ = List.length visible_rows to history_height - 1 do
@@ -2533,7 +2572,7 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        box_line_styled buf cols ~style:Ansi.cyan (prefix ^ line))
+        box_line buf cols (Ansi.cyan ^ prefix ^ Ansi.reset ^ line))
       composer;
 
     let input_row =
@@ -2580,9 +2619,14 @@ let render_keeper_message (state : state) =
            | Keeper_chat_return_list -> "Esc:list"
            | Keeper_chat_return_detail -> "Esc:detail")
     in
+    let switch_hint =
+      match next_keeper_message_target state with
+      | Masc_tui_keeper_selection.No_alternative -> ""
+      | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
+    in
     let footer =
-      Printf.sprintf "%s  %s  Ctrl-J:newline  %s  %s  Ctrl-U:clear%s" Ansi.dim
-        enter_hint scroll_hint escape_hint Ansi.reset
+      Printf.sprintf "%s  %s  Ctrl-J:newline  %s%s  %s  Ctrl-U:clear%s"
+        Ansi.dim enter_hint scroll_hint switch_hint escape_hint Ansi.reset
     in
     Buffer.add_string buf
       (Message_layout.fit_width footer (max 1 (cols - 1)));

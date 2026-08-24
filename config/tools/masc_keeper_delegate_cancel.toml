@@ -1,0 +1,26 @@
+name = "masc_keeper_delegate_cancel"
+description = """
+Cancel one queued Keeper chat operation by exact target and operation_id."""
+additional_properties = false
+
+[[params]]
+name = "target"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params]]
+name = "kind"
+type = "string"
+required = true
+enum = ["keeper"]
+
+[[params.params]]
+name = "name"
+type = "string"
+required = true
+
+[[params]]
+name = "operation_id"
+type = "string"
+required = true

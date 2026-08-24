@@ -546,9 +546,61 @@ let test_roster_decode_rejects_an_unknown_phase () =
         {|keepers[0]: keeper "analyst" has unknown lifecycle phase "teleporting"|}
         err
 
+(* The roster header's tally and the status column are the same reading drawn
+   twice. The tally used to fold [Surface_inactive] into "running", so a fleet
+   of ten inactive keepers read "10 running" above ten rows saying "inactive".
+   These pin the tally to the column's own words rather than to a second
+   spelling of them. *)
+let present ?(status = Status.Surface_active) name =
+  { Control.name
+  ; paused = false
+  ; liveness = Control.Present (runtime ~status name)
+  }
+
+let test_tally_uses_the_column_word () =
+  let readings =
+    [ present ~status:Status.Surface_active "a"
+    ; present ~status:Status.Surface_inactive "b"
+    ; present ~status:Status.Surface_inactive "c"
+    ]
+  in
+  Alcotest.(check (list (pair string int)))
+    "inactive is counted as inactive, not as running"
+    [ ("active", 1); ("inactive", 2) ]
+    (Control.status_tally readings)
+
+let test_tally_never_names_a_word_the_column_hides () =
+  let readings =
+    [ present ~status:Status.Surface_active "a"
+    ; present ~status:Status.Surface_inactive "b"
+    ; present ~status:Status.Surface_offline "c"
+    ; { Control.name = "d"; paused = true; liveness = Control.Absent }
+    ; reading "e"
+    ]
+  in
+  let tallied = List.map fst (Control.status_tally readings) in
+  let shown = List.map Control.status_label readings in
+  List.iter
+    (fun word ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the column shows %S somewhere" word)
+        true
+        (List.mem word shown))
+    tallied;
+  Alcotest.(check int)
+    "every reading is counted exactly once"
+    (List.length readings)
+    (List.fold_left (fun sum (_, n) -> sum + n) 0 (Control.status_tally readings))
+
 let () =
   Alcotest.run "tui-keeper-control"
-    [ ( "reading"
+    [ ( "status_tally"
+      , [ Alcotest.test_case "inactive is not counted as running" `Quick
+            test_tally_uses_the_column_word
+        ; Alcotest.test_case "every counted word appears in the column" `Quick
+            test_tally_never_names_a_word_the_column_hides
+        ] )
+    ; ( "reading"
       , [ Alcotest.test_case "unobserved roster offers nothing" `Quick
             test_unobserved_offers_nothing
         ; Alcotest.test_case "absent keeper offers boot" `Quick

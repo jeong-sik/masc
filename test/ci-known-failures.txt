@@ -35,7 +35,6 @@ test_fs_compat_capability_write              # publication: replace fatal and ca
 test_keeper_board_attention_exact_flow       # production adapter: resumable status gate
 test_keeper_fs_directory_durability          # durable commit observer: observer exception
 test_keeper_keepalive_helpers                # current_task_reconciliation
-test_keeper_msg_async_terminal_event         # on_worker_aborted: operator cancel
 test_keeper_tool_dispatch_runtime            # execute_keeper_tool_call_with_outcome
 test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
 test_server_mcp_session_persist              # persistence: save/forget/load round-trip

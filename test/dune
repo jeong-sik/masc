@@ -276,6 +276,13 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_keeper_schema_toml_parity
+  test_keeper_runtime_schemas_toml_parity
+  test_taskboard_tool_toml_parity
+  test_voice_tool_toml_parity
+  test_run_tool_toml_parity
+  test_local_runtime_tool_toml_parity
+  test_base_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
@@ -590,6 +597,13 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_keeper_schema_toml_parity
+  test_keeper_runtime_schemas_toml_parity
+  test_taskboard_tool_toml_parity
+  test_voice_tool_toml_parity
+  test_run_tool_toml_parity
+  test_local_runtime_tool_toml_parity
+  test_base_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
@@ -2724,6 +2738,11 @@
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
  (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))
+
+(test
+ (name test_tui_editor)
+ (modules test_tui_editor)
+ (libraries alcotest unix masc_tui_editor))
 
 (test
  (name test_tui_keeper_selection)

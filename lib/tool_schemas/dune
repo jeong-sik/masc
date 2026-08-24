@@ -5,6 +5,8 @@
  (public_name masc.tool_schemas)
  (modules
   tool_schemas_agent
+  tool_schemas_run_toml
+  tool_schemas_local_runtime_toml
   tool_schemas_workspace
   tool_schemas_misc
   tool_schemas_workspace_core

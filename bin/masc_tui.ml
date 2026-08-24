@@ -473,9 +473,9 @@ type async_msg =
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
-      string * (Keeper_chat_history.decoded, string) result
+      int * string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
-      string * float * (Keeper_chat_history.page, string) result
+      int * string * float * (Keeper_chat_history.page, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
@@ -792,6 +792,7 @@ let launch_verification_load state ~mailbox =
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = Env_config_core.masc_host () in
   let port = state.port in
+  let generation = state.msg_history_load_generation in
   state.msg_older_loading <- true;
   let run () =
     let result =
@@ -802,7 +803,8 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_chat_older_loaded (keeper_name, before, result))
+    enqueue_async mailbox
+      (Keeper_chat_older_loaded (generation, keeper_name, before, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -812,18 +814,22 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_older_loaded
-           (keeper_name, before, Error "Eio switch is unavailable"))
+           (generation, keeper_name, before, Error "Eio switch is unavailable"))
 
 let launch_keeper_history_load state ~mailbox ~keeper_name =
   let host = Env_config_core.masc_host () in
   let port = state.port in
+  state.msg_history_load_generation <- state.msg_history_load_generation + 1;
+  state.msg_older_loading <- false;
+  let generation = state.msg_history_load_generation in
   let run () =
     let result =
       try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_chat_history_loaded (keeper_name, result))
+    enqueue_async mailbox
+      (Keeper_chat_history_loaded (generation, keeper_name, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -833,7 +839,24 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_history_loaded
-           (keeper_name, Error "Eio switch is unavailable"))
+           (generation, keeper_name, Error "Eio switch is unavailable"))
+
+let switch_to_next_keeper_message state ~mailbox =
+  match next_keeper_message_target state with
+  | Masc_tui_keeper_selection.No_alternative -> ()
+  | Masc_tui_keeper_selection.Switch_to { keeper_name; cursor } ->
+      open_message_for_keeper ~return_to:state.msg_return state keeper_name;
+      state.keeper_cursor <- cursor;
+      state.msg_scroll <- 0;
+      state.msg_loaded <- [];
+      state.msg_loaded_keeper <- None;
+      state.msg_loaded_error <- None;
+      state.msg_loaded_dropped <- 0;
+      state.msg_older_cursor <- None;
+      state.msg_older_exist <- false;
+      state.msg_older_loading <- false;
+      state.msg_older_error <- None;
+      launch_keeper_history_load state ~mailbox ~keeper_name
 
 (* Rows this session wrote that the transcript now carries. Dropped so the same
    turn is not drawn twice, once from each source.
@@ -2486,11 +2509,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Keeper_chat_done (request, was_replay, result, acknowledge) ->
       settle_live_turn state request;
       (* The server persists the user row, the reply and the tool calls before
-         it ends the stream, so by now the transcript holds this turn. Reloading
-         makes the record the thing on screen; the rows settle_live_turn just
-         committed are what stands if the load fails. *)
-      launch_keeper_history_load state ~mailbox
-        ~keeper_name:request.Keeper_chat.keeper_name;
+         it ends the stream, so by now the transcript holds this turn. While
+         the pane still points here, reloading makes that record the thing on
+         screen; the rows settle_live_turn just committed are what stands if
+         the load fails. A background Keeper does not supersede the visible
+         Keeper's history generation. *)
+      if
+        Option.exists
+          (String.equal request.Keeper_chat.keeper_name)
+          state.msg_target_keeper_name
+      then
+        launch_keeper_history_load state ~mailbox
+          ~keeper_name:request.Keeper_chat.keeper_name;
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -2566,32 +2596,43 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
-  | Keeper_chat_history_loaded (keeper_name, result) -> (
-      match result with
-      | Ok { Keeper_chat_history.rows; dropped } ->
-          state.msg_loaded <-
-            List.map (msg_entry_of_history_row keeper_name) rows;
-          state.msg_loaded_keeper <- Some keeper_name;
-          state.msg_loaded_error <- None;
-          state.msg_loaded_dropped <- dropped;
-          (* Where reading further back starts. The oldest row this load
-             carried is the cursor; if it carried none there is nothing to page
-             back from. Whether older rows exist is only learned by asking, so
-             the pane assumes they might and finds out on the first page. *)
-          state.msg_older_cursor <-
-            List.fold_left
-              (fun oldest (row : Keeper_chat_history.row) ->
-                match oldest with
-                | None -> Some row.Keeper_chat_history.at
-                | Some at -> Some (Float.min at row.Keeper_chat_history.at))
-              None rows;
-          state.msg_older_exist <- Option.is_some state.msg_older_cursor;
-          state.msg_older_error <- None;
-          forget_session_rows_the_transcript_holds state keeper_name rows
-      | Error detail ->
-          (* The transcript is left as it was and the session rows stay: a
-             failed load must not be the reason the pane goes blank. *)
-          state.msg_loaded_error <- Some detail)
+  | Keeper_chat_history_loaded (generation, keeper_name, result) ->
+      (* The operator can switch while a previous GET is still in flight. The
+         pane owns one loaded-history cache, so a late response for the old
+         target or an older request for a target revisited since must not
+         replace the transcript now being read. *)
+      if
+        generation = state.msg_history_load_generation
+        && Option.exists (String.equal keeper_name)
+             state.msg_target_keeper_name
+      then
+        (match result with
+         | Ok { Keeper_chat_history.rows; dropped } ->
+             state.msg_loaded <-
+               List.map (msg_entry_of_history_row keeper_name) rows;
+             state.msg_loaded_keeper <- Some keeper_name;
+             state.msg_loaded_error <- None;
+             state.msg_loaded_dropped <- dropped;
+             (* Where reading further back starts. The oldest row this load
+                carried is the cursor; if it carried none there is nothing to
+                page back from. Whether older rows exist is only learned by
+                asking, so the pane assumes they might and finds out on the
+                first page. *)
+             state.msg_older_cursor <-
+               List.fold_left
+                 (fun oldest (row : Keeper_chat_history.row) ->
+                   match oldest with
+                   | None -> Some row.Keeper_chat_history.at
+                   | Some at ->
+                       Some (Float.min at row.Keeper_chat_history.at))
+                 None rows;
+             state.msg_older_exist <- Option.is_some state.msg_older_cursor;
+             state.msg_older_error <- None;
+             forget_session_rows_the_transcript_holds state keeper_name rows
+         | Error detail ->
+             (* The transcript is left as it was and the session rows stay: a
+                failed load must not be the reason the pane goes blank. *)
+             state.msg_loaded_error <- Some detail)
   | Tools_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2625,18 +2666,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_error <- Some detail)
-  | Keeper_chat_older_loaded (keeper_name, before, result) ->
-      state.msg_older_loading <- false;
+  | Keeper_chat_older_loaded (generation, keeper_name, before, result) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
          above a transcript they do not belong to. *)
       let still_current =
-        (match state.msg_loaded_keeper with
-         | Some loaded -> String.equal loaded keeper_name
-         | None -> false)
+        generation = state.msg_history_load_generation
+        && (match state.msg_loaded_keeper with
+            | Some loaded -> String.equal loaded keeper_name
+            | None -> false)
         && state.msg_older_cursor = Some before
       in
       if still_current then (
+        state.msg_older_loading <- false;
         match result with
         | Ok page ->
             let rows =
@@ -2777,6 +2819,11 @@ let main () =
       ~finally:(fun () ->
         Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
         Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+        (* restore_terminal above gave the alternate screen back so the shell
+           was usable while stopped. Take it again before the repaint, or the
+           frame lands on top of whatever the user did meanwhile. *)
+        Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+          ~flush:(fun () -> flush stdout);
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
   in
@@ -2796,6 +2843,10 @@ let main () =
      entry and the first frame the stream is quiet, and the enable is not
      urgent anyway -- the first wheel event always arrives after the first
      frame. *)
+  (* Before the first frame and after session entry, so the at_exit cleanup
+     that gives this back is already installed. *)
+  Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+    ~flush:(fun () -> flush stdout);
   output_string stdout mouse_tracking_enable;
   flush stdout;
 
@@ -2834,6 +2885,78 @@ let main () =
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
   let input_reader = create_input_reader () in
+
+  (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
+     The editor itself is the confirmation step: an exit other than 0
+     leaves the settings untouched, so these flows skip Keeper_control's
+     arming gate. The terminal handshake around the child is the pair
+     [suspend] already runs around Ctrl-Z. *)
+  let reenter_terminal () =
+    Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+    request_full_repaint 0
+  in
+  (* An empty object is the honest starting point for a partial patch: the
+     config route applies only the fields present in the body, and the TUI
+     has no view of the current settings to prefill from -- showing a
+     guessed stem would invite an operator to "keep" a value that is not
+     the one on disk. *)
+  let handle_keeper_settings_edit () =
+    match selected_keeper state with
+    | None -> ()
+    | Some keeper -> (
+      match Masc_tui_editor.editor_command () with
+      | None ->
+        add_event state "error"
+          "no $EDITOR set; export EDITOR to edit keeper settings here"
+      | Some _ -> (
+        match
+          Masc_tui_editor.roundtrip ~restore:restore_terminal
+            ~reenter:reenter_terminal "{\n}\n"
+        with
+        | None -> add_event state "system" (keeper.k_name ^ ": settings unchanged")
+        | Some patch -> (
+          match
+            Masc_tui_http.post_keeper_config ~host ~port
+              ~keeper_name:keeper.k_name ~patch_json:patch
+          with
+          | Ok _ -> add_event state "system" (keeper.k_name ^ ": settings applied")
+          | Error detail -> add_event state "error" detail)))
+  in
+  let handle_keeper_create () =
+    match Masc_tui_editor.editor_command () with
+    | None ->
+      add_event state "error" "no $EDITOR set; export EDITOR to create a keeper here"
+    | Some _ -> (
+      (* The stem names the only two fields a keeper cannot come up without;
+         the name is edited in place and the route name comes from it. *)
+      let stem =
+        "{\n  \"name\": \"new-keeper\",\n  \"instructions\": \"\"\n}\n"
+      in
+      match
+        Masc_tui_editor.roundtrip ~restore:restore_terminal
+          ~reenter:reenter_terminal stem
+      with
+      | None -> add_event state "system" "create cancelled"
+      | Some declaration -> (
+        let declared_name =
+          match Yojson.Safe.from_string declaration with
+          | `Assoc fields -> (
+            match List.assoc_opt "name" fields with
+            | Some (`String value) -> String.trim value
+            | _ -> "")
+          | _ -> ""
+        in
+        if String.length declared_name = 0 then
+          add_event state "error"
+            "declaration needs a non-empty \"name\" string; nothing was created"
+        else
+          match
+            Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
+              ~declaration_json:declaration
+          with
+          | Ok _ -> add_event state "system" (declared_name ^ ": keeper created")
+          | Error detail -> add_event state "error" detail))
+  in
   let run_loop () =
     while true do
       request_console_write_repair render_schedule;
@@ -2899,38 +3022,43 @@ let main () =
            let recovery_key =
              String.length k = 1 && Char.code k.[0] = 18
            in
+           let switch_key = String.length k = 1 && Char.code k.[0] = 7 in
            if
              keeper_message_input_supported state
              || String.equal k "esc"
              || recovery_key
+             || switch_key
            then
-             let _handled =
-               handle_message_key state
-                 ~submit_message:
-                   (send_operator_text state ~mailbox:async_messages)
-                 ~answer_approval:(fun ~tool_call_id ~allow ->
-                   match
-                     Option.bind state.msg_live (fun live ->
-                       inflight_by_request_id state
-                         (Keeper_chat_transcript.request_id live))
-                   with
-                   | Some request ->
-                       launch_keeper_approval state ~mailbox:async_messages
-                         request ~tool_call_id ~allow
-                   | None ->
-                       (* No request in flight means no turn to answer for.
-                          The prompt belongs to a turn, so this is
-                          unreachable while one is shown. *)
-                       ())
-                 ~load_older:(fun ~before ->
-                   match state.msg_target_keeper_name with
-                   | Some keeper_name ->
-                       launch_keeper_older_page state ~mailbox:async_messages
-                         ~keeper_name ~before
-                   | None -> ())
-                 k
-             in
-             ()
+             if switch_key then
+               switch_to_next_keeper_message state ~mailbox:async_messages
+             else
+               let _handled =
+                 handle_message_key state
+                   ~submit_message:
+                     (send_operator_text state ~mailbox:async_messages)
+                   ~answer_approval:(fun ~tool_call_id ~allow ->
+                     match
+                       Option.bind state.msg_live (fun live ->
+                         inflight_by_request_id state
+                           (Keeper_chat_transcript.request_id live))
+                     with
+                     | Some request ->
+                         launch_keeper_approval state ~mailbox:async_messages
+                           request ~tool_call_id ~allow
+                     | None ->
+                         (* No request in flight means no turn to answer for.
+                            The prompt belongs to a turn, so this is
+                            unreachable while one is shown. *)
+                         ())
+                   ~load_older:(fun ~before ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper_name ->
+                         launch_keeper_older_page state
+                           ~mailbox:async_messages ~keeper_name ~before
+                     | None -> ())
+                   k
+               in
+               ()
        | Some k
          when (not message_mode)
               && state.view = Board
@@ -3520,6 +3648,23 @@ let main () =
             | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs
             -> ())
+       | Some "e" | Some "E" ->
+           (* Settings edit hands the terminal to $EDITOR, so it cannot live
+              inside the keeper-action pipeline: the loop is inside the
+              editor, and the POST happens only after the editor returns. *)
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | System_logs -> ())
+       | Some "a" | Some "A" ->
+           (match state.view with
+            | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it

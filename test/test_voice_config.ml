@@ -224,6 +224,88 @@ let test_config_path_survives_deleted_cwd_without_base () =
          true
          (Filename.basename path = "voice_config.json"))
 
+(* A voice id is provider vocabulary: an ElevenLabs voice_id is 20-64
+   alphanumerics, an OpenAI voice is a name like "alloy". The fallback chain
+   used to resolve the voice once and hand it to whichever endpoint it landed
+   on, so the second endpoint was asked for a voice that does not exist there
+   (#24068). Each endpoint now answers for its own. *)
+let two_provider_config =
+  {|{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "aEO01A4wXwd1O8GPgGlF",
+    "default_voice_settings": {},
+    "endpoints": [
+      { "id": "eleven", "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY", "enabled": true },
+      { "id": "openai", "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY", "enabled": true,
+        "default_voice": "alloy" }
+    ]
+  },
+  "stt": {
+    "default_model": "scribe_v1",
+    "endpoints": [
+      { "id": "eleven-stt", "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY", "enabled": true }
+    ]
+  },
+  "session": { "endpoints": [] }
+}|}
+;;
+
+let endpoint_named config id =
+  match List.find_opt (fun (e : Vc.endpoint) -> String.equal e.id id) config.Vc.tts.endpoints with
+  | Some endpoint -> endpoint
+  | None -> failf "tts endpoint %S is missing from the parsed config" id
+;;
+
+let test_endpoint_voice_overrides_the_workspace_default () =
+  match parse two_provider_config with
+  | Error _ -> fail "the two-provider config must parse"
+  | Ok config ->
+    let eleven = endpoint_named config "eleven" in
+    let openai = endpoint_named config "openai" in
+    check (option string) "the eleven endpoint declares none" None eleven.Vc.default_voice;
+    check (option string) "the openai endpoint declares its own" (Some "alloy")
+      openai.Vc.default_voice;
+    check string
+      "an endpoint without one falls back to the workspace default"
+      "aEO01A4wXwd1O8GPgGlF"
+      (Vc.voice_for_agent_at_endpoint config eleven "some-agent");
+    check string
+      "an endpoint with one answers for itself"
+      "alloy"
+      (Vc.voice_for_agent_at_endpoint config openai "some-agent");
+    (* The point of the fix: switching endpoints changes the voice asked for. *)
+    check bool
+      "the two endpoints do not share a voice"
+      false
+      (String.equal
+         (Vc.voice_for_agent_at_endpoint config eleven "some-agent")
+         (Vc.voice_for_agent_at_endpoint config openai "some-agent"))
+;;
+
+let test_endpoint_voice_is_absent_when_not_declared () =
+  (* The shared fixture declares no per-endpoint voice, so every endpoint has
+     to keep resolving to the workspace default -- the field is additive. *)
+  match parse (minimal_config_json ~session_endpoints:"[]") with
+  | Error _ -> fail "the base config must parse"
+  | Ok config ->
+    List.iter
+      (fun (endpoint : Vc.endpoint) ->
+        check (option string)
+          (Printf.sprintf "%s declares no voice" endpoint.Vc.id)
+          None
+          endpoint.Vc.default_voice;
+        check string
+          (Printf.sprintf "%s resolves to the workspace default" endpoint.Vc.id)
+          (Vc.voice_for_agent config "some-agent")
+          (Vc.voice_for_agent_at_endpoint config endpoint "some-agent"))
+      config.Vc.tts.endpoints
+;;
+
 let () =
   Alcotest.run "voice_config"
     [
@@ -262,4 +344,14 @@ let () =
             `Quick
             test_config_path_survives_deleted_cwd_without_base;
         ] );
+      ( "per_endpoint_voice"
+      , [ test_case
+            "endpoint voice overrides the workspace default"
+            `Quick
+            test_endpoint_voice_overrides_the_workspace_default
+        ; test_case
+            "absent endpoint voice keeps the workspace default"
+            `Quick
+            test_endpoint_voice_is_absent_when_not_declared
+        ] )
     ]

@@ -1506,7 +1506,7 @@ def keeper_detail_overscroll_interaction(
                 bottom,
             )
 
-            fixtures["/api/v1/board"] = refresh_gate
+            fixtures["/api/v1/dashboard/briefing"] = refresh_gate
             read_available(master_fd, output)
             os.write(master_fd, b"jr")
             if not refresh_gate.requested.wait(timeout=3.0):
@@ -3487,7 +3487,11 @@ def run_keyboard_regression(executable: str) -> None:
     missing_target_requests: HttpRequests = []
     unreliable_roster_requests: HttpRequests = []
     keeper_scroll_fixtures = overview_event_http_fixtures()
-    keeper_scroll_gate = GatedHttpResponse((200, {"posts": []}))
+    # The gate holds a refresh open so the scenario can resize while one is in
+    # flight, so it has to sit on a request every refresh makes. The board list
+    # is fetched only while the board is on screen, which the scenario is not,
+    # so the briefing -- which every surface asks for -- carries the gate.
+    keeper_scroll_gate = GatedHttpResponse((200, overview_event_briefing()))
     approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
     planning_reorder_fixtures = planning_selection_http_fixtures()
     planning_missing_fixtures = planning_selection_http_fixtures()

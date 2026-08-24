@@ -13,6 +13,7 @@ let mcp_path = "/mcp"
 let observer_stream_path = "/mcp?sse_kind=observer"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
+let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -554,6 +555,54 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
   get_json ~host ~port
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
+(** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
+let fetch_runtime_resolved ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/runtime/resolved"
+
+(** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
+    [runtime_id = None] clears the explicit assignment back to the default. *)
+let post_runtime_assignment ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(runtime_id : string option) :
+    (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         (("keeper_name", `String keeper_name)
+          ::
+          (match runtime_id with
+           | Some id -> [ ("runtime_id", `String id) ]
+           | None -> [])))
+  in
+  match
+    post_json ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
+  with
+  | Error detail -> Error detail
+  | Ok _ -> Ok ()
+
+(** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
+let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/tool-approvals"
+
+(** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
+let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode"
+
+(** POST /api/v1/keepers/tool-approval-mode — set one keeper's gate stance. *)
+let post_keeper_tool_approval_mode ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(mode : string) : (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("name", `String keeper_name); ("mode", `String mode) ])
+  in
+  match
+    post_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode" ~body
+  with
+  | Error detail -> Error detail
+  | Ok _ -> Ok ()
+
 (** POST /api/v1/operator/confirm to approve/deny a pending confirmation. *)
 let operator_confirm_body ~(token : string)
     ~(decision : Masc_tui_operator_projection.approval_decision) =
@@ -719,6 +768,17 @@ let fetch_repositories ~(host : string) ~(port : int) :
 let fetch_harness_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
+
+(** Fetch the retained Fusion run registry list. *)
+let fetch_fusion_runs ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:fusion_runs_path
+
+(** Fetch one run joined to its exact typed-origin Board evidence. *)
+let fetch_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(fusion_runs_path ^ "/" ^ percent_encode_path_segment run_id)
 
 (** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
     lists what is waiting rather than the whole history. *)

@@ -1,0 +1,10 @@
+name = "masc_library_search"
+description = """
+Search the agent knowledge library by content keywords or tags. Use when \
+looking for documents on a specific topic without knowing the exact title. \
+Pair with masc_library_read to fetch matching documents in full."""
+
+[[params]]
+name = "query"
+type = "string"
+description = "Search query; empty or missing returns a workflow error"

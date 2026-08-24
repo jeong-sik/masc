@@ -173,6 +173,12 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
+(** One authority for the Fusion surface's list/detail state. The top-level
+    [surface] only says Fusion is open; it does not repeat this mode. *)
+type fusion_mode =
+  | Fusion_list
+  | Fusion_detail of string
+
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
   = {
@@ -346,6 +352,8 @@ type keeper_mode =
   | Keeper_logs
   | Keeper_calls
   | Keeper_message
+  | Keeper_runtime_pick
+      (** Choosing a runtime for the keeper under the roster cursor. *)
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
     legal destinations makes a new Keeper sub-view an explicit compiler error
@@ -366,6 +374,7 @@ type surface =
   | Schedules
   | Verification
   | Harness
+  | Fusion
   | Repositories
   | Connectors
   | Tools
@@ -411,7 +420,11 @@ let surface_needs : surface -> surface_needs = function
      the one that was missed. It loaded its history when it opened and never
      again, so a message that arrived while it was on screen only appeared
      after leaving and coming back. *)
-  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls) ->
+  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls)
+  (* The picker keeps the roster fresh for the same reason the list does: the
+     keeper it is choosing for can leave the roster while it is open. Its
+     catalogue has its own loader, fetched when the picker opens. *)
+  | Keepers Keeper_runtime_pick ->
       { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
   | Keepers Keeper_message ->
       { nothing with
@@ -422,8 +435,8 @@ let surface_needs : surface -> surface_needs = function
   | Board -> { nothing with needs_board = true }
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
-  | Lanes | Approvals | Schedules | Verification | Harness | Repositories
-  | Connectors | Tools ->
+  | Lanes | Approvals | Schedules | Verification | Harness | Fusion
+  | Repositories | Connectors | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -502,6 +515,14 @@ type state = {
   mutable last_refresh: float;
   mutable view: surface;
   mutable keeper_cursor: int;
+  (* The runtime picker: the keeper it is choosing for, its cursor into the
+     dispatchable catalogue, and the catalogue itself with where every keeper
+     points today. Loaded when the picker opens; absent otherwise. *)
+  mutable runtime_pick_keeper: string option;
+  mutable runtime_pick_cursor: int;
+  mutable runtime_catalog: Tui_decode.runtime_option list;
+  mutable runtime_assignments: Tui_decode.runtime_assignment list;
+  mutable runtime_catalog_error: string option;
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
   mutable keeper_calls_error: string option;
   mutable keeper_calls_scroll: int;
@@ -516,6 +537,15 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* The tool calls keepers are holding, drawn above the operator actions on
+     the same surface. Live registry state on the server; refreshed with the
+     surface. *)
+  mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
+  mutable keeper_tool_approvals_error: string option;
+  (* Keepers whose approval gate runs every call unasked. Names only: the
+     wire carries (keeper, mode) pairs and [auto] is the absent default, so
+     what the pane needs is exactly the yolo set. *)
+  mutable keeper_yolo_names: string list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
@@ -580,6 +610,22 @@ type state = {
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
+  mutable fusion_runs: Tui_decode.fusion_snapshot option;
+  mutable fusion_error: string option;
+  mutable fusion_cursor: int;
+  mutable fusion_scroll: int;
+  mutable fusion_mode: fusion_mode;
+  mutable fusion_runs_generation: int;
+  mutable fusion_runs_inflight: int option;
+  mutable fusion_detail: Tui_decode.fusion_detail option;
+  mutable fusion_detail_error: string option;
+  (* A detail GET captures this generation. A late response for a run the
+     operator already left cannot replace the exact run now on screen. *)
+  mutable fusion_detail_generation: int;
+  (* The current generation/run pair already being read. Periodic refreshes
+     do not pile another GET on top of it; changing runs still starts a new
+     request immediately, whose pair replaces this marker. *)
+  mutable fusion_detail_inflight: (int * string) option;
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
@@ -761,6 +807,11 @@ let create_state ~workspace ~port ~refresh_interval = {
   last_refresh = 0.0;
   view = Overview;
   keeper_cursor = 0;
+  runtime_pick_keeper = None;
+  runtime_pick_cursor = 0;
+  runtime_catalog = [];
+  runtime_assignments = [];
+  runtime_catalog_error = None;
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_scroll = 0;
@@ -775,6 +826,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  keeper_tool_approvals = [];
+  keeper_tool_approvals_error = None;
+  keeper_yolo_names = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_cursor = 0;
   pending_approval_action = None;
@@ -819,6 +873,17 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
+  fusion_runs = None;
+  fusion_error = None;
+  fusion_cursor = 0;
+  fusion_scroll = 0;
+  fusion_mode = Fusion_list;
+  fusion_runs_generation = 0;
+  fusion_runs_inflight = None;
+  fusion_detail = None;
+  fusion_detail_error = None;
+  fusion_detail_generation = 0;
+  fusion_detail_inflight = None;
   observer = Observer_off;
   mcp_session = None;
   acting = [];
@@ -927,6 +992,7 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Fusion_detail_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -935,6 +1001,7 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Fusion_detail_scroll value -> state.fusion_scroll <- value
 
 let scrolled_surface (state : state) : surface -> scrolled option =
   let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
@@ -979,7 +1046,8 @@ let scrolled_surface (state : state) : surface -> scrolled option =
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
-  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules ->
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Fusion ->
       None
 
 let keeper_message_status_rows (state : state) =
@@ -1012,7 +1080,19 @@ let keeper_message_status_rows (state : state) =
      else 0)
   + composer_extra_rows state
 
-let approval_items (state : state) =
+(* One list under one cursor: the calls keepers are holding first (they run
+   out in [kta_timeout_sec]; the operator actions keep), then the operator
+   actions. The two kinds answer through different routes, so the row is a
+   sum the key handler matches on rather than a shape it infers. *)
+type approval_row =
+  | Keeper_tool_row of Tui_decode.keeper_tool_approval
+  | Operator_row of Masc_tui_operator_projection.approval_item
+
+let operator_approval_items (state : state) =
   match state.approval_snapshot with
   | Some snapshot -> snapshot.aps_items
   | None -> []
+
+let approval_items (state : state) =
+  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
+  @ List.map (fun item -> Operator_row item) (operator_approval_items state)

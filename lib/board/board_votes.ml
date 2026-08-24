@@ -814,13 +814,17 @@ let flush_dirty store =
          | Ok () -> ()
          | Error _ -> remark_comments ())
       comments_jsonl;
-    (* [flush_dirty] is a fire-and-forget [unit]-returning flusher call
-       (same contract as the two snapshot writers above); the failure is
-       still visible via [record_persist_error]'s log line + counter inside
-       [save_vote_log_jsonl] itself, it just is not propagated past this
-       call the way [vote]/[vote_comment] propagate a live append failure. *)
+    (* A vote marks its post dirty, so the vote log rides the same dirty cycle
+       as the posts snapshot and recovers the same way: re-marking puts the
+       write back in the queue for the next flush. Dropping the failure here
+       left the log missing the votes of this cycle with nothing scheduled to
+       write them, which is the shape the two writers above already fixed
+       (#26168). The counter and log line inside [save_vote_log_jsonl] stay. *)
     Option.iter
-      (fun content -> match save_vote_log_jsonl content with Ok () | Error _ -> ())
+      (fun content ->
+         match save_vote_log_jsonl content with
+         | Ok () -> ()
+         | Error _ -> remark_posts ())
       vote_log)
 
 

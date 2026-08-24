@@ -160,6 +160,20 @@ let test_schedule_contract_mirrors () =
    accepting any matching enum elsewhere — a constructor added to either one
    without editing its file would otherwise ship a schema that never offers the
    value, and the tool would reject what its own documentation advertised. *)
+(* masc_library_add's [source] vocabulary. [Masc.Tool_library] owns it,
+   deriving the strings from its variant; the schema wrote the same four by
+   hand and now writes them in config/tools/masc_library_add.toml, where
+   nothing can read an OCaml value. Nothing compared the two until this: a
+   fifth source added to the variant would have shipped a schema that never
+   offered it. *)
+let test_library_source_mirrors_its_owner () =
+  check
+    (list string)
+    "masc_library_add source matches Tool_library.valid_source_strings"
+    (List.sort_uniq String.compare Masc.Tool_library.valid_source_strings)
+    (advertised_values_for_schemas Tool_schemas_library.schemas ~property:"source")
+;;
+
 let test_goal_tool_enum_mirrors () =
   List.iter
     (fun (property, owner) ->
@@ -284,6 +298,7 @@ let () =
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
+        ; test_case "library source enum" `Quick test_library_source_mirrors_its_owner
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode

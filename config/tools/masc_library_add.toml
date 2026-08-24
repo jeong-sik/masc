@@ -1,0 +1,30 @@
+name = "masc_library_add"
+description = """
+Add a new document to the agent knowledge library. Use when recording a new \
+finding, experiment result, or pattern that other agents should know about."""
+
+[[params]]
+name = "title"
+type = "string"
+required = true
+description = "Document title"
+
+[[params]]
+name = "source"
+type = "string"
+required = true
+description = """
+Source type: direct_experience, research, experiment, observation"""
+enum = ["direct_experience", "research", "experiment", "observation"]
+
+[[params]]
+name = "tags"
+type = "array"
+items = { type = "string" }
+description = "List of tags"
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Document body content (markdown)"

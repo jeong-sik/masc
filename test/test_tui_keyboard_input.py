@@ -3785,6 +3785,200 @@ def keeper_lanes_interaction(
     return interact
 
 
+FUSION_RUNS_PATH = "/api/v1/dashboard/fusion-runs"
+
+
+def fusion_run(
+    run_id: str,
+    *,
+    keeper: str,
+    status: str = "completed",
+) -> dict[str, object]:
+    return {
+        "run_id": run_id,
+        "keeper": keeper,
+        "preset": "trio",
+        "topology": "simple",
+        "started_at": 1787557669.715736,
+        "status": status,
+    }
+
+
+def fusion_runs_response(runs: list[dict[str, object]]) -> HttpResponse:
+    return (
+        200,
+        {
+            "generated_at": "2026-08-24T09:00:00Z",
+            "count": len(runs),
+            "runs": runs,
+        },
+    )
+
+
+def fusion_detail_response(run: dict[str, object], judge_reason: str) -> HttpResponse:
+    run_id = str(run["run_id"])
+    return (
+        200,
+        {
+            "generated_at": "2026-08-24T09:00:01Z",
+            "run": run,
+            "evidence": {
+                "status": "recorded",
+                "post": {
+                    "id": f"post-{run_id}",
+                    "title": f"Fusion evidence for {run_id}",
+                    "origin": {
+                        "source": "fusion",
+                        "fusion_run_id": run_id,
+                    },
+                    "meta": {
+                        "question": "question-proof-501",
+                        "panel": [
+                            {
+                                "model": "panel-first-501",
+                                "status": "answered",
+                                "answer": "panel-answer-first-501",
+                                "input_tokens": 10,
+                                "output_tokens": 20,
+                            },
+                            {
+                                "model": "panel-second-501",
+                                "status": "failed",
+                                "reason_code": "timeout",
+                                "reason_detail": "panel-failure-second-501",
+                            },
+                        ],
+                        "judge": {
+                            "status": "synthesized",
+                            "decision": "answer",
+                            "resolved_answer": "judge-resolved-501",
+                            "synthesis": judge_reason,
+                        },
+                    },
+                },
+            },
+        },
+    )
+
+
+def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    alpha = fusion_run("fusion-alpha-501", keeper="alpha")
+    target = fusion_run("fusion-target-501", keeper="beta")
+    new = fusion_run("fusion-new-501", keeper="gamma")
+    fixtures = overview_event_http_fixtures()
+    initial_runs = GatedHttpResponse(fusion_runs_response([alpha, target]))
+    fixtures[FUSION_RUNS_PATH] = initial_runs
+    fixtures[f"{FUSION_RUNS_PATH}/fusion-alpha-501"] = fusion_detail_response(
+        alpha, "wrong-alpha-judge-501"
+    )
+    fixtures[f"{FUSION_RUNS_PATH}/fusion-target-501"] = fusion_detail_response(
+        target, "judge-proof-501"
+    )
+    fixtures[f"{FUSION_RUNS_PATH}/fusion-new-501"] = fusion_detail_response(
+        new, "wrong-new-judge-501"
+    )
+    return fixtures, initial_runs
+
+
+def fusion_list_detail_interaction(
+    fixtures: HttpFixtures,
+    initial_runs: GatedHttpResponse,
+) -> Interaction:
+    """Select by run id across reorder, then read panel rows before judge."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Harness")
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"\t")
+        if not initial_runs.requested.wait(timeout=3.0):
+            raise AssertionError("Fusion did not request its Registry list")
+        # Several periodic ticks pass while the first read is held. The TUI
+        # must keep that one request authoritative instead of continually
+        # superseding it with a newer generation that will also be held.
+        time.sleep(0.2)
+        if initial_runs.calls != 1:
+            raise AssertionError(
+                "Fusion stacked Registry reads while one was in flight: "
+                f"{initial_runs.calls} calls"
+            )
+        initial_runs.release.set()
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"fusion-target-501",
+            start=start,
+            timeout=3.0,
+        )
+        target_end = output.find(b"fusion-target-501", start) + len(
+            b"fusion-target-501"
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=target_end,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, target_end) + len(FRAME_END)
+        loaded = bytes(output[start:frame_end])
+        plain = CSI_RE.sub(b"", loaded)
+        for column in (b"TIME", b"STATUS", b"KEEPER", b"PRESET", b"TOPOLOGY", b"RUN"):
+            if column not in plain:
+                raise AssertionError(
+                    f"Fusion did not draw the {column!r} source column: {plain!r}"
+                )
+
+        selected = send_and_wait(process, master_fd, output, b"j", b"fusion-target-501")
+        if re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", selected)) is None:
+            raise AssertionError(f"Fusion did not select the target run: {selected!r}")
+
+        target = fusion_run("fusion-target-501", keeper="beta")
+        new = fusion_run("fusion-new-501", keeper="gamma")
+        alpha = fusion_run("fusion-alpha-501", keeper="alpha")
+        fixtures[FUSION_RUNS_PATH] = fusion_runs_response([target, new, alpha])
+        refreshed = send_and_wait(process, master_fd, output, b"r", b"fusion-new-501")
+        if (
+            re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", refreshed))
+            is None
+        ):
+            raise AssertionError(
+                f"Fusion refresh moved selection off its run id: {refreshed!r}"
+            )
+
+        detail = send_and_wait(process, master_fd, output, b"\r", b"judge-proof-501")
+        detail_plain = CSI_RE.sub(b"", detail)
+        ordered = [
+            detail_plain.find(b"panel-answer-first-501"),
+            detail_plain.find(b"panel-failure-second-501"),
+            detail_plain.find(b"judge-proof-501"),
+        ]
+        if any(index < 0 for index in ordered) or ordered != sorted(ordered):
+            raise AssertionError(
+                f"Fusion detail did not preserve panel-to-judge order: {detail_plain!r}"
+            )
+        if (
+            b"wrong-alpha-judge-501" in detail_plain
+            or b"wrong-new-judge-501" in detail_plain
+        ):
+            raise AssertionError(
+                f"Fusion opened the numeric cursor, not the run id: {detail_plain!r}"
+            )
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"fusion-new-501")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
     b"event: message\n"
@@ -4093,6 +4287,7 @@ def run_keyboard_regression(executable: str) -> None:
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
     run_terminal_scenario(
         executable,
         description="UTF-8 message input",
@@ -4132,6 +4327,16 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper lanes unread, failed, empty, and populated",
         interact=keeper_lanes_interaction(lanes_fixtures, lanes_gate),
         http_fixtures=lanes_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Fusion list identity and panel-to-judge detail",
+        interact=fusion_list_detail_interaction(
+            fusion_fixtures,
+            fusion_initial_runs,
+        ),
+        refresh=0.05,
+        http_fixtures=fusion_fixtures,
     )
     run_terminal_scenario(
         executable,

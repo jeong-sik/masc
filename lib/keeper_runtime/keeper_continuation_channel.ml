@@ -14,6 +14,7 @@ type t =
       thread_ts : string option;
       user_id : string;
     }
+  | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
 let ( let* ) = Result.bind
@@ -34,6 +35,11 @@ let validate_optional_nonblank field = function
 let dashboard ~thread_id =
   let* thread_id = validate_nonblank "thread_id" thread_id in
   Ok (Dashboard { thread_id })
+;;
+
+let keeper ~keeper_name =
+  let* keeper_name = validate_nonblank "keeper_name" keeper_name in
+  Ok (Keeper { keeper_name })
 ;;
 
 let discord ~guild_id ~channel_id ~parent_channel_id ~thread_id
@@ -70,7 +76,7 @@ let discord_thread_parent t ~parent_channel_id =
       ; reply_to_message_id
       ; user_id
       }
-  | Dashboard _ | Slack _ | Unrouted _ -> t
+  | Dashboard _ | Slack _ | Keeper _ | Unrouted _ -> t
 ;;
 
 let slack ~team_id ~channel_id ~thread_ts ~user_id =
@@ -89,12 +95,13 @@ let unrouted reason =
 
 let is_routable = function
   | Unrouted _ -> false
-  | Dashboard _ | Discord _ | Slack _ -> true
+  | Dashboard _ | Discord _ | Slack _ | Keeper _ -> true
 
 let kind_label = function
   | Dashboard _ -> "dashboard"
   | Discord _ -> "discord"
   | Slack _ -> "slack"
+  | Keeper _ -> "keeper"
   | Unrouted _ -> "unrouted"
 
 let describe = function
@@ -128,6 +135,7 @@ let describe = function
       channel_id
       (opt "thread_ts" thread_ts)
       user_id
+  | Keeper { keeper_name } -> Printf.sprintf "keeper name=%s" keeper_name
   | Unrouted { reason } -> Printf.sprintf "unrouted (%s)" reason
 
 let same_string_option = Option.equal String.equal
@@ -174,11 +182,14 @@ let same_route a b =
     && String.equal left_channel right_channel
     && same_string_option left_thread right_thread
     && String.equal left_user right_user
+  | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
+    String.equal left right
   | Unrouted _, Unrouted _ -> false
   (* Distinct-constructor pairs share no route. Listing the constructors
      explicitly (not [_]) keeps this exhaustive: a new variant forces a
      compile error here rather than silently defaulting to [false]. *)
-  | (Dashboard _ | Discord _ | Slack _ | Unrouted _), (Dashboard _ | Discord _ | Slack _ | Unrouted _)
+  | ( (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _) )
     -> false
 
 (* RFC-0377: batching pending Connector_attention stimuli needs "is this the
@@ -213,12 +224,15 @@ let same_conversation a b =
   | ( Slack { channel_id = left_channel; _ }
     , Slack { channel_id = right_channel; _ } ) ->
     String.equal left_channel right_channel
+  | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
+    String.equal left right
   | Unrouted _, Unrouted _ -> false
   (* Distinct-constructor pairs share no conversation. Listing the
      constructors explicitly (not [_]) keeps this exhaustive: a new
      connector forces a compile error here rather than silently
      defaulting to [false]. *)
-  | (Dashboard _ | Discord _ | Slack _ | Unrouted _), (Dashboard _ | Discord _ | Slack _ | Unrouted _)
+  | ( (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _) )
     -> false
 
 let option_string_fields fields =
@@ -255,6 +269,8 @@ let to_yojson = function
        ; ("user_id", `String user_id)
        ]
        @ option_string_fields [ ("team_id", team_id); ("thread_ts", thread_ts) ])
+  | Keeper { keeper_name } ->
+    `Assoc [ ("kind", `String "keeper"); ("keeper_name", `String keeper_name) ]
   | Unrouted { reason } ->
     `Assoc [ ("kind", `String "unrouted"); ("reason", `String reason) ]
 
@@ -352,6 +368,10 @@ let of_yojson json =
     let* team_id = optional_string_field "team_id" fields in
     let* thread_ts = optional_string_field "thread_ts" fields in
     slack ~team_id ~channel_id ~thread_ts ~user_id
+  | "keeper" ->
+    let* () = validate_allowed_fields ~kind [ "kind"; "keeper_name" ] fields in
+    let* keeper_name = string_field "keeper_name" fields in
+    keeper ~keeper_name
   | "unrouted" ->
     let* () = validate_allowed_fields ~kind [ "kind"; "reason" ] fields in
     let* reason = string_field "reason" fields in

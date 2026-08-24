@@ -29,6 +29,6 @@ val route_evidence_issues :
     matching {!Eval_tool_selector.matches}, which yields no match for empty
     values.
 
-    Legacy name-only cases do not require route evidence. Runs that are not
+    [Tool_name] cases do not require route evidence. Runs that are not
     [Run_ok], unknown cases, and runs for non-declared keeper profiles are
     ignored in the same spirit as {!Tool_call_quality_benchmark_scoring.score_run}. *)

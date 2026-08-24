@@ -277,9 +277,22 @@ type keeper_phase
 val keeper_phase_of_string : string -> keeper_phase option
 val keeper_phase_to_string : keeper_phase -> string
 
+type keeper_health
+(** A validated keeper health reading — whether the keeper is reporting on
+    time. Behind the decoder boundary for the same reason as {!keeper_phase}:
+    a TUI executable should not need a second dependency on the Keeper runtime
+    library to name one. *)
+
+val keeper_health_of_string : string -> keeper_health option
+val keeper_health_to_string : keeper_health -> string
+
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
+  kr_health : keeper_health;
+  kr_paused : bool;
+  kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
@@ -289,10 +302,18 @@ type keeper_runtime = {
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.
 
-    [kr_status] is the six-member surface vocabulary. It carries no "paused"
-    member: operator pause is durable metadata and reaches the TUI on
-    {!keeper} instead. A reader that wants the published control-plane status
-    composes the two the way the operator snapshot does. *)
+    One keeper is described by four separate readings and each has its own
+    field here: [kr_phase] is the lifecycle cell, [kr_health] is whether the
+    keeper is reporting on time, [kr_paused] is whether a person stopped it,
+    and [kr_next_action] is what the runtime derived to do about it.
+
+    [kr_status] is a fifth field that re-answers [kr_health] with [stale],
+    [degraded] and [zombie] folded into one word. It is kept only until the
+    surfaces stop reading it; a caller wanting health should read
+    [kr_health].
+
+    [kr_next_action] is [None] when the runtime named no action, which is not
+    the same as naming one that means "nothing to do". *)
 
 val decode_keeper_runtime_list :
   Yojson.Safe.t -> (keeper_runtime list * bool * int, string) result
@@ -361,6 +382,139 @@ val decode_keeper_lanes_snapshot :
     [GET /api/v1/keepers/composite]. Missing or wrongly typed fields reject
     the reading; additional producer fields are outside this light
     projection and do not. *)
+
+(** Closed lifecycle vocabulary emitted by the Fusion run registry. A failed
+    run carries the registry's typed failure fields rather than flattening
+    them into a display string. *)
+type fusion_run_status =
+  | Fusion_running
+  | Fusion_completed
+  | Fusion_failed of {
+      frs_failure_code : string;
+      frs_error : string;
+    }
+
+val fusion_run_status_to_string : fusion_run_status -> string
+
+type fusion_run = {
+  fur_run_id : string;
+  fur_keeper : string;
+  fur_preset : string;
+  fur_topology : Fusion_types.fusion_topology;
+  fur_started_at : float;
+  fur_status : fusion_run_status;
+}
+
+type fusion_snapshot = {
+  fus_generated_at : string;
+  fus_runs : fusion_run list;
+}
+
+type fusion_panel_answer = {
+  fpa_model : string;
+  fpa_answer : string;
+  fpa_input_tokens : int;
+  fpa_output_tokens : int;
+}
+
+type fusion_panel_failure = {
+  fpf_model : string;
+  fpf_reason_code : string;
+  fpf_reason_detail : string;
+}
+
+type fusion_panel_result =
+  | Fusion_panel_answered of fusion_panel_answer
+  | Fusion_panel_failed of fusion_panel_failure
+
+type fusion_judge =
+  | Fusion_judge_synthesized of {
+      fj_decision : string;
+      fj_resolved_answer : string;
+      fj_reason : string;
+    }
+  | Fusion_judge_failed of {
+      fj_failure_code : string;
+      fj_error : string;
+    }
+
+type fusion_evidence = {
+  fe_post_id : string;
+  fe_title : string;
+  fe_question : string;
+  fe_panel : fusion_panel_result list;
+  fe_judge : fusion_judge;
+}
+
+type fusion_evidence_status =
+  | Fusion_evidence_recorded
+  | Fusion_evidence_pending
+  | Fusion_evidence_absent
+
+type fusion_detail = {
+  fud_generated_at : string;
+  fud_run : fusion_run;
+  fud_evidence_status : fusion_evidence_status;
+  fud_evidence : fusion_evidence option;
+}
+
+val decode_fusion_snapshot : Yojson.Safe.t -> (fusion_snapshot, string) result
+(** Decode the retained registry list from
+    [GET /api/v1/dashboard/fusion-runs]. The published count must equal the
+    decoded row count; unknown lifecycle labels reject the reading. *)
+
+val decode_fusion_detail : Yojson.Safe.t -> (fusion_detail, string) result
+(** Decode one exact run/evidence projection. [recorded] requires a Board post
+    whose typed origin is exactly [source=fusion] and whose [fusion_run_id]
+    matches the registry row. [pending] and [absent] require [post:null], and
+    only a running row may be pending. Panel array order is retained. *)
+
+(** One tool call a keeper is holding for an operator's answer, from
+    [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server
+    clock's epoch reading when the wait opened. *)
+type keeper_tool_approval = {
+  kta_keeper : string;
+  kta_tool_call_id : string;
+  kta_tool : string;
+  kta_args : string;
+  kta_question : string;
+  kta_asked_at : float;
+  kta_timeout_sec : float;
+}
+
+val decode_tool_approval_mode_overrides :
+  Yojson.Safe.t -> ((string * string) list, string) result
+(** Decode [GET /api/v1/keepers/tool-approval-mode]'s
+    [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
+
+val decode_keeper_tool_approvals :
+  Yojson.Safe.t -> (keeper_tool_approval list, string) result
+(** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with
+    missing or mistyped fields rather than dropping them. *)
+
+(** One runtime a keeper can be pointed at, from
+    [GET /api/v1/runtime/resolved]. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_is_default : bool;
+}
+
+(** Where one keeper points today. [ra_source] is the server's word:
+    ["default"] rides the fleet default, ["explicit"] was assigned. *)
+type runtime_assignment = {
+  ra_keeper : string;
+  ra_source : string;
+  ra_runtime_id : string option;
+}
+
+val decode_runtime_resolved :
+  Yojson.Safe.t ->
+  (runtime_option list * runtime_assignment list, string) result
+(** Decode the picker's slice of the resolved-runtime document: the runtime
+    catalogue and the keeper assignments, both in server order. *)
 
 type fleet_safety = {
   fs_status : string;

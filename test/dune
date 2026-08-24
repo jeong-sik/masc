@@ -276,6 +276,8 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_library_tool_toml_parity
+  test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
   test_taskboard_tool_toml_parity
@@ -599,6 +601,8 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_library_tool_toml_parity
+  test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
   test_taskboard_tool_toml_parity
@@ -885,6 +889,11 @@
  (modules test_fusion_status_tool)
  (libraries masc_test_deps masc.fusion_core))
 
+(test
+ (name test_dashboard_fusion_run_projection)
+ (modules test_dashboard_fusion_run_projection)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; 적대 리뷰 #22087 §1 — Fusion_judge.attach_usage가 파싱 실패 시에도 심판 usage를
 ; 보존함을 핀한다 (refine degrade 비용 undercount 회귀 방지).
 
@@ -1103,6 +1112,7 @@
   test_task_status_label_10421  test_task_cache_invariant_13397
   test_task_transition_broadcast
   test_keeper_task_cancellation_wake
+  test_keeper_delegate_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
@@ -1243,6 +1253,7 @@
   test_task_status_label_10421  test_task_cache_invariant_13397
   test_task_transition_broadcast
   test_keeper_task_cancellation_wake
+  test_keeper_delegate_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
@@ -2411,7 +2422,7 @@
 (test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
- (libraries alcotest masc.string_util)
+ (libraries alcotest masc.string_util masc_core yojson)
  (deps
   (source_tree ../lib/keeper)
   (source_tree ../lib/runtime)))
@@ -2775,6 +2786,14 @@
    python3
    %{dep:test_tui_keyboard_input.py}
    %{dep:../bin/masc_tui.exe})))
+
+; Keep the focused alias above for local evidence capture, and make the default
+; test alias run it too. CI asks only for @test/runtest; without this edge the
+; PTY suite compiles its TUI dependency but none of its interaction assertions
+; execute.
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input)))
 
 (test
  (name test_tui_metrics_tail)

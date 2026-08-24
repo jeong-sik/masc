@@ -479,11 +479,33 @@ type async_msg =
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
+  | Fusion_runs_loaded of
+      int * (Masc.Tui_decode.fusion_snapshot, string) result
+  | Fusion_detail_loaded of
+      int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
+  | Runtime_catalog_loaded of
+      ( Masc.Tui_decode.runtime_option list
+        * Masc.Tui_decode.runtime_assignment list,
+        string )
+      result
+  | Runtime_assignment_set of
+      string * string option * (unit, string) result
+      (** keeper, the runtime it was pointed at ([None] = back to default),
+          and whether the server took it. *)
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
+  | Keeper_tool_approvals_loaded of
+      (Tui_decode.keeper_tool_approval list, string) result
+  | Surface_tool_approval_answered of
+      string * string * bool * (bool, string) result
+  | Keeper_tool_modes_loaded of ((string * string) list, string) result
+  | Keeper_tool_mode_set of string * string * (unit, string) result
+      (** keeper, tool call id, allow, and whether a wait was released — the
+          Approvals-surface twin of [Keeper_chat_approval_answered], which
+          needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
   | Keeper_action_done of
       string
@@ -621,6 +643,102 @@ let settle_live_turn state (request : Keeper_chat.request) =
    the keypress that asked for it. *)
 (* Answer the call the keeper is held at. Runs on its own fiber: the pane stays
    responsive, and a slow server costs the answer rather than the keypress. *)
+(* The Approvals-surface twin of [launch_keeper_approval]: same route, no chat
+   request to correlate with, so the outcome lands in Recent Events instead of
+   a pane's transcript. *)
+let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
+    ~allow =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+          ~tool_call_id ~allow
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Surface_tool_approval_answered (keeper_name, tool_call_id, allow, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Surface_tool_approval_answered
+           (keeper_name, tool_call_id, allow, Error "Eio switch is unavailable"))
+
+(* Fetch the held tool calls for the Approvals surface. Its own fiber for the
+   same reason every loader runs on one: a slow server costs the refresh, not
+   the keypress. *)
+let launch_keeper_tool_approvals_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_tool_approvals ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_tool_approvals_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_tool_modes_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_tool_modes_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_tool_modes_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_tool_approval_mode ~host ~port ~keeper_name
+          ~mode
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_tool_mode_set (keeper_name, mode, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_tool_mode_set
+           (keeper_name, mode, Error "Eio switch is unavailable"))
+
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
   let host = Env_config_core.masc_host () in
@@ -771,6 +889,66 @@ let launch_harness_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+
+let launch_fusion_runs_load state ~mailbox =
+  match state.fusion_runs_inflight with
+  | Some _ -> ()
+  | None ->
+      state.fusion_runs_generation <- state.fusion_runs_generation + 1;
+      let generation = state.fusion_runs_generation in
+      state.fusion_runs_inflight <- Some generation;
+      let host = Env_config_core.masc_host () in
+      let port = state.port in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_fusion_runs ~host ~port with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Fusion_runs_loaded (generation, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Fusion_runs_loaded
+                (generation, Error "Eio switch is unavailable")))
+
+let launch_fusion_detail_load state ~mailbox ~run_id =
+  let already_loading =
+    match state.fusion_detail_inflight with
+    | Some (generation, loading_run_id) ->
+        generation = state.fusion_detail_generation
+        && String.equal loading_run_id run_id
+    | None -> false
+  in
+  if not already_loading then begin
+    state.fusion_detail_generation <- state.fusion_detail_generation + 1;
+    let generation = state.fusion_detail_generation in
+    state.fusion_detail_inflight <- Some (generation, run_id);
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_fusion_detail ~host ~port ~run_id with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Fusion_detail_loaded
+             (generation, run_id, Error "Eio switch is unavailable"))
+  end
 
 let launch_lanes_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -969,6 +1147,52 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
+
+(* Fetch the runtime catalogue and assignments for the picker. *)
+let launch_runtime_catalog_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_runtime_resolved ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Runtime_catalog_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
+
+let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+          ~runtime_id
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Runtime_assignment_set (keeper_name, runtime_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_assignment_set
+           (keeper_name, runtime_id, Error "Eio switch is unavailable"))
 
 let inflight_for state keeper_name =
   Option.map
@@ -1249,19 +1473,20 @@ let send_operator_text ?keeper_name state ~mailbox text =
   | Masc_tui_command.Switch_keeper_missing_name ->
       notice ~role:Message_error "/keeper needs a name on the same line"
   | Masc_tui_command.Switch_keeper name -> (
-      match
-        List.find_opt
-          (fun (keeper : keeper) -> String.equal keeper.k_name name)
-          state.keepers
-      with
-      | Some keeper ->
+      let names =
+        List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+      in
+      match Masc_tui_command.resolve_keeper_name ~names name with
+      | Masc_tui_command.Keeper_found keeper_name ->
           Buffer.clear state.msg_input;
-          open_message_for_keeper ~return_to:state.msg_return state
-            keeper.k_name;
-          launch_keeper_history_load state ~mailbox
-            ~keeper_name:keeper.k_name;
+          open_message_for_keeper ~return_to:state.msg_return state keeper_name;
+          launch_keeper_history_load state ~mailbox ~keeper_name;
           state.view <- Keepers Keeper_message
-      | None ->
+      | Masc_tui_command.Keeper_ambiguous candidates ->
+          notice ~role:Message_error
+            (Printf.sprintf "%S names more than one keeper: %s" name
+               (String.concat ", " candidates))
+      | Masc_tui_command.Keeper_unknown ->
           notice ~role:Message_error
             (Printf.sprintf "no keeper named %S on the roster" name))
   | Masc_tui_command.Interrupt_turn -> (
@@ -1403,9 +1628,19 @@ let apply_overview_load state = function
 
 let apply_approvals_load state = function
   | Ok snapshot ->
+      (* The cursor indexes the merged list; the operator rows sit after the
+         keeper tool rows, so reconciliation by token happens in operator
+         coordinates and the keeper prefix length converts both ways. A
+         cursor on a keeper row is not touched by an operator refresh. *)
+      let keeper_prefix = List.length state.keeper_tool_approvals in
+      let operator_cursor = state.approval_cursor - keeper_prefix in
       let approval_cursor =
-        Approval.reconcile_cursor ~current_items:(approval_items state)
-          ~cursor:state.approval_cursor ~next_items:snapshot.aps_items
+        if operator_cursor < 0 then state.approval_cursor
+        else
+          keeper_prefix
+          + Approval.reconcile_cursor
+              ~current_items:(operator_approval_items state)
+              ~cursor:operator_cursor ~next_items:snapshot.aps_items
       in
       state.approval_snapshot <- Some snapshot;
       state.approvals_error <- None;
@@ -1556,6 +1791,71 @@ let apply_planning_load state = function
         ~current_error:state.planning_error
         ~set_error:(fun value -> state.planning_error <- value)
         err
+
+let apply_fusion_runs_load state = function
+  | Ok snapshot ->
+      let current_selected_id =
+        match state.fusion_mode with
+        | Fusion_detail run_id -> Some run_id
+        | Fusion_list ->
+            Option.bind state.fusion_runs (fun current ->
+                List.nth_opt current.Tui_decode.fus_runs state.fusion_cursor
+                |> Option.map (fun run -> run.Tui_decode.fur_run_id))
+      in
+      let next_ids =
+        List.map
+          (fun run -> run.Tui_decode.fur_run_id)
+          snapshot.Tui_decode.fus_runs
+      in
+      let fallback_cursor =
+        min (max 0 state.fusion_cursor) (max 0 (List.length next_ids - 1))
+      in
+      let next_cursor =
+        match current_selected_id with
+        | None -> fallback_cursor
+        | Some run_id ->
+            Option.value
+              (List.find_index (String.equal run_id) next_ids)
+              ~default:fallback_cursor
+      in
+      state.fusion_runs <- Some snapshot;
+      state.fusion_error <- None;
+      state.fusion_cursor <- next_cursor;
+      (match state.fusion_mode, current_selected_id with
+       | Fusion_detail run_id, Some selected
+         when String.equal run_id selected
+              && List.exists (String.equal run_id) next_ids ->
+           ()
+       | Fusion_detail _, _ ->
+           state.fusion_mode <- Fusion_list;
+           state.fusion_scroll <- 0;
+           state.fusion_detail <- None;
+           state.fusion_detail_error <- None;
+           state.fusion_detail_generation <- state.fusion_detail_generation + 1
+       | Fusion_list, _ -> ())
+  | Error detail ->
+      (* Keep the previous rows. The error marks them stale instead of
+         translating a failed refresh into an empty registry. *)
+      state.fusion_error <- Some detail
+
+let apply_fusion_detail_load state generation run_id result =
+  if
+    generation = state.fusion_detail_generation
+    &&
+    match state.fusion_mode with
+    | Fusion_detail current -> String.equal current run_id
+    | Fusion_list -> false
+  then
+    match result with
+    | Ok detail when String.equal detail.Tui_decode.fud_run.fur_run_id run_id ->
+        state.fusion_detail <- Some detail;
+        state.fusion_detail_error <- None
+    | Ok detail ->
+        state.fusion_detail_error <-
+          Some
+            (Printf.sprintf "fusion detail returned run %s for request %s"
+               detail.Tui_decode.fud_run.fur_run_id run_id)
+    | Error detail -> state.fusion_detail_error <- Some detail
 
 let refresh_status results =
   let successes =
@@ -2404,6 +2704,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
+      (* The held-call listing rides the same cadence as the surface that
+         draws it. Fetched only while the surface is up: the waits are
+         short-lived and every other surface would fetch rows it never
+         shows. *)
+      (match state.view with
+       | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
+       | _ -> ());
       open_observer_if_due state ~retry_closed:false
         ~host:(Env_config_core.masc_host ()) ~port:state.port ~mailbox
   | Observer_opened session_id ->
@@ -2666,6 +2974,74 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       append_chat_history state request
         (match result with Ok true -> Message_status | _ -> Message_error)
         text
+  | Keeper_tool_approvals_loaded result ->
+      (match result with
+       | Ok held ->
+           state.keeper_tool_approvals <- held;
+           state.keeper_tool_approvals_error <- None;
+           let count = List.length (approval_items state) in
+           if state.approval_cursor >= count then
+             state.approval_cursor <- max 0 (count - 1)
+       | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Keeper_tool_modes_loaded result ->
+      (match result with
+       | Ok overrides ->
+           state.keeper_yolo_names <-
+             List.filter_map
+               (fun (keeper, mode) ->
+                 if String.equal mode "yolo" then Some keeper else None)
+               overrides
+       | Error _ ->
+           (* The stance listing is advisory colouring; a failed fetch keeps
+              the last known set rather than flashing every name back. *)
+           ())
+  | Keeper_tool_mode_set (keeper_name, mode, result) ->
+      (match result with
+       | Ok () ->
+           state.keeper_yolo_names <-
+             (let without =
+                List.filter
+                  (fun name -> not (String.equal name keeper_name))
+                  state.keeper_yolo_names
+              in
+              if String.equal mode "yolo" then keeper_name :: without
+              else without);
+           add_event state "system"
+             (if String.equal mode "yolo" then
+                Printf.sprintf
+                  "%s runs every tool call unasked (YOLO) until restart or g"
+                  keeper_name
+              else
+                Printf.sprintf "%s is back on the approval policy (auto)"
+                  keeper_name)
+       | Error detail ->
+           add_event state "error"
+             (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
+  | Surface_tool_approval_answered (keeper_name, tool_call_id, allow, result) ->
+      (* The listing is stale the moment an answer lands, so the settled call
+         leaves the local list at once rather than waiting for a refresh. *)
+      state.keeper_tool_approvals <-
+        List.filter
+          (fun (held : Tui_decode.keeper_tool_approval) ->
+            not (String.equal held.kta_tool_call_id tool_call_id))
+          state.keeper_tool_approvals;
+      let count = List.length (approval_items state) in
+      if state.approval_cursor >= count then
+        state.approval_cursor <- max 0 (count - 1);
+      add_event state
+        (match result with Ok true -> "system" | _ -> "error")
+        (match result with
+         | Ok true ->
+             Printf.sprintf "%s %s's held call %s"
+               (if allow then "allowed" else "denied")
+               keeper_name
+               (Keeper_chat.compact_request_id tool_call_id)
+         | Ok false ->
+             Printf.sprintf
+               "too late for %s's call %s; it was no longer waiting"
+               keeper_name
+               (Keeper_chat.compact_request_id tool_call_id)
+         | Error detail -> "could not answer the held call: " ^ detail)
   | Keeper_chat_interrupt_done (request, result) ->
       (match state.msg_live with
        | Some live
@@ -2744,6 +3120,36 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None
       | Error detail -> state.tools_error <- Some detail)
+  | Runtime_catalog_loaded result -> (
+      match result with
+      | Ok (runtimes, assignments) ->
+          state.runtime_catalog <- runtimes;
+          state.runtime_assignments <- assignments;
+          state.runtime_catalog_error <- None;
+          let dispatchable =
+            List.length
+              (List.filter
+                 (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
+                 runtimes)
+          in
+          if state.runtime_pick_cursor >= dispatchable then
+            state.runtime_pick_cursor <- max 0 (dispatchable - 1)
+      | Error detail -> state.runtime_catalog_error <- Some detail)
+  | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
+      match result with
+      | Ok () ->
+          add_event state "system"
+            (match runtime_id with
+             | Some id -> Printf.sprintf "%s now runs on %s" keeper_name id
+             | None ->
+                 Printf.sprintf "%s is back on the default runtime" keeper_name);
+          (* The assignment table just changed under the picker; re-read it
+             rather than patching a local copy the server may disagree with. *)
+          launch_runtime_catalog_load state ~mailbox
+      | Error detail ->
+          add_event state "error"
+            (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
+               detail))
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2772,6 +3178,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.harness <- Some snapshot;
           state.harness_error <- None
       | Error detail -> state.harness_error <- Some detail)
+  | Fusion_runs_loaded (generation, result) ->
+      (match state.fusion_runs_inflight with
+       | Some inflight when inflight = generation ->
+           state.fusion_runs_inflight <- None
+       | Some _ | None -> ());
+      if generation = state.fusion_runs_generation then
+        apply_fusion_runs_load state result
+  | Fusion_detail_loaded (generation, run_id, result) ->
+      (match state.fusion_detail_inflight with
+       | Some (inflight_generation, inflight_run_id)
+         when inflight_generation = generation
+              && String.equal inflight_run_id run_id ->
+           state.fusion_detail_inflight <- None
+       | Some _ | None -> ());
+      apply_fusion_detail_load state generation run_id result
   | Verification_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3189,18 +3610,31 @@ let main () =
            (match state.view with
             | Approvals ->
                 (match List.nth_opt (approval_items state) state.approval_cursor with
-                 | Some a ->
+                 | Some (Operator_row a) ->
                      handle_approval_decision state a Confirm
                        ~mailbox:async_messages
+                 | Some (Keeper_tool_row held) ->
+                     (* One press, matching the chat pane's [y]: the wait runs
+                        out on a short clock, so the two-press arming the
+                        operator actions use would spend it. *)
+                     launch_surface_tool_approval state
+                       ~mailbox:async_messages
+                       ~keeper_name:held.kta_keeper
+                       ~tool_call_id:held.kta_tool_call_id ~allow:true
                  | None -> ())
             | _ -> ())
        | Some "n" | Some "N" ->
            (match state.view with
             | Approvals ->
                 (match List.nth_opt (approval_items state) state.approval_cursor with
-                 | Some a ->
+                 | Some (Operator_row a) ->
                      handle_approval_decision state a Deny
                        ~mailbox:async_messages
+                 | Some (Keeper_tool_row held) ->
+                     launch_surface_tool_approval state
+                       ~mailbox:async_messages
+                       ~keeper_name:held.kta_keeper
+                       ~tool_call_id:held.kta_tool_call_id ~allow:false
                  | None -> ())
             | _ -> ())
        | Some "r" | Some "R" ->
@@ -3238,11 +3672,20 @@ let main () =
                 launch_verification_load state ~mailbox:async_messages
             | Lanes -> launch_lanes_load state ~mailbox:async_messages
             | Harness -> launch_harness_load state ~mailbox:async_messages
+            | Fusion ->
+                launch_fusion_runs_load state ~mailbox:async_messages;
+                (match state.fusion_mode with
+                 | Fusion_list -> ()
+                 | Fusion_detail run_id ->
+                     launch_fusion_detail_load state ~mailbox:async_messages
+                       ~run_id)
             | Repositories ->
                 launch_repositories_load state ~mailbox:async_messages
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
             | Tools -> launch_tools_load state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
+            | Keepers Keeper_runtime_pick ->
+                launch_runtime_catalog_load state ~mailbox:async_messages
             | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -3254,7 +3697,13 @@ let main () =
             | Keepers _ ->
                 launch_lanes_load state ~mailbox:async_messages;
                 state.view <- Lanes
-            | Lanes -> state.view <- Approvals
+            | Lanes ->
+                (* Loaded on arrival: a held call is on a short clock, and
+                   showing none until the next periodic refresh reads as
+                   "nothing is waiting". *)
+                launch_keeper_tool_approvals_load state
+                  ~mailbox:async_messages;
+                state.view <- Approvals
             | Approvals ->
                 state.pending_approval_action <- None;
                 state.view <- Board
@@ -3275,6 +3724,14 @@ let main () =
                 launch_harness_load state ~mailbox:async_messages;
                 state.view <- Harness
             | Harness ->
+                launch_fusion_runs_load state ~mailbox:async_messages;
+                (match state.fusion_mode with
+                 | Fusion_list -> ()
+                 | Fusion_detail run_id ->
+                     launch_fusion_detail_load state ~mailbox:async_messages
+                       ~run_id);
+                state.view <- Fusion
+            | Fusion ->
                 launch_repositories_load state ~mailbox:async_messages;
                 state.view <- Repositories
             | Repositories ->
@@ -3291,6 +3748,10 @@ let main () =
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
+            | Keepers Keeper_runtime_pick ->
+                state.runtime_pick_keeper <- None;
+                state.runtime_pick_cursor <- 0;
+                state.view <- Keepers Keeper_list
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
                 state.log_scroll <- 0;
@@ -3332,6 +3793,16 @@ let main () =
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
                  | Planning_list -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_detail _ ->
+                     state.fusion_mode <- Fusion_list;
+                     state.fusion_scroll <- 0;
+                     state.fusion_detail <- None;
+                     state.fusion_detail_error <- None;
+                     state.fusion_detail_generation <-
+                       state.fusion_detail_generation + 1
+                 | Fusion_list -> ())
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
                    a focused task panel hands j/k back to the event log. *)
@@ -3388,6 +3859,18 @@ let main () =
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     let count =
+                       match state.fusion_runs with
+                       | None -> 0
+                       | Some snapshot -> List.length snapshot.fus_runs
+                     in
+                     if state.fusion_cursor < count - 1 then
+                       state.fusion_cursor <- state.fusion_cursor + 1
+                 | Fusion_detail _ ->
+                     state.fusion_scroll <- state.fusion_scroll + 1)
             | Schedules ->
                 let count =
                   match state.schedules with
@@ -3439,6 +3922,16 @@ let main () =
             | System_logs -> state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.system_logs_scroll
+            | Keepers Keeper_runtime_pick ->
+                let dispatchable =
+                  List.length
+                    (List.filter
+                       (fun (o : Tui_decode.runtime_option) ->
+                         o.ro_dispatchable)
+                       state.runtime_catalog)
+                in
+                if state.runtime_pick_cursor < dispatchable - 1 then
+                  state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
@@ -3483,6 +3976,14 @@ let main () =
                  | Planning_detail _ ->
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     if state.fusion_cursor > 0 then
+                       state.fusion_cursor <- state.fusion_cursor - 1
+                 | Fusion_detail _ ->
+                     if state.fusion_scroll > 0 then
+                       state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
                 if state.schedule_cursor > 0 then
                   state.schedule_cursor <- state.schedule_cursor - 1
@@ -3545,10 +4046,34 @@ let main () =
                   state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.system_logs_scroll
+            | Keepers Keeper_runtime_pick ->
+                if state.runtime_pick_cursor > 0 then
+                  state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
             | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
+            | Keepers Keeper_runtime_pick ->
+                (match state.runtime_pick_keeper with
+                 | Some keeper_name ->
+                     let options =
+                       List.filter
+                         (fun (o : Tui_decode.runtime_option) ->
+                           o.ro_dispatchable)
+                         state.runtime_catalog
+                     in
+                     (match
+                        List.nth_opt options state.runtime_pick_cursor
+                      with
+                      | Some option ->
+                          launch_runtime_assignment_set state
+                            ~mailbox:async_messages ~keeper_name
+                            ~runtime_id:(Some option.ro_id);
+                          state.runtime_pick_keeper <- None;
+                          state.runtime_pick_cursor <- 0;
+                          state.view <- Keepers Keeper_list
+                      | None -> ())
+                 | None -> state.view <- Keepers Keeper_list)
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. *)
@@ -3594,6 +4119,24 @@ let main () =
                           state.planning_scroll <- 0
                       | None -> ())
                  | Planning_detail _ -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     let runs =
+                       match state.fusion_runs with
+                       | None -> []
+                       | Some snapshot -> snapshot.fus_runs
+                     in
+                     (match List.nth_opt runs state.fusion_cursor with
+                      | Some run ->
+                          state.fusion_mode <- Fusion_detail run.fur_run_id;
+                          state.fusion_scroll <- 0;
+                          state.fusion_detail <- None;
+                          state.fusion_detail_error <- None;
+                          launch_fusion_detail_load state
+                            ~mailbox:async_messages ~run_id:run.fur_run_id
+                      | None -> ())
+                 | Fusion_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
@@ -3603,6 +4146,45 @@ let main () =
        | Some "g" when state.view = Acting ->
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
+       | Some "g"
+         when (match state.view with
+               | Keepers Keeper_list | Keepers Keeper_detail -> true
+               | _ -> false)
+              && state.keeper_cursor < List.length state.keepers ->
+           (* Toggle the approval gate for the keeper under the cursor. One
+              press: the stance is in-memory and a restart returns it to
+              auto, and the event line plus the red roster name say loudly
+              what was armed. *)
+           let keeper = List.nth state.keepers state.keeper_cursor in
+           let mode =
+             if List.mem keeper.k_name state.keeper_yolo_names then "auto"
+             else "yolo"
+           in
+           launch_keeper_tool_mode_set state ~mailbox:async_messages
+             ~keeper_name:keeper.k_name ~mode
+       | Some "u" | Some "U"
+         when (match state.view with
+               | Keepers Keeper_list | Keepers Keeper_detail -> true
+               | _ -> false)
+              && state.keeper_cursor < List.length state.keepers ->
+           (* Open the runtime picker for the keeper under the cursor. The
+              catalogue is fetched on open so the list reflects the server
+              now, not the last visit. *)
+           let keeper = List.nth state.keepers state.keeper_cursor in
+           state.runtime_pick_keeper <- Some keeper.k_name;
+           state.runtime_pick_cursor <- 0;
+           launch_runtime_catalog_load state ~mailbox:async_messages;
+           state.view <- Keepers Keeper_runtime_pick
+       | Some "d" | Some "D"
+         when state.view = Keepers Keeper_runtime_pick ->
+           (match state.runtime_pick_keeper with
+            | Some keeper_name ->
+                launch_runtime_assignment_set state ~mailbox:async_messages
+                  ~keeper_name ~runtime_id:None;
+                state.runtime_pick_keeper <- None;
+                state.runtime_pick_cursor <- 0;
+                state.view <- Keepers Keeper_list
+            | None -> state.view <- Keepers Keeper_list)
        | Some "G" when state.view = Acting ->
            (* Past the end on purpose; the frame clamps it to the last page.
               The held count rather than max_int, because an event arriving
@@ -3612,6 +4194,7 @@ let main () =
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
@@ -3629,7 +4212,8 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Repositories | Connectors | Tools | System_logs -> ())
+            | Verification | Harness | Fusion | Repositories | Connectors | Tools
+            | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -3679,6 +4263,7 @@ let main () =
               chat is reachable from both: the keeper an operator wants the
               logs of is the one under the cursor. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 let keeper = selected_keeper state in
                 load_selected_keeper_logs state base_path 200 keeper;
@@ -3693,13 +4278,14 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
               talk to is the one under the cursor. [c] is an alias for [m]
               because the footer names the action rather than the mnemonic. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
@@ -3722,13 +4308,14 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
               applies is a fact about the keeper, not a choice the operator
               should have to make. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> (
                 match
                   Option.map (keeper_reading state) (selected_keeper state)
@@ -3744,22 +4331,24 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
               live, and Board compose takes the key only from the list --
               inside the compose pane the letter is draft text. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -3774,25 +4363,27 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs
+            | Fusion | Repositories | Connectors | Tools | System_logs
             -> ())
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the
               editor, and the POST happens only after the editor returns. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "a" | Some "A" ->
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it
@@ -3830,6 +4421,7 @@ let main () =
           ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
+         | Keepers Keeper_runtime_pick -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_selected_keeper_logs state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor)
@@ -3852,6 +4444,13 @@ let main () =
              launch_verification_load state ~mailbox:async_messages
          | Lanes -> launch_lanes_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages
+         | Fusion ->
+             launch_fusion_runs_load state ~mailbox:async_messages;
+             (match state.fusion_mode with
+              | Fusion_list -> ()
+              | Fusion_detail run_id ->
+                  launch_fusion_detail_load state ~mailbox:async_messages
+                    ~run_id)
          | Repositories ->
              (* Registration and keeper assignment change from elsewhere, so
                 the list is refreshed on the tick like the surfaces above. *)

@@ -30,9 +30,17 @@ type t = private
       thread_ts : string option;
       user_id : string;
     }
+  | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
 val dashboard : thread_id:string -> (t, string) result
+
+(** [keeper ~keeper_name] routes the continuation to another Keeper's own
+    event queue. A Keeper that submits work on behalf of a person keeps the
+    person's channel; a Keeper that submits work for itself is the reader of
+    the reply, and this names it. Without this destination such a reply is
+    addressed to a screen instead of to the Keeper waiting for it. *)
+val keeper : keeper_name:string -> (t, string) result
 
 val discord :
   guild_id:string option ->
@@ -67,7 +75,7 @@ val unrouted : string -> t
 val is_routable : t -> bool
 
 (** [kind_label t] is a stable lowercase tag for metrics / observability:
-    ["dashboard"] | ["discord"] | ["slack"] | ["unrouted"]. *)
+    ["dashboard"] | ["discord"] | ["slack"] | ["keeper"] | ["unrouted"]. *)
 val kind_label : t -> string
 
 (** [describe t] is a human-readable one-line summary for logs. *)

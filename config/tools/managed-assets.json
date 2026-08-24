@@ -64,6 +64,10 @@
     "masc_keeper_reset.toml",
     "masc_keeper_up.toml",
     "masc_keeper_waiting_inventory.toml",
+    "masc_library_add.toml",
+    "masc_library_list.toml",
+    "masc_library_read.toml",
+    "masc_library_search.toml",
     "masc_messages.toml",
     "masc_note_add.toml",
     "masc_pause.toml",
@@ -93,6 +97,7 @@
     "masc_transition.toml",
     "masc_update_priority.toml",
     "tool_edit_file.toml",
+    "tool_execute.toml",
     "tool_read_file.toml",
     "tool_search_files.toml",
     "tool_write_file.toml"

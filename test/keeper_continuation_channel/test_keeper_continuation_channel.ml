@@ -415,7 +415,7 @@ let test_discord_thread_parent_preserves_thread_target () =
     assert (reply_to_message_id = None);
     assert (guild_id = Some "G1");
     assert (user_id = "U1")
-  | Dashboard _ | Slack _ | Unrouted _ ->
+  | Dashboard _ | Slack _ | Keeper _ | Unrouted _ ->
     failwith "Discord thread parent changed connector kind"
 
 let () =

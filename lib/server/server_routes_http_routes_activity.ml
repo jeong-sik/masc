@@ -808,6 +808,24 @@ let add_routes ~sw ~clock router =
          request
          reqd)
 
+  (* Registered before the single-target read so the longer path is matched
+     first. One page of the board asks about its rows here instead of once per
+     row. *)
+  |> Http.Router.get "/api/v1/board/reactions/batch" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanReadState
+         (fun _state actor req reqd ->
+            let actor = board_actor_author_for_write actor in
+            let result =
+              Server_board_reaction_http.targets_of_strings
+                ~target_type:(query_param req "target_type")
+                ~target_ids:(query_param req "target_ids")
+              |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+            in
+            respond_board_reaction_result request reqd result)
+         request
+         reqd)
+
   |> Http.Router.get "/api/v1/board/reactions" (fun request reqd ->
        with_token_permission_auth
          ~permission:Masc_domain.CanReadState

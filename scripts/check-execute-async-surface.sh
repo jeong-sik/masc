@@ -21,7 +21,11 @@ require_normalized_text() {
   local label="$3"
   local haystack
 
-  haystack="$(tr '\n' ' ' < "${ROOT}/${file}" | tr -s ' ')"
+  # A TOML basic string wraps with a trailing backslash, so the sentence the
+  # contract names is split by "\\\n" rather than a bare newline. Drop the
+  # continuation before folding whitespace, or the check passes only while the
+  # text happens to live in OCaml.
+  haystack="$(sed 's/\\$//' "${ROOT}/${file}" | tr '\n' ' ' | tr -s ' ')"
   if [[ "${haystack}" != *"${needle}"* ]]; then
     echo "execute-async-surface: missing ${label}: ${file}" >&2
     echo "  expected text: ${needle}" >&2
@@ -58,8 +62,10 @@ require_normalized_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
   "Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr." \
   "typed Execute accepted-field list"
+# The sentence is in the tool's description, which now lives in the TOML the
+# model is handed rather than in an OCaml literal. Check it where it is.
 require_normalized_text \
-  "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
+  "config/tools/tool_execute.toml" \
   "this tool does not expose background task lifecycle tools" \
   "typed Execute background lifecycle exclusion"
 reject_text \
@@ -67,13 +73,25 @@ reject_text \
   "run_in_background" \
   "legacy Execute background flag"
 reject_text \
+  "config/tools/tool_execute.toml" \
+  "run_in_background" \
+  "legacy Execute background flag (declaration)"
+reject_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
   "job_id" \
   "Execute async job id field"
 reject_text \
+  "config/tools/tool_execute.toml" \
+  "job_id" \
+  "Execute async job id field (declaration)"
+reject_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
   "backgroundTaskId" \
   "Execute legacy background task id field"
+reject_text \
+  "config/tools/tool_execute.toml" \
+  "backgroundTaskId" \
+  "Execute legacy background task id field (declaration)"
 
 require_text \
   "test/test_tool_input_validation.ml" \

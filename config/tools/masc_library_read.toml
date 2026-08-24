@@ -1,0 +1,11 @@
+name = "masc_library_read"
+description = """
+Read a specific library document by topic name or partial match. Use when \
+you need the full content of a known knowledge document. After \
+masc_library_list or masc_library_search to find the topic name."""
+
+[[params]]
+name = "topic"
+type = "string"
+required = true
+description = "Topic name or partial match (e.g., 'eio-mutex')"

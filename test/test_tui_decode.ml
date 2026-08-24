@@ -1669,6 +1669,176 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
 
+let fusion_run_json ?(status = "completed") ?(topology = "simple")
+    ?(failure_fields = []) run_id =
+  `Assoc
+    ([ "run_id", `String run_id
+     ; "keeper", `String "fusion-keeper"
+     ; "preset", `String "trio"
+     ; "topology", `String topology
+     ; "started_at", `Float 1787557669.715736
+     ; "status", `String status
+     ]
+    @ failure_fields)
+
+let fusion_recorded_detail_json ?(source = "fusion")
+    ?(origin_run_id = "fusion-recorded-501") () =
+  let run_id = "fusion-recorded-501" in
+  `Assoc
+    [ "generated_at", `String "2026-08-24T09:00:00Z"
+    ; "run", fusion_run_json run_id
+    ; ( "evidence"
+      , `Assoc
+          [ "status", `String "recorded"
+          ; ( "post"
+            , `Assoc
+                [ "id", `String "p-fusion-501"
+                ; "title", `String "Fusion title 501"
+                ; ( "origin"
+                  , `Assoc
+                      [ "source", `String source
+                      ; "fusion_run_id", `String origin_run_id
+                      ] )
+                ; ( "meta"
+                  , `Assoc
+                      [ "question", `String "question-501"
+                      ; ( "panel"
+                        , `List
+                            [ `Assoc
+                                [ "model", `String "panel-first"
+                                ; "status", `String "answered"
+                                ; "answer", `String "answer-first-501"
+                                ; "input_tokens", `Int 10
+                                ; "output_tokens", `Int 20
+                                ]
+                            ; `Assoc
+                                [ "model", `String "panel-second"
+                                ; "status", `String "failed"
+                                ; "reason_code", `String "timeout"
+                                ; "reason_detail", `String "failure-second-501"
+                                ]
+                            ] )
+                      ; ( "judge"
+                        , `Assoc
+                            [ "status", `String "synthesized"
+                            ; "decision", `String "answer"
+                            ; "resolved_answer", `String "judge-answer-501"
+                            ; "synthesis", `String "judge-reason-501"
+                            ] )
+                      ] )
+                ] )
+          ] )
+    ]
+
+let test_decode_fusion_list_and_exact_detail () =
+  let failed_fields =
+    [ "error", `String "panel unavailable"
+    ; "failure_code", `String "panel_failed"
+    ]
+  in
+  let snapshot_json =
+    `Assoc
+      [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "count", `Int 2
+      ; ( "runs"
+        , `List
+            [ fusion_run_json "fusion-recorded-501"
+            ; fusion_run_json ~status:"failed"
+                ~failure_fields:failed_fields "fusion-failed-501"
+            ] )
+      ]
+  in
+  (match Tui_decode.decode_fusion_snapshot snapshot_json with
+   | Error err -> Alcotest.failf "list decode failed: %s" err
+   | Ok snapshot ->
+       (match snapshot.Tui_decode.fus_runs with
+        | [ first; second ] ->
+            Alcotest.(check string) "source order" "fusion-recorded-501"
+              first.Tui_decode.fur_run_id;
+            (match second.Tui_decode.fur_status with
+             | Tui_decode.Fusion_failed failure ->
+                 Alcotest.(check string) "typed failure code" "panel_failed"
+                   failure.frs_failure_code
+             | Tui_decode.Fusion_running | Tui_decode.Fusion_completed ->
+                 Alcotest.fail "failed row lost its typed status")
+        | runs ->
+            Alcotest.failf "expected two fusion rows, got %d"
+              (List.length runs)));
+  (match
+     Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ())
+   with
+   | Error err -> Alcotest.failf "detail decode failed: %s" err
+   | Ok detail ->
+       Alcotest.(check string) "detail identity" "fusion-recorded-501"
+         detail.Tui_decode.fud_run.fur_run_id;
+       (match detail.Tui_decode.fud_evidence with
+        | Some evidence ->
+            (match evidence.Tui_decode.fe_panel with
+             | [ Tui_decode.Fusion_panel_answered answer
+               ; Tui_decode.Fusion_panel_failed failure
+               ] ->
+                 Alcotest.(check string) "first panel stays first" "panel-first"
+                   answer.fpa_model;
+                 Alcotest.(check string) "second panel failure stays second"
+                   "failure-second-501" failure.fpf_reason_detail
+             | panel ->
+                 Alcotest.failf "expected answered then failed, got %d rows"
+                   (List.length panel));
+            (match evidence.Tui_decode.fe_judge with
+             | Tui_decode.Fusion_judge_synthesized judge ->
+                 Alcotest.(check string) "judge reason" "judge-reason-501"
+                   judge.fj_reason
+             | Tui_decode.Fusion_judge_failed _ ->
+                 Alcotest.fail "synthesized judge decoded as failed")
+        | None -> Alcotest.fail "recorded evidence lost its Board post"));
+  (match
+     Tui_decode.decode_fusion_detail
+       (fusion_recorded_detail_json ~source:"not-fusion" ())
+   with
+   | Ok _ -> Alcotest.fail "a non-fusion Board origin decoded as evidence"
+   | Error detail ->
+       Alcotest.(check bool) "origin mismatch is explicit" true
+         (String.starts_with
+            ~prefix:"fusion evidence origin.source is \"not-fusion\""
+            detail));
+  (match
+     Tui_decode.decode_fusion_detail
+       (fusion_recorded_detail_json ~origin_run_id:"fusion-other" ())
+   with
+   | Ok _ -> Alcotest.fail "evidence for another Fusion run decoded"
+   | Error detail ->
+       Alcotest.(check bool) "run identity mismatch is explicit" true
+         (String.starts_with
+            ~prefix:"fusion evidence origin run id is \"fusion-other\""
+            detail));
+  let completed_pending =
+    `Assoc
+      [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "run", fusion_run_json "fusion-completed-pending"
+      ; ( "evidence"
+        , `Assoc [ "status", `String "pending"; "post", `Null ] )
+      ]
+  in
+  (match Tui_decode.decode_fusion_detail completed_pending with
+   | Ok _ -> Alcotest.fail "a completed run decoded as pending evidence"
+   | Error detail ->
+       Alcotest.(check string) "pending is running-only"
+         "only a running fusion run may have pending evidence" detail);
+  let unknown_topology =
+    `Assoc
+      [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "count", `Int 1
+      ; "runs", `List [ fusion_run_json ~topology:"recursive" "fusion-new" ]
+      ]
+  in
+  match Tui_decode.decode_fusion_snapshot unknown_topology with
+  | Ok _ -> Alcotest.fail "an unknown Fusion topology decoded"
+  | Error detail ->
+      Alcotest.(check bool) "closed topology is explicit" true
+        (String.starts_with
+           ~prefix:"runs[0]: unknown fusion topology \"recursive\""
+           detail)
+
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
   `Assoc
@@ -1874,8 +2044,113 @@ let test_decode_system_log_requires_the_message () =
   | Ok _ -> Alcotest.fail "a line with no message decoded"
   | Error _ -> ()
 
+(* GET /api/v1/keepers/tool-approvals — the Approvals surface's held-call
+   rows. A row missing a field is rejected, not dropped: a listing that
+   silently thins is how a held call goes unanswered again (masc#30034). *)
+let keeper_tool_approvals_json =
+  `Assoc
+    [ ( "pending"
+      , `List
+          [ `Assoc
+              [ ("keeper", `String "sangsu")
+              ; ("tool_call_id", `String "call-1")
+              ; ("tool", `String "Execute")
+              ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
+              ; ("question", `String "Run Execute on git status?")
+              ; ("asked_at", `Float 1787555000.)
+              ; ("timeout_sec", `Float 180.)
+              ]
+          ] )
+    ]
+
+let test_decode_keeper_tool_approvals () =
+  match Tui_decode.decode_keeper_tool_approvals keeper_tool_approvals_json with
+  | Error err -> Alcotest.fail err
+  | Ok [ held ] ->
+      Alcotest.(check string) "keeper" "sangsu" held.Tui_decode.kta_keeper;
+      Alcotest.(check string) "call id" "call-1" held.kta_tool_call_id;
+      Alcotest.(check string) "tool" "Execute" held.kta_tool;
+      Alcotest.(check string) "question" "Run Execute on git status?"
+        held.kta_question;
+      Alcotest.(check (float 0.001)) "asked at" 1787555000. held.kta_asked_at;
+      Alcotest.(check (float 0.001)) "budget" 180. held.kta_timeout_sec
+  | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
+
+let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
+  let thin =
+    `Assoc [ ("pending", `List [ `Assoc [ ("keeper", `String "sangsu") ] ]) ]
+  in
+  match Tui_decode.decode_keeper_tool_approvals thin with
+  | Ok _ -> Alcotest.fail "a row with no call id decoded"
+  | Error _ -> ()
+
+(* GET /api/v1/runtime/resolved, the picker's slice. *)
+let runtime_resolved_json =
+  `Assoc
+    [ ( "runtimes"
+      , `List
+          [ `Assoc
+              [ ("id", `String "ollama_cloud.deepseek")
+              ; ("provider", `String "Ollama Cloud")
+              ; ("model", `String "deepseek-v4-flash:0731")
+              ; ("keeper_dispatchable", `Bool true)
+              ; ("is_default", `Bool true)
+              ]
+          ; `Assoc
+              [ ("id", `String "exact.embed")
+              ; ("provider", `String "Local")
+              ; ("model", `String "embed")
+              ; ("keeper_dispatchable", `Bool false)
+              ; ("is_default", `Bool false)
+              ]
+          ] )
+    ; ( "assignments"
+      , `List
+          [ `Assoc
+              [ ("keeper", `String "sangsu")
+              ; ("assignment_source", `String "explicit")
+              ; ( "resolved"
+                , `Assoc
+                    [ ("kind", `String "lane")
+                    ; ("id", `String "ollama_cloud.deepseek")
+                    ] )
+              ]
+          ] )
+    ]
+
+let test_decode_runtime_resolved () =
+  match Tui_decode.decode_runtime_resolved runtime_resolved_json with
+  | Error err -> Alcotest.fail err
+  | Ok (runtimes, assignments) ->
+      Alcotest.(check int) "both runtimes decode" 2 (List.length runtimes);
+      (match runtimes with
+       | first :: _ ->
+           Alcotest.(check string) "id" "ollama_cloud.deepseek"
+             first.Tui_decode.ro_id;
+           Alcotest.(check bool) "dispatchable" true first.ro_dispatchable;
+           Alcotest.(check bool) "default" true first.ro_is_default
+       | [] -> Alcotest.fail "no runtimes");
+      (match assignments with
+       | [ a ] ->
+           Alcotest.(check string) "keeper" "sangsu" a.Tui_decode.ra_keeper;
+           Alcotest.(check string) "source" "explicit" a.ra_source;
+           Alcotest.(check (option string)) "resolved id"
+             (Some "ollama_cloud.deepseek") a.ra_runtime_id
+       | other ->
+           Alcotest.failf "expected one assignment, got %d" (List.length other))
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_runtime_resolved",
+      [ Alcotest.test_case "carries runtimes and assignments" `Quick
+          test_decode_runtime_resolved
+      ] );
+    ( "decode_keeper_tool_approvals",
+      [ Alcotest.test_case "carries the whole ask" `Quick
+          test_decode_keeper_tool_approvals
+      ; Alcotest.test_case "rejects a thin row" `Quick
+          test_decode_keeper_tool_approvals_rejects_a_thin_row
+      ] );
     ( "decode_tools",
       [
         Alcotest.test_case "reads the live shape" `Quick
@@ -1914,6 +2189,11 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+      ] );
+    ( "decode_fusion",
+      [
+        Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
+          test_decode_fusion_list_and_exact_detail;
       ] );
     ( "decode_harness",
       [

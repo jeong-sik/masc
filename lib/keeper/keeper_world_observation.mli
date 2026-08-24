@@ -27,6 +27,10 @@ type pending_board_event_kind =
           fact the row states, and [post_id] is the post the vote belongs to
           (the parent post for a comment vote). *)
   | Fusion_completed
+  | Delegate_completed
+      (** A turn this Keeper asked another Keeper to run has ended. Like
+          {!Fusion_completed} the row carries the answer itself, because the
+          asker has nowhere else to read it mid-cycle. *)
   | Schedule_due of Keeper_event_queue.scheduled_wake
       (** The consumed wake, kept typed. The exact occurrence key is
           [(schedule_id, due_at, payload_digest)]; [schedule_id] alone can point

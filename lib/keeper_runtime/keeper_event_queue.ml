@@ -88,6 +88,12 @@ type stimulus_payload =
      message is an entry in the linear drain rather than only a row a scan may
      or may not reach. *)
   | Workspace_message of workspace_message
+  (* One Keeper asked another to run a turn and did not wait. This carries the
+     answer back to the asker. Without it the answer is written down where
+     only a screen reads it, and the asking Keeper has to remember to go
+     looking — measured over 2026-08-17..24, nobody did: 4 delegations
+     started, 0 status reads, 10 cancels. *)
+  | Delegate_completed of delegate_completion
 
 and board_attention = {
   candidate_id : string;
@@ -110,6 +116,24 @@ and fusion_terminal =
   | Fusion_succeeded of string
   | Fusion_failed of string
   | Fusion_cancelled
+
+and delegate_completion = {
+  dc_operation_id : string;
+  (* The id [masc_keeper_delegate] handed back, so the asker matches the
+     answer to its own request without a second lookup. *)
+  dc_keeper : string;
+  (* Which Keeper ran the turn. *)
+  dc_terminal : delegate_terminal;
+}
+
+and delegate_terminal =
+  | Delegate_replied of string
+  | Delegate_no_reply
+  (* The turn ended without text to hand back — it either finished its work
+     through a tool that posted elsewhere, or said nothing. Which of the two
+     is not carried: neither gives the asker something to read, and one
+     variant that says "no text" is the whole fact it acts on. *)
+  | Delegate_failed of string
 
 
 and hitl_resolution_decision =
@@ -171,6 +195,9 @@ let workspace_message_post_id (message : workspace_message) =
 
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
+let delegate_completion_post_id (dc : delegate_completion) =
+  "keeper-delegate:" ^ dc.dc_operation_id
+
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let manual_compaction_post_id = "manual-compaction-request"
@@ -228,6 +255,7 @@ let identity_payload = function
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested
     | Completion_authority_rejected _ | Workspace_message _
+    | Delegate_completed _
     ) as payload ->
     payload
 
@@ -329,6 +357,7 @@ let payload_kind_label = function
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
   | Workspace_message _ -> "workspace_message"
+  | Delegate_completed _ -> "keeper_delegate_completed"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
@@ -336,7 +365,7 @@ let is_board_signal = function
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested
   | Completion_authority_rejected _
-  | Task_cancelled _ | Workspace_message _ ->
+  | Task_cancelled _ | Workspace_message _ | Delegate_completed _ ->
     false
 
 (* RFC-0377: the batch-intake predicate needs the routed channel without
@@ -347,7 +376,8 @@ let connector_attention_channel = function
   | Connector_attention { channel; _ } -> Some channel
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
-  | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _ ->
+  | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+  | Delegate_completed _ ->
     None
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -606,6 +636,21 @@ let payload_to_yojson = function
       [ "kind", `String "workspace_message"
       ; "request_id", `String message.wmsg_request_id
       ; "from", `String message.wmsg_from
+      ]
+  | Delegate_completed dc ->
+    let terminal =
+      match dc.dc_terminal with
+      | Delegate_replied reply ->
+        `Assoc [ "kind", `String "replied"; "message", `String reply ]
+      | Delegate_no_reply -> `Assoc [ "kind", `String "no_reply" ]
+      | Delegate_failed detail ->
+        `Assoc [ "kind", `String "failed"; "message", `String detail ]
+    in
+    `Assoc
+      [ "kind", `String "keeper_delegate_completed"
+      ; "operation_id", `String dc.dc_operation_id
+      ; "keeper", `String dc.dc_keeper
+      ; "terminal", terminal
       ]
 
 let continuation_channel_field fields =
@@ -880,6 +925,52 @@ let payload_of_yojson json =
     let* request_id = string_field ~context "request_id" fields in
     let* from = string_field ~context "from" fields in
     Ok (Workspace_message { wmsg_request_id = request_id; wmsg_from = from })
+  | "keeper_delegate_completed" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "operation_id"; "keeper"; "terminal" ]
+        fields
+    in
+    let* operation_id = string_field ~context "operation_id" fields in
+    let* keeper = string_field ~context "keeper" fields in
+    let* terminal_json = required_field ~context "terminal" fields in
+    let* terminal_fields =
+      assoc_fields ~context:"stimulus.payload.terminal" terminal_json
+    in
+    let* terminal_kind =
+      string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
+    in
+    let* terminal =
+      match terminal_kind with
+      | "replied" | "failed" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind"; "message" ]
+            terminal_fields
+        in
+        let* message =
+          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+        in
+        Ok
+          (if String.equal terminal_kind "replied"
+           then Delegate_replied message
+           else Delegate_failed message)
+      | "no_reply" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind" ]
+            terminal_fields
+        in
+        Ok Delegate_no_reply
+      | value ->
+        Error (Printf.sprintf "unknown keeper delegate terminal kind: %s" value)
+    in
+    Ok
+      (Delegate_completed
+         { dc_operation_id = operation_id; dc_keeper = keeper; dc_terminal = terminal })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =
@@ -949,5 +1040,8 @@ let continuation_channel_of_payload = function
   | Manual_compaction_requested
   | Completion_authority_rejected _
   | Task_cancelled _
-  | Workspace_message _ -> None
+  | Workspace_message _
+  (* The answer arriving is itself the reply; there is nowhere further to
+     route it. *)
+  | Delegate_completed _ -> None
 ;;

@@ -447,7 +447,11 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Workspace_message _ ->
+  | Keeper_event_queue.Workspace_message _
+  (* Transferable receipts are the ones an operator can hand to another
+     Keeper. A delegation answer belongs to the Keeper that asked; moving it
+     would deliver an answer to someone who never asked. *)
+  | Keeper_event_queue.Delegate_completed _ ->
     Error "source event does not carry a typed terminal receipt"
 ;;
 

@@ -46,6 +46,19 @@ let dashboard_error_json ?ok message =
   in
   `Assoc fields
 
+let fusion_run_list_response ~registry =
+  Server_dashboard_fusion_run_projection.list_response
+    ~generated_at:(Masc_domain.now_iso ())
+    ~registry
+;;
+
+let fusion_run_detail_response ~registry ~path =
+  Server_dashboard_fusion_run_projection.detail_response
+    ~generated_at:(Masc_domain.now_iso ())
+    ~registry
+    ~path
+;;
+
 let respond_dashboard_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status
     (dashboard_error_json ?ok message)
@@ -578,6 +591,8 @@ module For_testing = struct
   let gate_mode_change_json = gate_mode_change_json
   let exact_lane_run_permission = exact_lane_run_permission
   let runtime_probe_read_permission = runtime_probe_read_permission
+  let fusion_run_detail_response = fusion_run_detail_response
+  let fusion_run_list_response = fusion_run_list_response
 end
 
 let handle_gate_mode_body state operator_name request reqd body_str =
@@ -814,15 +829,26 @@ let add_routes ~sw ~clock router =
      Fusion_run_registry.run_to_yojson so the shape matches the SSE delta. *)
   |> Http.Router.get "/api/v1/dashboard/fusion-runs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
          let json =
-           `Assoc
-             [ ("generated_at", `String (Masc_domain.now_iso ()))
-             ; ("count", `Int (List.length runs))
-             ; ("runs", `List (List.map Fusion_run_registry.run_to_yojson runs))
-             ]
+           fusion_run_list_response ~registry:(Fusion_run_registry.global ())
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.prefix_get
+       Server_dashboard_fusion_run_projection.detail_prefix
+       (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let status, json =
+           fusion_run_detail_response
+             ~registry:(Fusion_run_registry.global ())
+             ~path:(Http.Request.path req)
+         in
+         Http.Response.json_value
+           ~status:(status :> Httpun.Status.t)
+           ~compress:true
+           ~request:req
+           json
+           reqd
        ) request reqd)
   (* RFC-0361 D4: read-only snapshot of the completion-authority review registry
      (in-progress + recently completed). Sibling of the fusion route above and
@@ -1981,6 +2007,26 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
          handle_keeper_tool_approval state request reqd) request reqd)
+
+  (* Lists the tool calls keepers are holding, so a wait whose owning stream
+     watcher is gone can still be answered instead of only timing out
+     (masc#30034). Read authority follows the operator snapshot (public
+     read): the listing names what is being asked; answering stays behind
+     the authed POST above. *)
+  |> Http.Router.get "/api/v1/keepers/tool-approvals" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_keeper_tool_approvals_list state request reqd) request reqd)
+
+  (* The per-keeper approval stance the gate consults per call. Reading the
+     overrides is a public-read projection like the listing above; setting
+     one decides what a running turn may do next, so it carries the same
+     authority as answering a held call. *)
+  |> Http.Router.get "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_keeper_tool_approval_mode_get state request reqd) request reqd)
+  |> Http.Router.post "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+         handle_keeper_tool_approval_mode_set state request reqd) request reqd)
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->

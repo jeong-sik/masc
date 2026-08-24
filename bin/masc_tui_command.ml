@@ -56,6 +56,27 @@ let parse text =
     | "thinking", _ -> Toggle_thinking
     | word, _ -> Unknown word
 
+(* How [/keeper <name>] finds its keeper. The command grammar stays closed —
+   no prefix matching on command words — but a keeper NAME is an argument,
+   and an operator mid-thought types the least of it that still names one
+   keeper. Exact match wins outright so a keeper whose full name prefixes
+   another's is still reachable; otherwise a prefix must be unique, and an
+   ambiguous one reports its candidates instead of guessing. *)
+type keeper_match =
+  | Keeper_found of string
+  | Keeper_ambiguous of string list
+  | Keeper_unknown
+
+let resolve_keeper_name ~names typed =
+  if List.exists (String.equal typed) names then Keeper_found typed
+  else
+    match
+      List.filter (fun name -> String.starts_with ~prefix:typed name) names
+    with
+    | [ name ] -> Keeper_found name
+    | [] -> Keeper_unknown
+    | candidates -> Keeper_ambiguous candidates
+
 let task_message ~task_id ~title ~body =
   if String.equal (String.trim body) "" then Printf.sprintf "[%s] %s" task_id title
   else Printf.sprintf "[%s] %s\n%s" task_id title body

@@ -516,6 +516,15 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_focus: bool;
+  (* The [?] help overlay: open replaces the surface body until Esc/? closes
+     it. The scroll survives only while it is open. *)
+  mutable help_open: bool;
+  mutable help_scroll: int;
+  (* The [:] command palette: a typed filter over jump targets. Query and
+     cursor live only while it is open. *)
+  mutable palette_open: bool;
+  mutable palette_query: string;
+  mutable palette_cursor: int;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -834,6 +843,11 @@ let create_state ~workspace ~port ~refresh_interval = {
   tasks = [];
   tasks_domain = [];
   task_focus = false;
+  help_open = false;
+  help_scroll = 0;
+  palette_open = false;
+  palette_query = "";
+  palette_cursor = 0;
   task_cursor = 0;
   task_detail_id = None;
   task_detail_scroll = 0;
@@ -1159,3 +1173,41 @@ let operator_approval_items (state : state) =
 let approval_items (state : state) =
   List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+
+(* Command-palette jump targets. Surfaces come from the same ring the strip
+   draws; keepers come from the loaded roster, so the palette can only offer
+   a chat the roster can open. *)
+type palette_action =
+  | Palette_goto of surface
+  | Palette_chat of string
+
+let palette_contains ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.length needle and hl = String.length h in
+  if n = 0 then true
+  else begin
+    let found = ref false in
+    for start = 0 to hl - n do
+      if (not !found) && String.equal (String.sub h start n) needle then
+        found := true
+    done;
+    !found
+  end
+
+let palette_entries (state : state) =
+  List.map
+    (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
+    surface_ring
+  @ List.map
+      (fun (keeper : keeper) ->
+        ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
+      state.keepers
+
+let palette_matches (state : state) =
+  let needle =
+    String.lowercase_ascii (String.trim state.palette_query)
+  in
+  List.filter
+    (fun (label, _) -> palette_contains ~needle label)
+    (palette_entries state)

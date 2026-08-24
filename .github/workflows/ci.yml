@@ -1086,6 +1086,18 @@ jobs:
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         run: scripts/ci-run-test-suite.sh
 
+      # The step prints the failed assertions; this keeps everything around
+      # them. Without it the full output lived only in RUNNER_TEMP and went
+      # with the runner, so a red suite could not be diagnosed after the fact
+      # (#30117).
+      - name: Upload the test suite log
+        if: ${{ always() && steps.ocaml_test_suite.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-suite-log
+          path: ${{ runner.temp }}/test-suite.log
+          if-no-files-found: warn
+
       - name: Run transport harness suite
         id: transport_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

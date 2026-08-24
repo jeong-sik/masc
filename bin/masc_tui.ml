@@ -482,6 +482,15 @@ type async_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
+  | Runtime_catalog_loaded of
+      ( Masc.Tui_decode.runtime_option list
+        * Masc.Tui_decode.runtime_assignment list,
+        string )
+      result
+  | Runtime_assignment_set of
+      string * string option * (unit, string) result
+      (** keeper, the runtime it was pointed at ([None] = back to default),
+          and whether the server took it. *)
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_tool_approvals_loaded of
@@ -1074,6 +1083,52 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
+
+(* Fetch the runtime catalogue and assignments for the picker. *)
+let launch_runtime_catalog_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_runtime_resolved ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Runtime_catalog_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
+
+let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+          ~runtime_id
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Runtime_assignment_set (keeper_name, runtime_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_assignment_set
+           (keeper_name, runtime_id, Error "Eio switch is unavailable"))
 
 let inflight_for state keeper_name =
   Option.map
@@ -2936,6 +2991,36 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None
       | Error detail -> state.tools_error <- Some detail)
+  | Runtime_catalog_loaded result -> (
+      match result with
+      | Ok (runtimes, assignments) ->
+          state.runtime_catalog <- runtimes;
+          state.runtime_assignments <- assignments;
+          state.runtime_catalog_error <- None;
+          let dispatchable =
+            List.length
+              (List.filter
+                 (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
+                 runtimes)
+          in
+          if state.runtime_pick_cursor >= dispatchable then
+            state.runtime_pick_cursor <- max 0 (dispatchable - 1)
+      | Error detail -> state.runtime_catalog_error <- Some detail)
+  | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
+      match result with
+      | Ok () ->
+          add_event state "system"
+            (match runtime_id with
+             | Some id -> Printf.sprintf "%s now runs on %s" keeper_name id
+             | None ->
+                 Printf.sprintf "%s is back on the default runtime" keeper_name);
+          (* The assignment table just changed under the picker; re-read it
+             rather than patching a local copy the server may disagree with. *)
+          launch_runtime_catalog_load state ~mailbox
+      | Error detail ->
+          add_event state "error"
+            (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
+               detail))
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3448,6 +3533,8 @@ let main () =
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
             | Tools -> launch_tools_load state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
+            | Keepers Keeper_runtime_pick ->
+                launch_runtime_catalog_load state ~mailbox:async_messages
             | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -3502,6 +3589,10 @@ let main () =
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
+            | Keepers Keeper_runtime_pick ->
+                state.runtime_pick_keeper <- None;
+                state.runtime_pick_cursor <- 0;
+                state.view <- Keepers Keeper_list
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
                 state.log_scroll <- 0;
@@ -3650,6 +3741,16 @@ let main () =
             | System_logs -> state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.system_logs_scroll
+            | Keepers Keeper_runtime_pick ->
+                let dispatchable =
+                  List.length
+                    (List.filter
+                       (fun (o : Tui_decode.runtime_option) ->
+                         o.ro_dispatchable)
+                       state.runtime_catalog)
+                in
+                if state.runtime_pick_cursor < dispatchable - 1 then
+                  state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
@@ -3756,10 +3857,34 @@ let main () =
                   state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.system_logs_scroll
+            | Keepers Keeper_runtime_pick ->
+                if state.runtime_pick_cursor > 0 then
+                  state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
             | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
+            | Keepers Keeper_runtime_pick ->
+                (match state.runtime_pick_keeper with
+                 | Some keeper_name ->
+                     let options =
+                       List.filter
+                         (fun (o : Tui_decode.runtime_option) ->
+                           o.ro_dispatchable)
+                         state.runtime_catalog
+                     in
+                     (match
+                        List.nth_opt options state.runtime_pick_cursor
+                      with
+                      | Some option ->
+                          launch_runtime_assignment_set state
+                            ~mailbox:async_messages ~keeper_name
+                            ~runtime_id:(Some option.ro_id);
+                          state.runtime_pick_keeper <- None;
+                          state.runtime_pick_cursor <- 0;
+                          state.view <- Keepers Keeper_list
+                      | None -> ())
+                 | None -> state.view <- Keepers Keeper_list)
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. *)
@@ -3830,6 +3955,29 @@ let main () =
            in
            launch_keeper_tool_mode_set state ~mailbox:async_messages
              ~keeper_name:keeper.k_name ~mode
+       | Some "u" | Some "U"
+         when (match state.view with
+               | Keepers Keeper_list | Keepers Keeper_detail -> true
+               | _ -> false)
+              && state.keeper_cursor < List.length state.keepers ->
+           (* Open the runtime picker for the keeper under the cursor. The
+              catalogue is fetched on open so the list reflects the server
+              now, not the last visit. *)
+           let keeper = List.nth state.keepers state.keeper_cursor in
+           state.runtime_pick_keeper <- Some keeper.k_name;
+           state.runtime_pick_cursor <- 0;
+           launch_runtime_catalog_load state ~mailbox:async_messages;
+           state.view <- Keepers Keeper_runtime_pick
+       | Some "d" | Some "D"
+         when state.view = Keepers Keeper_runtime_pick ->
+           (match state.runtime_pick_keeper with
+            | Some keeper_name ->
+                launch_runtime_assignment_set state ~mailbox:async_messages
+                  ~keeper_name ~runtime_id:None;
+                state.runtime_pick_keeper <- None;
+                state.runtime_pick_cursor <- 0;
+                state.view <- Keepers Keeper_list
+            | None -> state.view <- Keepers Keeper_list)
        | Some "G" when state.view = Acting ->
            (* Past the end on purpose; the frame clamps it to the last page.
               The held count rather than max_int, because an event arriving
@@ -3839,6 +3987,7 @@ let main () =
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
@@ -3906,6 +4055,7 @@ let main () =
               chat is reachable from both: the keeper an operator wants the
               logs of is the one under the cursor. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 let keeper = selected_keeper state in
                 load_selected_keeper_logs state base_path 200 keeper;
@@ -3927,6 +4077,7 @@ let main () =
               talk to is the one under the cursor. [c] is an alias for [m]
               because the footer names the action rather than the mnemonic. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
@@ -3956,6 +4107,7 @@ let main () =
               applies is a fact about the keeper, not a choice the operator
               should have to make. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> (
                 match
                   Option.map (keeper_reading state) (selected_keeper state)
@@ -3974,6 +4126,7 @@ let main () =
             | Repositories | Connectors | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
@@ -3987,6 +4140,7 @@ let main () =
               live, and Board compose takes the key only from the list --
               inside the compose pane the letter is draft text. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -4008,6 +4162,7 @@ let main () =
               inside the keeper-action pipeline: the loop is inside the
               editor, and the POST happens only after the editor returns. *)
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
@@ -4015,6 +4170,7 @@ let main () =
             | Repositories | Connectors | Tools | System_logs -> ())
        | Some "a" | Some "A" ->
            (match state.view with
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
@@ -4057,6 +4213,7 @@ let main () =
           ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
+         | Keepers Keeper_runtime_pick -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_selected_keeper_logs state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor)

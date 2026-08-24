@@ -1914,8 +1914,67 @@ let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
   | Ok _ -> Alcotest.fail "a row with no call id decoded"
   | Error _ -> ()
 
+(* GET /api/v1/runtime/resolved, the picker's slice. *)
+let runtime_resolved_json =
+  `Assoc
+    [ ( "runtimes"
+      , `List
+          [ `Assoc
+              [ ("id", `String "ollama_cloud.deepseek")
+              ; ("provider", `String "Ollama Cloud")
+              ; ("model", `String "deepseek-v4-flash:0731")
+              ; ("keeper_dispatchable", `Bool true)
+              ; ("is_default", `Bool true)
+              ]
+          ; `Assoc
+              [ ("id", `String "exact.embed")
+              ; ("provider", `String "Local")
+              ; ("model", `String "embed")
+              ; ("keeper_dispatchable", `Bool false)
+              ; ("is_default", `Bool false)
+              ]
+          ] )
+    ; ( "assignments"
+      , `List
+          [ `Assoc
+              [ ("keeper", `String "sangsu")
+              ; ("assignment_source", `String "explicit")
+              ; ( "resolved"
+                , `Assoc
+                    [ ("kind", `String "lane")
+                    ; ("id", `String "ollama_cloud.deepseek")
+                    ] )
+              ]
+          ] )
+    ]
+
+let test_decode_runtime_resolved () =
+  match Tui_decode.decode_runtime_resolved runtime_resolved_json with
+  | Error err -> Alcotest.fail err
+  | Ok (runtimes, assignments) ->
+      Alcotest.(check int) "both runtimes decode" 2 (List.length runtimes);
+      (match runtimes with
+       | first :: _ ->
+           Alcotest.(check string) "id" "ollama_cloud.deepseek"
+             first.Tui_decode.ro_id;
+           Alcotest.(check bool) "dispatchable" true first.ro_dispatchable;
+           Alcotest.(check bool) "default" true first.ro_is_default
+       | [] -> Alcotest.fail "no runtimes");
+      (match assignments with
+       | [ a ] ->
+           Alcotest.(check string) "keeper" "sangsu" a.Tui_decode.ra_keeper;
+           Alcotest.(check string) "source" "explicit" a.ra_source;
+           Alcotest.(check (option string)) "resolved id"
+             (Some "ollama_cloud.deepseek") a.ra_runtime_id
+       | other ->
+           Alcotest.failf "expected one assignment, got %d" (List.length other))
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_runtime_resolved",
+      [ Alcotest.test_case "carries runtimes and assignments" `Quick
+          test_decode_runtime_resolved
+      ] );
     ( "decode_keeper_tool_approvals",
       [ Alcotest.test_case "carries the whole ask" `Quick
           test_decode_keeper_tool_approvals

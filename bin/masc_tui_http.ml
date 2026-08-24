@@ -554,6 +554,31 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
   get_json ~host ~port
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
+(** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
+let fetch_runtime_resolved ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/runtime/resolved"
+
+(** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
+    [runtime_id = None] clears the explicit assignment back to the default. *)
+let post_runtime_assignment ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(runtime_id : string option) :
+    (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         (("keeper_name", `String keeper_name)
+          ::
+          (match runtime_id with
+           | Some id -> [ ("runtime_id", `String id) ]
+           | None -> [])))
+  in
+  match
+    post_json ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
+  with
+  | Error detail -> Error detail
+  | Ok _ -> Ok ()
+
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
 let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

@@ -1766,6 +1766,65 @@ let decode_keeper_tool_approvals json =
   in
   loop [] items
 
+(* GET /api/v1/runtime/resolved, the slice the runtime picker draws: every
+   runtime a keeper can be pointed at, and where each keeper points today. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_is_default : bool;
+}
+
+type runtime_assignment = {
+  ra_keeper : string;
+  ra_source : string;  (* "default" | "explicit" *)
+  ra_runtime_id : string option;
+}
+
+let decode_runtime_option json =
+  let* ro_id = required_string_field json "id" in
+  let* ro_provider = required_string_field json "provider" in
+  let* ro_model = required_string_field json "model" in
+  let* ro_dispatchable =
+    match member "keeper_dispatchable" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "keeper_dispatchable" "a bool or null" bad
+  in
+  let* ro_is_default =
+    match member "is_default" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "is_default" "a bool or null" bad
+  in
+  Ok { ro_id; ro_provider; ro_model; ro_dispatchable; ro_is_default }
+
+let decode_runtime_assignment json =
+  let* ra_keeper = required_string_field json "keeper" in
+  let* ra_source = required_string_field json "assignment_source" in
+  let* ra_runtime_id =
+    match member "resolved" json with
+    | `Null -> Ok None
+    | resolved ->
+        let* id = required_string_field resolved "id" in
+        Ok (Some id)
+  in
+  Ok { ra_keeper; ra_source; ra_runtime_id }
+
+let decode_runtime_resolved json =
+  let* runtime_items = required_list_field json "runtimes" in
+  let* assignment_items = required_list_field json "assignments" in
+  let rec map_all decode acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* decoded = decode item in
+        map_all decode (decoded :: acc) rest
+  in
+  let* runtimes = map_all decode_runtime_option [] runtime_items in
+  let* assignments = map_all decode_runtime_assignment [] assignment_items in
+  Ok (runtimes, assignments)
+
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   let* fs_status = required_string_field section "status" in

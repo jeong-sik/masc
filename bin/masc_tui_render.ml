@@ -1891,6 +1891,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
           ; Ansi.red ^ "g" ^ Ansi.reset ^ " yolo"
+          ; Ansi.cyan ^ "u" ^ Ansi.reset ^ " runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
@@ -4011,6 +4012,90 @@ let render_acting (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~clamped:(Acting scroll) ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
+(** Render the runtime picker: the dispatchable catalogue, with the keeper it
+    is choosing for and where that keeper points today in the header. *)
+let render_runtime_pick (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let keeper_name =
+    Terminal_text.single_line_or ~default:"?" state.runtime_pick_keeper
+  in
+  let current =
+    match
+      List.find_opt
+        (fun (a : Tui_decode.runtime_assignment) ->
+          match state.runtime_pick_keeper with
+          | Some keeper -> String.equal a.ra_keeper keeper
+          | None -> false)
+        state.runtime_assignments
+    with
+    | Some a ->
+        Printf.sprintf "%s (%s)"
+          (Terminal_text.single_line_or ~default:"-" a.ra_runtime_id)
+          (Terminal_text.single_line a.ra_source)
+    | None -> "-"
+  in
+  (* Only what a keeper can actually be pointed at. The catalogue also lists
+     rows the dispatcher refuses; offering one would end in the server's
+     rejection, so the picker does not draw them. *)
+  let options =
+    List.filter
+      (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
+      state.runtime_catalog
+  in
+  let count = List.length options in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %scurrent: %s%s"
+       (screen_title (Printf.sprintf " Runtime for %s" keeper_name))
+       Ansi.dim current Ansi.reset);
+  box_divider buf cols;
+  (match Terminal_text.optional_single_line state.runtime_catalog_error with
+   | Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  (catalogue unreliable: "
+         ^ fit_width err (max 8 (cols - 28))
+         ^ ")" ^ Ansi.reset)
+   | None ->
+       if count = 0 then
+         box_line buf cols
+           (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset));
+  let content_height = max 0 (rows - 7) in
+  let scroll_offset =
+    if content_height > 0 && state.runtime_pick_cursor >= content_height then
+      state.runtime_pick_cursor - content_height + 1
+    else 0
+  in
+  for i = 0 to content_height - 1 do
+    let idx = i + scroll_offset in
+    match List.nth_opt options idx with
+    | Some option ->
+        let is_selected = idx = state.runtime_pick_cursor in
+        let line =
+          Printf.sprintf "  %s  %s%s"
+            (fit_width (Terminal_text.single_line option.ro_id) 44)
+            (fit_width
+               (Terminal_text.single_line
+                  (option.ro_provider ^ " / " ^ option.ro_model))
+               (max 8 (cols - 56)))
+            (if option.ro_is_default then " [default]" else "")
+        in
+        box_line buf cols
+          (if is_selected then Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+           else "  " ^ line)
+    | None -> box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "  %sj/k%s move  %senter%s assign  %sd%s back to default  %sesc%s \
+        cancel\n"
+       Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset Ansi.dim
+       Ansi.reset);
+  finish_surface state ~surface_key:"runtime-pick" ~rows:terminal_rows ~cols
+    buf
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -4031,6 +4116,7 @@ let render_surface (state : state) =
   | Keepers Keeper_logs -> render_keeper_logs state
   | Keepers Keeper_calls -> render_keeper_calls state
   | Keepers Keeper_message -> render_keeper_message state
+  | Keepers Keeper_runtime_pick -> render_runtime_pick state
   | Lanes -> render_lanes state
   | Board ->
       (match state.board_mode with

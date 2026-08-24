@@ -23,7 +23,7 @@
       Prompt_registry.set_markdown_dir "prompts";
       Prompt_registry.load_prompts_from_directory "prompts";
 
-      (* Effective text for a key, override > file > default *)
+      (* Effective text for a key, override > file *)
       let prompt = Prompt_registry.get_prompt "code-review-v2" in
 
       (* Every source's contribution, side by side *)
@@ -57,7 +57,6 @@ type prompt_resolution = Types.prompt_resolution = {
   source: string;
   file_value: string option;
   override_value: string option;
-  default_value: string option;
   file_path: string option;
   file_exists: bool;
   has_override: bool;
@@ -123,9 +122,6 @@ let prompts_dir = store.prompts_dir
 
 (** Markdown prompt source directory for operator-managed prompt text. *)
 let markdown_dir = store.markdown_dir
-
-(** Make a storage key from id and version *)
-let make_key ~id ~version = Printf.sprintf "%s@%s" id version
 
 let set_markdown_dir dir =
   with_override_mutation_lock (fun () ->
@@ -243,20 +239,13 @@ let clear () : unit =
 
 (** {1 Simple Override API for Hardcoded Prompts} *)
 
-let default_prompt_value_unlocked key =
-  let storage_key = make_key ~id:key ~version:"default" in
-  match Hashtbl.find_opt registry storage_key with
-  | Some entry -> Some entry.template
-  | None -> None
-
 (* Pure assembly of a [resolved] record from pre-captured values.
    Invariant: [file_value] must already be read by the caller — this
    function never touches the filesystem, so it is safe to call from
    inside a [with_mutex] block without the contention cost of disk
    I/O under the lock (the original sin that [resolve_prompt] at the
    bottom of this file was explicitly refactored to avoid, see #3335). *)
-let build_resolved_from_snapshot
-    ~key ~override_value ~default_value ~file_value =
+let build_resolved_from_snapshot ~key ~override_value ~file_value =
   let file_path = prompt_markdown_path key in
   let source, effective =
     match override_value with
@@ -264,17 +253,13 @@ let build_resolved_from_snapshot
     | None -> (
         match file_value with
         | Some value -> ("file", value)
-        | None -> (
-            match default_value with
-            | Some value -> ("default", value)
-            | None -> ("missing", "")))
+        | None -> ("missing", ""))
   in
   {
     effective;
     source;
     file_value;
     override_value;
-    default_value;
     file_path;
     file_exists = Option.is_some file_value;
     has_override = Option.is_some override_value;
@@ -287,7 +272,6 @@ type prompt_snapshot = {
   snap_key : string;
   snap_meta : prompt_meta;
   snap_override_value : string option;
-  snap_default_value : string option;
 }
 
 (* Resolve a single prompt by doing the filesystem read OUTSIDE the
@@ -299,7 +283,6 @@ let resolved_of_snapshot (s : prompt_snapshot) =
   build_resolved_from_snapshot
     ~key:s.snap_key
     ~override_value:s.snap_override_value
-    ~default_value:s.snap_default_value
     ~file_value
 
 (* [expected = []] means the prompt is never rendered through
@@ -328,9 +311,6 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
       ("category", `String meta.category);
       ("description", `String meta.description);
       ("current", `String resolved.effective);
-      ( "default",
-        ((match resolved.file_value with Some _ as v -> v | None -> resolved.default_value)
-         |> fun v -> match v with Some s -> `String s | None -> `Null) );
       ("effective", `String resolved.effective);
       ( "file_value", Json_util.string_opt_to_json resolved.file_value );
       ( "override_value", Json_util.string_opt_to_json resolved.override_value );
@@ -404,8 +384,7 @@ let load_prompts_from_directory dir =
         ) files
       end)
 
-(** Register a hardcoded prompt with its default value.
-    This also registers it in the versioned template system as a fallback. *)
+(** Resolve a prompt. Resolution: override > file > missing. *)
 let resolve_prompt key =
   let file_path = prompt_markdown_path key in
   let file_value = Option.bind file_path read_file_if_exists in
@@ -415,25 +394,21 @@ let resolve_prompt key =
       |> Option.map (fun (entry : Prompt_override_persistence.entry) ->
              entry.value)
     in
-    let default_value = default_prompt_value_unlocked key in
     let source, effective =
       match override_value with
       | Some value -> ("override", value)
       | None -> (
           match file_value with
           | Some value -> ("file", value)
-          | None -> (
-              match default_value with
-              | Some value -> ("default", value)
-              | None -> ("missing", "")))
+          | None -> ("missing", ""))
     in
     {
-      effective; source; file_value; override_value; default_value;
+      effective; source; file_value; override_value;
       file_path; file_exists = Option.is_some file_value;
       has_override = Option.is_some override_value;
     })
 
-(** Get a prompt value. Resolution: override > file > registered default *)
+(** Get a prompt value. Resolution: override > file > missing *)
 let get_prompt key = (resolve_prompt key).effective
 
 let render_prompt_template key vars =
@@ -495,11 +470,7 @@ let validated_override ?expected_contract_revision key value =
         match Hashtbl.find_opt meta_tbl key with
         | None -> Error "Unknown prompt key"
         | Some meta -> (
-            let contract_body =
-              match file_value with
-              | Some body -> Some body
-              | None -> default_prompt_value_unlocked key
-            in
+            let contract_body = file_value in
             match contract_body with
             | None -> Error "Prompt contract body is missing"
             | Some body ->
@@ -542,7 +513,7 @@ let set_override key value =
           with_mutex (fun () -> Hashtbl.replace override_tbl key entry);
           Ok ())
 
-(** Clear override, reverting to file or default *)
+(** Clear override, reverting to file *)
 let clear_prompt_override key =
   with_override_mutation_lock (fun () ->
       with_mutex (fun () -> Hashtbl.remove override_tbl key))
@@ -567,7 +538,6 @@ let validate_prompt_templates () =
               |> Option.map
                    (fun (entry : Prompt_override_persistence.entry) ->
                      entry.value);
-            snap_default_value = default_prompt_value_unlocked key;
           } :: acc)
         meta_tbl [])
   in
@@ -591,7 +561,7 @@ let validate_prompt_templates () =
     call (once per registered prompt), blocking all other prompt
     registry operations for the full disk scan.  Now:
 
-    1. Snapshot (key, meta, override, default) under [with_mutex].
+    1. Snapshot (key, meta, override) under [with_mutex].
     2. Release the lock.
     3. For each snapshot, read the markdown file and build the
        [resolved] record outside the lock.
@@ -611,7 +581,6 @@ let list_prompts () =
               |> Option.map
                    (fun (entry : Prompt_override_persistence.entry) ->
                      entry.value);
-            snap_default_value = default_prompt_value_unlocked key;
           } :: acc)
         meta_tbl [])
   in
@@ -743,10 +712,10 @@ let restore_overrides base_path =
           match key with
           | None ->
               Log.Misc.error
-                "prompt override restore: rejected persistence file, falling back to file/default values: %s"
+                "prompt override restore: rejected persistence file, falling back to file values: %s"
                 reason
           | Some key ->
               Log.Misc.error
-                "prompt override restore: rejected %s, falling back to file/default value: %s"
+                "prompt override restore: rejected %s, falling back to file value: %s"
                 key reason)
         failures)

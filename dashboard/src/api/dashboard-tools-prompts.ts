@@ -960,14 +960,13 @@ export async function fetchKeeperWaitingInventory(
 
 // --- Prompts (override management) ---
 
-export type PromptSource = 'override' | 'file' | 'default' | 'missing'
+export type PromptSource = 'override' | 'file' | 'missing'
 
 export interface DashboardPromptItem {
   key: string
   category: string
   description: string
   current: string
-  default: string | null
   effective: string
   file_value: string | null
   override_value: string | null

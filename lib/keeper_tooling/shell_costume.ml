@@ -27,11 +27,13 @@ let rec script_after_dash_c = function
     else script_after_dash_c (next :: rest)
 ;;
 
+let names_a_shell name = List.exists (String.equal name) shells
+
 let of_argv = function
   | [] -> None
   | program :: args ->
     let shell = Filename.basename program in
-    if not (List.exists (String.equal shell) shells) then None
+    if not (names_a_shell shell) then None
     else (
       match script_after_dash_c args with
       | None -> None

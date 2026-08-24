@@ -918,23 +918,26 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
 
 let inflight_for state keeper_name =
-  List.find_opt
-    (fun (request : Keeper_chat.request) ->
-      String.equal request.keeper_name keeper_name)
-    state.msg_inflight
+  Option.map
+    (fun entry -> entry.sent_request)
+    (List.find_opt
+       (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
+       state.msg_inflight)
 ;;
 
 let inflight_by_request_id state request_id =
-  List.find_opt
-    (fun (request : Keeper_chat.request) ->
-      String.equal request.request_id request_id)
-    state.msg_inflight
+  Option.map
+    (fun entry -> entry.sent_request)
+    (List.find_opt
+       (fun entry -> String.equal entry.sent_request.request_id request_id)
+       state.msg_inflight)
 ;;
 
 let drop_inflight state request =
   state.msg_inflight <-
     List.filter
-      (fun current -> not (Keeper_chat.same_request_identity current request))
+      (fun entry ->
+        not (Keeper_chat.same_request_identity entry.sent_request request))
       state.msg_inflight
 ;;
 
@@ -946,7 +949,9 @@ let drop_inflight state request =
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
 let launch_keeper_request state ~mailbox request =
-  state.msg_inflight <- request :: state.msg_inflight;
+  state.msg_inflight <-
+    { sent_request = request; sent_at = Unix.gettimeofday () }
+    :: state.msg_inflight;
   let run () =
     if enqueue_dispatch_start mailbox request false
     then begin
@@ -1020,19 +1025,7 @@ let start_keeper_message ?keeper_name state ~mailbox text =
               add_event state "message"
                 (Printf.sprintf "Queued for %s behind %s (%d waiting)"
                    (Keeper_chat.terminal_safe_text target)
-                   request.Keeper_chat.request_id waiting))
-      | Refused_prepared _ | Refused_cleanup _ | Refused_recovery_blocked _
-      | Refused_unverified _ ->
-          (* The durable chat fence is gone, so the states these rank are never
-             set and this cannot be reached. Matched rather than swept into a
-             catch-all so removing them from the vocabulary is a compile error
-             here, and reported rather than asserted so a future writer of one
-             of those states gets a line in the log instead of a crash. *)
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper %s: send refused by a chat fence state that no longer \
-                exists; the message was not sent"
-               (Keeper_chat.terminal_safe_text target)))
+                   request.Keeper_chat.request_id waiting)))
 ;;
 
 let drain_queued_message state ~mailbox =

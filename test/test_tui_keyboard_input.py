@@ -697,8 +697,6 @@ def row_budget_http_fixtures() -> HttpFixtures:
                     "workspace_health": "ok",
                     "cluster": "cluster-a",
                     "project": "project-a",
-                    "active_agents": 2,
-                    "incident_count": 6,
                 },
                 "generated_at": "2026-08-22T00:00:00Z",
                 "incidents": attention_items,
@@ -721,8 +719,6 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
             "workspace_health": "ok",
             "cluster": cluster,
             "project": "project-a",
-            "active_agents": 2,
-            "incident_count": 0,
         },
         "generated_at": "2026-08-22T00:00:00Z",
         "incidents": [],
@@ -3268,6 +3264,75 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         # send (and its 503 from the fixture) is on screen; the POST bodies
         # above are the proof of what went out.
         send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+
+def duplicated_attention_briefing() -> HttpResponse:
+    item = {
+        "kind": "keeper_attention",
+        "severity": "warning",
+        "summary": "sangsu has external attention from discord",
+        "target_type": "keeper",
+        "target_id": "sangsu",
+    }
+    other = dict(item, summary="analyst needs operator attention")
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-08-24T00:00:00Z",
+            # The same row on both lists, the way the live briefing serves an
+            # incident that is also queued for attention.
+            "incidents": [item, other],
+            "attention_queue": [item],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+        },
+    )
+
+
+def attention_drawn_once_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"sangsu has external attention",
+            start=0,
+            timeout=10.0,
+        )
+        wait_for_output(
+            process, master_fd, output, b"analyst needs operator", start=0, timeout=3.0
+        )
+        # One full repaint to count rows in: the ordinary paints are row
+        # diffs, so counting in the raw stream would count repaints.
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=99,
+            needle=b"sangsu has external attention",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        repeated = frame.count(b"sangsu has external attention")
+        if repeated != 1:
+            raise AssertionError(
+                f"an attention fact on two briefing lists drew {repeated} rows: {frame!r}"
+            )
+        if frame.count(b"analyst needs operator") != 1:
+            raise AssertionError(f"the distinct item vanished: {frame!r}")
+
         os.write(master_fd, b"q")
 
     return interact
@@ -3391,6 +3456,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=task_dispatch_interaction(dispatch_requests),
         http_fixtures=task_dispatch_http_fixtures(),
         http_requests=dispatch_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Attention drawn once",
+        interact=attention_drawn_once_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+        },
     )
     composer_requests: HttpRequests = []
     run_terminal_scenario(

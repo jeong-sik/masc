@@ -252,7 +252,8 @@ type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_active_agents: int;
+  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_incident_count: int;
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;
@@ -384,6 +385,16 @@ let surface_needs : surface -> surface_needs = function
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
+(* A request that has been POSTed and has not settled, with when it went out.
+   The instant rides with the request rather than in a second structure keyed
+   by id: a turn taking minutes is normal here and an operator watching one
+   needs to see it advancing, but two structures for one fact drift the moment
+   somebody adds a third place that removes a request. *)
+type inflight =
+  { sent_request : Masc_tui_keeper_chat_projection.request
+  ; sent_at : float
+  }
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -570,7 +581,7 @@ type state = {
      serialized on a single slot because the durable recovery fence held one
      un-acknowledged POST for the whole workspace; with that gone the only
      reason left is per keeper, which is how the server runs turns anyway. *)
-  mutable msg_inflight: Masc_tui_keeper_chat_projection.request list;
+  mutable msg_inflight: inflight list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -586,23 +597,16 @@ type send_disposition =
    keeper does not decide what Enter does here. *)
 let inflight_for_keeper state keeper_name =
   List.find_opt
-    (fun (request : Masc_tui_keeper_chat_projection.request) ->
-      String.equal request.keeper_name keeper_name)
+    (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
     state.msg_inflight
 ;;
 
-(* [prepared], [cleanup_pending], [recovery_blocked] and [unverified] were the
-   durable chat fence's states. The fence is gone — the server refuses a second
-   submission of the same request id, so the client does not carry its own —
-   and with it those four are always absent. Passed as [None] rather than
-   removed from the vocabulary: this module's ordering contract is what makes
-   the footer and the send path agree, and narrowing it is a separate change
-   from removing the states it ranked. *)
 let send_disposition state ~keeper_name : send_disposition =
-  Masc_tui_send_disposition.of_state ~prepared:None ~cleanup_pending:None
-    ~recovery_blocked:None
-    ~inflight:(inflight_for_keeper state keeper_name)
-    ~unverified:None
+  Masc_tui_send_disposition.of_state
+    ~inflight:
+      (Option.map
+         (fun entry -> entry.sent_request)
+         (inflight_for_keeper state keeper_name))
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
@@ -837,7 +841,6 @@ let keeper_message_status_rows (state : state) =
   + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
-  + (if state.msg_scroll > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
   + composer_extra_rows state

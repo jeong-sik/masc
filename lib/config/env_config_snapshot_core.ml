@@ -2,11 +2,6 @@
 
 let mask_sensitive _value = "[REDACTED]"
 
-(* This took a [string option] while [String_util.trim_nonempty] takes a
-   [string], so the same name meant two signatures depending on which module
-   you were reading (#26618). It is [option_trim]. *)
-let option_trim = String_util.option_trim
-
 let is_sensitive_name name =
   let lower = String.lowercase_ascii name in
   List.exists
@@ -157,7 +152,7 @@ let to_json (spec : spec) observation =
       let value = if spec.sensitive then mask_sensitive value else value in
       applied_provenance spec source, Some value
     | Raw_environment raw_env ->
-      let raw = option_trim raw_env in
+      let raw = String_util.option_trim raw_env in
       let provenance = source_provenance spec ~raw_env raw in
       let display_value =
         match raw with

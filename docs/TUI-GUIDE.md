@@ -7,7 +7,6 @@ code_refs:
   - bin/masc_tui_loader.ml
   - bin/masc_tui_http.ml
   - bin/masc_tui_types.ml
-  - bin/masc_tui_keeper_chat_recovery.ml
 ---
 
 # MASC TUI Guide
@@ -82,7 +81,7 @@ list, Recent Events, and active tasks.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]
-   Health: bad  Agents: 2  Approvals: 0  Incidents: 4
+   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0  Incidents: 4
    Cluster: default          Project: me      websocket/steady  sse 3  ws 1  grpc :8936
  Attention                              | Recent Events 1-5/5
  [bad ] analyst needs operator atten~   | [10:54:52] TUI started
@@ -307,8 +306,10 @@ rows, so its trace block is not drawn a second time.
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
 without visible text become explicit status or error rows; partial text is never
-promoted to a successful reply. One request may be in flight at a time. Drafts
-are retained per keeper while navigating.
+promoted to a successful reply. Requests are tracked per keeper, so a turn
+running for one keeper does not decide what `Enter` does in another's window;
+sends going elsewhere show as `(also sending to X)`. Drafts are retained per
+keeper while navigating.
 
 A failed roster read blocks sending. When `.masc/keepers/` cannot be read
 reliably, a stale entry may still name the target, so membership alone does not
@@ -495,12 +496,8 @@ Per surface:
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
-| `Ctrl-R` | Message | Claim a prepared fence, reconcile a fail-closed fence, replay only a replayable fence, or remove a rejected or settled fence by exact durable ID |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
-
-`Ctrl-R` stays available even when extra status rows leave the terminal too
-small for normal message input.
 
 ## Navigation
 

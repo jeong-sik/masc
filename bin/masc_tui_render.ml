@@ -42,7 +42,10 @@ let chat_markdown_palette : Markdown.palette =
   { strong = (Ansi.bold, Ansi.reset)
   ; emphasis = (Ansi.dim, Ansi.reset)
   ; code = (Ansi.cyan, Ansi.reset)
-  ; heading = (Ansi.bold ^ Ansi.white, Ansi.reset)
+  (* Bold alone. [white] is a colour like any other -- on a light background
+     it is the background -- so painting a heading with it hid the heading on
+     exactly the terminals that read it as text. Bold already says heading. *)
+  ; heading = (Ansi.bold, Ansi.reset)
   ; quote = (Ansi.dim, Ansi.reset)
   ; link_text = (Ansi.blue, Ansi.reset)
   ; link_target = (Ansi.dim, Ansi.reset)
@@ -50,6 +53,14 @@ let chat_markdown_palette : Markdown.palette =
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
   ; quote_gutter = "\xe2\x96\x8f "
+  (* Fenced-code tokens, inside the cyan the plain code span already uses:
+     one hue per role a keeper's eye scans for -- what binds, what is data,
+     what the reader can skip. *)
+  ; code_keyword = (Ansi.yellow, Ansi.reset)
+  ; code_string = (Ansi.green, Ansi.reset)
+  ; code_comment = (Ansi.gray, Ansi.reset)
+  ; code_number = (Ansi.magenta, Ansi.reset)
+  ; code_type = (Ansi.bold ^ Ansi.blue, Ansi.reset)
   }
 
 let chat_markdown ~width body =
@@ -309,9 +320,14 @@ let render_overview (state : state) =
           | Some snapshot, None -> string_of_int snapshot.aps_visible_count
           | None, _ | Some _, Some _ -> "?"
         in
-        Printf.sprintf "  Health: %s%s%s  Agents: %d  Approvals: %s  Incidents: %d"
-          health_color health_label Ansi.reset
-          o.ov_active_agents approval_count o.ov_incident_count
+        (* Keepers and MCP clients are counted apart: a row reading
+           "Agents: 2" over a runtime with ten keepers named the wrong
+           population. *)
+        Printf.sprintf
+          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s  \
+           Incidents: %d"
+          health_color health_label Ansi.reset o.ov_keepers o.ov_mcp_agents
+          approval_count o.ov_incident_count
   in
   box_line buf cols summary_line;
 
@@ -419,11 +435,16 @@ let render_overview (state : state) =
         let a = List.nth attention_items i in
         let sev_color = attention_severity_color a.ai_severity in
         let severity_label = attention_severity_label a.ai_severity in
+          (* Fitted once, by the fit that draws the row. Fitting the summary
+             here as well meant guessing how many cells the label ahead of it
+             spends, and the events column beside this one guessed one too
+             many: every event row came out a cell over its budget and was
+             marked truncated whether or not anything was cut. The severity
+             label keeps its own fit -- that one is a fixed column, not a
+             guess at the rest of the row. *)
           Printf.sprintf "%s[%s]%s %s"
             sev_color (fit_width severity_label 5) Ansi.reset
-            (fit_width
-               (Terminal_text.single_line a.ai_summary)
-               (panel_width - 12))
+            (Terminal_text.single_line a.ai_summary)
       else ""
     in
     let event_str =
@@ -432,8 +453,7 @@ let render_overview (state : state) =
         let e = List.nth state.events event_index in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
-          (fit_width (Terminal_text.single_line e.content)
-             (right_panel_width - 12))
+          (Terminal_text.single_line e.content)
       else ""
     in
     Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
@@ -1087,6 +1107,18 @@ let render_board_read (state : state) (list_post : board_post) =
 
 let planning_phase_label phase = Goal_phase.to_string phase
 
+(* As wide as the widest phase rather than a literal. Three of the four labels
+   are nine cells and the column was eight, so nearly every planning row read
+   [complet~] with sixty columns of space to its right -- the mark that says
+   "there was more" on a value nothing was cut from. Taken from the phase list
+   so a new phase widens the column instead of losing its last letter. *)
+let planning_phase_column =
+  List.fold_left
+    (fun widest phase ->
+      max widest (Message_layout.display_width (planning_phase_label phase)))
+    0
+    Goal_phase.all
+
 let planning_phase_color = function
   | Goal_phase.Executing -> Ansi.cyan
   | Goal_phase.Verifying -> Ansi.magenta
@@ -1219,7 +1251,7 @@ let render_planning_list (state : state) =
              let line =
                Printf.sprintf "%s%s%s[%s]%s %s P%d  %s%s"
                  indent branch status_color
-                 (fit_width status_label 8)
+                 (fit_width status_label planning_phase_column)
                  Ansi.reset
                  (planning_proof_mark g.pg_proof)
                  g.pg_priority
@@ -1270,7 +1302,7 @@ let render_planning_detail (state : state)
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s[%s]%s  %s"
     (screen_title " MASC Planning")
-    status_color (fit_width status_label 8) Ansi.reset
+    status_color (fit_width status_label planning_phase_column) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
 
@@ -2251,7 +2283,7 @@ let render_keeper_message (state : state) =
            ~terminal_cols:cols ~status_rows)
     then begin
       let notice =
-        " Keeper chat needs a larger terminal; resize to type (Ctrl-R:recover, Esc:back)"
+        " Keeper chat needs a larger terminal; resize to type (Esc:back)"
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
@@ -2396,31 +2428,40 @@ let render_keeper_message (state : state) =
     (* Input line *)
     (* This keeper's own turn first, then any other keeper's — talking here
        does not stop those, so the pane says they are going. *)
+    (* One clock read for the whole group so two rows drawn in the same frame
+       cannot report ages a tick apart. The age says how long the turn has
+       been going, which is what separates slow from stuck: a keeper turn
+       running minutes is ordinary here, and without it these rows look the
+       same at three seconds and at thirteen minutes. It changes the text of
+       a row, never how many there are, so the row budget is untouched. *)
+    let now = Unix.gettimeofday () in
+    let sending_age entry =
+      match Message_layout.age_text ~now ~since:entry.sent_at with
+      | None -> ""
+      | Some age -> " · " ^ age
+    in
     (match
        List.partition
-         (fun (request : Keeper_chat.request) ->
-           String.equal request.keeper_name keeper_name)
+         (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
          state.msg_inflight
      with
      | mine, others ->
          List.iter
-           (fun (request : Keeper_chat.request) ->
+           (fun entry ->
              box_line_styled buf cols ~style:Ansi.yellow
-               (Printf.sprintf "  (sending %s…)"
-                  (Keeper_chat.compact_request_id request.request_id)))
+               (Printf.sprintf "  (sending %s%s…)"
+                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
+                  (sending_age entry)))
            mine;
          List.iter
-           (fun (request : Keeper_chat.request) ->
+           (fun entry ->
              box_line_styled buf cols ~style:Ansi.dim
-               (Printf.sprintf "  (also sending to %s: %s)"
-                  (Keeper_chat.terminal_safe_text request.keeper_name)
-                  (Keeper_chat.compact_request_id request.request_id)))
+               (Printf.sprintf "  (also sending to %s: %s%s)"
+                  (Keeper_chat.terminal_safe_text
+                     entry.sent_request.keeper_name)
+                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
+                  (sending_age entry)))
            others);
-    (if scroll > 0 then
-       box_line_styled buf cols ~style:Ansi.yellow
-         (Printf.sprintf
-            "  scrolled back %d row(s); down or Ctrl-E returns to the newest"
-            scroll));
     (match state.msg_loaded_error with
      | Some detail ->
          box_line_styled buf cols ~style:Ansi.yellow
@@ -2506,16 +2547,8 @@ let render_keeper_message (state : state) =
               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
               waiting
       in
-      (* The fence refusals cannot occur any more — the states they ranked are
-         gone — but the vocabulary still carries them, so they stay matched
-         rather than swept into a catch-all. *)
       match send_disposition state ~keeper_name with
       | Queues_behind _ -> queue_hint ()
-      | Refused_cleanup _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
-      | Refused_prepared _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
-      | Refused_recovery_blocked _ ->
-          "Ctrl-R:reload exact recovery  Enter:blocked"
-      | Refused_unverified _ -> "Ctrl-R:resume exact request  Enter:blocked"
       | Sends ->
           if target_registered then "Enter:send"
           else if Option.is_some state.keepers_error then
@@ -2523,13 +2556,8 @@ let render_keeper_message (state : state) =
           else "Enter:disabled (Keeper unavailable)"
     in
     let scroll_hint =
-      if scroll > 0 then
-        (* At the oldest row with nothing more to fetch, say so: an operator
-           pressing up against a pane that will not move should know it is the
-           start of the conversation rather than a stuck key. *)
-        if state.msg_older_exist then "up/down:scroll  Ctrl-E:newest"
-        else "up/down:scroll  Ctrl-E:newest  (start of conversation)"
-      else "up:scroll back"
+      Message_layout.scroll_hint ~scrolled_back:scroll
+        ~older_exist:state.msg_older_exist
     in
     let escape_hint =
       match state.msg_live with
@@ -3420,9 +3448,26 @@ let render_keeper_calls (state : state) =
   in
   let chrome_rows = 8 + extra_rows in
   let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
+  (* Digested once, for the bound and for the drawing both. Working it out
+     twice would let the scroll bound believe in a different table than the
+     one on screen. *)
+  let rows =
+    List.map
+      (fun (call : Masc.Tui_decode.keeper_call) ->
+        ( call
+        , Option.bind call.Masc.Tui_decode.kc_output (fun result ->
+              Masc.Keeper_chat_tool_trail.tool_result_digest ~result) ))
+      entries
+  in
+  let max_scroll =
+    Message_layout.last_page_start ~height:content_height
+      (List.map (fun (_, digest) -> if Option.is_some digest then 2 else 1) rows)
+  in
   let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
   state.keeper_calls_scroll <- scroll;
+  (* How many calls the rows below actually reached. Filled by the drawing so
+     the count under the table cannot disagree with the table. *)
+  let drawn = ref 0 in
   if shown = 0 then begin
     let empty =
       match (state.keeper_calls, state.keeper_calls_error) with
@@ -3435,12 +3480,20 @@ let render_keeper_calls (state : state) =
       box_empty buf cols
     done
   end
-  else
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      match List.nth_opt entries idx with
-      | None -> box_empty buf cols
-      | Some call ->
+  else begin
+    (* Rows are spent, not indexed: a call draws one row and, when it answered
+       something, a second for what it said. Walking the height rather than
+       looping over it keeps [scroll] counting calls, so j/k still moves by
+       call and the footer's count still means what it says. *)
+    let remaining = ref content_height in
+    let idx = ref scroll in
+    while !remaining > 0 do
+      match List.nth_opt rows !idx with
+      | None ->
+          box_empty buf cols;
+          decr remaining
+      | Some (call, digest) ->
+          incr idx;
           let open Masc.Tui_decode in
           let glyph, style =
             if call.kc_success then ("✓", Ansi.reset)
@@ -3472,11 +3525,31 @@ let render_keeper_calls (state : state) =
               duration turn
               (Terminal_text.single_line subject)
           in
-          box_line_styled buf cols ~style line
+          box_line_styled buf cols ~style line;
+          decr remaining;
+          (* What the call answered. The row above says one ran and what it
+             was called with; this is the only place that says what came
+             back, which is the question a failed call leaves open. It takes
+             a failed call's colour so a reason does not read as ordinary
+             output. A call that answered nothing draws no row rather than an
+             empty one. *)
+          (match digest with
+           | Some digest when !remaining > 0 ->
+               box_line_styled buf cols
+                 ~style:(if call.kc_success then Ansi.dim else Ansi.red)
+                 (Printf.sprintf "  %-8s %s   %s" "" " "
+                    (Terminal_text.single_line ("\xe2\x86\x92 " ^ digest)));
+               decr remaining
+           | Some _ | None -> ())
     done;
-  if shown > content_height then
+    (* How many calls the height actually reached, not how many would fit if
+       each took one row. A call that answered something takes two, so
+       counting rows as calls hid the hint exactly when the screen needed it. *)
+    drawn := !idx - scroll
+  end;
+  if scroll > 0 || !drawn < shown then
     box_line_styled buf cols ~style:Ansi.dim
-      (Printf.sprintf "[%d calls, scroll %d]" shown scroll)
+      (Printf.sprintf "[%d calls, showing %d from %d]" shown !drawn scroll)
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf

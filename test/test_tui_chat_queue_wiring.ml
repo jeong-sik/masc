@@ -108,6 +108,64 @@ let test_the_pane_draws_the_queue_it_counts () =
       n
 ;;
 
+(* Every box row the chat pane draws belongs to the pane, not to the frame
+   around it. On a terminal at or above the split threshold the roster takes
+   the left columns and [chat_buf] is a separate buffer, so a row written to
+   the outer [buf] lands above the tab strip and pushes the whole screen down
+   by one row. That is what the queued lines did: #29818 rewrote the in-flight
+   block, and when the queue rows came back they came back on [buf]. The
+   operator saw the queue stack up over the tabs and the chat slide off the
+   bottom. Nothing failed — the rows were drawn, just into the wrong pane. *)
+let test_the_pane_draws_every_row_into_its_own_buffer () =
+  let source =
+    let channel = open_in_bin "bin/masc_tui_render.ml" in
+    let length = in_channel_length channel in
+    let text = really_input_string channel length in
+    close_in channel;
+    text
+  in
+  let lines = String.split_on_char '\n' source in
+  let in_renderer = ref false in
+  let offenders = ref [] in
+  List.iteri
+    (fun index line ->
+       if
+         String.length line > 26
+         && String.sub line 0 26 = "let render_keeper_message "
+       then in_renderer := true
+       else if
+         String.length line > 4
+         && String.sub line 0 4 = "let "
+         && !in_renderer
+       then in_renderer := false;
+       if !in_renderer then
+         List.iter
+           (fun call ->
+              let needle = call ^ " buf " in
+              let rec search from =
+                match String.index_from_opt line from needle.[0] with
+                | None -> ()
+                | Some at ->
+                  if
+                    at + String.length needle <= String.length line
+                    && String.sub line at (String.length needle) = needle
+                  then offenders := (index + 1, String.trim line) :: !offenders
+                  else search (at + 1)
+              in
+              search 0)
+           [ "box_top"; "box_line"; "box_line_styled"; "box_divider"; "box_empty" ])
+    lines;
+  match !offenders with
+  | [] -> ()
+  | rows ->
+    failf
+      "render_keeper_message must draw every box row into [chat_buf]; these \
+       go to the outer frame buffer and shift the screen when the roster \
+       pane is shown: %s"
+      (String.concat "; "
+         (List.map (fun (n, text) -> Printf.sprintf "line %d: %s" n text) rows))
+;;
+
 (* A line waiting for the next turn is the newest thing the operator typed.
    The arrows walked [msg_history], which is only written on dispatch, so the
    walk stepped straight over it: the queued line could be neither read back
@@ -188,6 +246,8 @@ let () =
             test_the_row_budget_counts_the_queue
         ; test_case "the pane draws the queue it counts" `Quick
             test_the_pane_draws_the_queue_it_counts
+        ; test_case "the pane draws every row into its own buffer" `Quick
+            test_the_pane_draws_every_row_into_its_own_buffer
         ; test_case "the arrow walk includes the queue" `Quick
             test_the_arrow_walk_includes_the_queue
         ; test_case "both readers share one disposition" `Quick

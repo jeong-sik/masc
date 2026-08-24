@@ -205,14 +205,9 @@ let test_catalog_accepts_async_only_for_statically_read_only_tools () =
   (match entry.execution with
    | Catalog.Async -> ()
    | Catalog.Inline -> fail "async execution mode was rewritten");
-  check
-    (list string)
-    "async model surface includes exact controls"
-    [ "keeper_compose_clock-background"
-    ; "keeper_composition_status"
-    ; "keeper_composition_cancel"
-    ]
-    (Catalog.model_tool_names catalog)
+  check string "async tool name" "keeper_compose_clock-background" (Catalog.tool_name entry);
+  check string "status control name" "keeper_composition_status" Catalog.status_tool_name;
+  check string "cancel control name" "keeper_composition_cancel" Catalog.cancel_tool_name
 ;;
 
 let test_catalog_rejects_async_effectful_tool () =
@@ -248,9 +243,7 @@ let test_catalog_projects_stable_tool_name_and_path () =
     | None -> fail "named composition lookup failed"
   in
   check string "model-visible tool name" "keeper_compose_clock-check"
-    (Catalog.tool_name entry);
-  check string "resolved catalog path" "config/tool-compositions.toml"
-    (Catalog.path ~config_root:"config")
+    (Catalog.tool_name entry)
 ;;
 
 let test_catalog_rejects_name_outside_tool_alphabet () =
@@ -296,78 +289,6 @@ value = {}
       (Catalog.Plan_rejected
         { error = Plan.Unknown_tool { tool_name = "invented_tool"; _ }; _ }) -> ()
   | Error _ | Ok _ -> fail "catalog bypassed canonical plan tool authority"
-;;
-
-let test_catalog_loader_distinguishes_missing_valid_and_invalid () =
-  let config_root = Filename.temp_file "keeper-composition-loader" "" in
-  Unix.unlink config_root;
-  Unix.mkdir config_root 0o755;
-  let catalog_path = Catalog.path ~config_root in
-  Fun.protect
-    ~finally:(fun () ->
-      if Sys.file_exists catalog_path then Unix.unlink catalog_path;
-      Unix.rmdir config_root)
-    (fun () ->
-       (match Masc.Keeper_run_tools_setup.load_composition_catalog ~config_root with
-        | Ok None -> ()
-        | Ok (Some _) | Error _ -> fail "missing catalog did not remain optional");
-       let write content =
-         let channel = open_out_bin catalog_path in
-         Fun.protect
-           ~finally:(fun () -> close_out channel)
-           (fun () -> output_string channel content)
-       in
-       write (one_node_composition "loaded");
-       (match Masc.Keeper_run_tools_setup.load_composition_catalog ~config_root with
-        | Ok (Some catalog) ->
-          check bool "valid catalog loaded" true (Option.is_some (Catalog.find catalog "loaded"))
-        | Ok None | Error _ -> fail "existing valid catalog was not loaded");
-       write "[[compositions]]\nname = \"broken\"\n";
-       match Masc.Keeper_run_tools_setup.load_composition_catalog ~config_root with
-       | Error
-           (Agent_core.Error.Config
-             (Agent_core.Error.InvalidConfig
-               { field = "tool-compositions.toml"; detail })) ->
-         check bool
-           "parse detail remains visible"
-           true
-           (String.length detail > 0)
-       | Ok _ | Error _ -> fail "invalid catalog did not return typed config error")
-;;
-
-let test_catalog_tools_join_runtime_projection_authority () =
-  let catalog =
-    match Catalog.parse (one_node_composition "projected") with
-    | Ok catalog -> catalog
-    | Error _ -> fail "valid projection catalog was rejected"
-  in
-  let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
-  let descriptor_names =
-    descriptors
-    |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
-    |> List.sort_uniq String.compare
-  in
-  let expected =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-      ~skill_catalog:Masc.Keeper_skill_catalog.empty
-      ~model_visible_descriptors:descriptors
-      ~composition_catalog:(Some catalog)
-  in
-  check bool
-    "dynamic composition joins descriptor projection"
-    true
-    (List.mem "keeper_compose_projected" expected);
-  check bool
-    "model-defined plan tool always joins the projection"
-    true
-    (List.mem
-       Masc.Keeper_tool_composition_surface.plan_execute_tool_name
-       expected);
-  (* One catalog tool plus the always-present keeper_plan_execute. *)
-  check int
-    "projection adds the catalog tool and the plan tool"
-    (List.length descriptor_names + 2)
-    (List.length expected)
 ;;
 
 let param_composition =
@@ -603,14 +524,6 @@ let () =
             "rejects unknown tools"
             `Quick
             test_catalog_rejects_unknown_tool_through_plan_authority
-        ; test_case
-            "loader distinguishes missing valid and invalid"
-            `Quick
-            test_catalog_loader_distinguishes_missing_valid_and_invalid
-        ; test_case
-            "catalog tools join runtime projection authority"
-            `Quick
-            test_catalog_tools_join_runtime_projection_authority
         ; test_case
             "params generate the input schema and bind arguments"
             `Quick

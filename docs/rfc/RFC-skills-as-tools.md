@@ -241,7 +241,7 @@ skills 디렉토리 하나가 된다. 마이그레이션 코드·호환 reader �
 | 3 | 진행 | 파싱 SSOT 통합: 카탈로그가 `Skill_definition` 에 위임 + 이 RFC 정합 |
 | 4 | 예정 | 스킬 디렉토리 스캔 + 합성 스킬 → make_tools 배선 + projection 기대 목록 |
 | 5 | 예정 | `Json_template.Param` + `[[compositions.params]]` + input schema 생성 |
-| 6 | 예정 | 라이브 합성 2개 이전, `tool-compositions.toml` 경로 삭제 |
+| 6 | 진행 | `tool-compositions.toml` 경로·로더 삭제 (라이브 파일 이전은 9와 함께) |
 | 7 | 예정 | `config/tools/<name>.help.md` + registry 서빙 전환 |
 | 8 | 예정 | `/api/v1/skills` + Skills 패널 + 합성 run 뷰 |
 | 9 | 예정 | 라이브 `<base_path>/.masc/skills/` 배치, keeper 재기동, 사용 실측·스크린샷 |

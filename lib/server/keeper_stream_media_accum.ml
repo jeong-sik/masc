@@ -49,9 +49,19 @@ type block_state =
 type t = {
   mutable blocks_by_index : (int * block_state) list;
   mutable completed_rev : completed list;
+  (* Read once per turn. [Keeper_chat_media_store.max_wire_bytes] resolves an
+     env var on every call, so reading it again at finalize could reject a
+     payload the chunk path had already accepted, or keep one it had already
+     dropped — within a single turn, from an operator edit landing mid-stream.
+     The accumulator decides against one number (#24018). *)
+  max_wire_bytes : int;
 }
 
-let create () = { blocks_by_index = []; completed_rev = [] }
+let create () =
+  { blocks_by_index = [];
+    completed_rev = [];
+    max_wire_bytes = Keeper_chat_media_store.max_wire_bytes ()
+  }
 
 let record_oversize_drop t ~index ~media_type ~encoded_bytes ~max_wire_bytes =
   Log.Keeper.warn
@@ -82,9 +92,9 @@ let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
     (Agent_core.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 
-let add_media_chunk ~media_type ~source_type ~chunks ~encoded_bytes data =
+let add_media_chunk t ~media_type ~source_type ~chunks ~encoded_bytes data =
   let encoded_bytes = encoded_bytes + String.length data in
-  let max_wire_bytes = Keeper_chat_media_store.max_wire_bytes () in
+  let max_wire_bytes = t.max_wire_bytes in
   if encoded_bytes > max_wire_bytes
   then Error (encoded_bytes, max_wire_bytes)
   else
@@ -93,7 +103,7 @@ let add_media_chunk ~media_type ~source_type ~chunks ~encoded_bytes data =
          { media_type; source_type; chunks = data :: chunks; encoded_bytes })
 
 let finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes =
-  let max_wire_bytes = Keeper_chat_media_store.max_wire_bytes () in
+  let max_wire_bytes = t.max_wire_bytes in
   if encoded_bytes > max_wire_bytes
   then
     record_oversize_drop t ~index ~media_type ~encoded_bytes ~max_wire_bytes
@@ -133,7 +143,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
        | Some (Active_media m)
          when String.equal m.media_type media_type && m.source_type = source_type ->
            (match
-              add_media_chunk ~media_type ~source_type ~chunks:m.chunks
+              add_media_chunk t ~media_type ~source_type ~chunks:m.chunks
                 ~encoded_bytes:m.encoded_bytes data
             with
             | Ok block -> replace_block t index block
@@ -153,7 +163,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
            ()
        | None ->
            (match
-              add_media_chunk ~media_type ~source_type ~chunks:[]
+              add_media_chunk t ~media_type ~source_type ~chunks:[]
                 ~encoded_bytes:0 data
             with
             | Ok block -> replace_block t index block

@@ -218,15 +218,148 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn () =
+  `Assoc
+    ([ "ts", `Float 1787534998.4
+     ; "keeper", `String keeper
+     ; "tool", `String tool
+     ; "input", `String "{\"file_path\": \"lib/a.ml\"}"
+     ; "success", `Bool success
+     ]
+    @ (match duration_ms with None -> [] | Some d -> [ "duration_ms", `Float d ])
+    @ (match turn with None -> [] | Some t -> [ "turn", `Int t ]))
+
+let test_keeper_calls_reject_rows_naming_another_keeper () =
+  let payload =
+    `Assoc
+      [ "keeper", `String "rondo"
+      ; "count", `Int 3
+      ; "health", `String "ok"
+      ; "latest_age_s", `Float 8.2
+      ; "stale_reason", `String "fresh"
+      ; ( "entries"
+        , `List
+            [ keeper_call_row ~keeper:"rondo" ~tool:"Read" ~duration_ms:28.4
+                ~turn:2143 ()
+            ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
+            ; keeper_call_row ~keeper:"rondo" ~tool:"tool_execute"
+                ~success:false ()
+            ] )
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo" payload
+  with
+  | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
+  | Ok snapshot ->
+      Alcotest.(check int) "two rows kept in order" 2
+        (List.length snapshot.Tui_decode.kcs_entries);
+      Alcotest.(check int) "the foreign row is counted, not drawn" 1
+        snapshot.Tui_decode.kcs_mismatched;
+      (match snapshot.Tui_decode.kcs_entries with
+       | [ first; second ] ->
+           Alcotest.(check string) "order kept" "Read" first.Tui_decode.kc_tool;
+           Alcotest.(check bool) "failure carried" false
+             second.Tui_decode.kc_success;
+           Alcotest.(check (option (Alcotest.float 0.01))) "duration optional"
+             (Some 28.4) first.Tui_decode.kc_duration_ms;
+           Alcotest.(check (option Alcotest.int)) "turn optional" (Some 2143)
+             first.Tui_decode.kc_turn
+       | _ -> Alcotest.fail "expected two rows");
+      Alcotest.(check (option string)) "a fresh stale_reason is no reason" None
+        snapshot.Tui_decode.kcs_stale_reason;
+      Alcotest.(check string) "health verbatim" "ok"
+        snapshot.Tui_decode.kcs_health
+
+(* The envelope has always carried what a call answered; the row did not read
+   it, so a call that failed said so without saying why. Absent and empty stay
+   absent: a row that carried no result is not a call that answered "". *)
+let test_keeper_calls_carry_what_the_call_answered () =
+  let row ~output =
+    `Assoc
+      [ "ts", `Float 1787534998.4
+      ; "keeper", `String "rondo"
+      ; "tool", `String "Execute"
+      ; "input", `String {|{"argv": ["ls"]}|}
+      ; "success", `Bool true
+      ; "output", output
+      ]
+  in
+  let payload entries =
+    `Assoc
+      [ "keeper", `String "rondo"
+      ; "count", `Int (List.length entries)
+      ; "health", `String "ok"
+      ; "entries", `List entries
+      ]
+  in
+  let outputs entries =
+    match
+      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+        (payload entries)
+    with
+    | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
+    | Ok snapshot ->
+        List.map
+          (fun (call : Tui_decode.keeper_call) -> call.Tui_decode.kc_output)
+          snapshot.Tui_decode.kcs_entries
+  in
+  Alcotest.(check (list (option string)))
+    "text kept, absent and blank stay absent, a non-string is serialised"
+    [ Some "a.ml  b.ml"; None; None; Some {|{"code":0}|} ]
+    (outputs
+       [ row ~output:(`String "a.ml  b.ml")
+       ; row ~output:`Null
+       ; row ~output:(`String "   ")
+       ; row ~output:(`Assoc [ "code", `Int 0 ])
+       ])
+
+let test_keeper_calls_require_the_envelope () =
+  Alcotest.(check bool) "no entries list is an error" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+          (`Assoc
+             [ "keeper", `String "rondo"
+             ; "count", `Int 0
+             ; "health", `String "ok"
+             ])));
+  Alcotest.(check bool) "a row without success is an error" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+          (`Assoc
+             [ "keeper", `String "rondo"
+             ; "count", `Int 1
+             ; "health", `String "ok"
+             ; ( "entries"
+               , `List
+                   [ `Assoc
+                       [ "ts", `Float 1.0
+                       ; "keeper", `String "rondo"
+                       ; "tool", `String "Read"
+                       ]
+                   ] )
+             ])))
+
 let test_timestamp_slices_are_sanitized_after_selection () =
-  Alcotest.(check string) "normal clock timestamp" "04:05:06"
-    (Tui_decode.clock_timestamp_for_terminal "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "normal clock timestamp, in the zone asked for"
+    "04:05:06"
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+       "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "the row clock follows the terminal's zone"
+    "13:05:06"
+    (Tui_decode.clock_timestamp_for_terminal
+       ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
+       "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "fractional seconds and offsets read the same clock"
+    "04:05:06"
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+       "2026-08-22T13:05:06.250+09:00");
   Alcotest.(check string) "empty short timestamp" "(never)"
     (Tui_decode.short_timestamp_for_terminal "");
   Alcotest.(check string)
     "clock slice cannot expose a UTF-8 continuation as raw C1"
     "\\x9B31mOWNE"
-    (Tui_decode.clock_timestamp_for_terminal
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "0123456789Û31mOWNED!!");
   Alcotest.(check string)
     "short timestamp cannot leave a split UTF-8 lead byte"
@@ -236,7 +369,7 @@ let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string)
     "clock slice escapes selected terminal controls"
     "0\\x1B]2;Xab"
-    (Tui_decode.clock_timestamp_for_terminal
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "2026-08-22T0\027]2;Xabcd")
 
 let test_decode_keeper_rejects_retired_fields () =
@@ -1145,6 +1278,31 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
        | Ok other -> Alcotest.failf "expected error, got %s" other)
     cases
 
+(* A wheel report must become the same key an arrow makes, and nothing
+   else -- clicks and releases arriving on the same encoding must not leak
+   into the key stream. *)
+let test_sgr_wheel_up_is_arrow_up () =
+  match Tui_decode.sgr_wheel_key "<64;10;5" 'M' with
+  | Some "up" -> ()
+  | Some other -> Alcotest.failf "expected up, got %s" other
+  | None -> Alcotest.fail "wheel up should claim the up key"
+
+let test_sgr_wheel_down_is_arrow_down () =
+  match Tui_decode.sgr_wheel_key "<65;10;5" 'M' with
+  | Some "down" -> ()
+  | Some other -> Alcotest.failf "expected down, got %s" other
+  | None -> Alcotest.fail "wheel down should claim the down key"
+
+let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
+  let cases = [ ("<0;10;5", 'M'); ("<32;10;5", 'M'); ("<66;10;5", 'M'); ("<0;10;5", 'm') ] in
+  List.iter
+    (fun (params, final) ->
+       match Tui_decode.sgr_wheel_key params final with
+       | None -> ()
+       | Some other ->
+           Alcotest.failf "report %S should stay unclaimed, got %s" params other)
+    cases
+
 type parent_node = {
   node_id : string;
   parent_id : string option;
@@ -1903,6 +2061,15 @@ let () =
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
       ] );
+    ( "keeper_calls",
+      [
+        Alcotest.test_case "rejects rows naming another keeper" `Quick
+          test_keeper_calls_reject_rows_naming_another_keeper
+      ; Alcotest.test_case "requires the envelope" `Quick
+          test_keeper_calls_require_the_envelope
+      ; Alcotest.test_case "carries what the call answered" `Quick
+          test_keeper_calls_carry_what_the_call_answered
+      ] );
     ( "parse_log_entry",
       [
         Alcotest.test_case "current turn contract" `Quick
@@ -1952,6 +2119,16 @@ let () =
           test_tool_envelope_outcome_rejection_carries_message;
         Alcotest.test_case "tool envelope rejects unexpected shapes" `Quick
           test_tool_envelope_outcome_rejects_unexpected_shapes;
+      ] );
+    ( "sgr_mouse",
+      [
+        Alcotest.test_case "wheel up is arrow up" `Quick
+          test_sgr_wheel_up_is_arrow_up;
+        Alcotest.test_case "wheel down is arrow down" `Quick
+          test_sgr_wheel_down_is_arrow_down;
+        Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
+          `Quick
+          test_sgr_click_and_horizontal_wheel_stay_unclaimed;
       ] );
     ( "bounded_parent_depth",
       [

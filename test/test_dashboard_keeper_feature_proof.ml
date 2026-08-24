@@ -104,16 +104,6 @@ let keeper_names feature key =
   |> List.sort compare
 ;;
 
-let duration_tier feature id =
-  feature
-  |> U.member "duration_tiers"
-  |> U.to_list
-  |> List.find_opt (fun tier -> U.member "id" tier |> U.to_string = id)
-  |> function
-  | Some tier -> tier
-  | None -> failf "duration tier %s absent from persistence proof" id
-;;
-
 let append_turn_exchange config keeper_name ts =
   Masc.Keeper_types_support.append_jsonl_line
     (Masc.Keeper_types_support.keeper_decision_log_path config keeper_name)
@@ -252,55 +242,131 @@ let test_stopped_keeper_fails_board_reactive_autonomy () =
     (U.member "status" feature |> U.to_string)
 ;;
 
-let test_persistence_duration_tiers_use_durable_turn_history () =
-  with_workspace
-  @@ fun config ->
-  seed_keeper config ~name:"four-hours" ~last_turn_ts:(now -. hour_seconds) ();
-  seed_keeper config ~name:"twenty-four-hours" ~last_turn_ts:(now -. hour_seconds) ();
-  append_turn_exchange config "four-hours" (now -. (5.0 *. hour_seconds));
-  append_turn_exchange config "four-hours" (now -. (0.5 *. hour_seconds));
-  append_turn_exchange config "twenty-four-hours" (now -. (24.0 *. hour_seconds));
-  append_turn_exchange config "twenty-four-hours" now;
-  let feature =
-    Feature_proof.json ~config ~now ()
-    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
-  in
-  List.iter
-    (fun id ->
-      let tier = duration_tier feature id in
-      check
-        string
-        (id ^ " tier names its evidence semantics")
-        "durable_turn_span"
-        U.(member "evidence_kind" tier |> to_string);
-      check string (id ^ " tier passes for both keepers") "pass" U.(member "status" tier |> to_string);
-      check int (id ^ " tier observes both keepers") 2 U.(member "observed_count" tier |> to_int))
-    [ "1h"; "2h"; "4h" ];
-  let tier_24h = duration_tier feature "24h" in
-  check string "24h tier stays partial" "warn" U.(member "status" tier_24h |> to_string);
-  check
-    (list string)
-    "24h tier names only the keeper with sufficient durable history"
-    [ "twenty-four-hours" ]
-    (tier_24h |> U.member "observed_keepers" |> U.to_list |> List.map U.to_string)
+(* A keeper whose record will not open did not fail to exercise the feature --
+   it failed to be read. Reporting it under both readings puts one name in two
+   lists that mean opposite things, and every surface drawing the report shows
+   it twice, once as a keeper to go chase and once as a record to go fix. *)
+let corrupt_keeper_record config name =
+  let path = Masc.Keeper_types_profile.keeper_meta_path config name in
+  let out = open_out path in
+  output_string out "{ this is not a keeper record";
+  close_out out
 ;;
 
-let test_persistence_duration_tiers_reject_future_turns () =
+let read_error_keepers feature =
+  feature
+  |> U.member "keeper_evidence"
+  |> U.member "read_errors"
+  |> U.to_list
+  |> List.map (fun entry -> U.member "keeper" entry |> U.to_string)
+  |> List.sort compare
+;;
+
+let test_unreadable_keeper_is_not_reported_as_missing () =
   with_workspace
   @@ fun config ->
-  seed_keeper config ~name:"future" ~last_turn_ts:(now -. hour_seconds) ();
-  append_turn_exchange config "future" (now -. (25.0 *. hour_seconds));
-  append_turn_exchange config "future" (now +. hour_seconds);
-  let feature =
-    Feature_proof.json ~config ~now ()
-    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "runtime_liveness" in
+  check
+    (list string)
+    "the readable keeper is observed"
+    [ "alive" ]
+    (keeper_names feature "observed_keepers");
+  check
+    (list string)
+    "the unreadable one is not blamed for the feature"
+    []
+    (keeper_names feature "missing_keepers");
+  check
+    (list string)
+    "it is reported as a record that would not open"
+    [ "broken" ]
+    (read_error_keepers feature)
+;;
+
+(* Setting the unreadable keeper aside must not promote the fleet. Nothing is
+   known about that keeper, and unknown does not become proven by being moved
+   out of the missing list. *)
+let test_unreadable_keeper_still_blocks_pass () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "runtime_liveness" in
+  check
+    string
+    "a fleet with an unreadable record is not proven"
+    "warn"
+    (U.member "status" feature |> U.to_string)
+;;
+
+(* [scheduled_proactive_autonomy] counted its read errors over the keepers it
+   had already filtered to proactive-enabled, which a keeper with no readable
+   meta can never reach. The field could only ever be empty, which reads as
+   "every record opened". *)
+let test_scheduled_proactive_reports_unreadable_records () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "scheduled_proactive_autonomy" in
+  check
+    (list string)
+    "the unreadable record is named here too"
+    [ "broken" ]
+    (read_error_keepers feature);
+  check
+    bool
+    "and it keeps the feature off pass"
+    false
+    (U.member "status" feature |> U.to_string = "pass")
+;;
+
+(* The summary used to be recovered by re-reading the status string out of the
+   payload each feature had just written, with anything unrecognised counted as
+   a failure. The status is now carried as a value, so this pins the
+   relationship that round-trip was maintaining: what the summary counts and
+   what each feature publishes are the same statuses. *)
+let test_summary_counts_agree_with_published_feature_statuses () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"live" ~last_turn_ts:(now -. hour_seconds)
+    ~autonomous_at:(iso_ago hour_seconds) ();
+  seed_keeper config ~name:"stopped" ~last_turn_ts:(now -. (72.0 *. hour_seconds)) ();
+  append_turn_exchange config "live" (now -. (25.0 *. hour_seconds));
+  append_turn_exchange config "live" now;
+  let payload = Feature_proof.json ~config ~now () in
+  let published =
+    payload
+    |> U.member "features"
+    |> U.to_list
+    |> List.map (fun feature -> U.member "status" feature |> U.to_string)
   in
-  List.iter
-    (fun id ->
-      let tier = duration_tier feature id in
-      check string (id ^ " tier rejects a future latest turn") "fail" U.(member "status" tier |> to_string);
-      check int (id ^ " tier observes no keeper with future evidence") 0 U.(member "observed_count" tier |> to_int))
-    [ "1h"; "2h"; "4h"; "24h" ]
+  let count status = List.length (List.filter (String.equal status) published) in
+  let summary = U.member "summary" payload in
+  check int "feature_count counts the published features"
+    (List.length published) U.(member "feature_count" summary |> to_int);
+  check int "pass_count counts the features that published pass"
+    (count "pass") U.(member "pass_count" summary |> to_int);
+  check int "warn_count counts the features that published warn"
+    (count "warn") U.(member "warn_count" summary |> to_int);
+  check int "fail_count counts the features that published fail"
+    (count "fail") U.(member "fail_count" summary |> to_int);
+  let worst =
+    if count "fail" > 0 then "fail" else if count "warn" > 0 then "warn" else "pass"
+  in
+  check string "the report status is the worst status any feature published"
+    worst U.(member "status" payload |> to_string);
+  (* A mix, so the assertions above are not all comparing zero to zero. *)
+  check bool "the fixture produces more than one distinct feature status" true
+    (List.length (List.sort_uniq String.compare published) > 1)
 ;;
 
 let () =
@@ -314,6 +380,20 @@ let () =
             `Quick
             test_keeper_without_turns_fails_runtime_liveness
         ] )
+    ; ( "unreadable_is_not_missing"
+      , [ test_case
+            "an unreadable record is not a missing keeper"
+            `Quick
+            test_unreadable_keeper_is_not_reported_as_missing
+        ; test_case
+            "and it still keeps the feature off pass"
+            `Quick
+            test_unreadable_keeper_still_blocks_pass
+        ; test_case
+            "scheduled proactive reports it too"
+            `Quick
+            test_scheduled_proactive_reports_unreadable_records
+        ] )
     ; ( "counter_features_are_dated"
       , [ test_case
             "stale autonomous action fails autonomous_tool_use"
@@ -324,15 +404,11 @@ let () =
             `Quick
             test_stopped_keeper_fails_board_reactive_autonomy
         ] )
-    ; ( "persistence_duration_tiers"
+    ; ( "summary_projection"
       , [ test_case
-            "durable history proves 1h 2h 4h and 24h tiers"
+            "summary counts agree with the published feature statuses"
             `Quick
-            test_persistence_duration_tiers_use_durable_turn_history
-        ; test_case
-            "future timestamps cannot prove a duration tier"
-            `Quick
-            test_persistence_duration_tiers_reject_future_turns
+            test_summary_counts_agree_with_published_feature_statuses
         ] )
     ]
 ;;

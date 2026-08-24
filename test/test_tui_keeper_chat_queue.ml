@@ -29,12 +29,12 @@ let test_lines_wait_in_the_order_they_were_written () =
 let test_a_line_keeps_the_keeper_it_was_written_to () =
   let q, _ = push_exn Queue.empty ~keeper_name:"kidsnote" "for kidsnote" in
   let q, _ = push_exn q ~keeper_name:"taskmaster" "for taskmaster" in
-  match Queue.pop q with
+  match Queue.take_first_sendable q ~sendable:(fun _ -> true) with
   | None -> fail "expected a waiting line"
   | Some ((keeper_name, text), rest) ->
       check string "the oldest goes first" "for kidsnote" text;
       check string "to its own keeper" "kidsnote" keeper_name;
-      (match Queue.pop rest with
+      (match Queue.take_first_sendable rest ~sendable:(fun _ -> true) with
        | None -> fail "expected the second line to still be waiting"
        | Some ((keeper_name, text), rest) ->
            check string "and the next keeps its own" "taskmaster" keeper_name;
@@ -74,10 +74,48 @@ let test_lines_for_a_departed_keeper_are_forgotten () =
   check int "and the count follows" 1 (Queue.length q)
 ;;
 
-let test_an_empty_queue_pops_nothing () =
+(* Lines wait because their own keeper had a turn running, and keepers run
+   turns independently. Taking strictly from the front stalls every line behind
+   one whose keeper is still busy — and permanently, because the ones behind it
+   are addressed to keepers that are idle and so have no settle coming. *)
+let test_a_busy_keeper_does_not_stall_the_lines_behind_it () =
+  let q, _ = push_exn Queue.empty ~keeper_name:"busy" "waits" in
+  let q, _ = push_exn q ~keeper_name:"free" "can go" in
+  let q, _ = push_exn q ~keeper_name:"busy" "waits too" in
+  match Queue.take_first_sendable q ~sendable:(fun k -> not (String.equal k "busy")) with
+  | None -> fail "the free keeper's line should be sendable"
+  | Some ((keeper_name, text), rest) ->
+      check string "the free keeper's line comes out" "can go" text;
+      check string "with its own keeper" "free" keeper_name;
+      check (list string) "and the busy keeper's lines keep their order"
+        [ "waits"; "waits too" ]
+        (List.map snd (Queue.waiting rest))
+;;
+
+let test_nothing_sendable_takes_nothing () =
+  let q, _ = push_exn Queue.empty ~keeper_name:"busy" "waits" in
+  check bool "a queue with only busy keepers takes nothing" true
+    (Option.is_none (Queue.take_first_sendable q ~sendable:(fun _ -> false)));
+  check int "and keeps what it had" 1 (Queue.length q)
+;;
+
+(* With everything sendable it is the oldest line, the same as popping. *)
+let test_all_sendable_is_oldest_first () =
+  let q, _ = push_exn Queue.empty ~keeper_name:"a" "one" in
+  let q, _ = push_exn q ~keeper_name:"b" "two" in
+  match Queue.take_first_sendable q ~sendable:(fun _ -> true) with
+  | None -> fail "expected a line"
+  | Some ((_, text), rest) ->
+      check string "oldest first" "one" text;
+      check (list string) "the rest keeps its order" [ "two" ]
+        (List.map snd (Queue.waiting rest))
+;;
+
+let test_an_empty_queue_takes_nothing () =
   check bool "empty is empty" true (Queue.is_empty Queue.empty);
   check int "and has no length" 0 (Queue.length Queue.empty);
-  check bool "and pops nothing" true (Option.is_none (Queue.pop Queue.empty))
+  check bool "and takes nothing" true
+    (Option.is_none (Queue.take_first_sendable Queue.empty ~sendable:(fun _ -> true)))
 ;;
 
 let () =
@@ -92,8 +130,14 @@ let () =
             test_the_cap_refuses_rather_than_forgetting
         ; test_case "lines for a departed keeper are forgotten" `Quick
             test_lines_for_a_departed_keeper_are_forgotten
-        ; test_case "an empty queue pops nothing" `Quick
-            test_an_empty_queue_pops_nothing
+        ; test_case "a busy keeper does not stall the lines behind it" `Quick
+            test_a_busy_keeper_does_not_stall_the_lines_behind_it
+        ; test_case "nothing sendable takes nothing" `Quick
+            test_nothing_sendable_takes_nothing
+        ; test_case "all sendable is oldest first" `Quick
+            test_all_sendable_is_oldest_first
+        ; test_case "an empty queue takes nothing" `Quick
+            test_an_empty_queue_takes_nothing
         ] )
     ]
 ;;

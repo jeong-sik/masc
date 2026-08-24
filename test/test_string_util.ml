@@ -347,6 +347,38 @@ let test_escape_xml_no_double_escape () =
 
 (* ---- Test runner ---- *)
 
+(* #26618: trim_nonempty and option_trim were separate copies of the same
+   three lines while the .mli called one a mapping of the other. A one-sided
+   edit would have split them silently -- neither had a test. The cases below
+   agree on every input, so the two cannot drift without one failing. *)
+let trim_inputs =
+  [ ""; " "; "\t\n "; "a"; " a "; "  hello world  "; "\xed\x95\x9c" ]
+;;
+
+let test_option_trim_agrees_with_trim_nonempty () =
+  List.iter
+    (fun raw ->
+      let direct = SU.trim_nonempty raw in
+      let through_option = SU.option_trim (Some raw) in
+      check
+        (option string)
+        (Printf.sprintf "option_trim (Some %S) = trim_nonempty %S" raw raw)
+        direct
+        through_option)
+    trim_inputs
+;;
+
+let test_option_trim_passes_none_through () =
+  check (option string) "None stays None" None (SU.option_trim None)
+;;
+
+let test_trim_nonempty_rejects_whitespace_only () =
+  check (option string) "empty" None (SU.trim_nonempty "");
+  check (option string) "spaces" None (SU.trim_nonempty "   ");
+  check (option string) "tabs and newlines" None (SU.trim_nonempty "\t\n\r ");
+  check (option string) "trims both ends" (Some "a b") (SU.trim_nonempty "  a b  ")
+;;
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -408,4 +440,11 @@ let () =
           test_case "ampersand first ordering" `Quick
             test_escape_xml_ampersand_first;
           test_case "no double escape" `Quick
-            test_escape_xml_no_double_escape ] ) ]
+            test_escape_xml_no_double_escape ] );
+      ( "trim_helpers",
+        [ test_case "option_trim agrees with trim_nonempty" `Quick
+            test_option_trim_agrees_with_trim_nonempty;
+          test_case "None passes through" `Quick
+            test_option_trim_passes_none_through;
+          test_case "whitespace-only is None" `Quick
+            test_trim_nonempty_rejects_whitespace_only ] ) ]

@@ -8,6 +8,10 @@ type navigation =
       keeper_name : string;
       cursor : int;
     }
+  | Calls_keeper of {
+      keeper_name : string;
+      cursor : int;
+    }
   | Message_keeper of {
       keeper_name : string;
       cursor : int;

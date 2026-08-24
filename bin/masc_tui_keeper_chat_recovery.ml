@@ -317,19 +317,29 @@ let with_dispatch_lock ~base_path f =
   | exn ->
       Error ("Keeper chat dispatch lock failed: " ^ Printexc.to_string exn)
 
+(* The claim is already exclusive without a second lock around it.
+   [claim_dispatch_with_writer] reads the fence, decides, and writes the new
+   phase under the fence's own lock, and [persist_pending_with_writer] takes
+   that same lock and refuses both a different request and a rewrite of
+   [Dispatching]. So no process can lose a claim it won, or overwrite one it
+   did not, regardless of who holds the dispatch lock.
+
+   What that outer lock did hold was the caller's work: a POST that stays open
+   until the turn's stream ends. Every TUI on the workspace shares one lock
+   file, so a turn that never settles kept every other TUI -- and every other
+   Keeper's screen -- from sending anything, and the one escape the UI offers
+   for that (Ctrl-R) needs the same lock and failed with it. That is #29750.
+
+   The claim is taken here and the caller's work runs after it, outside. The
+   phases stay the authority they already were. *)
 let with_dispatch_claim_with_writer ~save_file_atomic_strict_staged ~base_path
     request f =
   match
-    with_dispatch_lock ~base_path (fun () ->
-      match
-        claim_dispatch_with_writer ~save_file_atomic_strict_staged ~base_path
-          request
-      with
-      | Error _ as error -> error
-      | Ok claim -> Ok (f claim))
+    claim_dispatch_with_writer ~save_file_atomic_strict_staged ~base_path
+      request
   with
   | Error _ as error -> error
-  | Ok result -> result
+  | Ok claim -> Ok (f claim)
 
 let with_dispatch_claim ~base_path request f =
   with_dispatch_claim_with_writer

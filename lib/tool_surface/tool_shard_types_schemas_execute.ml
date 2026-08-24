@@ -258,6 +258,34 @@ let tool_execute_description =
    external-effect Gate, the invoked program owns its syntax and exit result."
 ;;
 
+(* The shell form. Every other agent product hands its model a shell string
+   (Codex [exec_command.cmd], Claude Code [Bash.command], Gemini [ShellTool],
+   OpenAI [shell.commands], Anthropic [bash_20250124]); MASC asked for a typed
+   structure instead, and measured over 2026-08-21..23 the model answered with
+   [bash -c] on 48% of one runtime's calls and [python3 -c] on 79% of
+   another's, while the typed [then] was chosen zero times.
+
+   Accepting the string is not giving up the typed path: it is the same
+   [Shell_ir.t] either way. [Bash.parse_string] lowers it, and a construct the
+   IR cannot represent is a typed refusal, not a shell. What changes is that
+   the gate now reads what runs, where [argv:["bash";"-c";...]] made the body
+   an opaque argument. *)
+let tool_execute_script_field =
+  ( "script"
+  , `Assoc
+      [ "type", `String "string"
+      ; "minLength", `Int 1
+      ; ( "description"
+        , `String
+            "Shell form: one command line, parsed rather than handed to a \
+             shell. Pipes, '&&', '||', ';' and redirections are read as \
+             structure. Use this instead of putting a script in argv as \
+             'bash -c'. Constructs outside the supported subset are refused \
+             by name rather than run. Mutually exclusive with 'argv' and \
+             'pipeline'." )
+      ] )
+;;
+
 let tool_execute_schema : Masc_domain.tool_schema =
   let properties =
     [ tool_execute_argv_field ~prose:Stated
@@ -269,6 +297,7 @@ let tool_execute_schema : Masc_domain.tool_schema =
     ; tool_execute_stdin_field
     ; tool_execute_stdout_field
     ; tool_execute_stderr_field
+    ; tool_execute_script_field
     ]
   in
   { name = "tool_execute"
@@ -300,6 +329,24 @@ let tool_execute_schema : Masc_domain.tool_schema =
                         "Pipeline form: include 'pipeline' array of exec \
                          stages.  DO NOT also include top-level 'argv' in the \
                          same call." )
+                  ]
+              ; `Assoc
+                  [ "required", `List [ `String "script" ]
+                  ; ( "not"
+                    , `Assoc
+                        [ ( "anyOf"
+                          , `List
+                              [ `Assoc
+                                  [ "required", `List [ `String "argv" ] ]
+                              ; `Assoc
+                                  [ "required"
+                                  , `List [ `String "pipeline" ] ]
+                              ] )
+                        ] )
+                  ; ( "description"
+                    , `String
+                        "Shell form: include 'script'.  DO NOT also include \
+                         'argv' or 'pipeline' in the same call." )
                   ]
               ] )
         ]

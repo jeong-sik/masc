@@ -175,9 +175,16 @@ let trim_phase_token token =
 let provider_runtime_error_timeout_phase_label ~code =
   let code = String.lowercase_ascii (String.trim code) in
   let code_phase =
-    match suffix_after_prefix code "provider_error_timeout:" with
+    match
+      suffix_after_prefix
+        code
+        Keeper_terminal_reason.wire_provider_error_timeout_prefix
+    with
     | Some label -> Some label
-    | None -> suffix_after_prefix code "provider_error_network:timeout:"
+    | None ->
+      suffix_after_prefix
+        code
+        Keeper_terminal_reason.wire_provider_error_network_timeout_prefix
   in
   match Option.map trim_phase_token code_phase with
   | Some phase when not (String.equal phase "") -> Some phase
@@ -186,10 +193,14 @@ let provider_runtime_error_timeout_phase_label ~code =
 
 let provider_runtime_error_looks_like_timeout ~code =
   let code = String.lowercase_ascii (String.trim code) in
-  String.equal code "provider_error_timeout"
-  || String.starts_with ~prefix:"provider_error_timeout:" code
-  || String.equal code "provider_error_network:timeout"
-  || String.starts_with ~prefix:"provider_error_network:timeout:" code
+  String.equal code Keeper_terminal_reason.wire_provider_error_timeout
+  || String.starts_with
+       ~prefix:Keeper_terminal_reason.wire_provider_error_timeout_prefix
+       code
+  || String.equal code Keeper_terminal_reason.wire_provider_error_network_timeout
+  || String.starts_with
+       ~prefix:Keeper_terminal_reason.wire_provider_error_network_timeout_prefix
+       code
 ;;
 
 let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () =

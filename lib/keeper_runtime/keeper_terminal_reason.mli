@@ -124,6 +124,17 @@ val wire_api_error_timeout : string
 
 val wire_api_error_network : string
 
+(** The [provider_error_*] codes both the producer and the classifier name.
+    Producer-only codes are matched by the shared [provider_error_] prefix
+    inside this module and are not listed individually. *)
+val wire_provider_error_auth : string
+val wire_provider_error_authorization : string
+val wire_provider_error_invalid_config_prefix : string
+val wire_provider_error_timeout : string
+val wire_provider_error_timeout_prefix : string
+val wire_provider_error_network_timeout : string
+val wire_provider_error_network_timeout_prefix : string
+
 (** [true] when [t] is a [Provider_runtime_failure] carrying one of the
     transient wire codes ([wire_api_error_timeout] / [wire_api_error_network])
     or a provider timeout marker. The API timeout matches remain exact, so

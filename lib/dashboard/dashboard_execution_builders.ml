@@ -214,15 +214,15 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let context_metrics_unavailable =
     member_assoc "context_metrics_unavailable" keeper
   in
+  (* The last action is dated by the tool call log through [tool_audit_at],
+     not by a keeper-meta mirror of it. The meta field this used to read was a
+     lifetime string stamped on autonomous tool turns only, so a keeper acting
+     on a reactive turn read as having never acted. *)
   let last_action_at =
-    String_util.trim_nonempty (string_field "last_autonomous_action_at" keeper)
+    String_util.trim_nonempty (string_field "tool_audit_at" keeper)
   in
   let last_heartbeat_at =
-    latest_iso_timestamp
-      [
-        String_util.trim_nonempty (string_field "updated_at" keeper);
-        String_util.trim_nonempty (string_field "tool_audit_at" keeper);
-      ]
+    String_util.trim_nonempty (string_field "updated_at" keeper)
   in
   let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
   let last_action_ts = Dashboard_utils.parse_iso_opt last_action_at |> Option.value ~default:0.0 in
@@ -237,9 +237,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     else infinity
   in
   let int_field_default key json = Option.value ~default:0 (Json_util.assoc_int_opt key json) in
-  let autonomous_action_count = int_field_default "autonomous_action_count" keeper in
-  let autonomous_turn_count = int_field_default "autonomous_turn_count" keeper in
-  let noop_turn_count = int_field_default "noop_turn_count" keeper in
   let turn_count = int_field_default "turn_count" keeper in
   (* Operator observation publishes a pause override in the same [status] field as
      the surface status, so this classifies the published vocabulary rather than
@@ -298,19 +295,17 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       | Lc_preparing | Lc_compacting ->
           (Exec_warning, Tone_warn, "연속성 압력이 높습니다")
       | Lc_offline | Lc_active | Lc_idle ->
-          if autonomous_turn_count = 0 && turn_count > 0 then
-            (Exec_warning, Tone_warn,
-             Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
-          else if effective_activity_age_s >= keeper_action_stale_sec then
+          (* The branch removed here warned whenever the lifetime autonomous
+             turn counter was zero. Being lifetime, it could only ever fire on
+             a keeper that had never taken an autonomous turn, and never again
+             once it took one - including after it stopped. *)
+          if effective_activity_age_s >= keeper_action_stale_sec then
             (Exec_warning, Tone_warn,
              Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. Masc_time_constants.hour))
           else
             (Exec_healthy, Tone_ok, "정상 동작 중")
   in
-  let continuity =
-    Printf.sprintf "Turns %d · Auto turns %d · Tool actions %d"
-      turn_count autonomous_turn_count autonomous_action_count
-  in
+  let continuity = Printf.sprintf "Turns %d" turn_count in
   let focus =
     match String_util.trim_nonempty (string_field "current_task_id" keeper) with
     | Some task_id -> task_id
@@ -348,7 +343,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
            ("note", `String note);
            ("focus", `String focus);
            ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
-           ("last_autonomous_action_at", Json_util.string_opt_to_json last_signal_at);
            ("turn_count", member_assoc "turn_count" keeper);
            ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
            ("context_metrics_unavailable", context_metrics_unavailable);
@@ -362,9 +356,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
             ("tool_audit_source", member_assoc "tool_audit_source" keeper);
             ("tool_audit_at", member_assoc "tool_audit_at" keeper);
-            ("autonomous_action_count", `Int autonomous_action_count);
-            ("autonomous_turn_count", `Int autonomous_turn_count);
-            ("noop_turn_count", `Int noop_turn_count);
             ("last_heartbeat_at", Json_util.string_opt_to_json last_heartbeat_at);
             ("proactive_enabled", member_assoc "proactive_enabled" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);

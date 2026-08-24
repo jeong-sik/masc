@@ -133,6 +133,19 @@ let required_string stage name fields =
   | None -> error stage (Printf.sprintf "missing field %S" name)
 ;;
 
+(* A numeric JSON-RPC request id counts from 1 per session, so it is unique
+   only within that session. Reusing it as the tool-call identity gives two
+   executions in different sessions the same id, and every consumer that joins
+   on it -- the dashboard's tool-call output store, the chat transcript row id
+   -- then shows one execution's output under the other. Measured on this
+   workspace's logs: 119 ids carried more than one (turn, planned_index), all
+   of them one- or two-digit.
+
+   A string id is the client naming its own call, so it is the identity and is
+   passed through. A numeric one is replaced the way every provider backend
+   replaces an id the wire did not supply. Which shapes are accepted at all is
+   unchanged -- the response still correlates on the request id, a separate
+   value (#25034). *)
 let request_id stage = function
   | id ->
     (match Mcp_transport_protocol.request_id_of_yojson id with
@@ -144,7 +157,9 @@ let request_id stage = function
        let json = Mcp_transport_protocol.request_id_to_yojson request_id in
        let* call_id =
          match json with
-         | `String value | `Intlit value -> Ok value
+         | `String value when not (Llm_provider.Api_common.string_is_blank value) ->
+           Ok value
+         | `String _ | `Intlit _ -> Ok (Llm_provider.Api_common.fresh_tool_use_id ())
          | _ -> error stage "typed request id projected to an invalid JSON value"
        in
        Ok (request_id, json, call_id))

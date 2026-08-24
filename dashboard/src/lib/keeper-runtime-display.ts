@@ -54,8 +54,8 @@ type KeeperRuntimeDisplaySource = {
 }
 
 type KeeperActivityDisplaySource = {
-  last_autonomous_action_at?: string | null
   last_heartbeat?: string | null
+  tool_audit_at?: string | null
   last_activity_at?: string | null
   last_activity_source?: Keeper['last_activity_source'] | null
   last_activity_ago_s?: number | null
@@ -192,7 +192,7 @@ export function keeperActivityDisplay(
       keeper?.last_activity_at,
       activityDetail,
     ),
-    timestampCandidate('autonomous_action', '마지막 행동', keeper?.last_autonomous_action_at),
+    timestampCandidate('autonomous_action', '마지막 행동', keeper?.tool_audit_at),
     timestampCandidate('heartbeat', '하트비트', keeper?.last_heartbeat),
     // The ago_s fallback describes the same underlying activity as
     // last_activity_at — keep the source-derived label/detail instead of
@@ -513,8 +513,8 @@ export function keeperRecentActionLabel(
   keeper: Keeper | null | undefined,
   fallbackLastTurnAgoS?: number | null,
 ): string | null {
-  if (keeper?.last_autonomous_action_at) {
-    return `마지막 행동 · ${relativeTime(keeper.last_autonomous_action_at)}`
+  if (keeper?.tool_audit_at) {
+    return `마지막 행동 · ${relativeTime(keeper.tool_audit_at)}`
   }
   const seconds = keeper?.last_turn_ago_s ?? fallbackLastTurnAgoS
   return typeof seconds === 'number' && Number.isFinite(seconds)

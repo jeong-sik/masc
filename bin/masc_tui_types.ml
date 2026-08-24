@@ -347,6 +347,13 @@ type keeper_mode =
   | Keeper_calls
   | Keeper_message
 
+(** Where [Esc] returns after the chat pane was opened. Keeping only the two
+    legal destinations makes a new Keeper sub-view an explicit compiler error
+    instead of silently becoming the detail view. *)
+type keeper_chat_return =
+  | Keeper_chat_return_list
+  | Keeper_chat_return_detail
+
 (** Top-level TUI surface. *)
 type surface =
   | Overview
@@ -581,6 +588,7 @@ type state = {
   mutable system_logs_scroll: int;
   mutable msg_input: Buffer.t;
   mutable msg_target_keeper_name: string option;
+  mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
   (* The turn currently streaming, if any. Drawn below the history and
@@ -781,6 +789,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   system_logs_scroll = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;
+  msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
   msg_live = None;

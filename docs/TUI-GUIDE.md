@@ -182,14 +182,18 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
  MASC Keepers (10)  10:55:25
-      Name                   Gen  Paused        Turns  Current Task
- >  adm-race-cf-001            1  no              498  -
-    analyst                    1  no              237  task-464
-    sangsu                     1  yes             182  task-317
-  j/k:move  Enter:detail  Tab:next  q:quit  r:refresh
+    STATUS       KEEPER             A P TURNS PHASE / MODEL       TASK
+ >  ● active     adm-race-cf-001    A P   498 running claude-opus task-471
+    ● idle       analyst            A -   237 paused  kimi-k2.5    task-464
+  j/k move  p pause  w wake  s shutdown  c chat  enter detail
 ```
 
-This surface needs no server, so it stays readable while the runtime is down.
+The metadata list needs no server, so names, turn counts, and tasks stay
+readable while the runtime is down. `STATUS`, `PHASE / MODEL`, and lifecycle
+actions come from `GET /api/v1/gate/keepers`; an unread live roster is shown as
+`- unread` rather than guessed from metadata. The status glyph is the primary
+colour cue. Phase and model stay neutral so an ordinary row does not turn into
+a strip of competing colours.
 
 ### Keeper detail
 
@@ -269,16 +273,18 @@ drawn rather than attributed by file position.
 
 ### Keeper message
 
-`m` from detail. Sends to the keeper over `POST /api/v1/keepers/chat/stream`
-with a durable UUIDv7 request ID. The send runs in the background, so refresh
-and navigation stay responsive while the turn runs.
+`c` (or `m`) from the roster or detail. Sends to the keeper over
+`POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
+runs in the background, so refresh and navigation stay responsive while the
+turn runs. `Esc` returns to the roster when chat opened there, and to detail
+when chat opened from detail.
 
 ```
  Message to: sangsu  (port 8935)
    [14:35:01] you:    hello, how are you?  [tui-019...]
    [14:35:03] sangsu: ...reply text...     [tui-019...]
    > type here_
-  Enter:send  Esc:back  Ctrl-U:clear line
+  Enter:send  Esc:list  Ctrl-U:clear line
 ```
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
@@ -491,7 +497,7 @@ Per surface:
 | `Enter` | Board | Open post body |
 | `Enter` | Planning | Open goal detail |
 | `l` | Keeper detail | Open logs |
-| `m` | Keeper detail | Open message input |
+| `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `Esc` | any detail or logs view | Back one level |
@@ -511,10 +517,10 @@ Tab cycles the surfaces:
 Within a surface:
 
   Keepers   --Enter-->  Keeper detail  --l-->  Keeper logs
-                              |
-                              m
-                              v
-                        Message input
+      |                       |
+      c                       c
+      v                       v
+  Message input          Message input
 
   Board     --Enter-->  Board read
   Planning  --Enter-->  Goal detail

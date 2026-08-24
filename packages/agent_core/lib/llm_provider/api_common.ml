@@ -390,6 +390,20 @@ let required_string_field ~block_type ~field json =
   | None -> Error (Missing_content_block_field { block_type; field })
 ;;
 
+(* An identifier that is present but blank is not an identifier. Downstream
+   writers each invent their own stand-in for it -- the transcript synthesises
+   [tc-<position>] while the event payload omits the field -- so the two
+   describe one execution under two identities and nothing joins them. Blank
+   is rejected here, where the shape is still a parse result. Free-text fields
+   keep using {!required_string_field}: an empty [text] block is a legitimate
+   thing for a provider to send. *)
+let required_identifier_field ~block_type ~field json =
+  let open Yojson.Safe.Util in
+  match json |> member field |> to_string_option with
+  | Some value when not (string_is_blank value) -> Ok value
+  | Some _ | None -> Error (Missing_content_block_field { block_type; field })
+;;
+
 let reasoning_detail_of_json json =
   let open Yojson.Safe.Util in
   match json with
@@ -458,14 +472,14 @@ let rec content_block_of_json_result json =
       (required_string_field ~block_type:"redacted_thinking" ~field:"data" json)
   | Some "tool_use" ->
     let ( let* ) = Result.bind in
-    let* id = required_string_field ~block_type:"tool_use" ~field:"id" json in
-    let* name = required_string_field ~block_type:"tool_use" ~field:"name" json in
+    let* id = required_identifier_field ~block_type:"tool_use" ~field:"id" json in
+    let* name = required_identifier_field ~block_type:"tool_use" ~field:"name" json in
     let input = json |> member "input" in
     Ok (ToolUse { id; name; input })
   | Some "tool_result" ->
     let ( let* ) = Result.bind in
     let* tool_use_id =
-      required_string_field ~block_type:"tool_result" ~field:"tool_use_id" json
+      required_identifier_field ~block_type:"tool_result" ~field:"tool_use_id" json
     in
     let content_json = json |> member "content" in
     let* content, content_blocks =

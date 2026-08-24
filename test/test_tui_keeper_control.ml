@@ -6,9 +6,14 @@ module Control = Masc_tui_keeper_control
 module Status = Masc.Keeper_status_runtime
 module Decode = Masc.Tui_decode
 
+let phase raw =
+  match Decode.keeper_phase_of_string raw with
+  | Some value -> value
+  | None -> invalid_arg ("unknown test Keeper phase: " ^ raw)
+
 let runtime ?(keepalive_running = true) ?(status = Status.Surface_active)
     ?(autoboot_enabled = true) ?(proactive_enabled = true)
-    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = "running") name :
+    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running") name :
     Decode.keeper_runtime =
   { kr_name = name
   ; kr_status = status
@@ -499,7 +504,13 @@ let test_roster_decode_reads_rows () =
         "idle parsed" true
         (match rows with
          | [ _; second ] -> second.Decode.kr_status = Status.Surface_idle
-         | _ -> false)
+         | _ -> false);
+      Alcotest.(check bool)
+        "phase parsed" true
+        (match rows with
+         | first :: _ ->
+           Decode.keeper_phase_to_string first.Decode.kr_phase = "running"
+         | [] -> false)
 
 (* A producer that grows a seventh status label must fail the reading. A
    default would render the new state as one of the six and offer the action
@@ -520,6 +531,20 @@ let test_roster_decode_rejects_an_unknown_status () =
            scan 0
          in
          contains "quarantined")
+
+let test_roster_decode_rejects_an_unknown_phase () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"keepers":[%s]}|}
+         (gate_row ~phase:"teleporting" "analyst"))
+  in
+  match Decode.decode_keeper_runtime_list json with
+  | Ok _ -> Alcotest.fail "an unknown phase must not decode"
+  | Error err ->
+      Alcotest.(check string)
+        "error names keeper and phase"
+        {|keepers[0]: keeper "analyst" has unknown lifecycle phase "teleporting"|}
+        err
 
 let () =
   Alcotest.run "tui-keeper-control"
@@ -600,5 +625,7 @@ let () =
             test_roster_decode_reads_rows
         ; Alcotest.test_case "unknown status is rejected" `Quick
             test_roster_decode_rejects_an_unknown_status
+        ; Alcotest.test_case "unknown phase is rejected" `Quick
+            test_roster_decode_rejects_an_unknown_phase
         ] )
     ]

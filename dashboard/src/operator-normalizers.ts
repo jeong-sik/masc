@@ -167,7 +167,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(raw.context_metrics_unavailable),
     last_turn_usage: normalizeKeeperLastTurnUsage(raw.last_turn_usage),
     generation: asNumber(raw.generation),
-    last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: hasModelLabel ? 'runtime' : undefined,
     needs_attention: typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,

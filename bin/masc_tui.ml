@@ -242,12 +242,30 @@ let save_message_draft state =
         if String.equal text "" then other_drafts
         else (keeper_name, text) :: other_drafts
 
-let open_message_for_keeper state keeper_name =
+let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
+    keeper_name =
   save_message_draft state;
   state.msg_target_keeper_name <- Some keeper_name;
+  state.msg_return <- return_to;
   Buffer.clear state.msg_input;
   List.assoc_opt keeper_name state.msg_drafts
   |> Option.iter (Buffer.add_string state.msg_input)
+
+let leave_keeper_message state =
+  save_message_draft state;
+  let target_registered =
+    match state.msg_target_keeper_name with
+    | Some keeper_name -> keeper_available_for_new_message state keeper_name
+    | None -> false
+  in
+  state.view <-
+    Keepers
+      (match state.msg_return, target_registered with
+       | Keeper_chat_return_detail, true -> Keeper_detail
+       | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
+           Keeper_list);
+  state.detail_scroll <- 0;
+  if not target_registered then state.log_scroll <- 0
 
 let clear_current_message_draft state =
   Buffer.clear state.msg_input;
@@ -296,17 +314,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | _ ->
   match key with
   | "esc" ->
-    save_message_draft state;
-    let target_registered =
-      match state.msg_target_keeper_name with
-      | Some keeper_name ->
-          keeper_available_for_new_message state keeper_name
-      | None -> false
-    in
-    state.view <-
-      Keepers (if target_registered then Keeper_detail else Keeper_list);
-    state.detail_scroll <- 0;
-    if not target_registered then state.log_scroll <- 0;
+    leave_keeper_message state;
     true
   | "\r" ->
     let text = Buffer.contents state.msg_input in
@@ -1569,11 +1577,21 @@ let launch_observer state ~host ~port ~mailbox =
    one, and that row is meant to say the stream dropped, not that there was
    never a server. Once closed it is reopened on the next refresh that
    reaches the server, which is the cadence the operator already chose. *)
-let open_observer_if_due state ~host ~port ~mailbox =
+(* [retry_closed] separates the first open from a retry. A feed that has never
+   run is opened as soon as the server answers, because the row is meant to say
+   the stream dropped and there is nothing to say yet. A feed that ran and
+   closed waits for the operator's cadence: retrying it once per finished
+   refresh made the retry rate whatever the refresh rate was, and a refresh
+   also goes out when the open surface needs something the last one did not
+   fetch -- so walking the surfaces retried a refused feed once per surface and
+   filled the eleven-entry event panel with its own refusals. *)
+let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match (state.connection_status, state.observer) with
-  | (Connected | Degraded), (Observer_off | Observer_closed _) ->
+  | (Connected | Degraded), Observer_off ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), (Observer_opening | Observer_live _)
+  | (Connected | Degraded), Observer_closed _ when retry_closed ->
+      launch_observer state ~host ~port ~mailbox
+  | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
   | (Disconnected | Connecting | Reconnecting), _ ->
       ()
 
@@ -2218,6 +2236,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Composer.Ready keeper_name ->
            (* Taking focus is what names the recipient: the draft that follows
               belongs to the keeper the row showed at that moment. *)
+           state.msg_return <- Keeper_chat_return_detail;
            if
              state.msg_target_keeper_name <> Some keeper_name
            then open_message_for_keeper state keeper_name;
@@ -2257,8 +2276,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
-      open_observer_if_due state ~host:(Env_config_core.masc_host ())
-        ~port:state.port ~mailbox
+      open_observer_if_due state ~retry_closed:false
+        ~host:(Env_config_core.masc_host ()) ~port:state.port ~mailbox
   | Observer_opened session_id ->
       state.mcp_session <- Some session_id;
       state.observer <-
@@ -3050,15 +3069,11 @@ let main () =
                       | Some request ->
                           launch_keeper_interrupt state
                             ~mailbox:async_messages request
-                      | None ->
-                          state.view <- Keepers Keeper_detail;
-                          state.detail_scroll <- 0)
+                      | None -> leave_keeper_message state)
                  | Some _ ->
                      (* An interrupt is already outstanding for this turn. *)
                      ()
-                 | None ->
-                     state.view <- Keepers Keeper_detail;
-                     state.detail_scroll <- 0)
+                 | None -> leave_keeper_message state)
             | Board ->
                 (match state.board_mode with
                  | Board_read _ ->
@@ -3429,11 +3444,21 @@ let main () =
               talk to is the one under the cursor. [c] is an alias for [m]
               because the footer names the action rather than the mnemonic. *)
            (match state.view with
-            | Keepers (Keeper_list | Keeper_detail)
+            | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
-                open_message_for_keeper state keeper.k_name;
+                open_message_for_keeper ~return_to:Keeper_chat_return_list state
+                  keeper.k_name;
+                launch_keeper_history_load state ~mailbox:async_messages
+                  ~keeper_name:keeper.k_name;
+                state.view <- Keepers Keeper_message
+            | Keepers Keeper_detail
+              when Option.is_none state.keepers_error
+                   && state.keeper_cursor < List.length state.keepers ->
+                let keeper = List.nth state.keepers state.keeper_cursor in
+                open_message_for_keeper ~return_to:Keeper_chat_return_detail
+                  state keeper.k_name;
                 launch_keeper_history_load state ~mailbox:async_messages
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
@@ -3524,6 +3549,9 @@ let main () =
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
         let port = state.port in
+        (* The retry a closed feed waits for. *)
+        open_observer_if_due state ~retry_closed:true ~host ~port
+          ~mailbox:async_messages;
         start_http_refresh state ~host ~port
           ~refresh_inflight:http_refresh_inflight
           ~mailbox:async_messages;

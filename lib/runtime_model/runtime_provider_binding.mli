@@ -17,10 +17,11 @@ val normalize_provider_id : string -> string
 val provider_name_of_kind :
   Llm_provider.Provider_config.provider_kind -> string
 
-val provider_health_key_of_config : Llm_provider.Provider_config.t -> string
-(** Key used by {!Runtime_health_tracker}. For OpenAI-compatible configs
-    the model and base URL are appended so each endpoint is tracked
-    independently. *)
+val provider_endpoint_label_of_config : Llm_provider.Provider_config.t -> string
+(** Which provider, model and endpoint a call resolved to. For
+    OpenAI-compatible configs the model and base URL are appended, so two
+    bindings sharing a provider are still distinguishable. Reported after a
+    turn succeeds; nothing keys failure state off it. *)
 
 val binding_auth_is_no_auth : Runtime_binding.t -> bool
 

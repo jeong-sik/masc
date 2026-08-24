@@ -39,8 +39,6 @@ val dashboard_scope_of_string_opt : string -> dashboard_scope option
 val dashboard_scope_strings : string list
 (** The enum, in the order the schema lists it. *)
 
-val dashboard_scope_default : dashboard_scope
-
 type tool_name_ref = string
 
 type usage_hint =

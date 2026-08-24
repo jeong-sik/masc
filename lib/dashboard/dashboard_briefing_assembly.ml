@@ -164,7 +164,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                last_seen_ts =
                  Dashboard_utils.parse_iso_opt
                    (String_util.trim_nonempty
-                      (match String_util.trim_nonempty (string_field "last_autonomous_action_at" keeper) with
+                      (match String_util.trim_nonempty (string_field "tool_audit_at" keeper) with
                       | Some value -> value
                       | None -> string_field "updated_at" keeper))
                  |> Option.value ~default:0.0;
@@ -178,7 +178,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("context_metrics_unavailable", context_metrics_unavailable);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ("current_work", member_assoc "current_task_id" keeper);
-                      ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
+                      ("tool_audit_at", member_assoc "tool_audit_at" keeper);
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);
                       ("exclusion_reason",

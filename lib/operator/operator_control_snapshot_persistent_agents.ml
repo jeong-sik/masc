@@ -51,8 +51,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                    , field_or_null "selected_runtime_canonical" )
                  ; "primary_model", field_or_null "primary_model"
                  ; "next_model_hint", field_or_null "next_model_hint"
-                 ; "last_autonomous_action_at", field_or_null "last_autonomous_action_at"
-                 ; "autonomous_action_count", field_or_null "autonomous_action_count"
                  ; "updated_at", field_or_null "updated_at"
                  ; "created_at", field_or_null "created_at"
                  ]
@@ -125,11 +123,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "last_model_used", `Null
                     ; "active_model", `Null
                     ; "next_model_hint", `Null
-                    ; ( "last_autonomous_action_at"
-                      , if String.trim meta.runtime.last_autonomous_action_at = ""
-                        then `Null
-                        else `String meta.runtime.last_autonomous_action_at )
-                    ; "autonomous_action_count", `Int meta.runtime.autonomous_action_count
                     ; "updated_at", `String meta.updated_at
                     ; "created_at", `String meta.created_at
                     ]

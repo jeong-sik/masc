@@ -19,7 +19,6 @@ import { formatTokens } from '../lib/format-number'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { findKeeper } from '../lib/keeper-utils'
 import { isSubmitEnter } from '../lib/keyboard'
-import { autonomyHint } from './keeper-detail-ctx-utils'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
@@ -294,7 +293,6 @@ function CharacterPlate({ name }: { name: string }) {
           <${StatGrid} cols=${4} items=${[
             { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : MISSING_DATA_DASH, delta: keeper.context_tokens != null && keeper.context_max != null ? { direction: 'flat' as const, text: `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` } : undefined },
             { label: '턴', value: keeper.turn_count ?? 0 },
-            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, delta: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ? { direction: 'flat' as const, text: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) } : undefined },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[

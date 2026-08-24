@@ -11,11 +11,6 @@ export function ctxColor(pct: number): string {
   return pct > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : pct > CTX_WARN_PCT ? CTX_COLOR_WARN : CTX_COLOR_OK
 }
 
-export function autonomyHint(count: number | undefined, proactiveEnabled: boolean | undefined): string | undefined {
-  if ((count ?? 0) === 0) return proactiveEnabled ? '활성 · 미발동' : '자율 비활성'
-  return undefined
-}
-
 export const CTX_SEGMENT_LABELS: Record<string, string> = {
   'prompt.keeper_instructions': 'Keeper 지침',
   'prompt.dynamic_context': '턴 컨텍스트',

@@ -45,7 +45,7 @@ let valid_fs_write_mode_strings = List.map fs_write_mode_to_string all_fs_write_
 let read_file_default_max_bytes = Tool_shard_limits.read_file_default_max_bytes
 
 let read_file_min_max_bytes = 512
-let read_file_max_max_bytes = 200_000
+let read_file_max_max_bytes = Tool_shard_limits.read_file_max_max_bytes
 
 (** Read line window. The Read descriptor (agent.read_file) exposes
     [offset]/[limit] as LINE coordinates — the shape mainstream Read tools

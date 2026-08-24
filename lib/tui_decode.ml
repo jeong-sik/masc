@@ -24,12 +24,6 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_autonomous_turn_count : int;
-  k_autonomous_text_turn_count : int;
-  k_autonomous_tool_turn_count : int;
-  k_board_reactive_turn_count : int;
-  k_mention_reactive_turn_count : int;
-  k_noop_turn_count : int;
   k_last_proactive_outcome : string;
   k_created_at : string;
   k_updated_at : string;
@@ -42,6 +36,11 @@ type keeper = {
    that wants the published control-plane status composes the two. Parsing the
    status into the closed variant here means a producer that grows a seventh
    label is a rejected row, not a row that silently reads as something else. *)
+type keeper_phase = Keeper_state_machine.phase
+
+let keeper_phase_of_string = Keeper_state_machine.phase_of_string
+let keeper_phase_to_string = Keeper_state_machine.phase_to_string
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
@@ -49,7 +48,7 @@ type keeper_runtime = {
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
-  kr_phase : string;
+  kr_phase : keeper_phase;
 }
 
 type goal_proof =
@@ -409,12 +408,6 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     k_total_cost_usd = usage.total_cost_usd;
     k_last_turn_ts;
     k_compaction_count = compaction.count;
-    k_autonomous_turn_count = runtime.autonomous_turn_count;
-    k_autonomous_text_turn_count = runtime.autonomous_text_turn_count;
-    k_autonomous_tool_turn_count = runtime.autonomous_tool_turn_count;
-    k_board_reactive_turn_count = runtime.board_reactive_turn_count;
-    k_mention_reactive_turn_count = runtime.mention_reactive_turn_count;
-    k_noop_turn_count = runtime.noop_turn_count;
     k_last_proactive_outcome =
       Keeper_meta_contract.proactive_cycle_outcome_to_string
         proactive.last_outcome;
@@ -1493,7 +1486,15 @@ let decode_keeper_runtime json =
   let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
   let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
   let* kr_runtime_id = required_string_field json "runtime_id" in
-  let* kr_phase = required_string_field json "phase" in
+  let* raw_phase = required_string_field json "phase" in
+  let* kr_phase =
+    match keeper_phase_of_string raw_phase with
+    | Some phase -> Ok phase
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown lifecycle phase %S" kr_name
+             raw_phase)
+  in
   Ok
     { kr_name
     ; kr_status

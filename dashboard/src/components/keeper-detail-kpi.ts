@@ -177,26 +177,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         </div>
       <//>
 
-      <${KpiSection} title="자율성 패턴">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <${StatTile}
-            label="자율 턴"
-            value=${String(keeper.autonomous_turn_count ?? 0)}
-          />
-          <${StatTile}
-            label="자율 행동"
-            value=${String(keeper.autonomous_action_count ?? 0)}
-          />
-          <${StatTile}
-            label="보드 반응"
-            value=${String(keeper.board_reactive_turn_count ?? 0)}
-          />
-          <${StatTile}
-            label="비활동"
-            value=${String(keeper.noop_turn_count ?? 0)}
-          />
-        </div>
-      <//>
 
       <${KpiSection} title="결과">
         ${outcomes ? html`<${OutcomesLedger} keeper=${keeper} outcomes=${outcomes} />` : html`

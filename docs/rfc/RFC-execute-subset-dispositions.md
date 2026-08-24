@@ -345,8 +345,27 @@ problem.
 And the largest live category is the one the IR refuses on purpose. `;` means
 "run the next thing whether or not the last one worked", and
 `Shell_ir.connector` omits it deliberately. Six of every ten escapes are
-someone reaching for exactly that. The rewrite that names `&&` is therefore
-doing more work than the flip is, which inverts the order the corpus implied.
+someone reaching for exactly that.
+
+Except the rewrite is not reaching them, and the same logs say so: 531
+`shell_costume` records, and zero occurrences of any `Subset_rewrite` sentence.
+
+The reason is structural rather than a defect. `Subset_rewrite` speaks on the
+refusal path, and an argv-shaped costume is never refused -- it arrives as one
+opaque program, the gate has nothing to object to, and it runs.
+`argv:["sh";"-c";"a; b"]` is smuggled through; only `script:"a; b"` is refused
+and told what to write instead. §3.7 step 4 does not touch it either, because
+it lowers the `representable` ones and deliberately leaves the rest on the
+path they already work on.
+
+So the largest live category has nothing in this plan pointed at it. Refusing
+those calls would break work that runs today; saying nothing leaves the caller
+with no reason to stop writing them. What is left is to **tell without
+refusing**: when a costume is not representable, carry its rewrite back beside
+the successful result, so the caller learns what the call should have been
+while the call still does what it did. That is the same "a refusal is a
+rewrite" shape as §3.1, applied where there is no refusal to carry it.
+
 
 Two entries of the first draft do not survive it.
 

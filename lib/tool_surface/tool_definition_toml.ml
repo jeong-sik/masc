@@ -367,14 +367,14 @@ and items_json ~context pairs =
     | other -> Error (sprintf "%s: unknown key %S" context other)
   in
   let* fields = ordered_fields ~field pairs in
-  (* Array items of type object declare their fields or declare nothing: an
-     items table with no [params] is a shape no caller can satisfy. A
-     top-level object parameter is not held to this — the fixture's [meta]
-     is an open bag by design. *)
+  (* An object item may declare its fields or leave them open, the same as a
+     top-level object parameter. The rule here used to demand [params], on the
+     ground that an item with none is a shape no caller can satisfy; that is
+     not what the surface does. keeper_surface_post carries Slack Block Kit
+     blocks as bare {"type": "object"} items and checks their shape at run
+     time, because the set of block types is Slack's to change, not ours. *)
   let* params =
     match declared, List.assoc_opt "params" pairs with
-    | Ptype_object, None ->
-      Error (sprintf "%s of type object must declare params" context)
     | Ptype_object, Some value -> params_of_value ~context value
     | _ -> Ok []
   in

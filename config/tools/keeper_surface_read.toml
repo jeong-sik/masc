@@ -1,0 +1,63 @@
+name = "keeper_surface_read"
+description = """
+Read recent messages from one conversation endpoint (dashboard, discord, \
+slack, or another connector label) with speaker identity and a derived \
+participant roster. With mode='channel', 'messages', 'members', or 'member', \
+the Discord lane can also query its live channel and server read surface \
+within the keeper's bound channels."""
+
+[[params]]
+name = "surface"
+type = "string"
+required = true
+description = """
+Lane label exactly as shown in Connected Surfaces or chat history source: \
+'dashboard', 'discord', 'slack', or another connector's channel label"""
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Maximum lane messages to return (default 20, max 100)"
+
+[[params]]
+name = "before"
+type = "number"
+description = """
+Page backward: return messages strictly older than this ts (a message \
+timestamp from a previous call). Walk history by passing the oldest_ts of \
+the previous response; stop when has_more is false."""
+
+[[params]]
+name = "mode"
+type = "string"
+enum = ["local", "channel", "messages", "members", "member"]
+description = """
+Optional exact read mode. When absent, the request is exactly 'local' for \
+the persisted lane; padded or unknown values are invalid. The other modes \
+query Discord live and require surface='discord'."""
+
+[[params]]
+name = "channel_id"
+type = "string"
+description = """
+Bound Discord channel snowflake; optional when exactly one channel is bound"""
+
+[[params]]
+name = "user_id"
+type = "string"
+description = "Discord user snowflake for mode='member'"
+
+[[params]]
+name = "query"
+type = "string"
+description = "Optional member username/nickname prefix"
+
+[[params]]
+name = "discord_before"
+type = "string"
+description = "Discord message snowflake for backward paging"
+
+[[params]]
+name = "discord_after"
+type = "string"
+description = "Discord paging cursor; do not combine with discord_before"

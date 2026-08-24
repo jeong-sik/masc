@@ -428,11 +428,6 @@ let test_rejections () =
   check_rejects ~name:"t"
     ~contents:
       (minimal "t"
-       ^ "[[params]]\nname = \"p\"\ntype = \"array\"\nitems = { type = \"object\" }\n")
-    "must declare params";
-  check_rejects ~name:"t"
-    ~contents:
-      (minimal "t"
        ^ "[[params]]\nname = \"p\"\ntype = \"array\"\n[params.items]\ntype = \"integer\"\n")
     "not supported for items";
   check_rejects ~name:"t"
@@ -608,6 +603,23 @@ let test_min_items_is_rejected_off_an_array () =
     "min_items"
 ;;
 
+(* An object item with no declared fields is an open bag, not a mistake.
+   keeper_surface_post takes Slack Block Kit blocks that way: the set of block
+   types belongs to Slack, so the schema admits any object and the executor
+   checks the shape. *)
+let test_object_items_may_stay_open () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"blocks\"\ntype = \"array\"\n\
+            items = { type = \"object\" }\n")
+  in
+  let blocks = property schema [ "blocks" ] in
+  check bool "the item stays an open object" true
+    (member blocks "items" = Some (`Assoc [ "type", `String "object" ]))
+;;
+
 let test_array_items_carry_max_items_and_required () =
   let schema =
     load_ok ~name:"t"
@@ -677,6 +689,10 @@ let () =
             "min_items is rejected off an array"
             `Quick
             test_min_items_is_rejected_off_an_array
+        ; test_case
+            "object items may stay open"
+            `Quick
+            test_object_items_may_stay_open
         ; test_case
             "array items carry max_items and required"
             `Quick

@@ -22,6 +22,22 @@ async function flush(): Promise<void> {
   }
 }
 
+// The runtime-probe path ends in `await import('./schemas/runtime-probe')`
+// (#30099), and how many ticks a dynamic import costs is not a constant --
+// it depends on whether the module graph is already warm, which depends on
+// the machine and on what ran before. Four was enough until that import went
+// in; on a fast machine it is not, and the panel asserts against a chip that
+// has not been drawn yet. Pump until the caller's condition holds instead of
+// guessing a number. The assertions after this still run normally, so a real
+// failure prints a diff rather than a timeout.
+async function flushUntil(until: () => boolean, rounds = 40): Promise<void> {
+  for (let i = 0; i < rounds; i += 1) {
+    if (until()) return
+    await Promise.resolve()
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+}
+
 function runtimeProvidersPayload() {
   return {
     updated_at: '2026-07-05T00:00:00Z',
@@ -345,6 +361,7 @@ describe('ConfigResolutionPanel', () => {
     expect(container.querySelector('.v2-lab-panel')).not.toBeNull()
     expect(container.querySelector('.v2-lab-action')).not.toBeNull()
     expect(container.textContent).toContain('provider reachability')
+    await flushUntil(() => container.textContent?.includes('refreshing stale cache') === true)
     expect(container.textContent).toContain('refreshing stale cache')
     expect(container.textContent).toContain('runpod_mtp.qwen')
     expect(container.textContent).toContain('keeper runtime configuration')

@@ -664,6 +664,18 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_res
   | Error error -> tool_result_of_handler_error error
 ;;
 
+(* Where the answer goes. A Keeper that delegates is the reader of the reply
+   and reads it from its own queue, so it names itself as the destination.
+   Everyone else — an operator or an agent driving the tool over HTTP — keeps
+   the dashboard thread, which is where they are watching. Registry
+   membership decides it, not the shape of the name: writing a queue for a
+   name no Keeper owns would leave the answer somewhere nobody drains. *)
+let delegate_continuation_channel ~(config : Workspace.config) ~submitted_by =
+  if Keeper_registry.is_registered ~base_path:config.base_path submitted_by
+  then Keeper_continuation_channel.keeper ~keeper_name:submitted_by |> Result.to_option
+  else None
+;;
+
 let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
   match
     let* request =
@@ -674,6 +686,8 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
     let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
     submit_agent_operation
       ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
+      ?continuation_channel:
+        (delegate_continuation_channel ~config:ctx.config ~submitted_by)
       ~submitted_by
       ~keeper_name:(Keeper_invocation_contract.target_name request)
       ~message:(Keeper_invocation_contract.prompt request)

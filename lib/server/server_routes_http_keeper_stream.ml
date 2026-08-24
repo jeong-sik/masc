@@ -2265,6 +2265,50 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 | None ->
                   settle_delivery (Error "SLACK_BOT_TOKEN is not configured");
                   fork_adapter drain_events)
+             (* The asker is another Keeper, so the answer goes onto its own
+                event queue rather than to a screen. Unlike the connector
+                adapters there is nothing to stream: [Reply_details] carries
+                the finalized visible reply in one event, so this loop only
+                remembers it and commits once the run ends. A failed commit
+                settles as a delivery failure, which is what marks the
+                operation [Delivery_failed] instead of acknowledging an answer
+                the asker never got. *)
+             | Keeper_continuation_channel.Keeper { keeper_name = asked_by } ->
+               fork_adapter (fun () ->
+                 let commit terminal =
+                   settle_delivery
+                     (Keeper_delegate_completion_wake.deliver
+                        ~base_path:(Mcp_server.workspace_config state).base_path
+                        ~asked_by
+                        ~operation_id
+                        ~delegate:keeper_name
+                        ~terminal)
+                 in
+                 let rec loop reply =
+                   match Keeper_chat_events.subscribe events with
+                   | Keeper_chat_events.Reply_details details ->
+                     loop
+                       (match details.turn_outcome with
+                        | Keeper_turn_outcome.Visible_reply
+                          when String.trim details.reply <> "" ->
+                          Some details.reply
+                        (* The turn spoke somewhere else or said nothing;
+                           either way there is no text to hand back. *)
+                        | Keeper_turn_outcome.Visible_reply
+                        | Keeper_turn_outcome.Continuation_checkpoint
+                        | Keeper_turn_outcome.External_effect_completed
+                        | Keeper_turn_outcome.External_effect_pending
+                        | Keeper_turn_outcome.No_visible_reply -> None)
+                   | Keeper_chat_events.Run_finished _ ->
+                     commit
+                       (match reply with
+                        | Some reply -> Keeper_event_queue.Delegate_replied reply
+                        | None -> Keeper_event_queue.Delegate_no_reply)
+                   | Keeper_chat_events.Event_error { message } ->
+                     commit (Keeper_event_queue.Delegate_failed message)
+                   | _ -> loop reply
+                 in
+                 loop None)
              | Keeper_continuation_channel.Unrouted { reason } ->
                settle_delivery (Error ("unrouted Keeper chat operation: " ^ reason));
                fork_adapter drain_events);

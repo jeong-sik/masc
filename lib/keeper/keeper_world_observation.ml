@@ -24,6 +24,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
+  | Delegate_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
@@ -54,6 +55,11 @@ let is_board_activity_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
+  (* Like [Fusion_completed] this has no Board post behind its id, and for the
+     same reason it is still counted here: this block is the only one that
+     renders the row's title and preview, and the answer is the whole point of
+     the wake. Excluded, the Keeper would be woken with nothing to read. *)
+  | Delegate_completed
   | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer. *)
@@ -68,6 +74,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
+  | Delegate_completed
   | External_attention _
   | Completion_authority_rejected _
   | Task_cancelled _ -> false
@@ -81,6 +88,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
+  | Delegate_completed
   | Schedule_due _
   | External_attention _
   | Task_cancelled _ -> false
@@ -92,6 +100,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
 let is_task_cancellation_event (event : pending_board_event) =
   match event.event_kind with
   | Task_cancelled _ -> true
+  | Delegate_completed
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
@@ -549,6 +558,45 @@ let pending_board_event_of_fusion_completion
 ;;
 
 
+let delegate_reply_preview_max_len = 480
+
+(* The answer to a turn this Keeper asked another Keeper to run. It arrives as
+   a just-arrived board event for the same reason a Fusion result does: the
+   asker is mid-cycle and reads its pending events, not a request store. The
+   Keeper that ran the turn is named as the author so the row reads as an
+   answer from someone rather than a note this Keeper wrote to itself. *)
+let pending_board_event_of_delegate_completion
+      ~(arrived_at : float)
+      (dc : Keeper_event_queue.delegate_completion)
+  : pending_board_event
+  =
+  let title, message =
+    match dc.dc_terminal with
+    | Keeper_event_queue.Delegate_replied reply ->
+      Printf.sprintf "%s answered your request" dc.dc_keeper, reply
+    | Keeper_event_queue.Delegate_no_reply ->
+      ( Printf.sprintf "%s finished without a reply" dc.dc_keeper
+      , "The delegated turn ended with no text to hand back." )
+    | Keeper_event_queue.Delegate_failed detail ->
+      Printf.sprintf "%s could not finish your request" dc.dc_keeper, detail
+  in
+  { event_kind = Delegate_completed
+  ; post_id = Keeper_event_queue.delegate_completion_post_id dc
+  ; author = dc.dc_keeper
+  ; title
+  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+;;
+
 let scheduled_automation_actor = "scheduled_automation"
 
 let pending_board_event_of_scheduled_wake
@@ -749,6 +797,12 @@ let pending_board_event_of_stimulus
          (pending_board_event_of_task_cancellation
             ~arrived_at:stimulus.arrived_at
             cancellation))
+  | Keeper_event_queue.Delegate_completed dc ->
+    Ok
+      (Some
+         (pending_board_event_of_delegate_completion
+            ~arrived_at:stimulus.arrived_at
+            dc))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _

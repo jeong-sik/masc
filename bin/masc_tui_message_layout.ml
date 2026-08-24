@@ -174,11 +174,14 @@ let display_pieces text =
   in
   loop 0 []
 
-let display_width text =
-  display_pieces text
-  |> List.fold_left (fun width piece -> width + piece.cell_width) 0
+let pieces_width pieces =
+  List.fold_left (fun width piece -> width + piece.cell_width) 0 pieces
 
-let cell_prefix text max_cells =
+(* Segmenting the text is what these cost, so the callers below that need both
+   a measurement and a cut take the pieces once and pass them along. Measuring
+   through [display_width] and then cutting through [cell_prefix] segmented
+   every rendered line twice. *)
+let cell_prefix_of_pieces text pieces max_cells =
   let buffer = Buffer.create (String.length text) in
   let rec loop used_cells saw_ansi = function
     | [] -> Buffer.contents buffer, used_cells, saw_ansi
@@ -192,26 +195,15 @@ let cell_prefix text max_cells =
         loop (used_cells + piece.cell_width) saw_ansi rest
     | _ -> Buffer.contents buffer, used_cells, saw_ansi
   in
-  loop 0 false (display_pieces text)
+  loop 0 false pieces
 
-let fit_width text width =
-  if width <= 0 then ""
-  else
-    let cells = display_width text in
-    if cells > width then
-      let prefix, prefix_cells, saw_ansi = cell_prefix text (width - 1) in
-      let reset = if saw_ansi then "\x1B[0m" else "" in
-      prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
-    else text ^ String.make (width - cells) ' '
-
-let cell_suffix text max_cells =
+let cell_suffix_of_pieces text pieces max_cells =
   let rec start_offset used current_start = function
     | [] -> current_start
     | piece :: rest when used + piece.cell_width <= max_cells ->
         start_offset (used + piece.cell_width) piece.start_offset rest
     | _ -> current_start
   in
-  let pieces = display_pieces text in
   let start =
     start_offset 0 (String.length text) (List.rev pieces)
   in
@@ -226,6 +218,24 @@ let cell_suffix text max_cells =
   let start = drop_detached_zero_width pieces in
   String.sub text start (String.length text - start)
 
+let display_width text = pieces_width (display_pieces text)
+
+let cell_prefix text max_cells =
+  cell_prefix_of_pieces text (display_pieces text) max_cells
+
+let fit_width text width =
+  if width <= 0 then ""
+  else
+    let pieces = display_pieces text in
+    let cells = pieces_width pieces in
+    if cells > width then
+      let prefix, prefix_cells, saw_ansi =
+        cell_prefix_of_pieces text pieces (width - 1)
+      in
+      let reset = if saw_ansi then "\x1B[0m" else "" in
+      prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
+    else text ^ String.make (width - cells) ' '
+
 let composer_max_rows = 5
 
 let composer_lines ~max_rows input =
@@ -236,9 +246,10 @@ let composer_lines ~max_rows input =
 
 let input_viewport ~max_cells input =
   let max_cells = max 0 max_cells in
-  if display_width input <= max_cells then input
+  let pieces = display_pieces input in
+  if pieces_width pieces <= max_cells then input
   else if max_cells = 0 then ""
-  else "~" ^ cell_suffix input (max_cells - 1)
+  else "~" ^ cell_suffix_of_pieces input pieces (max_cells - 1)
 
 let input_cursor_row ~terminal_rows ~history_height ~status_rows =
   let last_row = max 1 terminal_rows in
@@ -274,9 +285,10 @@ let input_cursor_column ~terminal_cols ~input =
 let chat_role_label_column = 16
 
 let align_role_label label =
-  let cells = display_width label in
+  let pieces = display_pieces label in
+  let cells = pieces_width pieces in
   if cells > chat_role_label_column then
-    let prefix, _, _ = cell_prefix label (chat_role_label_column - 1) in
+    let prefix, _, _ = cell_prefix_of_pieces label pieces (chat_role_label_column - 1) in
     prefix ^ "…"
   else label ^ String.make (chat_role_label_column - cells) ' '
 
@@ -306,29 +318,60 @@ let split_cells ~max_cells text =
     in
     loop 0 0 0 [] (display_pieces text)
 
+(* A row is built by adding each word's own width to the row so far. That
+   holds while no escape is left open across the join: an escape missing its
+   final byte swallows the space after it, so the row and its parts disagree
+   (pinned in the layout tests). A row carrying an escape therefore measures
+   itself whole, the way this used to for every word of every row -- which
+   made a row cost grow with the square of the words in it. *)
 let wrap_words ~max_cells text =
   let max_cells = max 1 max_cells in
-  let rec loop rows current = function
-    | [] -> List.rev (if String.equal current "" then rows else current :: rows)
-    | word :: rest as words ->
-        let candidate =
-          if String.equal current "" then word else current ^ " " ^ word
+  let current = Buffer.create 128 in
+  let current_cells = ref 0 in
+  let current_holds_escape = ref false in
+  let holds_escape word = String.contains word '\x1B' in
+  let take_row () =
+    let row = Buffer.contents current in
+    Buffer.clear current;
+    current_cells := 0;
+    current_holds_escape := false;
+    row
+  in
+  let rec loop rows = function
+    | [] ->
+        let rows =
+          if Buffer.length current = 0 then rows else take_row () :: rows
         in
-        if display_width candidate <= max_cells then loop rows candidate rest
-        else if not (String.equal current "") then
-          loop (current :: rows) "" words
+        List.rev rows
+    | word :: rest as words ->
+        let addition = if Buffer.length current = 0 then word else " " ^ word in
+        let candidate_cells =
+          if !current_holds_escape then
+            display_width (Buffer.contents current ^ addition)
+          else !current_cells + display_width addition
+        in
+        if candidate_cells <= max_cells then begin
+          Buffer.add_string current addition;
+          current_cells := candidate_cells;
+          if holds_escape word then current_holds_escape := true;
+          loop rows rest
+        end
+        else if Buffer.length current > 0 then loop (take_row () :: rows) words
         else
           let chunks = split_cells ~max_cells word in
           (match List.rev chunks with
-           | [] -> loop rows "" rest
+           | [] -> loop rows rest
            | last :: reversed_completed ->
                let completed = List.rev reversed_completed in
                let rows =
                  List.fold_left (fun rows chunk -> chunk :: rows) rows completed
                in
-               loop rows last rest)
+               Buffer.add_string current last;
+               current_cells := display_width last;
+               current_holds_escape := holds_escape last;
+               loop rows rest)
   in
-  loop [] "" (String.split_on_char ' ' text)
+  loop [] (String.split_on_char ' ' text)
 
 let rows_of_entry ?markdown ~inner_width entry =
   let metadata, _, _ =

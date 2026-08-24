@@ -18,7 +18,20 @@ type t =
       body : string;  (** Every line after the first, as typed. *)
     }
   | Task_missing_title  (** [/task] with nothing after it on the line. *)
+  | Help  (** [/help] — draw the command list into the pane. *)
+  | Switch_keeper of string
+      (** [/keeper <name>] — point this pane at another keeper. *)
+  | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)
+  | Interrupt_turn
+      (** [/interrupt] — the composer form of the interrupt keybinding, for
+          an operator mid-sentence whose hands are already on letters. *)
+  | Toggle_thinking
+      (** [/thinking] — fold or unfold reasoning blocks in this pane. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
+
+val help_lines : string list
+(** One line per command, the list [/help] draws. Kept beside the parser so a
+    new command cannot ship without its line. *)
 
 val parse : string -> t
 (** Read the composer's text. Leading blanks are not stripped before the

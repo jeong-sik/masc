@@ -1208,16 +1208,89 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
    composer row or the chat pane's input. Text goes to the keeper as it
    always did; a slash word is the TUI's to act on, and a mistyped one is
    reported rather than sent to the keeper as an instruction. *)
+(* A command's answer, drawn into the pane the operator typed it in. Recent
+   Events lives on another surface, and a /help answered there is a /help
+   that looks ignored. Falls back to the event log when the pane has no
+   keeper to file the row under. *)
+let chat_notice state ~keeper_name ~role text =
+  match keeper_name with
+  | Some keeper ->
+      state.msg_history <-
+        state.msg_history
+        @ [ {
+              me_role = role;
+              me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+              me_timestamp = current_clock_text ();
+              me_keeper_name = keeper;
+              me_request_id = "";
+              me_at = Unix.gettimeofday ();
+            } ]
+  | None ->
+      add_event state
+        (match role with Message_error -> "error" | _ -> "system")
+        text
+
 let send_operator_text ?keeper_name state ~mailbox text =
+  let target =
+    match keeper_name with
+    | Some _ as named -> named
+    | None -> state.msg_target_keeper_name
+  in
+  let notice = chat_notice state ~keeper_name:target in
   match Masc_tui_command.parse text with
   | Masc_tui_command.Say _ ->
       start_keeper_message ?keeper_name state ~mailbox text
   | Masc_tui_command.Task_missing_title ->
       add_event state "error" "/task needs a title on the same line"
+  | Masc_tui_command.Help ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_status
+        (String.concat "\n" Masc_tui_command.help_lines)
+  | Masc_tui_command.Switch_keeper_missing_name ->
+      notice ~role:Message_error "/keeper needs a name on the same line"
+  | Masc_tui_command.Switch_keeper name -> (
+      match
+        List.find_opt
+          (fun (keeper : keeper) -> String.equal keeper.k_name name)
+          state.keepers
+      with
+      | Some keeper ->
+          Buffer.clear state.msg_input;
+          open_message_for_keeper ~return_to:state.msg_return state
+            keeper.k_name;
+          launch_keeper_history_load state ~mailbox
+            ~keeper_name:keeper.k_name;
+          state.view <- Keepers Keeper_message
+      | None ->
+          notice ~role:Message_error
+            (Printf.sprintf "no keeper named %S on the roster" name))
+  | Masc_tui_command.Interrupt_turn -> (
+      Buffer.clear state.msg_input;
+      match state.msg_live with
+      | Some live
+        when Keeper_chat_transcript.interrupt live
+             = Keeper_chat_transcript.Not_requested -> (
+          match
+            inflight_by_request_id state
+              (Keeper_chat_transcript.request_id live)
+          with
+          | Some request -> launch_keeper_interrupt state ~mailbox request
+          | None -> notice ~role:Message_status "no turn of this pane's to interrupt")
+      | Some _ ->
+          notice ~role:Message_status
+            "an interrupt is already outstanding for this turn"
+      | None -> notice ~role:Message_status "no turn is streaming in this pane")
+  | Masc_tui_command.Toggle_thinking ->
+      Buffer.clear state.msg_input;
+      state.msg_thinking_collapsed <- not state.msg_thinking_collapsed;
+      notice ~role:Message_status
+        (if state.msg_thinking_collapsed
+         then "reasoning folded (/thinking to unfold)"
+         else "reasoning unfolded (/thinking to fold)")
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
-           "unknown command /%s (text is sent as typed; /task <title> creates             work)"
+           "unknown command /%s (text is sent as typed; /help lists commands)"
            word)
   | Masc_tui_command.Task_for_keeper { title; body } -> (
       let target =
@@ -2296,7 +2369,12 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Say _ ->
            state.msg_scroll <- 0;
            state.view <- Keepers Keeper_message
+       | Masc_tui_command.Switch_keeper _ ->
+           (* The switch handler owns the view change. *)
+           state.msg_scroll <- 0
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
+       | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Toggle_thinking
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)

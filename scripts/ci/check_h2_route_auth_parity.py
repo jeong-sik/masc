@@ -54,6 +54,14 @@ MIRRORED_WRAPPERS = (
     "with_h2_token_permission_auth",
 )
 
+# Routes the gateway hands to another module receive their auth wrapper as an
+# argument rather than applying it in the arm, so the arm scan below cannot see
+# whether one is applied. Five delegated routes answered unauthenticated over
+# h2c while HTTP/1 answered 401 (#28161); passing `fun f -> f ()` here restores
+# exactly that, and the arm scan stays green because the arm itself never
+# touches server state.
+DELEGATED_WRAPPER_ARGS = ("~with_public_read:",)
+
 
 def strip_comments(source: str) -> str:
     """Blank out OCaml comments, preserving every byte offset and newline.
@@ -140,8 +148,47 @@ def main() -> int:
         )
         return 1
 
+    # Every wrapper handed to a delegated dispatcher has to apply one of the
+    # mirrored gates. An identity lambda would leave those routes anonymous
+    # with nothing in the arm for the scan above to catch.
+    delegated_violations = []
+    for arg in DELEGATED_WRAPPER_ARGS:
+        start = 0
+        while True:
+            at = code.find(arg, start)
+            if at == -1:
+                break
+            start = at + len(arg)
+            window = code[at : at + 400]
+            if not any(w in window for w in MIRRORED_WRAPPERS):
+                lineno = code.count("\n", 0, at) + 1
+                delegated_violations.append((lineno, arg))
+
+    for lineno, arg in delegated_violations:
+        rel = GATEWAY.relative_to(ROOT)
+        print(
+            "FAIL: delegated H2 routes receive a wrapper that authorizes nothing",
+            file=sys.stderr,
+        )
+        print(f"  {rel}:{lineno}: {arg}", file=sys.stderr)
+        print(
+            "  Pass " + " / ".join(MIRRORED_WRAPPERS)
+            + " so the delegated paths enforce what the HTTP/1 routes enforce.",
+            file=sys.stderr,
+        )
+
+    if delegated_violations:
+        print(
+            f"=== H2 route auth parity gate: FAIL ({len(delegated_violations)}) ===",
+            file=sys.stderr,
+        )
+        return 1
+
     scanned = len(arms)
-    print(f"PASS: {scanned} H2 route arms scanned; none read state unauthorized")
+    print(
+        f"PASS: {scanned} H2 route arms scanned; none read state unauthorized. "
+        f"{len(DELEGATED_WRAPPER_ARGS)} delegated wrapper argument(s) apply a mirrored gate."
+    )
     print("=== H2 route auth parity gate: PASS ===")
     return 0
 

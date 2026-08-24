@@ -47,7 +47,8 @@ let of_stop_reason = function
   | Runtime_agent.Completed -> Visible_reply
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Continuation_checkpoint
   | Runtime_agent.Awaiting_external_effect _ -> External_effect_pending
   | Runtime_agent.InputRequired _ -> Visible_reply
@@ -57,7 +58,8 @@ let of_result_surface ~response_text = function
       if String.trim response_text = "" then No_visible_reply else Visible_reply
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Continuation_checkpoint
   | Runtime_agent.Awaiting_external_effect _ -> External_effect_pending
   | Runtime_agent.InputRequired _ -> Visible_reply

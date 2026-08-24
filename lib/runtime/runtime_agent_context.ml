@@ -30,6 +30,14 @@ type stop_reason =
     (* The current run repeated the same tool input and observed the same
        result enough times to prove that the provider loop was not advancing.
        The exact post-tool checkpoint is retained for a later cycle. *)
+  | Yielded_after_repeated_assistant_text of
+      { turns_used : int
+      ; repeated_count : int
+      }
+    (* The last [repeated_count] provider turns each emitted the same
+       non-blank assistant text, so the model is restating the same plan
+       without advancing even though its tool calls kept changing. The exact
+       post-tool checkpoint is retained for a later cycle. *)
   | InputRequired of
       { turns_used : int
       ; request : Agent_core.Error.input_required

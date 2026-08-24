@@ -200,6 +200,12 @@ let stop_reason_to_string = function
       turns_used
       tool_name
       repeated_count
+  | Runtime_agent.Yielded_after_repeated_assistant_text
+      { turns_used; repeated_count } ->
+    Printf.sprintf
+      "yielded_after_repeated_assistant_text:%d:%d"
+      turns_used
+      repeated_count
   | Runtime_agent.InputRequired _ ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
 ;;
@@ -215,7 +221,8 @@ let receipt_terminal_reason_code_of_stop_reason = function
   | ( Runtime_agent.Yielded_to_operation_queued _
     | Runtime_agent.Yielded_to_durable_stimulus _
     | Runtime_agent.Awaiting_external_effect _
-    | Runtime_agent.Yielded_after_repeated_tool_call _ ) as stop_reason ->
+    | Runtime_agent.Yielded_after_repeated_tool_call _
+    | Runtime_agent.Yielded_after_repeated_assistant_text _ ) as stop_reason ->
     stop_reason_to_string stop_reason
 ;;
 

@@ -541,6 +541,7 @@ let async_parent_invocation ~request_id source =
 
 let async_worker_result
       ~(entry : Catalog.entry)
+      ~plan
       ~tool_name
       ~request_id
       ~source_invocation
@@ -562,7 +563,7 @@ let async_worker_result
   let run_id = Keeper_tool_plan.Run_id.fresh () in
   let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
   Executor.execute_keeper
-    ~plan:entry.plan
+    ~plan
     ~run_id
     ~composition_run_id
     ~parent_invocation:
@@ -603,6 +604,7 @@ let result_from_json ~tool_name ~start_time ~class_ ~ok data =
 
 let async_submission_result
       ~entry
+      ~plan
       ~tool_name
       ~parent_invocation
       ~(config : Workspace.config)
@@ -636,6 +638,7 @@ let async_submission_result
          ~f:(fun ~request_id request_sw ->
            async_worker_result
              ~entry
+             ~plan
              ~tool_name
              ~request_id
              ~source_invocation:parent_invocation
@@ -951,8 +954,35 @@ let make_tools
              in
              (match entry.execution with
               | Catalog.Async ->
+                (match
+                   Catalog.instantiate
+                     ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+                     ~args:input
+                     entry
+                 with
+                 | Error error ->
+                   let message = Catalog.instantiation_error_to_string error in
+                   let class_ =
+                     match error with
+                     | Catalog.Missing_argument _ -> Tool_result.Policy_rejection
+                     | Catalog.Instantiated_plan_rejected _ ->
+                       Tool_result.Runtime_failure
+                   in
+                   Tool_result.make_err
+                     ~tool_name
+                     ~class_
+                     ~start_time
+                     ~data:
+                       (`Assoc
+                           [ "composition_tool", `String tool_name
+                           ; tool_kind_field (Catalog.tool_kind entry)
+                           ; "error", `String message
+                           ])
+                     message
+                 | Ok plan ->
                 async_submission_result
                   ~entry
+                  ~plan
                   ~tool_name
                   ~parent_invocation
                   ~config
@@ -961,7 +991,7 @@ let make_tools
                   ~ctx_snapshot
                   ~turn_context
                   ?clock
-                  ()
+                  ())
               | Catalog.Inline ->
                 (match
                    Catalog.instantiate

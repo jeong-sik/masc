@@ -85,7 +85,6 @@ type error =
       { name : string
       ; param : string
       }
-  | Async_composition_with_params of { name : string }
   | Plan_rejected of
       { name : string
       ; error : Keeper_tool_plan.error
@@ -118,8 +117,9 @@ type entry = private
         (** Declared invocation parameters, [[compositions.params]] in the
             document. Every declared name is referenced by some node input
             ([kind = "param"]) and vice versa — both directions are load
-            errors. All params are required; async compositions declare
-            none. *)
+            errors. All params are required. Async entries bind params at
+            submission: the broker never replays a worker closure after a
+            crash, so the bound plan lives exactly as long as the run. *)
   ; plan : Keeper_tool_plan.t
   }
 

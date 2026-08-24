@@ -18,6 +18,7 @@ module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
+module Planning_detail = Masc_tui_planning_detail
 module Status = Masc.Keeper_status_runtime
 
 (* Every surface lays out against a viewport one row shorter than the
@@ -1589,6 +1590,20 @@ let render_planning_list (state : state) =
       ~cols buf
 
 (** Render the Planning surface (detail view). *)
+(* Border, header, divider, title, phase, due, metric, blank, divider,
+   border, footer: the eleven rows the detail draws whatever the goal says.
+   A lifecycle arm and a refused request each add one more when they are
+   there, so the block is measured against them rather than against a
+   constant that would push the footer off a full screen. *)
+let planning_detail_fixed_rows = 11
+
+let planning_detail_tone (tone : Planning_detail.tone) =
+  match tone with
+  | Planning_detail.Proven -> Theme.ok
+  | Planning_detail.Refused -> Theme.bad
+  | Planning_detail.Waiting | Planning_detail.Unreadable -> Theme.warn
+  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+
 let render_planning_detail (state : state)
     ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1654,7 +1669,36 @@ let render_planning_detail (state : state)
    | None -> ());
   box_divider buf cols;
 
-  for _ = 1 to rows - 16 do
+  (* The verdict and the keeper's note: the two things the list draws under
+     the cursor and the detail used to leave out, so opening a goal showed
+     less than the row it was opened from. They wrap, so this is what the
+     surface's scroll moves through. *)
+  let body =
+    Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note
+  in
+  let chrome_rows =
+    planning_detail_fixed_rows
+    + (match armed with Some _ -> 1 | None -> 0)
+    + (match state.goal_action_error with Some _ -> 1 | None -> 0)
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length body) ~height:content_height
+      state.planning_scroll
+  in
+  let drawn =
+    body
+    |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  in
+  List.iter
+    (fun (line : Planning_detail.line) ->
+      box_line buf cols
+        (Printf.sprintf "  %s%s%s"
+           (planning_detail_tone line.Planning_detail.tone)
+           (fit_width line.Planning_detail.text (cols - 6))
+           Ansi.reset))
+    drawn;
+  for _ = 1 to content_height - List.length drawn do
     box_empty buf cols
   done;
 
@@ -1662,8 +1706,8 @@ let render_planning_detail (state : state)
 
   Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
 
-  finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
-      ~cols buf
+  finish_surface state ~clamped:(Planning_detail_scroll scroll)
+      ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
 (* The store's status vocabulary, as colours. An unknown word keeps its own
    text and no colour: the row is still a fact about the store, just one this

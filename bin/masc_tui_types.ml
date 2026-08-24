@@ -1168,6 +1168,7 @@ type clamped_scroll =
   | Keeper_calls of int
   | Acting of int
   | Fusion_detail_scroll of int
+  | Planning_detail_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -1177,6 +1178,7 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
+  | Planning_detail_scroll value -> state.planning_scroll <- value
 
 let scrolled_surface (state : state) : surface -> scrolled option =
   let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in

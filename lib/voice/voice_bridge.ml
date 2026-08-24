@@ -27,6 +27,17 @@ let audio_payload_fields ~audio_file ~audio_device =
   | _ -> []
 ;;
 
+(* Issue #7690 replaced the byte-based [String.sub] in [Audit_log.preview] with
+   a character-boundary cut but left this shape here. A 50-byte cut lands
+   mid-character on Korean (3 bytes per syllable); the trailing partial byte
+   rides the tool result into the codex app-server stdin, which decodes UTF-8
+   and exits on the invalid sequence. *)
+let message_preview_max_bytes = 50
+
+let message_preview message =
+  String_util.utf8_prefix ~max_bytes:message_preview_max_bytes message
+;;
+
 let available_stt_endpoints (config : Voice_config.t) =
   config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
@@ -401,9 +412,7 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; ( "message_preview"
-                      , `String
-                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "message_preview", `String (message_preview message)
                     ; "local_playback_status", `String local_playback_status
                     ; "local_playback_reason", `String reason
                     ]
@@ -417,9 +426,7 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; ( "message_preview"
-                      , `String
-                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "message_preview", `String (message_preview message)
                     ; "local_playback_status", `String "opened"
                     ; "local_playback_reason"
                       , `String
@@ -435,9 +442,7 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; ( "message_preview"
-                      , `String
-                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "message_preview", `String (message_preview message)
                     ; "local_playback_status", `String "played"
                     ; "played_seconds", `Float played_seconds
                     ]

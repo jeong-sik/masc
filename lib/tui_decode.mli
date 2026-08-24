@@ -804,6 +804,16 @@ val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
     horizontal wheel). [parameters] is the raw CSI parameter span
     (["<64;10;5"]), [final] the CSI final byte. *)
 val sgr_wheel_key : string -> char -> string option
+
+(** Decode the button byte of a legacy X10 mouse report ([CSI M] plus three raw
+    bytes) into [wheel-up] / [wheel-down].
+
+    Terminals without SGR ([?1006]) support answer the tracking request in this
+    older shape; Apple Terminal, the macOS default, is one. The three bytes
+    after [CSI M] must be consumed whatever this returns — left in the stream
+    they are read as ordinary text. Buttons other than the two wheel ones
+    return [None]. *)
+val x10_wheel_key : char -> string option
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result

@@ -4885,6 +4885,7 @@ let help_sections : (string * (string * string) list) list =
       ; "r", "refresh the current surface"
       ; "i", "focus the composer (message the shown keeper)"
       ; "?", "this help"
+      ; "Ctrl-T", "release the mouse so you can drag-select and copy"
       ; "q", "quit"
       ] )
   ; ( "Overview"

@@ -244,6 +244,28 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
+(** Fetch a keeper's durable tool-call log
+    ([GET /api/v1/keepers/:name/tool-calls]). *)
+let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(limit : int) : (Masc.Tui_decode.keeper_calls_snapshot, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/tool-calls?limit=%d"
+      (percent_encode_path_segment keeper_name)
+      (max 1 limit)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "tool calls returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json ->
+          Masc.Tui_decode.decode_keeper_calls_snapshot
+            ~requested_keeper:keeper_name json
+      | exception Yojson.Json_error detail ->
+          Error ("tool calls were not JSON: " ^ detail))
+
 (** Open the MCP session the observer feed is registered under.
 
     The transport registers an SSE observer only for a session it has seen

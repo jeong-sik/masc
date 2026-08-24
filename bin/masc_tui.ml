@@ -465,6 +465,8 @@ type async_msg =
   | Goal_transition_done of (string, string) result
   | Schedules_loaded of (schedule_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
+  | Keeper_calls_loaded of
+      string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Observer_opened of string
   | Observer_received of Masc_tui_observer.decoded list
   | Observer_closed of string
@@ -648,6 +650,30 @@ let launch_schedules_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox (Schedules_loaded (Error "Eio switch is unavailable"))
+
+(* The durable call log of one keeper, over HTTP. The row the answer is
+   applied to is named in the message so a load that returns after the
+   operator moved to another keeper is discarded, not drawn under it. *)
+let launch_keeper_calls_load state ~mailbox keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_calls_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_calls_loaded (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_autonomy_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -884,23 +910,26 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
 
 let inflight_for state keeper_name =
-  List.find_opt
-    (fun (request : Keeper_chat.request) ->
-      String.equal request.keeper_name keeper_name)
-    state.msg_inflight
+  Option.map
+    (fun entry -> entry.sent_request)
+    (List.find_opt
+       (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
+       state.msg_inflight)
 ;;
 
 let inflight_by_request_id state request_id =
-  List.find_opt
-    (fun (request : Keeper_chat.request) ->
-      String.equal request.request_id request_id)
-    state.msg_inflight
+  Option.map
+    (fun entry -> entry.sent_request)
+    (List.find_opt
+       (fun entry -> String.equal entry.sent_request.request_id request_id)
+       state.msg_inflight)
 ;;
 
 let drop_inflight state request =
   state.msg_inflight <-
     List.filter
-      (fun current -> not (Keeper_chat.same_request_identity current request))
+      (fun entry ->
+        not (Keeper_chat.same_request_identity entry.sent_request request))
       state.msg_inflight
 ;;
 
@@ -912,7 +941,9 @@ let drop_inflight state request =
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
 let launch_keeper_request state ~mailbox request =
-  state.msg_inflight <- request :: state.msg_inflight;
+  state.msg_inflight <-
+    { sent_request = request; sent_at = Unix.gettimeofday () }
+    :: state.msg_inflight;
   let run () =
     if enqueue_dispatch_start mailbox request false
     then begin
@@ -986,19 +1017,7 @@ let start_keeper_message ?keeper_name state ~mailbox text =
               add_event state "message"
                 (Printf.sprintf "Queued for %s behind %s (%d waiting)"
                    (Keeper_chat.terminal_safe_text target)
-                   request.Keeper_chat.request_id waiting))
-      | Refused_prepared _ | Refused_cleanup _ | Refused_recovery_blocked _
-      | Refused_unverified _ ->
-          (* The durable chat fence is gone, so the states these rank are never
-             set and this cannot be reached. Matched rather than swept into a
-             catch-all so removing them from the vocabulary is a compile error
-             here, and reported rather than asserted so a future writer of one
-             of those states gets a line in the log instead of a crash. *)
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper %s: send refused by a chat fence state that no longer \
-                exists; the message was not sent"
-               (Keeper_chat.terminal_safe_text target)))
+                   request.Keeper_chat.request_id waiting)))
 ;;
 
 let drain_queued_message state ~mailbox =
@@ -2145,9 +2164,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                      Observer_live { live with events = live.events + 1 }
                | Observer_off | Observer_opening | Observer_closed _ -> ());
               state.acting <-
-                { ae_at = received; ae_event = event } :: state.acting
-          | Masc_tui_observer.Undecodable _ ->
-              state.acting_undecodable <- state.acting_undecodable + 1)
+                { ae_at = received; ae_event = event } :: state.acting;
+              (* A row arriving at the top pushes every row down one. An
+                 operator scrolled into the past keeps the rows they were
+                 reading and a count of what arrived above them. *)
+              if state.acting_scroll > 0 then begin
+                state.acting_scroll <- state.acting_scroll + 1;
+                state.acting_unseen <- state.acting_unseen + 1
+              end
+          | Masc_tui_observer.Undecodable reason ->
+              state.acting_undecodable <- state.acting_undecodable + 1;
+              state.acting_undecodable_last <- Some reason)
         decoded;
       let kept = List.length state.acting in
       if kept > Masc_tui_types.acting_retained_entries then begin
@@ -2251,6 +2278,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Keeper_calls_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok snapshot ->
+            state.keeper_calls <- Some snapshot;
+            state.keeper_calls_error <- None
+        | Error detail -> state.keeper_calls_error <- Some detail)
   | Schedules_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2778,6 +2817,12 @@ let main () =
             | Keepers Keeper_logs ->
                 load_selected_keeper_logs state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
+            | Keepers Keeper_calls ->
+                (match selected_keeper state with
+                 | Some keeper ->
+                     launch_keeper_calls_load state ~mailbox:async_messages
+                       keeper.k_name
+                 | None -> ())
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
@@ -2799,13 +2844,14 @@ let main () =
             | Tools -> launch_tools_load state ~mailbox:async_messages
             | Autonomy -> launch_autonomy_load state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
-            | Overview | Keepers Keeper_list | Keepers Keeper_detail
+            | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab cycles through primary surfaces *)
            (match state.view with
-            | Overview -> state.view <- Keepers Keeper_list
+            | Overview -> state.view <- Acting
+            | Acting -> state.view <- Keepers Keeper_list
             | Keepers _ -> state.view <- Approvals
             | Approvals ->
                 state.pending_approval_action <- None;
@@ -2849,6 +2895,10 @@ let main () =
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
                 state.log_scroll <- 0;
+                state.detail_scroll <- 0
+            | Keepers Keeper_calls ->
+                state.view <- Keepers Keeper_detail;
+                state.keeper_calls_scroll <- 0;
                 state.detail_scroll <- 0
             | Keepers Keeper_message ->
                 (* While a turn is streaming, Esc interrupts it instead of
@@ -2895,7 +2945,7 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Keepers Keeper_list | Approvals | Schedules | Verification
+            | Acting | Keepers Keeper_list | Approvals | Schedules | Verification
             | Harness | Repositories | Connectors | Tools | Autonomy
             | System_logs -> ())
        | Some "j" | Some "down" ->
@@ -2915,6 +2965,8 @@ let main () =
                     ~entry_count:(List.length state.log_entries)
                     ~content_height:(keeper_log_content_height state)
                     state.log_scroll
+            | Keepers Keeper_calls ->
+                state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
             | Approvals ->
                 let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -2975,6 +3027,7 @@ let main () =
                 state.connectors_scroll <- state.connectors_scroll + 1
             | Tools -> state.tools_scroll <- state.tools_scroll + 1
             | Autonomy -> state.autonomy_scroll <- state.autonomy_scroll + 1
+            | Acting -> state.acting_scroll <- state.acting_scroll + 1
             | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
@@ -2995,6 +3048,9 @@ let main () =
                     ~entry_count:(List.length state.log_entries)
                     ~content_height:(keeper_log_content_height state)
                     state.log_scroll
+            | Keepers Keeper_calls ->
+                if state.keeper_calls_scroll > 0 then
+                  state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
             | Approvals ->
                 if state.approval_cursor > 0 then begin
                   state.pending_approval_action <- None;
@@ -3057,6 +3113,11 @@ let main () =
             | Autonomy ->
                 if state.autonomy_scroll > 0 then
                   state.autonomy_scroll <- state.autonomy_scroll - 1
+            | Acting ->
+                if state.acting_scroll > 0 then begin
+                  state.acting_scroll <- state.acting_scroll - 1;
+                  if state.acting_scroll = 0 then state.acting_unseen <- 0
+                end
             | System_logs ->
                 if state.system_logs_scroll > 0 then
                   state.system_logs_scroll <- state.system_logs_scroll - 1
@@ -3109,9 +3170,20 @@ let main () =
                           state.planning_scroll <- 0
                       | None -> ())
                  | Planning_detail _ -> ())
-            | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Schedules | Verification | Harness | Repositories
+            | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
+            | Acting | Approvals | Schedules | Verification | Harness | Repositories
             | Connectors | Tools | Autonomy | System_logs -> ())
+       | Some "f" | Some "F" when state.view = Acting ->
+           state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+       | Some "g" when state.view = Acting ->
+           state.acting_scroll <- 0;
+           state.acting_unseen <- 0
+       | Some "G" when state.view = Acting ->
+           (* Past the end on purpose; the frame clamps it to the last page.
+              The held count rather than max_int, because an event arriving
+              before that frame adds one to it. *)
+           state.acting_scroll <- List.length state.acting
        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
@@ -3119,7 +3191,20 @@ let main () =
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
-            | Overview | Keepers _ | Board | Approvals | Planning | Schedules
+            | Keepers (Keeper_list | Keeper_detail) ->
+                (* Tool calls, from the roster and from detail, the way logs
+                   are: the keeper under the cursor is the one asked about. *)
+                (match selected_keeper state with
+                 | Some keeper ->
+                     state.keeper_calls <- None;
+                     state.keeper_calls_error <- None;
+                     state.keeper_calls_scroll <- 0;
+                     launch_keeper_calls_load state ~mailbox:async_messages
+                       keeper.k_name;
+                     state.view <- Keepers Keeper_calls
+                 | None -> ())
+            | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
+            | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
@@ -3181,7 +3266,8 @@ let main () =
                          ~content_height:(keeper_log_content_height state);
                      state.view <- Keepers Keeper_logs
                  | None -> ())
-            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
@@ -3201,7 +3287,8 @@ let main () =
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
-            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "p" | Some "P" ->
@@ -3222,7 +3309,8 @@ let main () =
                     add_event state "system"
                       "No lifecycle action applies to this keeper yet"
                 | None -> ())
-            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "s" | Some "S" ->
@@ -3230,7 +3318,8 @@ let main () =
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
-            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "w" | Some "W" ->
@@ -3250,7 +3339,8 @@ let main () =
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
-            | Overview | Keepers Keeper_logs | Keepers Keeper_message
+            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
             | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs
             -> ())
@@ -3290,6 +3380,12 @@ let main () =
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_selected_keeper_logs state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor)
+         | Keepers Keeper_calls ->
+             (match selected_keeper state with
+              | Some keeper ->
+                  launch_keeper_calls_load state ~mailbox:async_messages
+                    keeper.k_name
+              | None -> ())
          | Board ->
              (match state.board_mode with
               | Board_read post_id ->
@@ -3323,7 +3419,7 @@ let main () =
                 watches; the page that answers "why is this keeper awake"
                 holds a reading from when the operator arrived otherwise. *)
              launch_schedules_load state ~mailbox:async_messages
-         | Overview | Keepers Keeper_list | Keepers Keeper_message
+         | Overview | Acting | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background

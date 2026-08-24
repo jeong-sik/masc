@@ -1,0 +1,464 @@
+name = "tool_execute"
+description = """
+Execute a typed process invocation inside the Keeper sandbox. Accepted \
+fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. \
+Provide either one non-empty argv process vector or an explicit pipeline of \
+typed stages, never both; this tool does not expose background task \
+lifecycle tools. The cmd and command string fields are rejected. Shell \
+metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
+objects for redirection and the pipeline field for pipelines. Use Grep for \
+structured file-content search. cwd must resolve inside the Keeper path \
+jail. Pass a relative cwd (typically '.') and relative filesystem operands, \
+which resolve against cwd. The Keeper-visible absolute root is \
+informational; Docker host absolute paths are unavailable. MASC does not \
+interpret program or subcommand meaning: after typed lowering, path \
+containment, sandbox resolution, and the external-effect Gate, the invoked \
+program owns its syntax and exit result."""
+additional_properties = false
+
+[[params]]
+name = "argv"
+type = "array"
+items = { type = "string" }
+min_items = 1
+description = """
+Non-empty process vector: argv[0] is the executable and remaining tokens are \
+arguments, all passed verbatim. There is no shell, so a literal '|', '&&' or \
+'>' token is data, not an operator, and wildcards (*, ?, [...]) are not \
+expanded: 'foo*.ml' names a file called 'foo*.ml'. Use pipeline, then, and \
+the redirect fields instead, and pass exact paths. Filesystem arguments use \
+the selected sandbox namespace; relative operands resolve against the typed \
+cwd, and Docker cannot reach host absolute paths."""
+
+[[params]]
+name = "pipeline"
+type = "array"
+description = """
+Typed pipeline form: ordered exec stages. Use this instead of putting '|' in \
+argv. Each stage may carry its own stdin/stdout/stderr, so piping and \
+redirecting combine in one call. Stage argv uses the selected sandbox \
+namespace, and relative path operands resolve against the typed cwd. \
+Mutually exclusive with top-level argv."""
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "argv"
+type = "array"
+required = true
+items = { type = "string" }
+min_items = 1
+description = """
+Same shape as the top-level argv. Still no shell: '|', '&&' and '>' are \
+data, and wildcards are not expanded."""
+
+[[params.items.params]]
+name = "stdin"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "file"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params]]
+name = "stdout"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+
+[[params.items.params]]
+name = "stderr"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+
+[[params]]
+name = "then"
+type = "array"
+description = """
+Programs to run after this one, each guarded by how the one before it ended, \
+the typed form of '&&' and '||'. Use this instead of putting those operators \
+in argv, where nothing reads them. Guards apply left to right."""
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "on"
+type = "string"
+required = true
+enum = ["success", "failure"]
+
+[[params.items.params]]
+name = "argv"
+type = "array"
+items = { type = "string" }
+min_items = 1
+description = """
+Same shape as the top-level argv. Still no shell: '|', '&&' and '>' are \
+data, and wildcards are not expanded."""
+
+[[params.items.params]]
+name = "pipeline"
+type = "array"
+
+[params.items.params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params.items.params]]
+name = "argv"
+type = "array"
+required = true
+items = { type = "string" }
+min_items = 1
+description = """
+Same shape as the top-level argv. Still no shell: '|', '&&' and '>' are \
+data, and wildcards are not expanded."""
+
+[[params.items.params.items.params]]
+name = "stdin"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.items.params.params]]
+name = "file"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.items.params]]
+name = "stdout"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.items.params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.items.params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.items.params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+
+[[params.items.params.items.params]]
+name = "stderr"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.items.params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.items.params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.items.params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+
+[[params.items.params]]
+name = "stdin"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "file"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params]]
+name = "stdout"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+
+[[params.items.params]]
+name = "stderr"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.items.params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+
+[[params.items.params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+
+[[params]]
+name = "env"
+type = "object"
+additional_properties = { type = "string" }
+description = """
+Optional typed environment bindings. Keys must be [A-Za-z0-9_]+ and values \
+are strings."""
+
+[[params]]
+name = "cwd"
+type = "string"
+description = """
+Working directory for the command, and the only way to set one: there is no \
+shell, so 'cd' runs as a program, changes the directory of a child that \
+exits, and reports success having done nothing. Must stay within the keeper \
+sandbox or an explicit allowed path. Pass a relative cwd, typically '.'. The \
+Keeper-visible absolute root is informational, not a cwd input. Docker host \
+absolute paths are unavailable."""
+
+[[params]]
+name = "timeout_sec"
+type = "number"
+exclusive_minimum = 0.0
+description = """
+Optional explicit subprocess wall-clock timeout in seconds. When absent, \
+Execute is unbounded and remains cancellable."""
+
+[[params]]
+name = "stdin"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.params]]
+name = "file"
+type = "string"
+min_length = 1
+pattern = "^/"
+description = "Absolute path to read from, the typed form of '<'."
+
+[[params]]
+name = "stdout"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+description = "Absolute path to replace, the typed form of '>'."
+
+[[params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+description = "Absolute path to add to, the typed form of '>>'."
+
+[[params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+description = """
+Send this stream into another of the stage's output descriptors, the typed \
+form of '2>&1'. The two streams are captured separately and joined \
+afterwards, so the merged text is grouped by stream, not ordered by time."""
+
+[[params]]
+name = "stderr"
+type = "object"
+additional_properties = false
+min_properties = 1
+max_properties = 1
+
+[[params.params]]
+name = "discard"
+type = "boolean"
+
+[[params.params]]
+name = "truncate"
+type = "string"
+min_length = 1
+pattern = "^/"
+description = "Absolute path to replace, the typed form of '>'."
+
+[[params.params]]
+name = "append"
+type = "string"
+min_length = 1
+pattern = "^/"
+description = "Absolute path to add to, the typed form of '>>'."
+
+[[params.params]]
+name = "fd"
+type = "integer"
+enum = [1, 2]
+description = """
+Send this stream into another of the stage's output descriptors, the typed \
+form of '2>&1'. The two streams are captured separately and joined \
+afterwards, so the merged text is grouped by stream, not ordered by time."""
+
+[[params]]
+name = "script"
+type = "string"
+min_length = 1
+description = """
+Shell form: one command line, parsed rather than handed to a shell. Pipes, \
+'&&', '||', ';' and redirections are read as structure. Use this instead of \
+putting a script in argv as 'bash -c'. Constructs outside the supported \
+subset are refused by name rather than run. Mutually exclusive with 'argv' \
+and 'pipeline'."""
+
+[[one_of]]
+required = ["argv"]
+forbidden = ["pipeline"]
+description = """
+Single-process form: include one non-empty 'argv'. DO NOT also include \
+'pipeline' in the same call."""
+
+[[one_of]]
+required = ["pipeline"]
+forbidden = ["argv"]
+description = """
+Pipeline form: include 'pipeline' array of exec stages.  DO NOT also include \
+top-level 'argv' in the same call."""
+
+[[one_of]]
+required = ["script"]
+forbidden = ["argv", "pipeline"]
+description = """
+Shell form: include 'script'.  DO NOT also include 'argv' or 'pipeline' in \
+the same call."""

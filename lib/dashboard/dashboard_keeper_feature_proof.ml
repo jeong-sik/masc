@@ -168,12 +168,20 @@ let meta_counter_feature
       | _ -> None)
     |> uniq_sorted
   in
+  (* Only keepers whose meta was read and did not carry the evidence. A
+     keeper whose record would not open is reported under [read_errors]
+     instead: it did not fail to exercise the feature, it failed to be read,
+     and listing it here would blame the keeper for a read failure and put
+     the same name in two lists that mean opposite things.
+
+     It still cannot reach [Pass], because it is counted in [total] and never
+     in [observed]. Unknown does not become proven by being set aside. *)
   let missing =
     eligible_snapshots
     |> List.filter_map (fun snapshot ->
       match snapshot.meta with
-      | Some meta when predicate meta -> None
-      | _ -> Some snapshot.keeper_name)
+      | Some meta -> if predicate meta then None else Some snapshot.keeper_name
+      | None -> None)
     |> uniq_sorted
   in
   let status =
@@ -415,9 +423,16 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       | _ -> Some snapshot.keeper_name)
     |> uniq_sorted
   in
+  (* Read errors are counted over every keeper, not over [enabled]. A keeper
+     whose meta will not open never reaches that filter, so computing them
+     there made the field structurally empty -- a report that could only ever
+     say "no read errors", which reads as "every record opened". *)
+  let unreadable = keeper_read_errors snapshots in
   let status =
     if total = 0 || observed = [] then Fail
-    else if List.length observed = total then Pass
+    (* A record that would not open leaves its keeper's proactive setting
+       unknown, so the fleet cannot be called proven while one exists. *)
+    else if List.length observed = total && unreadable = [] then Pass
     else Warn
   in
   let per_keeper =
@@ -464,7 +479,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
        ("meta_count", `Int (count_meta enabled));
        ("observed_keepers", Json_util.json_string_list observed);
        ("missing_keepers", Json_util.json_string_list missing);
-       ("read_errors", `List (keeper_read_errors enabled));
+       ("read_errors", `List unreadable);
        ("per_keeper", `List per_keeper);
      ]);
     ( "evidence_refs",

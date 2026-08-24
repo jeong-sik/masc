@@ -3127,12 +3127,12 @@ let main () =
      holds one the operator sees the cause ahead of the symptom: a tokenless
      process cannot dispatch, and cannot reconcile a dispatch an authenticated
      predecessor left behind. *)
-  Masc_tui_http.install_operator_token ~base_path;
-  if not (Masc_tui_http.operator_token_present ()) then
-    add_event state "error"
-      "No operator token: neither MASC_TOKEN nor this workspace holds one, so \
-       sends and approvals are refused and a recovered dispatch cannot be \
-       reconciled. Run: masc login --agent masc-tui --client-env MASC_TOKEN";
+  (match
+     Masc_tui_credential.outcome_notice
+       (Masc_tui_http.install_operator_token ~base_path ~host ~port)
+   with
+   | Some notice -> add_event state "error" notice
+   | None -> ());
   (match Keeper_chat_recovery.load_pending ~base_path with
    | Ok None -> ()
    | Error detail ->

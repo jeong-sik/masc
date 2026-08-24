@@ -915,6 +915,7 @@ sse_targets=(
   @test/runtest-test_tui_keeper_chat_recovery
   @test/runtest-test_tui_composer
   @test/runtest-test_tui_markdown
+  @test/runtest-test_tui_credential
   @test/runtest-test_tui_keeper_control
   @test/runtest-test_tui_keeper_selection
   @test/runtest-test_tui_keyboard_input

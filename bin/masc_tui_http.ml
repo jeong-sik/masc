@@ -28,7 +28,7 @@ let sanitize_header_value value =
        | c -> c)
   |> String.trim
 
-let default_agent_name = "masc-tui"
+let default_agent_name = Masc_tui_credential.agent_name
 
 (* One name for the bearer the write routes require, so the header builder and
    the surfaces that report its absence cannot disagree about whether this
@@ -40,16 +40,68 @@ let default_agent_name = "masc-tui"
    workspace other than the one on screen. *)
 let operator_token_cell = ref None
 
-(* [MASC_TOKEN] wins so a single run can be pointed at a different credential.
-   Its absence is no longer a failure: [masc login] already wrote this agent's
-   bearer under the workspace, and that file outlives the shell. *)
-let install_operator_token ~base_path =
-  operator_token_cell
-  := (match first_nonempty_env [ "MASC_TOKEN" ] with
-      | Some _ as token -> token
-      | None ->
-          Auth_login.read_persisted_token ~base_path
-            ~agent_name:default_agent_name)
+(* Carry out [Masc_tui_credential.plan]. The environment wins so a single run
+   can be pointed at a different credential; otherwise the bearer comes from the
+   workspace, and a workspace that demands one but holds none gets one minted.
+
+   Minting grants nothing this process did not already have: the credential
+   store is a directory under the workspace, so anything that can read the
+   bearer masc login wrote can equally write another. The trust boundary is
+   filesystem access to the workspace, not possession of the token. What it
+   does remove is the operator's obligation to carry a secret from shell to
+   shell, which is where every refusal in this file started.
+
+   Admin because that is the role [masc login] issues for this agent, and the
+   keeper lifecycle routes the TUI already offers require it -- minting a
+   narrower role would leave working surfaces failing. *)
+let install_operator_token ~base_path ~host ~port =
+  let cfg = Auth.load_auth_config base_path in
+  (* The auth directory, not the config file: a missing config reads as the
+     default, so its absence proves nothing about whether a workspace is here.
+     The directory holds the credential store, so a workspace a server has ever
+     served has one.
+
+     Read before anything else in startup can create it. Other startup steps do
+     make directories under .masc for a base path that names nothing -- a
+     mistyped flag gets an empty .masc/keepers -- and a check that ran after
+     one of those had made .masc/auth would read its own footprint as evidence
+     of a workspace. *)
+  let workspace_initialized = Sys.file_exists (Auth.auth_dir base_path) in
+  let outcome =
+    match
+      Masc_tui_credential.plan
+        ~env_token:(first_nonempty_env [ Masc_tui_credential.token_env_var ])
+        ~workspace_token:
+          (Auth_login.read_persisted_token ~base_path
+             ~agent_name:default_agent_name)
+        ~workspace_requires_token:(cfg.enabled && cfg.require_token)
+        ~workspace_initialized
+    with
+    | Masc_tui_credential.Use token ->
+        operator_token_cell := Some token;
+        Masc_tui_credential.Held
+    | Masc_tui_credential.Go_without ->
+        operator_token_cell := None;
+        Masc_tui_credential.Not_required
+    | Masc_tui_credential.No_workspace ->
+        operator_token_cell := None;
+        Masc_tui_credential.Unavailable Masc_tui_credential.no_workspace_detail
+    | Masc_tui_credential.Mint -> (
+        match
+          Auth_login.mint ~base_path ~host ~port
+            ~agent_name:default_agent_name ~role:Masc_domain.Admin
+            ~token_env_var:Masc_tui_credential.token_env_var
+            ~token_lifetime:Auth_login.Long_lived ()
+        with
+        | Ok report ->
+            operator_token_cell := Some report.bearer_token;
+            Masc_tui_credential.Minted
+        | Error err ->
+            operator_token_cell := None;
+            Masc_tui_credential.Unavailable
+              (Masc_domain.masc_error_to_string err))
+  in
+  outcome
 
 let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())
@@ -99,21 +151,33 @@ let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "POST failed" e)
 
+(* A refusal is about this client's credential, not about the surface that
+   asked for the data. Every surface used to paste the server's auth JSON into
+   the terminal -- "HTTP 401: {\"error\":\"[AuthError] Invalid token..." -- which
+   names neither what is wrong nor what clears it. Answered here because this
+   is the one place that knows what was presented. Other statuses keep the
+   server's own words: those are about the request, and the surface is right to
+   show them. *)
+let decode_json ~allow_empty ~status_code ~body =
+  match status_code with
+  | 401 | 403 ->
+      Error
+        (Masc_tui_credential.refusal
+           ~credential_sent:(operator_token_present ()))
+  | _ ->
+      Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
+
 (** GET a JSON response from a dashboard endpoint. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
   match http_get ~host ~port ~path with
   | Error e -> Error e
-  | Ok (status_code, body) ->
-      Masc.Tui_decode.decode_json_response_body ~allow_empty:false ~status_code
-        ~body
+  | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
-  | Ok (status_code, body) ->
-      Masc.Tui_decode.decode_json_response_body ~allow_empty:true ~status_code
-        ~body
+  | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
 let post_keeper_chat ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :

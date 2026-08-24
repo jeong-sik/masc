@@ -2718,6 +2718,11 @@
  (libraries alcotest masc_tui_composer masc_tui_render_schedule))
 
 (test
+ (name test_tui_credential)
+ (modules test_tui_credential)
+ (libraries alcotest masc.string_util masc_tui_credential))
+
+(test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
  (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))

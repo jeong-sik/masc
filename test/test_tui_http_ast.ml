@@ -1067,12 +1067,14 @@ let test_missing_operator_token_is_reported () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"Masc_tui_http.install_operator_token");
   (* Not a call count on [operator_token_present]: every surface that reports a
-     refusal now reads it, so counting occurrences stopped saying anything about
-     the startup line. The notice's own words are what must not disappear. *)
-  check int "startup still names both places a bearer could come from" 1
-    (Ast_grep.count_string_literals
+     refusal now reads it, so counting occurrences says nothing about startup.
+     What must not disappear is that startup says out loud what came of binding
+     a bearer -- a silent mint reads to the operator as a broken credential
+     when the server's index has not caught up yet. *)
+  check int "startup reports what came of binding a bearer" 1
+    (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
-       ~needle:"neither MASC_TOKEN nor this workspace");
+       ~callee:"Masc_tui_credential.outcome_notice");
   (* Both refusal surfaces must ask what this process actually holds. Passing a
      constant would compile and read plausibly while asserting something the
      401 never established -- which is the failure these lines exist to end. *)
@@ -1090,7 +1092,27 @@ let test_missing_operator_token_is_reported () =
        ~callee:"Keeper_control.roster_failure_message"
        ~label:"credential_sent"
        ~nested_callee:"Masc_tui_http.operator_token_present");
-  check int "the bearer env name is read in one place" 1
+  (* Every surface reads JSON through these two. Answering a refusal inside them
+     is what keeps the server's auth body out of six different panes; a surface
+     that decoded the status itself would print it again. *)
+  check int "the JSON reads share one refusal answer" 2
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json");
+  check int "no surface decodes a status on its own" 1
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_http.ml"
+       ~callee:"Masc.Tui_decode.decode_json_response_body");
+  (* Needled on the sentence rather than on "operator token": doc comments reach
+     the parsetree as string constants, so the looser needle counts prose that
+     is not a message. *)
+  check int "the refusal sentence has one owner" 0
+    (Ast_grep.count_string_literals_across_files
+       ~module_paths:[ "bin/masc_tui_http.ml"; "bin/masc_tui.ml" ]
+       ~needle:"holds no operator token");
+  (* Zero, not one: the name reaches a lookup, the argument that tells
+     masc login which name to print, and the command handed to the operator.
+     Three copies of one fact is how the header, the file, and the advice end
+     up naming different things. *)
+  check int "the bearer env name has one owner" 0
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_http.ml"
        ~needle:"MASC_TOKEN")

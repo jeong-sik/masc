@@ -89,6 +89,15 @@ let execute_with_observers
             ~input
             ())
     in
+    (* Carried to the row writer beside the truncation info, which crosses the
+       same boundary for the same reason. Two other stores already receive
+       this value below; the per-call row is the one that had to infer it. *)
+    Option.iter
+      (fun invocation ->
+         Keeper_tool_call_log.set_disposition
+           ~invocation
+           ~disposition:result.Keeper_tool_execution.disposition)
+      agent_core_invocation;
     let raw_result = result.Keeper_tool_execution.raw_output in
     let producer_data = result.data in
     let producer_metadata = result.metadata in

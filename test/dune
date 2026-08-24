@@ -1296,6 +1296,8 @@
   masc_test_runtime
   masc.embedded_config
   bigstringaf
+  ; test_activity_graph checks its day file against the layout owner
+  masc.jsonl_writer
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
   decompress.gz)
@@ -2588,7 +2590,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries alcotest ast_grep)
+ (libraries alcotest ast_grep masc_tui_keeper_chat_queue)
  (deps
   (source_tree ../bin)))
 

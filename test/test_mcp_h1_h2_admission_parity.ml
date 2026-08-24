@@ -661,7 +661,20 @@ let test_transport_guarded_paths_are_not_public_read () =
         (Printf.sprintf "%s is not public-read" path)
         false
         (Server_auth.is_public_read_path path))
-    [ "/graphql"; "/api/v1/dashboard/workspace"; "/api/v1/status" ]
+    [ "/graphql"
+    ; "/api/v1/dashboard/workspace"
+    ; "/api/v1/status"
+      (* Wrapped in with_public_read on HTTP/1 and answered unauthenticated
+         over h2c until #28161: the H2 arms ran their handlers with no gate at
+         all. They stay out of the allowlist, or wrapping them changes
+         nothing. *)
+    ; "/api/v1/openapi.json"
+    ; "/api/v1/voice/config"
+    ; "/api/v1/board/curation"
+    ; "/api/v1/board/hearths"
+    ; "/api/v1/board/karma/ledger"
+    ; "/api/v1/karma"
+    ]
 
 (* serve_auto hands h2c connections to Server_h2_gateway and everything else to
    the HTTP/1 router, so a route's authorization is decided independently on
@@ -696,7 +709,33 @@ let test_h1_h2_read_gate_wiring_parity () =
   (* [with_server_state] performs no authorization; no read route may reach it
      directly. The arms that still call it (MCP) authorize inside. *)
   assert_not_contains "H2 /graphql no longer reads state without authorizing"
-    ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2
+    ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2;
+  (* The delegated module has no gate of its own; it takes this gateway's.
+     Five of its routes are with_public_read on HTTP/1 and ran unauthenticated
+     over h2c (#28161). *)
+  let h2_extra = source_file "lib/server/server_h2_gateway_routes_extra.ml" in
+  assert_contains "H2 hands the delegated routes its own public-read gate"
+    ~needle:"~with_public_read:(fun f ->" h2;
+  List.iter
+    (fun (path, needle) ->
+      assert_contains
+        (Printf.sprintf "H2 %s passes through the public-read gate" path)
+        ~needle
+        h2_extra)
+    [ "/api/v1/voice/config",
+      "| `GET, \"/api/v1/voice/config\" ->\n      with_public_read"
+    ; "/api/v1/board/curation",
+      "| `GET, \"/api/v1/board/curation\" ->\n      with_public_read"
+    ; "/api/v1/board/hearths",
+      "| `GET, \"/api/v1/board/hearths\" ->\n      with_public_read"
+    ; "/api/v1/board/karma/ledger",
+      "| `GET, \"/api/v1/board/karma/ledger\" ->\n      with_public_read"
+    ; "/api/v1/karma",
+      "| `GET, \"/api/v1/karma\" ->\n      with_public_read"
+    ];
+  assert_contains "H2 openapi.json passes through the public-read gate"
+    ~needle:"| `GET, \"/api/v1/openapi.json\" ->\n          (*"
+    h2
 
 let () =
   Eio_main.run @@ fun env ->

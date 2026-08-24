@@ -21,8 +21,10 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_TOOL_APPROVAL_REQUESTED',
   'KEEPER_TOOL_APPROVAL_SETTLED',
   'KEEPER_TOOL_RESULT_READY',
-  'KEEPER_TOOL_APPROVAL_REQUESTED',
-  'KEEPER_TOOL_APPROVAL_SETTLED',
+  // #29742 and #29744 both registered the two approval events for the same
+  // main-red and both merged, leaving them listed twice. A duplicate entry
+  // makes the contract array longer than the OCaml codec's vocabulary and
+  // fails the cross-language parity test the other way.
 ] as const
 
 export type KeeperChatCustomEventName = typeof KEEPER_CHAT_CUSTOM_EVENT_NAMES[number]

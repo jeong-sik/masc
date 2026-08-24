@@ -218,6 +218,85 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn () =
+  `Assoc
+    ([ "ts", `Float 1787534998.4
+     ; "keeper", `String keeper
+     ; "tool", `String tool
+     ; "input", `String "{\"file_path\": \"lib/a.ml\"}"
+     ; "success", `Bool success
+     ]
+    @ (match duration_ms with None -> [] | Some d -> [ "duration_ms", `Float d ])
+    @ (match turn with None -> [] | Some t -> [ "turn", `Int t ]))
+
+let test_keeper_calls_reject_rows_naming_another_keeper () =
+  let payload =
+    `Assoc
+      [ "keeper", `String "rondo"
+      ; "count", `Int 3
+      ; "health", `String "ok"
+      ; "latest_age_s", `Float 8.2
+      ; "stale_reason", `String "fresh"
+      ; ( "entries"
+        , `List
+            [ keeper_call_row ~keeper:"rondo" ~tool:"Read" ~duration_ms:28.4
+                ~turn:2143 ()
+            ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
+            ; keeper_call_row ~keeper:"rondo" ~tool:"tool_execute"
+                ~success:false ()
+            ] )
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo" payload
+  with
+  | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
+  | Ok snapshot ->
+      Alcotest.(check int) "two rows kept in order" 2
+        (List.length snapshot.Tui_decode.kcs_entries);
+      Alcotest.(check int) "the foreign row is counted, not drawn" 1
+        snapshot.Tui_decode.kcs_mismatched;
+      (match snapshot.Tui_decode.kcs_entries with
+       | [ first; second ] ->
+           Alcotest.(check string) "order kept" "Read" first.Tui_decode.kc_tool;
+           Alcotest.(check bool) "failure carried" false
+             second.Tui_decode.kc_success;
+           Alcotest.(check (option (Alcotest.float 0.01))) "duration optional"
+             (Some 28.4) first.Tui_decode.kc_duration_ms;
+           Alcotest.(check (option Alcotest.int)) "turn optional" (Some 2143)
+             first.Tui_decode.kc_turn
+       | _ -> Alcotest.fail "expected two rows");
+      Alcotest.(check (option string)) "a fresh stale_reason is no reason" None
+        snapshot.Tui_decode.kcs_stale_reason;
+      Alcotest.(check string) "health verbatim" "ok"
+        snapshot.Tui_decode.kcs_health
+
+let test_keeper_calls_require_the_envelope () =
+  Alcotest.(check bool) "no entries list is an error" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+          (`Assoc
+             [ "keeper", `String "rondo"
+             ; "count", `Int 0
+             ; "health", `String "ok"
+             ])));
+  Alcotest.(check bool) "a row without success is an error" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+          (`Assoc
+             [ "keeper", `String "rondo"
+             ; "count", `Int 1
+             ; "health", `String "ok"
+             ; ( "entries"
+               , `List
+                   [ `Assoc
+                       [ "ts", `Float 1.0
+                       ; "keeper", `String "rondo"
+                       ; "tool", `String "Read"
+                       ]
+                   ] )
+             ])))
+
 let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string) "normal clock timestamp" "04:05:06"
     (Tui_decode.clock_timestamp_for_terminal "2026-08-22T04:05:06Z");
@@ -1927,6 +2006,13 @@ let () =
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
+      ] );
+    ( "keeper_calls",
+      [
+        Alcotest.test_case "rejects rows naming another keeper" `Quick
+          test_keeper_calls_reject_rows_naming_another_keeper
+      ; Alcotest.test_case "requires the envelope" `Quick
+          test_keeper_calls_require_the_envelope
       ] );
     ( "parse_log_entry",
       [

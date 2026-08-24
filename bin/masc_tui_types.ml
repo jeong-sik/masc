@@ -343,6 +343,7 @@ type keeper_mode =
   | Keeper_list
   | Keeper_detail
   | Keeper_logs
+  | Keeper_calls
   | Keeper_message
 
 (** Top-level TUI surface. *)
@@ -381,6 +382,16 @@ let surface_needs : surface -> surface_needs = function
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
+(* A request that has been POSTed and has not settled, with when it went out.
+   The instant rides with the request rather than in a second structure keyed
+   by id: a turn taking minutes is normal here and an operator watching one
+   needs to see it advancing, but two structures for one fact drift the moment
+   somebody adds a third place that removes a request. *)
+type inflight =
+  { sent_request : Masc_tui_keeper_chat_projection.request
+  ; sent_at : float
+  }
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -422,6 +433,9 @@ type state = {
   mutable last_refresh: float;
   mutable view: surface;
   mutable keeper_cursor: int;
+  mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
+  mutable keeper_calls_error: string option;
+  mutable keeper_calls_scroll: int;
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
@@ -560,7 +574,7 @@ type state = {
      serialized on a single slot because the durable recovery fence held one
      un-acknowledged POST for the whole workspace; with that gone the only
      reason left is per keeper, which is how the server runs turns anyway. *)
-  mutable msg_inflight: Masc_tui_keeper_chat_projection.request list;
+  mutable msg_inflight: inflight list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -576,14 +590,16 @@ type send_disposition =
    keeper does not decide what Enter does here. *)
 let inflight_for_keeper state keeper_name =
   List.find_opt
-    (fun (request : Masc_tui_keeper_chat_projection.request) ->
-      String.equal request.keeper_name keeper_name)
+    (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
     state.msg_inflight
 ;;
 
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state
-    ~inflight:(inflight_for_keeper state keeper_name)
+    ~inflight:
+      (Option.map
+         (fun entry -> entry.sent_request)
+         (inflight_for_keeper state keeper_name))
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
@@ -645,6 +661,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   last_refresh = 0.0;
   view = Overview;
   keeper_cursor = 0;
+  keeper_calls = None;
+  keeper_calls_error = None;
+  keeper_calls_scroll = 0;
   log_entries = [];
   log_error = None;
   log_scroll = 0;

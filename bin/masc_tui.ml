@@ -3256,7 +3256,7 @@ let main () =
                 launch_keeper_history_load state ~mailbox:async_messages
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
-            | Keepers Keeper_detail | Keepers Keeper_list
+            | Keepers Keeper_list | Keepers Keeper_detail
             | Overview | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness

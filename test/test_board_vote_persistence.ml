@@ -512,6 +512,42 @@ let test_vote_comment_persistence_failure_leaves_nothing_committed () =
     1
     (List.length (List.filter (fun (t, v, _) -> t = target && v = voter) rows))
 
+(* Only the vote log write fails here: posts and comments land, so the two
+   writers that already re-mark on failure stay quiet and the assertion is
+   about the third. A directory sitting where the vote log file goes makes
+   [save_file_atomic] fail without disturbing anything else.
+
+   [flush_dirty] clears the dirty flags before writing. Dropping this failure
+   left the cast votes out of the log with nothing scheduled to write them
+   again -- the shape the posts and comments writers fixed in #26168. *)
+let test_flush_failure_keeps_the_vote_log_scheduled () =
+  let voter = "vote-log-retry-voter" in
+  let post =
+    create_post_exn ~author:"vote-log-retry-author" ~content:"vote log retry body"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let store =
+    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
+  in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail ("vote must succeed: " ^ Board.show_board_error e));
+  Alcotest.(check bool) "the vote marked the post dirty" true store.Board.dirty_posts;
+  let vote_log = Board_votes.vote_log_path () in
+  (try Sys.remove vote_log with Sys_error _ -> ());
+  Fs_compat.mkdir_p vote_log;
+  let before = Board.persist_error_count () in
+  Board.flush_dirty store;
+  Alcotest.(check bool)
+    "the failed vote log write was counted"
+    true
+    (Board.persist_error_count () > before);
+  Alcotest.(check bool)
+    "the vote log write is still scheduled after it failed"
+    true
+    store.Board.dirty_posts
+;;
+
 let () =
   Alcotest.run "board_vote_persistence"
     [
@@ -542,5 +578,9 @@ let () =
             "comment vote: failed append leaves nothing committed"
             `Quick
             (with_eio test_vote_comment_persistence_failure_leaves_nothing_committed);
+          Alcotest.test_case
+            "flush: failed vote log write stays scheduled"
+            `Quick
+            (with_eio test_flush_failure_keeps_the_vote_log_scheduled);
         ] );
     ]

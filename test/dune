@@ -276,6 +276,7 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
@@ -600,6 +601,7 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity

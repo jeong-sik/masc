@@ -39,13 +39,10 @@ let cleanup_dir dir =
 
 let make_keeper_meta ~name ~trace_id =
   match
+    (* agent_name is omitted: the fixture derives the canonical
+       keeper-<name>-agent form, which the parser requires. *)
     Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-         [
-           ("name", `String name);
-           ("agent_name", `String name);
-           ("trace_id", `String trace_id);
-         ])
+      (`Assoc [ ("name", `String name); ("trace_id", `String trace_id) ])
   with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_keeper_meta failed: %s" e)

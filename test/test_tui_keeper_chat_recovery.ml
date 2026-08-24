@@ -438,7 +438,16 @@ let test_dispatch_claim_postcommit_cancellation_blocks_callback () =
     (Recovery.load_pending ~base_path
      |> expect_phase "durable dispatching fence retained" Recovery.Dispatching)
 
-let test_dispatch_lock_serializes_two_callers () =
+(* A dispatch that is still running is the ordinary case: the POST stays open
+   until the turn's stream ends. Every TUI on the workspace shares one fence,
+   so caller B has to reach it while caller A is mid-turn -- otherwise one turn
+   that never settles silences every other TUI, and the escape the UI names for
+   that (Ctrl-R) needs the same lock and fails with it (#29750).
+
+   Letting B through costs no safety: it reads [Dispatching] and is handed
+   [Reconcile_dispatch], which authorises no POST. Serialising the two only
+   decided which answer B saw, not whether a second POST could happen. *)
+let test_dispatch_in_flight_admits_other_callers () =
   with_base "dispatch-lock" @@ fun base_path ->
   let expected = request () in
   Recovery.persist_pending ~base_path expected |> expect_fsync "prepare";
@@ -478,8 +487,8 @@ let test_dispatch_lock_serializes_two_callers () =
     let result =
       Recovery.with_dispatch_claim ~base_path expected (fun claim ->
         Atomic.set second_entered true;
-        check bool "caller B observes accepted" true
-          (claim = Recovery.Accepted_dispatch))
+        check bool "caller B is authorised no second POST" true
+          (claim = Recovery.Reconcile_dispatch))
     in
     second_result := Some result
   in
@@ -490,8 +499,11 @@ let test_dispatch_lock_serializes_two_callers () =
   done;
   check bool "caller B attempted dispatch claim" true
     (Atomic.get second_attempted);
-  Thread.delay 0.1;
-  check bool "caller B blocked while caller A dispatches" false
+  let deadline = Unix.gettimeofday () +. 2.0 in
+  while not (Atomic.get second_entered) && Unix.gettimeofday () < deadline do
+    Thread.delay 0.001
+  done;
+  check bool "caller B reached the fence while caller A dispatches" true
     (Atomic.get second_entered);
   Stdlib.Mutex.lock mutex;
   release_first := true;
@@ -503,13 +515,19 @@ let test_dispatch_lock_serializes_two_callers () =
     !first_result;
   check (option (result unit string)) "caller B result" (Some (Ok ()))
     !second_result;
-  check bool "caller B entered after release" true (Atomic.get second_entered)
+  ignore
+    (Recovery.load_pending ~base_path
+     |> expect_phase "caller A still owns the outcome" Recovery.Accepted)
 
-let test_dispatch_lock_blocks_external_process () =
+(* Exclusion lives on the fence, not on a lock the caller holds across its own
+   work. An external holder of the fence lock is the case that has to fail
+   closed: while it is held nobody can read the phase and write the next one,
+   so nobody may act on a claim. *)
+let test_fence_lock_blocks_external_process () =
   with_base "dispatch-external-lock" @@ fun base_path ->
   let expected = request () in
   Recovery.persist_pending ~base_path expected |> expect_fsync "prepare";
-  let lock_path = Recovery.recovery_path ~base_path ^ ".dispatch.lock" in
+  let lock_path = Recovery.recovery_path ~base_path ^ ".lock" in
   let ready_read, ready_write = Unix.pipe () in
   let release_read, release_write = Unix.pipe () in
   let pid =
@@ -550,9 +568,9 @@ let test_dispatch_lock_blocks_external_process () =
        with
        | Error detail ->
            check bool "lock contention is explicit" true
-             (String.starts_with ~prefix:"Keeper chat dispatch lock failed:"
+             (String.starts_with ~prefix:"Keeper chat recovery lock failed:"
                 detail)
-       | Ok () -> fail "external dispatch lock admitted a second caller");
+       | Ok () -> fail "a held fence lock admitted a claim");
       check bool "contended callback did not run" false !callback_ran)
 
 let test_first_rejection_clears_before_stale_dispatch () =
@@ -939,10 +957,10 @@ let () =
             test_dispatch_claim_after_rename_failure_blocks_callback
         ; test_case "claim postcommit cancellation blocks callback" `Quick
             test_dispatch_claim_postcommit_cancellation_blocks_callback
-        ; test_case "dispatch lock serializes two callers" `Quick
-            test_dispatch_lock_serializes_two_callers
-        ; test_case "dispatch lock blocks external process" `Slow
-            test_dispatch_lock_blocks_external_process
+        ; test_case "dispatch in flight admits other callers" `Quick
+            test_dispatch_in_flight_admits_other_callers
+        ; test_case "fence lock blocks external process" `Slow
+            test_fence_lock_blocks_external_process
         ; test_case "first rejection blocks stale dispatch" `Quick
             test_first_rejection_clears_before_stale_dispatch
         ; test_case "rejection cleanup failure blocks replay" `Quick

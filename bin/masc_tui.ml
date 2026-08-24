@@ -467,6 +467,17 @@ type async_msg =
   | Observer_opened of string
   | Observer_received of Masc_tui_observer.decoded list
   | Observer_closed of string
+  | Task_dispatched of {
+      keeper : string;
+      task_id : string;
+      title : string;
+      body : string;
+    }
+  | Task_dispatch_failed of {
+      keeper : string;
+      detail : string;
+      original : string;
+    }
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -1075,6 +1086,100 @@ let chat_status_text completed =
       Printf.sprintf "External effect remains pending (turn %s)" turn_ref
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
+
+(* /task in the composer or the chat pane: create the task first, then hand
+   the keeper the operator's words with the task id in front. Creation runs
+   on a daemon fiber; only the mailbox result mutates state. The MCP session
+   is the one the observer feed keeps; without one, this call opens one and
+   the observer reuses it. *)
+let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let session = state.mcp_session in
+  (* A JSON-RPC id for this one call: the answer must name it back. Wall
+     clock is identity enough for correlation on a single request. *)
+  let request_id = Printf.sprintf "tui-task-%.6f" (Unix.gettimeofday ()) in
+  let run () =
+    let result =
+      try
+        let session_result =
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
+        in
+        match session_result with
+        | Error detail -> Error detail
+        | Ok session_id -> (
+            let arguments =
+              ("title", `String title)
+              ::
+              (if String.trim body = "" then []
+               else [ ("description", `String body) ])
+            in
+            match
+              Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
+                ~tool:"masc_add_task" ~arguments
+            with
+            | Error detail -> Error detail
+            | Ok outcome ->
+                if outcome.Masc_tui_mcp.is_error then
+                  Error outcome.Masc_tui_mcp.text
+                else Masc_tui_mcp.task_id_of_add_task outcome.Masc_tui_mcp.text)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (match result with
+       | Ok task_id ->
+           Task_dispatched { keeper = keeper_name; task_id; title; body }
+       | Error detail ->
+           Task_dispatch_failed { keeper = keeper_name; detail; original })
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Task_dispatch_failed
+           { keeper = keeper_name
+           ; detail = "Eio switch is unavailable"
+           ; original
+           })
+
+(* One reading of what the operator typed, wherever they typed it: the
+   composer row or the chat pane's input. Text goes to the keeper as it
+   always did; a slash word is the TUI's to act on, and a mistyped one is
+   reported rather than sent to the keeper as an instruction. *)
+let send_operator_text ?keeper_name state ~mailbox text =
+  match Masc_tui_command.parse text with
+  | Masc_tui_command.Say _ ->
+      start_keeper_message ?keeper_name state ~mailbox text
+  | Masc_tui_command.Task_missing_title ->
+      add_event state "error" "/task needs a title on the same line"
+  | Masc_tui_command.Unknown word ->
+      add_event state "error"
+        (Printf.sprintf
+           "unknown command /%s (text is sent as typed; /task <title> creates             work)"
+           word)
+  | Masc_tui_command.Task_for_keeper { title; body } -> (
+      let target =
+        match keeper_name with
+        | Some _ as named -> named
+        | None -> state.msg_target_keeper_name
+      in
+      match target with
+      | None -> add_event state "error" "/task needs a keeper to hand the work to"
+      | Some keeper ->
+          Buffer.clear state.msg_input;
+          add_event state "task"
+            (Printf.sprintf "creating a task for %s: %s" keeper title);
+          launch_task_dispatch state ~mailbox ~keeper_name:keeper ~title ~body
+            ~original:text)
 
 let apply_keeper_chat_result state request result =
   match inflight_by_request_id state request.Keeper_chat.request_id with
@@ -2117,9 +2222,16 @@ let handle_composer_key state ~base_path ~mailbox key =
   | Composer.Send ->
       state.composer_focused <- false;
       let text = Buffer.contents state.msg_input in
-      state.msg_scroll <- 0;
-      state.view <- Keepers Keeper_message;
-      start_keeper_message state ~mailbox text;
+      (match Masc_tui_command.parse text with
+       | Masc_tui_command.Say _ ->
+           state.msg_scroll <- 0;
+           state.view <- Keepers Keeper_message
+       | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
+       | Masc_tui_command.Unknown _ ->
+           (* A command keeps the surface: the operator asked the TUI, not
+              the keeper, and the answer lands in Recent Events. *)
+           ());
+      send_operator_text state ~mailbox text;
       true
   | Composer.Edit ->
       let _handled =
@@ -2176,6 +2288,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         state.acting_dropped <-
           state.acting_dropped + (kept - Masc_tui_types.acting_retained_entries)
       end
+  | Task_dispatched { keeper; task_id; title; body } ->
+      add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
+      state.msg_scroll <- 0;
+      state.view <- Keepers Keeper_message;
+      start_keeper_message ~keeper_name:keeper state ~mailbox
+        (Masc_tui_command.task_message ~task_id ~title ~body)
+  | Task_dispatch_failed { keeper; detail; original } ->
+      (* The operator's words come back to the input so nothing typed is
+         lost with the failure. *)
+      Buffer.clear state.msg_input;
+      Buffer.add_string state.msg_input original;
+      add_event state "error"
+        (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed reason ->
       let events =
         match state.observer with
@@ -2736,7 +2861,7 @@ let main () =
              let _handled =
                handle_message_key state
                  ~submit_message:
-                   (start_keeper_message state ~mailbox:async_messages)
+                   (send_operator_text state ~mailbox:async_messages)
                  ~answer_approval:(fun ~tool_call_id ~allow ->
                    match
                      Option.bind state.msg_live (fun live ->

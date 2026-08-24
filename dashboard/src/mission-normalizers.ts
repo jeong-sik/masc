@@ -38,6 +38,10 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     phase: asString(raw.phase) ?? null,
     pipeline_stage: asString(raw.pipeline_stage) ?? null,
     paused: asBoolean(raw.paused) ?? null,
+    // The brief row publishes health as a top-level word; the execution
+    // route publishes the same axis under `diagnostic.health_state`. Two
+    // placements, one axis — `isKeeperOffline` parses either.
+    health: asString(raw.health) ?? null,
     agent_name: asString(raw.agent_name),
     status: asString(raw.status),
     context_ratio: asNumber(raw.context_ratio),

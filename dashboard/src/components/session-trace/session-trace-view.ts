@@ -21,7 +21,6 @@ import {
   traceSlots,
 } from './session-trace-state'
 import type { TraceSummary } from './session-trace-state'
-import { isOfflineStatus } from '../../lib/keeper-classifiers'
 
 // ── Summary bar ────────────────────────────────────────
 
@@ -158,10 +157,14 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
 interface SessionTraceViewProps {
   agentName: string
   isKeeper: boolean
-  keeperStatus?: string
+  /** 빈 목록에 어떤 문장을 쓸지만 정한다. 예전에는 `keeper.status` 문자열을
+   *  받아 이 컴포넌트가 직접 분류했는데, 그 단어는 health 와 phase 를 한 번
+   *  접은 값이라 여기까지 오면 판정이 화면마다 갈렸다. 부모가 축을 읽어
+   *  답만 넘긴다. */
+  keeperOffline?: boolean
 }
 
-export function SessionTraceView({ agentName, isKeeper, keeperStatus }: SessionTraceViewProps) {
+export function SessionTraceView({ agentName, isKeeper, keeperOffline }: SessionTraceViewProps) {
   const listRef = useRef<HTMLDivElement>(null)
 
   // Load on first mount. Clean up only when agentName changes (overlay closes).
@@ -218,7 +221,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus }: SessionT
 
   // Empty state — contextual message based on keeper status
   if (events.length === 0) {
-    const isOffline = keeperStatus && isOfflineStatus(keeperStatus)
+    const isOffline = keeperOffline === true
     const msg = isOffline
       ? '오프라인 — 기동 시 기록 시작'
       : '기록된 활동 없음'

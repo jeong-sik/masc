@@ -656,16 +656,22 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"ctx_bar"
        ~callee:"Masc_tui_render_schedule.nonnegative_width"
      = 1);
+  (* [keeper_detail_pane], not [render_keeper_detail]: #30146 split the surface
+     so the frame picks a narrow or a side-by-side layout and the pane draws the
+     content. Everything these four guards watch -- the clamped bar width, the
+     scroll normalization, the sanitized fields, the timestamp projections --
+     went with the content. Nothing is left in the frame, so pointing them at
+     the old name read a move as four regressions. *)
   check bool "keeper detail clamps its derived bar width" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_detail"
+       ~binding_name:"keeper_detail_pane"
        ~callee:"Masc_tui_render_schedule.keeper_context_bar_width"
      = 1);
   check int "keeper detail persists one viewport-normalized scroll" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_detail"
+       ~binding_name:"keeper_detail_pane"
        ~callee:"Render_schedule.normalize_keeper_detail_scroll");
   check bool "interrupted input uses the deadline-aware retry contract" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
@@ -1148,7 +1154,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
-  check_fields "render_keeper_detail"
+  check_fields "keeper_detail_pane"
     [ "k_name"
     ; "k_current_task_id"
     ; "live_context_error"
@@ -1236,7 +1242,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      frame unprojected. *)
   check int "keeper detail uses safe short projections for every timestamp" 6
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_keeper_detail"
+       ~binding_name:"keeper_detail_pane"
        ~callee:"Terminal_text.short_timestamp");
   check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]

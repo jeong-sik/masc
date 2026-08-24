@@ -956,8 +956,7 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
   `
 }
 
-function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemblyReport; compact: boolean }) {
-  if (compact) return null
+function SourceEvidenceDetails({ report }: { report: KeeperPromptAssemblyReport }) {
   const pathSteps = buildPathSteps(report)
 
   return html`
@@ -1042,13 +1041,11 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
 
 function PromptAssemblyContent({
   report,
-  compact = false,
   activePreset,
   presets,
   onSelectPreset,
 }: {
   report: KeeperPromptAssemblyReport
-  compact?: boolean
   activePreset: string
   presets: KeeperPromptAssemblyPreset[]
   onSelectPreset: (id: string) => void
@@ -1061,19 +1058,17 @@ function PromptAssemblyContent({
         presets=${presets}
         onSelectPreset=${onSelectPreset}
       />
-      <${SourceEvidenceDetails} report=${report} compact=${compact} />
+      <${SourceEvidenceDetails} report=${report} />
     </div>
   `
 }
 
 export function KeeperPromptAssemblyPanel({
-  compact = false,
   prompts: providedPrompts,
   activePreset,
   presets: providedPresets,
   onPresetChange,
 }: {
-  compact?: boolean
   prompts?: DashboardPromptItem[]
   activePreset?: string
   presets?: KeeperPromptAssemblyPreset[]
@@ -1134,7 +1129,6 @@ export function KeeperPromptAssemblyPanel({
       ${error ? html`<${ErrorState} message=${error} class="mb-3" />` : null}
       <${PromptAssemblyContent}
         report=${report}
-        compact=${compact}
         activePreset=${selectedPreset}
         presets=${presets}
         onSelectPreset=${selectPreset}

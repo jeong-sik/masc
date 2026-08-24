@@ -58,6 +58,19 @@ CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
 CURSOR_RE = re.compile(rb"\x1b\[(\d+);(\d+)H\x1b\[\?25h")
 POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+
+def composer_showing(text: bytes, *, prefix: bytes = b"> ") -> re.Pattern[bytes]:
+    """The composer's prefix and what was typed after it are styled separately
+    -- the origin colour ends with the prefix and the body starts after a reset
+    -- so the two are not adjacent in the byte stream even though they are
+    adjacent on screen. Waiting on the literal bytes made every needle that
+    spanned the two time out on a frame that showed exactly what it asked for.
+    [prefix] is the prompt on the first row and the indent under it on the
+    rows a Ctrl-J opens."""
+    return re.compile(
+        re.escape(prefix) + rb"(?:" + CSI_RE.pattern + rb")*" + re.escape(text)
+    )
+
 BOARD_CELL_BODY = ("한" * 20) + " " + ("한" * 20)
 
 
@@ -185,6 +198,7 @@ def find_needle(
         return haystack.find(needle, start)
     found = needle.search(bytes(haystack), start)
     return found.start() if found else -1
+
 
 
 def end_of_needle(
@@ -490,7 +504,7 @@ def resize_and_wait(
     *,
     rows: int,
     columns: int,
-    needle: bytes,
+    needle: bytes | re.Pattern[bytes],
     controls: tuple[bytes, ...] = (),
     final_cursor: bytes | None = None,
 ) -> bytes:
@@ -521,17 +535,17 @@ def resize_and_wait(
         start=frame_start,
         timeout=3.0,
     )
-    needle_end = output.find(needle, frame_start) + len(needle)
+    frame_needle_end = end_of_needle(output, needle, frame_start)
     if final_cursor is not None:
         wait_for_output(
             process,
             master_fd,
             output,
             final_cursor,
-            start=needle_end,
+            start=frame_needle_end,
             timeout=3.0,
         )
-        cursor_start = output.find(final_cursor, needle_end)
+        cursor_start = output.find(final_cursor, frame_needle_end)
         wait_for_output(
             process,
             master_fd,
@@ -1334,7 +1348,7 @@ def navigate_with_arrows_and_quit(
         keeper_row_selected(b"alpha"),
     )
     send_and_wait(process, master_fd, output, b"c", b"Esc:list")
-    send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
+    send_and_wait(process, master_fd, output, b"q2Q", composer_showing(b"q2Q"))
     # That the letters became draft text is the claim above. Leaving the
     # pane returns to the list it opened from; quitting is this walk's own exit.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
@@ -1786,7 +1800,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
-        send_and_wait(process, master_fd, output, draft, b"> " + draft)
+        send_and_wait(process, master_fd, output, draft, composer_showing(draft))
 
         read_available(master_fd, output)
         refresh_start = len(output)
@@ -1826,7 +1840,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             b"Message to: beta",
             unavailable,
             b"Enter:disabled (Keeper unavailable)",
-            b"> " + draft,
+            composer_showing(draft),
         ):
             if expected not in refreshed_plain:
                 raise AssertionError(
@@ -1843,7 +1857,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             master_fd,
             output,
             b"\rx",
-            b"> " + draft + b"x",
+            composer_showing(draft + b"x"),
         )
         if any(path == chat_path for path, _body in requests):
             raise AssertionError(
@@ -1890,7 +1904,7 @@ def keeper_message_unreliable_roster_interaction(
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
-        send_and_wait(process, master_fd, output, draft, b"> " + draft)
+        send_and_wait(process, master_fd, output, draft, composer_showing(draft))
 
         read_available(master_fd, output)
         refresh_start = len(output)
@@ -1919,7 +1933,7 @@ def keeper_message_unreliable_roster_interaction(
             b"Message to: beta",
             b"Keeper roster is unavailable",
             b"Enter:disabled (roster unavailable)",
-            b"> " + draft,
+            composer_showing(draft),
         ):
             if expected not in unreliable_plain:
                 raise AssertionError(
@@ -1932,7 +1946,7 @@ def keeper_message_unreliable_roster_interaction(
             master_fd,
             output,
             b"\rx",
-            b"> " + draft + b"x",
+            composer_showing(draft + b"x"),
         )
         if any(path == chat_path for path, _body in requests):
             raise AssertionError("unreliable Keeper roster allowed a message POST")
@@ -2985,7 +2999,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
 
-        ascii_frame = send_and_wait(process, master_fd, output, b"A", b"> A")
+        ascii_frame = send_and_wait(process, master_fd, output, b"A", composer_showing(b"A"))
         assert_message_input_frame(
             ascii_frame,
             row=25,
@@ -3001,7 +3015,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             master_fd,
             output,
             combining_text.encode(),
-            b"> " + combining_text.encode(),
+            composer_showing(combining_text.encode()),
         )
         assert_message_input_frame(
             combining_frame,
@@ -3013,7 +3027,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
 
         typed_frame = send_and_wait(
-            process, master_fd, output, expected_bytes, b"> " + expected_bytes
+            process, master_fd, output, expected_bytes, composer_showing(expected_bytes)
         )
         typed_frame.decode("utf-8")
         assert_message_input_frame(
@@ -3029,7 +3043,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             output,
             rows=30,
             columns=16,
-            needle=b"> A",
+            needle=composer_showing(b"A"),
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
@@ -3046,14 +3060,14 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             output,
             rows=30,
             columns=100,
-            needle=b"> " + expected_bytes,
+            needle=composer_showing(expected_bytes),
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         backspace_cases = (
-            ("> Aé한".encode(), "🙂".encode()),
-            ("> Aé".encode(), "한".encode()),
-            (b"> A", "é".encode()),
+            (composer_showing("Aé한".encode()), "🙂".encode()),
+            (composer_showing("Aé".encode()), "한".encode()),
+            (composer_showing(b"A"), "é".encode()),
         )
         for expected, removed in backspace_cases:
             frame = send_and_wait(process, master_fd, output, b"\x7f", expected)
@@ -3063,10 +3077,10 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
                     f"backspace left part of UTF-8 scalar {removed!r}: {frame!r}"
                 )
 
-        send_and_wait(process, master_fd, output, b"\xe2x", b"> Ax")
-        send_and_wait(process, master_fd, output, b"\x7f", b"> A")
+        send_and_wait(process, master_fd, output, b"\xe2x", composer_showing(b"Ax"))
+        send_and_wait(process, master_fd, output, b"\x7f", composer_showing(b"A"))
         send_and_wait(process, master_fd, output, b"\xe2\x15", b"> ")
-        send_and_wait(process, master_fd, output, b"A", b"> A")
+        send_and_wait(process, master_fd, output, b"A", composer_showing(b"A"))
         os.write(master_fd, b"\xe2")
         wait_for_terminal_input_consumed(slave_fd)
         time.sleep(0.08)
@@ -3080,11 +3094,11 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
-        send_and_wait(process, master_fd, output, b"y", b"> Ay")
+        send_and_wait(process, master_fd, output, b"y", composer_showing(b"Ay"))
 
         send_and_wait(process, master_fd, output, b"\x15", b"> ")
         send_and_wait(
-            process, master_fd, output, expected_bytes, b"> " + expected_bytes
+            process, master_fd, output, expected_bytes, composer_showing(expected_bytes)
         )
         os.write(master_fd, b"\r")
         body = wait_for_http_request(
@@ -3620,11 +3634,15 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
 
-        send_and_wait(process, master_fd, output, b"first", b"> first")
+        send_and_wait(process, master_fd, output, b"first", composer_showing(b"first"))
         # Ctrl-J. The prompt stays on the first line and the second is indented
         # under it, so the two rows read as one message.
         second_frame = send_and_wait(
-            process, master_fd, output, b"\nsecond", b"    second"
+            process,
+            master_fd,
+            output,
+            b"\nsecond",
+            composer_showing(b"second", prefix=b"    "),
         )
         rendered = CSI_RE.sub(b"", second_frame).decode("utf-8")
         if "> first" not in rendered:

@@ -87,6 +87,14 @@ show how many entries hide past each edge (`‹4`, `5›`).
 | `?` | help screen -- every binding, grouped by surface; `j`/`k` scroll, `Esc` closes |
 | `:` | command palette -- type to filter `go <surface>` and `keeper <name>` jumps, `Enter` runs the highlighted one |
 
+On the keeper roster, `/` searches names: typing moves the cursor to the
+first match live, `Enter` keeps the query for `n`/`N` cycling, `Esc` keeps
+nothing. The list itself never narrows, so every action still acts on the
+row it shows.
+
+`NO_COLOR` (non-empty) suppresses colour; borders, markers, and the
+reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
+
 Keeper sub-views spell their position as a breadcrumb in the header:
 `Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).
 

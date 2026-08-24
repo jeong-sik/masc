@@ -1,0 +1,84 @@
+name: Gate Inheritance Check
+
+# #29555: a `pull_request` event runs the workflow file from the PR *branch*,
+# not from the base. A branch that forked before a full-inspection gate (e.g.
+# the model-prose ratchet, #29510) was introduced has no copy of that gate in
+# its own ci.yml, so its run is internally consistent and the PR merges green;
+# the moment it lands, main becomes "new harness + the PR's grown prose" and
+# turns red.
+#
+# This workflow must run on `pull_request_target` (base workflow file), not
+# `pull_request`: a branch that forked before this check existed has no copy of
+# it in its own ci.yml, so a `pull_request` run would never start it. Running
+# from the base workflow file is safe here because the job only reads two refs
+# from the repo (base and head ci.yml) and never executes PR-supplied code.
+#
+# The job compares the set of `scripts/*.sh` each ci.yml runs (base vs head)
+# and fails when the head omits any script the base runs — the author must
+# rebase onto the base so the full-inspection gate actually runs before merge.
+# This is a required check in main's branch protection.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to check'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: gate-inheritance-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Gate Inheritance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v7
+        with:
+          # pull_request_target checks out the base by default (so the base
+          # workflow file and this script are the ones that run). fetch-depth 0
+          # fetches all branches/tags so the PR head commit exists locally.
+          fetch-depth: 0
+
+      - name: Fetch PR head commit
+        # Defensive: ensure the head SHA is present even if fetch-depth 0 did
+        # not reach it (e.g. a force-pushed head). The script reads ci.yml from
+        # both refs via `git show`.
+        if: github.event_name == 'pull_request_target'
+        run: |
+          git fetch --no-tags origin "${{ github.event.pull_request.head.sha }}"
+
+      - name: Resolve refs
+        id: refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+            HEAD_REF="${{ github.event.pull_request.head.sha }}"
+          else
+            PR_NUM="${{ inputs.pr_number }}"
+            BASE_REF="origin/$(gh pr view "$PR_NUM" --repo "$GITHUB_REPOSITORY" --json baseRefName --jq .baseRefName)"
+            HEAD_REF="$(gh pr view "$PR_NUM" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
+          fi
+          echo "base_ref=$BASE_REF" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Run gate-inheritance check
+        run: |
+          scripts/check-gate-inheritance.sh \
+            --base-ref "${{ steps.refs.outputs.base_ref }}" \
+            --head-ref "${{ steps.refs.outputs.head_ref }}"

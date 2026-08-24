@@ -205,6 +205,39 @@ let error_to_string = function
       Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded (String.trim body))
   | Protocol_error { stream_error; _ } -> stream_error_to_string stream_error
 
+(* A reconciliation read asks "what happened to the operation". 401 and 403 do
+   not answer that question: the request stopped before the handler, so the
+   operation is untouched and still on the server. [error_certainty] below reads
+   the same two statuses on the dispatch POST as proof the operation was never
+   created. Both readings are right for their own caller, which is why they stay
+   separate predicates rather than one shared classifier. *)
+let reader_unauthenticated = function
+  | Http_error { status = 401 | 403; _ } -> true
+  | Http_error _ | Transport_error _ | Protocol_error _ -> false
+
+(* A refusal names two different situations and only one of them is fixed by
+   providing a token. Since #29793 this client finds the bearer masc login left
+   in the workspace, so it usually does present one -- and then a refusal means
+   the stored credential was rejected, where "you have no token" is both false
+   and useless advice. The distinction is #29790's. *)
+let refused_reader_remedy ~credential_sent =
+  let cause =
+    if credential_sent then
+      "The operator token this masc-tui presented was refused, so it cannot \
+       read the operation back"
+    else
+      "This masc-tui holds no operator token, so it cannot read the operation \
+       back"
+  in
+  cause
+  ^ "; the operation itself is untouched on the server. Run \
+     'masc login --agent masc-tui --client-env MASC_TOKEN', restart masc-tui, \
+     then press Ctrl-R to settle this request."
+
+let reconciliation_failure_detail ~credential_sent error =
+  if reader_unauthenticated error then refused_reader_remedy ~credential_sent
+  else error_to_string error |> terminal_safe_text
+
 let stream_error_acceptance_observed = function
   | Stream_interrupted { accepted }
   | Run_failed { accepted; _ } -> accepted

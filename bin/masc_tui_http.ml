@@ -30,9 +30,33 @@ let sanitize_header_value value =
 
 let default_agent_name = "masc-tui"
 
+(* One name for the bearer the write routes require, so the header builder and
+   the surfaces that report its absence cannot disagree about whether this
+   process holds one.
+
+   The bearer is discovered once, at boot, from the workspace the TUI was told
+   to open -- not per request. This module is never handed a base path, and
+   resolving one on its own would let the client present the credential of a
+   workspace other than the one on screen. *)
+let operator_token_cell = ref None
+
+(* [MASC_TOKEN] wins so a single run can be pointed at a different credential.
+   Its absence is no longer a failure: [masc login] already wrote this agent's
+   bearer under the workspace, and that file outlives the shell. *)
+let install_operator_token ~base_path =
+  operator_token_cell
+  := (match first_nonempty_env [ "MASC_TOKEN" ] with
+      | Some _ as token -> token
+      | None ->
+          Auth_login.read_persisted_token ~base_path
+            ~agent_name:default_agent_name)
+
+let operator_token () = !operator_token_cell
+let operator_token_present () = Option.is_some (operator_token ())
+
 let auth_headers () =
   let agent_header = [ ("X-MASC-Agent", default_agent_name) ] in
-  match first_nonempty_env [ "MASC_TOKEN" ] with
+  match operator_token () with
   | Some token ->
       ("Authorization", "Bearer " ^ sanitize_header_value token) :: agent_header
   | None -> agent_header
@@ -425,12 +449,58 @@ let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_goal_transition"
     ~body:(Yojson.Safe.to_string payload)
 
+(** POST /api/v1/tools/masc_board_vote. [up] rides as a bool rather than a
+    string so no direction word exists here to drift from the tool's. *)
+let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
+    ~(up : bool) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      [ ("post_id", `String post_id)
+      ; ("direction", `String (if up then "up" else "down"))
+      ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_board_vote"
+    ~body:(Yojson.Safe.to_string payload)
+
+(** POST /api/v1/tools/masc_board_comment. The author is stamped by the
+    route from the agent header, exactly as for a new post. *)
+let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
+    ~(content : string) : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc [ ("post_id", `String post_id); ("content", `String content) ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** Fetch /api/v1/board/<postId> (post detail + comments). *)
 let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
   get_json ~host ~port
     ~path:
       (Printf.sprintf "/api/v1/board/%s?format=flat"
          (percent_encode_path_segment post_id))
+
+(** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
+    The server sorts active-first by due time and caps rows at its own limit,
+    so the path alone is the whole request. *)
+let fetch_schedules ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/scheduled-automation"
+
+(** POST /api/v1/tools/masc_schedule_cancel. The payload is the tool's own
+    argument contract, so validation is the tool's, not duplicated here.
+    [cancelled_by_kind] is omitted: the tool defaults it to human operator,
+    which is what a terminal operator is. The reason is a fixed audit phrase --
+    the arm display already named which schedule the second press cancels. *)
+let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
+    : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      [ ("schedule_id", `String schedule_id)
+      ; ("cancelled_by_id", `String default_agent_name)
+      ; ("reason", `String "cancelled from the TUI")
+      ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
+    ~body:(Yojson.Safe.to_string payload)
 
 (** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
     for a screenful's worth of history rather than the whole ring. *)
@@ -460,6 +530,14 @@ let fetch_repositories ~(host : string) ~(port : int) :
 let fetch_harness_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
+
+(** Fetch /api/v1/dashboard/keeper-feature-proof. No [window_hours] is passed:
+    the surface asks whether a feature has ever been shown to work, and a
+    window turns that into "not lately", which is a narrower question than the
+    one the operator opened the screen with. *)
+let fetch_keeper_feature_proof ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-feature-proof"
 
 (** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
     lists what is waiting rather than the whole history. *)

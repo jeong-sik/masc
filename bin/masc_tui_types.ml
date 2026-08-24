@@ -49,6 +49,11 @@ type msg_role =
           drew while it ran. The strict stream decode carries no tool
           information, so without this a turn that read six files and edited
           two scrolls back looking like one answered from memory. *)
+  | Message_thinking
+      (** The reasoning of one autonomous turn as the transcript carried it:
+          the lines the server kept and the count it withheld. Drawn with the
+          live pane's thinking style, so a turn the keeper ran on its own and
+          one watched live read alike. *)
 
 (** Request-correlated message history entry. *)
 type msg_entry = {
@@ -129,6 +134,33 @@ type board_comment = {
   bc_author: string;
   bc_content: string;
   bc_created_at: string;
+}
+
+(** One scheduled-automation row, from the dashboard schedule projection.
+    [sch_status] stays a string rather than a variant: the pane projects the
+    store's own status vocabulary, and a status this build does not name
+    renders as itself rather than disappearing. *)
+type schedule_row = {
+  sch_schedule_id: string;
+  sch_status: string;
+  sch_source: string;
+  sch_due_at_iso: string option;
+  sch_recurrence_summary: string;
+  sch_payload_target: string option;
+  sch_payload_summary: string option;
+}
+
+(** Schedule list snapshot. [scs_request_count] is [None] exactly when the
+    store read failed -- the server reports that as [status = "unknown"]
+    rather than an empty list, and the pane keeps the two facts apart the
+    same way. *)
+type schedule_snapshot = {
+  scs_status: string;
+  scs_read_error: string option;
+  scs_request_count: int option;
+  scs_truncated: bool;
+  scs_next_due_iso: string option;
+  scs_rows: schedule_row list;
 }
 
 (** Board surface sub-mode *)
@@ -297,11 +329,13 @@ type surface =
   | Board
   | Approvals
   | Planning
+  | Schedules
   | Verification
   | Harness
   | Repositories
   | Connectors
   | Tools
+  | Autonomy
   | System_logs
 
 (** What a surface needs loaded to draw itself.
@@ -319,8 +353,8 @@ type surface_needs = {
 let surface_needs : surface -> surface_needs = function
   | Overview -> { needs_transport = true; needs_keeper_roster = false }
   | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
-  | Board | Approvals | Planning | Verification | Harness | Repositories
-  | Connectors | Tools | System_logs ->
+  | Board | Approvals | Planning | Schedules | Verification | Harness
+  | Repositories | Connectors | Tools | Autonomy | System_logs ->
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
@@ -386,12 +420,20 @@ type state = {
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
-  (* The new-post draft and its send arm. The arm is the operator's explicit
+  (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
-     send-or-discard and no other key can send. *)
+     send-or-discard and no other key can send. [board_compose_reply_to]
+     names what a sent draft answers -- [None] publishes a new post,
+     [Some post_id] adds a comment to that post -- so one pane covers both
+     writes and the payload alone decides which. *)
   mutable board_draft: Buffer.t;
   mutable board_compose_armed: bool;
+  mutable board_compose_reply_to: string option;
   mutable board_post_error: string option;
+  (* A vote armed for a second keypress: which post, and up or down. The
+     cursor can move between the two presses, so the post id is captured at
+     arm time and a press on a different row re-arms for that row. *)
+  mutable board_vote_armed: (string * bool) option;
   mutable planning: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
@@ -403,6 +445,17 @@ type state = {
   mutable goal_action_armed:
     (string * Goal_phase.Public_action.t) option;
   mutable goal_action_error: string option;
+  (* The schedule list and its cursor. The snapshot keeps the server's
+     ok/unknown split so a failed store read never draws as "no schedules". *)
+  mutable schedules: schedule_snapshot option;
+  mutable schedules_error: string option;
+  mutable schedule_cursor: int;
+  mutable schedule_scroll: int;
+  (* A cancel armed for a second keypress: which schedule. The cursor can move
+     between the two presses, so the schedule id is captured at arm time and a
+     press on a different row re-arms for that row. *)
+  mutable schedule_cancel_armed: string option;
+  mutable schedule_cancel_error: string option;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
@@ -418,6 +471,12 @@ type state = {
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
+  (* The feature-proof reading. Kept beside its error rather than collapsed
+     into an option: a report that failed to load must not draw as a report
+     with no features, which reads as "nothing is proven". *)
+  mutable autonomy: Tui_decode.autonomy_snapshot option;
+  mutable autonomy_error: string option;
+  mutable autonomy_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -559,7 +618,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   board_mode = Board_list;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
+  board_compose_reply_to = None;
   board_post_error = None;
+  board_vote_armed = None;
   planning = None;
   planning_error = None;
   planning_cursor = 0;
@@ -567,6 +628,12 @@ let create_state ~workspace ~port ~refresh_interval = {
   planning_mode = Planning_list;
   goal_action_armed = None;
   goal_action_error = None;
+  schedules = None;
+  schedules_error = None;
+  schedule_cursor = 0;
+  schedule_scroll = 0;
+  schedule_cancel_armed = None;
+  schedule_cancel_error = None;
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
@@ -581,6 +648,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
+  autonomy = None;
+  autonomy_error = None;
+  autonomy_scroll = 0;
   verification = None;
   verification_error = None;
   verification_scroll = 0;

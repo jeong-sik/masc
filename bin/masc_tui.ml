@@ -345,6 +345,29 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          far back is worse than a key that ends the trip. *)
       state.msg_scroll <- 0;
       true
+    end else if c = Some 11 then begin
+      (* Ctrl-K: drop the newest waiting line without sending it. The queue
+         shows what waits in the order it will go; the newest is the one a
+         mis-send just hit, and dropping it is local — nothing was
+         dispatched. *)
+      (match Chat_queue.take_newest state.msg_queued with
+       | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
+       | Some ((queued_keeper, _), rest) ->
+         state.msg_queued <- rest;
+         add_event state "info"
+           (Printf.sprintf "Cancelled queued message to %s"
+              (Keeper_chat.terminal_safe_text queued_keeper)));
+      true
+    end else if c = Some 16 then begin
+      (* Ctrl-P: pull the newest waiting line back into the composer. That is
+         the edit: fix it and Enter queues it again. *)
+      (match Chat_queue.take_newest state.msg_queued with
+       | None -> ()
+       | Some ((_, text), rest) ->
+         state.msg_queued <- rest;
+         Buffer.clear state.msg_input;
+         Buffer.add_string state.msg_input text);
+      true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       Buffer.add_string state.msg_input s;
       true
@@ -419,6 +442,7 @@ type async_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
+  | Autonomy_loaded of (Masc.Tui_decode.autonomy_snapshot, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_reconcile of Keeper_chat.request
@@ -432,7 +456,10 @@ type async_msg =
       * Keeper_control.action
       * (Keeper_control.outcome, string) result
   | Board_new_post_done of (string, string) result
+  | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
+  | Schedules_loaded of (schedule_snapshot, string) result
+  | Schedule_cancel_done of (string, string) result
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -596,6 +623,45 @@ let launch_tools_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
 
+let launch_schedules_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_schedules ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Schedules_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Schedules_loaded (Error "Eio switch is unavailable"))
+
+let launch_autonomy_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_autonomy ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Autonomy_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Autonomy_loaded (Error "Eio switch is unavailable"))
+
 let launch_connectors_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -732,7 +798,8 @@ let forget_session_rows_the_transcript_holds state keeper_name =
         ||
         match entry.me_role with
         | Message_status | Message_error -> true
-        | Message_user _ | Message_keeper | Message_tool -> false)
+        | Message_user _ | Message_keeper | Message_tool | Message_thinking ->
+            false)
       state.msg_history
 
 let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
@@ -745,6 +812,8 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
     | Keeper_chat_history.Delivery_failed -> (Message_error, row.text)
     | Keeper_chat_history.Tool_calls rows ->
         (Message_tool, String.concat "\n" rows)
+    | Keeper_chat_history.Reasoning lines ->
+        (Message_thinking, String.concat "\n" lines)
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
@@ -1465,10 +1534,18 @@ let apply_keeper_chat_reconciliation state ~base_path request result =
                  | Keeper_chat.Succeeded | Keeper_chat.Failed
                  | Keeper_chat.Cancelled -> "in an unexpected terminal state"))
        | Error error ->
+           (* The request stays unverified for every failure here, including the
+              statuses [Keeper_chat.error_certainty] calls a verified rejection.
+              That classifier answers "did the dispatch POST create anything";
+              this branch is reading back an operation an authenticated
+              predecessor already created, so a refused read proves nothing
+              about it. Routing this through the certainty classifier would
+              clear the recovery fence for an operation that is still running. *)
            remember_unverified state request;
            let detail =
-             Keeper_chat.error_to_string error
-             |> Keeper_chat.terminal_safe_text
+             Keeper_chat.reconciliation_failure_detail
+               ~credential_sent:(Masc_tui_http.operator_token_present ())
+               error
            in
            append_chat_history state request Message_error
              ("Operation reconciliation failed; outcome remains unverified. "
@@ -1622,7 +1699,9 @@ let apply_keeper_roster_load state = function
       remember_surface_error state ~surface:"keeper roster"
         ~current_error:state.keeper_roster_error
         ~set_error:(fun value -> state.keeper_roster_error <- value)
-        (Keeper_control.roster_failure_message failure)
+        (Keeper_control.roster_failure_message
+           ~credential_sent:(Masc_tui_http.operator_token_present ())
+           failure)
 
 let apply_planning_load state = function
   | Ok planning ->
@@ -2140,6 +2219,114 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
    send-or-discard, so a stray key during writing cannot publish. Returns
    false for keys this pane does not own, so Tab and quit keep their global
    meaning. *)
+(* Send a comment through the tools route. Same fiber-and-mailbox shape as
+   the other board writes; the route stamps the author. *)
+let start_board_comment state ~mailbox ~(post_id : string)
+    ~(content : string) =
+  state.board_post_error <- None;
+  add_event state "system" "commenting on Board";
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_comment () =
+    let result =
+      match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Board_new_post_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_comment
+  | None -> run_comment ()
+
+(* Send a vote through the tools route. The voter is stamped by the route,
+   so the payload says only which post and which way. *)
+let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
+  add_event state "system"
+    (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_vote () =
+    let result =
+      match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Board_vote_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_vote
+  | None -> run_vote ()
+
+(* The vote keys on the list row under the cursor. Two presses: the first
+   names the post and direction, the same press again sends it. The post id
+   is captured at arm time, so moving the cursor between presses re-arms
+   for the new row rather than voting on the one the operator left. *)
+let handle_board_vote_key state ~mailbox ~(up : bool) =
+  match state.board_mode with
+  | Board_list -> (
+      match List.nth_opt state.board_posts state.board_cursor with
+      | None -> ()
+      | Some post -> (
+          match state.board_vote_armed with
+          | Some (armed_post, armed_up)
+            when String.equal armed_post post.bp_id && armed_up = up ->
+              state.board_vote_armed <- None;
+              start_board_vote state ~mailbox ~post_id:post.bp_id ~up
+          | Some _ | None ->
+              state.board_vote_armed <- Some (post.bp_id, up);
+              add_event state "system"
+                (Printf.sprintf "press %s again to vote %s on %s"
+                   (if up then "v" else "V")
+                   (if up then "up" else "down")
+                   post.bp_id)))
+  | Board_read _ | Board_compose -> ()
+
+(* Cancel a schedule through the tools route. Same fiber-and-mailbox shape as
+   the other writes; the server's store rules decide whether the row is still
+   cancellable, so the TUI does not pre-guess from the status column. *)
+let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
+  state.schedule_cancel_error <- None;
+  add_event state "system"
+    (Printf.sprintf "cancelling schedule %s" schedule_id);
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_cancel () =
+    let result =
+      match Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Schedule_cancel_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_cancel
+  | None -> run_cancel ()
+
+(* The cancel key on the row under the cursor. Two presses, like the vote
+   keys: the first names the schedule, the same press again sends it. The
+   schedule id is captured at arm time, so moving the cursor between presses
+   re-arms for the new row rather than cancelling the one the operator left. *)
+let handle_schedule_cancel_key state ~mailbox =
+  let rows =
+    match state.schedules with
+    | None -> []
+    | Some snapshot -> snapshot.scs_rows
+  in
+  match List.nth_opt rows state.schedule_cursor with
+  | None -> ()
+  | Some row -> (
+      match state.schedule_cancel_armed with
+      | Some armed when String.equal armed row.sch_schedule_id ->
+          state.schedule_cancel_armed <- None;
+          start_schedule_cancel state ~mailbox
+            ~schedule_id:row.sch_schedule_id
+      | Some _ | None ->
+          state.schedule_cancel_armed <- Some row.sch_schedule_id;
+          state.schedule_cancel_error <- None;
+          add_event state "system"
+            (Printf.sprintf "press x again to cancel %s" row.sch_schedule_id))
+
 let handle_board_compose_key state ~mailbox (key : string) : bool =
   if
     state.board_compose_armed
@@ -2151,21 +2338,40 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
       state.board_compose_armed <- not state.board_compose_armed;
       true
   | "s" | "S" when state.board_compose_armed -> (
-      let title, body = split_board_draft (Buffer.contents state.board_draft) in
-      match String.split_on_char '\n' (String.trim title) with
-      | [] | [ "" ] ->
-          state.board_compose_armed <- false;
-          state.board_post_error <- Some "the first line (title) is empty";
-          true
-      | _ ->
-          state.board_compose_armed <- false;
-          start_board_post state ~mailbox ~title ~body;
-          true )
+      (* A reply sends the whole draft as one comment; a new post still
+         splits title from body at the first line. *)
+      match state.board_compose_reply_to with
+      | Some post_id ->
+          let content = Buffer.contents state.board_draft in
+          if String.equal (String.trim content) "" then begin
+            state.board_compose_armed <- false;
+            state.board_post_error <- Some "the comment is empty";
+            true
+          end else begin
+            state.board_compose_armed <- false;
+            start_board_comment state ~mailbox ~post_id ~content;
+            true
+          end
+      | None ->
+          let title, body =
+            split_board_draft (Buffer.contents state.board_draft)
+          in
+          match String.split_on_char '\n' (String.trim title) with
+          | [] | [ "" ] ->
+              state.board_compose_armed <- false;
+              state.board_post_error <- Some "the first line (title) is empty";
+              true
+          | _ ->
+              state.board_compose_armed <- false;
+              start_board_post state ~mailbox ~title ~body;
+              true )
   | "d" | "D" when state.board_compose_armed ->
       Buffer.clear state.board_draft;
       state.board_compose_armed <- false;
       state.board_post_error <- None;
-      state.board_mode <- Board_list;
+      (match state.board_compose_reply_to with
+       | Some post_id -> state.board_mode <- Board_read post_id
+       | None -> state.board_mode <- Board_list);
       add_event state "system" "Board draft discarded";
       true
   | "\r" | "\n" ->
@@ -2311,23 +2517,50 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       start_http_refresh state ~host:(Env_config_core.masc_host ())
         ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
   | Board_new_post_done result -> (
+      (* The same envelope carries a new post and a comment; where the
+         operator lands afterwards is the only difference. A comment returns
+         to the post it answered (and refreshes that detail), a post to the
+         list. *)
+      let reply_to = state.board_compose_reply_to in
       match result with
       | Ok message ->
           Buffer.clear state.board_draft;
           state.board_compose_armed <- false;
+          state.board_compose_reply_to <- None;
           state.board_post_error <- None;
-          state.board_mode <- Board_list;
+          (match reply_to with
+           | Some post_id -> state.board_mode <- Board_read post_id
+           | None -> state.board_mode <- Board_list);
           add_event state "system" ("Board: " ^ message);
           (* The posted row is the half the periodic refresh has not fetched
              yet; without this the operator returns to a list that does not
-             contain what they just published. *)
+             contain what they just published. A comment refreshes the
+             detail too, so the reply is visible the moment it lands. *)
           start_http_refresh state ~host:(Env_config_core.masc_host ())
-            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox;
+          (match reply_to with
+           | Some post_id ->
+               start_board_post_refresh state
+                 ~host:(Env_config_core.masc_host ())
+                 ~port:state.port ~post_id ~mailbox
+           | None -> ())
       | Error err ->
           state.board_compose_armed <- false;
           (* The draft stays: a rejected post is usually one field short, and
              losing the text over it would make the error a dead end. *)
           state.board_post_error <- Some err)
+  | Board_vote_done result -> (
+      match result with
+      | Ok message ->
+          state.board_vote_armed <- None;
+          add_event state "system" ("Board vote: " ^ message);
+          (* The score is drawn from the list; refresh it rather than
+             waiting out the interval to see the arrow land. *)
+          start_http_refresh state ~host:(Env_config_core.masc_host ())
+            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+      | Error err ->
+          state.board_vote_armed <- None;
+          add_event state "error" ("Board vote failed: " ^ err))
   | Goal_transition_done result -> (
       match result with
       | Ok message ->
@@ -2342,6 +2575,30 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Schedules_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.schedules <- Some snapshot;
+          state.schedules_error <- None;
+          (* The cursor can outlive a list whose rows changed underneath it;
+             clamping to the new tail keeps the cancel key pointing at a row
+             that exists. *)
+          let count = List.length snapshot.scs_rows in
+          if state.schedule_cursor >= count then
+            state.schedule_cursor <- max 0 (count - 1)
+      | Error err -> state.schedules_error <- Some err)
+  | Schedule_cancel_done result -> (
+      match result with
+      | Ok message ->
+          state.schedule_cancel_armed <- None;
+          state.schedule_cancel_error <- None;
+          add_event state "system" ("Schedule: " ^ message);
+          (* The row shown still carries the old status until this lands; a
+             cancelled row that reads "scheduled" invites a second cancel. *)
+          launch_schedules_load state ~mailbox
+      | Error err ->
+          state.schedule_cancel_armed <- None;
+          state.schedule_cancel_error <- Some err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -2582,6 +2839,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None
       | Error detail -> state.tools_error <- Some detail)
+  | Autonomy_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.autonomy <- Some snapshot;
+          state.autonomy_error <- None
+      (* The previous report is kept: a failed refresh must not turn a screen
+         that said "3/5 proven" into one that says nothing is proven. *)
+      | Error detail -> state.autonomy_error <- Some detail)
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2748,6 +3013,17 @@ let main () =
   let port = state.port in
   let http_refresh_inflight = ref false in
   let async_messages = Eio.Stream.create 32 in
+  (* Bind the bearer to the workspace actually opened, before any request is
+     built. Reported before the recovery load as well, so when neither source
+     holds one the operator sees the cause ahead of the symptom: a tokenless
+     process cannot dispatch, and cannot reconcile a dispatch an authenticated
+     predecessor left behind. *)
+  Masc_tui_http.install_operator_token ~base_path;
+  if not (Masc_tui_http.operator_token_present ()) then
+    add_event state "error"
+      "No operator token: neither MASC_TOKEN nor this workspace holds one, so \
+       sends and approvals are refused and a recovered dispatch cannot be \
+       reconciled. Run: masc login --agent masc-tui --client-env MASC_TOKEN";
   (match Keeper_chat_recovery.load_pending ~base_path with
    | Ok None -> ()
    | Error detail ->
@@ -2849,8 +3125,12 @@ let main () =
           minutes ago for something else. Same rule for an armed goal action. *)
        | Keepers _, Some ("s" | "S") -> ()
        | Keepers _, Some _ -> state.keeper_action_pending <- None
+       | Board, Some ("v" | "V") -> ()
+       | Board, Some _ -> state.board_vote_armed <- None
        | Planning, Some ("c" | "C" | "x" | "X" | "o" | "O") -> ()
        | Planning, Some _ -> state.goal_action_armed <- None
+       | Schedules, Some ("x" | "X") -> ()
+       | Schedules, Some _ -> state.schedule_cancel_armed <- None
        | _ -> ());
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
@@ -2967,6 +3247,8 @@ let main () =
                 launch_repositories_load state ~mailbox:async_messages
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
             | Tools -> launch_tools_load state ~mailbox:async_messages
+            | Autonomy -> launch_autonomy_load state ~mailbox:async_messages
+            | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Overview | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -2980,6 +3262,12 @@ let main () =
                 state.view <- Board
             | Board -> state.view <- Planning
             | Planning ->
+                (* Loaded on arrival: the schedule page is a snapshot of the
+                   store, and a stale one would answer "why is this keeper
+                   awake" with yesterday's rows. *)
+                launch_schedules_load state ~mailbox:async_messages;
+                state.view <- Schedules
+            | Schedules ->
                 (* Loaded on arrival: the queue is what the surface is, so
                    showing it empty until a refresh would read as "nothing is
                    waiting". *)
@@ -2997,7 +3285,10 @@ let main () =
             | Connectors ->
                 launch_tools_load state ~mailbox:async_messages;
                 state.view <- Tools
-            | Tools -> state.view <- System_logs
+            | Tools ->
+                launch_autonomy_load state ~mailbox:async_messages;
+                state.view <- Autonomy
+            | Autonomy -> state.view <- System_logs
             | System_logs -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
@@ -3051,8 +3342,9 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Keepers Keeper_list | Approvals | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Keepers Keeper_list | Approvals | Schedules | Verification
+            | Harness | Repositories | Connectors | Tools | Autonomy
+            | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -3096,6 +3388,14 @@ let main () =
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
+            | Schedules ->
+                let count =
+                  match state.schedules with
+                  | None -> 0
+                  | Some snapshot -> List.length snapshot.scs_rows
+                in
+                if state.schedule_cursor < count - 1 then
+                  state.schedule_cursor <- state.schedule_cursor + 1
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- state.task_detail_scroll + 1
@@ -3121,6 +3421,7 @@ let main () =
             | Connectors ->
                 state.connectors_scroll <- state.connectors_scroll + 1
             | Tools -> state.tools_scroll <- state.tools_scroll + 1
+            | Autonomy -> state.autonomy_scroll <- state.autonomy_scroll + 1
             | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
@@ -3163,6 +3464,9 @@ let main () =
                  | Planning_detail _ ->
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
+            | Schedules ->
+                if state.schedule_cursor > 0 then
+                  state.schedule_cursor <- state.schedule_cursor - 1
             | Overview ->
                 if Option.is_some state.task_detail_id then begin
                   if state.task_detail_scroll > 0 then
@@ -3197,6 +3501,9 @@ let main () =
             | Tools ->
                 if state.tools_scroll > 0 then
                   state.tools_scroll <- state.tools_scroll - 1
+            | Autonomy ->
+                if state.autonomy_scroll > 0 then
+                  state.autonomy_scroll <- state.autonomy_scroll - 1
             | System_logs ->
                 if state.system_logs_scroll > 0 then
                   state.system_logs_scroll <- state.system_logs_scroll - 1
@@ -3250,8 +3557,8 @@ let main () =
                       | None -> ())
                  | Planning_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Verification | Harness | Repositories
-            | Connectors | Tools | System_logs -> ())
+            | Approvals | Schedules | Verification | Harness | Repositories
+            | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
@@ -3259,8 +3566,8 @@ let main () =
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
-            | Overview | Keepers _ | Board | Approvals | Planning
-            | Verification | Harness | Repositories | Connectors | Tools | System_logs -> ())
+            | Overview | Keepers _ | Board | Approvals | Planning | Schedules
+            | Verification | Harness | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -3272,6 +3579,39 @@ let main () =
              | _ -> Goal_phase.Public_action.Reopen
            in
            handle_goal_action_key state ~mailbox:async_messages ~action
+       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
+           (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
+              letters stay navigation-free there. The first press arms, the
+              same press submits; the server owns the phase rules. *)
+           let action =
+             match key with
+             | Some ("c" | "C") -> Goal_phase.Public_action.Request_complete
+             | Some ("x" | "X") -> Goal_phase.Public_action.Drop
+             | _ -> Goal_phase.Public_action.Reopen
+           in
+           handle_goal_action_key state ~mailbox:async_messages ~action
+       | Some "c" | Some "C" when state.view = Board ->
+           (* Reply to the post being read. Same pane as a new post; the
+              reply target decides the payload and where the operator
+              lands after it sends. *)
+           (match state.board_mode with
+            | Board_read post_id ->
+                state.board_mode <- Board_compose;
+                state.board_compose_armed <- false;
+                state.board_compose_reply_to <- Some post_id;
+                state.board_post_error <- None
+            | Board_list | Board_compose -> ())
+       | Some "v" | Some "V" when state.view = Board ->
+           (* Lowercase votes up, uppercase votes down -- the shift is the
+              direction, so neither reading needs a second keypress to
+              choose one. *)
+           handle_board_vote_key state ~mailbox:async_messages
+             ~up:(match key with Some "v" -> true | _ -> false)
+       | Some "x" | Some "X" when state.view = Schedules ->
+           (* Two presses, like every irreversible action here: the first
+              names the schedule, the second cancels it. Whether the row is
+              still cancellable is the server's store rules to say. *)
+           handle_schedule_cancel_key state ~mailbox:async_messages
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
@@ -3289,8 +3629,8 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from detail only. Opening detail is the act that names the
               target: on the roster the cursor moves by itself when a refresh
@@ -3309,8 +3649,8 @@ let main () =
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -3330,16 +3670,16 @@ let main () =
                       "No lifecycle action applies to this keeper yet"
                 | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -3351,14 +3691,16 @@ let main () =
                  | Board_list ->
                      state.board_mode <- Board_compose;
                      state.board_compose_armed <- false;
+                     state.board_compose_reply_to <- None;
                      state.board_post_error <- None
                  | Board_read _ | Board_compose -> ())
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Planning | Verification | Harness | Repositories
-            | Connectors | Tools | System_logs -> ())
+            | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | Autonomy | System_logs
+            -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -3407,6 +3749,16 @@ let main () =
              (* The inventory is near-static, but a tool whose projection
                 changes is exactly what this surface is read for. *)
              launch_tools_load state ~mailbox:async_messages
+         | Autonomy ->
+             (* The whole point of the screen is watching a gap close while
+                the runtime runs, so it refreshes rather than holding the
+                reading taken when the operator arrived. *)
+             launch_autonomy_load state ~mailbox:async_messages
+         | Schedules ->
+             (* Rows cross their due time and turn terminal while an operator
+                watches; the page that answers "why is this keeper awake"
+                holds a reading from when the operator arrived otherwise. *)
+             launch_schedules_load state ~mailbox:async_messages
          | Overview | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;

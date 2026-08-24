@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-08-23
+last_verified: 2026-08-24
 code_refs:
   - bin/masc_tui.ml
   - bin/masc_tui_render.ml
@@ -13,9 +13,10 @@ code_refs:
 # MASC TUI Guide
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
-server is reachable, adds the surfaces that only exist over HTTP. Five surfaces
-rotate with `Tab`: Overview, Keepers, Approvals, Board, Planning, System
-Logs.
+server is reachable, adds the surfaces that only exist over HTTP. Surfaces
+rotate with `Tab` in this order: Overview, Keepers, Approvals, Board,
+Planning, Schedules, Verification, Harness, Repositories, Connectors, Tools,
+Autonomy, System Logs.
 
 ## Quick Start
 
@@ -56,6 +57,7 @@ decides whether launching one is worth it.
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
+| Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
 
@@ -199,6 +201,21 @@ and navigation stay responsive while the turn runs.
   Enter:send  Esc:back  Ctrl-U:clear line
 ```
 
+The pane opens on the keeper's durable transcript. A turn the keeper ran on
+its own is drawn as what it did, not as a blank line: a `thinking` row with
+the reasoning the server kept and a count of the steps it withheld, then a
+`tools` block with one row per call - the finished glyph for a call that
+returned, `✗` for one that returned an error, `·` for one the trace never
+saw finish, each with its duration - and then whatever the turn said.
+
+```
+ [21:41:34] thinking
+   (2 reasoning steps, content withheld)
+ [21:41:34] tools
+   ✓ masc_task_history · 32ms
+   ✗ tool_execute · 1.2s
+```
+
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
 without visible text become explicit status or error rows; partial text is never
@@ -280,6 +297,12 @@ a new line, and sending is armed rather than pressed - `esc` offers
 operator's agent identity; the server stamps the author. A rejected post
 keeps the draft and shows the server's message.
 
+`v` votes the row under the cursor up, `V` votes it down - the shift key is
+the direction. Like every irreversible action here, the first press arms and
+the same press again sends. In a post, `c` replies: the same compose pane
+opens with the post as its target, the whole draft is the comment, and
+sending returns to the post with the reply visible.
+
 ### Planning
 
 Goals with backlog rollups.
@@ -301,6 +324,36 @@ armed rather than pressed - the first press shows what the same key again
 would send, any other key disarms - and the server owns the phase rules: a
 transition the current phase does not allow comes back as the server's
 rejection on the detail, not a local guess.
+
+### Schedules
+
+The scheduled-automation list: every wake the runtime has queued, active rows
+first by due time. This is the surface that answers "why is this keeper about
+to wake up".
+
+```
+ MASC Schedules  [me]  10:44:57  [connected]
+   Requests: 34  (page shows first 20)
+   Next due: 2026-08-24T09:57:00
+ >   [scheduled] 2026-08-24T09:57:00  alpha        daily 09:57
+     [running  ] 2026-08-24T09:12:00  sangsu       one-shot
+  j/k:move  x:cancel  r:refresh  Tab:next  | Port: 8935
+```
+
+The header count and the page are different things: the server sorts the whole
+store active-first and serves the first twenty rows, so `(page shows first
+20)` names what is held back. A store that could not be read is
+`data unreliable` with the failing call, not an empty list - "the ledger is
+unreadable" and "nothing is scheduled" are different facts.
+
+`x` cancels the row under the cursor. Like every irreversible action here it
+is armed: the first press names the schedule, the same press again sends it,
+and the cursor moving between presses re-arms for the new row. Whether a row
+is still cancellable is the server's store rule to decide - cancelling a row
+that already ran comes back as the server's rejection on the surface, not a
+local guess from the status column. The payload target column names who the
+wake reaches (a keeper, for keeper wakes); rows without one fall back to the
+payload summary.
 
 ### System Logs
 
@@ -342,7 +395,7 @@ Per surface:
 | Key | Surface | Action |
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
-| `j` / `k` | Keepers, Approvals, Board, Planning | Move cursor |
+| `j` / `k` | Keepers, Approvals, Board, Planning, Schedules | Move cursor |
 | `j` / `k` | System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
@@ -351,6 +404,7 @@ Per surface:
 | `l` | Keeper detail | Open logs |
 | `m` | Keeper detail | Open message input |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
+| `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
 | `Ctrl-R` | Message | Claim a prepared fence, reconcile a fail-closed fence, replay only a replayable fence, or remove a rejected or settled fence by exact durable ID |
@@ -363,9 +417,11 @@ small for normal message input.
 ## Navigation
 
 ```
-Tab cycles the five surfaces:
+Tab cycles the surfaces:
 
-  Overview -> Keepers -> Approvals -> Board -> Planning -> Overview
+  Overview -> Keepers -> Approvals -> Board -> Planning -> Schedules
+           -> Verification -> Harness -> Repositories -> Connectors
+           -> Tools -> Autonomy -> System Logs -> Overview
 
 Within a surface:
 

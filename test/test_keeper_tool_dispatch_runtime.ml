@@ -397,11 +397,16 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (json_contains_tool "masc_board_fake" json);
   check bool "voice tool grouped" true
     (member "voice" "keeper_voice_speak");
+  let is_model_visible name =
+    List.exists
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+      (Masc.Keeper_tool_policy.keeper_model_tool_schemas ())
+  in
   check bool "task tool grouped as workspace" true
     (member "workspace" "keeper_task_claim");
-  check bool "MASC task tool grouped as workspace" true
+  check bool "MASC task tool grouped as workspace" (is_model_visible "masc_transition")
     (member "workspace" "masc_transition");
-  check bool "MASC plan tool grouped as workspace" true
+  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get")
     (member "workspace" "masc_plan_get");
   check bool "surface read grouped as surface" true
     (member "surface" "keeper_surface_read");

@@ -243,6 +243,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -553,6 +554,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -1292,6 +1294,8 @@
   masc_test_runtime
   masc.embedded_config
   bigstringaf
+  ; test_activity_graph checks its day file against the layout owner
+  masc.jsonl_writer
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
   decompress.gz)
@@ -1737,6 +1741,8 @@
  (libraries alcotest masc_test_deps))
 
 (include stanzas/test_ci_run_tests_script.inc)
+
+(include stanzas/test_telemetry_gate_handler_detection.inc)
 
 (include stanzas/test_contract_harness_auth_script.inc)
 
@@ -2582,7 +2588,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries alcotest ast_grep)
+ (libraries alcotest ast_grep masc_tui_keeper_chat_queue)
  (deps
   (source_tree ../bin)))
 
@@ -2647,6 +2653,7 @@
   alcotest
   masc
   masc.keeper_chat_operations
+  masc.string_util
   masc_tui_keeper_chat_projection
   masc.masc_random_id
   yojson))
@@ -2706,7 +2713,7 @@
 (test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
- (libraries alcotest masc masc_tui_keeper_control yojson))
+ (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))
 
 (test
  (name test_tui_keeper_selection)

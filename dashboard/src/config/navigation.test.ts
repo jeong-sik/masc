@@ -60,7 +60,7 @@ describe('dashboard surface navigation', () => {
     expect(workspace?.defaultTab).toBe('workspace')
   })
 
-  it('keeps the v2 primary shell aligned to the 2026-07 keeper-v2 export rail order', () => {
+  it('keeps the v2 primary shell aligned to the keeper-v2 prototype rail order', () => {
     expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
       'overview',
       'keepers',
@@ -74,6 +74,8 @@ describe('dashboard surface navigation', () => {
       'logs',
       'code',
       'connectors',
+      'command',
+      'lab',
       'settings',
     ])
     expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
@@ -89,6 +91,8 @@ describe('dashboard surface navigation', () => {
       'Logs',
       'IDE',
       'Connectors',
+      'Command',
+      'Lab',
       'Settings',
     ])
   })

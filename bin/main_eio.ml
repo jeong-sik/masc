@@ -406,7 +406,18 @@ let base_path =
   let doc =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
-  Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+  (* [Arg.opt] takes a value, not a thunk, so its default is computed while the
+     term is built — before Cmdliner has looked at argv. Calling
+     [default_base_path ()] there ran the environment-backed resolver on every
+     invocation: it logged a base path no command had selected, and it exited 1
+     when MASC_BASE_PATH was unset even though --base-path carried one. Parse
+     the flag as optional and consult the environment only when it is absent,
+     matching [run_base_path]. *)
+  let resolve = function Some raw -> raw | None -> default_base_path () in
+  Term.(
+    const resolve
+    $ Arg.(
+        value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc))
 
 let run_base_path =
   let doc =

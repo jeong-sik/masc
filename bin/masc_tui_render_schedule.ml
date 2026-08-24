@@ -173,10 +173,10 @@ type overview_allocation = {
   filler_rows : int;
 }
 
-(* The task block's share of the viewport when attention wants more rows than
-   there are. A quarter, so a fleet with a long attention list still shows some
-   of the backlog, and a viewport too small to spare four rows gives it one. *)
-let overview_task_reservation ~available = max 1 (available / 4)
+(* Rows the Attention / Recent Events panel may take. A reader scans this panel
+   for what needs attention now, not for history; past six rows the older rows
+   are scrolled to, not read at a glance. *)
+let overview_panel_row_cap = 6
 
 let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
     ~task_count ~has_task_error =
@@ -199,9 +199,26 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
   let desired_task_block_rows =
     desired_task_error_rows + desired_task_rows
   in
-  let reserved_task_rows =
-    min desired_task_block_rows (overview_task_reservation ~available)
-  in
+  (* The task block is held back before the panel is measured: what it wants,
+     but never more than half the viewport. The panel then takes what is left.
+
+     The panel used to stop at six rows whatever the terminal offered, which
+     wasted a tall window; removing that cap let it grow without bound, and on
+     a short viewport it starved the backlog -- eight events pushed the fifth
+     task off a 23-row screen. Reserving by what the tasks want rather than by
+     a fixed fraction keeps all three cases: a tall terminal gives both blocks
+     everything they ask for and turns the rest into filler, a 23-row one still
+     shows five tasks however many events arrive, and a viewport with three
+     spare rows still spends two of them on attention, which is the alert
+     surface and wins when almost nothing fits. *)
+  (* The panel keeps its six-row ceiling. #29696 removed it so a tall window
+     would not waste rows, but the rows it wasted were the frame's, not the
+     panel's -- the filler below fixes that -- and letting the panel grow
+     changed how a contended viewport is shared, which cost the backlog rows
+     the Overview scenarios pin. Growth here bought nothing the filler does not
+     already give and broke what the cap was holding. *)
+  let desired_panel_rows = min overview_panel_row_cap desired_panel_rows in
+  let reserved_task_rows = min desired_task_block_rows 1 in
   let attention_rows =
     min desired_panel_rows (max 0 (available - reserved_task_rows))
   in

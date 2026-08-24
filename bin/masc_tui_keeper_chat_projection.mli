@@ -120,3 +120,20 @@ val error_to_string : error -> string
 val protocol_error : ?acceptance_observed:bool -> stream_error -> error
 val error_acceptance_observed : error -> bool
 val error_certainty : ?was_unverified:bool -> error -> error_certainty
+
+(** Whether the failure means this process could not authenticate, rather than
+    anything about the operation it asked about. Reconciliation reads use this:
+    on a 401 the operation is untouched and still on the server, so the caller
+    must keep the request unverified and say the token is missing, not report a
+    rejection. {!error_certainty} reads the same statuses on the dispatch POST
+    as a verified rejection, which is the opposite conclusion for the opposite
+    question. *)
+val reader_unauthenticated : error -> bool
+
+(** The operator-facing detail for a reconciliation that failed. A refused read
+    is reported as a credential problem and its remedy, and [credential_sent]
+    decides which one: without a bearer the operator has none to present, with
+    one the server rejected what it was given. Every other failure keeps the
+    server's own words. *)
+val reconciliation_failure_detail : credential_sent:bool -> error -> string
+

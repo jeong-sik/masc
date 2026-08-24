@@ -102,9 +102,9 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Keepers _ | Board | Approvals | Planning
+            | Overview | Keepers _ | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools
-            | System_logs ->
+            | Autonomy | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -277,7 +277,8 @@ let render_overview (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf " MASC Overview  %s[%s]%s  %s  %s"
+  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
+    (screen_title " MASC Overview")
     Ansi.cyan (Terminal_text.single_line state.workspace) Ansi.reset timestamp
     (connection_badge state.connection_status) in
 
@@ -365,7 +366,13 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
+  (* Three verticals plus two panels have to add up to the box the rest of the
+     screen draws. An odd remainder used to be dropped by the division, so on
+     any odd width the Attention/Events band ended one column short of every
+     other row and the right edge stepped in and back out. The odd column goes
+     to the right panel. *)
   let panel_width = (cols - 3) / 2 in
+  let right_panel_width = cols - 3 - panel_width in
   let attention_title = " Attention " in
   let event_count = List.length state.events in
   let event_window =
@@ -389,7 +396,7 @@ let render_overview (state : state) =
     (String.make (max 0 (panel_width - String.length attention_title)) ' ')
     (Ansi.gray ^ Ansi.box_v ^ Ansi.reset)
     events_title
-    (String.make (max 0 (panel_width - String.length events_title)) ' ')
+    (String.make (max 0 (right_panel_width - String.length events_title)) ' ')
     (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
 
   for i = 0 to row_budget.attention_rows - 1 do
@@ -411,14 +418,15 @@ let render_overview (state : state) =
         let e = List.nth state.events event_index in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
-          (fit_width (Terminal_text.single_line e.content) (panel_width - 12))
+          (fit_width (Terminal_text.single_line e.content)
+             (right_panel_width - 12))
       else ""
     in
     Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
       Ansi.gray Ansi.box_v Ansi.reset
       (fit_width attention_str (panel_width - 2))
       Ansi.gray Ansi.box_v Ansi.reset
-      (fit_width event_str (panel_width - 2))
+      (fit_width event_str (right_panel_width - 2))
       Ansi.gray Ansi.box_v Ansi.reset)
   done;
 
@@ -493,7 +501,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf " MASC Task  %s[%s]%s  %s  %s"
+  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
+    (screen_title " MASC Task")
     Ansi.cyan (fit_width task.id 20) Ansi.reset timestamp
     (connection_badge state.connection_status) in
 
@@ -664,7 +673,8 @@ let render_approvals (state : state) =
   let action_badge = if action_inflight then "  [submitting]" else "" in
   let header =
     Printf.sprintf
-      " MASC Approvals (%s/%s, hidden %s, actor %s)  %s  %s%s"
+      "%s (%s/%s, hidden %s, actor %s)  %s  %s%s"
+      (screen_title " MASC Approvals")
       visible_count total_count hidden_count scope timestamp
       (connection_badge state.connection_status) action_badge
   in
@@ -797,24 +807,33 @@ let board_kind_mark = function
   | None -> " "
 ;;
 
-(** Render the Board surface (list view). *)
-(** The new-post draft. The commit-message convention is stated on screen
-    rather than assumed: first line is the title, the rest is the body. A
-    draft taller than the viewport shows its tail, where the caret is -- the
-    operator is always writing at the bottom. *)
+(** The draft pane. For a new post the commit-message convention is stated
+    on screen rather than assumed: first line is the title, the rest is the
+    body. A reply sends the whole draft as one comment, so its hint drops
+    the title convention. A draft taller than the viewport shows its tail,
+    where the caret is -- the operator is always writing at the bottom. *)
 let render_board_compose (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  let header = Printf.sprintf " MASC Board  %s[new post]%s  %s"
-    Ansi.cyan Ansi.reset
+  let kind_line =
+    match state.board_compose_reply_to with
+    | Some post_id ->
+        Printf.sprintf "  comment on %s  Enter: new line"
+          (fit_width (Terminal_text.single_line post_id) 16)
+    | None -> "  first line: title   rest: body   Enter: new line"
+  in
+  let header = Printf.sprintf "%s  %s[%s]%s  %s"
+    (screen_title " MASC Board")
+    Ansi.cyan
+    (match state.board_compose_reply_to with
+     | Some _ -> "reply" | None -> "new post")
+    Ansi.reset
     (connection_badge state.connection_status)
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  box_line buf cols
-    (Ansi.dim ^ "  first line: title   rest: body   Enter: new line"
-    ^ Ansi.reset);
+  box_line buf cols (Ansi.dim ^ kind_line ^ Ansi.reset);
   (match state.board_post_error with
    | Some err ->
        box_line buf cols
@@ -868,7 +887,8 @@ let render_board_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let count = List.length state.board_posts in
-  let header = Printf.sprintf " MASC Board (%d)  %s  %s"
+  let header = Printf.sprintf "%s (%d)  %s  %s"
+    (screen_title " MASC Board")
     count timestamp
     (connection_badge state.connection_status) in
 
@@ -937,7 +957,7 @@ let render_board_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  r:refresh  Tab:next  | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
@@ -961,7 +981,8 @@ let render_board_read (state : state) (list_post : board_post) =
         list_post
   in
 
-  let header = Printf.sprintf " MASC Board  %s[%s]%s  by %s  +%d  c%d"
+  let header = Printf.sprintf "%s  %s[%s]%s  by %s  +%d  c%d"
+    (screen_title " MASC Board")
     Ansi.cyan
     (fit_width (Terminal_text.single_line post.bp_id) 12)
     Ansi.reset
@@ -1044,7 +1065,7 @@ let render_board_read (state : state) (list_post : board_post) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
   finish_surface state ~surface_key:"board-read" ~rows:terminal_rows
@@ -1104,7 +1125,8 @@ let render_planning_list (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf " MASC Planning  %s  %s"
+  let header = Printf.sprintf "%s  %s  %s"
+    (screen_title " MASC Planning")
     timestamp
     (connection_badge state.connection_status) in
 
@@ -1232,7 +1254,8 @@ let render_planning_detail (state : state)
 
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
-  let header = Printf.sprintf " MASC Planning  %s[%s]%s  %s"
+  let header = Printf.sprintf "%s  %s[%s]%s  %s"
+    (screen_title " MASC Planning")
     status_color (fit_width status_label 8) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
@@ -1296,6 +1319,174 @@ let render_planning_detail (state : state)
     Ansi.dim state.port Ansi.reset);
 
   finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
+      ~cols buf
+
+(* The store's status vocabulary, as colours. An unknown word keeps its own
+   text and no colour: the row is still a fact about the store, just one this
+   build does not rank. *)
+let schedule_status_color status =
+  match status with
+  | "scheduled" | "due" -> Ansi.yellow
+  | "running" -> Ansi.cyan
+  | "failed" -> Ansi.red
+  | "succeeded" | "cancelled" | "expired" -> Ansi.dim
+  | _ -> Ansi.reset
+
+(** Render the Schedules surface: the scheduled-automation list, with an
+    armed cancel. The server sorts active rows first by due time and caps the
+    list at its own limit; [scs_truncated] and [scs_request_count] say what
+    of the whole store this page is. *)
+let render_schedules (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface lays
+     out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let header = Printf.sprintf " MASC Schedules  %s  %s"
+    timestamp
+    (connection_badge state.connection_status) in
+
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+
+  (match state.schedules with
+   | None ->
+       (match Terminal_text.optional_single_line state.schedules_error with
+        | Some err ->
+            box_line buf cols
+              (Ansi.red ^ "  (data unreliable: "
+              ^ fit_width err (cols - 24)
+              ^ ")" ^ Ansi.reset)
+        | None ->
+            box_line buf cols (Ansi.dim ^ "  (no schedule data)" ^ Ansi.reset));
+       for _ = 1 to rows - 10 do
+         box_empty buf cols
+       done
+   | Some snapshot ->
+       if not (String.equal snapshot.scs_status "ok") then begin
+         (* The server's "unknown" is a failed store read, not an empty list;
+            the row says which, so a dead ledger cannot read as "nothing is
+            scheduled". *)
+         (match snapshot.scs_read_error with
+          | Some err ->
+              box_line buf cols
+                (Ansi.red ^ "  (data unreliable: "
+                ^ fit_width err (cols - 24)
+                ^ ")" ^ Ansi.reset)
+          | None ->
+              box_line buf cols
+                (Ansi.red ^ "  (schedule store unreadable)" ^ Ansi.reset));
+         for _ = 1 to rows - 10 do
+           box_empty buf cols
+         done
+       end else begin
+         let count_text =
+           match snapshot.scs_request_count with
+           | Some total when snapshot.scs_truncated ->
+               Printf.sprintf "  Requests: %d  (page shows first %d)" total
+                 (List.length snapshot.scs_rows)
+           | Some total ->
+               Printf.sprintf "  Requests: %d" total
+           | None -> "  Requests: ?"
+         in
+         let next_due_text =
+           match snapshot.scs_next_due_iso with
+           | Some iso ->
+               Printf.sprintf "  Next due: %s"
+                 (Tui_decode.short_timestamp_for_terminal iso)
+           | None -> ""
+         in
+         box_line buf cols (Ansi.bold ^ count_text ^ Ansi.reset);
+         box_line buf cols (Ansi.dim ^ next_due_text ^ Ansi.reset);
+         box_divider buf cols;
+
+         let count = List.length snapshot.scs_rows in
+         if count = 0 then begin
+           box_line buf cols (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset);
+           for _ = 1 to rows - 12 do
+             box_empty buf cols
+           done
+         end else begin
+           let content_height = rows - 12 in
+           let scroll_offset =
+             if state.schedule_cursor >= content_height then
+               state.schedule_cursor - content_height + 1
+             else 0
+           in
+           for i = 0 to content_height - 1 do
+             let idx = i + scroll_offset in
+             if idx < count then begin
+               let row = List.nth snapshot.scs_rows idx in
+               let is_selected = idx = state.schedule_cursor in
+               let due =
+                 match row.sch_due_at_iso with
+                 | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+                 | None -> "-"
+               in
+               (* The payload target names who the wake reaches (a keeper for
+                  keeper wakes); rows without one fall back to the summary,
+                  then the source, so every row names something. *)
+               let subject =
+                 match row.sch_payload_target with
+                 | Some target -> target
+                 | None ->
+                     (match row.sch_payload_summary with
+                      | Some summary -> summary
+                      | None -> row.sch_source)
+               in
+               let status_color = schedule_status_color row.sch_status in
+               let line =
+                 Printf.sprintf "%s[%s]%s %s  %s  %s"
+                   status_color
+                   (fit_width row.sch_status 10)
+                   Ansi.reset
+                   due
+                   (fit_width (Terminal_text.single_line subject)
+                      (max 8 (cols - 60)))
+                   (Ansi.dim ^ row.sch_recurrence_summary ^ Ansi.reset)
+               in
+               let content =
+                 if is_selected then
+                   Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+                 else
+                   "  " ^ line
+               in
+               box_line buf cols content
+             end
+             else box_empty buf cols
+           done
+         end;
+         (* The arm and the server's last refusal sit under the list, the
+            same rows the goal detail carries them on. *)
+         (match state.schedule_cancel_armed with
+          | Some schedule_id ->
+              box_line buf cols
+                (Ansi.yellow
+                ^ Printf.sprintf
+                    "  armed: cancel %s -- same key again to send"
+                    (fit_width schedule_id (cols - 44))
+                ^ Ansi.reset)
+          | None -> ());
+         (match state.schedule_cancel_error with
+          | Some err ->
+              box_line buf cols
+                (Ansi.red ^ "  "
+                ^ fit_width (Terminal_text.single_line err) (cols - 8)
+                ^ Ansi.reset)
+          | None -> ())
+       end);
+
+  box_bottom buf cols;
+
+  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  x:cancel  r:refresh  Tab:next  | Port: %d%s\n"
+    Ansi.dim state.port Ansi.reset);
+
+  finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
       ~cols buf
 
 (** Render the keeper list view *)
@@ -1911,13 +2102,15 @@ let render_keeper_logs (state : state) =
 
     (* Header *)
     let header =
-      Printf.sprintf " Keeper Logs: %s  (%d entries)"
-        (Terminal_text.single_line k.k_name)
+      Printf.sprintf "%s  (%d entries)"
+        (screen_title
+           (Printf.sprintf " Keeper Logs: %s"
+              (Terminal_text.single_line k.k_name)))
         total_entries
     in
 
     box_top buf cols;
-    box_line_styled buf cols ~style:Ansi.bold header;
+    box_line buf cols header;
     box_divider buf cols;
 
     (* Column header *)
@@ -2025,7 +2218,9 @@ let render_keeper_message (state : state) =
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
-      Printf.sprintf " Message to: %s  (port %d)" display_keeper_name state.port
+      Printf.sprintf "%s  (port %d)"
+        (screen_title (Printf.sprintf " Message to: %s" display_keeper_name))
+        state.port
     in
     let target_registered =
       keeper_available_for_new_message state keeper_name
@@ -2046,7 +2241,7 @@ let render_keeper_message (state : state) =
     end else begin
     (* Header *)
     box_top buf cols;
-    box_line_styled buf cols ~style:Ansi.bold header;
+    box_line buf cols header;
     box_divider buf cols;
 
     (* Message history *)
@@ -2064,7 +2259,11 @@ let render_keeper_message (state : state) =
             | Message_status -> Message_layout.Status, "status"
             | Message_error -> Message_layout.Error, "error"
             | Message_tool -> Message_layout.Tool, "tools"
+            | Message_thinking -> Message_layout.Thinking, "thinking"
           in
+          (* One column for every speaker so the [timestamp] speaker request
+             rows line up down the pane, whatever name each row carries. *)
+          let role_label = Message_layout.align_role_label role_label in
           ({ style;
              timestamp = message.me_timestamp;
              role_label;
@@ -2367,8 +2566,12 @@ let render_keeper_message (state : state) =
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
-           a wrapped thought reads as one message rather than several. *)
-        let prefix = if index = 0 then "  > " else "    " in
+           a wrapped thought reads as one message rather than several. The
+           prefix here is the one [Message_layout.input_cursor_column] measures
+           the caret from, so both say the same constant. *)
+        let prefix =
+          if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
+        in
         box_line_styled buf cols ~style:Ansi.cyan (prefix ^ line))
       composer;
 
@@ -2391,7 +2594,10 @@ let render_keeper_message (state : state) =
       | Some _, (Some Chat_post | None), _ | None, Some _, _ ->
           (match Masc_tui_keeper_chat_queue.length state.msg_queued with
            | 0 -> "Enter:queue for next turn"
-           | waiting -> Printf.sprintf "Enter:queue (%d waiting)" waiting)
+           | waiting ->
+             Printf.sprintf
+               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+               waiting)
       | None, None, _ ->
       match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
       with
@@ -2472,17 +2678,19 @@ let render_system_logs (state : state) =
   let header =
     match state.system_logs with
     | None ->
-        Printf.sprintf " MASC System Logs  (not loaded)  %s  %s" timestamp
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC System Logs") timestamp
           (connection_badge state.connection_status)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
-        Printf.sprintf " MASC System Logs (%d of %d, seq %d)  %s  %s"
+        Printf.sprintf "%s (%d of %d, seq %d)  %s  %s"
+          (screen_title " MASC System Logs")
           total_entries snapshot.sys_total snapshot.sys_latest_seq timestamp
           (connection_badge state.connection_status)
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-8s %-5s %-16s %-12s %s" "Time" "Level" "Module" "Keeper"
@@ -2563,17 +2771,19 @@ let render_verification (state : state) =
   let header =
     match state.verification with
     | None ->
-        Printf.sprintf " MASC Verification  (not loaded)  %s  %s" timestamp
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Verification") timestamp
           (connection_badge state.connection_status)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
-        Printf.sprintf " MASC Verification (%d of %d)  %s  %s" shown
+        Printf.sprintf "%s (%d of %d)  %s  %s"
+          (screen_title " MASC Verification") shown
           snapshot.Masc.Tui_decode.vs_total timestamp
           (connection_badge state.connection_status)
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-14s %-16s %-9s %s" "Task" "Submitted by" "Evidence"
@@ -2683,19 +2893,22 @@ let render_harness (state : state) =
   let header =
     match state.harness with
     | None ->
-        Printf.sprintf " MASC Harness  (not loaded)  %s  %s" timestamp
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Harness") timestamp
           (connection_badge state.connection_status)
     | Some _ when fallbacks > 0 ->
         (* The count is the reading an operator opens this for: verdicts that
            came from something other than the evaluator the gate names. *)
-        Printf.sprintf " MASC Harness (%d verdicts, %d by fallback)  %s  %s"
+        Printf.sprintf "%s (%d verdicts, %d by fallback)  %s  %s"
+          (screen_title " MASC Harness")
           shown fallbacks timestamp (connection_badge state.connection_status)
     | Some _ ->
-        Printf.sprintf " MASC Harness (%d verdicts)  %s  %s" shown timestamp
+        Printf.sprintf "%s (%d verdicts)  %s  %s"
+          (screen_title " MASC Harness") shown timestamp
           (connection_badge state.connection_status)
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task" "Gate" "Verdict"
@@ -2786,14 +2999,16 @@ let render_repositories (state : state) =
   let header =
     match state.repositories with
     | None ->
-        Printf.sprintf " MASC Repositories  (not loaded)  %s  %s" timestamp
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Repositories") timestamp
           (connection_badge state.connection_status)
     | Some _ ->
-        Printf.sprintf " MASC Repositories (%d)  %s  %s" shown timestamp
+        Printf.sprintf "%s (%d)  %s  %s"
+          (screen_title " MASC Repositories") shown timestamp
           (connection_badge state.connection_status)
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status" "Sync"
@@ -2881,15 +3096,17 @@ let render_connectors (state : state) =
   let header =
     match state.connectors with
     | None ->
-        Printf.sprintf " MASC Connectors  (not loaded)  %s  %s" timestamp
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Connectors") timestamp
           (connection_badge state.connection_status)
     | Some snapshot ->
-        Printf.sprintf " MASC Connectors (%d of %d available)  %s  %s"
+        Printf.sprintf "%s (%d of %d available)  %s  %s"
+          (screen_title " MASC Connectors")
           snapshot.Masc.Tui_decode.cs_active snapshot.Masc.Tui_decode.cs_total
           timestamp (connection_badge state.connection_status)
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector" "Configured"
@@ -2982,17 +3199,20 @@ let render_tools (state : state) =
   let header =
     match state.tools_inventory with
     | None ->
-        Printf.sprintf " MASC Tools  (not loaded)  %s  %s" timestamp
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Tools") timestamp
           (connection_badge state.connection_status)
     | Some _ when unprojected > 0 ->
-        Printf.sprintf " MASC Tools (%d, %d on no surface)  %s  %s" shown
+        Printf.sprintf "%s (%d, %d on no surface)  %s  %s"
+          (screen_title " MASC Tools") shown
           unprojected timestamp (connection_badge state.connection_status)
     | Some _ ->
-        Printf.sprintf " MASC Tools (%d)  %s  %s" shown timestamp
+        Printf.sprintf "%s (%d)  %s  %s"
+          (screen_title " MASC Tools") shown timestamp
           (connection_badge state.connection_status)
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-30s %-8s %s" "Tool" "Direct" "Surfaces"
@@ -3052,6 +3272,147 @@ let render_tools (state : state) =
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
+(* Which autonomy features have behaviour evidence, and which still need it.
+
+   The server already computes this report; the surface draws it rather than
+   deriving a second opinion. Each feature that falls short gets its own
+   continuation rows: the keepers that have not exercised it, the ones whose
+   record would not open, and what the server says would close the gap. A
+   status column on its own says a feature is unproven without saying who to
+   go look at, which is the part an operator acts on. *)
+let autonomy_status_style (status : Masc.Tui_decode.feature_proof_status) =
+  match status with
+  | Masc.Tui_decode.Fp_pass -> Ansi.green
+  | Masc.Tui_decode.Fp_warn -> Ansi.yellow
+  (* An unreadable status is drawn like a failure on purpose: this build
+     cannot tell whether the feature works, and the safe reading of "I do not
+     know" is not "it does". *)
+  | Masc.Tui_decode.Fp_fail | Masc.Tui_decode.Fp_unreadable _ -> Ansi.red
+
+let autonomy_rows (features : Masc.Tui_decode.feature_proof list) =
+  let open Masc.Tui_decode in
+  List.concat_map
+    (fun f ->
+      let head =
+        Printf.sprintf "  %-30s %-6s %-7s %s"
+          (Terminal_text.single_line f.fp_label)
+          (feature_proof_status_label f.fp_status)
+          (Printf.sprintf "%d/%d" (List.length f.fp_observed) f.fp_keeper_count)
+          (Terminal_text.single_line f.fp_summary)
+      in
+      let head_row = (autonomy_status_style f.fp_status, head) in
+      if not (feature_proof_is_gap f.fp_status) then [ head_row ]
+      else
+        let missing_row =
+          match f.fp_missing with
+          | [] -> []
+          | names ->
+              [ ( Ansi.dim
+                , Printf.sprintf "      no evidence yet: %s"
+                    (Terminal_text.single_line (String.concat ", " names)) )
+              ]
+        in
+        let unreadable_row =
+          match f.fp_read_errors with
+          | [] -> []
+          | names ->
+              [ ( Ansi.red
+                , Printf.sprintf "      record would not open: %s"
+                    (Terminal_text.single_line (String.concat ", " names)) )
+              ]
+        in
+        let action_row =
+          [ ( Ansi.dim
+            , Printf.sprintf "      -> %s"
+                (Terminal_text.single_line f.fp_next_action) )
+          ]
+        in
+        (head_row :: missing_row) @ unreadable_row @ action_row)
+    features
+
+let render_autonomy (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let features =
+    match state.autonomy with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.au_features
+  in
+  let lines = autonomy_rows features in
+  let shown = List.length lines in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.autonomy with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Autonomy")
+          timestamp
+          (connection_badge state.connection_status)
+    | Some s ->
+        let open Masc.Tui_decode in
+        (* Proven against total, then the gap count. The pair is the whole
+           reading: five features all passing and five features where four
+           reports failed to load both leave the same "5" if only one number
+           is drawn. *)
+        Printf.sprintf "%s (%d/%d proven, %d gap%s, %d keepers)  %s  %s"
+          (screen_title " MASC Autonomy")
+          s.au_pass_count s.au_feature_count s.au_gap_count
+          (if s.au_gap_count = 1 then "" else "s")
+          s.au_keeper_count timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-30s %-6s %-7s %s" "Feature" "Proof" "Keepers"
+      "What the report measured"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.autonomy_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = if Option.is_some state.autonomy_error then 9 else 7 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.autonomy_scroll max_scroll) in
+  state.autonomy_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.autonomy_error with
+      | Some _ -> "  (load failed; nothing here is a reading)"
+      | None -> "  (the report named no features)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt lines idx with
+      | None -> box_empty buf cols
+      | Some (style, text) -> box_line_styled buf cols ~style text
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d rows, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"autonomy" ~rows:terminal_rows ~cols buf
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -3095,7 +3456,9 @@ let render_surface (state : state) =
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
   | Tools -> render_tools state
+  | Autonomy -> render_autonomy state
   | System_logs -> render_system_logs state
+  | Schedules -> render_schedules state
 
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in

@@ -336,6 +336,39 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
     (reacted_summary |> member "turn_started_count" |> to_int)
 ;;
 
+(* The fleet verdict reads each keeper's typed status. It used to sum the
+   pending and quarantined counts back out of the JSON those summaries had
+   just been rendered into, with a string comparison behind it that nothing
+   could reach (#27560). This is the path that carries a degraded keeper up
+   with no durable-queue signal involved. *)
+let test_fleet_summary_follows_a_degraded_keeper () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "fleet-degraded-keeper" in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ~post_id:"post-fleet-degraded" ());
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "the keeper itself is degraded" "degraded" "status" summary;
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int
+    "no stale durable queue, so that path cannot be what degrades the fleet"
+    0
+    (fleet |> member "durable_event_queue_stale_count" |> to_int);
+  check_member_string
+    "a degraded keeper degrades the fleet"
+    "degraded"
+    "status"
+    fleet
+;;
+
  let test_fleet_summary_surfaces_durable_event_queue_backlog () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "durable-backlog-keeper" in
@@ -1177,6 +1210,10 @@ let () =
             "summary marks unreacted and reacted stimuli"
             `Quick
             test_summary_marks_unreacted_and_reacted_stimuli
+        ; test_case
+            "fleet summary follows a degraded keeper"
+            `Quick
+            test_fleet_summary_follows_a_degraded_keeper
         ; test_case
             "fleet summary surfaces durable event queue backlog"
             `Quick

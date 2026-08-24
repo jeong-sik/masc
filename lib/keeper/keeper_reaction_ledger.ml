@@ -1307,6 +1307,24 @@ let board_stimulus_token metadata stimulus_kind =
   | Workspace_message -> None
 ;;
 
+(* The per-keeper status this module publishes. The fleet roll-up used to
+   recover it by reading back the JSON it had just written and comparing the
+   string, so a renamed value or a missing field read as "not degraded" with
+   nothing to fail the build (#27560). The value travels beside the JSON now
+   and the string exists only at the boundary. *)
+type keeper_summary_status =
+  | Summary_empty
+  | Summary_ok
+  | Summary_degraded
+  | Summary_unknown
+
+let keeper_summary_status_to_string = function
+  | Summary_empty -> "empty"
+  | Summary_ok -> "ok"
+  | Summary_degraded -> "degraded"
+  | Summary_unknown -> "unknown"
+;;
+
 let summarize_rows ~keeper_name ~limit rows =
   let scanned_row_count = List.length rows in
   let current_event_ids = ref Event_id_set.empty in
@@ -1409,14 +1427,15 @@ let summarize_rows ~keeper_name ~limit rows =
   let pending_stimulus_count = List.length pending_stimulus_ids in
   let degraded_signal_count = pending_stimulus_count + !quarantined_row_count in
   let status =
-    if !row_count = 0 && !quarantined_row_count = 0 then "empty"
-    else if degraded_signal_count = 0 then "ok"
-    else "degraded"
+    if !row_count = 0 && !quarantined_row_count = 0 then Summary_empty
+    else if degraded_signal_count = 0 then Summary_ok
+    else Summary_degraded
   in
-  `Assoc
+  ( status
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String status
+    ; "status", `String (keeper_summary_status_to_string status)
     ; "operator_action_required", `Bool (degraded_signal_count > 0)
     ; "scanned_row_count", `Int scanned_row_count
     ; "row_count", `Int !row_count
@@ -1438,14 +1457,15 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
     ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
-    ]
+    ] )
 ;;
 
 let error_summary ~keeper_name ~limit error =
-  `Assoc
+  ( Summary_unknown
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String "unknown"
+    ; "status", `String (keeper_summary_status_to_string Summary_unknown)
     ; "operator_action_required", `Bool true
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
@@ -1462,10 +1482,12 @@ let error_summary ~keeper_name ~limit error =
     ; "latest_recorded_at_unix", `Null
     ; "latest_stimulus_id", `Null
     ; "read_error", `String error
-    ]
+    ] )
 ;;
 
-let summary_for_keeper ~base_path ~keeper_name ~limit =
+(* The status travels with the JSON so the fleet roll-up can read it without
+   parsing what this module just wrote. *)
+let summary_with_status ~base_path ~keeper_name ~limit =
   try
     match
       Dated_jsonl.read_recent_result
@@ -1483,10 +1505,8 @@ let summary_for_keeper ~base_path ~keeper_name ~limit =
   | exn -> error_summary ~keeper_name ~limit (Printexc.to_string exn)
 ;;
 
-let summary_status json =
-  match string_field "status" json with
-  | Some value -> value
-  | None -> "unknown"
+let summary_for_keeper ~base_path ~keeper_name ~limit =
+  snd (summary_with_status ~base_path ~keeper_name ~limit)
 ;;
 
 let summary_read_error_count json =
@@ -1549,11 +1569,13 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   (* NDT-OK: fleet summary health renders stale-age telemetry at the read
      boundary; keeper control flow never branches on this timestamp. *)
   let now = Unix.gettimeofday () in
-  let summaries =
+  let summaries_with_status =
     List.map
-      (fun keeper_name -> summary_for_keeper ~base_path ~keeper_name ~limit:limit_per_keeper)
+      (fun keeper_name ->
+        summary_with_status ~base_path ~keeper_name ~limit:limit_per_keeper)
       keeper_names
   in
+  let summaries = List.map snd summaries_with_status in
   let durable_event_queue_summaries =
     List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
   in
@@ -1737,13 +1759,12 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       || durable_event_queue_read_error_count > 0
     then "unknown"
     else if
-      pending_count > 0
-      || quarantined_row_count > 0
+      List.exists
+        (fun (status, _) -> status = Summary_degraded)
+        summaries_with_status
       || durable_event_queue_stale_count > 0
     then "degraded"
     else if row_count = 0 && durable_event_queue_count = 0 then "empty"
-    else if List.exists (fun summary -> summary_status summary = "degraded") summaries
-    then "degraded"
     else "ok"
   in
   `Assoc

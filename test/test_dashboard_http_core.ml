@@ -2817,10 +2817,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "status", `String "active"
            ; "keepalive_running", `Bool false
            ; "turn_count", `Int 1
-           ; "autonomous_turn_count", `Int 1
-           ; "autonomous_action_count", `Int 1
-           ; "noop_turn_count", `Int 0
-           ; "last_autonomous_action_at", `String now
            ; "updated_at", `String now
            ; "tool_audit_at", `String ""
            ; "recent_tool_names", `List []

@@ -128,7 +128,6 @@ export function normalizeKeeperBrief(raw: unknown): DashboardMissionKeeperBrief 
     context_ratio: asNumber(raw.context_ratio) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s) ?? null,
     current_work: asString(raw.current_work) ?? null,
-    last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     latest_tool_names: asStringArray(raw.latest_tool_names),
     latest_tool_call_count: asNumber(raw.latest_tool_call_count) ?? null,
     tool_audit_source: asString(raw.tool_audit_source) ?? null,

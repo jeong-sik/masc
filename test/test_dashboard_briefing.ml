@@ -412,7 +412,6 @@ let test_dashboard_keeper_unknown_context_is_informational () =
                     ("reason", `String "context_measurement_missing");
                   ]
               | _ -> `Null );
-            ("autonomous_turn_count", `Int 1);
             ("turn_count", `Int 1);
           ]
       in

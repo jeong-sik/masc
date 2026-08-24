@@ -69,15 +69,6 @@ export function fleetActivityMinis(keeper: Keeper | null | undefined): FleetActi
   if (!keeper) return []
   const minis: FleetActivityMini[] = []
 
-  const autonomousTurns = finiteCount(keeper.autonomous_turn_count)
-  if (autonomousTurns != null) minis.push({ k: '자율 턴', v: String(autonomousTurns) })
-
-  const boardReactive = finiteCount(keeper.board_reactive_turn_count)
-  const mentionReactive = finiteCount(keeper.mention_reactive_turn_count)
-  if (boardReactive != null || mentionReactive != null) {
-    minis.push({ k: '반응 턴', v: String((boardReactive ?? 0) + (mentionReactive ?? 0)) })
-  }
-
   const drifts = finiteCount(keeper.drift_count_total)
   if (drifts != null) minis.push({ k: '드리프트', v: String(drifts) })
 

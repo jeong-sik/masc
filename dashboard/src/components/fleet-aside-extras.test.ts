@@ -60,22 +60,8 @@ describe('fleetActivityMinis', () => {
   })
 
   it('renders only counters the keeper actually reported', () => {
-    const minis = fleetActivityMinis(makeKeeper({
-      autonomous_turn_count: 7,
-      drift_count_total: 2,
-    }))
-    expect(minis).toEqual([
-      { k: '자율 턴', v: '7' },
-      { k: '드리프트', v: '2' },
-    ])
-  })
-
-  it('folds board + mention reactive turns into one row', () => {
-    const minis = fleetActivityMinis(makeKeeper({
-      board_reactive_turn_count: 3,
-      mention_reactive_turn_count: 4,
-    }))
-    expect(minis).toEqual([{ k: '반응 턴', v: '7' }])
+    const minis = fleetActivityMinis(makeKeeper({ drift_count_total: 2 }))
+    expect(minis).toEqual([{ k: '드리프트', v: '2' }])
   })
 
   it('never fabricates the design tps/traces slots', () => {

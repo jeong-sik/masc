@@ -129,9 +129,7 @@ function KeeperToolActivity() {
   // Aggregate top tools across all keepers (memoized)
   const { topTools, totalToolTurns } = useMemo(() => {
     const toolCounts = new Map<string, number>()
-    let turns = 0
     for (const k of keeperList) {
-      turns += k.autonomous_tool_turn_count ?? 0
       const items = k.metrics_window?.top_tools
       if (items) {
         for (const t of items) {
@@ -142,7 +140,10 @@ function KeeperToolActivity() {
     }
     return {
       topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
-      totalToolTurns: turns,
+      // The calls shown are the calls counted here. This used to add a
+      // lifetime keeper-meta counter instead, so the chip and the tool list
+      // below it were reading different periods.
+      totalToolTurns: [...toolCounts.values()].reduce((sum, count) => sum + count, 0),
     }
   }, [keeperList])
 

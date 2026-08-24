@@ -2071,17 +2071,7 @@ let render_keeper_detail (state : state) =
          |> String.concat "  ");
     add_empty ();
 
-    (* Autonomy section *)
     add_section "Autonomy";
-    add_row "Autonomous Turns:"
-      (string_of_int k.k_autonomous_turn_count);
-    add_row "Text / Tool:"
-      (Printf.sprintf "%d / %d" k.k_autonomous_text_turn_count
-         k.k_autonomous_tool_turn_count);
-    add_row "Board / Mention:"
-      (Printf.sprintf "%d / %d" k.k_board_reactive_turn_count
-         k.k_mention_reactive_turn_count);
-    add_row "No-op Turns:" (string_of_int k.k_noop_turn_count);
     add_row "Last Outcome:" k.k_last_proactive_outcome;
     add_empty ();
 

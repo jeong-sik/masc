@@ -423,23 +423,6 @@ let keepers_json
                          @ keeper_runtime_identity_fields meta
                          @ [ "keepalive_running", `Bool keepalive_running
                            ; "next_model_hint", `Null
-                           ; ( "last_autonomous_action_at"
-                             , if String.trim meta.runtime.last_autonomous_action_at = ""
-                               then `Null
-                               else `String meta.runtime.last_autonomous_action_at )
-                           ; ( "autonomous_action_count"
-                             , `Int meta.runtime.autonomous_action_count )
-                           ; ( "autonomous_turn_count"
-                             , `Int meta.runtime.autonomous_turn_count )
-                           ; ( "autonomous_text_turn_count"
-                             , `Int meta.runtime.autonomous_text_turn_count )
-                           ; ( "autonomous_tool_turn_count"
-                             , `Int meta.runtime.autonomous_tool_turn_count )
-                           ; ( "board_reactive_turn_count"
-                             , `Int meta.runtime.board_reactive_turn_count )
-                           ; ( "mention_reactive_turn_count"
-                             , `Int meta.runtime.mention_reactive_turn_count )
-                           ; "noop_turn_count", `Int meta.runtime.noop_turn_count
                            ; ( "latest_tool_names"
                              , `List
                                  (List.map (fun value -> `String value) latest_tool_names)

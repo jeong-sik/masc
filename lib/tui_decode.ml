@@ -24,12 +24,6 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_autonomous_turn_count : int;
-  k_autonomous_text_turn_count : int;
-  k_autonomous_tool_turn_count : int;
-  k_board_reactive_turn_count : int;
-  k_mention_reactive_turn_count : int;
-  k_noop_turn_count : int;
   k_last_proactive_outcome : string;
   k_created_at : string;
   k_updated_at : string;
@@ -409,12 +403,6 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     k_total_cost_usd = usage.total_cost_usd;
     k_last_turn_ts;
     k_compaction_count = compaction.count;
-    k_autonomous_turn_count = runtime.autonomous_turn_count;
-    k_autonomous_text_turn_count = runtime.autonomous_text_turn_count;
-    k_autonomous_tool_turn_count = runtime.autonomous_tool_turn_count;
-    k_board_reactive_turn_count = runtime.board_reactive_turn_count;
-    k_mention_reactive_turn_count = runtime.mention_reactive_turn_count;
-    k_noop_turn_count = runtime.noop_turn_count;
     k_last_proactive_outcome =
       Keeper_meta_contract.proactive_cycle_outcome_to_string
         proactive.last_outcome;

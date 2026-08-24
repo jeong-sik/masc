@@ -74,7 +74,30 @@ if [ -n "$new" ]; then
   echo
   for name in $new; do
     echo "--- $name ---"
-    awk -v n="$name" '$0 ~ n {p = 1} p && /^$/ {exit} p' "$log" | head -25
+    # Print the exact Dune failure block, including Alcotest's case name and
+    # assertion after the blank line that follows its run ID. Match the suite
+    # name from the stanza line instead of a substring in another executable.
+    awk -v n="$name" '
+      /^File "test\/(dune|stanzas\/[a-z0-9_]+\.inc)", line/ {
+        if (printing) exit
+        header = $0
+        want = 1
+        next
+      }
+      want {
+        suite = ""
+        if (match($0, /test_[a-z0-9_]+/))
+          suite = substr($0, RSTART, RLENGTH)
+        if (suite == n) {
+          print header
+          print
+          printing = 1
+        }
+        want = 0
+        next
+      }
+      printing { print }
+    ' "$log"
   done
 fi
 

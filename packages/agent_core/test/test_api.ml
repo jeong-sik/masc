@@ -855,6 +855,60 @@ let test_json_of_string_or_raw_invalid () =
 (* Test runner                                                          *)
 (* ------------------------------------------------------------------ *)
 
+(* A tool_use id that is present but blank used to parse. Downstream each
+   writer then invents its own stand-in -- the transcript synthesises
+   [tc-<position>], the event payload drops the field -- so one execution gets
+   two identities and the dashboard, which joins on the id, leaves the step
+   pending forever (#21894). The sibling parsers for the OpenAI Responses,
+   Gemini and Ollama shapes already reject or replace a blank id; this one
+   did not. *)
+let blank_identifier_cases =
+  [ ( "tool_use blank id"
+    , {|{"type":"tool_use","id":"","name":"fn","input":{}}|} )
+  ; ( "tool_use whitespace id"
+    , {|{"type":"tool_use","id":"   ","name":"fn","input":{}}|} )
+  ; ( "tool_use blank name"
+    , {|{"type":"tool_use","id":"tu_1","name":"","input":{}}|} )
+  ; ( "tool_result blank tool_use_id"
+    , {|{"type":"tool_result","tool_use_id":"","content":"ok"}|} )
+  ]
+;;
+
+let test_blank_identifiers_are_rejected () =
+  List.iter
+    (fun (label, raw) ->
+      let json = Yojson.Safe.from_string raw in
+      (match Llm_provider.Api_common.content_block_of_json_result json with
+       | Ok _ -> Alcotest.failf "%s: parsed instead of being rejected" label
+       | Error _ -> ());
+      match Llm_provider.Api_common.content_block_of_json json with
+      | Some _ -> Alcotest.failf "%s: option parser accepted it" label
+      | None -> ())
+    blank_identifier_cases
+;;
+
+let test_present_identifiers_still_parse () =
+  (* The guard is on blankness, not on presence: a real id has to survive. *)
+  let json =
+    Yojson.Safe.from_string {|{"type":"tool_use","id":"tu_1","name":"fn","input":{}}|}
+  in
+  match Llm_provider.Api_common.content_block_of_json json with
+  | Some (Llm_provider.Types.ToolUse { id; name; _ }) ->
+    Alcotest.(check string) "id survives" "tu_1" id;
+    Alcotest.(check string) "name survives" "fn" name
+  | Some _ | None -> Alcotest.fail "a well-formed tool_use must still parse"
+;;
+
+let test_empty_text_block_still_parses () =
+  (* An empty text block is a thing providers send; only identifiers are
+     guarded. *)
+  let json = Yojson.Safe.from_string {|{"type":"text","text":""}|} in
+  match Llm_provider.Api_common.content_block_of_json json with
+  | Some (Llm_provider.Types.Text text) ->
+    Alcotest.(check string) "empty text is preserved" "" text
+  | Some _ | None -> Alcotest.fail "an empty text block must still parse"
+;;
+
 let () =
   install_repo_model_catalog ();
   run
@@ -963,6 +1017,18 @@ let () =
             "kimi tool_result uses text blocks"
             `Quick
             test_kimi_message_to_json_tool_result_uses_text_blocks
+        ] )
+    ; ( "blank-identifiers"
+      , [ test_case
+            "blank tool_use/tool_result identifiers are rejected"
+            `Quick
+            test_blank_identifiers_are_rejected
+        ; test_case
+            "a present identifier still parses"
+            `Quick
+            test_present_identifiers_still_parse
+        ; test_case "an empty text block still parses" `Quick
+            test_empty_text_block_still_parses
         ] )
     ]
 ;;

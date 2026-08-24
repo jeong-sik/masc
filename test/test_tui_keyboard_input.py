@@ -2795,6 +2795,8 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                 "content": "",
                 "ts": 1787348490.3,
                 "autonomous_turn": {"turn_id": "trace-1787333555531-00020#54"},
+                # The server writes null, not "", when the turn said nothing.
+                # (content is set above; the marker is what the decoder keys on.)
                 "blocks": [
                     {
                         "t": "trace",
@@ -2811,7 +2813,7 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                                 "kind": "tool",
                                 "name": "tool_execute",
                                 "status": "err",
-                                "dur": "1.2s",
+                                "dur": "1200ms",
                             },
                         ],
                     }
@@ -2849,7 +2851,7 @@ def autonomous_turn_history_interaction() -> Interaction:
         for needle, what in (
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
-            ("\u2717 tool_execute \u00b7 1.2s".encode(), "the failed call"),
+            ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
         ):
             if needle not in pane:
                 raise AssertionError(

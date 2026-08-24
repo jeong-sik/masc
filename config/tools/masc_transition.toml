@@ -1,0 +1,107 @@
+name = "masc_transition"
+description = """
+Move a Task through the agent actions claim, start, submit_for_verification, \
+cancel, or release. Ownership is exact and cannot be overridden by caller \
+arguments. Completion requires the assignee to submit evidence, then wait \
+for an authenticated human-operator or typed auto-judge verdict outside this \
+tool. Direct done and approve/reject are deliberately unavailable here. \
+Supports expected_version CAS."""
+
+[[params]]
+name = "agent_name"
+type = "string"
+required = true
+description = "Your agent name"
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID (e.g., 'task-001')"
+
+[[params]]
+name = "action"
+type = "string"
+required = true
+description = """
+Which transition to apply. claim takes an unclaimed Task; start moves your \
+claim into progress; release hands it back with a required \
+handoff_context.summary; cancel ends it with a reason. Completion goes \
+through submit_for_verification with evidence in notes — done is refused \
+from every working status and cannot complete a Task here."""
+enum = ["claim", "start", "done", "cancel", "release", "submit_for_verification"]
+
+[[params]]
+name = "expected_version"
+type = "integer"
+description = """
+Optional CAS guard (current backlog.version). Transition fails if mismatched"""
+
+[[params]]
+name = "notes"
+type = "string"
+description = """
+Evidence summary for submit_for_verification, or completion notes for done"""
+
+[[params]]
+name = "reason"
+type = "string"
+description = "Cancellation reason (used with action='cancel')"
+
+[[params]]
+name = "handoff_context"
+type = "object"
+description = """
+Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
+actions (submit_for_verification / done / release / cancel). On \
+action='submit_for_verification', every 'evidence_refs' entry must use \
+'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
+'note:<text>' for narrative evidence. A public URL inside a note (a PR, a CI \
+run) can be fetched live by the verifier itself; materialize volatile \
+contents as an artifact when they must be pinned at submit time. Commits and \
+traces are not fetched. Bare relative paths and absolute host paths are \
+persisted as typed invalid references. The list itself is optional. Example: \
+{\"summary\": \"tests green, local proof saved\", \"evidence_refs\": \
+[\"artifact:artifacts/proof.json\"]}."""
+
+[[params.params]]
+name = "summary"
+type = "string"
+required = true
+min_length = 1
+description = """
+REQUIRED. Non-empty one-line summary of current state at release time. \
+Example: 'tests green, PR #123 pending review'."""
+
+[[params.params]]
+name = "reason"
+type = "string"
+description = "Why the task is being released (blocker, handoff, pause)."
+
+[[params.params]]
+name = "next_step"
+type = "string"
+description = "What the next owner should do first."
+
+[[params.params]]
+name = "failure_mode"
+type = "string"
+description = "If released due to failure, describe the failure mode."
+
+[[params.params]]
+name = "reclaim_policy"
+type = "string"
+enum = ["allow_reclaim", "block_reclaim"]
+description = """
+Explicit reclaim policy. Omit or use allow_reclaim for normal handoff. Use \
+block_reclaim only for deterministic terminal mismatches that must require \
+operator review."""
+
+[[params.params]]
+name = "evidence_refs"
+type = "array"
+items = { type = "string", min_length = 1 }
+description = """
+Typed verifier evidence. Use artifact:<producer-root-relative-path> for \
+files or note:<text> for narrative, commit, trace, receipt, or URL evidence. \
+Bare and absolute paths are invalid."""

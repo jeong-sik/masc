@@ -190,6 +190,8 @@
   test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
+  test_filesystem_tool_toml_parity
+  test_task_tool_toml_parity
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -500,6 +502,8 @@
   test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
+  test_filesystem_tool_toml_parity
+  test_task_tool_toml_parity
   test_tool_definition_toml
   test_ide_bridge
   test_server_ide_lsp_proxy
@@ -644,7 +648,9 @@
   test_keeper_model_input_demotion
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink
-  test_board_tool_toml_parity)
+  test_board_tool_toml_parity
+  test_filesystem_tool_toml_parity
+  test_task_tool_toml_parity)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
 

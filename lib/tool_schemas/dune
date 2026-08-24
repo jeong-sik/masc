@@ -13,6 +13,7 @@
   tool_schemas_schedule
   tool_schemas_library
   tool_schemas_local_runtime
+  tool_schemas_filesystem_files
   tools
   ;; RFC-0057 Phase 0 — emitted by bin/gen_tool_descriptors.ml via the
   ;; (rule ...) below. Lives in the same module namespace as the
@@ -30,7 +31,8 @@
   masc_core
   masc.task_handlers
   masc.masc_tool_surface
-  ; tool_schemas_workspace_extra reads config/tools/masc_goal_*.toml
+  ; tool_schemas_workspace_extra reads config/tools/masc_goal_*.toml and
+  ; tool_schemas_filesystem_files reads config/tools/tool_*_file*.toml
   ; from the binary-embedded config tree.
   masc.embedded_config
   masc.masc_goal))

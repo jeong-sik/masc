@@ -42,10 +42,24 @@ val load
     boolean | object | array), [required] (bool), [description], [enum]
     (non-empty string list, string params only), [default] (matching the
     declared scalar type), [minimum] / [maximum] (integer params only),
-    [max_length] / [pattern] (string params only), and [items] (array
-    params only; an items table carries [type] and, for object items,
-    nested [params] restricted to [name] / [type] / [description]).
-    Everything else is an [Error] naming the offending key or value. *)
+    [min_length] / [max_length] / [pattern] (string params only),
+    [max_items] (array params only), [additional_properties] (object params
+    only), [params] (object params only) and [items] (array params only).
+    Everything else is an [Error] naming the offending key or value.
+
+    [params] and an object [items] table take the same parameter grammar,
+    at any depth: an object parameter declares its own [[params]], one of
+    those can be an array whose [items] are objects with [params] again. A
+    child's [required = true] is collected into its parent's [required]
+    list, where JSON Schema puts it, rather than emitted onto the child.
+
+    One thing the file cannot control is where a sub-table lands in the
+    emitted JSON. TOML admits [[params.params]] and [params.items] only
+    after every scalar key of their parent, so [items] cannot be written
+    before [description]. Object key order is not part of a JSON object's
+    meaning (RFC 8259 §4), and the acceptance criterion in RFC
+    prompts-and-tool-definitions-outside-ocaml §4 compares schemas with
+    keys sorted for exactly this reason. *)
 
 val validate_embedded
   :  read:(string -> string option)

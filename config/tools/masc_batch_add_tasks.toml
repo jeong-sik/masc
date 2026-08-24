@@ -1,0 +1,71 @@
+name = "masc_batch_add_tasks"
+description = """
+Add multiple tasks in one call (more efficient than repeated masc_add_task). \
+Use when: loading sprint backlog, importing from JIRA, creating related \
+tasks. A task carries a completion contract only if you write one; none is \
+derived from the title. Each task gets unique ID (task-XXX). Atomic: all \
+succeed or all fail. Example: masc_batch_add_tasks({tasks: [{title: 'Task \
+A', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})"""
+
+[[params]]
+name = "tasks"
+type = "array"
+required = true
+max_items = 20
+description = "List of tasks to add"
+
+[params.items]
+type = "object"
+
+[[params.items.params]]
+name = "title"
+type = "string"
+required = true
+description = "Task title"
+
+[[params.items.params]]
+name = "priority"
+type = "integer"
+description = "Priority 1-5 (1=highest)"
+default = 3
+
+[[params.items.params]]
+name = "description"
+type = "string"
+description = "Task description"
+
+[[params.items.params]]
+name = "goal_id"
+type = "string"
+description = """
+Optional structured goal link for rollups. If omitted, the task is created \
+unscoped (goalless); pass goal_id explicitly to link it to a goal."""
+
+[[params.items.params]]
+name = "contract"
+type = "object"
+additional_properties = false
+
+[[params.items.params.params]]
+name = "strict"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "completion_contract"
+type = "array"
+items = { type = "string" }
+
+[[params.items.params.params]]
+name = "required_evidence"
+type = "array"
+items = { type = "string" }
+
+[[params.items.params.params]]
+name = "inspect_gate_evidence"
+type = "array"
+items = { type = "string" }
+
+[[params.items.params.params]]
+name = "verify_gate_evidence"
+type = "array"
+items = { type = "string" }

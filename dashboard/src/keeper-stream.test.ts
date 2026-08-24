@@ -113,6 +113,28 @@ describe('Keeper operation stream projection', () => {
     expect(entry?.rawText).toBe('첫째둘째')
   })
 
+  it('drops a custom event this view does not draw instead of ending the reply', () => {
+    assistantEntry()
+    // keeper-actions.ts throws on any string this returns, so a name with no
+    // handler used to stop the stream mid-reply and the answer never landed.
+    // #29650 added these two to the name list and the SSE field table but not
+    // to the value union or to the handlers, so they decoded and then killed
+    // the stream (rondo, 2026-08-24).
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+      value: {
+        tool_call_id: 'call-1',
+        tool_call_name: 'Execute',
+        args: '{}',
+        question: 'run it?',
+      },
+    })).toBeNull()
+
+    // The reply is still the one being streamed into.
+    expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toBeDefined()
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

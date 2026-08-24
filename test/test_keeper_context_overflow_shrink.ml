@@ -275,6 +275,28 @@ let test_state_clamps_a_remembered_value_above_the_current_cap () =
        ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
+(* The seed is the runtime's declared ceiling, and a caller that passes
+   [max_int] instead opts out of every clamp above: a remembered value can
+   never be stale, and the first attempt carries the whole history. The
+   claude_code lane did exactly that until 2026-08-24, so a model declaring
+   max-prompt-bytes=524288 learned its own ceiling from the provider's
+   rejection, one full turn at a time. This pins what [max_capacity_bytes]
+   means so the next lane that wires it reads the contract here. *)
+let test_max_int_capacity_disables_the_clamp () =
+  Eio_main.run
+  @@ fun _env ->
+  Shrink_state.For_testing.reset ();
+  Shrink_state.record_success
+    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity_bytes:8_388_608;
+  check int "an unbounded cap keeps a value a declared cap would have clamped"
+    8_388_608
+    (Shrink_state.starting_capacity_bytes
+       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:max_int);
+  check int "the same memory against a declared cap is clamped to it" 524_288
+    (Shrink_state.starting_capacity_bytes
+       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:524_288)
+;;
+
 let test_state_is_keyed_per_keeper_and_runtime () =
   Eio_main.run
   @@ fun _env ->
@@ -335,6 +357,10 @@ let () =
             "clamps a remembered value above the current cap"
             `Quick
             test_state_clamps_a_remembered_value_above_the_current_cap
+        ; test_case
+            "max_int capacity disables the clamp"
+            `Quick
+            test_max_int_capacity_disables_the_clamp
         ; test_case
             "is keyed per (keeper, runtime)"
             `Quick

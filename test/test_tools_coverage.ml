@@ -631,6 +631,46 @@ let test_masc_dashboard_schema () =
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
 
+(* The enum the model reads and the vocabulary Dashboard accepts sit on
+   opposite sides of the cut that keeps the descriptor generator out of its own
+   consumer, and they used to be spelled separately (#27069). A scope in one
+   and not the other either hides it from the model or advertises one the
+   runtime refuses. *)
+let test_masc_dashboard_scope_enum_matches_the_runtime () =
+  match find_registered_tool "masc_dashboard" with
+  | None -> Alcotest.fail "masc_dashboard not found"
+  | Some schema ->
+    let enum =
+      match get_json_assoc "properties" schema.input_schema with
+      | None -> Alcotest.fail "masc_dashboard missing properties"
+      | Some props ->
+        (match List.assoc_opt "scope" props with
+         | None -> Alcotest.fail "masc_dashboard has no scope parameter"
+         | Some scope_schema ->
+           (match Yojson.Safe.Util.member "enum" scope_schema with
+            | `List values ->
+              List.map
+                (function
+                  | `String value -> value
+                  | other ->
+                    Alcotest.failf
+                      "scope enum holds a non-string: %s"
+                      (Yojson.Safe.to_string other))
+                values
+            | _ -> Alcotest.fail "masc_dashboard scope has no enum"))
+    in
+    Alcotest.(check (list string))
+      "the schema enum is what Dashboard accepts"
+      Dashboard.valid_scope_strings
+      enum;
+    List.iter
+      (fun value ->
+        Alcotest.(check bool)
+          (Printf.sprintf "the runtime parses the advertised scope %S" value)
+          true
+          (Option.is_some (Dashboard.scope_of_string_opt value)))
+      enum
+
 let test_masc_keeper_waiting_inventory_schema () =
   match find_registered_tool "masc_keeper_waiting_inventory" with
   | None -> Alcotest.fail "masc_keeper_waiting_inventory not found"
@@ -793,6 +833,8 @@ let () =
     ];
     "dashboard_tools", [
       Alcotest.test_case "dashboard" `Quick test_masc_dashboard_schema;
+      Alcotest.test_case "dashboard scope enum matches the runtime" `Quick
+        test_masc_dashboard_scope_enum_matches_the_runtime;
       Alcotest.test_case "keeper_waiting_inventory" `Quick
         test_masc_keeper_waiting_inventory_schema;
       Alcotest.test_case "agent_fitness" `Quick test_masc_agent_fitness_schema;

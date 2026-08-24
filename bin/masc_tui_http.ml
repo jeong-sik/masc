@@ -12,9 +12,7 @@ let keeper_chat_stream_path = "/api/v1/keepers/chat/stream"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+let trim_nonempty = String_util.trim_nonempty
 
 let first_nonempty_env names =
   List.find_map

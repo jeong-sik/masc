@@ -27,6 +27,10 @@ val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
 val keeper_suffix_fusion : string
 val keeper_suffix_operator_note : string
+
+val keeper_suffix_file_changes : string
+(** [GET /api/v1/keepers/<name>/file-changes] — the files this keeper wrote,
+    read back out of the tool-call log. *)
 (** {1 Dashboard cache keys} *)
 
 val cache_key_string_segment : string -> string

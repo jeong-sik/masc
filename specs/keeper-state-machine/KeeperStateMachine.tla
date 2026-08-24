@@ -3,7 +3,7 @@
 \*
 \* This model contains only typed intent and durable lifecycle state.
 \* Runtime observations may select an observable phase, but only explicit
-\* operator intent may pause or stop a Keeper. Failing, Overflowed,
+\* operator intent may pause or stop a Keeper. Failing,
 \* Compacting, and HandingOff remain work-capable; they do not grant or deny
 \* effects. External effects are authorized independently by the Gate.
 \*
@@ -26,7 +26,6 @@ PhaseSet == {
     "Offline",
     "Running",
     "Failing",
-    "Overflowed",
     "Compacting",
     "HandingOff",
     "Draining",
@@ -39,7 +38,7 @@ PhaseSet == {
 \* These phases remain eligible to continue lane-local work. The set has no
 \* effect-authorization meaning; the Gate owns that boundary.
 WorkCapable == {
-    "Running", "Failing", "Overflowed", "Compacting", "HandingOff"
+    "Running", "Failing", "Compacting", "HandingOff"
 }
 
 Terminal == {"Stopped"}

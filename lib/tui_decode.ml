@@ -50,7 +50,6 @@ let keeper_phase_to_string = Keeper_state_machine.phase_to_string
 
 type keeper_runtime = {
   kr_name : string;
-  kr_status : Keeper_status_runtime.surface_status;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -65,7 +64,6 @@ type keeper_lane_phase =
   | Lane_phase_offline
   | Lane_phase_running
   | Lane_phase_failing
-  | Lane_phase_overflowed
   | Lane_phase_compacting
   | Lane_phase_handing_off
   | Lane_phase_draining
@@ -334,6 +332,26 @@ let required_nullable_float_field json key =
         (Printf.sprintf "field '%s' must be a float or null (received %s)" key
            (Json_util.kind_name other))
 
+let required_nullable_string_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some other ->
+      Error
+        (Printf.sprintf "field '%s' must be a string or null (received %s)" key
+           (Json_util.kind_name other))
+
+let required_nullable_bool_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some other ->
+      Error
+        (Printf.sprintf "field '%s' must be a bool or null (received %s)" key
+           (Json_util.kind_name other))
+
 let require_null_field json key =
   match Json_util.assoc_member_opt key json with
   | None -> Error (Printf.sprintf "missing required field '%s'" key)
@@ -346,6 +364,15 @@ let require_null_field json key =
 let require_string_field json key = require_string json key
 let require_int_field json key = require_int json key
 let require_float_field json key = require_float json key
+let required_bool_field json key =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
+  | bad ->
+      Error
+        (Printf.sprintf "field '%s' must be a bool (received %s)" key
+           (Json_util.kind_name bad))
+
 let require_string_list json key =
   match member key json with
   | `List items ->
@@ -957,10 +984,11 @@ let tool_envelope_outcome (json : Yojson.Safe.t) : (string, string) result =
 
 (** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a key.
 
-    The TUI turns wheel reports into the same [up]/[down] keys the arrow keys
-    produce, so every surface's existing scroll and cursor bindings apply to
-    the wheel without a second dispatch. Wheel-up is button [64], wheel-down
-    [65]; the horizontal wheel, clicks, and releases stay [None] -- the
+    A wheel report becomes [wheel-up] / [wheel-down] rather than the arrow keys
+    it used to share. Two things wanted to be told apart: a wheel notch moves
+    further than one row, and the chat composer answers the arrows with its own
+    history. A surface that scrolls binds both. Wheel-up is button [64],
+    wheel-down [65]; the horizontal wheel, clicks, and releases stay [None] -- the
     terminal sends them, but nothing consumes them yet, and an unconsumed
     report must not masquerade as a claimed key. [parameters] is the raw CSI
     parameter span (["<64;10;5"] for a wheel-up at column 10, row 5) and
@@ -970,8 +998,8 @@ let sgr_wheel_key (parameters : string) (final : char) : string option =
   else
     match String.split_on_char ';' parameters with
     | button :: _ ->
-        if String.equal button "<64" then Some "up"
-        else if String.equal button "<65" then Some "down"
+        if String.equal button "<64" then Some "wheel-up"
+        else if String.equal button "<65" then Some "wheel-down"
         else None
     | [] -> None
 
@@ -1291,6 +1319,117 @@ type connector_snapshot = {
   cs_active : int;
 }
 
+type runtime_probe_refresh_state =
+  | Runtime_probe_fresh
+  | Runtime_probe_recent
+  | Runtime_probe_served_stale
+  | Runtime_probe_warming_up
+
+type runtime_probe_status =
+  | Runtime_probe_reachable
+  | Runtime_probe_no_http_runtimes
+  | Runtime_probe_degraded
+  | Runtime_probe_unreachable
+  | Runtime_probe_warming
+
+type runtime_provider_status =
+  | Runtime_provider_reachable
+  | Runtime_provider_missing_auth
+  | Runtime_provider_auth_failed
+  | Runtime_provider_network_error
+  | Runtime_provider_server_error
+  | Runtime_provider_endpoint_not_found
+  | Runtime_provider_http_error
+  | Runtime_provider_unknown_http_status
+  | Runtime_provider_skipped_cli
+  | Runtime_provider_invalid_endpoint
+  | Runtime_provider_invalid_execution_transport
+
+type runtime_probe_transport =
+  | Runtime_probe_http
+  | Runtime_probe_cli
+
+type runtime_provider_probe = {
+  rpp_runtime_id : string;
+  rpp_transport : runtime_probe_transport;
+  rpp_status : runtime_provider_status;
+  rpp_reachable : bool option;
+  rpp_http_status : int option;
+  rpp_latency_ms : float option;
+  rpp_error : string option;
+  rpp_checked_at : string;
+}
+
+type runtime_probe_summary = {
+  rpsu_runtimes : int;
+  rpsu_probed : int;
+  rpsu_reachable : int;
+  rpsu_failed : int;
+  rpsu_skipped : int;
+  rpsu_default_runtime_id : string option;
+}
+
+type runtime_probe_snapshot = {
+  rps_generated_at : string;
+  rps_refreshed_at_unix : float option;
+  rps_cache_ttl_sec : float;
+  rps_cache_age_sec : float option;
+  rps_cache_hit : bool;
+  rps_refresh_state : runtime_probe_refresh_state;
+  rps_status : runtime_probe_status;
+  rps_probe_ok : bool;
+  rps_checked_at : string;
+  rps_summary : runtime_probe_summary;
+  rps_providers : runtime_provider_probe list;
+  rps_errors : string list;
+  rps_observations : string list;
+  rps_limitations : string list;
+}
+
+(* One decoder-owned resolved runtime row shared by the Keeper picker and the
+   Runtime surface. [ro_is_default] comes from the document's top-level
+   [default_runtime], not the row's independent binding flag. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_blocked_reason : string option;
+  ro_is_default : bool;
+}
+
+type runtime_resolved_lane = {
+  rrl_id : string;
+  rrl_runtime_ids : string list;
+  rrl_preferred_candidate : string option;
+  rrl_preferred_at_ts : float option;
+}
+
+type runtime_resolved_snapshot = {
+  rrs_generated_at_iso : string;
+  rrs_config_path : string option;
+  rrs_default_runtime_id : string option;
+  rrs_runtimes : runtime_option list;
+  rrs_lanes : runtime_resolved_lane list;
+}
+
+type runtime_candidate_row = {
+  rcr_lane_id : string;
+  rcr_position : int;
+  rcr_candidate_count : int;
+  rcr_runtime : runtime_option;
+  rcr_preferred_at_ts : float option;
+  rcr_probe : runtime_provider_probe option;
+}
+
+type runtime_surface_snapshot = {
+  rss_probe : runtime_probe_snapshot option;
+  rss_probe_error : string option;
+  rss_resolved : runtime_resolved_snapshot;
+  rss_candidates : runtime_candidate_row list;
+  rss_unassigned_probe_count : int;
+}
+
 type repository = {
   rp_name : string;
   rp_local_path : string;
@@ -1400,6 +1539,590 @@ let decode_connector_snapshot json =
   let* cs_total = required_int_field json "total" in
   let* cs_active = required_int_field json "active_count" in
   Ok { cs_connectors; cs_total; cs_active }
+
+let runtime_probe_refresh_state_to_string = function
+  | Runtime_probe_fresh -> "fresh"
+  | Runtime_probe_recent -> "recent"
+  | Runtime_probe_served_stale -> "served_stale"
+  | Runtime_probe_warming_up -> "warming_up"
+
+let runtime_probe_status_to_string = function
+  | Runtime_probe_reachable -> "reachable"
+  | Runtime_probe_no_http_runtimes -> "no_http_runtimes"
+  | Runtime_probe_degraded -> "degraded"
+  | Runtime_probe_unreachable -> "unreachable"
+  | Runtime_probe_warming -> "warming_up"
+
+let runtime_provider_status_to_string = function
+  | Runtime_provider_reachable -> "reachable"
+  | Runtime_provider_missing_auth -> "missing_auth"
+  | Runtime_provider_auth_failed -> "auth_failed"
+  | Runtime_provider_network_error -> "network_error"
+  | Runtime_provider_server_error -> "server_error"
+  | Runtime_provider_endpoint_not_found -> "endpoint_not_found"
+  | Runtime_provider_http_error -> "http_error"
+  | Runtime_provider_unknown_http_status -> "unknown_http_status"
+  | Runtime_provider_skipped_cli -> "skipped_cli"
+  | Runtime_provider_invalid_endpoint -> "invalid_endpoint"
+  | Runtime_provider_invalid_execution_transport ->
+      "invalid_execution_transport"
+
+let runtime_probe_refresh_state_of_string = function
+  | "fresh" -> Ok Runtime_probe_fresh
+  | "recent" -> Ok Runtime_probe_recent
+  | "served_stale" -> Ok Runtime_probe_served_stale
+  | "warming_up" -> Ok Runtime_probe_warming_up
+  | value -> Error (Printf.sprintf "unknown runtime probe refresh_state %S" value)
+
+let runtime_probe_status_of_string = function
+  | "reachable" -> Ok Runtime_probe_reachable
+  | "no_http_runtimes" -> Ok Runtime_probe_no_http_runtimes
+  | "degraded" -> Ok Runtime_probe_degraded
+  | "unreachable" -> Ok Runtime_probe_unreachable
+  | "warming_up" -> Ok Runtime_probe_warming
+  | value -> Error (Printf.sprintf "unknown runtime probe status %S" value)
+
+let runtime_provider_status_of_string = function
+  | "reachable" -> Ok Runtime_provider_reachable
+  | "missing_auth" -> Ok Runtime_provider_missing_auth
+  | "auth_failed" -> Ok Runtime_provider_auth_failed
+  | "network_error" -> Ok Runtime_provider_network_error
+  | "server_error" -> Ok Runtime_provider_server_error
+  | "endpoint_not_found" -> Ok Runtime_provider_endpoint_not_found
+  | "http_error" -> Ok Runtime_provider_http_error
+  | "unknown_http_status" -> Ok Runtime_provider_unknown_http_status
+  | "skipped_cli" -> Ok Runtime_provider_skipped_cli
+  | "invalid_endpoint" -> Ok Runtime_provider_invalid_endpoint
+  | "invalid_execution_transport" ->
+      Ok Runtime_provider_invalid_execution_transport
+  | value -> Error (Printf.sprintf "unknown runtime provider status %S" value)
+
+let runtime_probe_transport_of_string = function
+  | "http" -> Ok Runtime_probe_http
+  | "cli" -> Ok Runtime_probe_cli
+  | value -> Error (Printf.sprintf "unknown runtime probe transport %S" value)
+
+let decode_runtime_provider_probe json =
+  let* rpp_runtime_id = required_string_field json "runtime_id" in
+  let* transport = required_string_field json "transport" in
+  let* rpp_transport = runtime_probe_transport_of_string transport in
+  let* status = required_string_field json "status" in
+  let* rpp_status = runtime_provider_status_of_string status in
+  let* rpp_reachable = required_nullable_bool_field json "reachable" in
+  let* rpp_http_status = required_nullable_int_field json "http_status" in
+  let* rpp_latency_ms = required_nullable_float_field json "latency_ms" in
+  let* rpp_error = required_nullable_string_field json "error" in
+  let* rpp_checked_at = required_string_field json "checked_at" in
+  let expected_reachable =
+    match rpp_status with
+    | Runtime_provider_reachable -> Some true
+    | Runtime_provider_skipped_cli -> None
+    | Runtime_provider_missing_auth
+    | Runtime_provider_auth_failed
+    | Runtime_provider_network_error
+    | Runtime_provider_server_error
+    | Runtime_provider_endpoint_not_found
+    | Runtime_provider_http_error
+    | Runtime_provider_unknown_http_status
+    | Runtime_provider_invalid_endpoint
+    | Runtime_provider_invalid_execution_transport -> Some false
+  in
+  let* () =
+    if rpp_reachable = expected_reachable then Ok ()
+    else
+      Error
+        (Printf.sprintf "runtime %S status %S disagrees with reachable"
+           rpp_runtime_id status)
+  in
+  let* () =
+    match rpp_transport, rpp_status with
+    | Runtime_probe_cli, Runtime_provider_skipped_cli
+    | Runtime_probe_http,
+      ( Runtime_provider_reachable
+      | Runtime_provider_missing_auth
+      | Runtime_provider_auth_failed
+      | Runtime_provider_network_error
+      | Runtime_provider_server_error
+      | Runtime_provider_endpoint_not_found
+      | Runtime_provider_http_error
+      | Runtime_provider_unknown_http_status
+      | Runtime_provider_invalid_endpoint
+      | Runtime_provider_invalid_execution_transport ) -> Ok ()
+    | Runtime_probe_cli, _ ->
+        Error (Printf.sprintf "CLI runtime %S was not skipped" rpp_runtime_id)
+    | Runtime_probe_http, Runtime_provider_skipped_cli ->
+        Error (Printf.sprintf "HTTP runtime %S was marked skipped_cli" rpp_runtime_id)
+  in
+  let nonnegative name = function
+    | Some value when value < 0 ->
+        Error (Printf.sprintf "runtime %S has negative %s" rpp_runtime_id name)
+    | Some _ | None -> Ok ()
+  in
+  let* () = nonnegative "http_status" rpp_http_status in
+  let* () =
+    match rpp_latency_ms with
+    | Some value when value < 0.0 ->
+        Error (Printf.sprintf "runtime %S has negative latency_ms" rpp_runtime_id)
+    | Some _ | None -> Ok ()
+  in
+  Ok
+    { rpp_runtime_id
+    ; rpp_transport
+    ; rpp_status
+    ; rpp_reachable
+    ; rpp_http_status
+    ; rpp_latency_ms
+    ; rpp_error
+    ; rpp_checked_at
+    }
+
+let decode_runtime_probe_summary json =
+  let* rpsu_runtimes = required_int_field json "runtimes" in
+  let* rpsu_probed = required_int_field json "probed" in
+  let* rpsu_reachable = required_int_field json "reachable" in
+  let* rpsu_failed = required_int_field json "failed" in
+  let* rpsu_skipped = required_int_field json "skipped" in
+  let* rpsu_default_runtime_id =
+    required_nullable_string_field json "default_runtime_id"
+  in
+  let counts =
+    [ "runtimes", rpsu_runtimes
+    ; "probed", rpsu_probed
+    ; "reachable", rpsu_reachable
+    ; "failed", rpsu_failed
+    ; "skipped", rpsu_skipped
+    ]
+  in
+  match List.find_opt (fun (_, value) -> value < 0) counts with
+  | Some (name, _) -> Error (Printf.sprintf "runtime probe summary %s is negative" name)
+  | None ->
+      Ok
+        { rpsu_runtimes
+        ; rpsu_probed
+        ; rpsu_reachable
+        ; rpsu_failed
+        ; rpsu_skipped
+        ; rpsu_default_runtime_id
+        }
+
+let decode_runtime_probe_snapshot json =
+  let* rps_generated_at = required_string_field json "generated_at" in
+  let* rps_refreshed_at_unix =
+    required_nullable_float_field json "refreshed_at_unix"
+  in
+  let* rps_cache_ttl_sec = require_float_field json "cache_ttl_sec" in
+  let* rps_cache_age_sec = required_nullable_float_field json "cache_age_sec" in
+  let* rps_cache_hit = required_bool_field json "cache_hit" in
+  let* refresh_state = required_string_field json "refresh_state" in
+  let* rps_refresh_state = runtime_probe_refresh_state_of_string refresh_state in
+  let* probe = required_object_field json "probe" in
+  let* source = required_string_field probe "source" in
+  let* () =
+    if String.equal source "runtime.toml" then Ok ()
+    else Error (Printf.sprintf "runtime probe source is %S, expected runtime.toml" source)
+  in
+  let* status = required_string_field probe "status" in
+  let* rps_status = runtime_probe_status_of_string status in
+  let* rps_probe_ok = required_bool_field probe "probe_ok" in
+  let* rps_checked_at = required_string_field probe "checked_at" in
+  let* summary = required_object_field probe "summary" in
+  let* rps_summary = decode_runtime_probe_summary summary in
+  let* providers = required_list_field probe "providers" in
+  let* rps_providers =
+    decode_list "providers" decode_runtime_provider_probe providers
+  in
+  let* rps_errors = require_string_list probe "errors" in
+  let* rps_observations = require_string_list probe "observations" in
+  let* rps_limitations = require_string_list probe "limitations" in
+  let* () =
+    if rps_cache_ttl_sec <= 0.0 then Error "runtime probe cache_ttl_sec must be positive"
+    else
+      match rps_cache_age_sec with
+      | Some age when age < 0.0 -> Error "runtime probe cache_age_sec is negative"
+      | Some _ | None -> Ok ()
+  in
+  let* () =
+    match rps_refreshed_at_unix, rps_cache_age_sec with
+    | Some _, Some _ | None, None -> Ok ()
+    | Some _, None | None, Some _ ->
+        Error "runtime probe refreshed_at_unix and cache_age_sec disagree"
+  in
+  let* () =
+    match rps_refresh_state, rps_cache_hit with
+    | (Runtime_probe_fresh | Runtime_probe_recent), true
+    | (Runtime_probe_served_stale | Runtime_probe_warming_up), false -> Ok ()
+    | _ ->
+        Error
+          (Printf.sprintf "runtime probe refresh_state %S disagrees with cache_hit"
+             refresh_state)
+  in
+  let observed_reachable, observed_failed, observed_skipped =
+    List.fold_left
+      (fun (reachable, failed, skipped) provider ->
+         match provider.rpp_reachable with
+         | Some true -> reachable + 1, failed, skipped
+         | Some false -> reachable, failed + 1, skipped
+         | None -> reachable, failed, skipped + 1)
+      (0, 0, 0) rps_providers
+  in
+  let row_count = List.length rps_providers in
+  let* () =
+    if rps_summary.rpsu_runtimes <> row_count then
+      Error
+        (Printf.sprintf "runtime probe summary has %d runtimes but providers has %d rows"
+           rps_summary.rpsu_runtimes row_count)
+    else if rps_summary.rpsu_reachable <> observed_reachable then
+      Error "runtime probe reachable count disagrees with providers"
+    else if rps_summary.rpsu_failed <> observed_failed then
+      Error "runtime probe failed count disagrees with providers"
+    else if rps_summary.rpsu_skipped <> observed_skipped then
+      Error "runtime probe skipped count disagrees with providers"
+    else if rps_summary.rpsu_probed <> observed_reachable + observed_failed then
+      Error "runtime probe probed count disagrees with providers"
+    else Ok ()
+  in
+  let* () =
+    let seen = Hashtbl.create (max 1 row_count) in
+    let rec loop = function
+      | [] -> Ok ()
+      | row :: rest ->
+          if Hashtbl.mem seen row.rpp_runtime_id then
+            Error
+              (Printf.sprintf "duplicate runtime probe id %S" row.rpp_runtime_id)
+          else begin
+            Hashtbl.add seen row.rpp_runtime_id ();
+            loop rest
+          end
+    in
+    loop rps_providers
+  in
+  let* () =
+    match rps_summary.rpsu_default_runtime_id with
+    | None -> Ok ()
+    | Some default_id ->
+        if List.exists (fun row -> String.equal row.rpp_runtime_id default_id) rps_providers
+        then Ok ()
+        else Error (Printf.sprintf "default runtime %S is absent from providers" default_id)
+  in
+  let status_counts_valid =
+    match rps_status with
+    | Runtime_probe_reachable -> observed_failed = 0 && observed_reachable > 0
+    | Runtime_probe_no_http_runtimes ->
+        observed_failed = 0 && observed_reachable = 0
+    | Runtime_probe_degraded -> observed_failed > 0 && observed_reachable > 0
+    | Runtime_probe_unreachable ->
+        observed_reachable = 0 && (observed_failed > 0 || row_count = 0)
+    | Runtime_probe_warming -> row_count = 0
+  in
+  let* () =
+    if status_counts_valid then Ok ()
+    else
+      Error
+        (Printf.sprintf "runtime probe status %S disagrees with provider counts" status)
+  in
+  let expected_probe_ok =
+    match rps_status with
+    | Runtime_probe_reachable | Runtime_probe_no_http_runtimes -> true
+    | Runtime_probe_degraded | Runtime_probe_unreachable | Runtime_probe_warming -> false
+  in
+  let* () =
+    if rps_probe_ok = expected_probe_ok then Ok ()
+    else Error (Printf.sprintf "runtime probe status %S disagrees with probe_ok" status)
+  in
+  let* () =
+    match rps_refresh_state, rps_status, rps_refreshed_at_unix with
+    | Runtime_probe_warming_up, Runtime_probe_warming, None -> Ok ()
+    | Runtime_probe_warming_up, _, _ ->
+        Error "runtime probe warming_up refresh must carry a warming probe without a cache time"
+    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, Some _ ->
+        Ok ()
+    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, None ->
+        Error "runtime probe cached refresh is missing refreshed_at_unix"
+  in
+  Ok
+    { rps_generated_at
+    ; rps_refreshed_at_unix
+    ; rps_cache_ttl_sec
+    ; rps_cache_age_sec
+    ; rps_cache_hit
+    ; rps_refresh_state
+    ; rps_status
+    ; rps_probe_ok
+    ; rps_checked_at
+    ; rps_summary
+    ; rps_providers
+    ; rps_errors
+    ; rps_observations
+    ; rps_limitations
+    }
+
+let decode_runtime_option ~default_id json =
+  let* ro_id = required_string_field json "id" in
+  let* ro_provider = required_string_field json "provider" in
+  let* ro_model = required_string_field json "model" in
+  let* _binding_is_default = required_bool_field json "is_default" in
+  let* ro_dispatchable = required_bool_field json "keeper_dispatchable" in
+  let* ro_blocked_reason =
+    required_nullable_string_field json "keeper_dispatch_blocked_reason"
+  in
+  let* () =
+    match ro_dispatchable, ro_blocked_reason with
+    | true, None | false, Some _ -> Ok ()
+    | true, Some _ ->
+        Error
+          (Printf.sprintf "dispatchable runtime %S carries a blocker" ro_id)
+    | false, None ->
+        Error (Printf.sprintf "blocked runtime %S omits its blocker" ro_id)
+  in
+  let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
+  Ok
+    { ro_id
+    ; ro_provider
+    ; ro_model
+    ; ro_dispatchable
+    ; ro_blocked_reason
+    ; ro_is_default
+    }
+
+let decode_runtime_default_member json =
+  match Json_util.assoc_member_opt "default_runtime" json with
+  | None -> missing_field "default_runtime"
+  | Some `Null -> Ok (None, None)
+  | Some (`Assoc _ as value) ->
+      let* id = required_string_field value "id" in
+      Ok (Some value, Some id)
+  | Some bad -> field_type_error "default_runtime" "an object or null" bad
+
+let decode_runtime_resolved_lane json =
+  let* rrl_id = required_string_field json "id" in
+  let* runtime_ids = required_list_field json "runtime_ids" in
+  let* rrl_runtime_ids =
+    decode_list "runtime_ids"
+      (function
+        | `String value -> Ok value
+        | bad -> field_type_error "runtime_ids" "a string" bad)
+      runtime_ids
+  in
+  let* rrl_preferred_candidate =
+    required_nullable_string_field json "preferred_candidate"
+  in
+  let* rrl_preferred_at_ts =
+    required_nullable_float_field json "preferred_at_ts"
+  in
+  let* () =
+    match rrl_runtime_ids with
+    | [] -> Error (Printf.sprintf "runtime lane %S has no candidates" rrl_id)
+    | _ -> Ok ()
+  in
+  let* () =
+    let seen = Hashtbl.create (List.length rrl_runtime_ids) in
+    let rec loop = function
+      | [] -> Ok ()
+      | runtime_id :: rest ->
+          if Hashtbl.mem seen runtime_id then
+            Error
+              (Printf.sprintf "runtime lane %S repeats candidate %S" rrl_id
+                 runtime_id)
+          else begin
+            Hashtbl.add seen runtime_id ();
+            loop rest
+          end
+    in
+    loop rrl_runtime_ids
+  in
+  let* () =
+    match rrl_preferred_candidate, rrl_preferred_at_ts with
+    | None, None -> Ok ()
+    | Some candidate, Some at
+      when at >= 0.0 && List.mem candidate rrl_runtime_ids -> Ok ()
+    | Some candidate, Some at when at < 0.0 ->
+        Error
+          (Printf.sprintf "runtime lane %S has negative preferred_at_ts" rrl_id)
+    | Some candidate, Some _ ->
+        Error
+          (Printf.sprintf "runtime lane %S prefers absent candidate %S" rrl_id
+             candidate)
+    | Some _, None | None, Some _ ->
+        Error
+          (Printf.sprintf
+             "runtime lane %S preferred_candidate and preferred_at_ts disagree"
+             rrl_id)
+  in
+  Ok
+    { rrl_id
+    ; rrl_runtime_ids
+    ; rrl_preferred_candidate
+    ; rrl_preferred_at_ts
+    }
+
+let decode_runtime_resolved_snapshot json =
+  let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
+  let* source = required_string_field json "source" in
+  let* () =
+    if String.equal source "/api/v1/runtime/resolved" then Ok ()
+    else
+      Error
+        (Printf.sprintf "runtime resolved source is %S, expected endpoint path"
+           source)
+  in
+  let* rrs_config_path = required_nullable_string_field json "config_path" in
+  let* default_json, rrs_default_runtime_id =
+    decode_runtime_default_member json
+  in
+  let* runtime_items = required_list_field json "runtimes" in
+  let* rrs_runtimes =
+    decode_list "runtimes"
+      (decode_runtime_option ~default_id:rrs_default_runtime_id)
+      runtime_items
+  in
+  let runtime_by_id = Hashtbl.create (max 1 (List.length rrs_runtimes)) in
+  let* () =
+    let rec loop = function
+      | [] -> Ok ()
+      | runtime :: rest ->
+          if Hashtbl.mem runtime_by_id runtime.ro_id then
+            Error (Printf.sprintf "duplicate resolved runtime id %S" runtime.ro_id)
+          else begin
+            Hashtbl.add runtime_by_id runtime.ro_id runtime;
+            loop rest
+          end
+    in
+    loop rrs_runtimes
+  in
+  let* default_runtime =
+    match default_json with
+    | None -> Ok None
+    | Some value ->
+        let* runtime =
+          decode_runtime_option ~default_id:rrs_default_runtime_id value
+        in
+        Ok (Some runtime)
+  in
+  let* () =
+    match default_runtime with
+    | None -> Ok ()
+    | Some default ->
+        (match Hashtbl.find_opt runtime_by_id default.ro_id with
+         | None -> Error "default_runtime is absent from the resolved runtime list"
+         | Some listed
+           when String.equal default.ro_provider listed.ro_provider
+                && String.equal default.ro_model listed.ro_model
+                && Bool.equal default.ro_dispatchable listed.ro_dispatchable
+                && Option.equal String.equal default.ro_blocked_reason
+                     listed.ro_blocked_reason -> Ok ()
+         | Some _ ->
+             Error "default_runtime disagrees with its resolved runtime row")
+  in
+  let* lane_items = required_list_field json "lanes" in
+  let* rrs_lanes =
+    decode_list "lanes" decode_runtime_resolved_lane lane_items
+  in
+  let lane_by_id = Hashtbl.create (max 1 (List.length rrs_lanes)) in
+  let* () =
+    let rec loop = function
+      | [] -> Ok ()
+      | lane :: rest ->
+          if Hashtbl.mem lane_by_id lane.rrl_id then
+            Error (Printf.sprintf "duplicate runtime lane id %S" lane.rrl_id)
+          else begin
+            Hashtbl.add lane_by_id lane.rrl_id lane;
+            match List.find_opt (fun id -> not (Hashtbl.mem runtime_by_id id)) lane.rrl_runtime_ids with
+            | Some runtime_id ->
+                Error
+                  (Printf.sprintf "runtime lane %S names absent runtime %S"
+                     lane.rrl_id runtime_id)
+            | None -> loop rest
+          end
+    in
+    loop rrs_lanes
+  in
+  Ok
+    { rrs_generated_at_iso
+    ; rrs_config_path
+    ; rrs_default_runtime_id
+    ; rrs_runtimes
+    ; rrs_lanes
+    }
+
+let join_runtime_surface ~probe ~probe_error ~resolved =
+  let probe_rows =
+    match probe with
+    | Some snapshot -> snapshot.rps_providers
+    | None -> []
+  in
+  let probe_by_runtime = Hashtbl.create (max 1 (List.length probe_rows)) in
+  List.iter
+    (fun row -> Hashtbl.add probe_by_runtime row.rpp_runtime_id row)
+    probe_rows;
+  let runtime_by_id = Hashtbl.create (max 1 (List.length resolved.rrs_runtimes)) in
+  List.iter
+    (fun runtime -> Hashtbl.add runtime_by_id runtime.ro_id runtime)
+    resolved.rrs_runtimes;
+  let rows_of_lane lane =
+    let candidate_count = List.length lane.rrl_runtime_ids in
+    let rec loop position acc = function
+      | [] -> Ok (List.rev acc)
+      | runtime_id :: rest ->
+          (match Hashtbl.find_opt runtime_by_id runtime_id with
+           | None ->
+               Error
+                 (Printf.sprintf "runtime lane %S names absent runtime %S"
+                    lane.rrl_id runtime_id)
+           | Some runtime ->
+               let rcr_preferred_at_ts =
+                 match lane.rrl_preferred_candidate with
+                 | Some preferred when String.equal preferred runtime_id ->
+                     lane.rrl_preferred_at_ts
+                 | Some _ | None -> None
+               in
+               loop (position + 1)
+                 ({ rcr_lane_id = lane.rrl_id
+                  ; rcr_position = position
+                  ; rcr_candidate_count = candidate_count
+                  ; rcr_runtime = runtime
+                  ; rcr_preferred_at_ts
+                  ; rcr_probe = Hashtbl.find_opt probe_by_runtime runtime_id
+                  }
+                  :: acc)
+                 rest)
+    in
+    loop 1 [] lane.rrl_runtime_ids
+  in
+  let* reversed_candidates =
+    List.fold_left
+      (fun result lane ->
+         let* acc = result in
+         let* rows = rows_of_lane lane in
+         Ok (List.rev_append rows acc))
+      (Ok []) resolved.rrs_lanes
+  in
+  let rss_candidates = List.rev reversed_candidates in
+  let candidate_ids = Hashtbl.create (max 1 (List.length rss_candidates)) in
+  List.iter
+    (fun row -> Hashtbl.replace candidate_ids row.rcr_runtime.ro_id ())
+    rss_candidates;
+  let rss_unassigned_probe_count =
+    List.fold_left
+      (fun count row ->
+         if Hashtbl.mem candidate_ids row.rpp_runtime_id then count else count + 1)
+      0 probe_rows
+  in
+  Ok
+    { rss_probe = probe
+    ; rss_probe_error = probe_error
+    ; rss_resolved = resolved
+    ; rss_candidates
+    ; rss_unassigned_probe_count
+    }
+
+let decode_runtime_surface_snapshot ~probe_json ~resolved_json =
+  match decode_runtime_probe_snapshot probe_json with
+  | Error detail -> Error ("runtime probe decode failed: " ^ detail)
+  | Ok probe ->
+      (match decode_runtime_resolved_snapshot resolved_json with
+       | Error detail -> Error ("runtime resolved decode failed: " ^ detail)
+       | Ok resolved ->
+           join_runtime_surface ~probe:(Some probe) ~probe_error:None ~resolved)
 
 let decode_repository json =
   let* rp_name = required_string_field json "name" in
@@ -1602,23 +2325,8 @@ let decode_planning_snapshot json =
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
 
-let required_bool_field json key =
-  match member key json with
-  | `Bool value -> Ok value
-  | `Null -> missing_field key
-  | bad -> field_type_error key "a bool" bad
-
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
-  let* raw_status = required_string_field json "status" in
-  let* kr_status =
-    match Keeper_status_runtime.surface_status_of_string_opt raw_status with
-    | Some status -> Ok status
-    | None ->
-        Error
-          (Printf.sprintf "keeper %S has unknown runtime status %S" kr_name
-             raw_status)
-  in
   let* raw_health = required_string_field json "health" in
   let* kr_health =
     match keeper_health_of_string raw_health with
@@ -1657,7 +2365,6 @@ let decode_keeper_runtime json =
   in
   Ok
     { kr_name
-    ; kr_status
     ; kr_health
     ; kr_paused
     ; kr_next_action
@@ -1691,7 +2398,6 @@ let keeper_lane_phase_of_string raw =
       | Keeper_state_machine.Offline -> Lane_phase_offline
       | Keeper_state_machine.Running -> Lane_phase_running
       | Keeper_state_machine.Failing -> Lane_phase_failing
-      | Keeper_state_machine.Overflowed -> Lane_phase_overflowed
       | Keeper_state_machine.Compacting -> Lane_phase_compacting
       | Keeper_state_machine.HandingOff -> Lane_phase_handing_off
       | Keeper_state_machine.Draining -> Lane_phase_draining
@@ -1704,8 +2410,6 @@ let keeper_lane_phase_to_string = function
   | Lane_phase_offline -> keeper_phase_to_string Keeper_state_machine.Offline
   | Lane_phase_running -> keeper_phase_to_string Keeper_state_machine.Running
   | Lane_phase_failing -> keeper_phase_to_string Keeper_state_machine.Failing
-  | Lane_phase_overflowed ->
-      keeper_phase_to_string Keeper_state_machine.Overflowed
   | Lane_phase_compacting ->
       keeper_phase_to_string Keeper_state_machine.Compacting
   | Lane_phase_handing_off ->
@@ -1737,13 +2441,6 @@ let keeper_lane_turn_phase_to_string = function
   | Lane_turn_finalizing -> "finalizing"
   | Lane_turn_exhausted -> "exhausted"
   | Lane_turn_unknown raw -> raw
-
-let required_nullable_string_field json key =
-  match Json_util.assoc_member_opt key json with
-  | None -> missing_field key
-  | Some `Null -> Ok None
-  | Some (`String value) -> Ok (Some value)
-  | Some bad -> field_type_error key "a string or null" bad
 
 let decode_keeper_lane_last_outcome json =
   let* klo_runtime_state = required_string_field json "runtime_state" in
@@ -2001,64 +2698,59 @@ let decode_keeper_tool_approvals json =
   in
   loop [] items
 
-(* GET /api/v1/runtime/resolved, the slice the runtime picker draws: every
-   runtime a keeper can be pointed at, and where each keeper points today. *)
-type runtime_option = {
-  ro_id : string;
-  ro_provider : string;
-  ro_model : string;
-  ro_dispatchable : bool;
-  ro_is_default : bool;
-}
-
 type runtime_assignment = {
   ra_keeper : string;
   ra_source : string;  (* "default" | "explicit" *)
-  ra_runtime_id : string option;
+  ra_target_id : string option;
 }
-
-let decode_runtime_option json =
-  let* ro_id = required_string_field json "id" in
-  let* ro_provider = required_string_field json "provider" in
-  let* ro_model = required_string_field json "model" in
-  let* ro_dispatchable =
-    match member "keeper_dispatchable" json with
-    | `Bool value -> Ok value
-    | `Null -> Ok false
-    | bad -> field_type_error "keeper_dispatchable" "a bool or null" bad
-  in
-  let* ro_is_default =
-    match member "is_default" json with
-    | `Bool value -> Ok value
-    | `Null -> Ok false
-    | bad -> field_type_error "is_default" "a bool or null" bad
-  in
-  Ok { ro_id; ro_provider; ro_model; ro_dispatchable; ro_is_default }
 
 let decode_runtime_assignment json =
   let* ra_keeper = required_string_field json "keeper" in
   let* ra_source = required_string_field json "assignment_source" in
-  let* ra_runtime_id =
-    match member "resolved" json with
-    | `Null -> Ok None
-    | resolved ->
-        let* id = required_string_field resolved "id" in
-        Ok (Some id)
+  let* () =
+    match ra_source with
+    | "default" | "explicit" -> Ok ()
+    | value -> Error (Printf.sprintf "unknown runtime assignment source %S" value)
   in
-  Ok { ra_keeper; ra_source; ra_runtime_id }
+  let* resolved = required_object_field json "resolved" in
+  let* kind = required_string_field resolved "kind" in
+  let* id = required_nullable_string_field resolved "id" in
+  let* ra_target_id =
+    match kind, id with
+    | "lane", Some lane_id -> Ok (Some lane_id)
+    | "missing", None -> Ok None
+    | "lane", None -> Error "runtime lane assignment is missing its id"
+    | "missing", Some _ -> Error "missing runtime assignment carries an id"
+    | value, _ -> Error (Printf.sprintf "unknown resolved runtime kind %S" value)
+  in
+  Ok { ra_keeper; ra_source; ra_target_id }
 
 let decode_runtime_resolved json =
-  let* runtime_items = required_list_field json "runtimes" in
+  let* snapshot = decode_runtime_resolved_snapshot json in
   let* assignment_items = required_list_field json "assignments" in
-  let rec map_all decode acc = function
-    | [] -> Ok (List.rev acc)
-    | item :: rest ->
-        let* decoded = decode item in
-        map_all decode (decoded :: acc) rest
+  let* assignments =
+    decode_list "assignments" decode_runtime_assignment assignment_items
   in
-  let* runtimes = map_all decode_runtime_option [] runtime_items in
-  let* assignments = map_all decode_runtime_assignment [] assignment_items in
-  Ok (runtimes, assignments)
+  let* () =
+    match
+      List.find_opt
+        (fun assignment ->
+           match assignment.ra_target_id with
+           | None -> false
+           | Some lane_id ->
+               not
+                 (List.exists
+                    (fun lane -> String.equal lane.rrl_id lane_id)
+                    snapshot.rrs_lanes))
+        assignments
+    with
+    | None -> Ok ()
+    | Some assignment ->
+        Error
+          (Printf.sprintf "runtime assignment for %S names an absent lane"
+             assignment.ra_keeper)
+  in
+  Ok (snapshot.rrs_runtimes, assignments)
 
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in

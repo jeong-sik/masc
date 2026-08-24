@@ -475,8 +475,15 @@ let test_transport_health_json () =
     (http2_json |> U.member "multiplex_ready" |> U.to_bool);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
-  check string "summary queue pressure reflects relay drops" "high"
+  (* The fixture queues 4 events and records 4 lifetime relay drops. Nothing is
+     backing up -- 4 is under the watch threshold -- so the reading is steady.
+     It used to be "high" because a lifetime drop counter fed this field, and
+     that counter never decrements, so one drop held the reading there until
+     the process restarted (#27652). The drops are still reported, as totals. *)
+  check string "queue pressure reads the current depth" "steady"
     (summary_json |> U.member "queue_pressure" |> U.to_string);
+  check int "the lifetime relay drops are still reported" 4
+    (sse_json |> U.member "relay_drop_total" |> U.to_int);
   check int "agent lifecycle dispatch rejections surfaced" 2
     (agent_health_json
      |> U.member "lifecycle_dispatch_rejections_total"
@@ -533,6 +540,31 @@ let test_listen_status_disabled () =
    Test Runner
    ============================================================ *)
 
+(* Pressure has to answer "is anything backing up right now". Reading it off a
+   lifetime drop counter froze it at "high" after the first drop, so the depths
+   below could no longer move it either way (#27652). *)
+let test_queue_pressure_tracks_current_depth () =
+  Eio_main.run @@ fun _env ->
+  let pressure_at depth =
+    Otel_metric_store.set_gauge
+      Otel_metric_store.metric_agent_core_sse_relay_queue_depth
+      (float_of_int depth);
+    TM.transport_health_json ()
+    |> U.member "summary"
+    |> U.member "queue_pressure"
+    |> U.to_string
+  in
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_agent_core_sse_relay_drops
+    ~labels:[ ("stage", "queue") ]
+    ~delta:7.0
+    ();
+  check string "an empty queue is steady even after drops" "steady" (pressure_at 0);
+  check string "a filling queue is watched" "watch" (pressure_at 8);
+  check string "a deep queue is high" "high" (pressure_at 32);
+  check string "and it comes back down" "steady" (pressure_at 0)
+;;
+
 let () =
   run "Transport_metrics" [
     ("init", [
@@ -573,6 +605,8 @@ let () =
     ]);
     ("json", [
       test_case "transport_health_json structure" `Quick test_transport_health_json;
+      test_case "queue pressure tracks the current depth" `Quick
+        test_queue_pressure_tracks_current_depth;
     ]);
     ("listen_status", [
       test_case "grpc listen_status lifecycle" `Quick

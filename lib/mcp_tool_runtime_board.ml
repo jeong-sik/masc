@@ -5,6 +5,14 @@
     RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly
     instead of [(bool * string)]. *)
 
+(* Board content reaches SSE subscribers as JSON. A byte-based cut lands
+   mid-character on Korean (3 bytes per syllable) and emits an invalid
+   sequence; Issue #7690 fixed the same shape in [Audit_log.preview]. *)
+let board_notification_content_max_bytes = 200
+
+let board_notification_content content =
+  String_util.utf8_prefix ~max_bytes:board_notification_content_max_bytes content
+
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try
     let payload =
@@ -296,7 +304,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("type", `String "masc/board_post");
           ("author", `String author);
           ("author_identity", Server_utils.board_actor_identity_json author);
-          ("content", `String (String.sub content 0 (min 200 (String.length content))));
+          ("content", `String (board_notification_content content));
           ("post_id", `String (Option.value post_id ~default:"unknown"));
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
@@ -365,7 +373,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("author", `String author);
           ("author_identity", Server_utils.board_actor_identity_json author);
           ("post_id", `String post_id);
-          ("content", `String (String.sub content 0 (min 200 (String.length content))));
+          ("content", `String (board_notification_content content));
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;

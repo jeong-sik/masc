@@ -182,6 +182,7 @@
   masc.masc_tool_blob_store
   masc.fusion_core
   masc.run_registry_core
+  masc.masc_types
   masc.masc_core
   masc.config_dir_resolver
   masc.board_handlers
@@ -430,6 +431,10 @@
   masc_tui_credential
   masc_tui_types
   masc.runtime
+  ;; masc_tui_render names Fusion_types directly to label a run's topology.
+  ;; Tui_decode carries the type through fur_topology, but dune does not open a
+  ;; transitive library's module names, so masc_tui lists masc.fusion_core.
+  masc.fusion_core
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity

@@ -377,8 +377,41 @@ type surface =
   | Fusion
   | Repositories
   | Connectors
+  | Runtime
   | Tools
   | System_logs
+
+(* The Tab cycle and the strip drawn above every surface share this order,
+   so the strip cannot disagree with where Tab actually goes. Labels are the
+   strip's spelling; the Keepers entry stands for every keeper sub-mode. *)
+let surface_ring : (surface * string) list =
+  [ (Overview, "Overview");
+    (Acting, "Acting");
+    (Keepers Keeper_list, "Keepers");
+    (Lanes, "Lanes");
+    (Approvals, "Approvals");
+    (Board, "Board");
+    (Planning, "Planning");
+    (Schedules, "Schedules");
+    (Verification, "Verify");
+    (Harness, "Harness");
+    (Fusion, "Fusion");
+    (Repositories, "Repos");
+    (Connectors, "Connectors");
+    (Runtime, "Runtime");
+    (Tools, "Tools");
+    (System_logs, "Logs");
+  ]
+
+(* Ring position of the family a view belongs to. Keeper sub-modes collapse
+   onto the Keepers entry; every other surface is its own entry. *)
+let surface_ring_index (view : surface) =
+  let family = match view with Keepers _ -> Keepers Keeper_list | v -> v in
+  let rec find i = function
+    | [] -> 0
+    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
+  in
+  find 0 surface_ring
 
 (** What a surface needs loaded to draw itself.
 
@@ -436,7 +469,7 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Lanes | Approvals | Schedules | Verification | Harness | Fusion
-  | Repositories | Connectors | Tools ->
+  | Repositories | Connectors | Runtime | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -462,6 +495,7 @@ type scrolled = {
    screen. The number is the drawing's; a surface whose chrome moves has to
    move it here in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
+let runtime_listing_chrome ~error = listing_chrome ~error + 2
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out.
@@ -482,6 +516,21 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_focus: bool;
+  (* The [?] help overlay: open replaces the surface body until Esc/? closes
+     it. The scroll survives only while it is open. *)
+  mutable help_open: bool;
+  mutable help_scroll: int;
+  (* The [:] command palette: a typed filter over jump targets. Query and
+     cursor live only while it is open. *)
+  mutable palette_open: bool;
+  mutable palette_query: string;
+  mutable palette_cursor: int;
+  (* [/] on the roster: a search that moves the cursor, not a filter that
+     subsets the list -- every action reads the same [keepers] the rows
+     draw, so nothing can act on a hidden row. [Some q] while typing;
+     [roster_search_last] feeds n/N after Enter. *)
+  mutable roster_search: string option;
+  mutable roster_search_last: string;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -604,6 +653,14 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
+  (* Two server-owned documents joined by exact runtime id: resolved owns
+     lanes/provider/model identity, probe owns cached reachability. *)
+  mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
+  mutable runtime_surface_error: string option;
+  mutable runtime_surface_scroll: int;
+  mutable runtime_surface_generation: int;
+  mutable runtime_surface_inflight: int option;
+  mutable runtime_surface_force_pending: bool;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
@@ -653,6 +710,11 @@ type state = {
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
+  (* How far back the arrows have walked through what this pane sent, and the
+     draft they set aside to do it. [None] means the composer holds the
+     operator's own text, so pressing down has nothing to give back. *)
+  mutable msg_recall_at: int option;
+  mutable msg_recall_draft: string;
   (* The turn currently streaming, if any. Drawn below the history and
      discarded when the turn settles; its tool rows are committed to the
      history first. Never authoritative -- the recorded reply comes from the
@@ -787,6 +849,13 @@ let create_state ~workspace ~port ~refresh_interval = {
   tasks = [];
   tasks_domain = [];
   task_focus = false;
+  help_open = false;
+  help_scroll = 0;
+  palette_open = false;
+  palette_query = "";
+  palette_cursor = 0;
+  roster_search = None;
+  roster_search_last = "";
   task_cursor = 0;
   task_detail_id = None;
   task_detail_scroll = 0;
@@ -867,6 +936,12 @@ let create_state ~workspace ~port ~refresh_interval = {
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
+  runtime_surface = None;
+  runtime_surface_error = None;
+  runtime_surface_scroll = 0;
+  runtime_surface_generation = 0;
+  runtime_surface_inflight = None;
+  runtime_surface_force_pending = false;
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;
@@ -902,6 +977,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
+  msg_recall_at = None;
+  msg_recall_draft = "";
   msg_live = None;
   msg_loaded = [];
   msg_loaded_keeper = None;
@@ -1036,6 +1113,14 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         (match state.connectors with
          | None -> 0
          | Some s -> List.length s.Tui_decode.cs_connectors)
+  | Runtime ->
+      Some
+        { sc_count =
+            (match state.runtime_surface with
+             | None -> 0
+             | Some s -> List.length s.Tui_decode.rss_candidates)
+        ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        }
   | Tools ->
       listing ~error:state.tools_error
         (match state.tools_inventory with
@@ -1096,3 +1181,65 @@ let operator_approval_items (state : state) =
 let approval_items (state : state) =
   List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+
+(* Command-palette jump targets. Surfaces come from the same ring the strip
+   draws; keepers come from the loaded roster, so the palette can only offer
+   a chat the roster can open. *)
+type palette_action =
+  | Palette_goto of surface
+  | Palette_chat of string
+
+let palette_contains ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.length needle and hl = String.length h in
+  if n = 0 then true
+  else begin
+    let found = ref false in
+    for start = 0 to hl - n do
+      if (not !found) && String.equal (String.sub h start n) needle then
+        found := true
+    done;
+    !found
+  end
+
+let palette_entries (state : state) =
+  List.map
+    (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
+    surface_ring
+  @ List.map
+      (fun (keeper : keeper) ->
+        ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
+      state.keepers
+
+(* Subsequence match: every query character appears in order. "kadm" finds
+   "keeper adm-race". *)
+let palette_subsequence ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let hl = String.length h and nl = String.length needle in
+  let rec walk hi ni =
+    if ni >= nl then true
+    else if hi >= hl then false
+    else if Char.equal h.[hi] needle.[ni] then walk (hi + 1) (ni + 1)
+    else walk (hi + 1) ni
+  in
+  walk 0 0
+
+let palette_matches (state : state) =
+  let needle =
+    String.lowercase_ascii (String.trim state.palette_query)
+  in
+  let entries = palette_entries state in
+  (* Substring hits rank above subsequence-only hits, both keep entry
+     order inside their rank. *)
+  let substring_hits =
+    List.filter (fun (label, _) -> palette_contains ~needle label) entries
+  in
+  let subsequence_hits =
+    List.filter
+      (fun (label, _) ->
+        (not (palette_contains ~needle label))
+        && palette_subsequence ~needle label)
+      entries
+  in
+  substring_hits @ subsequence_hits

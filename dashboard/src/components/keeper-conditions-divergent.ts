@@ -24,7 +24,7 @@ import type { Keeper, KeeperConditions, KeeperPhase } from '../types'
 type DivergenceFn = (value: boolean, phase: KeeperPhase | null | undefined) => string | null
 
 export const isOperating = (p: KeeperPhase | null | undefined): boolean =>
-  p === 'Running' || p === 'Failing' || p === 'Overflowed'
+  p === 'Running' || p === 'Failing'
 
 export const isTerminated = (p: KeeperPhase | null | undefined): boolean =>
   p === 'Stopped'

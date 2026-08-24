@@ -157,7 +157,16 @@ max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
-thinking-control-format = "none"
+# 2026-08-24 live probe, ollama.com/v1 chat/completions, both deepseek-v4-flash
+# and its :0731 tag: the endpoint names its own ladder when it rejects an
+# unknown value -- must be "high", "medium", "low", "max", or "none" -- and
+# reasoning_effort = "none" comes back with an empty reasoning field and 2
+# completion tokens where an uncontrolled request returns 54 reasoning
+# characters and 17. The previous "none" claimed the opposite: that this wire
+# carries no thinking control at all. Under that claim the request path had
+# nothing to emit, so the model reasoned on every turn and nothing could stop
+# it. The accepted ladder itself is declared on the catalog row.
+thinking-control-format = "reasoning-effort"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
 # response axis resolves to reading no field and the reasoning is discarded.

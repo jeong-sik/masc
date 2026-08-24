@@ -17,7 +17,7 @@ import { toKeeperPhase } from '../keeper-store-normalize'
 // sub-FSMs is captured by the invariants panel, not the graph edges.
 
 interface CompositeFsmParams {
-  phase: string            // KSM — offline | running | failing | overflowed | compacting | handing_off | draining | paused | stopped | crashed | restarting
+  phase: string            // KSM — offline | running | failing | compacting | handing_off | draining | paused | stopped | crashed | restarting
   turnPhase: string        // KTC — idle | prompting | routing | executing | compacting | finalizing | exhausted
   decisionStage: string    // KDP — undecided | guard_ok | tool_policy_selected
   runtimeState: string     // KCL — idle | selecting | trying | done | exhausted
@@ -25,7 +25,7 @@ interface CompositeFsmParams {
 }
 
 const KSM_STATES = [
-  'offline', 'running', 'failing', 'overflowed', 'compacting',
+  'offline', 'running', 'failing', 'compacting',
   'handing_off', 'draining', 'paused', 'stopped', 'crashed',
   'restarting',
 ]
@@ -177,7 +177,7 @@ export function buildCompactionSpec(
   const tone: 'active' | 'warn' | 'err' =
     activeStage === 'compacting'
       ? 'warn'
-      : normalizedPhase === 'overflowed' || normalizedPhase === 'failing'
+      : normalizedPhase === 'failing'
         ? 'err'
         : 'active'
 

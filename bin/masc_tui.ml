@@ -25,6 +25,10 @@ exception Break
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
+(* What one wheel detent moves. Terminals report three lines per detent, so a
+   notch here is worth what a notch is worth in a pager. *)
+let wheel_notch_rows = 3
+
 let maximum_input_wait_seconds = 0.016
 let nanoseconds_per_second = 1_000_000_000.0
 
@@ -35,6 +39,39 @@ let synchronized_output_enabled () =
        | "0" | "false" | "no" | "off" -> false
        | "" | "1" | "true" | "yes" | "on" | _ -> true)
   | None -> true
+
+(* Point fd 2 at a file under the base path, so writing to stderr cannot land
+   in the frame. Best effort by construction: a surface that cannot open its
+   log is still a working surface, and refusing to start over it would trade a
+   cosmetic fault for an outage. The failure is reported on the terminal that
+   is about to be cleared, which is the last moment a person can see it. *)
+let redirect_stderr_off_terminal ~base_path =
+  match
+    let dir =
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "logs"
+    in
+    let path =
+      Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
+    in
+    let fd =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+    in
+    (* No [Fun.protect] around the close: its [Finally_raised] is neither
+       [Unix_error] nor [Sys_error], so a raising finaliser would leave this
+       match and take the surface down over a descriptor. If [dup2] raises,
+       one fd leaks in a process that is one line from reporting it. *)
+    Unix.dup2 fd Unix.stderr;
+    Unix.close fd;
+    path
+  with
+  | path ->
+      Log.info ~ctx:"masc-tui" "stderr redirected to %s" path
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+      (* Say so before the screen is taken: a surface drawing over a mirror it
+         could not move is the state this whole path exists to avoid. *)
+      prerr_endline
+        "[masc-tui] could not redirect stderr off this terminal; log lines may \
+         land in the drawn screen"
 
 let require_interactive_terminal () =
   let term =
@@ -296,6 +333,62 @@ let keeper_message_page_rows state =
   let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
   max 1 (rows - chrome - keeper_message_status_rows state)
 
+(* What this pane has sent to the keeper on screen, oldest first. The arrows
+   walk it the way a shell walks its own history. That is why the wheel no
+   longer arrives as the same key: one of the two had to be wrong while they
+   shared it, and scrolling has the wheel and the page keys. *)
+let own_sent_messages (state : state) =
+  let target = Option.value ~default:"" state.msg_target_keeper_name in
+  state.msg_history
+  |> List.filter (fun entry ->
+         (match entry.me_role with
+          | Message_user label -> String.equal label "you"
+          | Message_keeper | Message_status | Message_error | Message_tool
+          | Message_thinking ->
+              false)
+         && String.equal entry.me_keeper_name target)
+  |> List.map (fun entry -> entry.me_text)
+
+let set_composer_text (state : state) text =
+  Buffer.clear state.msg_input;
+  Buffer.add_string state.msg_input text
+
+(* The draft is put aside on the first step back and handed over on the way
+   forward past the newest, so a walk through the history never costs what was
+   already typed. *)
+let recall_older (state : state) =
+  let sent = own_sent_messages state in
+  let count = List.length sent in
+  if count = 0 then ()
+  else begin
+    let at =
+      match state.msg_recall_at with
+      | None ->
+          state.msg_recall_draft <- Buffer.contents state.msg_input;
+          0
+      | Some at -> min (at + 1) (count - 1)
+    in
+    state.msg_recall_at <- Some at;
+    set_composer_text state (List.nth sent (count - 1 - at))
+  end
+
+let recall_newer (state : state) =
+  match state.msg_recall_at with
+  | None -> ()
+  | Some 0 ->
+      state.msg_recall_at <- None;
+      set_composer_text state state.msg_recall_draft
+  | Some at ->
+      let sent = own_sent_messages state in
+      let at = at - 1 in
+      state.msg_recall_at <- Some at;
+      let count = List.length sent in
+      if count > at then set_composer_text state (List.nth sent (count - 1 - at))
+
+(* Typing makes the composer the operator's again: the walk is over, so a step
+   forward must not replace what they just wrote with a draft from before it. *)
+let forget_recall (state : state) = state.msg_recall_at <- None
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) (key : string) : bool =
@@ -322,6 +415,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       (* Back to the newest row: the turn that is about to start is drawn
          there, and staying scrolled back would hide the send. *)
       state.msg_scroll <- 0;
+      forget_recall state;
       submit_message text
     end;
     true
@@ -329,22 +423,29 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     (* Ctrl-J, or Return on a terminal that still translates it. A composer
        that cannot hold two lines makes an operator send two messages for one
        thought. *)
+    forget_recall state;
     Buffer.add_char state.msg_input '\n';
     true
   | "up" ->
-    state.msg_scroll <- state.msg_scroll + 1;
-    (* Scrolling into the oldest rows is the ask for older ones. Fetching on
-       the keypress rather than on reaching an exact row means the page is
-       usually there before the reader arrives; the render clamps the position
-       either way, so an early fetch costs nothing on screen. *)
+    recall_older state;
+    true
+  | "down" ->
+    recall_newer state;
+    true
+  | "wheel-up" ->
+    (* A notch is worth more than a row. The wheel used to arrive as the arrow
+       key and moved one row with it, so reading back through a keeper turn --
+       hundreds of rows -- took hundreds of notches. Three is what a terminal
+       reports per detent, so a notch here covers what a notch covers
+       everywhere else. *)
+    state.msg_scroll <- state.msg_scroll + wheel_notch_rows;
     (match state.msg_older_cursor with
-     | Some before
-       when state.msg_older_exist && not state.msg_older_loading ->
+     | Some before when state.msg_older_exist && not state.msg_older_loading ->
          load_older ~before
      | Some _ | None -> ());
     true
-  | "down" ->
-    state.msg_scroll <- max 0 (state.msg_scroll - 1);
+  | "wheel-down" ->
+    state.msg_scroll <- max 0 (state.msg_scroll - wheel_notch_rows);
     true
   | "pageup" ->
     (* A keeper's turn is many rows, so one row per press walks back through a
@@ -359,6 +460,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.msg_scroll <- 0;
     true
   | "\127" | "\b" ->
+    forget_recall state;
     let new_content =
       Buffer.contents state.msg_input
       |> Masc_tui_message_layout.drop_last_utf8_scalar
@@ -405,6 +507,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          Buffer.add_string state.msg_input text);
       true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
+      forget_recall state;
       Buffer.add_string state.msg_input s;
       true
     end else
@@ -485,6 +588,8 @@ type async_msg =
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
+  | Runtime_surface_loaded of
+      int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
@@ -852,6 +957,33 @@ let launch_connectors_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
 
+let launch_runtime_surface_load state ~mailbox ~force =
+  match state.runtime_surface_inflight with
+  | Some _ -> if force then state.runtime_surface_force_pending <- true
+  | None ->
+      state.runtime_surface_generation <- state.runtime_surface_generation + 1;
+      let generation = state.runtime_surface_generation in
+      state.runtime_surface_inflight <- Some generation;
+      let host = Env_config_core.masc_host () in
+      let port = state.port in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_runtime_surface ~host ~port ~force with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Runtime_surface_loaded (generation, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Runtime_surface_loaded
+                (generation, Error "Eio switch is unavailable")))
+
 let launch_repositories_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -985,6 +1117,60 @@ let launch_verification_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+
+(* Move the roster cursor to the next keeper whose name contains [query],
+   scanning forward from [after] and wrapping. A miss moves nothing. *)
+let roster_search_jump state ~query ~after =
+  let query = String.lowercase_ascii query in
+  let total = List.length state.keepers in
+  if String.length query > 0 && total > 0 then begin
+    let matches index =
+      match List.nth_opt state.keepers index with
+      | Some (k : keeper) ->
+          Masc_tui_types.palette_contains ~needle:query k.k_name
+      | None -> false
+    in
+    let rec scan step =
+      if step > total then ()
+      else begin
+        let index = (after + step + total) mod total in
+        if matches index then state.keeper_cursor <- index
+        else scan (step + 1)
+      end
+    in
+    scan 1
+  end
+
+(* Move to a surface, fetching what that surface shows on arrival. Tab,
+   Shift-Tab, and any future jump go through here so no direction can forget
+   a load the other performs. Surfaces not listed refresh on the periodic
+   cadence ([surface_needs]); the ones here are snapshots that would
+   otherwise read as empty until the next tick. *)
+let goto_surface state ~mailbox (destination : surface) =
+  (match destination with
+   | Lanes -> launch_lanes_load state ~mailbox
+   | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+   | Schedules -> launch_schedules_load state ~mailbox
+   | Verification -> launch_verification_load state ~mailbox
+   | Harness -> launch_harness_load state ~mailbox
+   | Fusion ->
+       launch_fusion_runs_load state ~mailbox;
+       (match state.fusion_mode with
+        | Fusion_list -> ()
+        | Fusion_detail run_id ->
+            launch_fusion_detail_load state ~mailbox ~run_id)
+   | Repositories -> launch_repositories_load state ~mailbox
+   | Connectors -> launch_connectors_load state ~mailbox
+   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
+   | Tools -> launch_tools_load state ~mailbox
+   | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
+  (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
+     arm did on the Approvals -> Board step. *)
+  (match state.view with
+   | Approvals when destination <> Approvals ->
+       state.pending_approval_action <- None
+   | _ -> ());
+  state.view <- destination
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = Env_config_core.masc_host () in
@@ -2604,7 +2790,10 @@ let handle_keeper_action state ~base_path ~mailbox action =
               | Keeper_control.Unobserved ->
                   "the live roster has not been read"
               | Keeper_control.Absent | Keeper_control.Present _ ->
-                  Keeper_control.status_label reading ^ " keeper"))
+                  (if reading.Keeper_control.paused then "paused, "
+                   else "")
+                  ^ Keeper_control.health_label reading
+                  ^ " keeper"))
       else
         match
           Keeper_control.gate_transition
@@ -3156,6 +3345,40 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.connectors <- Some snapshot;
           state.connectors_error <- None
       | Error detail -> state.connectors_error <- Some detail)
+  | Runtime_surface_loaded (generation, result) ->
+      let is_current = generation = state.runtime_surface_generation in
+      (match state.runtime_surface_inflight with
+       | Some inflight when inflight = generation ->
+           state.runtime_surface_inflight <- None
+       | Some _ | None -> ());
+      if is_current then
+        (match result with
+         | Ok load ->
+             let previous_probe =
+               Option.bind state.runtime_surface (fun snapshot ->
+                   snapshot.Tui_decode.rss_probe)
+             in
+             let probe, probe_error =
+               match load.Masc_tui_loader.rsl_probe with
+               | Ok current -> Some current, None
+               | Error detail -> previous_probe, Some detail
+             in
+             (match
+                Tui_decode.join_runtime_surface ~probe ~probe_error
+                  ~resolved:load.rsl_resolved
+              with
+              | Ok snapshot ->
+                  state.runtime_surface <- Some snapshot;
+                  state.runtime_surface_error <- None
+              | Error detail -> state.runtime_surface_error <- Some detail)
+         | Error detail ->
+             (* The last joined reading remains visible. An authority read or
+                decode failure is not an empty lane inventory. *)
+             state.runtime_surface_error <- Some detail);
+      if is_current && state.runtime_surface_force_pending then begin
+        state.runtime_surface_force_pending <- false;
+        launch_runtime_surface_load state ~mailbox ~force:true
+      end
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3291,15 +3514,21 @@ let main () =
   Provider_diag_log_sink.install ();
   let (base_path, workspace, port, refresh) = parse_args () in
   require_interactive_terminal ();
-  (* The console mirror writes every record to stderr, and stderr is this
-     terminal. A library Info line printed between two frames lands inside the
-     drawn screen, and the repaint that follows does not unprint it -- it is
-     already in the scrollback the frame occupies. Warn is the floor because a
-     warning is worth that cost and a routine "loaded N entries" is not.
+  (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
+     on the same [/dev/ttys*]. Everything that writes there writes into the
+     drawn screen: the console mirror behind every [Log] record, this binary's
+     own decode reports ([Masc_tui_loader.report]), and anything a library
+     prints without asking. Raising the level to Warn narrowed that to fewer
+     lines; it did not stop them, and it bought the narrowing by dropping Info
+     records from the ring the System logs surface reads.
 
-     MASC_LOG_LEVEL still wins: init_from_env runs after, so an operator who
-     asks for Info gets it, terminal or not. *)
-  Log.set_level Log.Warn;
+     So the terminal is taken away from stderr instead. The console is a
+     mirror by its own contract -- {!Console_sink} names the file sink and the
+     ring authoritative -- and a mirror pointed at a file is still a mirror,
+     while one pointed here is a corruption. This runs after
+     [require_interactive_terminal] so its refusal still reaches a person, and
+     before anything can log. *)
+  redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
   let state = create_state ~workspace ~port ~refresh_interval:refresh in
   state.view <- Overview;
@@ -3543,6 +3772,8 @@ let main () =
          appeared. The chat surface is excluded — it draws its own composer. *)
       let composer_claimed =
         (not compact_viewport)
+        && (not state.help_open)
+        && (not state.palette_open)
         && state.view <> Keepers Keeper_message
         &&
         match key with
@@ -3551,8 +3782,119 @@ let main () =
       in
       (match key with
        | Some _ when composer_claimed -> ()
-       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
+       | Some k
+         when Render_schedule.Input_shortcut.is_quit ~message_mode k
+              && Option.is_none state.roster_search ->
            raise Break
+       (* The help overlay is modal: it answers scrolling and closing, and
+          swallows everything else so a surface binding cannot fire under a
+          screen that is describing it. Quit stays global above. *)
+       | Some k when state.help_open ->
+           (match k with
+            | "?" | "esc" ->
+                state.help_open <- false;
+                state.help_scroll <- 0
+            | "j" | "down" -> state.help_scroll <- state.help_scroll + 1
+            | "k" | "up" -> state.help_scroll <- max 0 (state.help_scroll - 1)
+            | _ -> ())
+       (* The palette is the same kind of modal, but typed: printable keys
+          build the query, arrows move the cursor, Enter runs the highlighted
+          jump through the exact goto/chat paths the bound keys use. *)
+       | Some k when state.palette_open ->
+           let close () =
+             state.palette_open <- false;
+             state.palette_query <- "";
+             state.palette_cursor <- 0
+           in
+           (match k with
+            | "esc" -> close ()
+            | "\r" ->
+                let matches = Masc_tui_types.palette_matches state in
+                let chosen =
+                  List.nth_opt matches
+                    (max 0 (min state.palette_cursor (List.length matches - 1)))
+                in
+                close ();
+                (match chosen with
+                 | Some (_, Masc_tui_types.Palette_goto destination) ->
+                     goto_surface state ~mailbox:async_messages destination
+                 | Some (_, Masc_tui_types.Palette_chat keeper_name) ->
+                     open_message_for_keeper
+                       ~return_to:Keeper_chat_return_list state keeper_name;
+                     launch_keeper_history_load state
+                       ~mailbox:async_messages ~keeper_name;
+                     state.view <- Keepers Keeper_message
+                 | None -> ())
+            | "down" -> state.palette_cursor <- state.palette_cursor + 1
+            | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
+            | "\127" | "\b" ->
+                state.palette_query <-
+                  Masc_tui_message_layout.drop_last_utf8_scalar
+                    state.palette_query;
+                state.palette_cursor <- 0
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                state.palette_query <- state.palette_query ^ s;
+                state.palette_cursor <- 0
+            | _ -> ())
+       (* Roster search: typing moves the cursor live to the first match
+          from the top; Enter keeps the query for n/N, Esc keeps nothing.
+          The list itself never narrows -- see [roster_search] in types. *)
+       | Some k
+         when state.view = Keepers Keeper_list
+              && Option.is_some state.roster_search ->
+           let query = Option.value state.roster_search ~default:"" in
+           (match k with
+            | "esc" -> state.roster_search <- None
+            | "\r" ->
+                state.roster_search <- None;
+                state.roster_search_last <- query
+            | "\127" | "\b" ->
+                let shorter =
+                  Masc_tui_message_layout.drop_last_utf8_scalar query
+                in
+                state.roster_search <- Some shorter;
+                roster_search_jump state ~query:shorter ~after:(-1)
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                let longer = query ^ s in
+                state.roster_search <- Some longer;
+                roster_search_jump state ~query:longer ~after:(-1)
+            | _ -> ())
+       | Some "/" when state.view = Keepers Keeper_list ->
+           state.roster_search <- Some ""
+       | Some "n"
+         when state.view = Keepers Keeper_list
+              && state.roster_search_last <> "" ->
+           roster_search_jump state ~query:state.roster_search_last
+             ~after:state.keeper_cursor
+       | Some "N"
+         when state.view = Keepers Keeper_list
+              && state.roster_search_last <> "" ->
+           (* Backwards: the same wrap walked the other way. *)
+           let total = List.length state.keepers in
+           let query = String.lowercase_ascii state.roster_search_last in
+           if total > 0 then begin
+             let matches index =
+               match List.nth_opt state.keepers index with
+               | Some (k : keeper) ->
+                   Masc_tui_types.palette_contains ~needle:query k.k_name
+               | None -> false
+             in
+             let rec scan step =
+               if step > total then ()
+               else begin
+                 let index =
+                   (state.keeper_cursor - step + (total * 2)) mod total
+                 in
+                 if matches index then state.keeper_cursor <- index
+                 else scan (step + 1)
+               end
+             in
+             scan 1
+           end
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =
@@ -3604,6 +3946,13 @@ let main () =
               surface cycle keeps working, and quit was answered above. *)
            let _handled = handle_board_compose_key state ~mailbox:async_messages k in
            ()
+       | Some "?" ->
+           state.help_open <- true;
+           state.help_scroll <- 0
+       | Some ":" ->
+           state.palette_open <- true;
+           state.palette_query <- "";
+           state.palette_cursor <- 0
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -3682,6 +4031,9 @@ let main () =
             | Repositories ->
                 launch_repositories_load state ~mailbox:async_messages
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
+            | Runtime ->
+                launch_runtime_surface_load state ~mailbox:async_messages
+                  ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
@@ -3689,59 +4041,18 @@ let main () =
             | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
-       | Some "\t" ->
-           (* Tab cycles through primary surfaces *)
-           (match state.view with
-            | Overview -> state.view <- Acting
-            | Acting -> state.view <- Keepers Keeper_list
-            | Keepers _ ->
-                launch_lanes_load state ~mailbox:async_messages;
-                state.view <- Lanes
-            | Lanes ->
-                (* Loaded on arrival: a held call is on a short clock, and
-                   showing none until the next periodic refresh reads as
-                   "nothing is waiting". *)
-                launch_keeper_tool_approvals_load state
-                  ~mailbox:async_messages;
-                state.view <- Approvals
-            | Approvals ->
-                state.pending_approval_action <- None;
-                state.view <- Board
-            | Board -> state.view <- Planning
-            | Planning ->
-                (* Loaded on arrival: the schedule page is a snapshot of the
-                   store, and a stale one would answer "why is this keeper
-                   awake" with yesterday's rows. *)
-                launch_schedules_load state ~mailbox:async_messages;
-                state.view <- Schedules
-            | Schedules ->
-                (* Loaded on arrival: the queue is what the surface is, so
-                   showing it empty until a refresh would read as "nothing is
-                   waiting". *)
-                launch_verification_load state ~mailbox:async_messages;
-                state.view <- Verification
-            | Verification ->
-                launch_harness_load state ~mailbox:async_messages;
-                state.view <- Harness
-            | Harness ->
-                launch_fusion_runs_load state ~mailbox:async_messages;
-                (match state.fusion_mode with
-                 | Fusion_list -> ()
-                 | Fusion_detail run_id ->
-                     launch_fusion_detail_load state ~mailbox:async_messages
-                       ~run_id);
-                state.view <- Fusion
-            | Fusion ->
-                launch_repositories_load state ~mailbox:async_messages;
-                state.view <- Repositories
-            | Repositories ->
-                launch_connectors_load state ~mailbox:async_messages;
-                state.view <- Connectors
-            | Connectors ->
-                launch_tools_load state ~mailbox:async_messages;
-                state.view <- Tools
-            | Tools -> state.view <- System_logs
-            | System_logs -> state.view <- Overview)
+       | Some "\t" | Some "shift-tab" ->
+           (* Tab and Shift-Tab walk the ring the surface strip draws, in the
+              two directions. Arrival loads live in [goto_surface] so both
+              directions (and any future jump) fetch the same things. *)
+           let ring = Masc_tui_types.surface_ring in
+           let count = List.length ring in
+           let step = if key = Some "\t" then 1 else count - 1 in
+           let index =
+             (Masc_tui_types.surface_ring_index state.view + step) mod count
+           in
+           goto_surface state ~mailbox:async_messages
+             (fst (List.nth ring index))
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
@@ -3812,9 +4123,9 @@ let main () =
                 end
                 else state.task_focus <- false
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
-            | Verification | Harness | Repositories | Connectors | Tools
+            | Verification | Harness | Repositories | Connectors | Runtime | Tools
             | System_logs -> ())
-       | Some "j" | Some "down" ->
+       | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Keepers Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
@@ -3915,6 +4226,10 @@ let main () =
                 state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.connectors_scroll
+            | Runtime ->
+                state.runtime_surface_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.runtime_surface_scroll
             | Tools -> state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.tools_scroll
@@ -3933,7 +4248,7 @@ let main () =
                 if state.runtime_pick_cursor < dispatchable - 1 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
             | Keepers Keeper_message -> ())
-       | Some "k" | Some "up" ->
+       | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Keepers Keeper_list ->
                 if state.keeper_cursor > 0 then begin
@@ -4031,6 +4346,11 @@ let main () =
                   state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.connectors_scroll
+            | Runtime ->
+                if state.runtime_surface_scroll > 0 then
+                  state.runtime_surface_scroll <-
+                    move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                      ~current:state.runtime_surface_scroll
             | Tools ->
                 if state.tools_scroll > 0 then
                   state.tools_scroll <-
@@ -4140,7 +4460,7 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -4212,7 +4532,7 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Fusion | Repositories | Connectors | Tools
+            | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Tools
             | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
@@ -4278,7 +4598,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
@@ -4308,7 +4628,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -4331,7 +4651,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -4341,7 +4661,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -4363,7 +4683,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs
             -> ())
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
@@ -4375,7 +4695,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "a" | Some "A" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -4383,7 +4703,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it
@@ -4458,6 +4778,11 @@ let main () =
          | Connectors ->
              (* Reachability is the column that moves on its own. *)
              launch_connectors_load state ~mailbox:async_messages
+         | Runtime ->
+             (* Both authorities can move independently. Single-flight keeps
+                a slow authenticated read from stacking across ticks. *)
+             launch_runtime_surface_load state ~mailbox:async_messages
+               ~force:false
          | Tools ->
              (* The inventory is near-static, but a tool whose projection
                 changes is exactly what this surface is read for. *)

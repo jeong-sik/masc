@@ -58,6 +58,13 @@ type t =
   ; top_p : float option
   ; top_k : int option
   ; min_p : float option
+  (* Ollama's own repetition samplers. A model that falls into an R1-style
+     loop -- re-evaluating its own reasoning without ever answering -- is
+     caught by penalising verbatim repetition over a window, and the provider
+     supports both knobs natively. Without them the loop had nothing in the
+     request that could end it. *)
+  ; repeat_penalty : float option
+  ; repeat_last_n : int option
   ; system_prompt : string option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
@@ -223,6 +230,8 @@ val make
   -> ?top_p:float
   -> ?top_k:int
   -> ?min_p:float
+  -> ?repeat_penalty:float
+  -> ?repeat_last_n:int
   -> ?system_prompt:string
   -> ?enable_thinking:bool
   -> ?preserve_thinking:bool

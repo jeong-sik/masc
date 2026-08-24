@@ -703,7 +703,7 @@ let test_canonical_names_are_unchanged () =
   (* Every name in this workspace is already canonical, so no path moves. *)
   List.iter
     (fun name -> Alcotest.(check string) name name (segment name))
-    [ "alpha"; "keeper-1"; "a_b-c"; "sangsu"; "rw-e0-r9-20260820-coord" ]
+    [ "alpha"; "keeper-1"; "a_b-c"; "orbiter"; "rw-e0-r9-20260820-coord" ]
 ;;
 
 let () =

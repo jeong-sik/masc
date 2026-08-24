@@ -27,6 +27,9 @@ let schema_of_name name : Masc_domain.tool_schema =
      | Error message -> failwith message)
 ;;
 
+let sandbox_start = schema_of_name "masc_keeper_sandbox_start"
+let sandbox_stop = schema_of_name "masc_keeper_sandbox_stop"
+let status = schema_of_name "masc_keeper_status"
 let audit = schema_of_name "masc_keeper_audit"
 let up = schema_of_name "masc_keeper_up"
 let delegate = schema_of_name "masc_keeper_delegate"

@@ -284,6 +284,14 @@ type binding =
   ; price_output : float option
   ; keep_alive : string option
   ; num_ctx : int option
+  ; repeat_penalty : float option
+    (** Ollama [options.repeat_penalty]. Raises the cost of tokens already in
+        the window, which is the documented remedy for R1-style reasoning
+        models that restate the same thought until the turn dies. Declared per
+        binding because it is an Ollama-only option, like [num_ctx]. *)
+  ; repeat_last_n : int option
+    (** Ollama [options.repeat_last_n]: how many recent tokens
+        [repeat_penalty] looks back over. *)
   ; return_progress : bool option
   }
 [@@deriving show, eq]

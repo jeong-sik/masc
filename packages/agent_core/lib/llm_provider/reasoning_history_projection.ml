@@ -359,7 +359,12 @@ let summarize_drops drops =
     drops
 ;;
 
-let observe ~component projection =
+(* [stream] tells the two serializations of one request apart. Exact-output
+   planning serializes with [stream:false] before admission serializes with the
+   transport's real value, so the same history is projected twice and this
+   summary is emitted twice with byte-identical payloads. Without the flag the
+   pair says nothing about which stage produced it (#28636). *)
+let observe ~component ~stream projection =
   let target_json = snd (Types.Reasoning_source.entry projection.reasoning_target) in
   (match projection.reasoning_replay_drops with
    | [] -> ()
@@ -371,6 +376,8 @@ let observe ~component projection =
        Yojson.Safe.to_string
          (`Assoc
              [ "event", `String "reasoning_replay_dropped"
+             ; "component", `String component
+             ; "stream", `Bool stream
              ; "target", target_json
              ; "drop_count", `Int (List.length drops)
              ; "replay_policy_excluded", `Int replay_policy_excluded

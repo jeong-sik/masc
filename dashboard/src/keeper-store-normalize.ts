@@ -198,7 +198,6 @@ const BACKEND_PHASE_LOWERCASE_MAP = {
   offline: 'Offline',
   running: 'Running',
   failing: 'Failing',
-  overflowed: 'Overflowed',
   compacting: 'Compacting',
   handing_off: 'HandingOff',
   draining: 'Draining',
@@ -215,7 +214,6 @@ const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Offline: 'Offline',
   Running: 'Running',
   Failing: 'Failing',
-  Overflowed: 'Overflowed',
   Compacting: 'Compacting',
   HandingOff: 'HandingOff',
   Draining: 'Draining',
@@ -261,7 +259,7 @@ export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | nul
 // `toKeeperLifecycleState` (iter65, sibling cleanup PR).
 const PIPELINE_STAGES: ReadonlySet<PipelineStage> = new Set<PipelineStage>([
   'idle', 'compacting', 'handoff', 'offline',
-  'failing', 'overflowed', 'draining', 'paused',
+  'failing', 'draining', 'paused',
   'crashed', 'restarting', 'unknown',
 ])
 

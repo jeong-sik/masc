@@ -18,7 +18,13 @@ type t =
    operators as one severity. *)
 let of_string_opt raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "ok" | "good" | "healthy" -> Some Ok
+  (* [empty] is what [Keeper_reaction_ledger] publishes for a ledger it read
+     and found nothing in, which its own type keeps distinct from the store it
+     could not reach at all ([Summary_unavailable]). Absent here it fell to
+     [Unknown], and the fleet health reader counts [Unknown] as unreachable, so
+     a quiet fleet reported its event-queue storage and work as unavailable
+     (#27560). *)
+  | "ok" | "good" | "healthy" | "empty" -> Some Ok
   (* [initializing] is what the dashboard core and the operator digest emit for
      a workspace that has not finished starting. It was absent here, so it fell
      to [Unknown], which ranks 2 — the same rung as [Degraded] and [Stale] — and

@@ -1,0 +1,82 @@
+name = "keeper_ide_annotate"
+description = """
+Attach a keeper-authored annotation to a source file line range. Use this to \
+leave durable IDE context linked to an optional goal, task, or opaque \
+external reference. codebase, file_path, line_start, and content are \
+required. Hand codebase and file_path back exactly as the IDE co-view \
+context names them — never derive them from your sandbox mount layout. The \
+IDE transport stores and renders reference relation/value pairs without \
+interpreting the producer's product vocabulary."""
+additional_properties = false
+
+[[params]]
+name = "codebase"
+type = "string"
+required = true
+description = """
+Canonical codebase slug exactly as the co-view context names it (e.g. \
+example.com_owner_repo)"""
+
+[[params]]
+name = "file_path"
+type = "string"
+required = true
+description = """
+Repo-root-relative source file path exactly as the co-view context names it"""
+
+[[params]]
+name = "line_start"
+type = "integer"
+required = true
+minimum = 1
+description = "First 1-based source line"
+
+[[params]]
+name = "line_end"
+type = "integer"
+minimum = 1
+description = "Last 1-based source line; defaults to line_start"
+
+[[params]]
+name = "kind"
+type = "string"
+enum = ["Comment", "Decision", "Question", "Bookmark"]
+description = "Annotation kind; defaults to Comment"
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Short annotation text shown in the IDE"
+
+[[params]]
+name = "goal_id"
+type = "string"
+description = "Optional Goal route id"
+
+[[params]]
+name = "task_id"
+type = "string"
+description = "Optional Task route id"
+
+[[params]]
+name = "references"
+type = "array"
+description = """
+Optional opaque links rendered by the IDE without product-specific routing"""
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "relation"
+type = "string"
+required = true
+description = "Opaque relation label supplied by the producer"
+
+[[params.items.params]]
+name = "reference"
+type = "string"
+required = true
+description = "Opaque reference value preserved without interpretation"

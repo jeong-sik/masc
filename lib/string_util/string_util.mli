@@ -105,6 +105,10 @@ val to_string : truncation -> string
 val was_truncated : truncation -> bool
 (** [true] iff the argument is the [Truncated] constructor. *)
 
+val is_valid_utf8 : string -> bool
+(** [is_valid_utf8 s]: whether every byte of [s] decodes as UTF-8. Used at
+    process boundaries whose reader rejects invalid sequences. *)
+
 val utf8_prefix : max_bytes:int -> string -> string
 (** [utf8_prefix ~max_bytes s]: returns at most [max_bytes] bytes of [s],
     cutting at a UTF-8 character boundary. Returns [""] when

@@ -277,9 +277,22 @@ let rec param_of_pairs ~context pairs =
               key_context
               (param_type_to_string declared)))
     | "minimum" | "maximum" ->
-      let* () = only_for ~context:key_context ~declared Ptype_integer in
-      let* v = as_int ~context:key_context value in
-      Ok (Some (key, `Int v))
+      (* The bound carries the parameter's own type: an integer bound
+         serializes as 0 and a number bound as 0.0, and the two are different
+         bytes on the wire. *)
+      (match declared with
+       | Ptype_integer ->
+         let* v = as_int ~context:key_context value in
+         Ok (Some (key, `Int v))
+       | Ptype_number ->
+         let* v = as_float ~context:key_context value in
+         Ok (Some (key, `Float v))
+       | Ptype_string | Ptype_boolean | Ptype_object | Ptype_array ->
+         Error
+           (sprintf
+              "%s is only valid for type integer or number params, this param is type %s"
+              key_context
+              (param_type_to_string declared)))
     | "exclusive_minimum" ->
       (* A [number] bound, not an [integer] one: tool_execute's timeout_sec and
          the keeper sandbox durations are seconds, and "greater than zero" is

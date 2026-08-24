@@ -90,8 +90,6 @@ val augment_keeper_diagnostic_json :
     above this layer, not a member of this domain. *)
 type surface_status =
   | Surface_active
-  | Surface_busy
-  | Surface_listening
   | Surface_inactive
   | Surface_offline
   | Surface_idle

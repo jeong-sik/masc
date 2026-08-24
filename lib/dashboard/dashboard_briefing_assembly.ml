@@ -142,11 +142,18 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
               the string; the producer builds it exhaustively, so a status this
               parser does not know is a producer/consumer mismatch, not a rank
               to guess at (#29350). *)
-           let surface = Keeper_status_runtime.surface_status_of_string_opt status in
+           let health =
+             Keeper_status_runtime.keeper_health_of_string_opt
+               (string_field "health_state" (member_assoc "diagnostic" keeper))
+           in
            let pressure_rank =
-             match surface with
-             | Some (Keeper_status_runtime.Surface_offline | Surface_inactive) -> 3
-             | Some (Surface_active | Surface_busy | Surface_listening | Surface_idle)
+             match health with
+             (* Ranked by health rather than by the status word, which folded
+                stale, degraded and zombie together and then folded that into
+                offline here. A late heartbeat and a dead fiber are different
+                amounts of trouble. *)
+             | Some (Keeper_types.KH_offline | KH_zombie) -> 3
+             | Some (KH_healthy | KH_idle | KH_stale | KH_degraded)
              | None ->
                if
                  Option.exists
@@ -154,9 +161,10 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                    context_ratio
                then 2
                else (
-                 match surface with
-                 | Some Keeper_status_runtime.Surface_idle -> 1
-                 | Some _ | None -> 0)
+                 match health with
+                 | Some Keeper_types.KH_idle -> 1
+                 | Some (KH_healthy | KH_stale | KH_degraded | KH_zombie | KH_offline)
+                 | None -> 0)
            in
            Some
              {
@@ -181,6 +189,18 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("tool_audit_at", member_assoc "tool_audit_at" keeper);
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);
+                      (* The rank above is computed from [health], but the row it
+                         ranks did not carry it, so no reader could reproduce or
+                         explain the order -- and [status] was the only liveness
+                         word on this row, which is the fold this axis replaces.
+                         [phase] travels with it because operator surfaces ask
+                         two different questions: "is it running" (health) and
+                         "did an operator stop it" (phase). *)
+                      ("health",
+                       Json_util.option_to_yojson
+                         (fun value -> `String (Keeper_status_runtime.keeper_health_to_string value))
+                         health);
+                      ("phase", member_assoc "phase" keeper);
                       ("exclusion_reason",
                        Keeper_runtime.autoboot_exclusion_reason_opt_to_yojson
                          (Keeper_runtime.autoboot_exclusion_reason config name));

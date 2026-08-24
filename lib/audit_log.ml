@@ -68,6 +68,13 @@ let preview ?(max_len = 200) (value : string) =
   String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." value
   |> String_util.to_string
 
+(* [audit_summary] renders raw detail fields, so it cannot reuse [preview]'s
+   "..." suffix, but it needs the same character-boundary cut. *)
+let audit_summary_field_max_bytes = 80
+
+let audit_summary_field value =
+  String_util.utf8_prefix ~max_bytes:audit_summary_field_max_bytes value
+
 (** {1 Serialization} *)
 
 let gate_audit_decision_to_string = function
@@ -427,7 +434,7 @@ let audit_summary ~action ~details =
   let extract_str key =
     match details with
     | `Assoc fields -> (match List.assoc_opt key fields with
-      | Some (`String v) -> Some (String.sub v 0 (min (String.length v) 80))
+      | Some (`String v) -> Some (audit_summary_field v)
       | _ -> None)
     | _ -> None
   in
@@ -446,7 +453,7 @@ let audit_summary ~action ~details =
          let rec loop acc = function
            | [] -> Some (List.rev acc)
            | `String v :: rest ->
-             loop (String.sub v 0 (min (String.length v) 80) :: acc) rest
+             loop (audit_summary_field v :: acc) rest
            | _ :: _ -> None
          in
          loop [] values

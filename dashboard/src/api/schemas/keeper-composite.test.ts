@@ -90,7 +90,7 @@ describe('parseKeeperCompositeSnapshot', () => {
   // snake_case). The schema must round-trip each one verbatim.
   it('round-trips every phase the backend can emit', () => {
     for (const phase of [
-      'offline', 'running', 'failing', 'overflowed', 'compacting',
+      'offline', 'running', 'failing', 'compacting',
       'handing_off', 'draining', 'paused', 'stopped', 'crashed',
       'restarting',
     ]) {

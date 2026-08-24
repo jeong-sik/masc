@@ -1871,6 +1871,120 @@ let test_runtime_toml_parses_optional_return_progress () =
          binding.Runtime_schema.return_progress
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
+(* An R1-style reasoning model can restate the same thought until the turn
+   dies, and Ollama's own control for that is repeat_penalty over
+   repeat_last_n tokens. Neither could be declared at all, so the remedy was
+   unreachable from configuration. Binding-level like keep-alive / num-ctx,
+   because both are Ollama options rather than a portable sampling knob. *)
+let test_runtime_toml_parses_repetition_samplers () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     repeat-penalty = 1.15\n\
+     repeat-last-n = 1024\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse the repetition samplers:\n%s" rendered
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "explicit repeat-last-n" (Some 1024)
+         binding.Runtime_schema.repeat_last_n;
+       (match binding.Runtime_schema.repeat_penalty with
+        | Some value -> check bool "explicit repeat-penalty" true (Float.equal value 1.15)
+        | None -> failf "repeat-penalty should be declared")
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_omitted_repetition_samplers_stay_none () =
+  let content = "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n" in
+  match Runtime_toml.parse_string content with
+  | Error _ -> failf "runtime TOML without the samplers should still parse"
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "omitted repeat-last-n stays None" None
+         binding.Runtime_schema.repeat_last_n;
+       check bool "omitted repeat-penalty stays None" true
+         (Option.is_none binding.Runtime_schema.repeat_penalty)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+(* 0 and below would silence the sampler while reading as "configured", so the
+   declaration is rejected instead of being carried onto the wire. *)
+let test_runtime_toml_rejects_non_positive_repeat_penalty () =
+  let content = "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     repeat-penalty = 0.0\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n" in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "repeat-penalty = 0.0 should be rejected"
+  | Error errs ->
+    check bool "names the offending key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+           String.equal err.path "local.sample.repeat-penalty")
+         errs)
+
+(* -1 is Ollama's "the whole context"; anything below it has no meaning. *)
+let test_runtime_toml_rejects_repeat_last_n_below_minus_one () =
+  let content = "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     repeat-last-n = -2\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n" in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "repeat-last-n = -2 should be rejected"
+  | Error errs ->
+    check bool "names the offending key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+           String.equal err.path "local.sample.repeat-last-n")
+         errs)
+
 let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
   (* Undeclared must stay None rather than acquiring a default. AGENT_CORE reads None as
      "no ceiling declared" and passes every size; a default here would silently
@@ -2746,6 +2860,8 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; price_output = None
     ; keep_alive = None
     ; num_ctx = None
+  ; repeat_penalty = None
+  ; repeat_last_n = None
     ; return_progress = None
     }
   in
@@ -3219,6 +3335,54 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
       in
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))
+
+(* Under the Reasoning_effort dialect the wire field comes from the declared
+   effort, not from enable_thinking, so a model row that names an effort has
+   to reach the materialized provider config. It did not: only the
+   official-client path read spec.reasoning_effort, which left an HTTP model
+   whose endpoint honours the control reasoning on every turn with no way to
+   say otherwise. *)
+let test_runtime_toml_reasoning_effort_flows_to_provider_config () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.undeclared]\n\
+     api-name = \"undeclared\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.quiet]\n\
+     api-name = \"quiet\"\n\
+     max-context = 1024\n\
+     reasoning-effort = \"none\"\n\
+     \n\
+     [local.undeclared]\n\
+     \n\
+     [local.quiet]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.undeclared\"\n"
+  in
+  with_temp_runtime_toml content (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "runtime TOML should materialize: %s" msg
+    | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+      let effort id =
+        match
+          List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
+        with
+        | None -> failf "expected runtime %s" id
+        | Some rt ->
+          Option.map
+            Llm_provider.Reasoning_effort.to_string
+            (agent_core_provider_config rt).reasoning_effort
+      in
+      check (option string) "declared effort reaches the provider config"
+        (Some "none") (effort "local.quiet");
+      check (option string) "omitted effort stays absent" None
+        (effort "local.undeclared"))
 
 let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -4089,12 +4253,22 @@ let () =
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick
             test_runtime_toml_max_concurrent_flows_to_provider_config;
+          test_case "reasoning-effort flows from model row to provider config" `Quick
+            test_runtime_toml_reasoning_effort_flows_to_provider_config;
           test_case "max-request-body-bytes is optional opt-in" `Quick
             test_runtime_toml_parses_optional_max_request_body_bytes;
           test_case "return-progress is optional opt-in" `Quick
             test_runtime_toml_parses_optional_return_progress;
           test_case "omitted max-request-body-bytes stays None" `Quick
             test_runtime_toml_omitted_max_request_body_bytes_is_none;
+          test_case "repetition samplers are optional opt-in" `Quick
+            test_runtime_toml_parses_repetition_samplers;
+          test_case "omitted repetition samplers stay None" `Quick
+            test_runtime_toml_omitted_repetition_samplers_stay_none;
+          test_case "non-positive repeat-penalty is rejected" `Quick
+            test_runtime_toml_rejects_non_positive_repeat_penalty;
+          test_case "repeat-last-n below -1 is rejected" `Quick
+            test_runtime_toml_rejects_repeat_last_n_below_minus_one;
           test_case
             "keeper dispatch graph enumeration"
             `Quick test_keeper_dispatch_runtime_graph_enumeration;

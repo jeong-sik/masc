@@ -678,7 +678,7 @@ let build_request_artifact
         ("Backend_gemini.build_request: "
          ^ Reasoning_history_projection.error_to_string error)
     | Ok projection ->
-      Reasoning_history_projection.observe ~component:"backend_gemini" projection;
+      Reasoning_history_projection.observe ~component:"backend_gemini" ~stream projection;
       validate_projected_thought_signatures projection.messages;
       projection.messages
   in

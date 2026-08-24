@@ -127,6 +127,34 @@ let filter_environment_scrubs_proxy_credentials () =
        || String_util.contains_substring e "pass"))
 ;;
 
+(* The measured hang: the host EDITOR is on the allowlist, so a keeper
+   subprocess inherited the operator's editor and git launched it with no tty.
+   Both facts are pinned — the editor still arrives for anything that wants to
+   read it, and git is told not to open one. *)
+let subprocess_cannot_wait_for_a_person () =
+  let out = Env_keeper_scrub.filter_environment [| "EDITOR=nvim"; "PATH=/usr/bin" |] in
+  let mem k = Array.to_list out |> List.exists (String.equal k) in
+  Alcotest.(check bool) "git is told not to open an editor" true (mem "GIT_EDITOR=false");
+  Alcotest.(check bool) "git is told not to prompt for credentials" true
+    (mem "GIT_TERMINAL_PROMPT=0");
+  Alcotest.(check bool) "the host editor still reaches the subprocess" true
+    (mem "EDITOR=nvim")
+;;
+
+(* The entries are appended, not filtered: neither key is on the allowlist, so
+   a host value for either one is dropped before this and cannot win. *)
+let a_host_value_cannot_reinstate_the_editor () =
+  let out =
+    Env_keeper_scrub.filter_environment
+      [| "GIT_EDITOR=nvim"; "GIT_TERMINAL_PROMPT=1" |]
+  in
+  let entries = Array.to_list out in
+  Alcotest.(check (list string))
+    "only the non-interactive values survive"
+    [ "GIT_EDITOR=false"; "GIT_TERMINAL_PROMPT=0" ]
+    entries
+;;
+
 let () =
   Alcotest.run
     "env keeper scrub"
@@ -146,6 +174,12 @@ let () =
             filter_environment_preserves_allowed_locale_values
         ; Alcotest.test_case "scrubs proxy URL credentials" `Quick
             filter_environment_scrubs_proxy_credentials
+        ] )
+    ; ( "non-interactive"
+      , [ Alcotest.test_case "a subprocess cannot wait for a person" `Quick
+            subprocess_cannot_wait_for_a_person
+        ; Alcotest.test_case "a host value cannot reinstate the editor" `Quick
+            a_host_value_cannot_reinstate_the_editor
         ] )
     ]
 ;;

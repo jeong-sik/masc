@@ -59,6 +59,9 @@ run_self_test_when_changed() {
 blocking_lints() {
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
   run_lint "Issue taxonomy parser and reconciliation" node scripts/test-issue-taxonomy-core.cjs
+  run_self_test_when_changed "OCaml test suite reporter self-test" \
+    scripts/ci-run-test-suite.sh \
+    bash scripts/ci-run-test-suite.sh --self-test
   run_lint "Hardcoded model prefix" bash scripts/lint/no-roadmap-stale-hardcoding.sh
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh

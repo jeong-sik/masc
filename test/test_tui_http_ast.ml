@@ -121,8 +121,8 @@ let test_keeper_chat_uses_current_async_contract () =
          >= 1))
     (* [Ansi.move_to] is gone from this binding on purpose: the renderer no
        longer writes a cursor escape inline. It hands the position to
-       [finish_frame ~cursor:(Frame_presenter.Visible_at ...)], and the frame
-       presenter emits the move when it paints. Asserting the old escape here
+       [finish_frame_with_strip ~cursor:...], and the frame presenter emits the
+       move when it paints. Asserting the old escape here
        would pin the pre-differential-frame renderer.
 
        [Message_layout.input_cursor_row] is gone for a related reason: it
@@ -134,7 +134,11 @@ let test_keeper_chat_uses_current_async_contract () =
     ; "frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
-    ; "finish_frame"
+      (* Renamed by #30141, which put a surface strip above every frame.  The
+         assertion is that the renderer still hands its rows to the frame
+         presenter rather than painting them itself, and that is what the new
+         name does. *)
+    ; "finish_frame_with_strip"
     ];
   check bool "message input uses the same viewport gate as rendering" true
     (Ast_grep.count_calls_in_value_binding ~module_path
@@ -469,11 +473,25 @@ let test_tui_current_projection_wiring () =
        ~callee:"Metrics_tail.empty_message"
      = 1);
   (* Exact, not substring: the retired alias is the whole key "running", and
-     the fleet reading legitimately holds "running_keeper_fiber_count". *)
-  check int "retired planning running alias absent" 0
-    (Ast_grep.count_exact_string_literals
-       ~module_path:"lib/tui_decode.ml"
-       ~needle:"running");
+     the fleet reading legitimately holds "running_keeper_fiber_count".
+     Scoped to the planning decoders, not the file: the alias was theirs, and
+     other readers in this module spell the same word for their own reasons --
+     [Fusion_running] serialises to it (#30079). A file-wide count read those
+     as the retired alias returning. *)
+  List.iter
+    (fun binding_name ->
+      check int
+        (Printf.sprintf "retired planning running alias absent from %s" binding_name)
+        0
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:"lib/tui_decode.ml"
+           ~binding_name
+           ~needle:"running"))
+    [ "decode_planning_goal"
+    ; "decode_planning_rollup"
+    ; "decode_planning_backlog"
+    ; "decode_planning_snapshot"
+    ];
   (* [proactive_enabled] left the keeper detail row in #29311, and that row is
      now built from [Keeper_meta_contract] rather than raw keys, so it cannot
      come back through it. The one literal left is [decode_keeper_runtime],
@@ -638,16 +656,22 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"ctx_bar"
        ~callee:"Masc_tui_render_schedule.nonnegative_width"
      = 1);
+  (* [keeper_detail_pane], not [render_keeper_detail]: #30146 split the surface
+     so the frame picks a narrow or a side-by-side layout and the pane draws the
+     content. Everything these four guards watch -- the clamped bar width, the
+     scroll normalization, the sanitized fields, the timestamp projections --
+     went with the content. Nothing is left in the frame, so pointing them at
+     the old name read a move as four regressions. *)
   check bool "keeper detail clamps its derived bar width" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_detail"
+       ~binding_name:"keeper_detail_pane"
        ~callee:"Masc_tui_render_schedule.keeper_context_bar_width"
      = 1);
   check int "keeper detail persists one viewport-normalized scroll" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_detail"
+       ~binding_name:"keeper_detail_pane"
        ~callee:"Render_schedule.normalize_keeper_detail_scroll");
   check bool "interrupted input uses the deadline-aware retry contract" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
@@ -1130,7 +1154,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
-  check_fields "render_keeper_detail"
+  check_fields "keeper_detail_pane"
     [ "k_name"
     ; "k_current_task_id"
     ; "live_context_error"
@@ -1218,7 +1242,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      frame unprojected. *)
   check int "keeper detail uses safe short projections for every timestamp" 6
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_keeper_detail"
+       ~binding_name:"keeper_detail_pane"
        ~callee:"Terminal_text.short_timestamp");
   check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]

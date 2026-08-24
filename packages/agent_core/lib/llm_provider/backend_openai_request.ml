@@ -282,6 +282,7 @@ let build_request_assoc_artifact
         Backend_openai_serialize.dialect_messages_of_history
           ~assistant_tool_content_format
           ~replay_capability
+          ~stream
           dialect
           messages
       with

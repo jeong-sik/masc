@@ -413,11 +413,19 @@ let primary_path ~grpc_subscribers ~ws_sessions ~sse_sessions =
   else "streamable_http"
 ;;
 
-let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_retry_total ~relay_drop_total =
+(* [relay_retry_total] and [relay_drop_total] used to feed this. They are
+   process-lifetime counters with no decrement anywhere, so one relay drop
+   pinned the reading to "high" until the next restart and the queue depths
+   below could no longer move it. The totals travel beside this field in the
+   same payload, where a number that only grows belongs (#27652). *)
+let queue_pressure_high_depth = 32
+let queue_pressure_watch_depth = 8
+
+let queue_pressure ~sse_queue_max ~relay_queue_depth =
   let max_queue_depth = max sse_queue_max relay_queue_depth in
-  if max_queue_depth >= 32 || relay_drop_total > 0
+  if max_queue_depth >= queue_pressure_high_depth
   then "high"
-  else if max_queue_depth >= 8 || relay_queue_depth > 0 || relay_retry_total > 0
+  else if max_queue_depth >= queue_pressure_watch_depth
   then "watch"
   else "steady"
 ;;
@@ -536,11 +544,7 @@ let transport_health_json () =
           [ "primary_path", `String primary_path
           ; ( "queue_pressure"
             , `String
-                (queue_pressure
-                   ~sse_queue_max
-                   ~relay_queue_depth
-                   ~relay_retry_total
-                   ~relay_drop_total) )
+                (queue_pressure ~sse_queue_max ~relay_queue_depth) )
           ; "external_fanout_targets", `Int sse_external_subscribers
           ] )
     ; ( "sse"

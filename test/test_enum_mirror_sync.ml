@@ -174,6 +174,174 @@ let test_library_source_mirrors_its_owner () =
     (advertised_values_for_schemas Tool_schemas_library.schemas ~property:"source")
 ;;
 
+(* The keeper sandbox and status vocabularies. Their owners are
+   [Keeper_types_profile_sandbox], [Keeper_sandbox_control_contract] and
+   [Masc.Keeper_status_options_defaults]; the schemas write the strings in
+   config/tools/masc_keeper_*.toml, where nothing reads an OCaml value. *)
+let test_keeper_tool_enum_mirrors () =
+  List.iter
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Keeper property %s matches its typed owner" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Masc.Keeper_schema.schemas ~property))
+    [ "network_mode", Keeper_types_profile_sandbox.valid_network_mode_strings
+    ; "container_kind", Masc.Keeper_sandbox_control_contract.stop_scope_strings
+    ; "tail_order", Masc.Keeper_status_options_defaults.valid_tail_order_strings
+    ]
+;;
+
+(* masc_keeper_status states its bounds twice -- once as minimum/maximum and
+   once inside the sentence a model reads -- and both were built from
+   [Masc.Keeper_status_options_defaults] by Printf. In TOML they are literals, so
+   check the numbers rather than trusting them to agree. *)
+let test_keeper_status_bounds_match_their_owner () =
+  let status =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_keeper_status")
+        Masc.Keeper_schema.schemas
+    with
+    | Some s -> s
+    | None -> failf "masc_keeper_status is absent"
+  in
+  let bound property key =
+    match status.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt property props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt key p with
+             | Some (`Int v) -> v
+             | _ -> failf "%s.%s is absent or not an integer" property key)
+          | _ -> failf "property %s is absent" property)
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  let open Masc.Keeper_status_options_defaults in
+  List.iter
+    (fun (property, lo, hi) ->
+      check int (property ^ " minimum") lo (bound property "minimum");
+      check int (property ^ " maximum") hi (bound property "maximum"))
+    [ Argument.tail_turns, min_tail_turns, max_tail_turns
+    ; Argument.tail_messages, min_tail_messages, max_tail_messages
+    ; Argument.tail_bytes, min_tail_bytes, max_tail_bytes
+    ]
+;;
+
+(* keeper_artifact_read states its max_bytes bounds and default, and
+   analyze_image its media-type vocabulary. [Keeper_artifact_read] and
+   [Keeper_vision_tool] own them; in config/tools/*.toml they are literals. *)
+let test_runtime_tool_owners_match () =
+  check
+    (list string)
+    "analyze_image media types match Keeper_vision_tool"
+    (List.sort_uniq String.compare Masc.Keeper_vision_tool.supported_image_media_types)
+    (advertised_values_for_schemas
+       Masc.Keeper_tool_runtime_schemas.schemas
+       ~property:"media_type");
+  let artifact =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_artifact_read")
+        Masc.Keeper_tool_runtime_schemas.schemas
+    with
+    | Some s -> s
+    | None -> failf "keeper_artifact_read is absent"
+  in
+  let field key =
+    match artifact.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "max_bytes" props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt key p with
+             | Some (`Int v) -> v
+             | _ -> failf "max_bytes.%s is absent or not an integer" key)
+          | _ -> failf "max_bytes is absent")
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  check int "max_bytes minimum" Masc.Keeper_artifact_read.minimum_max_bytes (field "minimum");
+  check int "max_bytes maximum" Masc.Keeper_artifact_read.maximum_max_bytes (field "maximum");
+  check int "max_bytes default" Masc.Keeper_artifact_read.default_max_bytes (field "default")
+;;
+
+(* keeper_surface_post caps two arrays, and [Keeper_surface_post] owns both
+   numbers. The descriptor used to build the mentions cap from the constant;
+   that copy is gone, so the file states it and this compares the two. The
+   block cap already had a check in the registry-integrity suite. *)
+let test_surface_post_caps_match_their_owner () =
+  let post =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_surface_post")
+        Tool_shard_types.surface_tools
+    with
+    | Some s -> s
+    | None -> failf "keeper_surface_post is absent"
+  in
+  let cap property =
+    match post.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt property props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt "maxItems" p with
+             | Some (`Int v) -> v
+             | _ -> failf "%s has no maxItems" property)
+          | _ -> failf "property %s is absent" property)
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  check int "mention_user_ids cap" Masc.Keeper_surface_post.max_user_mentions
+    (cap "mention_user_ids");
+  check int "blocks cap" Masc.Keeper_surface_post.max_rich_blocks (cap "blocks")
+;;
+
+(* tool_read_file states its default byte ceiling inside the sentence a client
+   reads. [Tool_shard_limits] owns the number; the declaration used to render
+   it through a pre-made string, and in TOML it is a literal. Nothing else
+   compares the two. *)
+let test_read_file_default_appears_in_its_description () =
+  let read_file =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "tool_read_file")
+        Tool_shard_types.filesystem_tools
+    with
+    | Some s -> s
+    | None -> failf "tool_read_file is absent"
+  in
+  let description =
+    match read_file.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "max_bytes" props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt "description" p with
+             | Some (`String d) -> d
+             | _ -> failf "max_bytes has no description")
+          | _ -> failf "max_bytes is absent")
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  let needle = string_of_int Tool_shard_limits.read_file_default_max_bytes in
+  let n = String.length needle
+  and h = String.length description in
+  let rec probe i =
+    i + n <= h && (String.equal (String.sub description i n) needle || probe (i + 1))
+  in
+  check bool
+    (Printf.sprintf "max_bytes description names %s" needle)
+    true
+    (probe 0)
+;;
+
 let test_goal_tool_enum_mirrors () =
   List.iter
     (fun (property, owner) ->
@@ -299,6 +467,20 @@ let () =
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "library source enum" `Quick test_library_source_mirrors_its_owner
+        ; test_case "runtime tool owners" `Quick test_runtime_tool_owners_match
+        ; test_case "keeper tool enums" `Quick test_keeper_tool_enum_mirrors
+        ; test_case
+            "keeper status bounds"
+            `Quick
+            test_keeper_status_bounds_match_their_owner
+        ; test_case
+            "surface post caps"
+            `Quick
+            test_surface_post_caps_match_their_owner
+        ; test_case
+            "read_file default in its description"
+            `Quick
+            test_read_file_default_appears_in_its_description
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode

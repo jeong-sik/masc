@@ -20,6 +20,15 @@ module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
 module Status = Masc.Keeper_status_runtime
 
+(* Every surface lays out against a viewport one row shorter than the
+   terminal: the top row belongs to the surface strip, prepended when a frame
+   is finished. Shadowing the probe here (and, via open order, in masc_tui.ml)
+   keeps all sixteen surfaces' row budgets and the input layer's paging math
+   in step without touching each formula. *)
+let get_terminal_size () =
+  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  (max 1 (rows - 1), cols)
+
 let frame_lines buf =
   match List.rev (String.split_on_char '\n' (Buffer.contents buf)) with
   | "" :: reversed -> List.rev reversed
@@ -65,6 +74,10 @@ let chat_markdown_palette : Markdown.palette =
   ; rule = (Ansi.gray, Ansi.reset)
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
+  (* Reverse video uses the terminal's own foreground and background, so the
+     language banner stays legible on both light and dark themes. *)
+  ; code_header = (Ansi.reverse, Ansi.reset)
+  ; code_border = (Ansi.gray, Ansi.reset)
   ; quote_gutter = "\xe2\x96\x8f "
   ; table_header = (Ansi.bold, Ansi.reset)
   ; table_gutter = " \xe2\x94\x82 "
@@ -202,7 +215,7 @@ let awaiting_approval_notice (state : state) =
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
             | Schedules | Verification | Harness | Fusion | Repositories
-            | Connectors | Tools | System_logs ->
+            | Connectors | Runtime | Tools | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -260,6 +273,83 @@ let composer_cursor state ~rows ~cols =
         ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
         }
 
+(* The strip above every surface: the Tab ring with the active family
+   highlighted. Wider terminals see the whole ring; narrower ones see a
+   window around the active entry with how many entries hide past each edge,
+   so position in the cycle stays readable at any width. *)
+let surface_strip (state : state) ~cols =
+  let ring = Masc_tui_types.surface_ring in
+  let n = List.length ring in
+  let active = Masc_tui_types.surface_ring_index state.view in
+  let label i = snd (List.nth ring i) in
+  (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
+  let entry_width ~lo i =
+    String.length (label i)
+    + (if i = active then 1 else 0)
+    + (if i > lo then 2 else 0)
+  in
+  let window_width lo hi =
+    let rec sum i acc =
+      if i > hi then acc else sum (i + 1) (acc + entry_width ~lo i)
+    in
+    sum lo 0
+  in
+  let budget = max 8 (cols - 1) in
+  let lo, hi =
+    if window_width 0 (n - 1) <= budget then (0, n - 1)
+    else begin
+      (* Markers for hidden entries cost room; reserve it up front. *)
+      let budget = max 8 (budget - 10) in
+      let lo = ref active and hi = ref active in
+      let grew = ref true in
+      while !grew do
+        grew := false;
+        if !hi + 1 < n && window_width !lo (!hi + 1) <= budget then begin
+          incr hi;
+          grew := true
+        end;
+        if !lo > 0 && window_width (!lo - 1) !hi <= budget then begin
+          decr lo;
+          grew := true
+        end
+      done;
+      (!lo, !hi)
+    end
+  in
+  let parts = Buffer.create 128 in
+  Buffer.add_char parts ' ';
+  if lo > 0 then
+    Buffer.add_string parts
+      (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
+  for i = lo to hi do
+    if i > lo then Buffer.add_string parts "  ";
+    if i = active then
+      Buffer.add_string parts
+        (Ansi.bold ^ Ansi.cyan ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
+    else Buffer.add_string parts (Ansi.dim ^ label i ^ Ansi.reset)
+  done;
+  if hi < n - 1 then
+    Buffer.add_string parts
+      (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
+  Buffer.contents parts
+
+(* Finish a frame with the strip on top. Surfaces measured cursor rows inside
+   their own frame, so a visible cursor shifts down with the prepend, and the
+   declared height grows back to the terminal's real row count. *)
+let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
+    ~cols buf =
+  let cursor =
+    match cursor with
+    | Frame_presenter.Hidden -> Frame_presenter.Hidden
+    | Frame_presenter.Visible_at { row; column } ->
+      Frame_presenter.Visible_at { row = row + 1; column }
+  in
+  let framed = Buffer.create (Buffer.length buf + 160) in
+  Buffer.add_string framed (surface_strip state ~cols);
+  Buffer.add_char framed '\n';
+  Buffer.add_buffer framed buf;
+  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + 1) ~cols framed
+
 (* Close a surface: pad its frame to the row above the composer, then draw the
    composer on the terminal's last row.
 
@@ -287,7 +377,7 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        Buffer.add_char framed '\n')
     body;
   Buffer.add_string framed (composer_line state ~cols ^ "\n");
-  finish_frame ?clamped ~surface_key
+  finish_frame_with_strip state ?clamped ~surface_key
     ~cursor:(composer_cursor state ~rows ~cols) ~rows ~cols framed
 
 (* Exhaustive over [connection_status]: a new state is a compile error
@@ -1027,7 +1117,7 @@ let render_board_compose (state : state) =
   in
   Buffer.add_string buf
     (Printf.sprintf "%s  %s%s\n" Ansi.dim prompt Ansi.reset);
-  finish_frame ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
+  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
 
 let render_board_list (state : state) =
@@ -1970,6 +2060,16 @@ let render_keeper_list (state : state) =
   let heading =
     Printf.sprintf " %sMASC Keepers (%d)%s" Ansi.bold (List.length state.keepers)
       Ansi.reset
+    ^ (match state.roster_search with
+       | Some query ->
+           Printf.sprintf "  %s/%s%s\xe2\x96\x8c%s" Ansi.cyan
+             (Terminal_text.single_line query) Ansi.reset Ansi.reset
+       | None ->
+           if state.roster_search_last = "" then ""
+           else
+             Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
+               (Terminal_text.single_line state.roster_search_last)
+               Ansi.reset)
     ^ (match keeper_roster_summary readings with
        | [] -> ""
        | parts ->
@@ -2122,7 +2222,7 @@ let keeper_lane_phase_style (phase : Tui_decode.keeper_lane_phase) =
       (Ansi.yellow, "\xe2\x97\x90")
   | Lane_phase_paused -> (Ansi.yellow, "\xe2\x97\x8b")
   | Lane_phase_offline | Lane_phase_stopped -> (Ansi.gray, "\xc3\x97")
-  | Lane_phase_overflowed | Lane_phase_unknown _ -> (Ansi.yellow, "?")
+  | Lane_phase_unknown _ -> (Ansi.yellow, "?")
 
 let keeper_lane_turn_style (phase : Tui_decode.keeper_lane_turn_phase) =
   match phase with
@@ -2333,19 +2433,10 @@ let render_lanes (state : state) =
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
-let render_keeper_detail (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
-  let buf = Buffer.create 4096 in
-
-  if state.keeper_cursor >= List.length state.keepers then begin
-    Buffer.add_string buf "No keeper selected.\n";
-    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
-      ~cols buf
-  end else begin
-    let k = List.nth state.keepers state.keeper_cursor in
+(* The detail box alone -- borders, title, scrolled content -- written into
+   [buf] at [cols] wide, footer excluded so a caller can lay it beside the
+   roster pane. Returns the scroll the frame actually used. *)
+let keeper_detail_pane (state : state) (k : keeper) ~rows ~cols buf =
     let inner = cols - 4 in  (* width inside borders *)
 
     (* Build all detail lines first, then apply scroll *)
@@ -2481,7 +2572,7 @@ let render_keeper_detail (state : state) =
 
     (* Title *)
     let title =
-      Printf.sprintf " Keeper: %s%s%s " Ansi.bold
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s " Ansi.bold
         (Terminal_text.single_line k.k_name)
         Ansi.reset
     in
@@ -2523,16 +2614,90 @@ let render_keeper_detail (state : state) =
 
     (* Bottom border *)
     box_bottom buf cols;
+    scroll
 
-    (* Footer. The lifecycle keys work here as well as on the roster, so the
-       footer names the same actions with the same keys; a detail view that
-       listed a different set would read as a different set of powers. *)
-    Buffer.add_string buf
-      (keeper_action_hints state (Some (keeper_reading state k)) ^ "\n");
+(* A narrow roster beside the detail: position context, not a second input
+   surface -- the keys keep their detail meaning. The window follows the
+   cursor the way the detail follows the selection. *)
+let keeper_roster_pane (state : state) ~rows ~cols buf =
+  box_top buf cols;
+  box_line buf cols (Ansi.dim ^ " Keepers" ^ Ansi.reset);
+  box_divider buf cols;
+  let content_height = max 0 (rows - 5) in
+  let first =
+    if state.keeper_cursor < content_height then 0
+    else state.keeper_cursor - content_height + 1
+  in
+  for i = 0 to content_height - 1 do
+    match List.nth_opt state.keepers (first + i) with
+    | Some (k : keeper) ->
+        let selected = first + i = state.keeper_cursor in
+        let name = Terminal_text.single_line k.k_name in
+        (* Reverse video is the one selection signal every terminal
+           renders, colour or not. *)
+        let line =
+          if selected then
+            Ansi.reverse ^ " " ^ name
+            ^ String.make (max 0 (cols - 5 - Message_layout.display_width name)) ' '
+            ^ Ansi.reset
+          else " " ^ name
+        in
+        box_line buf cols line
+    | None -> box_empty buf cols
+  done;
+  box_bottom buf cols
 
-    finish_surface state ~clamped:(Keeper_detail scroll)
-      ~surface_key:"keeper-detail" ~rows:terminal_rows
+let keeper_split_threshold_cols = 110
+let keeper_roster_pane_cols = 30
+
+let render_keeper_detail (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  if state.keeper_cursor >= List.length state.keepers then begin
+    Buffer.add_string buf "No keeper selected.\n";
+    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
       ~cols buf
+  end else begin
+    let k = List.nth state.keepers state.keeper_cursor in
+    let footer =
+      keeper_action_hints state (Some (keeper_reading state k))
+    in
+    if cols < keeper_split_threshold_cols then begin
+      let scroll = keeper_detail_pane state k ~rows ~cols buf in
+      Buffer.add_string buf (footer ^ "\n");
+      finish_surface state ~clamped:(Keeper_detail scroll)
+        ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
+    end
+    else begin
+      (* Wide terminals keep the roster in sight beside the detail. Both
+         panes draw the same number of rows, so the zip below is a plain
+         row-by-row join. *)
+      let left_cols = keeper_roster_pane_cols in
+      let right_cols = cols - left_cols in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      keeper_roster_pane state ~rows ~cols:left_cols left_buf;
+      let scroll = keeper_detail_pane state k ~rows ~cols:right_cols right_buf in
+      let blank_left = String.make left_cols ' ' in
+      let rec zip left right =
+        match left, right with
+        | [], [] -> []
+        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+        | l :: lt, [] -> l :: zip lt []
+      in
+      List.iter
+        (fun line ->
+          Buffer.add_string buf line;
+          Buffer.add_char buf '\n')
+        (zip (frame_lines left_buf) (frame_lines right_buf));
+      Buffer.add_string buf (footer ^ "\n");
+      finish_surface state ~clamped:(Keeper_detail scroll)
+        ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
+    end
   end
 
 (** Render keeper log view *)
@@ -2555,7 +2720,7 @@ let render_keeper_logs (state : state) =
     let header =
       Printf.sprintf "%s  (%d entries)"
         (screen_title
-           (Printf.sprintf " Keeper Logs: %s"
+           (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 logs"
               (Terminal_text.single_line k.k_name)))
         total_entries
     in
@@ -2663,13 +2828,14 @@ let render_keeper_message (state : state) =
   match state.msg_target_keeper_name with
   | None ->
     Buffer.add_string buf "No keeper selected.\n";
-    finish_frame ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
+    finish_frame_with_strip state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
       Printf.sprintf "%s  %s  %s(port %d)%s"
-        (screen_title (Printf.sprintf " Message to: %s" display_keeper_name))
+        (screen_title
+         (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
         (keeper_message_identity state keeper_name)
         Ansi.dim state.port Ansi.reset
     in
@@ -2687,7 +2853,7 @@ let render_keeper_message (state : state) =
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
-      finish_frame ~surface_key:"keeper-message"
+      finish_frame_with_strip state ~surface_key:"keeper-message"
         ~cursor:Frame_presenter.Hidden ~rows ~cols buf
     end else begin
     (* Header *)
@@ -2991,7 +3157,7 @@ let render_keeper_message (state : state) =
       Message_layout.input_cursor_column ~terminal_cols:cols
         ~input:visible_input
     in
-    finish_frame ~surface_key:"keeper-message"
+    finish_frame_with_strip state ~surface_key:"keeper-message"
       ~cursor:
         (Frame_presenter.Visible_at
            { row = input_row; column = input_column })
@@ -3783,6 +3949,276 @@ let render_connectors (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
 
+let runtime_refresh_badge refresh_state =
+  let open Masc.Tui_decode in
+  let label, style =
+    match refresh_state with
+    | Runtime_probe_fresh -> "fresh", Ansi.green
+    | Runtime_probe_recent -> "recent", Ansi.cyan
+    | Runtime_probe_served_stale -> "stale", Ansi.yellow
+    | Runtime_probe_warming_up -> "warming", Ansi.yellow
+  in
+  style ^ label ^ Ansi.reset
+
+let runtime_overall_badge status =
+  let open Masc.Tui_decode in
+  let style =
+    match status with
+    | Runtime_probe_reachable -> Ansi.green
+    | Runtime_probe_no_http_runtimes | Runtime_probe_warming -> Ansi.dim
+    | Runtime_probe_degraded -> Ansi.yellow
+    | Runtime_probe_unreachable -> Ansi.red
+  in
+  style ^ runtime_probe_status_to_string status ^ Ansi.reset
+
+let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
+  if runtime.ro_dispatchable then Ansi.cyan ^ "ready" ^ Ansi.reset
+  else Ansi.red ^ "blocked" ^ Ansi.reset
+
+let runtime_probe_badge = function
+  | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
+  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
+      let open Masc.Tui_decode in
+      let style =
+        match probe.rpp_status with
+        | Runtime_provider_reachable -> Ansi.green
+        | Runtime_provider_skipped_cli -> Ansi.dim
+        | Runtime_provider_missing_auth | Runtime_provider_auth_failed ->
+            Ansi.yellow
+        | Runtime_provider_network_error
+        | Runtime_provider_server_error
+        | Runtime_provider_endpoint_not_found
+        | Runtime_provider_http_error
+        | Runtime_provider_unknown_http_status
+        | Runtime_provider_invalid_endpoint
+        | Runtime_provider_invalid_execution_transport -> Ansi.red
+      in
+      let label =
+        match probe.rpp_status with
+        | Runtime_provider_skipped_cli -> "CLI not probed"
+        | status -> runtime_provider_status_to_string status
+      in
+      style ^ label ^ Ansi.reset
+
+let runtime_probe_detail = function
+  | None -> []
+  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
+      let latency =
+        Option.map (fun value -> Printf.sprintf "%.0fms" value) probe.rpp_latency_ms
+      in
+      let http =
+        Option.map (fun value -> Printf.sprintf "HTTP %d" value) probe.rpp_http_status
+      in
+      let error = Terminal_text.optional_single_line probe.rpp_error in
+      let checked =
+        Some ("checked " ^ Terminal_text.clock_timestamp probe.rpp_checked_at)
+      in
+      List.filter_map Fun.id [ latency; http; error; checked ]
+
+let runtime_column_widths cols =
+  if cols >= 140 then 18, 30, 30, 22
+  else if cols >= 120 then 14, 24, 24, 22
+  else 10, 20, 20, 22
+
+let runtime_column width text =
+  let clipped = fit_width text width in
+  clipped
+  ^ String.make
+      (max 0 (width - Message_layout.display_width clipped))
+      ' '
+
+(* Lane candidates come from /runtime/resolved; reachability comes from the
+   cached runtime-probe document. Exact runtime-id joining happened in the
+   decoder module, so drawing never parses ids or reconstructs a lane. *)
+let render_runtime (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let ( runtime_lane_width
+      , runtime_candidate_width
+      , runtime_identity_width
+      , runtime_status_width ) =
+    runtime_column_widths cols
+  in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let candidates =
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot -> snapshot.Masc.Tui_decode.rss_candidates
+  in
+  let shown = List.length candidates in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.runtime_surface with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Runtime") timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
+        let probe_status =
+          match snapshot.Masc.Tui_decode.rss_probe with
+          | None -> Ansi.yellow ^ "probe unavailable" ^ Ansi.reset
+          | Some probe ->
+              runtime_overall_badge probe.rps_status ^ " / "
+              ^ runtime_refresh_badge probe.rps_refresh_state
+        in
+        let probe_read =
+          if Option.is_some snapshot.rss_probe_error then
+            Ansi.yellow ^ " / read failed" ^ Ansi.reset
+          else ""
+        in
+        Printf.sprintf "%s (%d lanes, %d candidates)  %s%s  %s  %s"
+          (screen_title " MASC Runtime") lane_count shown probe_status probe_read
+          timestamp (connection_badge state.connection_status)
+  in
+  let authority_line =
+    match state.runtime_surface with
+    | None ->
+        "  SSOT: runtime.toml  projections: /api/v1/runtime/resolved + runtime-probe"
+    | Some snapshot ->
+        let config =
+          Terminal_text.single_line_or ~default:"config path unavailable"
+            snapshot.rss_resolved.rrs_config_path
+        in
+        let summary_text =
+          match snapshot.Masc.Tui_decode.rss_probe with
+          | None -> "probe unavailable"
+          | Some probe ->
+              let summary = probe.rps_summary in
+              Printf.sprintf "%d reachable / %d failed / %d skipped"
+                summary.rpsu_reachable summary.rpsu_failed summary.rpsu_skipped
+        in
+        let probe_note =
+          match snapshot.rss_probe_error, snapshot.rss_probe with
+          | Some detail, _ -> "  probe: " ^ Terminal_text.single_line detail
+          | None, Some probe ->
+              (match probe.rps_errors with
+               | detail :: _ -> "  probe: " ^ Terminal_text.single_line detail
+               | [] -> "")
+          | None, None -> ""
+        in
+        let probe_only_note =
+          match snapshot.rss_unassigned_probe_count with
+          | 0 -> ""
+          | count -> Printf.sprintf "  %d probe-only" count
+        in
+        Printf.sprintf
+          "  SSOT: runtime.toml  projections: resolved + probe  %s  %s%s%s"
+          summary_text config probe_only_note probe_note
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  let authority_style =
+    match state.runtime_surface with
+    | Some snapshot when Option.is_some snapshot.rss_probe_error -> Ansi.yellow
+    | Some _ | None -> Ansi.dim
+  in
+  box_line_styled buf cols ~style:authority_style authority_line;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:Ansi.dim
+    ("  "
+     ^ runtime_column runtime_lane_width "LANE" ^ " "
+     ^ runtime_column runtime_candidate_width "CANDIDATE" ^ " "
+     ^ runtime_column runtime_identity_width "PROVIDER / MODEL" ^ " "
+     ^ runtime_column runtime_status_width "ROUTE / PROBE"
+     ^ " DETAIL");
+  box_divider buf cols;
+  (match state.runtime_surface_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = runtime_listing_chrome ~error:state.runtime_surface_error in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
+  if shown = 0 then begin
+    let empty =
+      match
+        empty_page_of ~snapshot:state.runtime_surface
+          ~error:state.runtime_surface_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no runtime lanes configured)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for index = 0 to content_height - 1 do
+      match List.nth_opt candidates (index + scroll) with
+      | None -> box_empty buf cols
+      | Some candidate ->
+          let open Masc.Tui_decode in
+          let runtime = candidate.rcr_runtime in
+          let candidate_label =
+            Printf.sprintf "%d/%d %s" candidate.rcr_position
+              candidate.rcr_candidate_count
+              (Terminal_text.single_line runtime.ro_id)
+          in
+          let provider_model =
+            Terminal_text.single_line
+              (runtime.ro_provider ^ " / " ^ runtime.ro_model)
+          in
+          let route_probe =
+            runtime_route_badge runtime ^ " / "
+            ^ runtime_probe_badge candidate.rcr_probe
+          in
+          let route_detail =
+            if runtime.ro_dispatchable then []
+            else
+              match Terminal_text.optional_single_line runtime.ro_blocked_reason with
+              | Some reason -> [ "blocked: " ^ reason ]
+              | None -> []
+          in
+          let lane_fact =
+            match candidate.rcr_preferred_at_ts with
+            | Some at ->
+                [ "last success "
+                  ^ Terminal_text.clock_timestamp
+                      (Masc_domain.iso8601_of_unix_seconds at)
+                ]
+            | None when candidate.rcr_candidate_count = 1 -> [ "single candidate" ]
+            | None -> []
+          in
+          let default_fact = if runtime.ro_is_default then [ "default" ] else [] in
+          let detail =
+            String.concat " \xc2\xb7 "
+              (route_detail @ default_fact @ lane_fact
+               @ runtime_probe_detail candidate.rcr_probe)
+          in
+          let line =
+            "  "
+            ^ runtime_column runtime_lane_width
+                (Terminal_text.single_line candidate.rcr_lane_id)
+            ^ " " ^ runtime_column runtime_candidate_width candidate_label
+            ^ " " ^ runtime_column runtime_identity_width provider_model
+            ^ " " ^ runtime_column runtime_status_width route_probe
+            ^ " " ^ detail
+          in
+          box_line buf cols line
+    done;
+  let scroll_hint =
+    if shown > content_height then
+      Printf.sprintf "[%d candidates, scroll %d]  " shown scroll
+    else ""
+  in
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  %sj/k:scroll  Tab:next  q:quit  r:live refresh  | Port: %d%s\n"
+       Ansi.dim scroll_hint state.port Ansi.reset);
+  finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
+
 (* The tools a keeper can reach.
 
    Surfaces is the column that carries the reading: a tool registered and
@@ -3938,7 +4374,7 @@ let render_keeper_calls (state : state) =
   let header =
     match state.keeper_calls with
     | None ->
-        Printf.sprintf " Keeper Calls: %s  (not loaded yet)  %s  %s"
+        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (not loaded yet)  %s  %s"
           (Terminal_text.single_line keeper_name)
           timestamp
           (connection_badge state.connection_status)
@@ -3952,7 +4388,7 @@ let render_keeper_calls (state : state) =
           | health, Some age -> Printf.sprintf "%s · latest %.0fs ago" health age
           | health, None -> health
         in
-        Printf.sprintf " Keeper Calls: %s (%d)  %s  %s  %s"
+        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  %s  %s  %s"
           (Terminal_text.single_line keeper_name)
           (List.length snapshot.Masc.Tui_decode.kcs_entries)
           freshness timestamp
@@ -4288,7 +4724,7 @@ let render_runtime_pick (state : state) =
     with
     | Some a ->
         Printf.sprintf "%s (%s)"
-          (Terminal_text.single_line_or ~default:"-" a.ra_runtime_id)
+          (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
           (Terminal_text.single_line a.ra_source)
     | None -> "-"
   in
@@ -4304,7 +4740,8 @@ let render_runtime_pick (state : state) =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %scurrent: %s%s"
-       (screen_title (Printf.sprintf " Runtime for %s" keeper_name))
+       (screen_title
+         (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
        Ansi.dim current Ansi.reset);
   box_divider buf cols;
   (match Terminal_text.optional_single_line state.runtime_catalog_error with
@@ -4401,10 +4838,179 @@ let render_surface (state : state) =
        | Fusion_detail run_id -> render_fusion_detail state run_id)
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
+  | Runtime -> render_runtime state
   | Tools -> render_tools state
   | Acting -> render_acting state
   | System_logs -> render_system_logs state
   | Schedules -> render_schedules state
+
+(* The [?] help screen: every binding, grouped by the surface that answers
+   it. Hand-maintained beside the arms that bind them -- a key added without
+   its row here is the discoverability bug this screen exists to close. *)
+let help_sections : (string * (string * string) list) list =
+  [ ( "Global"
+    , [ "Tab / Shift-Tab", "next / previous surface"
+      ; "r", "refresh the current surface"
+      ; "i", "focus the composer (message the shown keeper)"
+      ; "?", "this help"
+      ; "q", "quit"
+      ] )
+  ; ( "Overview"
+    , [ "j / k", "scroll events"
+      ; "t", "hand j/k to the task list"
+      ; "Enter", "open the selected task"
+      ; "Esc", "close detail / back to events"
+      ] )
+  ; ( "Keepers"
+    , [ "j / k", "move the roster cursor"
+      ; "/", "search names; Enter keeps the query"
+      ; "n / N", "next / previous search match"
+      ; "Enter", "keeper detail"
+      ; "c", "chat with the keeper"
+      ; "l", "logs"
+      ; "t", "tool calls"
+      ; "u", "pick a runtime lane"
+      ; "g", "toggle yolo tool approval"
+      ; "p / w", "pause / wake"
+      ; "s", "shutdown"
+      ; "e", "settings"
+      ; "a", "new keeper"
+      ] )
+  ; ( "Chat"
+    , [ "Enter", "send, or queue while a turn runs"
+      ; "Ctrl-J", "newline in the draft"
+      ; "Ctrl-G", "next keeper with a chat open"
+      ; "Ctrl-U", "clear the draft"
+      ; "Ctrl-K / Ctrl-P", "cancel / edit the last queued line"
+      ; "PgUp / PgDn", "scroll history"
+      ; "y / n", "answer a tool approval"
+      ; "Esc", "back; during a turn, interrupt it"
+      ] )
+  ; ( "Board"
+    , [ "j / k", "move"
+      ; "Enter", "read the post"
+      ; "w", "write a post"
+      ; "v / V", "vote up / down"
+      ; "c", "reply (while reading)"
+      ] )
+  ; ( "Approvals"
+    , [ "j / k", "move"; "y", "confirm"; "n", "deny" ] )
+  ; ( "Planning"
+    , [ "c", "complete goal"; "x", "drop"; "o", "reopen" ] )
+  ; ( "Logs (Acting / System)"
+    , [ "j / k", "scroll"
+      ; "g / G", "newest / oldest"
+      ; "f", "cycle the filter"
+      ] )
+  ]
+
+let help_lines () =
+  help_sections
+  |> List.concat_map (fun (title, entries) ->
+       (Ansi.bold ^ title ^ Ansi.reset)
+       :: List.map
+            (fun (key, action) ->
+              Printf.sprintf
+                "  %s%-18s%s %s"
+                Ansi.cyan
+                key
+                Ansi.reset
+                action)
+            entries
+       @ [ "" ])
+
+(* The [:] palette: a typed filter over every jump the strip and roster
+   offer. The list is the same [palette_matches] the Enter key resolves, so
+   what is highlighted is what will run. *)
+let render_palette (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 2048 in
+  let matches = Masc_tui_types.palette_matches state in
+  let total = List.length matches in
+  let cursor = max 0 (min state.palette_cursor (total - 1)) in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s:%s %s%s" Ansi.bold Ansi.reset
+       (Terminal_text.single_line state.palette_query)
+       (Ansi.cyan ^ "\xe2\x96\x8c" ^ Ansi.reset));
+  box_divider buf cols;
+  let content_height = max 1 (rows - 5) in
+  let first =
+    if cursor < content_height then 0
+    else cursor - content_height + 1
+  in
+  matches
+  |> List.filteri (fun i _ -> i >= first && i < first + content_height)
+  |> List.iteri (fun visible_index (label, _) ->
+       let selected = first + visible_index = cursor in
+       let line =
+         if selected then
+           Ansi.reverse ^ " " ^ label
+           ^ String.make
+               (max 0 (cols - 5 - Message_layout.display_width label))
+               ' '
+           ^ Ansi.reset
+         else " " ^ label
+       in
+       box_line buf cols line);
+  if total = 0 then
+    box_line buf cols (Ansi.dim ^ "  (no match)" ^ Ansi.reset);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  %d/%d  Enter:jump  Esc:close  | Port: %d%s\n"
+       Ansi.dim
+       (if total = 0 then 0 else cursor + 1)
+       total state.port Ansi.reset);
+  finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
+
+let render_help (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
+    ^ "Esc or ? to close" ^ Ansi.reset);
+  box_divider buf cols;
+  let lines = help_lines () in
+  (* Two columns when they fit; the split point keeps groups readable by
+     cutting at the overall middle rather than balancing exact heights. *)
+  let column_width = (cols - 6) / 2 in
+  let rendered_rows =
+    if cols >= 96 then begin
+      let n = List.length lines in
+      let half = (n + 1) / 2 in
+      let left = List.filteri (fun i _ -> i < half) lines in
+      let right = List.filteri (fun i _ -> i >= half) lines in
+      let rec zip l r =
+        match l, r with
+        | [], [] -> []
+        | lh :: lt, [] -> (lh, "") :: zip lt []
+        | [], rh :: rt -> ("", rh) :: zip [] rt
+        | lh :: lt, rh :: rt -> (lh, rh) :: zip lt rt
+      in
+      List.map
+        (fun (l, r) ->
+          Message_layout.fit_width l column_width
+          ^ "  "
+          ^ Message_layout.fit_width r column_width)
+        (zip left right)
+    end
+    else lines
+  in
+  let content_height = max 1 (rows - 5) in
+  let max_scroll = max 0 (List.length rendered_rows - content_height) in
+  let scroll = max 0 (min state.help_scroll max_scroll) in
+  rendered_rows
+  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun line -> box_line buf cols line);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Esc:close  | Port: %d%s\n" Ansi.dim
+       state.port Ansi.reset);
+  ignore scroll;
+  finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in
@@ -4427,4 +5033,6 @@ let render (state : state) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
+  else if state.palette_open then render_palette state
+  else if state.help_open then render_help state
   else render_surface state

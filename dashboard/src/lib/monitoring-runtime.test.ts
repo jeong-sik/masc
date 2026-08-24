@@ -374,7 +374,7 @@ describe('summarizeKeeperMonitoring', () => {
       const summary = summarizeKeeperMonitoring(
         {
           name: 'keeper-offline-restarting',
-          status: 'offline',
+          diagnostic: { health_state: 'offline' },
           phase: 'Restarting',
           pipeline_stage: 'restarting',
         } as Keeper,
@@ -462,7 +462,7 @@ describe('summarizeKeeperMonitoring', () => {
     it('offline beats Draining-→-paused band when both apply', () => {
       const summary = summarizeKeeperMonitoring({
         name: 'keeper-offline-draining',
-        status: 'offline',
+        diagnostic: { health_state: 'offline' },
         phase: 'Draining',
         pipeline_stage: 'draining',
         last_heartbeat: new Date().toISOString(),

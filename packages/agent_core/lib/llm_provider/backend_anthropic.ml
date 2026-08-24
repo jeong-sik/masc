@@ -332,7 +332,13 @@ let build_request_payload
         ("Backend_anthropic.build_request: "
          ^ Reasoning_history_projection.error_to_string error)
     | Ok projection ->
-      Reasoning_history_projection.observe ~component:"backend_anthropic" projection;
+      Reasoning_history_projection.observe
+        ~component:"backend_anthropic"
+        ~stream:
+          (match request_mode with
+           | Completion { stream; _ } -> stream
+           | Count_tokens -> false)
+        projection;
       projection.messages
   in
   let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in

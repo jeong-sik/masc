@@ -41,7 +41,7 @@ describe('buildCompositeFsmMermaid', () => {
 
   it('covers the full KSM state surface (11 phases)', () => {
     const ksm = [
-      'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
+      'Offline', 'Running', 'Failing', 'Compacting',
       'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
       'Restarting',
     ]

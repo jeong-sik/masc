@@ -5,7 +5,11 @@ let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 (* [tool_audit_at] dates the last action now: it comes from the tool call log
    rather than from a keeper-meta mirror of it. *)
-let keeper ?(status = "offline") ?(tool_audit_at = "")
+(* Liveness is read from two fields now, not from one status word: [paused] is
+   a person's decision and [diagnostic.health_state] is an observation. The
+   word this fixture used to set folded both, so a paused keeper's health was
+   unreachable and stale could not be told from offline. *)
+let keeper ?(health = "offline") ?(status = "offline") ?(tool_audit_at = "")
     ?(updated_at = "") ?(keepalive_running = false) ?(turn_count = 0)
     ?(paused = false) () =
   `Assoc
@@ -13,6 +17,9 @@ let keeper ?(status = "offline") ?(tool_audit_at = "")
       ("name", `String "omega");
       ("agent_name", `String "omega");
       ("keeper_id", `String "k-executor");
+      ("diagnostic", `Assoc [ ("health_state", `String health) ]);
+      (* Still on the wire and still passed through to the row, but no longer
+         read for any decision here. *)
       ("status", `String status);
       ("paused", `Bool paused);
       ("keepalive_running", `Bool keepalive_running);
@@ -71,28 +78,49 @@ let test_reconciled_active_status_is_healthy_active () =
   let row =
     build_one
       (keeper
+         ~health:"healthy"
          ~status:"active"
          ~keepalive_running:true
          ~tool_audit_at:"2001-09-09T01:46:40Z"
          ~turn_count:1
          ())
   in
+  (* [status] is passed through untouched; the verdicts below come from
+     health. Setting the two independently is what shows they are separate. *)
   check string "status" "active" (status_of row);
   check string "lifecycle" "active" (lifecycle_of row);
   check string "state" "healthy" (state_of row)
 
-let test_running_but_inactive_stays_critical () =
+(* A late heartbeat is not a stopped keeper. The status word spelled stale and
+   offline the same way, so a keeper whose fiber was alive and taking turns
+   read as critical and sent an operator to boot something already up. Health
+   separates the two, and stale stays live. *)
+let test_a_stale_heartbeat_is_not_a_stopped_keeper () =
   let row =
     build_one
       (keeper
+         ~health:"stale"
          ~status:"inactive"
          ~keepalive_running:true
          ~tool_audit_at:"2001-09-09T01:46:40Z"
          ~turn_count:1
          ())
   in
-  check string "lifecycle" "offline" (lifecycle_of row);
-  check string "state" "critical" (state_of row)
+  check string "lifecycle" "active" (lifecycle_of row);
+  check string "state" "healthy" (state_of row)
+
+(* The readings that do mean stopped still do. *)
+let test_zombie_and_offline_are_stopped () =
+  List.iter
+    (fun health ->
+      let row =
+        build_one
+          (keeper ~health ~status:"inactive" ~keepalive_running:true
+             ~tool_audit_at:"2001-09-09T01:46:40Z" ~turn_count:1 ())
+      in
+      check string (health ^ " lifecycle") "offline" (lifecycle_of row);
+      check string (health ^ " state") "critical" (state_of row))
+    [ "zombie"; "offline" ]
 
 (* The operator pauses a keeper that was running a moment ago. Every activity
    signal still looks fresh, so the healthy branch is the one this row falls
@@ -102,6 +130,7 @@ let test_paused_keeper_with_fresh_activity_is_not_healthy () =
   let row =
     build_one
       (keeper
+         ~health:"healthy"
          ~status:"paused"
          ~paused:true
          ~tool_audit_at:"2001-09-09T01:46:40Z"
@@ -117,24 +146,25 @@ let test_paused_keeper_with_fresh_activity_is_not_healthy () =
 (* A pause is not a liveness failure, so it must not inherit the offline
    verdict either. *)
 let test_paused_keeper_is_not_critical () =
-  let row = build_one (keeper ~status:"paused" ~paused:true ()) in
+  let row = build_one (keeper ~paused:true ()) in
   check string "state" "warning" (state_of row);
   check string "note" "운영자 일시정지" (note_of row)
 
-(* [paused] is a duplicate of what [status] already carries. Letting it rescue
-   an unparsed status would reopen the permissive fallback one field over: any
-   producer drift would be accepted for free on every paused keeper. *)
+(* Pause is read before health, so a paused keeper never reaches the health
+   parse. It must still reject a health this build cannot read: accepting
+   producer drift for free on paused keepers would reopen the permissive
+   fallback one field over. *)
 let test_unknown_status_is_rejected_even_when_paused () =
   check_raises
     "unknown status stays a rejected parse"
     (Invalid_argument
-       "dashboard continuity: unknown current keeper status \"suspended\"")
-    (fun () -> ignore (build_one (keeper ~status:"suspended" ~paused:true ())))
+       "dashboard continuity: unknown keeper health \"suspended\"")
+    (fun () -> ignore (build_one (keeper ~health:"suspended" ~paused:true ())))
 
 let () =
   run "dashboard_continuity_briefs"
     [
-      ( "offline_status_override",
+      ( "liveness from paused and health",
         [
           test_case "no signal -> critical" `Quick
             test_offline_without_signal_is_critical;
@@ -144,8 +174,10 @@ let () =
             test_running_flag_does_not_override_offline_status;
           test_case "reconciled active status -> healthy active" `Quick
             test_reconciled_active_status_is_healthy_active;
-          test_case "running + inactive -> critical" `Quick
-            test_running_but_inactive_stays_critical;
+          test_case "a stale heartbeat is not a stopped keeper" `Quick
+            test_a_stale_heartbeat_is_not_a_stopped_keeper;
+          test_case "zombie and offline are stopped" `Quick
+            test_zombie_and_offline_are_stopped;
           test_case "paused keeper with fresh activity is not healthy" `Quick
             test_paused_keeper_with_fresh_activity_is_not_healthy;
           test_case "paused keeper is not critical" `Quick

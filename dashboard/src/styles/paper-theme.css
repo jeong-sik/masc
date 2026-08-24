@@ -219,7 +219,7 @@
   --ok-10: var(--forest-fill);
   --ok-20: var(--forest-fill);
 
-  /* warn — Failing / Overflowed, amber-group */
+  /* warn — Failing, amber-group */
   --warn: var(--ember);
   --warn-10: var(--ember-fill);
   --warn-20: var(--ember-fill);

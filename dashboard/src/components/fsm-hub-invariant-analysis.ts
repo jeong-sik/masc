@@ -78,9 +78,6 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (isFailingAfterRuntimeExhausted(snapshot)) {
     return '정상 provider path 또는 명시적 recovery clearance 가 failing 을 해제해야 running 재개 가능.'
   }
-  if (snapshot.phase === 'overflowed') {
-    return 'context overflow 은 compaction 또는 명시적 operator clearance 로 해소되어야 lifecycle 이 정착 가능.'
-  }
   if (isCompactionActive(snapshot)) {
     return 'KMC 가 done 에 도달한 뒤 KSM 이 running 으로 control 을 반환해야 함.'
   }
@@ -171,7 +168,7 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.phase === 'overflowed' || snapshot.phase === 'handing_off' || snapshot.phase === 'draining') {
+  if (snapshot.phase === 'handing_off' || snapshot.phase === 'draining') {
     const collapsedDetail = snapshot.collapsed_from
       ? ` raw keeper phase is ${snapshot.collapsed_from} — 이건 단순한 idleness 가 아님.`
       : ''

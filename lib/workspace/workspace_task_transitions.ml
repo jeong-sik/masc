@@ -480,6 +480,7 @@ let transition_task_outcome_r
              commit so agents that cache the task don't emit stale broadcasts
              referencing the old status. *)
           Task_cache_invariant.clear_stale_agent_task config
+            ~cause:Task_cache_invariant.After_commit
             ~agent_name ~task_id ~status:new_status
             ~module_name:"transition_task_r";
           update_local_agent_state config ~agent_name (fun agent ->
@@ -948,6 +949,7 @@ let commit_verdict_r
              | None ->
                Task_cache_invariant.clear_stale_agent_task
                  config
+                 ~cause:Task_cache_invariant.After_commit
                  ~agent_name:producer
                  ~task_id
                  ~status:new_status

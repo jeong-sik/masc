@@ -45,7 +45,7 @@ describe('keeperGroup', () => {
   it('projects the canonical operational-state variants without a parallel lifecycle heuristic', () => {
     expect(keeperGroup(keeper(), null)).toBe('running')
     expect(keeperGroup(keeper({ paused: true }), null)).toBe('paused')
-    expect(keeperGroup(keeper({ status: 'unbooted' }), null)).toBe('offline')
+    expect(keeperGroup(keeper({ phase: 'Offline' }), null)).toBe('offline')
     expect(keeperGroup(keeper({ runtime_blocker_class: 'runtime_exhausted' }), null)).toBe('stuck')
   })
 })
@@ -55,7 +55,7 @@ describe('groupRegistryKeepers', () => {
     const roster = [
       keeper({ name: 'running' }),
       keeper({ name: 'paused', paused: true }),
-      keeper({ name: 'offline', status: 'unbooted' }),
+      keeper({ name: 'offline', phase: 'Offline' }),
       keeper({ name: 'stuck', runtime_blocker_class: 'runtime_exhausted' }),
     ]
     const grouped = groupRegistryKeepers(roster, buildCompositeByKeeperKey(null))

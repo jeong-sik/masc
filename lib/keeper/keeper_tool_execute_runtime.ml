@@ -634,12 +634,23 @@ let handle_tool_execute_typed
                   meta.name
                   (Printexc.to_string exn));
             authorized (typed_error_json diagnostic)
-          | Error Keeper_tooling.Execute_shell_ir.Cannot_parse ->
+          | Error (Keeper_tooling.Execute_shell_ir.Cannot_parse reason) ->
+            let reason_tag = Keeper_tooling.Execute_shell_ir.parse_reason_tag reason in
+            (* Parity with gate_reject/path_reject, which have always carried
+               their diagnostic.  These two could not until the typed gate
+               could produce them. *)
+            Log.Keeper.warn
+              "shell_ir cannot_parse keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              reason_tag;
             (try
                Keeper_keepalive_signal.record_execute_stream_end
                  ~keeper_name:meta.name
                  ~task_id
-                 ~status:(`Assoc [ "rejected", `String "cannot_parse" ])
+                 ~status:
+                   (`Assoc
+                      [ "rejected", `String "cannot_parse"; "reason", `String reason_tag ])
              with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
@@ -647,13 +658,25 @@ let handle_tool_execute_typed
                   "execute stream end callback failed keeper=%s: %s"
                   meta.name
                   (Printexc.to_string exn));
-            authorized (typed_error_json "Cannot parse command")
-          | Error Keeper_tooling.Execute_shell_ir.Too_complex ->
+            authorized
+              (typed_error_json (Printf.sprintf "Cannot parse command: %s" reason_tag))
+          | Error (Keeper_tooling.Execute_shell_ir.Too_complex reason) ->
+            let reason_tag = Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason in
+            (* Parity with gate_reject/path_reject, which have always carried
+               their diagnostic.  These two could not until the typed gate
+               could produce them. *)
+            Log.Keeper.warn
+              "shell_ir too_complex keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              reason_tag;
             (try
                Keeper_keepalive_signal.record_execute_stream_end
                  ~keeper_name:meta.name
                  ~task_id
-                 ~status:(`Assoc [ "rejected", `String "too_complex" ])
+                 ~status:
+                   (`Assoc
+                      [ "rejected", `String "too_complex"; "reason", `String reason_tag ])
              with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
@@ -661,7 +684,13 @@ let handle_tool_execute_typed
                   "execute stream end callback failed keeper=%s: %s"
                   meta.name
                   (Printexc.to_string exn));
-            authorized (typed_error_json "Command too complex")
+            authorized
+              (typed_error_json
+                 (Printf.sprintf
+                    "Command too complex: %s. %s."
+                    reason_tag
+                    (Keeper_tooling.Subset_rewrite.to_string
+                       (Keeper_tooling.Subset_rewrite.of_reason reason))))
           | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
             (* RFC-0208 P1: path-policy denial audit line. *)
             Log.Keeper.warn

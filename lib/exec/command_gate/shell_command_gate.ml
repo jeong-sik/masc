@@ -150,14 +150,6 @@ let apply_policy ~(syntax_policy : syntax_policy) ~(sandbox : sandbox_context) ~
          })
 ;;
 
-let parse_only_to_ir (parsed : SI.t PD.t) :
-    (SI.t, [ `Cannot_parse of parse_reason | `Too_complex of too_complex_reason ]) result =
-  match parsed with
-  | PD.Parse_error _ -> Error (`Cannot_parse Parse_error)
-  | PD.Parse_aborted reason -> Error (`Cannot_parse (Parse_aborted reason))
-  | PD.Too_complex reason -> Error (`Too_complex (Unsupported_construct reason))
-  | PD.Parsed ir -> Ok ir
-;;
 
 let verdict_tag = function
   | Allow _ -> "allow"
@@ -222,11 +214,37 @@ let log_verdict ~source = function
 
 (* The verdict with no logging. [gate_raw] reaches the policy through here
    rather than through [gate_typed], so one call reports one source. *)
+(* [SI.Pipeline] carries [t list], so a typed caller can hand [gate_typed] a
+   pipeline whose stages are themselves pipelines, or one with fewer than the
+   two stages its own documentation requires.  [lower_typed_pipeline] cannot:
+   its input is a [simple list], so the invariant holds there by construction.
+   [Unsupported_nested_pipeline] was written for exactly the shape only this
+   entry point can produce, and nothing produced it -- a nested pipeline
+   reached dispatch and ran. *)
+let rec structural_refusal (ir : SI.t) =
+  match ir with
+  | SI.Simple _ -> None
+  | SI.Pipeline stages ->
+    if List.exists (function SI.Pipeline _ -> true | _ -> false) stages
+    then Some (`Too_complex Unsupported_nested_pipeline)
+    else if List.compare_length_with stages 2 < 0
+    then Some (`Cannot_parse Parse_error)
+    else List.find_map structural_refusal stages
+  | SI.Sequence { head; tail } ->
+    (match structural_refusal head with
+     | Some refusal -> Some refusal
+     | None -> List.find_map (fun (_, part) -> structural_refusal part) tail)
+;;
+
+(* [parse_only_to_ir (PD.Parsed ir)] used to stand where the structural check
+   is now.  It always answered [Ok]: the value it inspected is the one this
+   function had just wrapped, so its other arms were unreachable and the call
+   was an identity wearing the shape of a check. *)
 let decide_typed ~ir ~syntax_policy ~sandbox =
-  match parse_only_to_ir (PD.Parsed ir) with
-  | Error (`Cannot_parse reason) -> Cannot_parse { reason }
-  | Error (`Too_complex reason) -> Too_complex { reason }
-  | Ok ir -> apply_policy ~syntax_policy ~sandbox ~ir
+  match structural_refusal ir with
+  | Some (`Too_complex reason) -> Too_complex { reason }
+  | Some (`Cannot_parse reason) -> Cannot_parse { reason }
+  | None -> apply_policy ~syntax_policy ~sandbox ~ir
 ;;
 
 let gate_typed ~ir ~syntax_policy ~sandbox () : verdict =

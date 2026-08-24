@@ -2520,16 +2520,8 @@ let render_keeper_message (state : state) =
               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
               waiting
       in
-      (* The fence refusals cannot occur any more — the states they ranked are
-         gone — but the vocabulary still carries them, so they stay matched
-         rather than swept into a catch-all. *)
       match send_disposition state ~keeper_name with
       | Queues_behind _ -> queue_hint ()
-      | Refused_cleanup _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
-      | Refused_prepared _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
-      | Refused_recovery_blocked _ ->
-          "Ctrl-R:reload exact recovery  Enter:blocked"
-      | Refused_unverified _ -> "Ctrl-R:resume exact request  Enter:blocked"
       | Sends ->
           if target_registered then "Enter:send"
           else if Option.is_some state.keepers_error then

@@ -1014,19 +1014,7 @@ let start_keeper_message ?keeper_name state ~mailbox text =
               add_event state "message"
                 (Printf.sprintf "Queued for %s behind %s (%d waiting)"
                    (Keeper_chat.terminal_safe_text target)
-                   request.Keeper_chat.request_id waiting))
-      | Refused_prepared _ | Refused_cleanup _ | Refused_recovery_blocked _
-      | Refused_unverified _ ->
-          (* The durable chat fence is gone, so the states these rank are never
-             set and this cannot be reached. Matched rather than swept into a
-             catch-all so removing them from the vocabulary is a compile error
-             here, and reported rather than asserted so a future writer of one
-             of those states gets a line in the log instead of a crash. *)
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper %s: send refused by a chat fence state that no longer \
-                exists; the message was not sent"
-               (Keeper_chat.terminal_safe_text target)))
+                   request.Keeper_chat.request_id waiting)))
 ;;
 
 let drain_queued_message state ~mailbox =

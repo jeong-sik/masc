@@ -71,8 +71,14 @@ PY
   같은 환경에서 플래그만 빼면 빌트인+플러그인 91개 스킬이 로드된다 (2026-08-24 실측,
   아티팩트 "스킬은 어떻게 로드되는가"). 지금 masc 에는 SKILL.md 를 읽는 코드가 없다.
 - 도구 스키마 표면 상한은 `test/test_keeper_tool_schema_bytes.ml:44` 의 85,000 B.
-  2026-08-21 wire capture 기준 라이브 중앙값 78,916 B / 최대 79,512 B (RFC-0389 §1.1).
-  도구 하나가 평균 약 780 B 이므로 남은 여유는 도구 예닐곱 개분이다.
+  **정정 (2026-08-25 재측정, main `3dafed3f98`)**: 이 문서 초판은 08-21~23 의 수치
+  (79,512 B / 88,138 B)를 인용했는데 그 뒤 표면이 줄었다. 현재
+  `model_visible_schemas ()` 기준 **82개 / 69,282 B, 여유 15,718 B** — "도구로 넣는
+  길이 막혀 있다" 는 초판의 압박 서술은 더 이상 사실이 아니다. 게이트는 양방향이라
+  (여유가 상한의 1/3 을 넘어도 실패) 표면을 12,616 B 이상 더 줄이면 상한도 같이
+  내려야 한다. 스킬의 근거는 예산 압박이 아니라 §1.1 의 선택 행동과, 지시 스킬의
+  표면 비용이 0 B 라는 구조적 성질에 있다. 참고로 설명문은 표면의 28%뿐이고
+  단일 최대 항목은 `Execute` 8,455 B (반복 문단 4,158 B — `$ref` 미검증이라 보류)다.
 - 도구 *정의* 는 이미 밖에 있다: `config/tools/*.toml` 113개
   (`Tool_definition_toml` 로더). 도구 *도움말* 은 아직 안이다:
   `tool_help_registry.ml` 의 `short_description`/`when_to_use`/`details_markdown` 은
@@ -276,3 +282,35 @@ skills 디렉토리 하나가 된다. 마이그레이션 코드·호환 reader �
   항목(프롬프트 키, 도구 TOML)은 그대로다.
 - **RFC-0386 (tool_kind 닫힌 합타입)**: 새 tool_kind 는 없다. 합성 스킬은 기존
   `Composition_tool`/`Async_composition_tool` 그대로.
+
+## 7. 선행 사례 (2026-08-25 확인, 전부 공식 문서/원논문)
+
+이 설계가 어디에 서 있는지의 기록이다. 수치는 각 출처의 것이다.
+
+- **Agent Skills 스펙** (agentskills.io/specification): frontmatter 전체 필드는 6개
+  (`name` ≤64자·소문자/숫자/하이픈·디렉터리명 일치, `description` ≤1024자, `license`,
+  `compatibility`, `metadata`, 실험적 `allowed-tools`). 3단계 progressive disclosure
+  (메타 ~100토큰 상시 / 본문 <5k 토큰 / 참조 파일 필요 시). 채택 클라이언트 40+
+  (Claude Code, Codex, Gemini CLI, Cursor, OpenClaw, pi 등). masc 의 미정합 하나:
+  지시 스킬 이름에 스펙의 문자 집합(소문자·하이픈)을 아직 강제하지 않는다 —
+  합성 스킬은 카탈로그 이름 규칙으로 이미 강제된다.
+- **Anthropic Tool Search Tool (GA)**: `defer_loading: true` 도구는 컨텍스트에서
+  빠지고 검색 시 `tool_reference` 로 인라인 확장(캐시 보존). 공식 수치 ~55k 토큰의
+  85%+ 절감, 도구 30–50개 초과 시 선택 정확도 저하. 커스텀 검색 도구가
+  `tool_result` 에 `tool_reference` 를 반환하는 확장점이 문서화돼 있다 — masc 가
+  서버 수준에서 같은 패턴을 재현할 수 있는 근거.
+- **Anthropic Programmatic Tool Calling (GA)** + **OpenAI Responses API**: 코드 실행
+  안에서 도구를 함수로 호출(`allowed_callers`, `caller` 구분), OpenAI 도
+  `defer_loading`/`allowed_callers` 라는 **같은 필드명**으로 수렴했다. 벤더 중립
+  타입으로 정의해도 종속이 아니라는 뜻이다.
+- **"Code execution with MCP"** (anthropic.com/engineering, 2025-11-04): 도구를
+  파일시스템 위 코드 API 로 제시해 필요한 것만 로드 — 예시 150,000→2,000 토큰.
+  keeper 의 Execute 표면과 스킬 참조 파일이 같은 노선의 자리다.
+- **LLMCompiler** (arXiv:2312.04511, ICML 2024): planner→DAG→executor 와 `$N` 참조.
+  masc 의 `Keeper_tool_plan` (`after` + `output` pointer) 이 같은 모양이며, 논문의
+  근거 수치는 ReAct 대비 최대 3.7× 지연·6.7× 비용 절감(Table 1·2).
+- **CodeAct** (arXiv:2402.01030, ICML 2024): 코드를 행동 공간으로 통일하면 최대
+  20% 높은 성공률(abstract). Anthropic/OpenAI PTC 가 이 노선의 상용화다.
+- **MCP 스펙 2025-11-25**: tool 배칭·합성·그룹은 스펙 관심사가 아니다(JSON-RPC
+  batching 은 2025-06-18 개정에서 제거). 합성 도구를 일반 `tools/call` 로 노출하는
+  masc 방식은 스펙과 충돌하지 않는다.

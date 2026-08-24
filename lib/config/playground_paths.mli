@@ -65,6 +65,12 @@ val parse_bundle_relative_repo_path : string -> (string * string) option
     not reject [.] or [..] segments, and callers turning the result into an
     I/O path must resolve it themselves. *)
 
+val bundle_relative_repo_path : repo_id:string -> string -> string
+(** [bundle_relative_repo_path ~repo_id rel] is the bundle-relative path of
+    [rel] inside [repo_id]'s clone — the inverse of
+    {!parse_bundle_relative_repo_path}. Building it here keeps the [repos]
+    segment spelled in one place. *)
+
 val parse_playground_repo_path
   :  base_path:string
   -> abs_path:string

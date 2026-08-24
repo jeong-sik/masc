@@ -224,8 +224,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Tools
-    | System_logs -> None
+    | Verification | Harness | Fusion | Repositories | Changes | Connectors
+    | Runtime | Tools | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -734,6 +734,14 @@ let load_repositories ~(host : string) ~(port : int) :
   match fetch_repositories ~host ~port with
   | Error err -> Error ("repository load failed: " ^ err)
   | Ok json -> Tui_decode.decode_repository_snapshot json
+
+(** Load a keeper's file changes from /api/v1/keepers/:name/file-changes. *)
+let load_keeper_file_changes ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(window_hours : float) :
+    (Tui_decode.file_change_snapshot, string) result =
+  match fetch_keeper_file_changes ~host ~port ~keeper_name ~window_hours with
+  | Error err -> Error ("file change load failed: " ^ err)
+  | Ok snapshot -> Ok snapshot
 
 (** Load the harness snapshot from /api/v1/dashboard/harness-health *)
 let load_harness ~(host : string) ~(port : int) :

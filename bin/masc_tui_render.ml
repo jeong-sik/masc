@@ -1633,6 +1633,35 @@ let keeper_runtime_label (runtime : keeper_runtime option) =
         (Tui_decode.keeper_phase_to_string row.kr_phase)
         model)
 
+let keeper_message_identity state keeper_name =
+  match
+    List.find_opt
+      (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+      state.keepers
+  with
+  | None ->
+      Ansi.dim ^ "\xc3\x97 unavailable \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset
+  | Some keeper ->
+      let reading = keeper_reading state keeper in
+      let status = Keeper_control.display_status reading in
+      let runtime =
+        match reading.Keeper_control.liveness with
+        | Keeper_control.Present row -> Some row
+        | Keeper_control.Absent | Keeper_control.Unobserved -> None
+      in
+      let status_color, glyph = keeper_status_glyph status in
+      String.concat ""
+        [ status_color
+        ; glyph
+        ; " "
+        ; keeper_status_word status
+        ; Ansi.reset
+        ; Ansi.dim
+        ; " \xc2\xb7 "
+        ; keeper_runtime_label runtime
+        ; Ansi.reset
+        ]
+
 (* Two dispositions an operator needs before stopping anything: whether the
    keeper comes back by itself, and whether it takes turns without being
    asked. Both are on the roster row. *)
@@ -2318,9 +2347,10 @@ let render_keeper_message (state : state) =
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
-      Printf.sprintf "%s  (port %d)"
+      Printf.sprintf "%s  %s  %s(port %d)%s"
         (screen_title (Printf.sprintf " Message to: %s" display_keeper_name))
-        state.port
+        (keeper_message_identity state keeper_name)
+        Ansi.dim state.port Ansi.reset
     in
     let target_registered =
       keeper_available_for_new_message state keeper_name
@@ -2610,9 +2640,14 @@ let render_keeper_message (state : state) =
            | Keeper_chat_return_list -> "Esc:list"
            | Keeper_chat_return_detail -> "Esc:detail")
     in
+    let switch_hint =
+      match next_keeper_message_target state with
+      | Masc_tui_keeper_selection.No_alternative -> ""
+      | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
+    in
     let footer =
-      Printf.sprintf "%s  %s  Ctrl-J:newline  %s  %s  Ctrl-U:clear%s" Ansi.dim
-        enter_hint scroll_hint escape_hint Ansi.reset
+      Printf.sprintf "%s  %s  Ctrl-J:newline  %s%s  %s  Ctrl-U:clear%s"
+        Ansi.dim enter_hint scroll_hint switch_hint escape_hint Ansi.reset
     in
     Buffer.add_string buf
       (Message_layout.fit_width footer (max 1 (cols - 1)));

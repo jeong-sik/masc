@@ -835,6 +835,23 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
         (Keeper_chat_history_loaded
            (keeper_name, Error "Eio switch is unavailable"))
 
+let switch_to_next_keeper_message state ~mailbox =
+  match next_keeper_message_target state with
+  | Masc_tui_keeper_selection.No_alternative -> ()
+  | Masc_tui_keeper_selection.Switch_to { keeper_name; cursor } ->
+      open_message_for_keeper ~return_to:state.msg_return state keeper_name;
+      state.keeper_cursor <- cursor;
+      state.msg_scroll <- 0;
+      state.msg_loaded <- [];
+      state.msg_loaded_keeper <- None;
+      state.msg_loaded_error <- None;
+      state.msg_loaded_dropped <- 0;
+      state.msg_older_cursor <- None;
+      state.msg_older_exist <- false;
+      state.msg_older_loading <- false;
+      state.msg_older_error <- None;
+      launch_keeper_history_load state ~mailbox ~keeper_name
+
 (* Rows this session wrote that the transcript now carries. Dropped so the same
    turn is not drawn twice, once from each source.
 
@@ -2566,32 +2583,41 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
-  | Keeper_chat_history_loaded (keeper_name, result) -> (
-      match result with
-      | Ok { Keeper_chat_history.rows; dropped } ->
-          state.msg_loaded <-
-            List.map (msg_entry_of_history_row keeper_name) rows;
-          state.msg_loaded_keeper <- Some keeper_name;
-          state.msg_loaded_error <- None;
-          state.msg_loaded_dropped <- dropped;
-          (* Where reading further back starts. The oldest row this load
-             carried is the cursor; if it carried none there is nothing to page
-             back from. Whether older rows exist is only learned by asking, so
-             the pane assumes they might and finds out on the first page. *)
-          state.msg_older_cursor <-
-            List.fold_left
-              (fun oldest (row : Keeper_chat_history.row) ->
-                match oldest with
-                | None -> Some row.Keeper_chat_history.at
-                | Some at -> Some (Float.min at row.Keeper_chat_history.at))
-              None rows;
-          state.msg_older_exist <- Option.is_some state.msg_older_cursor;
-          state.msg_older_error <- None;
-          forget_session_rows_the_transcript_holds state keeper_name rows
-      | Error detail ->
-          (* The transcript is left as it was and the session rows stay: a
-             failed load must not be the reason the pane goes blank. *)
-          state.msg_loaded_error <- Some detail)
+  | Keeper_chat_history_loaded (keeper_name, result) ->
+      (* The operator can switch while a previous GET is still in flight. The
+         pane owns one loaded-history cache, so a late response for the old
+         target must not replace the transcript now being read. *)
+      if
+        Option.exists (String.equal keeper_name)
+          state.msg_target_keeper_name
+      then
+        (match result with
+         | Ok { Keeper_chat_history.rows; dropped } ->
+             state.msg_loaded <-
+               List.map (msg_entry_of_history_row keeper_name) rows;
+             state.msg_loaded_keeper <- Some keeper_name;
+             state.msg_loaded_error <- None;
+             state.msg_loaded_dropped <- dropped;
+             (* Where reading further back starts. The oldest row this load
+                carried is the cursor; if it carried none there is nothing to
+                page back from. Whether older rows exist is only learned by
+                asking, so the pane assumes they might and finds out on the
+                first page. *)
+             state.msg_older_cursor <-
+               List.fold_left
+                 (fun oldest (row : Keeper_chat_history.row) ->
+                   match oldest with
+                   | None -> Some row.Keeper_chat_history.at
+                   | Some at ->
+                       Some (Float.min at row.Keeper_chat_history.at))
+                 None rows;
+             state.msg_older_exist <- Option.is_some state.msg_older_cursor;
+             state.msg_older_error <- None;
+             forget_session_rows_the_transcript_holds state keeper_name rows
+         | Error detail ->
+             (* The transcript is left as it was and the session rows stay: a
+                failed load must not be the reason the pane goes blank. *)
+             state.msg_loaded_error <- Some detail)
   | Tools_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2971,38 +2997,43 @@ let main () =
            let recovery_key =
              String.length k = 1 && Char.code k.[0] = 18
            in
+           let switch_key = String.length k = 1 && Char.code k.[0] = 7 in
            if
              keeper_message_input_supported state
              || String.equal k "esc"
              || recovery_key
+             || switch_key
            then
-             let _handled =
-               handle_message_key state
-                 ~submit_message:
-                   (send_operator_text state ~mailbox:async_messages)
-                 ~answer_approval:(fun ~tool_call_id ~allow ->
-                   match
-                     Option.bind state.msg_live (fun live ->
-                       inflight_by_request_id state
-                         (Keeper_chat_transcript.request_id live))
-                   with
-                   | Some request ->
-                       launch_keeper_approval state ~mailbox:async_messages
-                         request ~tool_call_id ~allow
-                   | None ->
-                       (* No request in flight means no turn to answer for.
-                          The prompt belongs to a turn, so this is
-                          unreachable while one is shown. *)
-                       ())
-                 ~load_older:(fun ~before ->
-                   match state.msg_target_keeper_name with
-                   | Some keeper_name ->
-                       launch_keeper_older_page state ~mailbox:async_messages
-                         ~keeper_name ~before
-                   | None -> ())
-                 k
-             in
-             ()
+             if switch_key then
+               switch_to_next_keeper_message state ~mailbox:async_messages
+             else
+               let _handled =
+                 handle_message_key state
+                   ~submit_message:
+                     (send_operator_text state ~mailbox:async_messages)
+                   ~answer_approval:(fun ~tool_call_id ~allow ->
+                     match
+                       Option.bind state.msg_live (fun live ->
+                         inflight_by_request_id state
+                           (Keeper_chat_transcript.request_id live))
+                     with
+                     | Some request ->
+                         launch_keeper_approval state ~mailbox:async_messages
+                           request ~tool_call_id ~allow
+                     | None ->
+                         (* No request in flight means no turn to answer for.
+                            The prompt belongs to a turn, so this is
+                            unreachable while one is shown. *)
+                         ())
+                   ~load_older:(fun ~before ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper_name ->
+                         launch_keeper_older_page state
+                           ~mailbox:async_messages ~keeper_name ~before
+                     | None -> ())
+                   k
+               in
+               ()
        | Some k
          when (not message_mode)
               && state.view = Board

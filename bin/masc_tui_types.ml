@@ -693,6 +693,25 @@ let keeper_available_for_new_message (state : state) keeper_name =
        (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
        state.keepers
 
+(** The next target both the input path and footer agree is safe to select.
+    A pending request or live transcript stays pinned to its Keeper until that
+    turn settles. A retained roster is not enough after a failed refresh:
+    switching is disabled until the roster is readable again. *)
+let next_keeper_message_target (state : state) =
+  if
+    Option.is_some state.keepers_error
+    || Option.is_some state.msg_live
+    || state.msg_inflight <> []
+  then
+    Masc_tui_keeper_selection.No_alternative
+  else
+    match state.msg_target_keeper_name with
+    | None -> Masc_tui_keeper_selection.No_alternative
+    | Some current_keeper ->
+        Masc_tui_keeper_selection.next_message_target ~current_keeper
+          ~keeper_ids:
+            (List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
+
 (** Create initial state *)
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];

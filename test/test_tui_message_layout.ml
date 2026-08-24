@@ -99,6 +99,7 @@ let test_terminal_cell_width_and_fit () =
       ; "Enter:queue (99 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
       ; "Ctrl-J:newline"
       ; Layout.scroll_hint ~scrolled_back:9999 ~older_exist:false
+      ; "Ctrl-G:next Keeper"
       ; "Esc:interrupt turn"
       ; "Ctrl-U:clear\x1B[0m"
       ]

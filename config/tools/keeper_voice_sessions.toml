@@ -1,0 +1,2 @@
+name = "keeper_voice_sessions"
+description = "List active voice sessions from the voice bridge."

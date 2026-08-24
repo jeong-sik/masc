@@ -244,6 +244,9 @@ normal_targets=(
   @test/runtest-test_keeper_runtime_schemas_toml_parity
   @test/runtest-test_taskboard_tool_toml_parity
   @test/runtest-test_base_tool_toml_parity
+  @test/runtest-test_voice_tool_toml_parity
+  @test/runtest-test_run_tool_toml_parity
+  @test/runtest-test_local_runtime_tool_toml_parity
   @test/runtest-test_client_identity
   @test/runtest-test_mcp_session_task_lifecycle
   @test/runtest-test_mcp_server_eio

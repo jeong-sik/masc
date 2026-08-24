@@ -230,7 +230,11 @@ let pad_to width text =
 let render_activity_rows (activities : tool_activity list) =
   let name_width =
     List.fold_left
-      (fun widest activity ->
+      (* Three record types in this file carry a [tool_name], and OCaml reads
+         a bare field as the last one declared -- [awaiting_approval]. The
+         annotation on the parameter above binds the list, not this lambda's
+         own argument, so it has to be said again here. *)
+      (fun widest (activity : tool_activity) ->
         max widest (String.length activity.tool_name))
       0 activities
   in

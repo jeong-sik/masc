@@ -370,6 +370,194 @@ let test_catalog_tools_join_runtime_projection_authority () =
     (List.length expected)
 ;;
 
+let param_composition =
+  {|[[compositions]]
+name = "memory-probe"
+description = "Search durable memory for the caller's query."
+execution = "inline"
+
+[[compositions.params]]
+name = "query"
+type = "string"
+description = "What to search durable memory for."
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "query"
+|}
+;;
+
+let parse_ok document =
+  match Catalog.parse document with
+  | Ok catalog -> catalog
+  | Error error ->
+    fail ("valid composition was rejected: " ^ Catalog.error_to_string error)
+;;
+
+let contains ~needle haystack =
+  let needle_length = String.length needle in
+  let haystack_length = String.length haystack in
+  let rec probe index =
+    if index + needle_length > haystack_length
+    then false
+    else if String.equal (String.sub haystack index needle_length) needle
+    then true
+    else probe (index + 1)
+  in
+  probe 0
+;;
+
+let test_catalog_params_generate_schema_and_bind () =
+  let catalog = parse_ok param_composition in
+  let entry =
+    match Catalog.find catalog "memory-probe" with
+    | Some entry -> entry
+    | None -> fail "param composition lookup missed exact name"
+  in
+  check int "one declared param" 1 (List.length entry.Catalog.params);
+  let schema =
+    Yojson.Safe.to_string (Catalog.input_schema_of_params entry.Catalog.params)
+  in
+  check
+    bool
+    "schema requires the declared param"
+    true
+    (contains ~needle:{|"required":["query"]|} schema);
+  check
+    bool
+    "schema types the declared param"
+    true
+    (contains ~needle:{|"type":"string"|} schema);
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  (match
+     Catalog.instantiate
+       ~descriptors
+       ~args:(`Assoc [ "query", `String "what changed today" ])
+       entry
+   with
+   | Ok plan ->
+     let leftover =
+       Plan.nodes plan
+       |> List.concat_map (fun (node : Plan.node) ->
+         Plan.Json_template.param_names node.input)
+     in
+     check int "instantiated plan is param-free" 0 (List.length leftover)
+   | Error error ->
+     fail
+       ("instantiation with full args failed: "
+        ^ Catalog.instantiation_error_to_string error));
+  match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
+  | Error (Catalog.Missing_argument "query") -> ()
+  | Ok _ -> fail "instantiation without args was accepted"
+  | Error error ->
+    fail ("unexpected error: " ^ Catalog.instantiation_error_to_string error)
+;;
+
+let test_catalog_rejects_param_declaration_mismatches () =
+  let undeclared_reference =
+    {|[[compositions]]
+name = "probe"
+description = "d"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "query"
+|}
+  in
+  (match Catalog.parse undeclared_reference with
+   | Error (Catalog.Unknown_param_reference { name = "probe"; param = "query" }) -> ()
+   | Ok _ -> fail "undeclared param reference was accepted"
+   | Error error -> fail ("unexpected error: " ^ Catalog.error_to_string error));
+  let unused_declaration =
+    {|[[compositions]]
+name = "probe"
+description = "d"
+execution = "inline"
+
+[[compositions.params]]
+name = "query"
+type = "string"
+description = "unused"
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+  in
+  (match Catalog.parse unused_declaration with
+   | Error (Catalog.Unused_param { name = "probe"; param = "query" }) -> ()
+   | Ok _ -> fail "unused declared param was accepted"
+   | Error error -> fail ("unexpected error: " ^ Catalog.error_to_string error));
+  let bad_type =
+    {|[[compositions]]
+name = "probe"
+description = "d"
+execution = "inline"
+
+[[compositions.params]]
+name = "query"
+type = "object"
+description = "wrong"
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+  in
+  (match Catalog.parse bad_type with
+   | Error (Catalog.Invalid_param_type { type_name = "object"; _ }) -> ()
+   | Ok _ -> fail "invalid param type was accepted"
+   | Error error -> fail ("unexpected error: " ^ Catalog.error_to_string error));
+  let async_with_params =
+    {|[[compositions]]
+name = "probe"
+description = "d"
+execution = "async"
+
+[[compositions.params]]
+name = "query"
+type = "string"
+description = "carried nowhere"
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "query"
+|}
+  in
+  match Catalog.parse async_with_params with
+  | Error (Catalog.Async_composition_with_params { name = "probe" }) -> ()
+  | Ok _ -> fail "async composition with params was accepted"
+  | Error error -> fail ("unexpected error: " ^ Catalog.error_to_string error)
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
@@ -423,6 +611,14 @@ let () =
             "catalog tools join runtime projection authority"
             `Quick
             test_catalog_tools_join_runtime_projection_authority
+        ; test_case
+            "params generate the input schema and bind arguments"
+            `Quick
+            test_catalog_params_generate_schema_and_bind
+        ; test_case
+            "param declaration mismatches are rejected"
+            `Quick
+            test_catalog_rejects_param_declaration_mismatches
         ] )
     ]
 ;;

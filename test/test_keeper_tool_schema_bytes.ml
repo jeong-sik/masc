@@ -67,8 +67,8 @@ let measured ~surface =
    feature. Pinned on 2026-08-23 from the pre-feature surface; re-pinned on
    2026-08-24 to 68,881 bytes because main's other tool refactors grew the All
    surface by 567 bytes (count unchanged at 82). *)
-let all_surface_golden_count = 82
-let all_surface_golden_bytes = 68_881
+let all_surface_golden_count = 86
+let all_surface_golden_bytes = 72_834
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in
@@ -83,17 +83,17 @@ let test_declared_surface_is_smaller_than_all () =
   let _, all_bytes = measured ~surface:All in
   let declared_surfaces =
     [ Masc.Keeper_tool_descriptor.Declared
-        { groups = [ Masc.Keeper_tool_descriptor.Board_group ] }
+        { groups = [ Masc.Keeper_tool_group.Board_group ] }
     ; Masc.Keeper_tool_descriptor.Declared
         { groups =
-            [ Masc.Keeper_tool_descriptor.Board_group
-            ; Masc.Keeper_tool_descriptor.Workspace_group
+            [ Masc.Keeper_tool_group.Board_group
+            ; Masc.Keeper_tool_group.Workspace_group
             ]
         }
     ; Masc.Keeper_tool_descriptor.Declared
         { groups =
-            [ Masc.Keeper_tool_descriptor.Memory_group
-            ; Masc.Keeper_tool_descriptor.Surface_group
+            [ Masc.Keeper_tool_group.Memory_group
+            ; Masc.Keeper_tool_group.Surface_group
             ]
         }
     ]

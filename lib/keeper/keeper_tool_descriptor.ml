@@ -23,17 +23,13 @@ type keeper_model_projection =
   | Operator_only
   | Transport_alias of { projected_by : string }
 
-type keeper_tool_group =
-  | Execute_group
-  | Search_files_group
-  | Filesystem_group
-  | Board_group
-  | Voice_group
-  | Workspace_group
-  | Surface_group
-  | Memory_group
-  | Meta_group
-  | Core_group
+(* RFC-0389: the group vocabulary lives in [Keeper_tool_group], a leaf under
+   both this descriptor and the TOML parser, so the parser can reject an
+   unknown group at load time instead of this module stringly re-parsing it
+   at the consumer. The alias keeps every existing constructor use working. *)
+type keeper_tool_group = Keeper_tool_group.t
+
+open Keeper_tool_group
 
 (** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
     every model-visible descriptor. [Declared] narrows the surface to the
@@ -216,34 +212,13 @@ let keeper_model_projection_to_string = function
 
 ;;
 
-let keeper_tool_group_to_string = function
-  | Execute_group -> "execute"
-  | Search_files_group -> "search_files"
-  | Filesystem_group -> "fs"
-  | Board_group -> "board"
-  | Voice_group -> "voice"
-  | Workspace_group -> "workspace"
-  | Surface_group -> "surface"
-  | Memory_group -> "memory"
-  | Meta_group -> "meta"
-  | Core_group -> "core"
+let keeper_tool_group_to_string = Keeper_tool_group.to_string
 ;;
 
 (* RFC-0389: strict inverse of [keeper_tool_group_to_string]. Unknown strings
-   are an error, never a silent fallback — a typo in [keeper.tools] must fail
-   the TOML load, not quietly keep the full surface. *)
-let keeper_tool_group_of_string = function
-  | "execute" -> Some Execute_group
-  | "search_files" -> Some Search_files_group
-  | "fs" -> Some Filesystem_group
-  | "board" -> Some Board_group
-  | "voice" -> Some Voice_group
-  | "workspace" -> Some Workspace_group
-  | "surface" -> Some Surface_group
-  | "memory" -> Some Memory_group
-  | "meta" -> Some Meta_group
-  | "core" -> Some Core_group
-  | _ -> None
+   are [None], never a silent fallback — the TOML loader rejects them at
+   load time; this reader is for rows that predate a rename. *)
+let keeper_tool_group_of_string = Keeper_tool_group.of_string
 ;;
 
 (* RFC-0389: convert raw TOML group names to a [tool_surface].

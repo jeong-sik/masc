@@ -552,6 +552,31 @@ let test_profile_rejects_unknown_key () =
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.typo_field"))
 
+(* Two RFCs put a key in [keeper.tools] within days of each other, and the
+   second one's loader accepted the whole [keeper.tools.] prefix so its own
+   nested key would pass. That also accepted [tools.nativ], which is the
+   silence RFC-0390 declared its key to prevent: a typo would leave the
+   runtime on its default posture with nothing said. Both keys are declared
+   now, so the table is closed again. *)
+let test_profile_rejects_a_typo_in_the_tools_table () =
+  List.iter
+    (fun (input, typo) ->
+       match TL.parse_toml input with
+       | Error error -> fail error
+       | Ok doc ->
+         (match KTP.profile_defaults_of_toml doc with
+          | Ok _ ->
+            fail (Printf.sprintf "%s must fail closed, not read as a default" typo)
+          | Error detail ->
+            check bool
+              (Printf.sprintf "%s is named as unknown" typo)
+              true
+              (String_util.contains_substring detail typo)))
+    [ "[keeper.tools]\nnativ = \"read\"\n", "keeper.tools.nativ"
+    ; "[keeper.tools]\ngroup = [\"execute\"]\n", "keeper.tools.group"
+    ; "[keeper.tools]\nnative_posture = \"read\"\n", "keeper.tools.native_posture"
+    ]
+
 (* Each declared kind must reject a value of another kind. Paired with
    [keeper_toml_fields], where a key cannot exist without a kind, this covers a
    newly added key too: it has to pick one of these four, and each is shown to
@@ -640,6 +665,36 @@ let test_profile_rejects_unknown_tools_sibling_key () =
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.tools.group"))
 
+
+(* RFC-0389: a typo in [keeper.tools.groups] must fail the load. All-unknown
+   used to fall back to All, which quietly cancelled the narrowing the
+   declaration existed to make. *)
+let test_tool_groups_rejects_unknown_names () =
+  let input = "[keeper.tools]\ngroups = [\"exeucte\", \"borad\"]\n" in
+  match TL.parse_toml input with
+  | Error error -> failf "fixture did not parse: %s" error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ ->
+         fail "all-unknown groups fell back to All: the narrowing was cancelled"
+     | Error detail ->
+         check bool "names the first typo" true
+           (String_util.contains_substring detail "exeucte");
+         check bool "names the second typo" true
+           (String_util.contains_substring detail "borad"))
+;;
+
+let test_tool_groups_accepts_known_names () =
+  let input = "[keeper.tools]\ngroups = [\"execute\", \"meta\"]\n" in
+  match TL.parse_toml input with
+  | Error error -> failf "fixture did not parse: %s" error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error detail -> failf "known groups were rejected: %s" detail
+     | Ok defaults ->
+         check (option (list string)) "groups carried through"
+           (Some [ "execute"; "meta" ]) defaults.KTP.tool_groups)
+;;
 
 let test_profile_full () =
   let input = {|
@@ -1661,6 +1716,8 @@ let () =
             test_profile_rejects_unknown_key;
           test_case "parses tools.native postures" `Quick
             test_profile_parses_tools_native;
+        Alcotest.test_case "a typo in [keeper.tools] fails the load" `Quick
+            test_profile_rejects_a_typo_in_the_tools_table;
           test_case "absent tools.native is None" `Quick
             test_profile_absent_tools_native_is_none;
           test_case "rejects invalid tools.native" `Quick
@@ -1741,6 +1798,10 @@ let () =
             test_discover_retains_invalid_files;
           test_case "each field kind rejects a wrong-typed value" `Quick
             test_each_keeper_field_kind_rejects_a_wrong_typed_value;
+          test_case "tool groups reject unknown names" `Quick
+            test_tool_groups_rejects_unknown_names;
+          test_case "tool groups accept known names" `Quick
+            test_tool_groups_accepts_known_names;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick

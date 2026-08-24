@@ -35,17 +35,7 @@ type keeper_model_projection =
   | Transport_alias of { projected_by : string }
 
 (** Typed display group for Keeper capability discovery. *)
-type keeper_tool_group =
-  | Execute_group
-  | Search_files_group
-  | Filesystem_group
-  | Board_group
-  | Voice_group
-  | Workspace_group
-  | Surface_group
-  | Memory_group
-  | Meta_group
-  | Core_group
+type keeper_tool_group = Keeper_tool_group.t
 
 (** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
     every model-visible descriptor. [Declared] narrows the surface to the

@@ -37,19 +37,18 @@ let keeper_toml_fields =
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
   ; "always_allow", Field_bool
-    (* RFC-0390. Declared here so any other [keeper.tools] key is an unknown
-       key that fails the load, not a silently ignored sibling. *)
+    (* RFC-0390 and RFC-0389. Both [keeper.tools] keys are declared, so any
+       other key in that table is unknown and fails the load rather than
+       being a silently ignored sibling. A prefix rule would accept
+       [tools.nativ] and leave the runtime on its default posture without a
+       word, which is what naming them here prevents. *)
   ; "tools.native", Field_string
+  ; "tools.groups", Field_string_array
   ]
 
 let keeper_toml_field_names = List.map fst keeper_toml_fields
 
 let canonical_keeper_toml_key_names = keeper_toml_field_names
-
-(* RFC-0389: [keeper.tools] is a nested table (like [keeper.agent_core_env]),
-   so its keys arrive flattened as [keeper.tools.<group>]. Declare the prefix
-   so unknown-key detection accepts it and the loader can read it. *)
-let tools_key_prefix = "keeper.tools."
 
 (** One current-key detector shared by profile loading and config audit. *)
 let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
@@ -61,17 +60,10 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
     String.length key > agent_core_env_prefix_len
     && String.starts_with key ~prefix:agent_core_env_key_prefix
   in
-  let tools_prefix_len = String.length tools_key_prefix in
-  let starts_with_tools key =
-    String.length key > tools_prefix_len
-    && String.starts_with key ~prefix:tools_key_prefix
-  in
   doc
   |> List.map fst
   |> List.filter (fun key ->
-       not (List.mem key known)
-       && not (starts_with_agent_core_env key)
-       && not (starts_with_tools key))
+       not (List.mem key known) && not (starts_with_agent_core_env key))
   |> dedupe_keep_order
 
 let toml_value_kind = function
@@ -113,7 +105,6 @@ let validate_known_keeper_field_types doc =
   |> List.find_map (fun (key, value) ->
        if String.starts_with key ~prefix:"keeper."
           && not (String.starts_with key ~prefix:agent_core_env_key_prefix)
-          && not (String.starts_with key ~prefix:tools_key_prefix)
        then
          match expected key with
          | Some (expected_kind, accepts) when not (accepts value) ->
@@ -132,17 +123,6 @@ let validate_known_keeper_field_types doc =
               "%s must be a scalar TOML value, got %s"
               key
               (toml_value_kind value))
-       else if String.starts_with key ~prefix:tools_key_prefix
-               && String.equal key "keeper.tools.groups"
-               && (match value with
-                   | Keeper_toml_loader.Toml_string_array _ -> false
-                   | _ -> true)
-       then
-         Some
-           (Printf.sprintf
-              "%s must be a TOML string array, got %s"
-              key
-              (toml_value_kind value))
        else None)
   |> function None -> Ok () | Some error -> Error error
 ;;
@@ -156,14 +136,34 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let agent_core_env = extract_agent_core_env_from_doc doc in
-  (* RFC-0389: [keeper.tools] nested table — read groups as string array. *)
-  let tool_groups =
+  (* RFC-0389: [keeper.tools] nested table — read groups as a string array
+     and reject unknown names here, at load time. [Keeper_tool_group] is a
+     leaf under this parser and the descriptor, which is what makes the
+     check possible at this end at all: a typo in [keeper.tools] fails the
+     load instead of quietly keeping the full surface. *)
+  let tool_groups_result =
     match List.assoc_opt "keeper.tools.groups" doc with
-    | None -> None
+    | None -> Ok None
     | Some (Keeper_toml_loader.Toml_string_array groups) ->
       let normalized = normalize_name_list groups in
-      if normalized = [] then None else Some normalized
-    | Some _ -> None
+      if normalized = [] then Ok None
+      else
+        let unknown =
+          List.filter_map
+            (fun name ->
+               match Keeper_tool_group.of_string name with
+               | Some _ -> None
+               | None -> Some name)
+            normalized
+        in
+        (match unknown with
+         | [] -> Ok (Some normalized)
+         | names ->
+           Error
+             (Printf.sprintf
+                "unknown keeper tool groups (keeper.tools.groups): %s"
+                (String.concat ", " names)))
+    | Some _ -> Ok None
   in
   let result =
     match detect_unknown_keeper_toml_keys doc with
@@ -173,6 +173,18 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (Printf.sprintf
              "unknown keeper TOML keys: %s"
              (String.concat ", " fields))
+  in
+  let result =
+    Result.bind result (fun () ->
+        match tool_groups_result with
+        | Ok _ -> Ok ()
+        | Error error -> Error error)
+  in
+  (* The record is built from the checked value; on [Error] the parse below
+     never escapes to a caller anyway, so the fallback here is unreachable
+     bookkeeping rather than a silent pass-through. *)
+  let tool_groups =
+    match tool_groups_result with Ok groups -> groups | Error _ -> None
   in
   let result =
     Result.bind result (fun () ->

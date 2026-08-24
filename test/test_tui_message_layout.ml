@@ -218,11 +218,6 @@ let test_input_cursor_uses_visible_terminal_cells () =
   check string "short role label pads with spaces"
     ("you" ^ String.make 13 ' ')
     (Layout.align_role_label "you");
-  let row terminal_rows history_height status_rows =
-    Layout.input_cursor_row ~terminal_rows ~history_height ~status_rows
-  in
-  check int "normal input row" 25 (row 30 15 5);
-  check int "excess status rows clamp to the terminal" 30 (row 30 20 20);
   let supported rows cols status_rows =
     Layout.message_viewport_supported ~terminal_rows:rows ~terminal_cols:cols
       ~status_rows

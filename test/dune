@@ -276,6 +276,9 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_keeper_schema_toml_parity
+  test_keeper_runtime_schemas_toml_parity
+  test_taskboard_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
@@ -590,6 +593,9 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_keeper_schema_toml_parity
+  test_keeper_runtime_schemas_toml_parity
+  test_taskboard_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle

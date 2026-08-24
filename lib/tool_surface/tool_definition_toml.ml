@@ -250,6 +250,10 @@ let rec param_of_pairs ~context pairs =
       let* () = only_for ~context:key_context ~declared Ptype_array in
       let* v = as_int ~context:key_context value in
       Ok (Some ("maxItems", `Int v))
+    | "min_items" ->
+      let* () = only_for ~context:key_context ~declared Ptype_array in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("minItems", `Int v))
     | "additional_properties" ->
       let* () = only_for ~context:key_context ~declared Ptype_object in
       let* v = as_bool ~context:key_context value in

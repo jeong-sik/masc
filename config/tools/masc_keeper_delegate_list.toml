@@ -1,0 +1,22 @@
+name = "masc_keeper_delegate_list"
+description = """
+List queued Keeper chat operations owned by the caller for one exact Keeper \
+target."""
+additional_properties = false
+
+[[params]]
+name = "target"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params]]
+name = "kind"
+type = "string"
+required = true
+enum = ["keeper"]
+
+[[params.params]]
+name = "name"
+type = "string"
+required = true

@@ -424,6 +424,11 @@
  (libraries unix))
 
 (library
+ (name masc_tui_csi)
+ (wrapped false)
+ (modules masc_tui_csi))
+
+(library
  (name masc_tui_editor_jump)
  (wrapped false)
  (modules masc_tui_editor_jump)
@@ -521,6 +526,7 @@
   masc_tui_terminal_write_repair
   masc_tui_editor
   masc_tui_editor_jump
+  masc_tui_csi
   masc.dashboard
   masc.server
   masc.config

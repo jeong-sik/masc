@@ -2833,10 +2833,28 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
            ; "keeper_id", `String ("k-" ^ keeper_name)
            ; "status", `String "active"
+             (* #30084 moved [continuity_row_of_keeper] off the folded [status]
+                word onto two fields this row never carried: [health_state] and
+                the last action time. An absent diagnostic reads as health "",
+                which the builder refuses by design -- and the refusal took the
+                whole continuity list down with it, because it is raised inside
+                the [filter_map] that builds every brief.
+
+                The row now says in the new vocabulary what it always meant in
+                the old one: a live keeper that has taken its turn. Both fields
+                are ones the live producer always writes
+                ([keeper_status_runtime.ml] stamps [health_state] on every
+                diagnostic), so this is the fixture catching up, not the
+                builder being loosened. *)
+           ; ( "diagnostic"
+             , `Assoc [ "health_state", `String "healthy" ] )
            ; "keepalive_running", `Bool false
            ; "turn_count", `Int 1
            ; "updated_at", `String now
-           ; "tool_audit_at", `String ""
+             (* [tool_audit_at] is where the builder reads "has this keeper
+                acted"; empty means never, and never is [Lc_idle]. The row
+                claims [turn_count = 1], so it has. *)
+           ; "tool_audit_at", `String now
            ; "recent_tool_names", `List []
            ; "latest_tool_names", `List []
            ]

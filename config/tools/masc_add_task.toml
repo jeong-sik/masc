@@ -79,3 +79,11 @@ items = { type = "string" }
 name = "verify_gate_evidence"
 type = "array"
 items = { type = "string" }
+
+[[params]]
+name = "skills"
+type = "array"
+items = { type = "string" }
+description = """
+Skill directory names under <base-path>/.masc/skills/ that a keeper working \
+this task may read. Omit when the task needs none."""

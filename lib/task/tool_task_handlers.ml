@@ -122,7 +122,14 @@ include Tool_task_contract_gate
 
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let valid_keys =
-    [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id" ]
+    [ "title"
+    ; "priority"
+    ; "description"
+    ; "goal_id"
+    ; "contract"
+    ; "predecessor_task_id"
+    ; "skills"
+    ]
   in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
@@ -151,6 +158,16 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     match Safe_ops.json_string_opt "predecessor_task_id" args with
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
+  in
+  (* Skill directory names under <base-path>/.masc/skills/. Blank entries are
+     dropped rather than stored: a name that trims to nothing can never match
+     a directory, and keeping it would put an empty item in the prompt line
+     the keeper reads. *)
+  let skills =
+    Safe_ops.json_string_list "skills" args
+    |> List.filter_map (fun name ->
+      let trimmed = String.trim name in
+      if String.equal trimmed "" then None else Some trimmed)
   in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
@@ -198,6 +215,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
           Workspace.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
+            ~skills
             ~created_by ctx.config ~title:trimmed_title
             ~priority ~description
         in

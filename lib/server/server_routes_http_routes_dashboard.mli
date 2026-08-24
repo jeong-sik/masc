@@ -20,6 +20,14 @@ module For_testing : sig
   val exact_lane_run_permission : Masc_domain.permission
   val runtime_probe_read_permission : Masc_domain.permission
 
+  val fusion_run_detail_response :
+    registry:Fusion_run_registry.t ->
+    path:string ->
+    [ `Bad_request | `Not_found | `OK ] * Yojson.Safe.t
+
+  val fusion_run_list_response :
+    registry:Fusion_run_registry.t -> Yojson.Safe.t
+
   type gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report
     | Recovery_failed of string

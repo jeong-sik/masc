@@ -102,6 +102,30 @@ let invalidate_terminal_size () =
   Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
 
 let probe_terminal_size () =
+  (* The size lives on the controlling terminal. Since #30160 pointed stderr
+     at a file, a child probe inherits no tty fd at all -- stdout is the pipe
+     this read comes from -- so tput fell back to the terminfo default and
+     every real terminal drew as 80x24 (#30181). stty asks /dev/tty by name,
+     which no redirect can take away. *)
+  let read_stty_size () =
+    try
+      let line, status =
+        With_process.with_process_args_in "/bin/sh"
+          [| "/bin/sh"; "-c"; "stty size </dev/tty" |]
+          input_line
+      in
+      match status with
+      | Unix.WEXITED 0 -> (
+          match String.split_on_char ' ' (String.trim line) with
+          | [ rows; cols ] -> (
+              match int_of_string_opt rows, int_of_string_opt cols with
+              | Some rows, Some cols when rows > 0 && cols > 0 ->
+                  Some (rows, cols)
+              | _ -> None)
+          | _ -> None)
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
+    with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
+  in
   let read_tput arg =
     try
       let line, status =
@@ -113,6 +137,9 @@ let probe_terminal_size () =
       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
     with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
   in
+  match read_stty_size () with
+  | Some (rows, cols) -> Some (rows, cols)
+  | None ->
   match read_tput "cols", read_tput "lines" with
   | Some cols, Some rows -> Some (rows, cols)
   | _ -> None

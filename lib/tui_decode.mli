@@ -710,8 +710,8 @@ val decode_keeper : Yojson.Safe.t -> (keeper, string) result
     that is not listening carries no session or port, so those stay [None]
     rather than collapsing to zero. *)
 type transport_health = {
-  th_primary_path : string;
-  th_queue_pressure : string;
+  th_primary_path : Transport_metrics.primary_path_kind;
+  th_queue_pressure : Transport_metrics.queue_pressure_kind;
   th_sse_sessions : int;
   th_websocket_sessions : int option;
   th_grpc_port : int option;

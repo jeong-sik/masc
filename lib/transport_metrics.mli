@@ -288,6 +288,35 @@ val inc_agent_stale : unit -> unit
 
 (** {1 Transport health snapshot} *)
 
+(** Which transport carries the operator's stream right now. Closed so a
+    reader lands on one of the four values this module can publish; a spelling
+    it does not know is a decode failure rather than a word rendered as if it
+    named a path (#27652). *)
+type primary_path_kind =
+  | Grpc_subscribe
+  | Websocket
+  | Sse
+  | Streamable_http
+
+val primary_path_kind_to_string : primary_path_kind -> string
+
+val primary_path_kind_of_string : string -> primary_path_kind option
+(** [None] when the word is not one this module publishes. *)
+
+(** How full the deepest outbound queue is. Read from current depths, not from
+    lifetime totals: a counter that only grows pinned this to [High] until the
+    next restart (#27652). *)
+type queue_pressure_kind =
+  | Steady
+  | Watch
+  | High
+
+val queue_pressure_kind_to_string : queue_pressure_kind -> string
+
+val queue_pressure_kind_of_string : string -> queue_pressure_kind option
+(** [None] when the word is not one this module publishes. *)
+
+
 (** [transport_health_json ()] returns a JSON object with
     SSE / gRPC / WebSocket / agent-health metric values plus
     derived fields ([primary_path], [queue_pressure],

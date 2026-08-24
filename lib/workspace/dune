@@ -56,6 +56,8 @@
   masc_eio_context
   masc_process
   masc.masc_exec
+  ; #27397: the evidence snapshot cap is the Read ceiling, read from the leaf
+  masc_tool_types
   ; #27143: the day-file layout has one owner; this module used to rebuild it
   masc.jsonl_writer
   ; RFC-0085 PR-9 — workspace_utils_backend_setup reads the env-derived

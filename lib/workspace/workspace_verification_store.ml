@@ -155,8 +155,13 @@ let evidence_access_failure_to_string ~request_id = function
    20_000 to 200_000 so contract artifacts in the observed 40-128KB range are
    persisted in full (truncated=false) instead of being marked unusable by the
    completion authority. The cap stays bounded to bound verifier memory and
-   backlog storage. *)
-let verification_evidence_max_bytes = 200_000
+   backlog storage.
+
+   It is the Read ceiling, taken from the same value rather than written out
+   again: the authority reads live through Read and the operator reviews the
+   snapshot, so a Read allowed past this cap would let a verdict rest on bytes
+   the snapshot does not hold (#27397). *)
+let verification_evidence_max_bytes = Tool_shard_limits.verification_evidence_max_bytes
 
 let submitted_evidence_access_to_yojson = function
   | Evidence_available { request; items } ->

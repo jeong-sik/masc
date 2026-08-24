@@ -85,8 +85,20 @@ let test_terminal_cell_width_and_fit () =
     (Layout.fit_width "\x1B[31m한글\x1B[0m" 3);
   check string "emoji grapheme is never split by fit" " ~"
     (Layout.fit_width "👍🏽A" 2);
+  (* The widest footer the chat pane assembles, built from the longest value
+     of each part rather than quoted whole. The fixture used to be a short
+     blocked hint and stopped being the widest when the queue hint arrived,
+     without anything going red: this check passes on any string over the
+     budget, so a stale fixture stays green while covering less than it says. *)
   let longest_footer =
-    "\x1B[2m  reconciling exact operation  Enter:blocked  Esc:back  Ctrl-U:clear line\x1B[0m"
+    String.concat "  "
+      [ "\x1B[2m"
+      ; "Enter:queue (99 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+      ; "Ctrl-J:newline"
+      ; "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+      ; "Esc:interrupt turn"
+      ; "Ctrl-U:clear\x1B[0m"
+      ]
   in
   List.iter
     (fun terminal_cols ->

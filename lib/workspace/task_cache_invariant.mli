@@ -31,13 +31,24 @@ type agent_task_match =
     [Cancelled _]. *)
 val is_terminal : Masc_domain.task_status -> bool
 
+(** Why an agent record had its [current_task] cleared.
+
+    [After_commit] is the routine sweep a writer runs once its backlog commit
+    lands. [Desync] is the reactive path, which clears only after reading the
+    canonical backlog and finding the task terminal or gone. The event name
+    follows the cause, so counting one does not count the other (#27411). *)
+type clear_cause =
+  | After_commit
+  | Desync
+
 (** Clear the agent's on-disk [current_task] when it equals [task_id] and
-    log a [cache_desync.cleared] diagnostic event.
+    log one diagnostic event named by [cause].
 
     Callers should invoke this before emitting a [cache_invalidated] broadcast
     to ensure the agent's state is clean before the message is sent. *)
 val clear_stale_agent_task :
   Workspace_utils_backend_setup.config ->
+  cause:clear_cause ->
   agent_name:string ->
   task_id:string ->
   status:Masc_domain.task_status ->
@@ -50,6 +61,7 @@ val clear_stale_agent_task :
     was written. *)
 val clear_stale_agent_task_if_matching :
   Workspace_utils_backend_setup.config ->
+  cause:clear_cause ->
   agent_name:string ->
   task_id:string ->
   status_label:string ->
@@ -66,12 +78,13 @@ val agent_current_task_match :
 (** Scan every on-disk agent record and clear [current_task] when it equals
     [task_id].  Use this when the backlog no longer references the task
     (terminal status or deletion) and the exact previous assignee is not
-    known.  Logs one [cache_desync.cleared] event per affected agent.
+    known.  Logs one event per affected agent, named by [cause].
 
     The read is best-effort and unlocked; {!clear_stale_agent_task}
     re-checks the match under the per-agent file lock before writing. *)
 val clear_stale_agent_task_for_task :
   Workspace_utils_backend_setup.config ->
+  cause:clear_cause ->
   task_id:string ->
   status:Masc_domain.task_status ->
   module_name:string ->

@@ -75,6 +75,24 @@ export type KeeperTurnOutcome =
 
 type KeeperChatCustomEvent =
   | { type: 'CUSTOM'; name: 'KEEPER_CONNECTED'; value: null }
+  // #29650 added these two to the name list above and to the SSE field table,
+  // but not here, so a decoded frame could not be handed to a handler that
+  // takes a KeeperChatStreamEvent. The fields match sse.ts's allowedFields.
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_TOOL_APPROVAL_REQUESTED'
+      value: {
+        tool_call_id: string
+        tool_call_name: string
+        args: string
+        question: string
+      }
+    }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_TOOL_APPROVAL_SETTLED'
+      value: { tool_call_id: string; outcome: string }
+    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_CHAT_OPERATION_ACCEPTED'

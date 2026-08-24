@@ -40,6 +40,39 @@ let synchronized_output_enabled () =
        | "" | "1" | "true" | "yes" | "on" | _ -> true)
   | None -> true
 
+(* Point fd 2 at a file under the base path, so writing to stderr cannot land
+   in the frame. Best effort by construction: a surface that cannot open its
+   log is still a working surface, and refusing to start over it would trade a
+   cosmetic fault for an outage. The failure is reported on the terminal that
+   is about to be cleared, which is the last moment a person can see it. *)
+let redirect_stderr_off_terminal ~base_path =
+  match
+    let dir =
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "logs"
+    in
+    let path =
+      Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
+    in
+    let fd =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+    in
+    (* No [Fun.protect] around the close: its [Finally_raised] is neither
+       [Unix_error] nor [Sys_error], so a raising finaliser would leave this
+       match and take the surface down over a descriptor. If [dup2] raises,
+       one fd leaks in a process that is one line from reporting it. *)
+    Unix.dup2 fd Unix.stderr;
+    Unix.close fd;
+    path
+  with
+  | path ->
+      Log.info ~ctx:"masc-tui" "stderr redirected to %s" path
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+      (* Say so before the screen is taken: a surface drawing over a mirror it
+         could not move is the state this whole path exists to avoid. *)
+      prerr_endline
+        "[masc-tui] could not redirect stderr off this terminal; log lines may \
+         land in the drawn screen"
+
 let require_interactive_terminal () =
   let term =
     Sys.getenv_opt "TERM"
@@ -1084,6 +1117,29 @@ let launch_verification_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+
+(* Move the roster cursor to the next keeper whose name contains [query],
+   scanning forward from [after] and wrapping. A miss moves nothing. *)
+let roster_search_jump state ~query ~after =
+  let query = String.lowercase_ascii query in
+  let total = List.length state.keepers in
+  if String.length query > 0 && total > 0 then begin
+    let matches index =
+      match List.nth_opt state.keepers index with
+      | Some (k : keeper) ->
+          Masc_tui_types.palette_contains ~needle:query k.k_name
+      | None -> false
+    in
+    let rec scan step =
+      if step > total then ()
+      else begin
+        let index = (after + step + total) mod total in
+        if matches index then state.keeper_cursor <- index
+        else scan (step + 1)
+      end
+    in
+    scan 1
+  end
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -3458,15 +3514,21 @@ let main () =
   Provider_diag_log_sink.install ();
   let (base_path, workspace, port, refresh) = parse_args () in
   require_interactive_terminal ();
-  (* The console mirror writes every record to stderr, and stderr is this
-     terminal. A library Info line printed between two frames lands inside the
-     drawn screen, and the repaint that follows does not unprint it -- it is
-     already in the scrollback the frame occupies. Warn is the floor because a
-     warning is worth that cost and a routine "loaded N entries" is not.
+  (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
+     on the same [/dev/ttys*]. Everything that writes there writes into the
+     drawn screen: the console mirror behind every [Log] record, this binary's
+     own decode reports ([Masc_tui_loader.report]), and anything a library
+     prints without asking. Raising the level to Warn narrowed that to fewer
+     lines; it did not stop them, and it bought the narrowing by dropping Info
+     records from the ring the System logs surface reads.
 
-     MASC_LOG_LEVEL still wins: init_from_env runs after, so an operator who
-     asks for Info gets it, terminal or not. *)
-  Log.set_level Log.Warn;
+     So the terminal is taken away from stderr instead. The console is a
+     mirror by its own contract -- {!Console_sink} names the file sink and the
+     ring authoritative -- and a mirror pointed at a file is still a mirror,
+     while one pointed here is a corruption. This runs after
+     [require_interactive_terminal] so its refusal still reaches a person, and
+     before anything can log. *)
+  redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
   let state = create_state ~workspace ~port ~refresh_interval:refresh in
   state.view <- Overview;
@@ -3720,7 +3782,9 @@ let main () =
       in
       (match key with
        | Some _ when composer_claimed -> ()
-       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
+       | Some k
+         when Render_schedule.Input_shortcut.is_quit ~message_mode k
+              && Option.is_none state.roster_search ->
            raise Break
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
@@ -3774,6 +3838,63 @@ let main () =
                 state.palette_query <- state.palette_query ^ s;
                 state.palette_cursor <- 0
             | _ -> ())
+       (* Roster search: typing moves the cursor live to the first match
+          from the top; Enter keeps the query for n/N, Esc keeps nothing.
+          The list itself never narrows -- see [roster_search] in types. *)
+       | Some k
+         when state.view = Keepers Keeper_list
+              && Option.is_some state.roster_search ->
+           let query = Option.value state.roster_search ~default:"" in
+           (match k with
+            | "esc" -> state.roster_search <- None
+            | "\r" ->
+                state.roster_search <- None;
+                state.roster_search_last <- query
+            | "\127" | "\b" ->
+                let shorter =
+                  Masc_tui_message_layout.drop_last_utf8_scalar query
+                in
+                state.roster_search <- Some shorter;
+                roster_search_jump state ~query:shorter ~after:(-1)
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                let longer = query ^ s in
+                state.roster_search <- Some longer;
+                roster_search_jump state ~query:longer ~after:(-1)
+            | _ -> ())
+       | Some "/" when state.view = Keepers Keeper_list ->
+           state.roster_search <- Some ""
+       | Some "n"
+         when state.view = Keepers Keeper_list
+              && state.roster_search_last <> "" ->
+           roster_search_jump state ~query:state.roster_search_last
+             ~after:state.keeper_cursor
+       | Some "N"
+         when state.view = Keepers Keeper_list
+              && state.roster_search_last <> "" ->
+           (* Backwards: the same wrap walked the other way. *)
+           let total = List.length state.keepers in
+           let query = String.lowercase_ascii state.roster_search_last in
+           if total > 0 then begin
+             let matches index =
+               match List.nth_opt state.keepers index with
+               | Some (k : keeper) ->
+                   Masc_tui_types.palette_contains ~needle:query k.k_name
+               | None -> false
+             in
+             let rec scan step =
+               if step > total then ()
+               else begin
+                 let index =
+                   (state.keeper_cursor - step + (total * 2)) mod total
+                 in
+                 if matches index then state.keeper_cursor <- index
+                 else scan (step + 1)
+               end
+             in
+             scan 1
+           end
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =

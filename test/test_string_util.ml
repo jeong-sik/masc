@@ -379,6 +379,32 @@ let test_trim_nonempty_rejects_whitespace_only () =
   check (option string) "trims both ends" (Some "a b") (SU.trim_nonempty "  a b  ")
 ;;
 
+let test_is_valid_utf8_basic () =
+  check bool "ascii" true (String_util.is_valid_utf8 "abc");
+  check bool "empty" true (String_util.is_valid_utf8 "");
+  check bool "korean" true (String_util.is_valid_utf8 "\xed\x95\x9c\xea\xb8\x80");
+  check bool "lone lead byte" false (String_util.is_valid_utf8 "\xec");
+  check bool "truncated three-byte sequence" false
+    (String_util.is_valid_utf8 "\xec\x9d")
+
+(* 2026-08-24, sangsu turn 23:23:13. [Voice_bridge] cut this message at 50
+   bytes to build [message_preview]. The cut landed inside the third byte of
+   the 17th syllable, and the codex app-server exited while decoding the tool
+   result as UTF-8, taking the turn with it. Both cuts are asserted so a
+   future regression cannot pass by matching only the new value. *)
+let test_utf8_prefix_korean_boundary () =
+  let message =
+    "\xec\x9d\x91, \xea\xb0\x80\xeb\x8a\xa5\xed\x95\xb4. \xeb\x8b\xa4\xeb\xa7\x8c \xec\xa7\x80\xea\xb8\x88\xec\x9d\x80 \xec\x8b\xa4\xec\x8b\x9c\xea\xb0\x84 \xec\xa0\x84\xed\x99\x94\xec\xb2\x98\xeb\x9f\xbc"
+  in
+  check bool "byte cut splits a character" false
+    (String_util.is_valid_utf8 (String.sub message 0 50));
+  let boundary_cut = String_util.utf8_prefix ~max_bytes:50 message in
+  check bool "boundary cut decodes" true (String_util.is_valid_utf8 boundary_cut);
+  check bool "boundary cut stays within the cap" true
+    (String.length boundary_cut <= 50);
+  check bool "boundary cut drops only the split character" true
+    (String.equal boundary_cut (String.sub message 0 49))
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -447,4 +473,8 @@ let () =
           test_case "None passes through" `Quick
             test_option_trim_passes_none_through;
           test_case "whitespace-only is None" `Quick
-            test_trim_nonempty_rejects_whitespace_only ] ) ]
+            test_trim_nonempty_rejects_whitespace_only ] );
+      ( "utf8_boundary",
+        [ test_case "is_valid_utf8 basics" `Quick test_is_valid_utf8_basic;
+          test_case "Korean 50-byte cut regression" `Quick
+            test_utf8_prefix_korean_boundary ] ) ]

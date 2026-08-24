@@ -228,6 +228,9 @@ export interface OperatorKeeperSnapshot {
   phase?: string | null
   pipeline_stage?: string | null
   paused?: boolean | null
+  /** `Keeper_status_runtime.keeper_health` as published by the keeper brief
+   *  row. Separate from `status`, which folded this axis into the phase. */
+  health?: string | null
   registered?: boolean
   agent_name?: string
   status?: string

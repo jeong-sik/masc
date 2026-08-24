@@ -328,6 +328,7 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_shell_costume
+  test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
   test_auth_strict_mode
@@ -658,6 +659,7 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_shell_costume
+  test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
   test_auth_strict_mode
@@ -1988,6 +1990,8 @@
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
 
+(include stanzas/test_pause_authority_agrees.inc)
+
 (include stanzas/test_keeper_meta_config_not_durable.inc)
 
 (include stanzas/test_keeper_mutex_coverage.inc)
@@ -2692,6 +2696,11 @@
 (test
  (name test_tui_surface_needs)
  (modules test_tui_surface_needs)
+ (libraries alcotest masc_tui_types))
+
+(test
+ (name test_tui_palette_matching)
+ (modules test_tui_palette_matching)
  (libraries alcotest masc_tui_types))
 
 (test

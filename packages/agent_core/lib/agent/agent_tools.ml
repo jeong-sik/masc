@@ -226,6 +226,49 @@ let resolve_tool_call tool_index name input =
     | None -> name, input, None)
 ;;
 
+(* The transcript is what the next request replays to the model, so a tool name
+   that never routed must not survive in it. Live shape 2026-08-24 (masc#29337):
+   a keeper emitted [Execute-1.1111e1111111] once, the block stayed in history,
+   and the same byte string came back 115 times over 2h17m. The same string also
+   survived a lane switch from glm-5-turbo to deepseek-v4-flash, which is only
+   possible if the source is the transcript rather than either model.
+
+   History therefore carries what dispatch resolved, not what the wire carried:
+   a recovered name is stored under its registered spelling (so the call-number
+   recovery above stops teaching the fused shape), and an unroutable call is
+   stored not at all. The wire text stays intact in the raw trace, which is the
+   evidence authority for what the provider actually sent. *)
+type tool_use_admission =
+  { admitted : Types.content_block list
+  ; rejected : int
+  }
+
+let admit_tool_use_names tool_index blocks =
+  let rejected = ref 0 in
+  let admitted =
+    List.filter_map
+      (fun (block : Types.content_block) ->
+         match block with
+         | Types.ToolUse { id; name; input } ->
+           (match resolve_tool_call tool_index name input with
+            | resolved, resolved_input, Some _ ->
+              Some (Types.ToolUse { id; name = resolved; input = resolved_input })
+            | _, _, None ->
+              incr rejected;
+              None)
+         | Types.Text _
+         | Types.Thinking _
+         | Types.ReasoningDetails _
+         | Types.RedactedThinking _
+         | Types.ToolResult _
+         | Types.Image _
+         | Types.Document _
+         | Types.Audio _ -> Some block)
+      blocks
+  in
+  { admitted; rejected = !rejected }
+;;
+
 let schedule_tool_use ~tool_index index (id, name, input) =
   (* Resolving through [resolve_tool_call] (not a bare [find_in_index]) keeps
      the scheduled name, execution_mode, and completion consistent with what

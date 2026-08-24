@@ -189,6 +189,18 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("tool_audit_at", member_assoc "tool_audit_at" keeper);
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);
+                      (* The rank above is computed from [health], but the row it
+                         ranks did not carry it, so no reader could reproduce or
+                         explain the order -- and [status] was the only liveness
+                         word on this row, which is the fold this axis replaces.
+                         [phase] travels with it because operator surfaces ask
+                         two different questions: "is it running" (health) and
+                         "did an operator stop it" (phase). *)
+                      ("health",
+                       Json_util.option_to_yojson
+                         (fun value -> `String (Keeper_status_runtime.keeper_health_to_string value))
+                         health);
+                      ("phase", member_assoc "phase" keeper);
                       ("exclusion_reason",
                        Keeper_runtime.autoboot_exclusion_reason_opt_to_yojson
                          (Keeper_runtime.autoboot_exclusion_reason config name));

@@ -88,12 +88,19 @@ describe('keeperActionVisibility', () => {
       expect(v.canWake).toBe(false)
     })
 
-    it('detects paused via status even if phase is missing', () => {
-      const k = makeKeeper({ status: 'paused', phase: null, paused: false })
+    it('phase 가 없어도 flag 가 서 있으면 재개를 권한다', () => {
+      const k = makeKeeper({ status: 'active', phase: null, paused: true })
       const v = keeperActionVisibility(k)
       expect(v.canResume).toBe(true)
       expect(v.canPause).toBe(false)
       expect(v.canWake).toBe(false)
+    })
+
+    // flag 가 내려간 뒤에도 캐시된 `status` 단어가 남아 있을 수 있다.
+    // 그 단어만 보고 재개 버튼을 열면 이미 멈춘 키퍼를 재개 가능으로 그린다.
+    it("flag 가 false 면 status='paused' 만으로 재개를 권하지 않는다", () => {
+      const k = makeKeeper({ status: 'paused', phase: null, paused: false })
+      expect(keeperActionVisibility(k).canResume).toBe(false)
     })
 
     it('detects paused via pipeline_stage even if status is active', () => {

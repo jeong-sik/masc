@@ -11,6 +11,72 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root" || exit 2
 
+print_failure_block() {
+  local name="$1"
+  local source_log="$2"
+  awk -v n="$name" '
+    /^File "test\/(dune|stanzas\/[a-z0-9_]+\.inc)", line/ {
+      if (printing) exit
+      header = $0
+      if ((getline stanza) <= 0) next
+      if (match(stanza, /test_[a-z0-9_]+/) && substr(stanza, RSTART, RLENGTH) == n) {
+        print header
+        print stanza
+        printing = 1
+      }
+      next
+    }
+    printing
+  ' "$source_log"
+}
+
+self_test() {
+  local exact_block
+  local longer_block
+  fixture_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-self-test.XXXXXX")"
+  trap 'rm -f "$fixture_log"' EXIT
+
+  cat > "$fixture_log" <<'EOF'
+File "test/dune", line 10, characters 0-20:
+10 |  (name test_ci_failure_output_extra)
+This run has ID `EXTRA'.
+
+  [FAIL]        wrong group          0   longer suite name.
+ASSERT this belongs only to the longer suite name
+File "test/stanzas/test_ci_failure_output.inc", line 2, characters 1-40:
+2 |  (name test_ci_failure_output)
+This run has ID `EXACT'.
+
+  [FAIL]        exact group          7   exact failing case.
+ASSERT exact assertion survived the blank line
+EOF
+
+  exact_block="$(print_failure_block test_ci_failure_output "$fixture_log")"
+  longer_block="$(print_failure_block test_ci_failure_output_extra "$fixture_log")"
+
+  printf '%s\n' "$exact_block" | grep -Fq '[FAIL]        exact group          7   exact failing case.' \
+    || { echo "[test-suite] self-test FAIL - exact case is missing" >&2; exit 1; }
+  printf '%s\n' "$exact_block" | grep -Fq 'ASSERT exact assertion survived the blank line' \
+    || { echo "[test-suite] self-test FAIL - assertion after blank line is missing" >&2; exit 1; }
+  if printf '%s\n' "$exact_block" | grep -Fq 'longer suite name'; then
+    echo "[test-suite] self-test FAIL - prefix suite leaked into exact block" >&2
+    exit 1
+  fi
+  printf '%s\n' "$longer_block" | grep -Fq 'ASSERT this belongs only to the longer suite name' \
+    || { echo "[test-suite] self-test FAIL - prefix suite block is missing" >&2; exit 1; }
+  if printf '%s\n' "$longer_block" | grep -Fq 'exact failing case'; then
+    echo "[test-suite] self-test FAIL - exact suite leaked into prefix block" >&2
+    exit 1
+  fi
+
+  echo "[test-suite] self-test OK - blank line and prefix collision"
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  self_test
+  exit 0
+fi
+
 known_file="test/ci-known-failures.txt"
 # One budget for the whole suite. The job timeout above this is the last
 # boundary; this one exists so a hang prints its diagnostics first.
@@ -74,7 +140,10 @@ if [ -n "$new" ]; then
   echo
   for name in $new; do
     echo "--- $name ---"
-    awk -v n="$name" '$0 ~ n {p = 1} p && /^$/ {exit} p' "$log" | head -25
+    # Print the exact Dune failure block, including Alcotest's case name and
+    # assertion after the blank line that follows its run ID. Match the suite
+    # name from the stanza line instead of a substring in another executable.
+    print_failure_block "$name" "$log"
   done
 fi
 

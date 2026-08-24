@@ -52,7 +52,7 @@ val ends_with_tool_results : Agent_core.Types.message list -> bool
     anywhere in history, so it is non-empty for almost every turn of a keeper
     that has ever used a tool. Gating the recurring context blocks on that
     predicate suppressed the world state on the first round of ordinary turns
-    (live: sangsu turn 15, 2026-08-24 08:08Z — ctx absent on round one). The
+    (live: a keeper's turn 15, 2026-08-24 08:08Z — ctx absent on round one). The
     first round of a turn ends with the user's message; only rounds that
     follow tool execution end with the Tool message. *)
 

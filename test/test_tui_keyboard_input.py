@@ -837,6 +837,41 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
+def keeper_runtime_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/gate/keepers?detailed=true"] = (
+        200,
+        {
+            "count": 2,
+            "total": 2,
+            "truncated": False,
+            "keepers": [
+                {
+                    "runtime_class": "keeper",
+                    "name": "alpha",
+                    "status": "active",
+                    "phase": "running",
+                    "keepalive_running": True,
+                    "autoboot_enabled": True,
+                    "proactive_enabled": True,
+                    "runtime_id": "anthropic.claude-opus-5",
+                },
+                {
+                    "runtime_class": "keeper",
+                    "name": "beta",
+                    "status": "idle",
+                    "phase": "paused",
+                    "keepalive_running": True,
+                    "autoboot_enabled": True,
+                    "proactive_enabled": False,
+                    "runtime_id": "anthropic.claude-sonnet-4",
+                },
+            ],
+        },
+    )
+    return fixtures
+
+
 PLANNING_PATH = "/api/v1/dashboard/planning"
 
 
@@ -1300,12 +1335,44 @@ def navigate_with_arrows_and_quit(
         b"\x1b[A",
         keeper_row_selected(b"alpha"),
     )
-    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
-    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Esc:list")
     send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
     # That the letters became draft text is the claim above. Leaving the
-    # pane and quitting is this walk's own exit, not part of the claim.
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    # pane returns to the list it opened from; quitting is this walk's own exit.
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    os.write(master_fd, b"q")
+
+
+def keeper_runtime_phase_and_model_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=140,
+        needle=b"MASC Overview",
+    )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"2",
+        b"running claude-opus-5",
+    )
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"paused claude-sonnet-4",
+        start=0,
+        timeout=3.0,
+    )
     os.write(master_fd, b"q")
 
 
@@ -3679,6 +3746,12 @@ def run_keyboard_regression(executable: str) -> None:
         description="console diagnostic repair",
         interact=repair_after_console_diagnostic,
         refresh=0.05,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper phase and model",
+        interact=keeper_runtime_phase_and_model_interaction,
+        http_fixtures=keeper_runtime_http_fixtures(),
     )
     run_terminal_scenario(
         executable,

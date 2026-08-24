@@ -1591,7 +1591,9 @@ let keeper_runtime_label (runtime : keeper_runtime option) =
             String.sub raw (idx + 1) (String.length raw - idx - 1)
         | Some _ | None -> raw
       in
-      Printf.sprintf "%s %s" (Terminal_text.single_line row.kr_phase) model)
+      Printf.sprintf "%s %s"
+        (Tui_decode.keeper_phase_to_string row.kr_phase)
+        model)
 
 (* Two dispositions an operator needs before stopping anything: whether the
    keeper comes back by itself, and whether it takes turns without being
@@ -1620,7 +1622,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
        else "")
     ; Printf.sprintf " %*s" Render_schedule.keeper_turns_width "TURNS"
     ; (if columns.kcol_show_runtime then
-         " " ^ Printf.sprintf "%-*s" columns.kcol_runtime "RUNTIME"
+         " " ^ fit_width "PHASE / MODEL" columns.kcol_runtime
        else "")
     ; " "
     ; "TASK"
@@ -2583,7 +2585,10 @@ let render_keeper_message (state : state) =
              = Keeper_chat_transcript.Not_requested ->
           "Esc:interrupt turn"
       | Some _ -> "Esc:interrupt sent"
-      | None -> "Esc:back"
+      | None ->
+          (match state.msg_return with
+           | Keeper_chat_return_list -> "Esc:list"
+           | Keeper_chat_return_detail -> "Esc:detail")
     in
     let footer =
       Printf.sprintf "%s  %s  Ctrl-J:newline  %s  %s  Ctrl-U:clear%s" Ansi.dim

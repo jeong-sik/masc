@@ -2068,7 +2068,6 @@
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
-(include stanzas/test_dashboard_keeper_feature_proof.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
 (include stanzas/test_keeper_claude_code_runtime.inc)
 (include stanzas/test_server_dashboard_official_client_probe.inc)

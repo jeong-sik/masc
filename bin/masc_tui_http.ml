@@ -691,14 +691,6 @@ let fetch_harness_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
 
-(** Fetch /api/v1/dashboard/keeper-feature-proof. No [window_hours] is passed:
-    the surface asks whether a feature has ever been shown to work, and a
-    window turns that into "not lately", which is a narrower question than the
-    one the operator opened the screen with. *)
-let fetch_keeper_feature_proof ~(host : string) ~(port : int) :
-    (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-feature-proof"
-
 (** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
     lists what is waiting rather than the whole history. *)
 let fetch_verification_requests ~(host : string) ~(port : int) ~(limit : int) :

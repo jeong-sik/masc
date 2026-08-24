@@ -82,7 +82,7 @@ list, Recent Events, and active tasks.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]
-   Health: bad  Agents: 2  Approvals: 0  Incidents: 4
+   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0  Incidents: 4
    Cluster: default          Project: me      websocket/steady  sse 3  ws 1  grpc :8936
  Attention                              | Recent Events 1-5/5
  [bad ] analyst needs operator atten~   | [10:54:52] TUI started

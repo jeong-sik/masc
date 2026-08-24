@@ -370,9 +370,22 @@ let short_timestamp_for_terminal text =
      else text)
 ;;
 
-let clock_timestamp_for_terminal text =
+(* The clock beside a row, in the zone the operator's terminal is in. The
+   server writes RFC 3339 on the UTC timeline; slicing HH:MM:SS straight out
+   of that string put a UTC clock on every log row under a header that showed
+   local time, nine hours apart in Seoul. [localtime] is the conversion the
+   caller chooses -- the terminal's own zone on a screen, a fixed one in a
+   test -- so this stays a function of its inputs. A timestamp the codec
+   cannot read keeps the old slice: the byte positions are still where a
+   clock would be, and the sanitizer still makes them safe to draw. *)
+let clock_timestamp_for_terminal ~localtime text =
   sanitize_terminal_text
-    (if String.length text >= 19 then String.sub text 11 8 else text)
+    (match Time_codec.parse_rfc3339_opt text with
+     | Some unix_seconds ->
+         let tm = localtime unix_seconds in
+         Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min
+           tm.Unix.tm_sec
+     | None -> if String.length text >= 19 then String.sub text 11 8 else text)
 ;;
 
 let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =

@@ -19,12 +19,6 @@ type t =
 val keeper_basename : keeper_name:string -> keeper_artifact -> string
 val basename : t -> string
 
-(** Return every typed interpretation whose canonical renderer exactly
-    round-trips to the input. The root catalog is injective; the list shape
-    makes that invariant directly testable without a hidden descriptor-order
-    fallback. *)
-val classify_basename : string -> t list
-
 (** Exact metadata interpretation, independent of overlapping artifact
     suffixes. *)
 val metadata_keeper_name : string -> string option

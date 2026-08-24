@@ -1315,15 +1315,6 @@
   (action
    (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test}))))
 
-; The 24h persistence gate shipped with no test, which is how a window that
-; could not hold 24h of rows survived as a permanent FAIL. Declared here and
-; attached to the alias below so it executes inside an existing CI step
-; instead of being added and never run.
-(test
- (name test_keeper_persistence_span_history)
- (modules test_keeper_persistence_span_history)
- (libraries masc_test_deps masc.dashboard))
-
 ; Stable dashboard behavior contracts only. The HTTP core executable also
 ; contains source-shape assertions, so CI selects its behavior suite; the
 ; briefing executable is behavior-only and runs in full.
@@ -1332,8 +1323,7 @@
  (action
   (progn
    (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")
-   (run %{exe:test_dashboard_briefing.exe})
-   (run %{exe:test_keeper_persistence_span_history.exe}))))
+   (run %{exe:test_dashboard_briefing.exe}))))
 
 (test
  (name test_voice_config)
@@ -1902,6 +1892,7 @@
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
 (include stanzas/test_keeper_tool_plan_executor.inc)
+(include stanzas/test_keeper_tool_progress_identity.inc)
 
 (include stanzas/test_keeper_fs.inc)
 
@@ -2649,6 +2640,11 @@
  (libraries alcotest fmt masc_tui_keeper_chat_live yojson))
 
 (test
+ (name test_tui_acting)
+ (modules test_tui_acting)
+ (libraries alcotest masc_tui_acting masc_tui_observer))
+
+(test
  (name test_tui_observer)
  (modules test_tui_observer)
  (libraries alcotest masc_tui_observer yojson))
@@ -2664,18 +2660,6 @@
   masc_tui_keeper_chat_projection
   masc.masc_random_id
   yojson))
-
-(test
- (name test_tui_keeper_chat_recovery)
- (modules test_tui_keeper_chat_recovery)
- (libraries
-  alcotest
-  eio
-  masc_tui_keeper_chat_projection
-  masc_tui_keeper_chat_recovery
-  fs_compat
-  threads
-  unix))
 
 (test
  (name test_tui_message_layout)

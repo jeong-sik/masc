@@ -102,7 +102,7 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Keepers _ | Board | Approvals | Planning | Schedules
+            | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools
             | Autonomy | System_logs ->
                 "  (2 then m to answer)"
@@ -309,9 +309,14 @@ let render_overview (state : state) =
           | Some snapshot, None -> string_of_int snapshot.aps_visible_count
           | None, _ | Some _, Some _ -> "?"
         in
-        Printf.sprintf "  Health: %s%s%s  Agents: %d  Approvals: %s  Incidents: %d"
-          health_color health_label Ansi.reset
-          o.ov_active_agents approval_count o.ov_incident_count
+        (* Keepers and MCP clients are counted apart: a row reading
+           "Agents: 2" over a runtime with ten keepers named the wrong
+           population. *)
+        Printf.sprintf
+          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s  \
+           Incidents: %d"
+          health_color health_label Ansi.reset o.ov_keepers o.ov_mcp_agents
+          approval_count o.ov_incident_count
   in
   box_line buf cols summary_line;
 
@@ -1664,6 +1669,7 @@ let keeper_action_hints ?(offers_chat = true) state reading =
           ; hint Keeper_control.Wakeup "wake"
           ; hint Keeper_control.Shutdown "shutdown"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
+          ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
@@ -2250,7 +2256,7 @@ let render_keeper_message (state : state) =
            ~terminal_cols:cols ~status_rows)
     then begin
       let notice =
-        " Keeper chat needs a larger terminal; resize to type (Ctrl-R:recover, Esc:back)"
+        " Keeper chat needs a larger terminal; resize to type (Esc:back)"
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
@@ -2353,10 +2359,8 @@ let render_keeper_message (state : state) =
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
     let scroll =
-      min state.msg_scroll
-        (Message_layout.max_scroll ~markdown:chat_markdown ~inner_width
-           ~height:history_height
-           layout_entries)
+      Message_layout.clamp_scroll ~markdown:chat_markdown ~inner_width
+        ~height:history_height state.msg_scroll layout_entries
     in
     let visible_rows =
       Message_layout.scrolled_rows ~markdown:chat_markdown ~inner_width
@@ -2395,78 +2399,42 @@ let render_keeper_message (state : state) =
     box_divider buf cols;
 
     (* Input line *)
-    (match state.msg_inflight, state.msg_inflight_kind with
-     | Some request, Some Dispatch_claim ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (waiting for serialized dispatch %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Operation_get ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (reconciling exact operation %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Cleanup_delete ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (finishing durable cleanup %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post
-       when Option.exists
-              (Keeper_chat.same_request_identity request)
-              state.msg_unverified ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (replaying exact request %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post
-       when String.equal request.keeper_name keeper_name ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (sending %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (sending to %s: %s)"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, None ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (processing %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | None, Some _ | None, None -> ());
-    (* What is waiting, in the order it will go. Shown in full rather than as a
-       count: an operator who typed three lines during a turn needs to see
-       which three, and a queue that only says "3 waiting" is the same silence
-       that made a refused send look like a sent one. *)
-    (match Masc_tui_keeper_chat_queue.waiting state.msg_queued with
-     | [] -> ()
-     | queued ->
-         List.iteri
-           (fun index (queued_keeper, text) ->
-             let body =
-               match String.index_opt text '\n' with
-               | None -> text
-               | Some cut -> String.sub text 0 cut ^ " …"
-             in
-             let addressed =
-               if String.equal queued_keeper keeper_name
-               then ""
-               else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
-             in
+    (* This keeper's own turn first, then any other keeper's — talking here
+       does not stop those, so the pane says they are going. *)
+    (* One clock read for the whole group so two rows drawn in the same frame
+       cannot report ages a tick apart. The age says how long the turn has
+       been going, which is what separates slow from stuck: a keeper turn
+       running minutes is ordinary here, and without it these rows look the
+       same at three seconds and at thirteen minutes. It changes the text of
+       a row, never how many there are, so the row budget is untouched. *)
+    let now = Unix.gettimeofday () in
+    let sending_age entry =
+      match Message_layout.age_text ~now ~since:entry.sent_at with
+      | None -> ""
+      | Some age -> " · " ^ age
+    in
+    (match
+       List.partition
+         (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
+         state.msg_inflight
+     with
+     | mine, others ->
+         List.iter
+           (fun entry ->
+             box_line_styled buf cols ~style:Ansi.yellow
+               (Printf.sprintf "  (sending %s%s…)"
+                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
+                  (sending_age entry)))
+           mine;
+         List.iter
+           (fun entry ->
              box_line_styled buf cols ~style:Ansi.dim
-               (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
-                  (Keeper_chat.terminal_safe_text body)))
-           queued);
-    (if state.msg_older_loading then
-       box_line_styled buf cols ~style:Ansi.dim
-         "  loading older messages…"
-     else
-       match state.msg_older_error with
-       | Some detail ->
-           box_line_styled buf cols ~style:Ansi.yellow
-             ("  older messages could not be loaded; up retries: " ^ detail)
-       | None -> ());
-    (if scroll > 0 then
-       box_line_styled buf cols ~style:Ansi.yellow
-         (Printf.sprintf
-            "  scrolled back %d row(s); down or Ctrl-E returns to the newest"
-            scroll));
+               (Printf.sprintf "  (also sending to %s: %s%s)"
+                  (Keeper_chat.terminal_safe_text
+                     entry.sent_request.keeper_name)
+                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
+                  (sending_age entry)))
+           others);
     (match state.msg_loaded_error with
      | Some detail ->
          box_line_styled buf cols ~style:Ansi.yellow
@@ -2490,70 +2458,6 @@ let render_keeper_message (state : state) =
              box_line_styled buf cols ~style ("  " ^ text))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
-    (match state.msg_prepared with
-     | Some request when state.msg_inflight = None ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf
-              "  prepared fence: %s %s; Ctrl-R retries the first serialized dispatch"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some _ | None -> ());
-    (match state.msg_unverified, state.msg_inflight_kind with
-     | Some request, Some Dispatch_claim ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  prior outcome unverified: %s %s; waiting for the serialized phase recheck"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  prior outcome unverified: %s %s; replaying the same request ID"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Operation_get ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  outcome unverified: %s %s; polling the exact operation"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Cleanup_delete ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  request settled: %s %s; durable cleanup is in progress"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, None ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  outcome unverified: %s %s; Ctrl-R resumes the exact request"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | None, Some _ | None, None -> ());
-    (match state.msg_cleanup_pending with
-     | Some request ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf
-              "  request settled: %s %s; Ctrl-R finishes durable cleanup"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | None -> ());
-    (match
-       state.msg_prepared, state.msg_cleanup_pending, state.msg_recovery_error
-     with
-     | Some _, _, Some (Recovery_blocked detail) ->
-         box_line_styled buf cols ~style:Ansi.red
-           ("  prepared recovery blocked; no new request may start: "
-          ^ Keeper_chat.terminal_safe_text detail)
-     | None, Some _, Some (Recovery_blocked detail) ->
-         box_line_styled buf cols ~style:Ansi.red
-           ("  cleanup retry failed; no POST or GET will be issued: "
-          ^ Keeper_chat.terminal_safe_text detail)
-     | None, None, Some (Recovery_blocked detail) ->
-         box_line_styled buf cols ~style:Ansi.red
-           ("  recovery needs retry; Ctrl-R reloads durable recovery state: "
-          ^ Keeper_chat.terminal_safe_text detail)
-     | Some _, _, None | None, Some _, None | None, None, None -> ());
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with
@@ -2616,17 +2520,8 @@ let render_keeper_message (state : state) =
               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
               waiting
       in
-      (* What the in-flight work is stays out of the footer: the box above it
-         already names it ("polling the exact operation", "durable cleanup is
-         in progress"), and repeating it here pushed the footer past a narrow
-         terminal. *)
-      match send_disposition state with
+      match send_disposition state ~keeper_name with
       | Queues_behind _ -> queue_hint ()
-      | Refused_cleanup _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
-      | Refused_prepared _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
-      | Refused_recovery_blocked _ ->
-          "Ctrl-R:reload exact recovery  Enter:blocked"
-      | Refused_unverified _ -> "Ctrl-R:resume exact request  Enter:blocked"
       | Sends ->
           if target_registered then "Enter:send"
           else if Option.is_some state.keepers_error then
@@ -2634,13 +2529,8 @@ let render_keeper_message (state : state) =
           else "Enter:disabled (Keeper unavailable)"
     in
     let scroll_hint =
-      if scroll > 0 then
-        (* At the oldest row with nothing more to fetch, say so: an operator
-           pressing up against a pane that will not move should know it is the
-           start of the conversation rather than a stuck key. *)
-        if state.msg_older_exist then "up/down:scroll  Ctrl-E:newest"
-        else "up/down:scroll  Ctrl-E:newest  (start of conversation)"
-      else "up:scroll back"
+      Message_layout.scroll_hint ~scrolled_back:scroll
+        ~older_exist:state.msg_older_exist
     in
     let escape_hint =
       match state.msg_live with
@@ -3452,6 +3342,360 @@ let render_autonomy (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"autonomy" ~rows:terminal_rows ~cols buf
 
+(* One keeper's durable tool-call log, the row vocabulary the chat pane
+   uses: the finished glyph for a call that returned, the failure glyph for
+   one that returned an error, the subject the trail names the call by. The
+   server's own freshness verdict rides the header - a stale page must not
+   read as a quiet keeper. *)
+let render_keeper_calls (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let keeper_name =
+    match List.nth_opt state.keepers state.keeper_cursor with
+    | Some keeper -> keeper.k_name
+    | None -> "?"
+  in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.keeper_calls with
+    | None ->
+        Printf.sprintf " Keeper Calls: %s  (not loaded yet)  %s  %s"
+          (Terminal_text.single_line keeper_name)
+          timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        let freshness =
+          match
+            (snapshot.Masc.Tui_decode.kcs_health,
+             snapshot.Masc.Tui_decode.kcs_latest_age_s)
+          with
+          | "ok", Some age -> Printf.sprintf "ok · latest %.0fs ago" age
+          | health, Some age -> Printf.sprintf "%s · latest %.0fs ago" health age
+          | health, None -> health
+        in
+        Printf.sprintf " Keeper Calls: %s (%d)  %s  %s  %s"
+          (Terminal_text.single_line keeper_name)
+          (List.length snapshot.Masc.Tui_decode.kcs_entries)
+          freshness timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-8s %s %-24s %-8s %-6s %s" "Time" " " "Tool" "Dur"
+      "Turn" "Subject"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (match state.keeper_calls_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  (match state.keeper_calls with
+   | Some snapshot when snapshot.Masc.Tui_decode.kcs_mismatched > 0 ->
+       box_line_styled buf cols ~style:Ansi.yellow
+         (Printf.sprintf
+            "  %d row(s) named another keeper and were not drawn"
+            snapshot.Masc.Tui_decode.kcs_mismatched);
+       box_divider buf cols
+   | Some _ | None -> ());
+  let entries =
+    match state.keeper_calls with
+    | None -> []
+    | Some snapshot -> snapshot.Masc.Tui_decode.kcs_entries
+  in
+  let shown = List.length entries in
+  let extra_rows =
+    (if Option.is_some state.keeper_calls_error then 2 else 0)
+    + (match state.keeper_calls with
+       | Some snapshot when snapshot.Masc.Tui_decode.kcs_mismatched > 0 -> 2
+       | Some _ | None -> 0)
+  in
+  let chrome_rows = 8 + extra_rows in
+  let content_height = max 1 (rows - chrome_rows) in
+  (* Digested once, for the bound and for the drawing both. Working it out
+     twice would let the scroll bound believe in a different table than the
+     one on screen. *)
+  let rows =
+    List.map
+      (fun (call : Masc.Tui_decode.keeper_call) ->
+        ( call
+        , Option.bind call.Masc.Tui_decode.kc_output (fun result ->
+              Masc.Keeper_chat_tool_trail.tool_result_digest ~result) ))
+      entries
+  in
+  let max_scroll =
+    Message_layout.last_page_start ~height:content_height
+      (List.map (fun (_, digest) -> if Option.is_some digest then 2 else 1) rows)
+  in
+  let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
+  state.keeper_calls_scroll <- scroll;
+  (* How many calls the rows below actually reached. Filled by the drawing so
+     the count under the table cannot disagree with the table. *)
+  let drawn = ref 0 in
+  if shown = 0 then begin
+    let empty =
+      match (state.keeper_calls, state.keeper_calls_error) with
+      | _, Some _ -> "  (load failed; nothing here is a reading)"
+      | None, None -> "  (not loaded yet)"
+      | Some _, None -> "  (no calls recorded)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else begin
+    (* Rows are spent, not indexed: a call draws one row and, when it answered
+       something, a second for what it said. Walking the height rather than
+       looping over it keeps [scroll] counting calls, so j/k still moves by
+       call and the footer's count still means what it says. *)
+    let remaining = ref content_height in
+    let idx = ref scroll in
+    while !remaining > 0 do
+      match List.nth_opt rows !idx with
+      | None ->
+          box_empty buf cols;
+          decr remaining
+      | Some (call, digest) ->
+          incr idx;
+          let open Masc.Tui_decode in
+          let glyph, style =
+            if call.kc_success then ("✓", Ansi.reset)
+            else ("✗", Ansi.red)
+          in
+          let duration =
+            match call.kc_duration_ms with
+            | Some ms when ms < 1000. -> Printf.sprintf "%.0fms" ms
+            | Some ms -> Printf.sprintf "%.1fs" (ms /. 1000.)
+            | None -> "-"
+          in
+          let turn =
+            match call.kc_turn with Some t -> string_of_int t | None -> "-"
+          in
+          let subject =
+            match
+              Masc.Keeper_chat_tool_trail.tool_subject ~name:call.kc_tool
+                ~args:call.kc_input
+            with
+            | Some subject -> subject
+            | None -> ""
+          in
+          let line =
+            Printf.sprintf "  %-8s %s %-24s %-8s %-6s %s"
+              (Terminal_text.clock_timestamp
+                 (Masc_domain.iso8601_of_unix_seconds call.kc_at))
+              glyph
+              (fit_width (Terminal_text.single_line call.kc_tool) 24)
+              duration turn
+              (Terminal_text.single_line subject)
+          in
+          box_line_styled buf cols ~style line;
+          decr remaining;
+          (* What the call answered. The row above says one ran and what it
+             was called with; this is the only place that says what came
+             back, which is the question a failed call leaves open. It takes
+             a failed call's colour so a reason does not read as ordinary
+             output. A call that answered nothing draws no row rather than an
+             empty one. *)
+          (match digest with
+           | Some digest when !remaining > 0 ->
+               box_line_styled buf cols
+                 ~style:(if call.kc_success then Ansi.dim else Ansi.red)
+                 (Printf.sprintf "  %-8s %s   %s" "" " "
+                    (Terminal_text.single_line ("\xe2\x86\x92 " ^ digest)));
+               decr remaining
+           | Some _ | None -> ())
+    done;
+    (* How many calls the height actually reached, not how many would fit if
+       each took one row. A call that answered something takes two, so
+       counting rows as calls hid the hint exactly when the screen needed it. *)
+    drawn := !idx - scroll
+  end;
+  if scroll > 0 || !drawn < shown then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d calls, showing %d from %d]" shown !drawn scroll)
+  else box_empty buf cols;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
+
+(* The runtime's event feed, newest first, for watching every keeper act at
+   once. Rows are built from the events the TUI holds; the filter decides
+   which kinds draw; a completed call is paired with its start for a
+   duration. Scrolling away from the newest row freezes the view and counts
+   what arrives above it, so an operator reading the past is not pushed off
+   it by the present. *)
+let render_acting (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let module Acting = Masc_tui_acting in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let held = List.length state.acting in
+  (* The agent_core family names its runtime lane, not the keeper; the
+     keeper is the one whose trace the event's correlation id carries. *)
+  let traces =
+    List.map (fun keeper -> (keeper.k_name, keeper.k_trace_id)) state.keepers
+  in
+  (* Visible entries, newest first, paired with the events older than each
+     -- in a newest-first list, the tail after it -- so a completed call on
+     the page can look up its start. Rows are built only for the page: the
+     pairing walks the older events, and doing it for a thousand held
+     entries on every frame is work the screen never shows. *)
+  let visible =
+    let rec walk acc = function
+      | [] -> List.rev acc
+      | entry :: older ->
+          if Acting.visible state.acting_filter entry.ae_event then
+            walk ((entry, older) :: acc) older
+          else walk acc older
+    in
+    walk [] state.acting
+  in
+  let row_of (entry, older) =
+    let event = entry.ae_event in
+    let duration_ms =
+      match event with
+      | Masc_tui_observer.Agent_core
+          ({ Masc_tui_observer.kind = Masc_tui_observer.Tool_completed; _ } as
+           completed) ->
+          Acting.duration_of_completion
+            ~before:(List.map (fun e -> e.ae_event) older)
+            completed
+      | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
+      | Masc_tui_observer.Keeper_tool_call _
+      | Masc_tui_observer.Keeper_turn_complete _
+      | Masc_tui_observer.Keeper_composite_changed _
+      | Masc_tui_observer.Keeper_chat_appended _ | Masc_tui_observer.Snapshot _
+      | Masc_tui_observer.Other _ ->
+          None
+    in
+    let row = Acting.row_of_event ~duration_ms event in
+    { row with Acting.keeper = Acting.keeper_of_event ~traces event }
+  in
+  let shown = List.length visible in
+  let feed =
+    match state.observer with
+    | Observer_off -> "feed: off"
+    | Observer_opening -> "feed: opening"
+    | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
+    | Observer_closed { events; reason; _ } ->
+        Printf.sprintf "feed: closed after %d (%s)" events
+          (Terminal_text.single_line reason)
+  in
+  let header =
+    Printf.sprintf " MASC Acting (%d of %d held, %s)  %s  %s" shown held
+      (Acting.filter_label state.acting_filter) timestamp
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Ansi.bold header;
+  box_divider buf cols;
+  let dropped =
+    if state.acting_dropped = 0 then ""
+    else Printf.sprintf "  dropped %d" state.acting_dropped
+  in
+  let undecodable =
+    match state.acting_undecodable_last with
+    | None -> ""
+    | Some reason ->
+        Printf.sprintf "  undecodable %d (last: %s)" state.acting_undecodable
+          (Terminal_text.single_line reason)
+  in
+  let unseen =
+    if state.acting_unseen = 0 then ""
+    else Printf.sprintf "  %d new above (g)" state.acting_unseen
+  in
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
+  box_divider buf cols;
+  let col_hdr =
+    Printf.sprintf "  %-8s %-16s %s %-16s %s" "Time" "Keeper" " " "Event"
+      "Detail"
+  in
+  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_divider buf cols;
+  (* The page indicator has a row of its own whether or not it is drawn, so a
+     list that overflows does not push the help line off the bottom. *)
+  let chrome_rows = 10 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.acting_scroll max_scroll) in
+  state.acting_scroll <- scroll;
+  if shown = 0 then begin
+    let empty =
+      match state.observer with
+      | Observer_off | Observer_opening -> "  (no events yet: the feed is not open)"
+      | Observer_live _ ->
+          if held = 0 then "  (no events yet)"
+          else "  (nothing under this filter; f shows everything)"
+      | Observer_closed _ ->
+          if held = 0 then "  (the feed closed before any event arrived)"
+          else "  (nothing under this filter; f shows everything)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match Option.map row_of (List.nth_opt visible idx) with
+      | None -> box_empty buf cols
+      | Some row ->
+          let style =
+            match row.Acting.glyph with
+            | Acting.Call_started -> Ansi.cyan
+            | Acting.Call_returned -> Ansi.green
+            | Acting.Turn_boundary -> Ansi.reset
+            | Acting.Turn_settled -> Ansi.bold
+            | Acting.Failure -> Ansi.red
+            | Acting.Attention -> Ansi.yellow
+            | Acting.Quiet -> Ansi.dim
+          in
+          let clock =
+            if row.Acting.at <= 0. then "--:--:--"
+            else
+              Terminal_text.clock_timestamp
+                (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
+          in
+          let line =
+            Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
+              (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+              (Acting.glyph_text row.Acting.glyph)
+              (fit_width (Terminal_text.single_line row.Acting.label) 16)
+              (Terminal_text.single_line row.Acting.detail)
+          in
+          box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d rows, scroll %d]" shown scroll)
+  else box_empty buf cols;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"acting" ~rows:terminal_rows ~cols buf
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -3470,6 +3714,7 @@ let render_surface (state : state) =
   | Keepers Keeper_list -> render_keeper_list state
   | Keepers Keeper_detail -> render_keeper_detail state
   | Keepers Keeper_logs -> render_keeper_logs state
+  | Keepers Keeper_calls -> render_keeper_calls state
   | Keepers Keeper_message -> render_keeper_message state
   | Board ->
       (match state.board_mode with
@@ -3496,6 +3741,7 @@ let render_surface (state : state) =
   | Connectors -> render_connectors state
   | Tools -> render_tools state
   | Autonomy -> render_autonomy state
+  | Acting -> render_acting state
   | System_logs -> render_system_logs state
   | Schedules -> render_schedules state
 

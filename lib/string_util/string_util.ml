@@ -286,11 +286,10 @@ let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v
 
-let option_trim = function
-  | None -> None
-  | Some s ->
-    let v = String.trim s in
-    if v = "" then None else Some v
+(* The .mli says this maps trim_nonempty over an option, and it now does.
+   Written out a second time, the two could drift apart under a one-sided
+   edit -- which is the shape #26618 was filed about. *)
+let option_trim opt = Option.bind opt trim_nonempty
 
 let strip_trailing_cr s =
   let len = String.length s in

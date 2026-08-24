@@ -64,6 +64,24 @@ module Ansi = struct
   let box_r = "\xe2\x94\xa4"  (* right tee *)
 end
 
+(** Semantic styles for state.
+
+    A fact about health, phase, or attention draws through these names, so
+    one remap -- a theme, a colourblind palette -- moves every reading at
+    once. The boundary: state goes through [Theme]; prose emphasis and
+    syntax colouring keep raw [Ansi] styles, because "this word is green"
+    is sometimes the content itself (a diff, a code literal) rather than a
+    reading of state. *)
+module Theme = struct
+  let ok = Ansi.green
+  let warn = Ansi.yellow
+  let bad = Ansi.red
+  let info = Ansi.cyan
+  let muted = Ansi.dim
+  let selection = Ansi.reverse
+  let border_focus = Ansi.cyan
+end
+
 (** A screen title.
 
     Emphasis belongs to the words that name the screen, not to the whole header

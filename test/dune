@@ -2973,6 +2973,8 @@
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_paste.inc)
+(include stanzas/test_tui_graphics.inc)
+(include stanzas/test_tui_paste_spill.inc)
 
 (test
  (name test_code_address)

@@ -333,7 +333,7 @@ let test_user_message_of_network_errors () =
   in
   Alcotest.(check string)
     "api dns user message"
-    "Runtime provider unavailable: DNS lookup failed. Check network/DNS or select another runtime. Detail: failed to resolve hostname: ollama.com"
+    "Runtime provider: failed to resolve hostname: ollama.com"
     (AE.user_message_of_core_error api_dns);
   Alcotest.(check bool)
     "api dns hides Agent.run prefix"
@@ -352,8 +352,25 @@ let test_user_message_of_network_errors () =
   in
   Alcotest.(check string)
     "provider dns user message"
-    "Runtime provider 'ollama_cloud' unavailable: DNS lookup failed. Check network/DNS or select another runtime. Detail: failed to resolve hostname: ollama.com"
+    "Runtime provider 'ollama_cloud': failed to resolve hostname: ollama.com"
     (AE.user_message_of_core_error provider_dns);
+  (* The shape an operator reported: an argument-less exception renders its own
+     constructor, so the message stated the same failure twice -- once in the
+     operator's words ("connection closed") and once in OCaml's ("Detail:
+     End_of_file") -- after two more namings ahead of both. *)
+  let provider_eof =
+    CoreError.Provider
+      (Llm_provider.Error.NetworkError
+         { provider = "ollama_cloud"
+         ; kind = Http.End_of_file
+         ; timeout_phase = None
+         ; detail = "End_of_file"
+         })
+  in
+  Alcotest.(check string)
+    "a closed connection is named once"
+    "Runtime provider 'ollama_cloud' closed the connection"
+    (AE.user_message_of_core_error provider_eof);
   let guardrail =
     CoreError.Agent
       (CoreError.GuardrailViolation { validator = "policy"; reason = "blocked" })

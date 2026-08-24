@@ -79,13 +79,56 @@ let expect_invalid_transition label = function
   | Ok msg -> fail (label ^ ": unexpectedly succeeded: " ^ msg)
 ;;
 
-(* A plain pass-through now. This wrapper used to route [Done_action] through
-   submit -> peer-keeper claim -> approve, because completion of a claimed task
-   went via a verifier keeper. Neither hop exists: no agent claims an obligation
-   and no agent issues a verdict, so the producer's own [Done_action] is the
-   agent-side completion. *)
+let verification_id_for_task config task_id =
+  match
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ }
+    ->
+    verification_id
+  | Some _ -> failf "task %s is not awaiting verification" task_id
+  | None -> failf "task %s not found" task_id
+;;
+
+(* [Done_action] on a claimed or started task is answered with
+   [Verification_submission_required]: the producer submits, and a completion
+   authority commits the verdict. The peer-keeper claim that used to sit
+   between them is gone -- the authority is not a keeper -- but the submission
+   and the verdict both remain, so a test that wants a completed task has to
+   walk that path rather than name its destination. *)
 let transition config ~agent_name ~task_id ~action ?(notes = "") ?(reason = "") () =
-  Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
+  let submit_then_approve () =
+    match
+      Workspace.transition_task_r config ~agent_name ~task_id
+        ~action:Masc_domain.Submit_for_verification
+          (* Submission persists a verification record before it moves the
+             status, and refuses to move it when that storage is absent. This
+             suite has no verification store, so it stands in for one. *)
+        ~prepare_verification_request:
+          (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ())
+        ~notes ()
+    with
+    | Error _ as error -> error
+    | Ok _ ->
+      Workspace.commit_verdict_r config
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:Masc_domain.Verdict_approved ~task_id
+        ~verification_id:(verification_id_for_task config task_id)
+        ~notes:("verified: " ^ notes) ()
+      |> Result.map (fun (o : Workspace.transition_outcome) -> o.Workspace.message)
+  in
+  match action with
+  | Masc_domain.Done_action ->
+    (match (task config task_id).task_status with
+     | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> submit_then_approve ()
+     | Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Done _
+     | Masc_domain.Cancelled _ ->
+       Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason
+         ())
+  | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Release
+  | Masc_domain.Submit_for_verification | Masc_domain.Cancel ->
+    Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
 ;;
 
 let test_claim_start_done_path () =
@@ -129,9 +172,11 @@ let test_done_from_todo_is_rejected () =
     in
     check
       bool
-      "remediation mentions claim"
+      (* The rejection names what to do instead. It used to spell that as
+         "action=claim"; it now lists every action the status admits. *)
+      "remediation names claim"
       true
-      (Astring.String.is_infix ~affix:"action=claim" msg);
+      (Astring.String.is_infix ~affix:"valid_next_actions=[claim" msg);
     check string "status preserved" "todo" (status_name config task_id))
 ;;
 
@@ -167,9 +212,12 @@ let test_cancel_from_todo_is_terminal () =
     in
     check
       bool
-      "terminal remediation"
+      (* Cancelled admits nothing, so the rejection carries no
+         valid_next_actions clause; naming the status it refused from is what
+         tells the caller the task is over. *)
+      "terminal rejection names the cancelled status"
       true
-      (Astring.String.is_infix ~affix:"already cancelled" msg))
+      (Astring.String.is_infix ~affix:"cancelled -> claim" msg))
 ;;
 
 let test_done_is_idempotent_terminal () =

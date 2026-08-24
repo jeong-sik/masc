@@ -1,3 +1,5 @@
+module Shell_gate = Masc_exec_command_gate.Shell_command_gate
+
 (* Where a stage's standard streams attach. Reading and writing admit
    different shapes -- a source cannot be truncated, a sink cannot be read --
    so they are separate types. One shared type would have to carry a field
@@ -39,9 +41,15 @@ type conditional =
   | And_then
   | Or_else
 
+type source =
+  | Staged of {
+      program : program;
+      next : (conditional * program) list;
+    }
+  | Script of string
+
 type execute_input = {
-  program : program;
-  next : (conditional * program) list;
+  source : source;
   cwd : string option;
   env : (string * string) list;
   timeout_sec : float option;
@@ -64,6 +72,14 @@ type validation_error =
       path : string;
     }
   | Cwd_not_absolute of string
+  | Script_not_a_command_line of {
+      token : string;
+      expected : string list;
+    }
+  | Script_unreadable of Masc_exec.Parsed.reason_aborted
+  | Script_outside_the_subset of Masc_exec.Parsed.reason_too_complex
+  | Script_nested_pipeline
+  | Script_rejected_by_the_gate of string
   | Redirect_fd_unknown of {
       fd : int;
       target : int;
@@ -410,6 +426,45 @@ let optional_next ~path fields =
     result_errorf "%s.then must be array, got %s" path (json_type_name value)
 ;;
 
+(* The schema's [oneOf] and this function are the same rule stated twice: a
+   call names one form. Stating it here is what makes [source] a sum rather
+   than three optional fields a validator has to reconcile. *)
+let source_of_fields ~path fields =
+  let ( let* ) = Result.bind in
+  let named key =
+    match member fields key with
+    | None | Some `Null -> false
+    | Some _ -> true
+  in
+  let staged = List.exists named program_fields in
+  match named "script", staged with
+  | true, true ->
+    result_errorf
+      "%s names both script and %s; a call takes one form"
+      path
+      (String.concat "/" (List.filter named program_fields))
+  | true, false ->
+    let* script = optional_string ~path fields "script" in
+    (* [named "script"] is what put us in this arm, so the field is present;
+       a default here would turn "not a string" into an empty script. *)
+    (match script with
+     | None -> result_errorf "%s.script must be a string" path
+     | Some script ->
+       if String.trim script = ""
+       then result_errorf "%s.script is empty" path
+       else if named "then"
+       then
+         result_errorf
+           "%s.then belongs to the staged form; a script writes && and || \
+            itself"
+           path
+       else Ok (Script script))
+  | false, _ ->
+    let* program = program_of_fields ~path fields in
+    let* next = optional_next ~path fields in
+    Ok (Staged { program; next })
+;;
+
 let of_json (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields = assoc_fields ~path:"$" json in
@@ -417,22 +472,23 @@ let of_json (json : Yojson.Safe.t) =
     if Option.is_some (member fields "cmd")
     then
       Error
-        "cmd string is not a typed Shell IR input; provide \
-         argv or pipeline"
+        "cmd is not a field of this tool; the shell form is named \
+         script"
     else Ok ()
   in
   let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:(program_fields @ [ "then"; "cwd"; "env"; "timeout_sec" ])
+      ~allowed:
+        (program_fields
+        @ [ "then"; "cwd"; "env"; "timeout_sec"; "script" ])
       fields
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
   let* timeout_sec = optional_positive_float ~path:"$" fields "timeout_sec" in
-  let* program = program_of_fields ~path:"$" fields in
-  let* next = optional_next ~path:"$" fields in
-  Ok { program; next; cwd; env; timeout_sec }
+  let* source = source_of_fields ~path:"$" fields in
+  Ok { source; cwd; env; timeout_sec }
 ;;
 
 let check_argv argv =
@@ -530,18 +586,26 @@ let check_stage_redirects { argv = _; stdin; stdout; stderr } =
 
 let stages_of { head; tail } = head :: tail
 
-let validate { program; cwd; env; timeout_sec = _ } =
+(* [Script] has no stages to walk before it is parsed, and the checks that
+   walk them are not skipped: [Execute_shell_ir.dispatch] runs the typed gate
+   and [validate_paths] over the lowered [Shell_ir.t], which is the same value
+   the staged form produces. What is checked here is what a string cannot
+   carry -- the call's own [cwd] and [env]. *)
+let validate { source; cwd; env; timeout_sec = _ } =
   let ( let* ) = Result.bind in
   let* () = check_cwd cwd in
   let* () = check_env env in
-  let rec each = function
-    | [] -> Ok ()
-    | stage :: rest ->
-      let* () = check_exec ~argv:stage.argv ~cwd:None ~env:[] in
-      let* () = check_stage_redirects stage in
-      each rest
-  in
-  each (stages_of program)
+  match source with
+  | Script _ -> Ok ()
+  | Staged { program; next = _ } ->
+    let rec each = function
+      | [] -> Ok ()
+      | stage :: rest ->
+        let* () = check_exec ~argv:stage.argv ~cwd:None ~env:[] in
+        let* () = check_stage_redirects stage in
+        each rest
+    in
+    each (stages_of program)
 ;;
 
 let shell_bin = function
@@ -660,10 +724,75 @@ let redirects_of_stage ~namespace ~cwd { argv = _; stdin; stdout; stderr } =
   Ok (List.filter_map (fun x -> x) [ stdin_entry; stdout_entry; stderr_entry ])
 ;;
 
+(* The parser hands back an IR whose simples carry no sandbox and no working
+   directory: the string never said. The staged path stamps both while it
+   builds each simple, so the script path stamps them afterwards, over the same
+   [Shell_ir.t]. Env entries the script assigns itself stay ahead of the
+   call's [env], so a script that sets a variable still sees its own value. *)
+let rec stamp_context ~sandbox ~cwd ~env (ir : Masc_exec.Shell_ir.t) =
+  match ir with
+  | Masc_exec.Shell_ir.Simple simple ->
+    Masc_exec.Shell_ir.Simple
+      { simple with
+        sandbox
+      ; cwd =
+          (match simple.cwd with
+           | Some _ as own -> own
+           | None ->
+             Option.map
+               (fun c -> Masc_exec.Path_scope.classify ~raw:c ~cwd:c)
+               cwd)
+      ; env =
+          simple.env
+          @ List.map
+              (fun (k, v) ->
+                 k, Masc_exec.Shell_ir.Lit (v, Masc_exec.Shell_ir.default_meta))
+              env
+      }
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    Masc_exec.Shell_ir.Pipeline
+      (List.map (stamp_context ~sandbox ~cwd ~env) stages)
+  | Masc_exec.Shell_ir.Sequence { head; tail } ->
+    Masc_exec.Shell_ir.Sequence
+      { head = stamp_context ~sandbox ~cwd ~env head
+      ; tail =
+          List.map
+            (fun (c, ir) -> c, stamp_context ~sandbox ~cwd ~env ir)
+            tail
+      }
+;;
+
+(* Through the gate, not around it. [Bash.parse_string] ownership sits inside
+   the command-gate library on purpose -- its own interface says so, and a
+   ratchet counts the caller files -- so the shell form crosses the same
+   boundary a shell frontend would. [gate_raw] has carried this entrypoint,
+   with tests, and had no production caller until now. *)
+let script_to_shell_ir ~sandbox ~cwd ~env script =
+  let gate_sandbox = { Shell_gate.target = sandbox } in
+  let syntax_policy =
+    { Shell_gate.redirect_allowed = true; allow_pipes = true }
+  in
+  match Shell_gate.gate_raw ~text:script ~syntax_policy ~sandbox:gate_sandbox () with
+  | Shell_gate.Allow { ast; _ } -> Ok (stamp_context ~sandbox ~cwd ~env ast)
+  | Shell_gate.Reject { diagnostic; _ } ->
+    Error (Script_rejected_by_the_gate diagnostic)
+  | Shell_gate.Cannot_parse { reason = Shell_gate.Parse_error } ->
+    Error (Script_not_a_command_line { token = ""; expected = [] })
+  | Shell_gate.Cannot_parse { reason = Shell_gate.Parse_aborted reason } ->
+    Error (Script_unreadable reason)
+  (* Carried, not flattened: [reason_too_complex] is the value the corpus tap
+     counts to decide which construct the subset takes next, and a script
+     hidden inside [argv:["bash";"-c";...]] is counted as nothing at all. *)
+  | Shell_gate.Too_complex { reason = Shell_gate.Unsupported_construct reason } ->
+    Error (Script_outside_the_subset reason)
+  | Shell_gate.Too_complex { reason = Shell_gate.Unsupported_nested_pipeline } ->
+    Error (Script_nested_pipeline)
+;;
+
 let to_shell_ir_unvalidated
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       ?(namespace = Command_filesystem)
-      { program; next; cwd; env; timeout_sec = _ }
+      { source; cwd; env; timeout_sec = _ }
   =
   let ( let* ) = Result.bind in
   let lower stage =
@@ -688,6 +817,9 @@ let to_shell_ir_unvalidated
     | And_then -> Masc_exec.Shell_ir.And_if
     | Or_else -> Masc_exec.Shell_ir.Or_if
   in
+  match source with
+  | Script script -> script_to_shell_ir ~sandbox ~cwd ~env script
+  | Staged { program; next } ->
   let* head = lower_program program in
   match next with
   | [] -> Ok head
@@ -766,4 +898,47 @@ let pp_validation_error ppf = function
       target
   | Env_key_invalid k ->
     Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
+  | Script_not_a_command_line { token; expected } ->
+    Format.fprintf
+      ppf
+      "script is not a command line: unexpected %S%s"
+      token
+      (match expected with
+       | [] -> ""
+       | _ -> ", expected " ^ String.concat " or " expected)
+  | Script_unreadable reason ->
+    Format.fprintf
+      ppf
+      "script could not be read: %s"
+      (match reason with
+       | `Timeout_50ms -> "it took too long to parse"
+       | `Depth_limit -> "it nests too deeply"
+       | `Token_limit_50k -> "it is too long")
+  | Script_outside_the_subset reason ->
+    Format.fprintf
+      ppf
+      "script uses %s, which this tool does not run. Say it with argv or \
+       pipeline instead."
+      (match reason with
+       | `Heredoc -> "a heredoc"
+       | `Here_string -> "a here-string"
+       | `Cmd_subst -> "command substitution"
+       | `Proc_subst -> "process substitution"
+       | `Subshell -> "a subshell"
+       | `Arith_expansion -> "arithmetic expansion"
+       | `Control_flow -> "control flow"
+       | `Logic_op -> "&& or ||"
+       | `Function_def -> "a function definition"
+       | `Glob_brace -> "brace expansion"
+       | `Background -> "a background job"
+       | `Command_separator -> "a ; between commands"
+       | `Redirect -> "a redirection"
+       | `Unknown_construct name -> name)
+  | Script_nested_pipeline ->
+    Format.fprintf
+      ppf
+      "script nests a pipeline inside a pipeline; write the stages in one \
+       pipeline instead."
+  | Script_rejected_by_the_gate diagnostic ->
+    Format.fprintf ppf "script was refused: %s" diagnostic
 ;;

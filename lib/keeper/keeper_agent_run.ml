@@ -171,7 +171,7 @@ let repeated_exact_tool_call ~threshold tool_calls =
     (* Every earlier identical call counts, not only the ones immediately
        before [latest]. The old fold stopped at the first different call, so it
        measured a run rather than a total, and a provider alternating between
-       two stalled calls never reached the threshold: sangsu ran
+       two stalled calls never reached the threshold: one keeper ran
        [git status --short --branch] 48 times with identical input in one
        dispatch, always with a Read or a git diff in between, and the count
        never left 1. That dispatch made 279 tool calls over 31 minutes and

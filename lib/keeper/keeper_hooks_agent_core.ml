@@ -524,7 +524,14 @@ let make_hooks
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
-             ~success:(outcome = Tool_result.Ok) ~duration_ms
+             ~success:(outcome = Tool_result.Ok)
+             (* The boolean above is what AGENT_CORE's result can say. The
+                typed value crossed from the masc dispatch boundary; without
+                it the row cannot tell a policy rejection from a runtime
+                failure, and cannot represent [Deferred] at all. *)
+             ?disposition:
+               (Keeper_tool_call_log.consume_disposition ~invocation ())
+             ~duration_ms
              ~model:(current_keeper_model !meta_ref)
              ?agent_name:tctx.agent_name
              ?turn_kind:tctx.turn_kind

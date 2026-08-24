@@ -2349,10 +2349,8 @@ let render_keeper_message (state : state) =
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
     let scroll =
-      min state.msg_scroll
-        (Message_layout.max_scroll ~markdown:chat_markdown ~inner_width
-           ~height:history_height
-           layout_entries)
+      Message_layout.clamp_scroll ~markdown:chat_markdown ~inner_width
+        ~height:history_height state.msg_scroll layout_entries
     in
     let visible_rows =
       Message_layout.scrolled_rows ~markdown:chat_markdown ~inner_width

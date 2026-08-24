@@ -18,6 +18,13 @@ val provider_attempt_effect_fenced_kind : string
     {!provider_attempt_effect_fenced_kind}; only the label differs. *)
 val tool_correction_lost_kind : string
 
+(** Canonical wire kind for a response MASC's own accept contract refused. *)
+val accept_rejected_kind : string
+
+(** Canonical wire kind for a failed turn-closing tool effect, or one that
+    returned no typed receipt for what it did. *)
+val terminal_effect_failed_kind : string
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -180,6 +187,37 @@ val cap_blocker_detail : string -> string
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 
 val summary_of_masc_internal_error : masc_internal_error -> string option
+
+(** The closed set of wire kinds {!kind_of_masc_internal_error} can emit — one
+    per {!masc_internal_error} constructor.
+
+    It exists because the wire is a string and the receipt classifier
+    ([Keeper_terminal_reason.of_wire]) had to guess the string back. It knew
+    five of the thirteen and read the rest as an unrecognised state, so a
+    keeper's own named failures reached the operator as "unmapped runtime
+    state" (#29929). Matching this type instead makes a new constructor a
+    compile obligation at every consumer, which is what
+    [Keeper_turn_terminal_code] already promises for the layer above. *)
+type wire_kind =
+  | Wire_runtime_exhausted
+  | Wire_capacity_backpressure
+  | Wire_resumable_cli_session
+  | Wire_accept_rejected
+  | Wire_internal_unhandled_exception
+  | Wire_internal_bridge_exception
+  | Wire_internal_contract_rejected
+  | Wire_incomplete_tool_transcript
+  | Wire_terminal_effect_failed
+  | Wire_provider_attempt_effect_fenced
+  | Wire_tool_correction_lost
+  | Wire_receipt_persistence_failed
+  | Wire_gate_replay_repair_required
+
+val wire_kind_to_string : wire_kind -> string
+
+(** [None] for any string this module does not emit, including the agent-core
+    and provider wire families that travel the same receipt field. *)
+val wire_kind_of_string : string -> wire_kind option
 
 val kind_of_masc_internal_error : masc_internal_error -> string
 

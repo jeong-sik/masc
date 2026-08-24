@@ -473,7 +473,7 @@ type async_msg =
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
-      string * (Keeper_chat_history.decoded, string) result
+      int * string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
       string * float * (Keeper_chat_history.page, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
@@ -817,13 +817,16 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
 let launch_keeper_history_load state ~mailbox ~keeper_name =
   let host = Env_config_core.masc_host () in
   let port = state.port in
+  state.msg_history_load_generation <- state.msg_history_load_generation + 1;
+  let generation = state.msg_history_load_generation in
   let run () =
     let result =
       try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_chat_history_loaded (keeper_name, result))
+    enqueue_async mailbox
+      (Keeper_chat_history_loaded (generation, keeper_name, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -833,7 +836,7 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_history_loaded
-           (keeper_name, Error "Eio switch is unavailable"))
+           (generation, keeper_name, Error "Eio switch is unavailable"))
 
 let switch_to_next_keeper_message state ~mailbox =
   match next_keeper_message_target state with
@@ -2503,11 +2506,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Keeper_chat_done (request, was_replay, result, acknowledge) ->
       settle_live_turn state request;
       (* The server persists the user row, the reply and the tool calls before
-         it ends the stream, so by now the transcript holds this turn. Reloading
-         makes the record the thing on screen; the rows settle_live_turn just
-         committed are what stands if the load fails. *)
-      launch_keeper_history_load state ~mailbox
-        ~keeper_name:request.Keeper_chat.keeper_name;
+         it ends the stream, so by now the transcript holds this turn. While
+         the pane still points here, reloading makes that record the thing on
+         screen; the rows settle_live_turn just committed are what stands if
+         the load fails. A background Keeper does not supersede the visible
+         Keeper's history generation. *)
+      if
+        Option.exists
+          (String.equal request.Keeper_chat.keeper_name)
+          state.msg_target_keeper_name
+      then
+        launch_keeper_history_load state ~mailbox
+          ~keeper_name:request.Keeper_chat.keeper_name;
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -2583,13 +2593,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
-  | Keeper_chat_history_loaded (keeper_name, result) ->
+  | Keeper_chat_history_loaded (generation, keeper_name, result) ->
       (* The operator can switch while a previous GET is still in flight. The
          pane owns one loaded-history cache, so a late response for the old
-         target must not replace the transcript now being read. *)
+         target or an older request for a target revisited since must not
+         replace the transcript now being read. *)
       if
-        Option.exists (String.equal keeper_name)
-          state.msg_target_keeper_name
+        generation = state.msg_history_load_generation
+        && Option.exists (String.equal keeper_name)
+             state.msg_target_keeper_name
       then
         (match result with
          | Ok { Keeper_chat_history.rows; dropped } ->

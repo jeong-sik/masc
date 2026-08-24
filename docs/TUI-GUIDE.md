@@ -292,10 +292,11 @@ when chat opened from detail.
 The header joins the selected Keeper's published status with its typed runtime
 phase and model, using the same roster reading as the Keepers table. While no
 turn is starting or running, `Ctrl-G` selects the next readable Keeper and
-wraps at the end of the roster. Each Keeper keeps its own draft. A history GET
-that finishes after the operator switched away is discarded instead of being
-drawn under the new Keeper's title. The shortcut is withdrawn while a turn is
-in flight or the roster cannot be read.
+wraps at the end of the roster. Each Keeper keeps its own draft. Every history
+GET carries a load generation, so a response that finishes after the operator
+switched away or left and returned is discarded instead of replacing the
+newer transcript. The shortcut is withdrawn while a turn is in flight or the
+roster cannot be read.
 
 `From` is a fixed-width reverse-video badge: operator sources are cyan,
 Keepers blue, tool blocks magenta, status yellow, and errors red. The badge is

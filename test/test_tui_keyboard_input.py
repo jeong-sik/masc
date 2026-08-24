@@ -91,13 +91,26 @@ class SequencedHttpResponse:
 
 
 class GatedHttpResponse:
-    def __init__(self, response: HttpResponse) -> None:
+    def __init__(
+        self,
+        response: HttpResponse,
+        *,
+        subsequent_response: HttpResponse | None = None,
+    ) -> None:
         self.response = response
+        self.subsequent_response = subsequent_response
         self.requested = threading.Event()
         self.release = threading.Event()
         self.completed = threading.Event()
+        self.calls = 0
+        self.lock = threading.Lock()
 
     def __call__(self) -> HttpResponse:
+        with self.lock:
+            call_index = self.calls
+            self.calls += 1
+        if call_index > 0 and self.subsequent_response is not None:
+            return self.subsequent_response
         self.requested.set()
         try:
             if not self.release.wait(timeout=5.0):
@@ -3284,13 +3297,24 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
             200,
             [
                 {
-                    "id": "alpha-late-history",
+                    "id": "alpha-stale-history",
                     "role": "assistant",
-                    "content": "alpha-late-history-marker",
+                    "content": "alpha-stale-history-marker",
                     "ts": 1787348500.3,
                 }
             ],
-        )
+        ),
+        subsequent_response=(
+            200,
+            [
+                {
+                    "id": "alpha-current-history",
+                    "role": "assistant",
+                    "content": "alpha-current-history-marker",
+                    "ts": 1787348502.3,
+                }
+            ],
+        ),
     )
     fixtures["/api/v1/keepers/alpha/chat/history"] = alpha_history
     fixtures["/api/v1/keepers/beta/chat/history"] = (
@@ -3383,43 +3407,45 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"beta-draft"),
         )
 
-        alpha_history.release.set()
-        if not alpha_history.completed.wait(timeout=3.0):
-            raise AssertionError("released alpha history fixture did not complete")
-        # The response has crossed the fixture boundary; give the local client
-        # one frame window to enqueue it before forcing an inspectable redraw.
-        time.sleep(0.1)
-        stale_check = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=140,
-            needle=b"Message to: beta",
-            controls=(FULL_REDRAW,),
-            final_cursor=b"\x1b[?25h",
-        )
-        stale_plain = CSI_RE.sub(b"", stale_check)
-        if b"beta-current-history-marker" not in stale_plain:
-            raise AssertionError(
-                f"late alpha response replaced beta history: {stale_check!r}"
-            )
-        if b"alpha-late-history-marker" in stale_plain:
-            raise AssertionError(
-                f"late alpha response drew in beta chat: {stale_check!r}"
-            )
-
         alpha_start = len(output)
         send_and_wait(process, master_fd, output, b"\x07", b"Message to: alpha")
         wait_for_output(
             process,
             master_fd,
             output,
-            b"alpha-late-history-marker",
+            b"alpha-current-history-marker",
             start=alpha_start,
             timeout=3.0,
         )
         alpha_frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"Message to: alpha",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25h",
+        )
+        alpha_plain = CSI_RE.sub(b"", alpha_frame)
+        for expected in (
+            b"active \xc2\xb7 running claude-opus-5",
+            b"alpha-current-history-marker",
+            b"> alpha-draft",
+        ):
+            if expected not in alpha_plain:
+                raise AssertionError(
+                    f"restored alpha chat omitted {expected!r}: {alpha_frame!r}"
+                )
+
+        # The first alpha request now finishes after alpha was left and opened
+        # again. Keeper identity matches; only the load generation can reject
+        # this ABA response in favour of the second alpha request above.
+        alpha_history.release.set()
+        if not alpha_history.completed.wait(timeout=3.0):
+            raise AssertionError("released alpha history fixture did not complete")
+        time.sleep(0.1)
+        stale_check = resize_and_wait(
             process,
             master_fd,
             output,
@@ -3429,15 +3455,15 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
-        alpha_plain = CSI_RE.sub(b"", alpha_frame)
-        for expected in (
-            b"active \xc2\xb7 running claude-opus-5",
-            b"> alpha-draft",
-        ):
-            if expected not in alpha_plain:
-                raise AssertionError(
-                    f"restored alpha chat omitted {expected!r}: {alpha_frame!r}"
-                )
+        stale_plain = CSI_RE.sub(b"", stale_check)
+        if b"alpha-current-history-marker" not in stale_plain:
+            raise AssertionError(
+                f"late first alpha response replaced current history: {stale_check!r}"
+            )
+        if b"alpha-stale-history-marker" in stale_plain:
+            raise AssertionError(
+                f"late first alpha response survived generation guard: {stale_check!r}"
+            )
 
         beta_again_start = len(output)
         send_and_wait(process, master_fd, output, b"\x07", b"Message to: beta")

@@ -604,6 +604,10 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  (* Every full-history GET captures this generation. Keeper identity alone is
+     not enough after alpha -> beta -> alpha: the first alpha response can
+     arrive after the second alpha request and still name the visible Keeper. *)
+  mutable msg_history_load_generation: int;
   (* How many rows above the newest the chat pane is showing. 0 is the bottom,
      where the pane follows a running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
@@ -816,6 +820,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_history_load_generation = 0;
   msg_scroll = 0;
   msg_older_cursor = None;
   msg_older_exist = false;

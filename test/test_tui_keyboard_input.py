@@ -13,6 +13,7 @@ import select
 import signal
 import socket
 import struct
+import zlib
 import subprocess
 import sys
 import tempfile
@@ -1210,6 +1211,7 @@ def run_terminal_scenario(
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
+    preload_input: bytes | None = None,
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -1285,6 +1287,13 @@ def run_terminal_scenario(
                 )
                 original_termios: list[Any] = termios.tcgetattr(slave_fd)
                 start_http_endpoint()
+                if preload_input is not None:
+                    # Bytes waiting in the terminal before the process reads
+                    # anything. A terminal that answers a capability query
+                    # answers within microseconds; this scenario cannot write
+                    # the answer later, because the TUI asks and gives up
+                    # before the first frame the harness waits for.
+                    os.write(master_fd, preload_input)
                 os.kill(process.pid, signal.SIGCONT)
                 wait_for_output(
                     process,
@@ -3130,6 +3139,121 @@ def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+GRAPHICS_QUERY_ID = 31
+GRAPHICS_SUPPORTED_REPLY = b"\x1b_Gi=%d;OK\x1b\\" % GRAPHICS_QUERY_ID
+IMAGE_NAME = "shot.png"
+
+
+def seed_image_workspace(base_path: str) -> None:
+    # A real 8x8 PNG rather than arbitrary bytes: the TUI hands the file
+    # straight to the terminal, and a scenario that passed on nonsense would
+    # not have shown that a picture can make the trip.
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(body))
+            + kind
+            + body
+            + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+        )
+
+    width = height = 8
+    raw = b"".join(b"\x00" + bytes([255, 0, 0, 255] * width) for _ in range(height))
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+    Path(base_path, IMAGE_NAME).write_bytes(png)
+
+
+def image_view_interaction() -> Interaction:
+    """A terminal that says it draws pictures gets one, and gets it taken away.
+
+    The reply to the capability query is preloaded, so this scenario is a
+    terminal that answers. What a terminal that stays silent does is the other
+    half, asserted below by asking for an image it cannot be given."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        # Asked before the first frame, so it is already on the stream.
+        for expected in (b"\x1b_G", b"i=%d" % GRAPHICS_QUERY_ID, b"a=q"):
+            if expected not in output:
+                raise AssertionError(
+                    f"the capability query never went out; missing {expected!r}"
+                )
+
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        path = str(Path(base_path, IMAGE_NAME))
+        command = f"/image {path}".encode()
+        send_and_wait(process, master_fd, output, command, composer_showing(command))
+
+        read_available(master_fd, output)
+        drawn_from = len(output)
+        os.write(master_fd, b"\r")
+        wait_for_output(
+            process, master_fd, output, b"a=T", start=drawn_from, timeout=5.0
+        )
+        drawn = bytes(output[drawn_from:])
+        for expected in (b"\x1b_G", b"f=100", b"a=T"):
+            if expected not in drawn:
+                raise AssertionError(
+                    f"the image was not placed; missing {expected!r}: {drawn!r}"
+                )
+
+        # The terminal keeps a picture in its own layer, so leaving has to say
+        # so explicitly; clearing the screen does not remove one.
+        read_available(master_fd, output)
+        dismissed_from = len(output)
+        os.write(master_fd, b" ")
+        wait_for_output(
+            process, master_fd, output, b"a=d", start=dismissed_from, timeout=5.0
+        )
+
+        # Back on the frame, and the space that dismissed the picture is not
+        # also a character in the draft.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+            start=dismissed_from,
+            timeout=5.0,
+        )
+
+        # Short on purpose: every character typed into the composer is a
+        # frame, and a long path spends the scenario's patience on redraws
+        # rather than on the thing being asserted.
+        missing = b"/image /nope.png"
+        send_and_wait(process, master_fd, output, missing, composer_showing(missing))
+        send_and_wait(process, master_fd, output, b"\r", b"No such file")
+
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
@@ -4957,6 +5081,13 @@ def run_keyboard_regression(executable: str) -> None:
         runtime_http_fixtures()
     )
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Image view over the frame",
+        interact=image_view_interaction(),
+        prepare_workspace=seed_image_workspace,
+        preload_input=GRAPHICS_SUPPORTED_REPLY,
+    )
     paste_requests: HttpRequests = []
     run_terminal_scenario(
         executable,

@@ -295,6 +295,12 @@
  (modules masc_tui_paste))
 
 (library
+ (name masc_tui_graphics)
+ (wrapped false)
+ (modules masc_tui_graphics)
+ (libraries base64))
+
+(library
  (name masc_tui_message_layout)
  (wrapped false)
  (modules masc_tui_message_layout)
@@ -468,6 +474,7 @@
   masc_tui_composer
   masc_tui_keeper_control
   masc_tui_markdown
+  masc_tui_graphics
   masc_tui_message_layout
   masc_tui_paste
   masc_tui_scroll

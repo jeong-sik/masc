@@ -416,6 +416,24 @@ A paste over 1 MiB keeps the first 1 MiB. The rest is read - the end marker
 has to be consumed, or the tail of the paste arrives as keystrokes - and
 counted, and Recent Events says how many bytes are not in the draft.
 
+#### Looking at an image
+
+`/image <path>` draws an image file on the terminal, if the terminal can hold
+one. The picture takes the whole screen, with the path above it, and the next
+key press takes it away and repaints the frame - that key does nothing else,
+so dismissing a screenshot cannot also move a cursor.
+
+Whether the terminal draws pictures is asked once, before the first frame,
+with the Kitty graphics protocol's own capability query. Terminals that
+implement it (Ghostty, Kitty, WezTerm) answer; terminals that do not say
+nothing, and `/image` then refuses in words instead of writing base64 onto the
+screen. Inside tmux the escapes are wrapped for passthrough, which also needs
+`allow-passthrough on` in the tmux config - that is the operator's setting and
+the TUI cannot check it.
+
+A path that cannot be read, or a file that is empty, is refused as a line in
+the pane. Nothing takes the screen to report a failure.
+
 #### Lines typed during a turn
 
 Enter during a running turn holds the line for the next one rather than

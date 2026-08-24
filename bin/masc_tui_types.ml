@@ -378,6 +378,15 @@ type keeper_chat_return =
   | Keeper_chat_return_detail
 
 (** Top-level TUI surface. *)
+(* A picture currently on the terminal. Only the drawn case: a refusal has
+   nothing to draw, and putting one here would take the screen away from the
+   frame to show a message the frame is the only thing that can show. Refusals
+   go to the pane as text, like every other thing that did not happen. *)
+type image_shown = {
+  image_path : string;
+  image_bytes : int;
+}
+
 type surface =
   | Overview
   | Acting
@@ -539,6 +548,13 @@ type state = {
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
   mutable help_scroll: int;
+  (* An image the operator asked to see, drawn over the whole terminal rather
+     than into a frame. A picture does not live in a row: the terminal keeps
+     it in its own layer, and the frame presenter redraws only the rows that
+     changed, so a frame drawn on top would clear part of the picture and
+     leave the rest. While this is set the loop draws no frames at all, and
+     the next key takes the picture away and repaints everything. *)
+  mutable image_open: image_shown option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -892,6 +908,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   task_focus = false;
   help_open = false;
   help_scroll = 0;
+  image_open = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;

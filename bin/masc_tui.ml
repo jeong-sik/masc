@@ -216,13 +216,48 @@ let read_utf8_scalar reader first expected_length =
 type input_event =
   | Key of string
   | Pasted of Masc_tui_paste.t
+  | Graphics_reply of string
+      (** The body of an APC the terminal sent back, between [ESC _ G] and
+          [ESC \\]. Only the graphics capability query asks for one -- every
+          placement says q=2 -- but a reply that is never read is not silent:
+          stdin here is the key stream, so its bytes are typed into whatever
+          the operator was writing. Reading it is what keeps that from
+          happening, whether or not anyone is waiting for it. *)
 
 (* How long to wait for the next byte of a paste already in progress. The
    terminal writes the payload in one go behind the start marker, so this is a
    liveness bound on a stream that stalled, not a pace. *)
 let paste_byte_timeout_seconds = 0.5
 
-(** Read one key, or one paste. *)
+(* Read an APC body to its terminator. Bounded: a terminal that opens one and
+   never closes it would otherwise hold the reader until the stream stalled,
+   and every reply the protocol defines is short. *)
+let apc_reply_max_bytes = 4096
+
+let read_apc_body reader =
+  let body = Buffer.create 64 in
+  let finished = ref false in
+  let ended = ref false in
+  let escaped = ref false in
+  while not (!finished || !ended) do
+    match take_input_byte reader ~timeout:0.05 with
+    | None -> ended := true
+    | Some '\x1b' -> escaped := true
+    | Some byte ->
+        if !escaped then begin
+          escaped := false;
+          if byte = '\\' then finished := true
+          else begin
+            Buffer.add_char body '\x1b';
+            Buffer.add_char body byte
+          end
+        end
+        else Buffer.add_char body byte;
+        if Buffer.length body > apc_reply_max_bytes then ended := true
+  done;
+  Buffer.contents body
+
+(** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
   Eio_guard.run_in_systhread (fun () ->
       let key name = Some (Key name) in
@@ -292,6 +327,13 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                         | Some wheel_key -> key wheel_key
                         | None -> key "unknown-esc"))
                | Some (_, _) -> key "unknown-esc")
+          (* [ESC _ G] opens an APC the terminal is sending back. Left
+             unread its body arrives as keys: "Gi=31" typed into the
+             composer, once per image. *)
+          | Some '_' -> (
+              match take_input_byte reader ~timeout:0.05 with
+              | Some 'G' -> Some (Graphics_reply (read_apc_body reader))
+              | Some _ | None -> key "esc")
           | Some _ | None -> key "esc")
       | Some byte -> (
           match Masc_tui_message_layout.utf8_scalar_byte_length byte with
@@ -1876,6 +1918,84 @@ let chat_notice state ~keeper_name ~role text =
         (match role with Message_error -> "error" | _ -> "system")
         text
 
+(* Whether this terminal draws pictures. Asked once, before the first frame,
+   and remembered: the answer cannot change while the process runs, and asking
+   again would put another reply on the key stream. [None] until asked. *)
+let terminal_draws_images = ref None
+
+(* Read a whole file. Images are the only thing this reads off disk, and a
+   picture is not a thing to stream: it goes to the terminal in one write or
+   not at all. *)
+let read_file_bytes path =
+  match open_in_bin path with
+  | exception Sys_error detail -> Error detail
+  | channel ->
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr channel)
+        (fun () ->
+          match really_input_string channel (in_channel_length channel) with
+          | contents -> Ok contents
+          | exception End_of_file ->
+              Error "the file ended sooner than its length said")
+
+(* Everything written for a picture goes through here, wrapped for tmux when
+   this process is inside one. tmux eats an escape it does not recognise, so
+   these reach the terminal underneath only when they are wrapped -- and only
+   when tmux was configured to pass them through, which is the operator's
+   setting and not something this can check. *)
+let write_to_terminal payload =
+  let payload =
+    match Sys.getenv_opt "TMUX" with
+    | Some _ -> Masc_tui_graphics.tmux_wrapped payload
+    | None -> payload
+  in
+  output_string stdout payload;
+  flush stdout
+
+(* Put a picture on the terminal, or say why not. The refusal is text for the
+   pane: there is nothing to draw, and taking the screen away from the frame
+   to say so would hide the only surface that can say it. *)
+let open_image state ~notice path =
+  let refuse reason =
+    notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
+  in
+  match !terminal_draws_images with
+  | Some false ->
+      refuse
+        "this terminal does not draw images (it did not answer the graphics query)"
+  | Some true | None -> (
+      match read_file_bytes path with
+      | Error detail -> refuse detail
+      | Ok data when String.length data = 0 -> refuse "the file is empty"
+      | Ok data ->
+          let rows, columns = get_terminal_size () in
+          (* Two rows kept back: one names the file above the picture, one
+             says how to leave below it. *)
+          let box =
+            { Masc_tui_graphics.columns = max 1 (columns - 2)
+            ; rows = max 1 (rows - 3)
+            }
+          in
+          write_to_terminal
+            (Ansi.clear ^ Masc_tui_graphics.delete_all
+            ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
+                (Message_layout.fit_width path (max 1 (columns - 1)))
+            ^ Masc_tui_graphics.place ~data box
+            ^ Printf.sprintf "\x1b[%d;1H%s" rows
+                (Message_layout.fit_width "  any key: back"
+                   (max 1 (columns - 1))));
+          state.image_open <-
+            Some { image_path = path; image_bytes = String.length data })
+
+(* Take the picture away and give the frame back. The terminal holds images in
+   its own layer, so clearing the screen is not enough to remove one. *)
+let close_image state =
+  match state.image_open with
+  | None -> ()
+  | Some _ ->
+      state.image_open <- None;
+      write_to_terminal Masc_tui_graphics.delete_all
+
 let send_operator_text ?keeper_name state ~mailbox text =
   let target =
     match keeper_name with
@@ -1888,6 +2008,11 @@ let send_operator_text ?keeper_name state ~mailbox text =
       start_keeper_message ?keeper_name state ~mailbox text
   | Masc_tui_command.Task_missing_title ->
       add_event state "error" "/task needs a title on the same line"
+  | Masc_tui_command.View_image_missing_path ->
+      notice ~role:Message_error "/image needs a path on the same line"
+  | Masc_tui_command.View_image path ->
+      Buffer.clear state.msg_input;
+      open_image state ~notice (String.trim path)
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
       notice ~role:Message_status
@@ -3112,6 +3237,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Toggle_thinking
+       | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)
@@ -3821,6 +3947,12 @@ let toggle_mouse_tracking () =
 
    Written and cleared beside the mouse mode, for the reasons its comment
    gives about when a byte may be put on this stream. *)
+(* How long to wait for the graphics query's answer. A terminal that
+   implements the protocol replies as soon as it has parsed the escape; one
+   that does not never replies, and this is the whole cost of finding that
+   out, paid once at startup. *)
+let graphics_query_wait_seconds = 0.2
+
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
@@ -3986,6 +4118,21 @@ let main () =
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
   let input_reader = create_input_reader () in
+  (* Ask once whether this terminal draws pictures, here rather than when one
+     is first asked for: the answer cannot change while the process runs, the
+     stream is quiet between session entry and the first frame, and a query
+     sent later would drop its reply into the middle of the operator's typing.
+     A terminal that does not implement the protocol says nothing at all, so
+     the deadline is the answer for those. *)
+  write_to_terminal Masc_tui_graphics.query;
+  terminal_draws_images :=
+    Some
+      (match read_input ~timeout:graphics_query_wait_seconds input_reader () with
+       | Some (Graphics_reply body) -> (
+           match Masc_tui_graphics.parse_query_reply body with
+           | Some Masc_tui_graphics.Supported -> true
+           | Some (Masc_tui_graphics.Refused _) | None -> false)
+       | Some (Key _) | Some (Pasted _) | None -> false);
 
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0
@@ -4195,15 +4342,31 @@ let main () =
          [key] the way it always has, and a paste is simply not one. Splitting
          here rather than inside the surfaces is what keeps a paste from
          needing a name in the key vocabulary. *)
+      (* A picture is showing, which means the terminal is not showing this
+         program's frame. The next key is the one that takes the picture away
+         and is not also a keystroke for the surface underneath -- an operator
+         pressing j to dismiss a screenshot did not mean to move a cursor. *)
+      let dismissed_image =
+        Option.is_some state.image_open && Option.is_some input
+      in
+      if dismissed_image then begin
+        close_image state;
+        invalidate_frame_for_resize frame_presenter render_schedule
+      end;
       let key =
-        match input with
-        | Some (Key name) -> Some name
-        | Some (Pasted _) | None -> None
+        if dismissed_image then None
+        else
+          match input with
+          | Some (Key name) -> Some name
+          | Some (Pasted _) | Some (Graphics_reply _) | None -> None
       in
       (match input with
-       | Some (Pasted paste) ->
+       | Some (Pasted paste) when not dismissed_image ->
            handle_paste state ~base_path ~mailbox:async_messages ~paste
-       | Some (Key _) | None -> ());
+       (* A graphics reply is read and dropped. Nothing asks for one outside
+          the capability probe, which does its own reading before the loop
+          starts; what matters here is that it does not become keys. *)
+       | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
       let terminal_rows, _terminal_columns = get_terminal_size () in
@@ -5350,6 +5513,9 @@ let main () =
          Render_schedule.take render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
+       (* The terminal belongs to the picture until it is dismissed. A frame
+          drawn now would clear the rows it occupies and leave the rest. *)
+       | Render_schedule.Render when Option.is_some state.image_open -> ()
        | Render_schedule.Render ->
            let frame, clamped = render state in
            (* The frame is what the operator will act on next, so the scroll it

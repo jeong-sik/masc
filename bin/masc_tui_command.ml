@@ -10,6 +10,8 @@ type t =
   | Switch_keeper_missing_name
   | Interrupt_turn
   | Toggle_thinking
+  | View_image of string
+  | View_image_missing_path
   | Unknown of string
 
 (* One list, drawn by /help and kept beside the parser so a new command
@@ -19,6 +21,7 @@ let help_lines =
   ; "/keeper <name>  switch this pane to another keeper"
   ; "/interrupt      signal the streaming turn to stop"
   ; "/thinking       fold or unfold reasoning blocks in this pane"
+  ; "/image <path>   draw an image file on the terminal"
   ; "/help           this list"
   ]
 
@@ -54,6 +57,8 @@ let parse text =
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn
     | "thinking", _ -> Toggle_thinking
+    | "image", "" -> View_image_missing_path
+    | "image", path -> View_image path
     | word, _ -> Unknown word
 
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —

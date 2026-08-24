@@ -27,6 +27,12 @@ type t =
           an operator mid-sentence whose hands are already on letters. *)
   | Toggle_thinking
       (** [/thinking] — fold or unfold reasoning blocks in this pane. *)
+  | View_image of string
+      (** [/image <path>] — draw an image file on the terminal, if it can
+          hold one. The path is the rest of the first line, untrimmed of
+          nothing but the space after the word: a path may contain spaces,
+          and quoting it would be a second grammar. *)
+  | View_image_missing_path  (** [/image] with no path on the line. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 
 val help_lines : string list

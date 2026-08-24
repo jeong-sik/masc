@@ -920,6 +920,50 @@ let test_prune () =
   let result = Dated_jsonl.read_recent store 10 in
   check bool "today survives prune" true (List.length result > 0)
 
+(* The cutoff month and day used to be formatted here rather than asked of
+   the writer, and the existing case only separates 2020 from today -- six
+   years of slack hides any disagreement. These put a file on each side of
+   the boundary and name the boundary through Jsonl_writer, the module that
+   decides where rows land (#27143). *)
+let test_prune_boundary_follows_the_writer_layout () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_prune_boundary" in
+  let day = 86_400.0 in
+  let now = Unix.gettimeofday () in
+  let write_day ~ts =
+    let dated = Jsonl_writer.dated_path ~base_dir:dir ~ts in
+    Fs_compat.mkdir_p (Filename.concat dir dated.Jsonl_writer.month_dir);
+    Fs_compat.append_file dated.Jsonl_writer.path "{\"probe\":true}\n";
+    dated.Jsonl_writer.path
+  in
+  (* One day past the cutoff and one day inside it. *)
+  let outside = write_day ~ts:(now -. (31.0 *. day)) in
+  let inside = write_day ~ts:(now -. (29.0 *. day)) in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  ignore (Dated_jsonl.prune store ~days:30);
+  check bool "the day past the cutoff is gone" false (Sys.file_exists outside);
+  check bool "the day inside the cutoff is kept" true (Sys.file_exists inside)
+;;
+
+let test_prune_keeps_the_cutoff_day_itself () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_prune_cutoff_day" in
+  let day = 86_400.0 in
+  let now = Unix.gettimeofday () in
+  let dated = Jsonl_writer.dated_path ~base_dir:dir ~ts:(now -. (30.0 *. day)) in
+  Fs_compat.mkdir_p (Filename.concat dir dated.Jsonl_writer.month_dir);
+  Fs_compat.append_file dated.Jsonl_writer.path "{\"probe\":true}\n";
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  ignore (Dated_jsonl.prune store ~days:30);
+  check
+    bool
+    "the cutoff day is retained, not deleted"
+    true
+    (Sys.file_exists dated.Jsonl_writer.path)
+;;
+
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1255,6 +1299,10 @@ let () =
         [
           test_case "removes old files" `Quick test_prune;
           test_case "zero days safe" `Quick test_prune_zero_days;
+          test_case "boundary follows the writer layout" `Quick
+            test_prune_boundary_follows_the_writer_layout;
+          test_case "cutoff day itself is kept" `Quick
+            test_prune_keeps_the_cutoff_day_itself;
           test_case "max bytes prunes oldest completed day-files" `Quick
             test_max_bytes_prunes_oldest_completed_day_files;
           test_case "max bytes preserves current day-file" `Quick

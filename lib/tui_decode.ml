@@ -371,9 +371,22 @@ let short_timestamp_for_terminal text =
      else text)
 ;;
 
-let clock_timestamp_for_terminal text =
+(* The clock beside a row, in the zone the operator's terminal is in. The
+   server writes RFC 3339 on the UTC timeline; slicing HH:MM:SS straight out
+   of that string put a UTC clock on every log row under a header that showed
+   local time, nine hours apart in Seoul. [localtime] is the conversion the
+   caller chooses -- the terminal's own zone on a screen, a fixed one in a
+   test -- so this stays a function of its inputs. A timestamp the codec
+   cannot read keeps the old slice: the byte positions are still where a
+   clock would be, and the sanitizer still makes them safe to draw. *)
+let clock_timestamp_for_terminal ~localtime text =
   sanitize_terminal_text
-    (if String.length text >= 19 then String.sub text 11 8 else text)
+    (match Time_codec.parse_rfc3339_opt text with
+     | Some unix_seconds ->
+         let tm = localtime unix_seconds in
+         Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min
+           tm.Unix.tm_sec
+     | None -> if String.length text >= 19 then String.sub text 11 8 else text)
 ;;
 
 let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
@@ -1040,6 +1053,7 @@ type keeper_call = {
   kc_at : float;
   kc_tool : string;
   kc_input : string;
+  kc_output : string option;
   kc_success : bool;
   kc_duration_ms : float option;
   kc_turn : int option;
@@ -1444,6 +1458,18 @@ let decode_keeper_call json =
     | `String value -> value
     | other -> Yojson.Safe.to_string other
   in
+  (* What came back, as the server serves it. The row already said a call ran
+     and what it was called with; without this it never said what the call
+     answered, which is the question a failed call leaves open. The server
+     bounds it (the envelope carries [truncated_to]), so this is a read, not a
+     second budget. A row that carries no result says nothing rather than an
+     empty string: "returned nothing" and "was not recorded" are different. *)
+  let kc_output =
+    match member "output" json with
+    | `String value when String.trim value <> "" -> Some value
+    | `String _ | `Null -> None
+    | other -> Some (Yojson.Safe.to_string other)
+  in
   let kc_duration_ms =
     match member "duration_ms" json with
     | `Float value -> Some value
@@ -1461,6 +1487,7 @@ let decode_keeper_call json =
     , { kc_at
       ; kc_tool
       ; kc_input
+      ; kc_output
       ; kc_success
       ; kc_duration_ms
       ; kc_turn

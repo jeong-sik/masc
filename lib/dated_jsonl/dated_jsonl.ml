@@ -762,13 +762,12 @@ let prune_unlocked t ~days =
   else begin
     let now = Unix.gettimeofday () in
     let cutoff = now -. (float_of_int days *. Masc_time_constants.day) in
-    let cutoff_tm = Unix.gmtime cutoff in
-    let cutoff_month =
-      Printf.sprintf "%04d-%02d"
-        (cutoff_tm.Unix.tm_year + 1900)
-        (cutoff_tm.Unix.tm_mon + 1)
-    in
-    let cutoff_day = Printf.sprintf "%02d" cutoff_tm.Unix.tm_mday in
+    (* The cutoff has to name directories the same way the writer named them.
+       Rebuilding the format here is what lets prune delete by one calendar
+       while the writer files by another (#27143). *)
+    let cutoff_path = Jsonl_writer.dated_path ~base_dir:t.base_dir ~ts:cutoff in
+    let cutoff_month = cutoff_path.Jsonl_writer.month_dir in
+    let cutoff_day = Filename.remove_extension cutoff_path.Jsonl_writer.day_file in
     let deleted = ref 0 in
     let months = list_month_dirs t.base_dir in
     List.iter (fun m ->

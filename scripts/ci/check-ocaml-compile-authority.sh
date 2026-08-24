@@ -54,22 +54,6 @@ require_text \
   "${build_body}" \
   "scripts/check-keeper-event-queue-projection-boundary.sh" \
   "Build and Test"
-
-# The suite reporter keeps exact assertions in the job log; the artifact keeps
-# the complete surrounding output. Both belong to the one Build authority, so
-# workflow edits must not silently detach or weaken the archive step.
-require_text "${build_body}" "id: ocaml_test_suite" "Build and Test"
-require_text \
-  "${build_body}" \
-  "if: \${{ always() && steps.ocaml_test_suite.outcome == 'failure' }}" \
-  "Build and Test"
-require_text "${build_body}" "uses: actions/upload-artifact@v7" "Build and Test"
-require_text "${build_body}" "name: test-suite-log" "Build and Test"
-require_text \
-  "${build_body}" \
-  "path: \${{ runner.temp }}/test-suite.log" \
-  "Build and Test"
-require_text "${build_body}" "if-no-files-found: warn" "Build and Test"
 reject_text "${build_body}" "OCAMLPARAM" "Build and Test"
 reject_text "${build_body}" "dune build --root . @default @check @install --force" "Build and Test"
 

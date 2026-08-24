@@ -300,6 +300,14 @@ def tab_until(
     output: bytearray,
     needle: bytes,
 ) -> bytes:
+    """Tab until the page carrying needle is on screen.
+
+    Reaching a page and knowing how far away it is are different claims, and
+    only the first is what most of these scenarios are about. Seven of them
+    used to press Tab once for the Keepers page, which held while Keepers sat
+    next to Overview; the Acting page landed between them and every one of the
+    seven timed out on a screen it had no reason to care about.
+    """
     for _ in range(TAB_CYCLE_BOUND):
         read_available(master_fd, output)
         start = len(output)
@@ -1918,7 +1926,7 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
     send_and_wait(process, master_fd, output, b"\t", b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
@@ -2148,7 +2156,7 @@ def assert_overview_event_rows(
     send_and_wait(process, master_fd, output, b"jk", event_range(total - 2, total - 1, total))
     send_and_wait(process, master_fd, output, b"j", oldest_window(2, total))
 
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Keepers")
     tab_until(process, master_fd, output, oldest_window(2, total))
     resize_and_wait(
         process,
@@ -2264,7 +2272,7 @@ def approval_selection_identity_interaction(
             start=cluster_end,
             timeout=3.0,
         )
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Keepers")
         send_and_wait(
             process,
             master_fd,
@@ -2354,7 +2362,7 @@ def open_loaded_planning(
         start=cluster_end,
         timeout=3.0,
     )
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
     send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (0)"))
     send_and_wait(process, master_fd, output, b"\t", b"plan-alpha-29424")
@@ -2503,7 +2511,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
             timeout=3.0,
         )
 
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Keepers")
         send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
         send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (3)"))
         selected_b = selected_row(b"post-b")
@@ -2558,7 +2566,7 @@ def open_loaded_board(
         start=cluster_end,
         timeout=3.0,
     )
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
     send_and_wait(
         process,
@@ -2669,7 +2677,7 @@ def board_detail_authority_interaction(
             send_and_wait(process, master_fd, output, b"\t", b"MASC Planning")
             tab_until(process, master_fd, output, b"MASC System Logs")
             send_and_wait(process, master_fd, output, b"\t", b"late-list-applied")
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+            tab_until(process, master_fd, output, b"MASC Keepers")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
             board = send_and_wait(
                 process,

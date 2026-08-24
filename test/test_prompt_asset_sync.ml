@@ -370,6 +370,48 @@ let test_tools_domain_scopes_to_tools () =
       check bool "prompt asset not written" false
         (Sys.file_exists (Filename.concat dir "keeper.example.md")))
 
+(* 2026-08-25: a half-built binary held the masc server down and the failure
+   line ("manifest differs from current assets") said neither which side was
+   ahead nor that a rebuild was the remedy. Two sessions each spent time
+   guessing at the runtime directory and the source tree instead. Both
+   directions are asserted so the message keeps naming them. *)
+let tools_unlisted_embedded =
+  [ ( "tools/masc_listed.toml"
+    , "name = \"masc_listed\"\ndescription = \"Listed.\"\n" )
+  ; ( "tools/masc_unlisted.toml"
+    , "name = \"masc_unlisted\"\ndescription = \"Unlisted.\"\n" )
+  ; ( tools_manifest_rel
+    , manifest ~schema:"masc.tool-managed-assets.v1" [ "masc_listed.toml" ] )
+  ]
+
+let mentions_substring ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
+  nl = 0 || scan 0
+
+let test_manifest_mismatch_names_direction_and_remedy () =
+  with_temp_prompts_dir (fun dir ->
+      let result =
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
+          ~read:(fun rel -> List.assoc_opt rel tools_unlisted_embedded)
+          ~files:(List.map fst tools_unlisted_embedded)
+          ~dest_dir:dir
+          ()
+      in
+      let msg =
+        match result.Managed_asset_sync.failed with
+        | [ (rel, m) ] when String.equal rel tools_manifest_rel -> m
+        | _ -> failwith "expected exactly one failure on the tools manifest"
+      in
+      let has needle = mentions_substring ~needle msg in
+      check bool "names the build as the fault" true (has "half-built");
+      check bool "states the remedy" true (has "rebuild");
+      check bool "names the embedded-but-unlisted asset" true
+        (has "masc_unlisted.toml");
+      check bool "shows the empty direction explicitly" true (has "(none)");
+      check bool "nothing is deleted on a failed check" true
+        (List.length result.Managed_asset_sync.removed = 0))
+
 let test_tools_domain_rejects_prompt_manifest_schema () =
   with_temp_prompts_dir (fun dir ->
       let mixed_schema =
@@ -449,5 +491,7 @@ let () =
             test_tools_domain_rejects_prompt_manifest_schema;
           test_case "binary manifest covers current tool assets" `Quick
             test_binary_manifest_covers_current_tool_assets;
+          test_case "manifest mismatch names direction and remedy" `Quick
+            test_manifest_mismatch_names_direction_and_remedy;
         ] );
     ]

@@ -1,0 +1,13 @@
+name = "masc_schedule_list"
+description = "List durable scheduled internal automation requests."
+additional_properties = false
+
+[[params]]
+name = "status"
+type = "string"
+enum = ["scheduled", "due", "running", "succeeded", "failed", "cancelled", "expired"]
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Maximum rows to return. Defaults to 50, capped at 200."

@@ -1,0 +1,65 @@
+name = "keeper_surface_post"
+description = """
+Post a message to one conversation endpoint: 'dashboard' (appears in the \
+operator's chat transcript), 'discord', or 'slack'. Standard Markdown is \
+rendered natively by Discord and by Slack's Block Kit markdown block. To \
+create a real highlighted user mention, pass stable participant-roster ids \
+in mention_user_ids; never guess ids from display names. A Slack post may \
+reply inside an existing thread (thread_ts) or carry Block Kit blocks; see \
+those parameters. Posting to an unbound surface is an error. These endpoints \
+are read by a person, so an unchanged status reposted every cycle crowds \
+their view and says nothing the previous one did not; when there is nothing \
+new, the turn ends without a post."""
+
+[[params]]
+name = "surface"
+type = "string"
+required = true
+description = "Lane to post to: 'dashboard', 'discord', or 'slack'"
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Message text to deliver on the lane"
+
+[[params]]
+name = "channel_id"
+type = "string"
+description = """
+Bound Discord or Slack channel id; required only when more than one channel \
+is bound for the selected surface"""
+
+[[params]]
+name = "mention_user_ids"
+type = "array"
+items = { type = "string" }
+max_items = 100
+description = """
+Stable ids from keeper_surface_read participants to visibly mention. Slack \
+requires U.../W... ids; Discord requires decimal user snowflakes. Display \
+names such as @Vincent do not create API mentions."""
+
+[[params]]
+name = "thread_ts"
+type = "string"
+description = """
+Slack timestamp of an existing thread's root message (from \
+keeper_surface_read). Posts this message as a reply inside that thread. \
+Slack surface only — a dashboard or discord target is rejected, not ignored. \
+When both this and a continuation thread exist, this value wins."""
+
+[[params]]
+name = "blocks"
+type = "array"
+max_items = 50
+description = """
+Slack Block Kit blocks (chat.postMessage blocks parameter) for a \
+structurally rich PR report: section/header/divider/context blocks, color \
+banners, images. Slack surface only — a dashboard or discord target is \
+rejected, not ignored. Each block must be a JSON object carrying a non-empty \
+string \"type\" member. When blocks is present it is sent alongside content \
+(content remains the notification fallback text)."""
+
+[params.items]
+type = "object"

@@ -254,6 +254,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
+| RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Draft | - |
 
 ### 신규 RFC
 

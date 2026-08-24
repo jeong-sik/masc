@@ -218,7 +218,13 @@ let rec param_of_pairs ~context pairs =
        | Ptype_boolean ->
          let* v = as_bool ~context:key_context value in
          Ok (Some ("default", `Bool v))
-       | Ptype_string | Ptype_number | Ptype_object | Ptype_array ->
+       | Ptype_string ->
+         (* A string default names which value a caller gets by omitting the
+            key, the same way an integer one does. It was refused, so a tool
+            that had one could not be declared here at all. *)
+         let* v = as_non_empty_string ~context:key_context value in
+         Ok (Some ("default", `String v))
+       | Ptype_number | Ptype_object | Ptype_array ->
          Error
            (sprintf
               "%s is not supported for type %s"

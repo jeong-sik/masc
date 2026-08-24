@@ -1,0 +1,20 @@
+name = "masc_deliver"
+description = """
+Attach final output/result to a task for handoff or review. Use for: code \
+diffs, PR URLs, analysis reports, generated files. Deliverables persist with \
+task and are visible to other agents. Call before \
+masc_transition(action='done'). Example: masc_deliver({task_id: 'task-001', \
+content: 'artifact:review-123'})"""
+additional_properties = false
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID"
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Deliverable content"

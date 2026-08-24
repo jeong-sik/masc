@@ -1,0 +1,40 @@
+name = "masc_broadcast"
+description = """
+Send a message visible to ALL agents via SSE push.
+
+Usage rules:
+- Call \
+`masc_status` first to verify state before invoking this tool.
+- Use \
+`@agent_name` syntax to ping a specific agent.
+- Use for status updates \
+(e.g. starting/done/blocker).
+- Use to request help or review from another \
+agent."""
+additional_properties = false
+
+[[params]]
+name = "agent_name"
+type = "string"
+required = true
+description = "Your agent name"
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Broadcast body text (use @mention for specific agents)"
+
+[[params]]
+name = "task_cache_subject_agent"
+type = "string"
+description = """
+Optional typed cache signal: agent whose cached current task is being \
+observed. Must be supplied together with task_cache_task_id."""
+
+[[params]]
+name = "task_cache_task_id"
+type = "string"
+description = """
+Optional typed cache signal: task ID observed as active in the subject agent \
+cache. Must be supplied together with task_cache_subject_agent."""

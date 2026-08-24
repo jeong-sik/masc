@@ -101,12 +101,36 @@ export function isCrashedPhase(phase: string | null | undefined): boolean {
 export interface KeeperOfflineInput {
   lifecycle_phase?: Keeper['lifecycle_phase'] | string | null
   phase?: Keeper['phase'] | string | null
-  status?: string | null
+  /** Keeper health, one axis published in two placements: the keeper brief
+   *  row carries it top-level, the execution route nests it under
+   *  `diagnostic`. `Keeper['diagnostic']` types `health_state` as a closed
+   *  union while operator snapshots keep an untyped record, so both read
+   *  `unknown` and narrow below. */
+  health?: unknown
+  diagnostic?: { health_state?: unknown } | null
 }
 
-/** Operator considers the keeper offline / down on any of: terminal
- *  FSM phases (Offline/Stopped/Crashed) or one of the
- *  off-tokens emitted in `keeper.status`. */
+const OFFLINE_HEALTH = 'offline'
+
+function healthToken(keeper: KeeperOfflineInput): string | null {
+  const raw = keeper.health ?? keeper.diagnostic?.health_state
+  return typeof raw === 'string' ? raw.toLowerCase() : null
+}
+
+/** Operator considers the keeper offline / down on either axis that
+ *  states it directly: a terminal lifecycle phase (Offline/Stopped/Crashed)
+ *  or `health_state = offline`, which the backend computes fresh from
+ *  `keepalive_running` and heartbeat age.
+ *
+ *  It deliberately ignores `keeper.status`. That field folds health and
+ *  phase back into one word and is refreshed by a different path than the
+ *  axes it summarises, so the two can disagree on the same row — measured
+ *  2026-08-24: `rondo` carried `status=offline` beside `health=healthy`,
+ *  `phase=Running` for the whole observation window. Reading it here made
+ *  a live keeper look shut down, which offered `boot` and `purge` and hid
+ *  `wakeup`. `inactive` was the worse half: it stood for stale, degraded
+ *  and zombie at once, so a keeper that had merely gone quiet was counted
+ *  as one that had stopped. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   const phase = lowerToken(keeper.lifecycle_phase ?? keeper.phase)
   if (
@@ -116,18 +140,7 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   ) {
     return true
   }
-  const status = lowerToken(keeper.status)
-  // RFC-0139 PR-2: the `'stopped'` status token is emitted from
-  // `Keeper_state_machine.phase_to_string`
-  // (lib/keeper/keeper_lifecycle_events.ml:74) when only the
-  // wire-format status string is in hand (no PascalCase phase yet).
-  // The legacy `lib/status-utils.isOfflineStatus` recognised it; folded
-  // in here so `isOfflineStatus` can be retired as strict-subset
-  // duplication.
-  return status === 'offline'
-    || status === 'inactive'
-    || status === 'unbooted'
-    || status === 'stopped'
+  return healthToken(keeper) === OFFLINE_HEALTH
 }
 
 /** Closed set of blocker classes that the wakeup action is intended

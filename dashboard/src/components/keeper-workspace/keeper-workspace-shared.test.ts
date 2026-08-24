@@ -29,7 +29,7 @@ describe('keeperBucket', () => {
     expect(keeperBucket(mk({ status: 'offline', lifecycle_phase: 'Paused' }))).toBe('paused')
   })
   it('classifies a stopped keeper as offline', () => {
-    expect(keeperBucket(mk({ status: 'stopped' }))).toBe('offline')
+    expect(keeperBucket(mk({ phase: 'Stopped' }))).toBe('offline')
   })
   it('classifies a blocked keeper as stuck (typed SSOT, 확인 필요 group)', () => {
   })

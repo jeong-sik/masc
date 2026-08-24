@@ -153,16 +153,23 @@ describe('deriveKeeperOperationalState — offline branch', () => {
     expect(state).toMatchObject({ kind: 'offline', attention: 'clean', cause })
   })
 
-  it.each<['offline' | 'inactive' | 'unbooted']>([
-    ['offline'],
-    ['inactive'],
-    ['unbooted'],
-  ])('status=%s without phase → offline', (status) => {
+  // 예전에는 status 가 'offline' | 'inactive' | 'unbooted' 중 하나이기만 하면
+  // phase 없이도 offline 으로 접혔다. 'inactive' 한 단어가 stale·degraded·zombie
+  // 셋을 함께 가리켰으므로, 늦은 하트비트 하나가 멈춘 키퍼와 같은 판정을 받았다.
+  it('phase 가 없어도 health=offline 이면 offline', () => {
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ status }),
+      keeper: makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>),
       composite: null,
     })
     expect(state.kind).toBe('offline')
+  })
+
+  it.each(['stale', 'degraded', 'zombie'])('health=%s 는 offline 이 아니다', (health_state) => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ diagnostic: { health_state } } as Partial<Keeper>),
+      composite: null,
+    })
+    expect(state.kind).not.toBe('offline')
   })
 
   it('composite phase Stopped overrides keeper.phase', () => {

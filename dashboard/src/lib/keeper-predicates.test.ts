@@ -5,10 +5,12 @@ import {
   isCrashedPhase,
   isKeeperPaused,
   isKeeperOffline,
+  type KeeperOfflineInput,
   isKeeperOperatorTargetable,
   isKeeperRunningExcludingRestarting,
   keeperIsStuckOnRecoverableBlocker,
   keeperCanWakeup,
+  keeperActionVisibility,
 } from './keeper-predicates'
 
 function k(overrides: Partial<Keeper> = {}): Keeper {
@@ -61,18 +63,26 @@ describe('isKeeperOffline', () => {
   it.each(['offline', 'stopped', 'crashed'])('lowercase phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline({ phase })).toBe(true)
   })
-  it.each([['offline'], ['inactive'], ['unbooted'], ['stopped']])('status=%s ⇒ offline', (status) => {
-    expect(isKeeperOffline(k({ status }))).toBe(true)
-  })
   it('Running keeper not offline', () => {
     expect(isKeeperOffline(k({ phase: 'Running' }))).toBe(false)
   })
-  it('audit B5 absorbed: status-only `stopped` token (legacy isOfflineStatus arm)', () => {
-    // Pre RFC-0139 PR-2 the `'stopped'` status token was recognised
-    // only by `lib/status-utils.isOfflineStatus`. The keeper-side SSOT
-    // now absorbs it so a wire-format-only snapshot (phase missing)
-    // still routes to the offline branch.
-    expect(isKeeperOffline({ status: 'stopped' })).toBe(true)
+  it('health=offline ⇒ offline', () => {
+    expect(isKeeperOffline({ diagnostic: { health_state: 'offline' } })).toBe(true)
+  })
+  it.each(['stale', 'degraded', 'zombie', 'idle', 'healthy'])(
+    'health=%s 는 조용해진 것이지 멈춘 것이 아니다',
+    (health_state) => {
+      expect(isKeeperOffline({ diagnostic: { health_state } })).toBe(false)
+    },
+  )
+  it.each(['offline', 'inactive', 'unbooted', 'stopped', 'active'])(
+    'status=%s 는 판정에 관여하지 않는다',
+    (status) => {
+      expect(isKeeperOffline({ status } as KeeperOfflineInput)).toBe(false)
+    },
+  )
+  it('축이 하나도 없으면 offline 이라고 단정하지 않는다', () => {
+    expect(isKeeperOffline({})).toBe(false)
   })
 })
 
@@ -182,5 +192,42 @@ describe('isKeeperRunningExcludingRestarting — RFC-0135 PR-11', () => {
     ['Offline'], ['Stopped'], ['Crashed'], ['Paused'],
   ])('phase=%s ⇒ NOT running', (phase) => {
     expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: phase as Keeper['phase'] }))).toBe(false)
+  })
+})
+
+// 2026-08-24 라이브 관측: /api/v1/dashboard/execution 의 `rondo` 는
+// status='offline' 인데 health='healthy', phase='Running', paused=false 였다.
+// 캐시된 행에서 `status` 만 옛 값에 머물고 diagnostic 은 새로 채워진 결과다.
+// 18초 동안 네 번 폴링해도 그대로였으니 경합이 아니라 고정된 어긋남이다.
+describe('접힌 status 가 살아 있는 축과 어긋날 때', () => {
+  const rondo = k({
+    status: 'offline',
+    phase: 'Running',
+    lifecycle_phase: 'Running',
+    paused: false,
+    keepalive_running: true,
+    diagnostic: { health_state: 'healthy' },
+  } as Partial<Keeper>)
+
+  it('health 와 phase 가 살아 있다고 말하면 offline 이 아니다', () => {
+    expect(isKeeperOffline(rondo)).toBe(false)
+  })
+
+  it('살아 있는 키퍼에게 부팅과 삭제를 권하지 않는다', () => {
+    const vis = keeperActionVisibility(rondo)
+    expect(vis.canBoot).toBe(false)
+    expect(vis.canPurge).toBe(false)
+  })
+
+  it('살아 있는 키퍼는 깨울 수 있다', () => {
+    expect(keeperCanWakeup(rondo)).toBe(true)
+  })
+
+  it('health=offline 은 phase 와 무관하게 offline 으로 읽는다', () => {
+    expect(isKeeperOffline(k({
+      status: 'active',
+      phase: 'Running',
+      diagnostic: { health_state: 'offline' },
+    } as Partial<Keeper>))).toBe(true)
   })
 })

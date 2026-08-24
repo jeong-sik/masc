@@ -127,6 +127,30 @@ if [ "$rc" != 0 ] && [ "$failed_count" -eq 0 ]; then
   exit 2
 fi
 
+# The evidence a reader needs is the failed assertion, and it used to reach
+# nobody. The excerpt began at the first line matching the suite name and
+# stopped at the first blank line; the first match is Alcotest's start banner
+# and a blank line follows it, so the excerpt ended before the assertion and
+# the log itself lived only in RUNNER_TEMP (#30117).
+#
+# Anchor on the failure lines instead. Alcotest names the suite with its own
+# label, not the Dune target, so these are not attributed per target -- the
+# whole set is printed once, which is what a reader opens the job to see.
+print_assertions() {
+  echo "Assertions dune reported:"
+  echo
+  awk '
+    /^(> )?\[FAIL\]/ || /^FAIL / || /^ASSERT / \
+      || /^ *(Expected|Received):/ || /^File ".*", line [0-9]+/ {
+      print "  " $0
+      shown++
+    }
+    shown >= 80 { print "  ... (the rest is in the test-suite-log artifact)"; exit }
+  ' "$log"
+  echo
+  echo "Full output: $log (uploaded as the test-suite-log artifact)"
+}
+
 status=0
 new="$(comm -23 "${RUNNER_TEMP:-/tmp}/failed.txt" "${RUNNER_TEMP:-/tmp}/known.txt")"
 if [ -n "$new" ]; then
@@ -138,6 +162,7 @@ if [ -n "$new" ]; then
   echo "Fix the suite. Adding it to $known_file records the break as normal,"
   echo "which is how the last six spent a month unnoticed."
   echo
+<<<<<<< HEAD
   for name in $new; do
     echo "--- $name ---"
     # Print the exact Dune failure block, including Alcotest's case name and
@@ -145,6 +170,14 @@ if [ -n "$new" ]; then
     # name from the stanza line instead of a substring in another executable.
     print_failure_block "$name" "$log"
   done
+||||||| parent of 6255908c6c (fix(tui): follow the keeper detail guards to the pane that now draws it)
+  for name in $new; do
+    echo "--- $name ---"
+    awk -v n="$name" '$0 ~ n {p = 1} p && /^$/ {exit} p' "$log" | head -25
+  done
+=======
+  print_assertions
+>>>>>>> 6255908c6c (fix(tui): follow the keeper detail guards to the pane that now draws it)
 fi
 
 fixed="$(comm -13 "${RUNNER_TEMP:-/tmp}/failed.txt" "${RUNNER_TEMP:-/tmp}/known.txt")"

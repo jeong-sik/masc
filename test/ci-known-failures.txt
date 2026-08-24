@@ -26,7 +26,6 @@
 
 # --- assertions that fail -------------------------------------------------
 test_dashboard                               # Keepers: a keepers section with an entry
-test_dashboard_http_core                     # executor_pool
 test_dashboard_namespace_truth               # read_model: a keeper-only workspace
 test_fs_compat                               # save_file_atomic: strict payload cancellation
 test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation

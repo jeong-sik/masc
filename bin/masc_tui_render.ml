@@ -42,7 +42,10 @@ let chat_markdown_palette : Markdown.palette =
   { strong = (Ansi.bold, Ansi.reset)
   ; emphasis = (Ansi.dim, Ansi.reset)
   ; code = (Ansi.cyan, Ansi.reset)
-  ; heading = (Ansi.bold ^ Ansi.white, Ansi.reset)
+  (* Bold alone. [white] is a colour like any other -- on a light background
+     it is the background -- so painting a heading with it hid the heading on
+     exactly the terminals that read it as text. Bold already says heading. *)
+  ; heading = (Ansi.bold, Ansi.reset)
   ; quote = (Ansi.dim, Ansi.reset)
   ; link_text = (Ansi.blue, Ansi.reset)
   ; link_target = (Ansi.dim, Ansi.reset)
@@ -419,11 +422,16 @@ let render_overview (state : state) =
         let a = List.nth attention_items i in
         let sev_color = attention_severity_color a.ai_severity in
         let severity_label = attention_severity_label a.ai_severity in
+          (* Fitted once, by the fit that draws the row. Fitting the summary
+             here as well meant guessing how many cells the label ahead of it
+             spends, and the events column beside this one guessed one too
+             many: every event row came out a cell over its budget and was
+             marked truncated whether or not anything was cut. The severity
+             label keeps its own fit -- that one is a fixed column, not a
+             guess at the rest of the row. *)
           Printf.sprintf "%s[%s]%s %s"
             sev_color (fit_width severity_label 5) Ansi.reset
-            (fit_width
-               (Terminal_text.single_line a.ai_summary)
-               (panel_width - 12))
+            (Terminal_text.single_line a.ai_summary)
       else ""
     in
     let event_str =
@@ -432,8 +440,7 @@ let render_overview (state : state) =
         let e = List.nth state.events event_index in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
-          (fit_width (Terminal_text.single_line e.content)
-             (right_panel_width - 12))
+          (Terminal_text.single_line e.content)
       else ""
     in
     Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
@@ -1087,6 +1094,18 @@ let render_board_read (state : state) (list_post : board_post) =
 
 let planning_phase_label phase = Goal_phase.to_string phase
 
+(* As wide as the widest phase rather than a literal. Three of the four labels
+   are nine cells and the column was eight, so nearly every planning row read
+   [complet~] with sixty columns of space to its right -- the mark that says
+   "there was more" on a value nothing was cut from. Taken from the phase list
+   so a new phase widens the column instead of losing its last letter. *)
+let planning_phase_column =
+  List.fold_left
+    (fun widest phase ->
+      max widest (Message_layout.display_width (planning_phase_label phase)))
+    0
+    Goal_phase.all
+
 let planning_phase_color = function
   | Goal_phase.Executing -> Ansi.cyan
   | Goal_phase.Verifying -> Ansi.magenta
@@ -1219,7 +1238,7 @@ let render_planning_list (state : state) =
              let line =
                Printf.sprintf "%s%s%s[%s]%s %s P%d  %s%s"
                  indent branch status_color
-                 (fit_width status_label 8)
+                 (fit_width status_label planning_phase_column)
                  Ansi.reset
                  (planning_proof_mark g.pg_proof)
                  g.pg_priority
@@ -1270,7 +1289,7 @@ let render_planning_detail (state : state)
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s[%s]%s  %s"
     (screen_title " MASC Planning")
-    status_color (fit_width status_label 8) Ansi.reset
+    status_color (fit_width status_label planning_phase_column) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
 

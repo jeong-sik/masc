@@ -41,6 +41,19 @@ type unreadable =
   ; last_detail : string
   }
 
+(* One stretch of the turn as it arrived. The three accumulators above answer
+   "what did the turn say / think / call" as totals; the trail answers "in what
+   order". A tool-call round interleaves them -- reasoning, then a call, then
+   more reasoning -- and flattening that into three blocks is what made a long
+   turn read as one wall of text with its calls listed elsewhere. Text and
+   thinking nodes own their bytes; a tool node only names the call, whose
+   record lives in [reversed_tool_calls] and keeps updating after later nodes
+   have opened (arguments stream in, the result lands). *)
+type trail_node =
+  | Node_thinking of Buffer.t
+  | Node_text of Buffer.t
+  | Node_tool of string
+
 (* Tool calls are held newest-first so opening one is a prepend; [tool_calls]
    reverses on read. Appending an argument fragment walks the list, which a
    turn's handful of calls makes cheap enough -- the list is short and the
@@ -55,6 +68,7 @@ type t =
   ; text_buffer : Buffer.t
   ; thinking_buffer : Buffer.t
   ; mutable reversed_tool_calls : tool_call list
+  ; mutable reversed_trail : trail_node list
   ; mutable phase : phase
   ; mutable interrupt : interrupt
   ; mutable checkpoints : int
@@ -70,6 +84,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; text_buffer = Buffer.create 1024
   ; thinking_buffer = Buffer.create 256
   ; reversed_tool_calls = []
+  ; reversed_trail = []
   ; phase = Waiting
   ; interrupt = Not_requested
   ; checkpoints = 0
@@ -77,6 +92,25 @@ let create ~keeper_name ~request_id ~started_at =
   ; last_unreadable = ""
   ; awaiting = None
   }
+
+(* Consecutive deltas of one kind are one stretch; a delta of another kind in
+   between closes it. Coalescing here rather than at draw time keeps the trail
+   bounded by the turn's shape (rounds), not by its chunking on the wire. *)
+let trail_thinking t text =
+  (match t.reversed_trail with
+   | Node_thinking buffer :: _ -> Buffer.add_string buffer text
+   | (Node_text _ | Node_tool _) :: _ | [] ->
+       let buffer = Buffer.create 256 in
+       Buffer.add_string buffer text;
+       t.reversed_trail <- Node_thinking buffer :: t.reversed_trail)
+
+let trail_text t text =
+  (match t.reversed_trail with
+   | Node_text buffer :: _ -> Buffer.add_string buffer text
+   | (Node_thinking _ | Node_tool _) :: _ | [] ->
+       let buffer = Buffer.create 256 in
+       Buffer.add_string buffer text;
+       t.reversed_trail <- Node_text buffer :: t.reversed_trail)
 
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
@@ -184,6 +218,62 @@ let persisted_tool_rows steps =
   |> List.map (fun (outcome, tool_name, args, duration) ->
          (persisted_marker outcome, tool_name, args, duration))
   |> render_rows
+
+type trail_item =
+  | Trail_thinking of string list
+  | Trail_tools of string list
+  | Trail_text of string
+
+(* The turn in arrival order, one item per stretch. Consecutive tool calls
+   render as one block so their names align, same as [tool_rows]; a call whose
+   arguments or result landed after later stretches opened still reads its
+   current record, because the node names the call and the record keeps
+   updating. Blank stretches are dropped here so the pane never budgets a row
+   for an empty heading. *)
+let trail t =
+  let call_of id =
+    List.find_opt
+      (fun (call : tool_call) -> String.equal call.call_id id)
+      t.reversed_tool_calls
+  in
+  let flush_tools acc group =
+    match group with
+    | [] -> acc
+    | calls ->
+        let rows =
+          calls |> List.rev
+          |> List.map (fun call -> (marker_of call, call.tool_name, call.args, None))
+          |> render_rows
+        in
+        Trail_tools rows :: acc
+  in
+  let rec walk acc group = function
+    | [] -> List.rev (flush_tools acc group)
+    | Node_tool id :: rest -> (
+        match call_of id with
+        | Some call -> walk acc (call :: group) rest
+        | None -> walk acc group rest)
+    | Node_thinking buffer :: rest ->
+        let acc = flush_tools acc group in
+        let lines =
+          Buffer.contents buffer
+          |> String.split_on_char '\n'
+          |> List.filter (fun line -> String.trim line <> "")
+          |> List.map safe_line
+        in
+        let acc =
+          match lines with [] -> acc | lines -> Trail_thinking lines :: acc
+        in
+        walk acc [] rest
+    | Node_text buffer :: rest ->
+        let acc = flush_tools acc group in
+        let text = safe_block (Buffer.contents buffer) in
+        let acc =
+          if String.trim text = "" then acc else Trail_text text :: acc
+        in
+        walk acc [] rest
+  in
+  walk [] [] (List.rev t.reversed_trail)
 
 type status_kind =
   | Progress
@@ -294,8 +384,12 @@ let apply t (delta : Live.delta) =
          Duplicate_run_start. Nothing to draw differently for it here, and
          moving a finished turn back to Working would be wrong. *)
       | Working | Stream_ended | Stream_failed _ -> ())
-  | Live.Text text -> Buffer.add_string t.text_buffer text
-  | Live.Thinking text -> Buffer.add_string t.thinking_buffer text
+  | Live.Text text ->
+      Buffer.add_string t.text_buffer text;
+      trail_text t text
+  | Live.Thinking text ->
+      Buffer.add_string t.thinking_buffer text;
+      trail_thinking t text
   | Live.Tool_started { call_id; tool_name } ->
       t.reversed_tool_calls <-
         { call_id
@@ -305,7 +399,8 @@ let apply t (delta : Live.delta) =
         ; ended = false
         ; result_ready = false
         }
-        :: t.reversed_tool_calls
+        :: t.reversed_tool_calls;
+      t.reversed_trail <- Node_tool call_id :: t.reversed_trail
   | Live.Tool_args { call_id; fragment } ->
       update_call t call_id (fun call ->
           let args =

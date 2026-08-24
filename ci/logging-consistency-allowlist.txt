@@ -40,7 +40,6 @@ bin/masc_trace.ml
 bin/trace_to_tla.ml
 bin/masc_tui_loader.ml
 bin/masc_cost.ml
-bin/keeper_feature_proof_report.ml
 
 # --- RFC-0079 legacy raw-stderr bridge (embedded [LEVEL] prefix) ---
 # Log.legacy_stderr / Log.legacy_traceln deliberately emit a raw, unprefixed

@@ -13,7 +13,6 @@ type actor_kind =
   | Automated_actor
   | System
 
-val actor_kinds : actor_kind list
 val actor_kind_to_string : actor_kind -> string
 val actor_kind_of_string : string -> (actor_kind, decode_error) result
 val actor_kind_strings : string list
@@ -47,7 +46,6 @@ type recurrence_kind =
   | Daily
   | Cron
 
-val recurrence_kinds : recurrence_kind list
 val recurrence_kind_to_string : recurrence_kind -> string
 val recurrence_kind_of_string : string -> (recurrence_kind, decode_error) result
 val recurrence_kind_strings : string list

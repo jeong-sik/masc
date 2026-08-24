@@ -1,0 +1,20 @@
+name = "masc_messages"
+description = """
+Get recent broadcast messages from all agents. Use to: catch up after \
+joining, check if someone @mentioned you, see project activity. Returns \
+chronological list with sender, timestamp, content. Default: last 20 \
+messages. Use limit param for more/less. Tip: Search for '@your-name' in \
+results to find mentions."""
+additional_properties = false
+
+[[params]]
+name = "since_seq"
+type = "integer"
+description = "Get messages after this sequence number"
+default = 0
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Max messages to return"
+default = 10

@@ -734,17 +734,14 @@ let of_json json =
       Error (Printf.sprintf "unknown event: %S" event)
   | Error _ as error -> error
 
-let dated_jsonl_today_path base_dir =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
-  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-  Filename.concat (Filename.concat base_dir month) day
-
 let execution_receipt_path_for_today config ~keeper_name =
-  Keeper_types_support.keeper_execution_receipt_store config keeper_name
-  |> Dated_jsonl.base_dir
-  |> dated_jsonl_today_path
+  (* [Jsonl_writer.dated_path_now] is the same calculation the writer runs;
+     a second copy here is free to drift to a different calendar (#27143). *)
+  let base_dir =
+    Keeper_types_support.keeper_execution_receipt_store config keeper_name
+    |> Dated_jsonl.base_dir
+  in
+  (Jsonl_writer.dated_path_now ~base_dir).Jsonl_writer.path
 
 let base_dir config ~keeper_name =
   Filename.concat

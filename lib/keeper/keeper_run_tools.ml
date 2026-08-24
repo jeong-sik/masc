@@ -29,6 +29,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable assistant_turn_texts : string list
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =

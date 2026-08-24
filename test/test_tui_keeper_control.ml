@@ -6,15 +6,22 @@ module Control = Masc_tui_keeper_control
 module Status = Masc.Keeper_status_runtime
 module Decode = Masc.Tui_decode
 
+let phase raw =
+  match Decode.keeper_phase_of_string raw with
+  | Some value -> value
+  | None -> invalid_arg ("unknown test Keeper phase: " ^ raw)
+
 let runtime ?(keepalive_running = true) ?(status = Status.Surface_active)
     ?(autoboot_enabled = true) ?(proactive_enabled = true)
-    ?(runtime_id = "anthropic.claude-opus-5") name : Decode.keeper_runtime =
+    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running") name :
+    Decode.keeper_runtime =
   { kr_name = name
   ; kr_status = status
   ; kr_keepalive_running = keepalive_running
   ; kr_autoboot_enabled = autoboot_enabled
   ; kr_proactive_enabled = proactive_enabled
   ; kr_runtime_id = runtime_id
+  ; kr_phase = phase
   }
 
 let complete rows = Control.Roster_complete rows
@@ -149,11 +156,11 @@ let test_arming_does_not_carry_to_another_keeper () =
   in
   match
     Control.gate_transition ~inflight:false ~pending:(Some armed)
-      ~keeper:"taskmaster" Control.Shutdown
+      ~keeper:"bandleader" Control.Shutdown
   with
   | Control.Gate_arm rearmed ->
       Alcotest.(check string)
-        "re-armed on the keeper under the cursor" "taskmaster"
+        "re-armed on the keeper under the cursor" "bandleader"
         rearmed.pending_keeper
   | Control.Gate_submit ->
       Alcotest.fail "another keeper's arming must not submit this one"
@@ -282,7 +289,7 @@ let test_operation_id_is_per_attempt () =
     "distinct across keepers" false
     (String.equal
        (Control.mint_operation_id ~keeper:"analyst" ~serial:7)
-       (Control.mint_operation_id ~keeper:"taskmaster" ~serial:7))
+       (Control.mint_operation_id ~keeper:"bandleader" ~serial:7))
 
 (* {1 Roster completeness} *)
 
@@ -388,8 +395,8 @@ let test_full_roster_is_complete () =
   | Control.Roster_complete rows ->
       Alcotest.(check int) "one row" 1 (List.length rows);
       let absent =
-        { Control.name = "taskmaster"; paused = false
-        ; liveness = Control.liveness_of_roster (complete rows) "taskmaster" }
+        { Control.name = "bandleader"; paused = false
+        ; liveness = Control.liveness_of_roster (complete rows) "bandleader" }
       in
       Alcotest.(check string) "a name a complete roster omits is offline"
         "offline" (Control.status_label absent)
@@ -469,20 +476,20 @@ let test_empty_error_body_names_the_status () =
 
 (* {1 Roster decode} *)
 
-let gate_row ?(status = "active") name =
+let gate_row ?(status = "active") ?(phase = "running") name =
   Printf.sprintf
     {|{"runtime_class":"keeper","name":%S,"agent_name":"keeper-%s-agent",
-       "status":%S,"keepalive_running":true,"autoboot_enabled":true,
+       "status":%S,"phase":%S,"keepalive_running":true,"autoboot_enabled":true,
        "proactive_enabled":true,"runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
-    name name status
+    name name status phase
 
 let test_roster_decode_reads_rows () =
   let json =
     Yojson.Safe.from_string
       (Printf.sprintf {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
          (gate_row "analyst")
-         (gate_row ~status:"idle" "taskmaster"))
+         (gate_row ~status:"idle" "bandleader"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
@@ -491,13 +498,19 @@ let test_roster_decode_reads_rows () =
       Alcotest.(check bool) "not truncated" false truncated;
       Alcotest.(check int) "total" 2 total;
       Alcotest.(check (list string))
-        "names in order" [ "analyst"; "taskmaster" ]
+        "names in order" [ "analyst"; "bandleader" ]
         (List.map (fun (row : Decode.keeper_runtime) -> row.kr_name) rows);
       Alcotest.(check bool)
         "idle parsed" true
         (match rows with
          | [ _; second ] -> second.Decode.kr_status = Status.Surface_idle
-         | _ -> false)
+         | _ -> false);
+      Alcotest.(check bool)
+        "phase parsed" true
+        (match rows with
+         | first :: _ ->
+           Decode.keeper_phase_to_string first.Decode.kr_phase = "running"
+         | [] -> false)
 
 (* A producer that grows a seventh status label must fail the reading. A
    default would render the new state as one of the six and offer the action
@@ -519,9 +532,75 @@ let test_roster_decode_rejects_an_unknown_status () =
          in
          contains "quarantined")
 
+let test_roster_decode_rejects_an_unknown_phase () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"keepers":[%s]}|}
+         (gate_row ~phase:"teleporting" "analyst"))
+  in
+  match Decode.decode_keeper_runtime_list json with
+  | Ok _ -> Alcotest.fail "an unknown phase must not decode"
+  | Error err ->
+      Alcotest.(check string)
+        "error names keeper and phase"
+        {|keepers[0]: keeper "analyst" has unknown lifecycle phase "teleporting"|}
+        err
+
+(* The roster header's tally and the status column are the same reading drawn
+   twice. The tally used to fold [Surface_inactive] into "running", so a fleet
+   of ten inactive keepers read "10 running" above ten rows saying "inactive".
+   These pin the tally to the column's own words rather than to a second
+   spelling of them. *)
+let present ?(status = Status.Surface_active) name =
+  { Control.name
+  ; paused = false
+  ; liveness = Control.Present (runtime ~status name)
+  }
+
+let test_tally_uses_the_column_word () =
+  let readings =
+    [ present ~status:Status.Surface_active "a"
+    ; present ~status:Status.Surface_inactive "b"
+    ; present ~status:Status.Surface_inactive "c"
+    ]
+  in
+  Alcotest.(check (list (pair string int)))
+    "inactive is counted as inactive, not as running"
+    [ ("active", 1); ("inactive", 2) ]
+    (Control.status_tally readings)
+
+let test_tally_never_names_a_word_the_column_hides () =
+  let readings =
+    [ present ~status:Status.Surface_active "a"
+    ; present ~status:Status.Surface_inactive "b"
+    ; present ~status:Status.Surface_offline "c"
+    ; { Control.name = "d"; paused = true; liveness = Control.Absent }
+    ; reading "e"
+    ]
+  in
+  let tallied = List.map fst (Control.status_tally readings) in
+  let shown = List.map Control.status_label readings in
+  List.iter
+    (fun word ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the column shows %S somewhere" word)
+        true
+        (List.mem word shown))
+    tallied;
+  Alcotest.(check int)
+    "every reading is counted exactly once"
+    (List.length readings)
+    (List.fold_left (fun sum (_, n) -> sum + n) 0 (Control.status_tally readings))
+
 let () =
   Alcotest.run "tui-keeper-control"
-    [ ( "reading"
+    [ ( "status_tally"
+      , [ Alcotest.test_case "inactive is not counted as running" `Quick
+            test_tally_uses_the_column_word
+        ; Alcotest.test_case "every counted word appears in the column" `Quick
+            test_tally_never_names_a_word_the_column_hides
+        ] )
+    ; ( "reading"
       , [ Alcotest.test_case "unobserved roster offers nothing" `Quick
             test_unobserved_offers_nothing
         ; Alcotest.test_case "absent keeper offers boot" `Quick
@@ -598,5 +677,7 @@ let () =
             test_roster_decode_reads_rows
         ; Alcotest.test_case "unknown status is rejected" `Quick
             test_roster_decode_rejects_an_unknown_status
+        ; Alcotest.test_case "unknown phase is rejected" `Quick
+            test_roster_decode_rejects_an_unknown_phase
         ] )
     ]

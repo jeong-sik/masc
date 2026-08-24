@@ -280,25 +280,21 @@ let redact_stream_finish state =
   trailing
 ;;
 
+(* Keys as well as values. A secret can be the key -- a header name, a
+   parameter used as a dict key, {"<secret>": "x"} straight from a tool
+   argument -- and a traversal that only rewrites leaves emits it (#22941).
+   Doing both here rather than in one caller means every boundary that reaches
+   for the redactor gets the same policy; the alternative left two of three
+   callers redacting values only, without saying so. *)
 let rec redact_json_exact t = function
   | `String s -> `String (redact_text t s)
   | `Assoc fields ->
       `Assoc
         (List.map
-           (fun (key, value) -> (key, redact_json_exact t value))
+           (fun (key, value) -> (redact_text t key, redact_json_exact t value))
            fields)
   | `List items -> `List (List.map (redact_json_exact t) items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
-
-let rec redact_json_keys t = function
-  | `String _ as value -> value
-  | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) -> redact_text t key, redact_json_keys t value)
-           fields)
-  | `List items -> `List (List.map (redact_json_keys t) items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
 
 let redact_json t json =
   json |> redact_json_exact t |> Observability_redact.redact_json_strings

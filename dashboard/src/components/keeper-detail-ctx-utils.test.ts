@@ -1,29 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { formatDurationCompound } from '../lib/format-time'
-import { autonomyHint } from './keeper-detail-ctx-utils'
-
-describe('autonomyHint', () => {
-  it('returns active hint when count is 0 and proactive enabled', () => {
-    expect(autonomyHint(0, true)).toBe('활성 · 미발동')
-  })
-
-  it('returns disabled hint when count is 0 and proactive disabled', () => {
-    expect(autonomyHint(0, false)).toBe('자율 비활성')
-  })
-
-  it('returns disabled hint when count is 0 and proactive undefined', () => {
-    expect(autonomyHint(0, undefined)).toBe('자율 비활성')
-  })
-
-  it('returns undefined when count is positive', () => {
-    expect(autonomyHint(5, true)).toBeUndefined()
-    expect(autonomyHint(1, false)).toBeUndefined()
-  })
-
-  it('returns disabled hint when count is undefined', () => {
-    expect(autonomyHint(undefined, undefined)).toBe('자율 비활성')
-  })
-})
 
 describe('formatDurationCompound', () => {
   it('formats seconds under 60', () => {

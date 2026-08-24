@@ -1090,12 +1090,19 @@ let test_json_terminal_and_id_boundaries () =
       | Ok (Event.Tool_invocation { provider_tool_use_id = Some decoded; _ }) ->
         check string "provider tool id roundtrip is exact" exact_provider_id decoded
       | Ok _ | Error _ -> fail "opaque provider tool id did not roundtrip exactly"));
+  (* Opaque, but not blank. #30002 made a present-but-blank tool_use id a
+     parse error where provider JSON enters, and the content-block codec these
+     updates share inherited it, so a blank id can no longer reach the journal
+     and no longer round-trips through it. What the journal still owes is that
+     it does not normalise what it was handed: whitespace and control bytes in
+     the middle of an id survive it byte for byte. *)
   let opaque_tool_use =
-    Llm_provider.Types.ToolUse { id = " \t"; name = "valid_tool"; input = `Assoc [] }
+    Llm_provider.Types.ToolUse
+      { id = "call\t 01"; name = "valid_tool"; input = `Assoc [] }
   in
   let opaque_tool_result =
     Llm_provider.Types.ToolResult
-      { tool_use_id = "\n "
+      { tool_use_id = "call\n 01"
       ; content = "ok"
       ; outcome = Llm_provider.Types.Tool_succeeded
       ; json = None
@@ -1111,6 +1118,25 @@ let test_json_terminal_and_id_boundaries () =
           | Ok decoded when decoded = update -> ()
           | Ok _ | Error _ -> fail "opaque content-block provider id changed"))
     [ Event.Tool_input_snapshot opaque_tool_use; Event.Tool_result opaque_tool_result ];
+  (* The other half of the same contract. A blank id is not an identifier, and
+     the codec says so rather than writing a row nothing can join on. *)
+  List.iter
+    (fun update ->
+       match Event.node_update_to_yojson update with
+       | Ok _ -> fail "blank content-block provider id encoded instead of being refused"
+       | Error _ -> ())
+    [ Event.Tool_input_snapshot
+        (Llm_provider.Types.ToolUse
+           { id = " \t"; name = "valid_tool"; input = `Assoc [] })
+    ; Event.Tool_result
+        (Llm_provider.Types.ToolResult
+           { tool_use_id = "\n "
+           ; content = "ok"
+           ; outcome = Llm_provider.Types.Tool_succeeded
+           ; json = None
+           ; content_blocks = None
+           })
+    ];
   let before_invalid_response = Journal.length journal in
   let invalid_response = provider_response ~cost_usd:(Some nan) () in
   (match

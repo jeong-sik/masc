@@ -14,7 +14,6 @@ function prompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
     category: 'keeper',
     description: 'Keeper prompt',
     current: '',
-    default: null,
     effective: '',
     file_value: null,
     override_value: null,

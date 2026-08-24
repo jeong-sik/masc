@@ -1,0 +1,17 @@
+name = "tool_write_file"
+description = """
+Write full file content into the keeper sandbox or an allowed path. Missing \
+parent directories are created safely; call Write directly instead of using \
+Execute mkdir."""
+
+[[params]]
+name = "file_path"
+type = "string"
+required = true
+description = "Absolute or sandbox-relative file path. Parent directories are created as needed."
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Full file content. Overwrites the existing file."

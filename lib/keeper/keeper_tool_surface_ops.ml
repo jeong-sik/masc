@@ -301,13 +301,51 @@ let keeper_list_row_json ~runtime_class config name =
                (Keeper_status_bridge.runtime_keepalive_started_at config meta)
              ~now_ts
       in
+      (* One keeper is described by four separate readings, and each row
+         carries its own field for one of them rather than a single word that
+         answers for all four:
+
+           phase        lifecycle state machine  - which cell it is in
+           health       observed signal          - is it reporting on time
+           paused       operator override        - did a person stop it
+           next_action  what to do about it      - already derived from health
+
+         [status] is a fifth field that re-answers [health] with three of its
+         values folded into "inactive". The TUI counted that word as running
+         while the dashboard counted it as attention, because a folded word
+         leaves the reader to guess. Both are published here so neither has to.
+
+         The diagnostic already carries health and next_action; this only stops
+         discarding them. *)
       let status = Keeper_status_runtime.keeper_surface_status ~diagnostic in
+      let health =
+        Keeper_status_runtime.keeper_health_to_string
+          (Keeper_status_runtime.keeper_diagnostic_health
+             ~diagnostic
+             ~source:"keeper_list_row")
+      in
+      (* The action the diagnostic already derived. Absent means the diagnostic
+         did not name one, which is a different thing from "nothing to do", so
+         it publishes as null rather than as an empty string. *)
+      let next_action =
+        Json_util.string_opt_to_json
+          (Json_util.get_string diagnostic "next_action_path")
+      in
+      let phase =
+        match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+        | Some p -> Keeper_state_machine.phase_to_string p
+        | None -> "offline"
+      in
       Some
         (`Assoc (
           [
             ("runtime_class", `String runtime_class); ("name", `String meta.name);
             ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
-            ("status", `String status); ("keepalive_running", `Bool keepalive_running);
+            ("status", `String status); ("phase", `String phase);
+            ("health", `String health);
+            ("paused", `Bool meta.paused);
+            ("next_action", next_action);
+            ("keepalive_running", `Bool keepalive_running);
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);

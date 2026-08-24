@@ -1,0 +1,77 @@
+name = "masc_keeper_up"
+description = """
+Create or update a durable keeper. Keepers auto-start on server boot and are \
+reconciled back into live presence."""
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+required = true
+description = "Keeper handle (stable). Example: 'keeper-helper'"
+
+[[params]]
+name = "instructions"
+type = "string"
+description = """
+Complete Keeper instructions, written to the keeper TOML declaration (kept \
+across compaction/handoff)."""
+
+[[params]]
+name = "mention_targets"
+type = "array"
+items = { type = "string" }
+description = """
+Exact direct-mention tokens that can wake the keeper in workspace traffic \
+(for example ['alpha'])."""
+
+[[params]]
+name = "sandbox_profile"
+type = "string"
+enum = ["local", "docker"]
+default = "local"
+description = """
+Sandbox isolation profile. New keepers default to local with playground-only \
+writes when omitted; select docker explicitly when required."""
+
+[[params]]
+name = "autoboot_enabled"
+type = "boolean"
+description = """
+If false, persist the keeper but skip auto-start on future server boots."""
+
+[[params]]
+name = "max_context_override"
+type = "integer"
+description = """
+Optional: absolute context token limit override for this keeper. Use 0 to \
+clear the override."""
+
+[[params]]
+name = "autonomous_wake_prompt"
+type = "string"
+description = """
+Optional: user message this keeper's autonomous turns are woken with, \
+overriding the fleet autonomous.wake_prompt. Non-blank, at most 2048 bytes; \
+it is appended to the durable checkpoint every autonomous turn. Use null to \
+clear."""
+
+[[params]]
+name = "proactive_enabled"
+type = "boolean"
+description = """
+If true, scheduled keeper cycles may produce proactive responses."""
+
+[[params]]
+name = "runtime_id"
+type = "string"
+description = """
+Optional opaque runtime id. Writes the keeper assignment to runtime.toml."""
+
+[[params]]
+name = "allowed_paths"
+type = "array"
+items = { type = "string" }
+description = """
+Restrict file writes to these path prefixes. Empty list means \
+playground-only (.masc/playground/<name>/)."""

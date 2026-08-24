@@ -848,17 +848,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
-              ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
-              ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
-              ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
-              ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
-              ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
-              ("noop_turn_count", `Int m.runtime.noop_turn_count);
-              ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
-              ("last_autonomous_action_at",
-                if String.trim m.runtime.last_autonomous_action_at = ""
-                then `Null
-                else `String m.runtime.last_autonomous_action_at);
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
               ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
               ( "last_proactive_outcome"

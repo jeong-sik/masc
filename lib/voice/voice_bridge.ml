@@ -111,7 +111,10 @@ let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_d
             endpoint
             ~agent_id
             ~message
-            ~voice
+            (* Resolved per endpoint, not once for the chain: a voice id is
+               provider vocabulary, so carrying the first endpoint's id to the
+               next asks for a voice that does not exist there (#24068). *)
+            ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
             ~model
             ~output_file:audio_file
         with
@@ -508,9 +511,9 @@ let try_http_tts_for_browser_audio
       ~sw
       ~clock
       ~net
+      ~config
       ~agent_id
       ~message
-      ~voice
       ~model
       ~priority
       ?audio_device
@@ -527,7 +530,8 @@ let try_http_tts_for_browser_audio
          speak_via_http_tts_to_file
            endpoint
            ~message
-           ~voice
+             (* Resolved per endpoint (#24068): see the dashboard chain. *)
+           ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
            ~model
            ~agent_id
            ~output_file:audio_file
@@ -663,9 +667,9 @@ let agent_speak_json
                ~sw
                ~clock
                ~net
+               ~config
                ~agent_id
                ~message
-               ~voice
                ~model
                ~priority
                ?audio_device

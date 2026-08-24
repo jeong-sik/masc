@@ -114,13 +114,16 @@ let test_unknown_event_type_keeps_its_token () =
       (`Assoc
          [ "ts", `String "2026-08-05T23:03:13Z"
          ; "goal_id", `String "goal-1"
-         ; "event_type", `String "goal_owner"
-         ; "payload", `Assoc [ "owner", `String "alpha" ]
+           (* Any token the projection does not know. It must not be one the
+              codebase used to have -- a reader who greps for it and finds
+              only this file cannot tell a fixture from a live concept. *)
+         ; "event_type", `String "goal_sprouted"
+         ; "payload", `Assoc [ "colour", `String "alpha" ]
          ])
   in
-  check (option string) "kind" (Some "goal_owner") (field "kind" json);
+  check (option string) "kind" (Some "goal_sprouted") (field "kind" json);
   check (option string) "title" (Some "Goal Event") (field "title" json);
-  check (option string) "summary is the token" (Some "goal_owner") (field "summary" json)
+  check (option string) "summary is the token" (Some "goal_sprouted") (field "summary" json)
 ;;
 
 (* {1 The tree field} *)

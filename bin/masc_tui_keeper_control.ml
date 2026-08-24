@@ -113,6 +113,24 @@ let status_label reading =
   | None -> "unread"
   | Some status -> Status.control_plane_status_to_string status
 
+(* The roster header's tally, counted with {!status_label} so the header and
+   the status column cannot disagree. They did: the tally folded
+   [Surface_inactive] into "running", so ten rows reading "inactive" sat under
+   a header reading "10 running". Counting the label itself removes the second
+   spelling of the same reading rather than keeping it in step by hand. *)
+let status_tally readings =
+  List.fold_left
+    (fun counts reading ->
+      let label = status_label reading in
+      let rec bump = function
+        | [] -> [ (label, 1) ]
+        | (name, n) :: rest when String.equal name label -> (name, n + 1) :: rest
+        | entry :: rest -> entry :: bump rest
+      in
+      bump counts)
+    []
+    readings
+
 type action =
   | Pause
   | Resume

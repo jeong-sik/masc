@@ -2,8 +2,8 @@ open Alcotest
 
 module Layout = Masc_tui_message_layout
 
-let entry style role request_label body : Layout.entry =
-  { style; timestamp = "12:34:56"; role_label = role; request_label; body }
+let entry ?(timestamp = "12:34:56") style role request_label body : Layout.entry =
+  { style; timestamp; role_label = role; request_label; body }
 
 let test_keeps_latest_reply () =
   let entries =
@@ -99,6 +99,7 @@ let test_terminal_cell_width_and_fit () =
       ; "Enter:queue (99 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
       ; "Ctrl-J:newline"
       ; Layout.scroll_hint ~scrolled_back:9999 ~older_exist:false
+      ; "Ctrl-G:next Keeper"
       ; "Esc:interrupt turn"
       ; "Ctrl-U:clear\x1B[0m"
       ]
@@ -481,11 +482,91 @@ let test_a_trailing_newline_opens_a_line () =
     [ "typed"; "" ]
     (Layout.composer_lines ~max_rows:5 "typed\n")
 
+(* One speaker talking twice is one heading. The pane used to write
+   "[time] speaker request" above every message, so a keeper answering in four
+   parts spent four rows saying who was talking. *)
+let test_one_speaker_keeps_one_heading () =
+  let rows entries =
+    Layout.visible_rows ~inner_width:60 ~height:40 entries
+    |> List.map (fun (row : Layout.row) -> row.text)
+  in
+  check (list string) "the same second is the same message"
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"; "  first"; "  second" ]
+    (rows
+       [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
+       ; entry Layout.Keeper "keeper.one" "tui-..dddddddd" "second"
+       ]);
+  check (list string) "a later second keeps its own row, without the name"
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    ; "  first"
+    ; "[12:35:01]"
+    ; "  second"
+    ]
+    (rows
+       [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
+       ; entry ~timestamp:"12:35:01" Layout.Keeper "keeper.one"
+           "tui-..dddddddd" "second"
+       ]);
+  check (list string) "a different speaker starts again"
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    ; "  first"
+    ; "[12:34:56] From [you] tui-..dddddddd"
+    ; "  second"
+    ]
+    (rows
+       [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
+       ; entry Layout.User "you" "tui-..dddddddd" "second"
+       ]);
+  check (list string) "a new turn starts again even from the same speaker"
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    ; "  first"
+    ; "[12:34:56] From [keeper.one] tui-..eeeeeeee"
+    ; "  second"
+    ]
+    (rows
+       [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
+       ; entry Layout.Keeper "keeper.one" "tui-..eeeeeeee" "second"
+       ])
+;;
+
+let test_metadata_keeps_a_typed_origin () =
+  let rows =
+    Layout.visible_rows ~inner_width:80 ~height:10
+      [ entry Layout.User "you" "tui-..aaaaaaaa" "hello"
+      ; entry ~timestamp:"12:35:01" Layout.User "you" "tui-..aaaaaaaa"
+          "again"
+      ]
+  in
+  match rows with
+  | { Layout.kind =
+        Layout.Metadata
+          (Layout.Origin { timestamp; role_label; request_label });
+      _
+    }
+    :: { Layout.kind = Layout.Body; _ }
+    :: { Layout.kind =
+           Layout.Metadata (Layout.Continued_at { timestamp = continued_at });
+         _
+       }
+    :: { Layout.kind = Layout.Body; _ }
+    :: [] ->
+      check string "origin timestamp" "12:34:56" timestamp;
+      check string "origin label" "you" role_label;
+      check string "origin request" "tui-..aaaaaaaa" request_label;
+      check string "continuation timestamp" "12:35:01" continued_at
+  | _ -> fail "message rows lost their typed origin/body structure"
+;;
+
 (* Scrollback. Ten one-line entries render to twenty rows -- a metadata row and
-   a body row each -- so the arithmetic below is checkable by hand. *)
+   a body row each -- so the arithmetic below is checkable by hand.
+
+   Each carries its own second. Ten messages stamped the same second are one
+   message as far as the pane is concerned and share a heading, which is the
+   point of the grouping and would make this eleven rows rather than twenty. *)
 let ten_entries =
   List.init 10 (fun index ->
-      entry Layout.Keeper "keeper.one" "tui-..dddddddd"
+      entry ~timestamp:(Printf.sprintf "12:34:%02d" index) Layout.Keeper
+        "keeper.one" "tui-..dddddddd"
         (Printf.sprintf "line-%d" index))
 
 let text_of rows = List.map (fun (row : Layout.row) -> row.text) rows
@@ -632,7 +713,11 @@ let () =
             test_a_trailing_newline_opens_a_line
         ] )
     ; ( "scrollback"
-      , [ test_case "total rows counts metadata and body" `Quick
+      , [ test_case "one speaker keeps one heading" `Quick
+            test_one_speaker_keeps_one_heading
+        ; test_case "metadata keeps a typed origin" `Quick
+            test_metadata_keeps_a_typed_origin
+        ; test_case "total rows counts metadata and body" `Quick
             test_total_rows_counts_metadata_and_body
         ; test_case "unscrolled matches the existing window" `Quick
             test_unscrolled_is_the_existing_window

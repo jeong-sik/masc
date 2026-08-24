@@ -22,6 +22,10 @@ type stop_reason =
       tool_name : string;
       repeated_count : int;
     }
+  | Yielded_after_repeated_assistant_text of {
+      turns_used : int;
+      repeated_count : int;
+    }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;

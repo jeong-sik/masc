@@ -38,14 +38,6 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Consecutive_noop_count
-  | Last_autonomous_action_at
-  | Autonomous_action_count
-  | Autonomous_turn_count
-  | Autonomous_text_turn_count
-  | Autonomous_tool_turn_count
-  | Board_reactive_turn_count
-  | Mention_reactive_turn_count
-  | Noop_turn_count
   | Message_scope_ack_id
   | Last_runtime_attempt
   | Paused

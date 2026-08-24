@@ -24,12 +24,6 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_autonomous_turn_count : int;
-  k_autonomous_text_turn_count : int;
-  k_autonomous_tool_turn_count : int;
-  k_board_reactive_turn_count : int;
-  k_mention_reactive_turn_count : int;
-  k_noop_turn_count : int;
   k_last_proactive_outcome : string;
   k_created_at : string;
   k_updated_at : string;
@@ -42,6 +36,11 @@ type keeper = {
    that wants the published control-plane status composes the two. Parsing the
    status into the closed variant here means a producer that grows a seventh
    label is a rejected row, not a row that silently reads as something else. *)
+type keeper_phase = Keeper_state_machine.phase
+
+let keeper_phase_of_string = Keeper_state_machine.phase_of_string
+let keeper_phase_to_string = Keeper_state_machine.phase_to_string
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
@@ -49,6 +48,51 @@ type keeper_runtime = {
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
+  kr_phase : keeper_phase;
+}
+
+type keeper_lane_phase =
+  | Lane_phase_offline
+  | Lane_phase_running
+  | Lane_phase_failing
+  | Lane_phase_overflowed
+  | Lane_phase_compacting
+  | Lane_phase_handing_off
+  | Lane_phase_draining
+  | Lane_phase_paused
+  | Lane_phase_stopped
+  | Lane_phase_crashed
+  | Lane_phase_restarting
+  | Lane_phase_unknown of string
+
+type keeper_lane_turn_phase =
+  | Lane_turn_idle
+  | Lane_turn_prompting
+  | Lane_turn_routing
+  | Lane_turn_executing
+  | Lane_turn_compacting
+  | Lane_turn_finalizing
+  | Lane_turn_exhausted
+  | Lane_turn_unknown of string
+
+type keeper_lane_last_outcome = {
+  klo_runtime_state : string;
+  klo_selected_model : string option;
+}
+
+type keeper_lane = {
+  kl_keeper : string;
+  kl_phase : keeper_lane_phase;
+  kl_turn_phase : keeper_lane_turn_phase;
+  kl_idle_seconds : int;
+  kl_last_outcome : keeper_lane_last_outcome option;
+  kl_diagnosis : string option;
+}
+
+type keeper_lanes_snapshot = {
+  kls_generated_at : float;
+  kls_count : int;
+  kls_lanes : keeper_lane list;
 }
 
 type goal_proof =
@@ -408,12 +452,6 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     k_total_cost_usd = usage.total_cost_usd;
     k_last_turn_ts;
     k_compaction_count = compaction.count;
-    k_autonomous_turn_count = runtime.autonomous_turn_count;
-    k_autonomous_text_turn_count = runtime.autonomous_text_turn_count;
-    k_autonomous_tool_turn_count = runtime.autonomous_tool_turn_count;
-    k_board_reactive_turn_count = runtime.board_reactive_turn_count;
-    k_mention_reactive_turn_count = runtime.mention_reactive_turn_count;
-    k_noop_turn_count = runtime.noop_turn_count;
     k_last_proactive_outcome =
       Keeper_meta_contract.proactive_cycle_outcome_to_string
         proactive.last_outcome;
@@ -864,6 +902,12 @@ let optional_string_field json key =
   | `Null -> Ok None
   | bad -> field_type_error key "a string or null" bad
 
+let optional_bool_field json key =
+  match member key json with
+  | `Bool value -> Ok (Some value)
+  | `Null -> Ok None
+  | bad -> field_type_error key "a boolean or null" bad
+
 let required_int_field json key =
   match member key json with
   | `Int value -> Ok value
@@ -1129,9 +1173,14 @@ type tool_entry = {
   tl_direct_call : bool;
 }
 
+type inventory_freshness =
+  | Warming
+  | Settled
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
+  ts_freshness : inventory_freshness;
 }
 
 type connector = {
@@ -1195,35 +1244,6 @@ type verification_snapshot = {
   vs_total : int;
 }
 
-type feature_proof_status =
-  | Fp_pass
-  | Fp_warn
-  | Fp_fail
-  | Fp_unreadable of string
-
-type feature_proof = {
-  fp_id : string;
-  fp_label : string;
-  fp_status : feature_proof_status;
-  fp_summary : string;
-  fp_next_action : string;
-  fp_keeper_count : int;
-  fp_observed : string list;
-  fp_missing : string list;
-  fp_read_errors : string list;
-}
-
-type autonomy_snapshot = {
-  au_generated_at : string;
-  au_status : feature_proof_status;
-  au_features : feature_proof list;
-  au_feature_count : int;
-  au_pass_count : int;
-  au_gap_count : int;
-  au_keeper_count : int;
-  au_window_hours : float option;
-}
-
 let decode_string_name_list json key =
   let* items = optional_list_field json key in
   decode_list key
@@ -1256,7 +1276,16 @@ let decode_tool_snapshot json =
   let* tools_json = required_list_field inventory "tools" in
   let* ts_tools = decode_list "tools" decode_tool_entry tools_json in
   let* ts_count = required_int_field inventory "count" in
-  Ok { ts_tools; ts_count }
+  (* Only the warming placeholder carries this flag, and it carries it as
+     [true]; a payload built from a real inventory does not mention it. So an
+     absent flag is a built inventory, and the pane can tell "the server has
+     not looked yet" apart from "there are none" -- which it could not, and so
+     reported a warming server as a workspace with no tools registered. *)
+  let* warming = optional_bool_field json "is_warming" in
+  let ts_freshness =
+    match warming with Some true -> Warming | Some false | None -> Settled
+  in
+  Ok { ts_tools; ts_count; ts_freshness }
 
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in
@@ -1370,77 +1399,6 @@ let decode_verification_snapshot json =
   in
   let* vs_total = required_int_field json "total" in
   Ok { vs_requests; vs_total }
-
-let feature_proof_status_of_string = function
-  | "pass" -> Fp_pass
-  | "warn" -> Fp_warn
-  | "fail" -> Fp_fail
-  | other -> Fp_unreadable other
-
-let feature_proof_status_label = function
-  | Fp_pass -> "PASS"
-  | Fp_warn -> "WARN"
-  | Fp_fail -> "FAIL"
-  | Fp_unreadable _ -> "????"
-
-let feature_proof_is_gap = function
-  | Fp_pass -> false
-  | Fp_warn | Fp_fail | Fp_unreadable _ -> true
-
-(* The server reports a read failure as an object naming the keeper it could
-   not open. Only the name is carried: the surface says which keeper has no
-   readable record, and the error text belongs to the log, not to a column. *)
-let decode_read_error_keeper json = required_string_field json "keeper"
-
-let decode_feature_proof json =
-  let* fp_id = required_string_field json "id" in
-  let* fp_label = required_string_field json "label" in
-  let* status_raw = required_string_field json "status" in
-  let* fp_summary = required_string_field json "summary" in
-  let* fp_next_action = required_string_field json "next_action" in
-  let* evidence = required_object_field json "keeper_evidence" in
-  let* fp_keeper_count = required_int_field evidence "keeper_count" in
-  let* fp_observed = decode_string_name_list evidence "observed_keepers" in
-  let* fp_missing = decode_string_name_list evidence "missing_keepers" in
-  let* read_errors_json = required_list_field evidence "read_errors" in
-  let* fp_read_errors =
-    decode_list "read_errors" decode_read_error_keeper read_errors_json
-  in
-  Ok
-    { fp_id
-    ; fp_label
-    ; fp_status = feature_proof_status_of_string status_raw
-    ; fp_summary
-    ; fp_next_action
-    ; fp_keeper_count
-    ; fp_observed
-    ; fp_missing
-    ; fp_read_errors
-    }
-
-let decode_autonomy_snapshot json =
-  let* au_generated_at = required_string_field json "generated_at" in
-  let* summary = required_object_field json "summary" in
-  let* status_raw = required_string_field summary "status" in
-  let* au_feature_count = required_int_field summary "feature_count" in
-  let* au_pass_count = required_int_field summary "pass_count" in
-  let* au_gap_count = required_int_field summary "gap_count" in
-  let* au_keeper_count = required_int_field summary "keeper_count" in
-  let* au_window_hours = required_nullable_float_field summary "window_hours" in
-  let* features_json = required_list_field json "features" in
-  let* au_features =
-    decode_list "features" decode_feature_proof features_json
-  in
-  Ok
-    { au_generated_at
-    ; au_status = feature_proof_status_of_string status_raw
-    ; au_features
-    ; au_feature_count
-    ; au_pass_count
-    ; au_gap_count
-    ; au_keeper_count
-    ; au_window_hours
-    }
 
 let decode_keeper_call json =
   let* kc_at = require_float_field json "ts" in
@@ -1572,6 +1530,15 @@ let decode_keeper_runtime json =
   let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
   let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
   let* kr_runtime_id = required_string_field json "runtime_id" in
+  let* raw_phase = required_string_field json "phase" in
+  let* kr_phase =
+    match keeper_phase_of_string raw_phase with
+    | Some phase -> Ok phase
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown lifecycle phase %S" kr_name
+             raw_phase)
+  in
   Ok
     { kr_name
     ; kr_status
@@ -1579,6 +1546,7 @@ let decode_keeper_runtime json =
     ; kr_autoboot_enabled
     ; kr_proactive_enabled
     ; kr_runtime_id
+    ; kr_phase
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own
@@ -1595,6 +1563,111 @@ let decode_keeper_runtime_list json =
   in
   let* total = int_field_or json "total" ~default:(List.length rows) in
   Ok (rows, truncated, total)
+
+let keeper_lane_phase_of_string raw =
+  match keeper_phase_of_string raw with
+  | None -> Lane_phase_unknown raw
+  | Some phase -> (
+      match phase with
+      | Keeper_state_machine.Offline -> Lane_phase_offline
+      | Keeper_state_machine.Running -> Lane_phase_running
+      | Keeper_state_machine.Failing -> Lane_phase_failing
+      | Keeper_state_machine.Overflowed -> Lane_phase_overflowed
+      | Keeper_state_machine.Compacting -> Lane_phase_compacting
+      | Keeper_state_machine.HandingOff -> Lane_phase_handing_off
+      | Keeper_state_machine.Draining -> Lane_phase_draining
+      | Keeper_state_machine.Paused -> Lane_phase_paused
+      | Keeper_state_machine.Stopped -> Lane_phase_stopped
+      | Keeper_state_machine.Crashed -> Lane_phase_crashed
+      | Keeper_state_machine.Restarting -> Lane_phase_restarting)
+
+let keeper_lane_phase_to_string = function
+  | Lane_phase_offline -> keeper_phase_to_string Keeper_state_machine.Offline
+  | Lane_phase_running -> keeper_phase_to_string Keeper_state_machine.Running
+  | Lane_phase_failing -> keeper_phase_to_string Keeper_state_machine.Failing
+  | Lane_phase_overflowed ->
+      keeper_phase_to_string Keeper_state_machine.Overflowed
+  | Lane_phase_compacting ->
+      keeper_phase_to_string Keeper_state_machine.Compacting
+  | Lane_phase_handing_off ->
+      keeper_phase_to_string Keeper_state_machine.HandingOff
+  | Lane_phase_draining -> keeper_phase_to_string Keeper_state_machine.Draining
+  | Lane_phase_paused -> keeper_phase_to_string Keeper_state_machine.Paused
+  | Lane_phase_stopped -> keeper_phase_to_string Keeper_state_machine.Stopped
+  | Lane_phase_crashed -> keeper_phase_to_string Keeper_state_machine.Crashed
+  | Lane_phase_restarting ->
+      keeper_phase_to_string Keeper_state_machine.Restarting
+  | Lane_phase_unknown raw -> raw
+
+let keeper_lane_turn_phase_of_string = function
+  | "idle" -> Lane_turn_idle
+  | "prompting" -> Lane_turn_prompting
+  | "routing" -> Lane_turn_routing
+  | "executing" -> Lane_turn_executing
+  | "compacting" -> Lane_turn_compacting
+  | "finalizing" -> Lane_turn_finalizing
+  | "exhausted" -> Lane_turn_exhausted
+  | raw -> Lane_turn_unknown raw
+
+let keeper_lane_turn_phase_to_string = function
+  | Lane_turn_idle -> "idle"
+  | Lane_turn_prompting -> "prompting"
+  | Lane_turn_routing -> "routing"
+  | Lane_turn_executing -> "executing"
+  | Lane_turn_compacting -> "compacting"
+  | Lane_turn_finalizing -> "finalizing"
+  | Lane_turn_exhausted -> "exhausted"
+  | Lane_turn_unknown raw -> raw
+
+let required_nullable_string_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> missing_field key
+  | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some bad -> field_type_error key "a string or null" bad
+
+let decode_keeper_lane_last_outcome json =
+  let* klo_runtime_state = required_string_field json "runtime_state" in
+  let* klo_selected_model =
+    required_nullable_string_field json "selected_model"
+  in
+  Ok { klo_runtime_state; klo_selected_model }
+
+let decode_keeper_lane json =
+  let* kl_keeper = required_string_field json "keeper" in
+  let* raw_phase = required_string_field json "phase" in
+  let kl_phase = keeper_lane_phase_of_string raw_phase in
+  let* raw_turn_phase = required_string_field json "turn_phase" in
+  let kl_turn_phase = keeper_lane_turn_phase_of_string raw_turn_phase in
+  let* kl_idle_seconds = required_int_field json "idle_seconds" in
+  let* kl_last_outcome =
+    match Json_util.assoc_member_opt "last_outcome" json with
+    | None -> missing_field "last_outcome"
+    | Some `Null -> Ok None
+    | Some (`Assoc _ as outcome) ->
+        let* decoded = decode_keeper_lane_last_outcome outcome in
+        Ok (Some decoded)
+    | Some bad -> field_type_error "last_outcome" "an object or null" bad
+  in
+  let* diagnosis = required_object_field json "phase_diagnosis" in
+  let* kl_diagnosis =
+    required_nullable_string_field diagnosis "determining_condition"
+  in
+  Ok
+    { kl_keeper
+    ; kl_phase
+    ; kl_turn_phase
+    ; kl_idle_seconds
+    ; kl_last_outcome
+    ; kl_diagnosis
+    }
+
+let decode_keeper_lanes_snapshot json =
+  let* kls_generated_at = require_float_field json "generated_at" in
+  let* kls_count = required_int_field json "count" in
+  let* items = required_list_field json "snapshots" in
+  let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
+  Ok { kls_generated_at; kls_count; kls_lanes }
 
 (* The counts are read with a default rather than required: the server adds
    fields to this section over time, and a TUI that refuses the whole reading

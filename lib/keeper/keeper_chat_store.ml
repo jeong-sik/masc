@@ -277,11 +277,9 @@ let redact_string_opt redaction =
 let redact_trace_json redaction json =
   (* Caller-supplied trace tool args/results can carry a secret embedded in a
      key name (e.g. a header/param used as a dict key), not only in values.
-     Use the SSOT JSON redactor for keys and values so the traversal policy has
-     a single owner. *)
-  json
-  |> Keeper_secret_redaction.redact_json_keys redaction
-  |> Keeper_secret_redaction.redact_json redaction
+     [redact_json] covers both, so the traversal policy is the redactor's and
+     not assembled here. *)
+  Keeper_secret_redaction.redact_json redaction json
 
 let redact_table_cell redaction = function
   | Keeper_chat_blocks.Cell_text value ->

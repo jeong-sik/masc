@@ -337,6 +337,93 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
         (latest_tool_names ()))
 ;;
 
+(* Every failure_reason the registry can hold, so a new variant lands here
+   rather than reaching the trust snapshot as an undecodable string. The
+   producer emits blocker_class as a string and the consumer parses it with
+   Keeper_meta_contract.blocker_class_of_serialized_string; the two
+   vocabularies are not the same set (#25797). *)
+let every_failure_reason : Keeper_registry.failure_reason list =
+  [ Keeper_registry.Heartbeat_consecutive_failures 3
+  ; Keeper_registry.Turn_consecutive_failures 2
+  ; Keeper_registry.Stale_termination_storm { count = 4 }
+  ; Keeper_registry.Provider_runtime_error
+      { code = "api_error_500"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = Some 500
+      ; runtime_id = None
+      ; agent_core_timeout = None
+      ; reason = None
+      }
+  ; Keeper_registry.Turn_overflow_failure
+  ; Keeper_registry.Operator_interrupt
+  ; Keeper_registry.Exception "boom"
+  ]
+;;
+
+let test_undecodable_blocker_classes_are_named_not_counted () =
+  let undecodable =
+    List.filter_map
+      (fun reason ->
+        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        | None -> None
+        | Some surface ->
+          (match
+             Keeper_meta_contract.blocker_class_of_serialized_string
+               surface.Keeper_status_bridge.blocker_class
+           with
+           | Some _ -> None
+           | None -> Some surface.Keeper_status_bridge.blocker_class))
+      every_failure_reason
+  in
+  (* This is the gap the issue reports, pinned as a list rather than a count:
+     when a class is taught to the decoder it leaves this list, and when a new
+     producer class appears it joins it. Either way the diff names it. *)
+  Alcotest.(check (slist string String.compare))
+    "classes the trust-snapshot decoder does not know"
+    [ "exception"
+    ; "heartbeat_failures"
+    ; "operator_interrupt"
+    ; "provider_runtime_error"
+    ; "stale_termination_storm"
+    ; "turn_failures"
+    ; "turn_overflow_failure"
+    ]
+    undecodable
+;;
+
+let test_decodable_blocker_classes_stay_decodable () =
+  let decodable =
+    List.filter_map
+      (fun reason ->
+        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        | None -> None
+        | Some surface ->
+          (match
+             Keeper_meta_contract.blocker_class_of_serialized_string
+               surface.Keeper_status_bridge.blocker_class
+           with
+           | Some _ -> Some surface.Keeper_status_bridge.blocker_class
+           | None -> None))
+      every_failure_reason
+  in
+  (* Today every producer class is undecodable, so this list is empty. The
+     assertion is that the complement is computed at all: when a class is
+     taught to the decoder it has to appear here, and a run where the producer
+     stopped emitting anything would show up as both lists empty. *)
+  Alcotest.(check int)
+    "producer classes that decode today"
+    0
+    (List.length decodable);
+  Alcotest.(check bool)
+    "the producer does emit classes"
+    true
+    (List.exists
+       (fun reason ->
+         Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason <> None)
+       every_failure_reason)
+;;
+
 let () =
   Alcotest.run
     "keeper_status_bridge"
@@ -390,5 +477,15 @@ let () =
             `Quick
             test_next_action_path_wire_strings_are_pinned;
         ] );
+    ( "blocker_class_vocabulary"
+    , [ Alcotest.test_case
+          "undecodable producer classes are named"
+          `Quick
+          test_undecodable_blocker_classes_are_named_not_counted
+      ; Alcotest.test_case
+          "decodable classes still decode"
+          `Quick
+          test_decodable_blocker_classes_stay_decodable
+      ] );
     ]
 ;;

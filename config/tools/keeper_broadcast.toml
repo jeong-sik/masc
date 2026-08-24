@@ -1,0 +1,27 @@
+name = "keeper_broadcast"
+description = """
+Send a message visible to all agents in the MASC workspace. Use for status \
+updates, announcements, or warnings."""
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Broadcast body text"
+min_length = 1
+
+[[params]]
+name = "task_cache_subject_agent"
+type = "string"
+description = """
+Agent whose current-task cache was observed; supply together with \
+task_cache_task_id"""
+min_length = 1
+
+[[params]]
+name = "task_cache_task_id"
+type = "string"
+description = """
+Task ID observed in the subject agent cache; supply together with \
+task_cache_subject_agent"""
+min_length = 1

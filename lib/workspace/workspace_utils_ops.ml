@@ -582,19 +582,12 @@ let log_event config event_json =
   let events_dir = Filename.concat (masc_dir config) "events" in
   mkdir_p events_dir;
 
-  let today =
-    let open Unix in
-    let tm = gmtime (gettimeofday ()) in
-    Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)
-  in
-  let month_dir = Filename.concat events_dir today in
+  (* Two gmtime calls used to pick the month and the day, so a midnight
+     between them filed the last day of one month under the next one's
+     directory. [Jsonl_writer] runs one call behind both (#27143). *)
+  let dated = Jsonl_writer.dated_path_now ~base_dir:events_dir in
+  let month_dir = Filename.concat events_dir dated.Jsonl_writer.month_dir in
   mkdir_p month_dir;
-
-  let day =
-    let open Unix in
-    let tm = gmtime (gettimeofday ()) in
-    Printf.sprintf "%02d.jsonl" tm.tm_mday
-  in
-  let log_file = Filename.concat month_dir day in
+  let log_file = dated.Jsonl_writer.path in
 
   Fs_compat.append_file log_file (Yojson.Safe.to_string event_json ^ "\n")

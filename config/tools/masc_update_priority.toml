@@ -1,0 +1,19 @@
+name = "masc_update_priority"
+description = """
+Change the priority of a task. Priority 1 is highest (most urgent), 5 is \
+lowest. Use this to reprioritize work based on new information or urgency \
+changes."""
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID to update"
+
+[[params]]
+name = "priority"
+type = "integer"
+required = true
+description = "New priority (1=highest, 5=lowest)"
+minimum = 1
+maximum = 5

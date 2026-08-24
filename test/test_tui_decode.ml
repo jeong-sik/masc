@@ -95,12 +95,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
        ; ("total_cost_usd", `Float 0.42)
        ; ("last_turn_ts", `Float last_turn_ts)
        ; ("compaction_count", `Int 1)
-       ; ("autonomous_turn_count", `Int 7)
-       ; ("autonomous_text_turn_count", `Int 5)
-       ; ("autonomous_tool_turn_count", `Int 2)
-       ; ("board_reactive_turn_count", `Int 3)
-       ; ("mention_reactive_turn_count", `Int 1)
-       ; ("noop_turn_count", `Int 4)
        ; ("last_proactive_outcome", `String "tool_use")
        ; ("created_at", `String "2026-08-20T01:02:03Z")
        ; ("updated_at", `String "2026-08-21T04:05:06Z")
@@ -124,22 +118,11 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check bool) "paused" true keeper.k_paused;
       Alcotest.(check (option string)) "current task" (Some "task-42")
         keeper.k_current_task_id;
-      Alcotest.(check int) "autonomous turns" 7
-        keeper.k_autonomous_turn_count;
       Alcotest.(check int) "total turns" 4 keeper.k_total_turns;
       Alcotest.(check int) "total tokens" 120 keeper.k_total_tokens;
       Alcotest.(check (float 0.0001)) "total cost" 0.42
         keeper.k_total_cost_usd;
       Alcotest.(check int) "compactions" 1 keeper.k_compaction_count;
-      Alcotest.(check int) "autonomous text turns" 5
-        keeper.k_autonomous_text_turn_count;
-      Alcotest.(check int) "autonomous tool turns" 2
-        keeper.k_autonomous_tool_turn_count;
-      Alcotest.(check int) "board turns" 3
-        keeper.k_board_reactive_turn_count;
-      Alcotest.(check int) "mention turns" 1
-        keeper.k_mention_reactive_turn_count;
-      Alcotest.(check int) "no-op turns" 4 keeper.k_noop_turn_count;
       Alcotest.(check string) "last outcome" "tool_use"
         keeper.k_last_proactive_outcome;
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"
@@ -232,23 +215,23 @@ let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn () =
 let test_keeper_calls_reject_rows_naming_another_keeper () =
   let payload =
     `Assoc
-      [ "keeper", `String "rondo"
+      [ "keeper", `String "largo"
       ; "count", `Int 3
       ; "health", `String "ok"
       ; "latest_age_s", `Float 8.2
       ; "stale_reason", `String "fresh"
       ; ( "entries"
         , `List
-            [ keeper_call_row ~keeper:"rondo" ~tool:"Read" ~duration_ms:28.4
+            [ keeper_call_row ~keeper:"largo" ~tool:"Read" ~duration_ms:28.4
                 ~turn:2143 ()
             ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
-            ; keeper_call_row ~keeper:"rondo" ~tool:"tool_execute"
+            ; keeper_call_row ~keeper:"largo" ~tool:"tool_execute"
                 ~success:false ()
             ] )
       ]
   in
   match
-    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo" payload
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo" payload
   with
   | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
   | Ok snapshot ->
@@ -278,7 +261,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
   let row ~output =
     `Assoc
       [ "ts", `Float 1787534998.4
-      ; "keeper", `String "rondo"
+      ; "keeper", `String "largo"
       ; "tool", `String "Execute"
       ; "input", `String {|{"argv": ["ls"]}|}
       ; "success", `Bool true
@@ -287,7 +270,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
   in
   let payload entries =
     `Assoc
-      [ "keeper", `String "rondo"
+      [ "keeper", `String "largo"
       ; "count", `Int (List.length entries)
       ; "health", `String "ok"
       ; "entries", `List entries
@@ -295,7 +278,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
   in
   let outputs entries =
     match
-      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
         (payload entries)
     with
     | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
@@ -317,24 +300,24 @@ let test_keeper_calls_carry_what_the_call_answered () =
 let test_keeper_calls_require_the_envelope () =
   Alcotest.(check bool) "no entries list is an error" true
     (Result.is_error
-       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
           (`Assoc
-             [ "keeper", `String "rondo"
+             [ "keeper", `String "largo"
              ; "count", `Int 0
              ; "health", `String "ok"
              ])));
   Alcotest.(check bool) "a row without success is an error" true
     (Result.is_error
-       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
           (`Assoc
-             [ "keeper", `String "rondo"
+             [ "keeper", `String "largo"
              ; "count", `Int 1
              ; "health", `String "ok"
              ; ( "entries"
                , `List
                    [ `Assoc
                        [ "ts", `Float 1.0
-                       ; "keeper", `String "rondo"
+                       ; "keeper", `String "largo"
                        ; "tool", `String "Read"
                        ]
                    ] )
@@ -664,10 +647,10 @@ let fleet_safety_json ?(missing = true) () =
                    (List.map
                       (fun n -> `String n)
                       (if missing
-                       then [ "analyst"; "kidsnote"; "sangsu" ]
-                       else [ "analyst"; "kidsnote" ])) )
+                       then [ "analyst"; "bluebird"; "haneul" ]
+                       else [ "analyst"; "bluebird" ])) )
              ; ( "executable_keeper_names"
-               , `List [ `String "analyst"; `String "kidsnote" ] )
+               , `List [ `String "analyst"; `String "bluebird" ] )
              ]) )
     ]
 
@@ -687,11 +670,11 @@ let test_decode_fleet_safety_carries_both_name_lists () =
         fleet.fs_active_task_owner_without_fiber_count;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
-        [ "analyst"; "kidsnote"; "sangsu" ] fleet.fs_bootable_names;
+        [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
       Alcotest.(check (list string)) "keepers that do run"
-        [ "analyst"; "kidsnote" ] fleet.fs_executable_names;
+        [ "analyst"; "bluebird" ] fleet.fs_executable_names;
       Alcotest.(check (list string)) "the difference names the missing keeper"
-        [ "sangsu" ]
+        [ "haneul" ]
         (List.filter
            (fun n -> not (List.mem n fleet.fs_executable_names))
            fleet.fs_bootable_names)
@@ -1412,6 +1395,28 @@ let test_decode_tool_snapshot_reads_the_live_shape () =
              t.Tui_decode.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
 
+(* The server answers a cold cache with its warming placeholder: the same
+   envelope, an empty inventory, and a flag saying so. Reading only the list
+   made that identical to a workspace with no tools, and the pane said "no
+   tools registered" to an operator who has a hundred. *)
+let test_decode_tool_snapshot_keeps_the_warming_flag () =
+  let warming =
+    match tool_snapshot_json [] with
+    | `Assoc fields -> `Assoc (("is_warming", `Bool true) :: fields)
+    | other -> other
+  in
+  (match Tui_decode.decode_tool_snapshot warming with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check bool) "an empty warming inventory is not an answer" true
+         (snapshot.Tui_decode.ts_freshness = Tui_decode.Warming));
+  (* A built inventory does not mention the flag at all. *)
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json []) with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check bool) "an empty built inventory does mean none" true
+        (snapshot.Tui_decode.ts_freshness = Tui_decode.Settled)
+
 let test_decode_tool_projected_nowhere () =
   (* A registered tool on no surface is reachable by nothing. Kept as an empty
      list rather than dropped: that it exists and is projected nowhere is the
@@ -1578,6 +1583,92 @@ let test_decode_repository_with_no_keepers () =
   | Ok _ -> Alcotest.fail "expected one repository"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+(* Keeper lane rows. Shape is the light projection the TUI reads from
+   [GET /api/v1/keepers/composite]. *)
+let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
+    ?(idle_seconds = 75) ?(last_outcome = `Null)
+    ?(diagnosis = `String "running_fiber_alive") keeper =
+  `Assoc
+    [ "keeper", `String keeper
+    ; "phase", `String phase
+    ; "turn_phase", `String turn_phase
+    ; "idle_seconds", `Int idle_seconds
+    ; "last_outcome", last_outcome
+    ; ( "phase_diagnosis"
+      , `Assoc [ "determining_condition", diagnosis ] )
+    ]
+
+let keeper_lanes_json lanes =
+  `Assoc
+    [ "generated_at", `Float 1787557669.715736
+    ; "count", `Int (List.length lanes)
+    ; "snapshots", `List lanes
+    ]
+
+let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
+  let last_outcome =
+    `Assoc
+      [ "runtime_state", `String "done"
+      ; "selected_model", `String "claude-opus-5"
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_lanes_snapshot
+      (keeper_lanes_json
+         [ keeper_lane_json ~last_outcome "alpha"
+         ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
+             ~diagnosis:`Null "beta"
+         ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "envelope count" 2 snapshot.Tui_decode.kls_count;
+      (match snapshot.Tui_decode.kls_lanes with
+       | [ alpha; beta ] ->
+           Alcotest.(check string) "first keeper" "alpha" alpha.kl_keeper;
+           Alcotest.(check string) "known phase" "running"
+             (Tui_decode.keeper_lane_phase_to_string alpha.kl_phase);
+           Alcotest.(check string) "known turn" "executing"
+             (Tui_decode.keeper_lane_turn_phase_to_string alpha.kl_turn_phase);
+           Alcotest.(check int) "idle seconds" 75 alpha.kl_idle_seconds;
+           (match alpha.kl_last_outcome with
+            | Some outcome ->
+                Alcotest.(check string) "outcome" "done"
+                  outcome.klo_runtime_state;
+                Alcotest.(check (option string)) "model"
+                  (Some "claude-opus-5") outcome.klo_selected_model
+            | None -> Alcotest.fail "alpha lost its last outcome");
+           (match beta.kl_phase with
+            | Tui_decode.Lane_phase_unknown raw ->
+                Alcotest.(check string) "unknown phase" "future_phase" raw
+            | _ -> Alcotest.fail "future phase was folded into a known phase");
+           (match beta.kl_turn_phase with
+            | Tui_decode.Lane_turn_unknown raw ->
+                Alcotest.(check string) "unknown turn" "future_turn" raw
+            | _ -> Alcotest.fail "future turn was folded into a known turn");
+           Alcotest.(check (option string)) "no determining condition" None
+             beta.kl_diagnosis
+       | lanes ->
+           Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
+
+let test_decode_keeper_lanes_requires_the_table_fields () =
+  let incomplete =
+    `Assoc
+      [ "keeper", `String "alpha"
+      ; "phase", `String "running"
+      ; "turn_phase", `String "idle"
+      ; "last_outcome", `Null
+      ; "phase_diagnosis", `Assoc [ "determining_condition", `Null ]
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_lanes_snapshot (keeper_lanes_json [ incomplete ])
+  with
+  | Ok _ -> Alcotest.fail "a lane without idle_seconds decoded"
+  | Error detail ->
+      Alcotest.(check bool) "error names the missing field" true
+        (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
   `Assoc
@@ -1597,147 +1688,6 @@ let harness_snapshot_json verdicts =
     ; ("recent_verdicts", `List verdicts)
     ; ("calibration", `Assoc [])
     ]
-
-(* ── Autonomy feature-proof report ── *)
-
-let feature_proof_json ?(id = "autonomous_tool_use") ?(status = "warn")
-    ?(observed = [ "alice" ]) ?(missing = [ "bob" ]) ?(read_errors = []) () =
-  `Assoc
-    [ ("id", `String id)
-    ; ("label", `String "autonomous tool use")
-    ; ("status", `String status)
-    ; ("summary", `String "1/2 keepers called a tool on an autonomous turn")
-    ; ( "keeper_evidence"
-      , `Assoc
-          [ ("keeper_count", `Int 2)
-          ; ("meta_count", `Int 2)
-          ; ( "observed_keepers"
-            , `List (List.map (fun k -> `String k) observed) )
-          ; ("missing_keepers", `List (List.map (fun k -> `String k) missing))
-          ; ( "read_errors"
-            , `List
-                (List.map
-                   (fun k ->
-                     `Assoc
-                       [ ("keeper", `String k)
-                       ; ("error", `String "meta.json is not readable")
-                       ])
-                   read_errors) )
-          ] )
-    ; ("evidence_refs", `List [])
-    ; ("next_action", `String "Let the runtime run an autonomous cycle.")
-    ]
-
-let autonomy_json ?(status = "warn") ?(pass_count = 1) ?(gap_count = 1)
-    ?(window_hours = `Null) features =
-  `Assoc
-    [ ("generated_at", `String "2026-08-24T00:00:00Z")
-    ; ("status", `String status)
-    ; ( "summary"
-      , `Assoc
-          [ ("status", `String status)
-          ; ("feature_count", `Int (List.length features))
-          ; ("pass_count", `Int pass_count)
-          ; ("warn_count", `Int gap_count)
-          ; ("fail_count", `Int 0)
-          ; ("gap_count", `Int gap_count)
-          ; ("keeper_count", `Int 2)
-          ; ("window_hours", window_hours)
-          ] )
-    ; ("features", `List features)
-    ; ("evidence_refs", `List [])
-    ]
-
-let test_decode_autonomy_reads_the_live_shape () =
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json [ feature_proof_json () ])
-  with
-  | Error err -> Alcotest.failf "decode failed: %s" err
-  | Ok snapshot ->
-      Alcotest.(check int) "features proven" 1
-        snapshot.Tui_decode.au_pass_count;
-      Alcotest.(check int) "features still open" 1
-        snapshot.Tui_decode.au_gap_count;
-      Alcotest.(check int) "keepers the report covered" 2
-        snapshot.Tui_decode.au_keeper_count;
-      Alcotest.(check (option (float 0.01)))
-        "no window was asked for" None snapshot.Tui_decode.au_window_hours;
-      (match snapshot.Tui_decode.au_features with
-       | [ f ] ->
-           Alcotest.(check (list string))
-             "keepers with evidence" [ "alice" ] f.Tui_decode.fp_observed;
-           Alcotest.(check (list string))
-             "keepers without it" [ "bob" ] f.Tui_decode.fp_missing;
-           Alcotest.(check string) "what would close the gap"
-             "Let the runtime run an autonomous cycle."
-             f.Tui_decode.fp_next_action
-       | fs -> Alcotest.failf "expected one feature, got %d" (List.length fs))
-
-let test_decode_autonomy_keeps_read_errors_apart_from_missing () =
-  (* A keeper that never exercised the feature and a keeper whose record would
-     not open are different problems. Folding the second into the first blames
-     the keeper for a read failure and hides that the report is partly blind. *)
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json
-         [ feature_proof_json ~missing:[ "bob" ] ~read_errors:[ "carol" ] () ])
-  with
-  | Ok { Tui_decode.au_features = [ f ]; _ } ->
-      Alcotest.(check (list string))
-        "missing stays missing" [ "bob" ] f.Tui_decode.fp_missing;
-      Alcotest.(check (list string))
-        "and the unreadable one is named separately" [ "carol" ]
-        f.Tui_decode.fp_read_errors
-  | Ok _ -> Alcotest.fail "expected one feature"
-  | Error err -> Alcotest.failf "decode failed: %s" err
-
-let test_decode_autonomy_unknown_status_is_a_gap () =
-  (* The whole screen answers "is this proven". A status word this build was
-     not taught means it cannot tell, and the safe reading of "I do not know"
-     is not "yes" -- so it must not decode into the passing member. *)
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json [ feature_proof_json ~status:"degraded" () ])
-  with
-  | Ok { Tui_decode.au_features = [ f ]; _ } ->
-      (match f.Tui_decode.fp_status with
-       | Tui_decode.Fp_unreadable raw ->
-           Alcotest.(check string) "the word is kept as written" "degraded" raw
-       | Tui_decode.Fp_pass | Tui_decode.Fp_warn | Tui_decode.Fp_fail ->
-           Alcotest.fail "an unknown status decoded into a known one");
-      Alcotest.(check bool) "and it counts as a gap" true
-        (Tui_decode.feature_proof_is_gap f.Tui_decode.fp_status)
-  | Ok _ -> Alcotest.fail "expected one feature"
-  | Error err -> Alcotest.failf "decode failed: %s" err
-
-let test_decode_autonomy_missing_evidence_block_is_an_error () =
-  (* A feature row with no keeper evidence is a malformed report, not a
-     feature nobody has exercised. Defaulting it to an empty roster would draw
-     "0/0" and read as a clean screen. *)
-  let broken =
-    `Assoc
-      [ ("id", `String "runtime_liveness")
-      ; ("label", `String "runtime liveness")
-      ; ("status", `String "pass")
-      ; ("summary", `String "all keepers up")
-      ; ("next_action", `String "nothing")
-      ]
-  in
-  match Tui_decode.decode_autonomy_snapshot (autonomy_json [ broken ]) with
-  | Ok _ -> Alcotest.fail "a report with no keeper evidence decoded"
-  | Error _ -> ()
-
-let test_autonomy_window_hours_survives () =
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json ~window_hours:(`Float 24.0) [ feature_proof_json () ])
-  with
-  | Ok snapshot ->
-      Alcotest.(check (option (float 0.01)))
-        "the window the report used" (Some 24.0)
-        snapshot.Tui_decode.au_window_hours
-  | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_harness_snapshot_reads_the_live_shape () =
   match
@@ -1930,6 +1880,8 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_tool_snapshot_reads_the_live_shape;
+        Alcotest.test_case "keeps the warming flag" `Quick
+          test_decode_tool_snapshot_keeps_the_warming_flag;
         Alcotest.test_case "a tool projected nowhere" `Quick
           test_decode_tool_projected_nowhere;
         Alcotest.test_case "absent direct-call is off" `Quick
@@ -1955,6 +1907,14 @@ let () =
         Alcotest.test_case "a repository with no keepers" `Quick
           test_decode_repository_with_no_keepers;
       ] );
+    ( "decode_keeper_lanes",
+      [
+        Alcotest.test_case "reads the live shape and keeps unknown values"
+          `Quick
+          test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
+        Alcotest.test_case "requires the table fields" `Quick
+          test_decode_keeper_lanes_requires_the_table_fields;
+      ] );
     ( "decode_harness",
       [
         Alcotest.test_case "reads the live shape" `Quick
@@ -1963,19 +1923,6 @@ let () =
           test_decode_harness_keeps_the_fallback_reason;
         Alcotest.test_case "an empty harness is a reading" `Quick
           test_decode_harness_with_no_verdicts_is_not_an_error;
-      ] );
-    ( "decode_autonomy",
-      [
-        Alcotest.test_case "reads the live shape" `Quick
-          test_decode_autonomy_reads_the_live_shape;
-        Alcotest.test_case "an unreadable record is not a missing keeper"
-          `Quick test_decode_autonomy_keeps_read_errors_apart_from_missing;
-        Alcotest.test_case "an unknown status counts as a gap" `Quick
-          test_decode_autonomy_unknown_status_is_a_gap;
-        Alcotest.test_case "a report with no keeper evidence is an error"
-          `Quick test_decode_autonomy_missing_evidence_block_is_an_error;
-        Alcotest.test_case "the window the report used survives" `Quick
-          test_autonomy_window_hours_survives;
       ] );
     ( "decode_verification",
       [

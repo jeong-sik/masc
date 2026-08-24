@@ -1,0 +1,11 @@
+name = "masc_schedule_get"
+description = """
+Read the current durable scheduled request by schedule_id. A recurring \
+request may already point at its next occurrence."""
+additional_properties = false
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Durable schedule id."

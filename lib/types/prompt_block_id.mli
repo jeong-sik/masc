@@ -29,3 +29,17 @@ val of_string : string -> (t, string) result
 
 val all_known : t list
 (** Every current producer-backed constructor, for exhaustive codec tests. *)
+
+val injected_on_post_tool_round : t -> bool
+(** Whether the per-turn context assembly re-injects this block on a
+    provider round that follows tool results.
+
+    The assembly rides the wire as a trailing User-role message, so on a
+    post-tool round it reads to the model as "someone spoke again" — the
+    documented DeepSeek and GLM tool loops end such a request with the tool
+    result instead, and re-broadcasting the world state there made models
+    re-answer it on every round (task-514, 2026-08-24). Recurring state
+    blocks therefore stay on the first round only; a block answers [true]
+    only when its appearance genuinely is someone speaking mid-turn
+    ([Operator_note], RFC-0366). A new constructor must declare its class
+    here before it can ride a post-tool round. *)

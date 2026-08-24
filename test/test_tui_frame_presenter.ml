@@ -225,6 +225,29 @@ let test_viewport_discards_offscreen_rows () =
   check bool "last visible row is painted" true (contains painted "visible two");
   check bool "offscreen row is not emitted" false (contains painted "offscreen")
 
+let test_alternate_screen_is_taken_and_given_back () =
+  let presenter = Presenter.create ~synchronized_output:false () in
+  let captured = sink () in
+  Presenter.setup presenter ~write:(write captured) ~flush:(flush captured);
+  let entered = output captured in
+  check bool "setup takes the alternate screen" true
+    (contains entered "\027[?1049h");
+  reset_sink captured;
+  Presenter.cleanup presenter ~write:(write captured) ~flush:(flush captured);
+  let left = output captured in
+  check bool "cleanup gives the alternate screen back" true
+    (contains left "\027[?1049l");
+  (* Leaving restores what the shell had. Clearing would take it away, which
+     is the whole reason the frame borrowed a screen of its own. *)
+  check bool "cleanup does not clear the screen it hands back" false
+    (contains left "\027[2J");
+  (* A screen taken fresh has nothing to diff against. *)
+  reset_sink captured;
+  present presenter captured (frame ~rows:2 [ "after resume" ]);
+  check bool "the frame after setup is a full redraw" true
+    (contains (output captured) "\027[2J")
+;;
+
 let () =
   run "tui_frame_presenter"
     [ ( "differential output"
@@ -243,5 +266,7 @@ let () =
             test_sync_fallback_and_visible_cursor_are_explicit
         ; test_case "viewport clipping" `Quick
             test_viewport_discards_offscreen_rows
+        ; test_case "alternate screen" `Quick
+            test_alternate_screen_is_taken_and_given_back
         ] )
     ]

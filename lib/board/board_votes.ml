@@ -607,13 +607,21 @@ let reactions_jsonl_snapshot store =
     store.reactions;
   Buffer.contents buf
 
-let save_jsonl_snapshot ~where ~path content =
+let save_jsonl_snapshot_result ~where ~path content =
   try
     ensure_masc_dir ();
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where msg
-  with Sys_error msg -> record_persist_error ~where msg
+    | Ok () -> Ok ()
+    | Error msg ->
+      record_persist_error ~where msg;
+      Error msg
+  with Sys_error msg ->
+    record_persist_error ~where msg;
+    Error msg
+;;
+
+let save_jsonl_snapshot ~where ~path content =
+  ignore (save_jsonl_snapshot_result ~where ~path content)
 
 let delete_post store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
@@ -770,12 +778,41 @@ let flush_dirty store =
       store.last_flush <- Time_compat.now ();
       (posts_jsonl, comments_jsonl, vote_log))
   in
+  (* The dirty flags were cleared above, before the write. A failed write used
+     to end there: the snapshot never reached disk and the change was no
+     longer scheduled for any later flush, so an in-memory post carried an
+     [updated_at] the file did not have until the next unrelated edit marked
+     it dirty again -- or forever, if none came (#26168). Re-marking on
+     failure puts the change back in the queue; the counter and the log line
+     stay, they just are not the whole response. *)
+  let remark_posts () =
+    with_lock store (fun () ->
+      store.dirty_posts <- true;
+      Hashtbl.iter (fun key _ -> Hashtbl.replace store.dirty_post_ids key ()) store.posts)
+  in
+  let remark_comments () =
+    with_lock store (fun () ->
+      store.dirty_comments <- true;
+      Hashtbl.iter
+        (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
+        store.comments)
+  in
   with_persist_lock store (fun () ->
     Option.iter
-      (save_jsonl_snapshot ~where:"flush_posts" ~path:(persist_path ()))
+      (fun content ->
+         match
+           save_jsonl_snapshot_result ~where:"flush_posts" ~path:(persist_path ()) content
+         with
+         | Ok () -> ()
+         | Error _ -> remark_posts ())
       posts_jsonl;
     Option.iter
-      (save_jsonl_snapshot ~where:"flush_comments" ~path:(comments_path ()))
+      (fun content ->
+         match
+           save_jsonl_snapshot_result ~where:"flush_comments" ~path:(comments_path ()) content
+         with
+         | Ok () -> ()
+         | Error _ -> remark_comments ())
       comments_jsonl;
     (* [flush_dirty] is a fire-and-forget [unit]-returning flusher call
        (same contract as the two snapshot writers above); the failure is

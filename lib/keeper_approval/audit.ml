@@ -274,13 +274,11 @@ let approval_decision_kind_and_reason = function
 ;;
 
 let audit_today_path base_dir =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
-  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-  let dir = Filename.concat base_dir month in
-  Fs_compat.mkdir_p dir;
-  Filename.concat dir day
+  (* The layout belongs to [Jsonl_writer]; a copy here can pick a different
+     calendar than the one readers filter with (#27143). *)
+  let dated = Jsonl_writer.dated_path_now ~base_dir in
+  Fs_compat.mkdir_p (Filename.concat base_dir dated.Jsonl_writer.month_dir);
+  dated.Jsonl_writer.path
 ;;
 
 let store_create_probe = Atomic.make (fun ~base_path:_ -> ())

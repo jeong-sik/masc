@@ -33,6 +33,15 @@ let disable_autowrap = "\027[?7l"
 let enable_autowrap = "\027[?7h"
 let reset_style = "\027[0m"
 let clear_screen = "\027[2J"
+
+(* The frame gets its own screen. Sharing the shell's buffer means the wheel
+   scrolls the terminal's scrollback and takes the frame with it, the shell's
+   own output sits above whatever the first paint clears, and quitting leaves
+   the last frame where the prompt should be. Every full-screen program that
+   draws at absolute coordinates does this; nothing else makes row 1 of the
+   frame reliably row 1 of the window. *)
+let enter_alternate_screen = "\027[?1049h"
+let leave_alternate_screen = "\027[?1049l"
 let erase_line = "\027[2K"
 let hide_cursor = "\027[?25l"
 let show_cursor = "\027[?25h"
@@ -42,11 +51,18 @@ let create ~synchronized_output () =
 
 let invalidate presenter = presenter.invalidated <- true
 
+let setup presenter ~write ~flush =
+  presenter.invalidated <- true;
+  try
+    write enter_alternate_screen;
+    flush ()
+  with _ -> ()
+
 let cleanup presenter ~write ~flush =
   try
     write
       ((if presenter.synchronized_output then end_synchronized_output else "")
-       ^ reset_style ^ show_cursor ^ enable_autowrap ^ clear_screen ^ "\027[H");
+       ^ reset_style ^ show_cursor ^ enable_autowrap ^ leave_alternate_screen);
     flush ()
   with _ -> ()
 

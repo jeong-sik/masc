@@ -1,0 +1,93 @@
+(** Byte-identity pins for the schedule tool toml parity declarations moving to
+    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
+    §2.2).
+
+    The expected values were read off [Tool_schemas_schedule.schemas] before any file moved, so this
+    suite passing *before* the TOML replaces a literal is what proves the file
+    says the same thing. Written against the published list rather than a loader
+    module, so it holds across the whole migration: what a Keeper receives must
+    not move whether a declaration lives in OCaml or TOML.
+
+    The enum arrays are literals in TOML -- nothing there can read an OCaml
+    variant. [test_enum_mirror_sync] already compares each of the six against
+    Schedule_contract_values, so the owners stay the owners and a drifted
+    literal fails there rather than shipping a schema that never offers the
+    value.
+
+    Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
+    not part of a JSON object's meaning, and TOML cannot place a sub-table
+    before its parent's scalar keys. *)
+
+open Alcotest
+
+let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (key, value) -> key, sorted value)
+       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
+  | `List items -> `List (List.map sorted items)
+  | other -> other
+;;
+
+(* name, description, input_schema (keys sorted) *)
+let expected =
+    [ {|masc_schedule_create|}, {|Create a durable Keeper wake request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. The due request wakes its Keeper; it does not authorize later effects. When the creating turn has a routable continuation, the runtime records that exact route as the result destination; otherwise it records an explicit no-delivery policy.|}, {|{"additionalProperties":false,"properties":{"allow_unregistered_keeper":{"description":"Allow a masc.keeper_wake schedule whose target keeper has no durable metadata yet. Default false: creation is rejected because such a wake can never be settled until the keeper exists.","type":"boolean"},"due_at_iso":{"description":"RFC 3339 timestamp with Z or an explicit numeric offset, for example 2026-08-02T09:00:00+09:00. It is normalized to whole-second UTC; fractional seconds are accepted and truncated. Provide this, due_at_unix, or a calendar recurrence (daily/cron) that can derive the first due time.","type":"string"},"due_at_unix":{"description":"Unix timestamp in seconds. Provide this, due_at_iso, or a calendar recurrence (daily/cron) that can derive the first due time.","type":"number"},"expires_at_unix":{"description":"Optional expiry timestamp.","type":"number"},"payload":{"additionalProperties":true,"description":"Typed schedule payload envelope: {kind:string, schema_version:int, body:object}.","type":"object"},"payload_body":{"additionalProperties":true,"description":"Payload body used when payload is omitted. For masc.keeper_wake use {keeper_name, message, optional title, optional urgency}. Result delivery policy is stamped by the runtime from the current continuation and cannot be supplied by the model.","type":"object"},"payload_kind":{"description":"Payload kind used when payload is omitted. The server consumer accepts masc.keeper_wake.","type":"string"},"payload_schema_version":{"description":"Payload schema version used when payload is omitted.","type":"integer"},"recurrence_cron":{"description":"Required when recurrence_kind is cron. Standard 5-field cron expression: minute hour day-of-month month day-of-week. Supports wildcards, comma lists, numeric ranges, and steps such as */15 or 1-5/2.","type":"string"},"recurrence_hour":{"description":"Required when recurrence_kind is daily; local hour in 0..23.","type":"integer"},"recurrence_interval_sec":{"description":"Required when recurrence_kind is interval; seconds between runs.","type":"integer"},"recurrence_kind":{"description":"Recurrence kind. Defaults to one_shot.","enum":["one_shot","interval","daily","cron"],"type":"string"},"recurrence_minute":{"description":"Required when recurrence_kind is daily; local minute in 0..59.","type":"integer"},"recurrence_second":{"description":"Optional when recurrence_kind is daily; local second in 0..59.","type":"integer"},"recurrence_timezone":{"description":"Required when recurrence_kind is daily or cron. Fixed-offset only: UTC, Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. DST-aware IANA zones are not supported.","type":"string"},"requested_at_unix":{"description":"Optional request timestamp for replay/tests.","type":"number"},"requested_by_display_name":{"description":"Requester display name.","type":"string"},"requested_by_id":{"description":"Requester actor id. Defaults to operator.","type":"string"},"requested_by_kind":{"enum":["human_operator","automated_actor","system"],"type":"string"},"schedule_id":{"description":"Optional stable schedule id.","type":"string"},"scheduled_by_display_name":{"description":"Scheduler display name.","type":"string"},"scheduled_by_id":{"description":"Scheduler actor id. Defaults to caller agent name.","type":"string"},"scheduled_by_kind":{"enum":["human_operator","automated_actor","system"],"type":"string"},"source":{"enum":["operator_request","automated_request","system_request"],"type":"string"}},"type":"object"}|}
+    ; {|masc_schedule_list|}, {|List durable scheduled internal automation requests.|}, {|{"additionalProperties":false,"properties":{"limit":{"description":"Maximum rows to return. Defaults to 50, capped at 200.","type":"integer"},"status":{"enum":["scheduled","due","running","succeeded","failed","cancelled","expired"],"type":"string"}},"type":"object"}|}
+    ; {|masc_schedule_get|}, {|Read the current durable scheduled request by schedule_id. A recurring request may already point at its next occurrence.|}, {|{"additionalProperties":false,"properties":{"schedule_id":{"description":"Durable schedule id.","type":"string"}},"required":["schedule_id"],"type":"object"}|}
+    ; {|masc_schedule_cancel|}, {|Cancel a scheduled or due request before execution.|}, {|{"additionalProperties":false,"properties":{"cancelled_by_id":{"description":"Human or system actor id cancelling the schedule.","type":"string"},"cancelled_by_kind":{"enum":["human_operator","automated_actor","system"],"type":"string"},"reason":{"description":"Reason for operator-visible cancellation.","type":"string"},"schedule_id":{"description":"Schedule id to cancel.","type":"string"}},"required":["schedule_id","cancelled_by_id","reason"],"type":"object"}|}
+    ]
+;;
+
+let published = Tool_schemas_schedule.schemas
+
+let find name =
+  match
+    List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) published
+  with
+  | Some schema -> schema
+  | None -> failwith (name ^ " is absent from Tool_schemas_schedule.schemas")
+;;
+
+let test_descriptions_are_byte_identical () =
+  List.iter
+    (fun (name, description, _) ->
+       check string (name ^ " description") description (find name).description)
+    expected
+;;
+
+let test_input_schemas_match_with_keys_sorted () =
+  List.iter
+    (fun (name, _, schema) ->
+       check
+         string
+         (name ^ " input_schema")
+         schema
+         (Yojson.Safe.to_string (sorted (find name).input_schema)))
+    expected
+;;
+
+(* The order is what a model reads the tool list in, so a reordering is a
+   change to the surface even when every schema still matches. *)
+let test_the_published_order_is_unchanged () =
+  check
+    (list string)
+    "Tool_schemas_schedule.schemas in order"
+    (List.map (fun (name, _, _) -> name) expected)
+    (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
+;;
+
+let () =
+  run
+    "schedule_tool_toml_parity"
+    [ ( "byte_identity"
+      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
+        ; test_case
+            "input schemas, keys sorted"
+            `Quick
+            test_input_schemas_match_with_keys_sorted
+        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+        ] )
+    ]
+;;

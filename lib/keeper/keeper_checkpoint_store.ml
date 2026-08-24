@@ -330,6 +330,13 @@ type save_agent_core_error =
   | Existing_checkpoint_unreadable of checkpoint_load_error
   | Canonical_write_failed of Keeper_fs.durable_write_error
   | Transaction_lock_failed of File_lock_eio.durable_lock_error
+  | Structurally_invalid of Keeper_compaction_unit.structural_error
+      (** The messages do not satisfy the tool-protocol contract a reload has
+          to replay. One of the three writers ran this check before calling
+          here; the mid-run sink and finalize assembled their checkpoint
+          directly and did not, so a broken history was admitted by the two
+          hottest paths (#25561). The check belongs at the write boundary
+          every writer passes through. *)
 
 let checkpoint_load_error_to_string = function
   | Not_found -> "checkpoint not found"
@@ -358,6 +365,9 @@ let save_agent_core_error_to_string = function
   | Transaction_lock_failed error ->
     "checkpoint transaction lock failed: "
     ^ File_lock_eio.durable_lock_error_to_string error
+  | Structurally_invalid error ->
+    "checkpoint messages are structurally invalid: "
+    ^ Keeper_compaction_unit.show_structural_error error
 
 let canonical_session_location session_dir =
   (* Containment boundary for every checkpoint path (issue #25077).
@@ -909,6 +919,9 @@ let save_agent_core_classified_typed
     ~(session_dir : string)
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
+  match Keeper_compaction_unit.validate ckpt.messages with
+  | Error structural -> Error (Structurally_invalid structural)
+  | Ok () ->
   match Keeper_id.Trace_id.of_string ckpt.session_id with
   | Error reason -> Error (Invalid_session_id reason)
   | Ok trace_id ->

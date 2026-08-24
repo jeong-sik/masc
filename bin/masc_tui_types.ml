@@ -347,11 +347,19 @@ type keeper_mode =
   | Keeper_calls
   | Keeper_message
 
+(** Where [Esc] returns after the chat pane was opened. Keeping only the two
+    legal destinations makes a new Keeper sub-view an explicit compiler error
+    instead of silently becoming the detail view. *)
+type keeper_chat_return =
+  | Keeper_chat_return_list
+  | Keeper_chat_return_detail
+
 (** Top-level TUI surface. *)
 type surface =
   | Overview
   | Acting
   | Keepers of keeper_mode
+  | Lanes
   | Board
   | Approvals
   | Planning
@@ -361,7 +369,6 @@ type surface =
   | Repositories
   | Connectors
   | Tools
-  | Autonomy
   | System_logs
 
 (** What a surface needs loaded to draw itself.
@@ -374,15 +381,74 @@ type surface =
 type surface_needs = {
   needs_transport : bool;
   needs_keeper_roster : bool;
+  needs_fleet_safety : bool;
+  needs_board : bool;
+  needs_planning : bool;
+  needs_system_logs : bool;
+  needs_keeper_chat : bool;
 }
 
+let nothing =
+  { needs_transport = false;
+    needs_keeper_roster = false;
+    needs_fleet_safety = false;
+    needs_board = false;
+    needs_planning = false;
+    needs_system_logs = false;
+    needs_keeper_chat = false;
+  }
+
+(* Each datum is read by the one surface that draws it, so a refresh spends a
+   request and a decode on it only while that surface is open. The planning and
+   system-log payloads are tens of kilobytes each, and fetching them behind
+   every other surface cost that on every tick for rows nobody was looking at. *)
 let surface_needs : surface -> surface_needs = function
-  | Overview -> { needs_transport = true; needs_keeper_roster = false }
-  | Acting -> { needs_transport = false; needs_keeper_roster = false }
-  | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
-  | Board | Approvals | Planning | Schedules | Verification | Harness
-  | Repositories | Connectors | Tools | Autonomy | System_logs ->
-      { needs_transport = false; needs_keeper_roster = false }
+  | Overview -> { nothing with needs_transport = true }
+  (* Its rows come from the acting store and the keeper list, neither of which
+     is fetched here. *)
+  | Acting -> nothing
+  (* Exhaustive over the sub-mode rather than [Keepers _]: the chat pane is
+     the one that was missed. It loaded its history when it opened and never
+     again, so a message that arrived while it was on screen only appeared
+     after leaving and coming back. *)
+  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls) ->
+      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+  | Keepers Keeper_message ->
+      { nothing with
+        needs_keeper_roster = true
+      ; needs_fleet_safety = true
+      ; needs_keeper_chat = true
+      }
+  | Board -> { nothing with needs_board = true }
+  | Planning -> { nothing with needs_planning = true }
+  | System_logs -> { nothing with needs_system_logs = true }
+  | Lanes | Approvals | Schedules | Verification | Harness | Repositories
+  | Connectors | Tools ->
+      nothing
+
+(** How far a surface's list can scroll, given the terminal's height.
+
+    A bound belongs where the move happens, and the move is a keypress. The
+    drawing used to work it out mid-frame and write the clamped value back
+    into the state -- the same four lines copied once per surface -- so
+    drawing a frame corrected the state it was drawing from. Declared here,
+    the key handler and the drawing read one answer and the drawing only
+    reads.
+
+    [None] is a surface whose rows the state cannot count: its row count is
+    built by the drawing, out of text the drawing formats. Those report the
+    value they used as a {!clamped_scroll} beside the frame instead, so the
+    drawing still does not write. *)
+type scrolled = {
+  sc_count : int;  (** rows of content the surface has *)
+  sc_chrome : int;  (** rows it spends on its own frame *)
+}
+
+(* These seven draw the same frame: a title, a column row, three dividers, the
+   scroll line and the footer -- and two more rows when a load error is on
+   screen. The number is the drawing's; a surface whose chrome moves has to
+   move it here in the same change. *)
+let listing_chrome ~error = if Option.is_some error then 9 else 7
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out.
@@ -496,6 +562,9 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: string option;
+  mutable lanes: Tui_decode.keeper_lanes_snapshot option;
+  mutable lanes_error: string option;
+  mutable lanes_scroll: int;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
@@ -514,9 +583,6 @@ type state = {
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
-  mutable autonomy: Tui_decode.autonomy_snapshot option;
-  mutable autonomy_error: string option;
-  mutable autonomy_scroll: int;
   mutable observer: observer_status;
   mutable mcp_session: string option;
       (** The MCP session the server issued, kept across streams: the server
@@ -538,6 +604,7 @@ type state = {
   mutable system_logs_scroll: int;
   mutable msg_input: Buffer.t;
   mutable msg_target_keeper_name: string option;
+  mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
   (* The turn currently streaming, if any. Drawn below the history and
@@ -553,6 +620,10 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  (* Every full-history GET captures this generation. Keeper identity alone is
+     not enough after alpha -> beta -> alpha: the first alpha response can
+     arrive after the second alpha request and still name the visible Keeper. *)
+  mutable msg_history_load_generation: int;
   (* How many rows above the newest the chat pane is showing. 0 is the bottom,
      where the pane follows a running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
@@ -566,6 +637,9 @@ type state = {
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
   mutable msg_older_error: string option;
+  (* Whether this pane folds reasoning blocks to a one-line count. A view
+     preference, not data: toggled by /thinking and never persisted. *)
+  mutable msg_thinking_collapsed: bool;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
      request, so a second Enter used to be answered with "already in progress"
@@ -642,6 +716,25 @@ let keeper_available_for_new_message (state : state) keeper_name =
        (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
        state.keepers
 
+(** The next target both the input path and footer agree is safe to select.
+    A pending request or live transcript stays pinned to its Keeper until that
+    turn settles. A retained roster is not enough after a failed refresh:
+    switching is disabled until the roster is readable again. *)
+let next_keeper_message_target (state : state) =
+  if
+    Option.is_some state.keepers_error
+    || Option.is_some state.msg_live
+    || state.msg_inflight <> []
+  then
+    Masc_tui_keeper_selection.No_alternative
+  else
+    match state.msg_target_keeper_name with
+    | None -> Masc_tui_keeper_selection.No_alternative
+    | Some current_keeper ->
+        Masc_tui_keeper_selection.next_message_target ~current_keeper
+          ~keeper_ids:
+            (List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
+
 (** Create initial state *)
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];
@@ -709,6 +802,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   schedule_scroll = 0;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
+  lanes = None;
+  lanes_error = None;
+  lanes_scroll = 0;
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
@@ -723,9 +819,6 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
-  autonomy = None;
-  autonomy_error = None;
-  autonomy_scroll = 0;
   observer = Observer_off;
   mcp_session = None;
   acting = [];
@@ -741,6 +834,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   system_logs_scroll = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;
+  msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
   msg_live = None;
@@ -748,11 +842,13 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_history_load_generation = 0;
   msg_scroll = 0;
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
   msg_older_error = None;
+  msg_thinking_collapsed = false;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
   detail_scroll = 0;
@@ -814,6 +910,77 @@ let composer_extra_rows (state : state) =
       (Buffer.contents state.msg_input)
   in
   max 0 (List.length lines - 1)
+
+(** A scroll a frame had to hold inside what it could show.
+
+    {!scrolled_surface} answers this before the frame is built, for the
+    surfaces whose rows the state can count. The rest count rows the drawing
+    formats -- lines of a task's notes, of a board post, of a keeper's detail
+    -- so the bound is not knowable until the frame exists. Those frames say
+    which value they used and the loop stores it, which is not the same as the
+    drawing reaching back into the state it is drawing from: the drawing is a
+    function of the state again, and every write lives on one side of it. *)
+type clamped_scroll =
+  | Overview_events of int
+  | Task_detail of int
+  | Board_read of int
+  | Keeper_detail of int
+  | Keeper_calls of int
+  | Acting of int
+
+let apply_clamped_scroll (state : state) = function
+  | Overview_events value -> state.overview_event_scroll <- value
+  | Task_detail value -> state.task_detail_scroll <- value
+  | Board_read value -> state.board_scroll <- value
+  | Keeper_detail value -> state.detail_scroll <- value
+  | Keeper_calls value -> state.keeper_calls_scroll <- value
+  | Acting value -> state.acting_scroll <- value
+
+let scrolled_surface (state : state) : surface -> scrolled option =
+  let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
+  function
+  | System_logs ->
+      listing ~error:state.system_logs_error
+        (match state.system_logs with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.sys_entries)
+  | Verification ->
+      listing ~error:state.verification_error
+        (match state.verification with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.vs_requests)
+  | Lanes ->
+      listing ~error:state.lanes_error
+        (match state.lanes with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.kls_lanes)
+  | Harness ->
+      listing ~error:state.harness_error
+        (match state.harness with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.hs_verdicts)
+  | Repositories ->
+      listing ~error:state.repositories_error
+        (match state.repositories with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Connectors ->
+      listing ~error:state.connectors_error
+        (match state.connectors with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.cs_connectors)
+  | Tools ->
+      listing ~error:state.tools_error
+        (match state.tools_inventory with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.ts_tools)
+  (* Acting counts rows the drawing builds out of formatted text, not rows the
+     state holds; counting them here would be a second copy of the formatting,
+     so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
+     Planning and Schedules move a cursor or a detail pane rather than a plain
+     list. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules ->
+      None
 
 let keeper_message_status_rows (state : state) =
   let unavailable_target =

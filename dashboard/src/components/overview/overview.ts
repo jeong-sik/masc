@@ -155,7 +155,7 @@ export interface OverviewStats {
 }
 
 function keeperTraceCount(keeper: Keeper): number {
-  return keeper.total_turns ?? keeper.turn_count ?? keeper.autonomous_turn_count ?? 0
+  return keeper.total_turns ?? keeper.turn_count ?? 0
 }
 
 export function keeperRuntimeLabel(keeper: Keeper): string {

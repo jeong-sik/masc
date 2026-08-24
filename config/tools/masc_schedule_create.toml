@@ -1,0 +1,160 @@
+name = "masc_schedule_create"
+description = """
+Create a durable Keeper wake request. For 'every day at 09:00 KST', use \
+recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, \
+recurrence_timezone=Asia/Seoul. For compact calendar rules, use \
+recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. \
+The due request wakes its Keeper; it does not authorize later effects. When \
+the creating turn has a routable continuation, the runtime records that \
+exact route as the result destination; otherwise it records an explicit \
+no-delivery policy."""
+additional_properties = false
+
+[[params]]
+name = "due_at_unix"
+type = "number"
+description = """
+Unix timestamp in seconds. Provide this, due_at_iso, or a calendar \
+recurrence (daily/cron) that can derive the first due time."""
+
+[[params]]
+name = "due_at_iso"
+type = "string"
+description = """
+RFC 3339 timestamp with Z or an explicit numeric offset, for example \
+2026-08-02T09:00:00+09:00. It is normalized to whole-second UTC; fractional \
+seconds are accepted and truncated. Provide this, due_at_unix, or a calendar \
+recurrence (daily/cron) that can derive the first due time."""
+
+[[params]]
+name = "payload"
+type = "object"
+additional_properties = true
+description = """
+Typed schedule payload envelope: {kind:string, schema_version:int, \
+body:object}."""
+
+[[params]]
+name = "payload_kind"
+type = "string"
+description = """
+Payload kind used when payload is omitted. The server consumer accepts \
+masc.keeper_wake."""
+
+[[params]]
+name = "payload_schema_version"
+type = "integer"
+description = "Payload schema version used when payload is omitted."
+
+[[params]]
+name = "payload_body"
+type = "object"
+additional_properties = true
+description = """
+Payload body used when payload is omitted. For masc.keeper_wake use \
+{keeper_name, message, optional title, optional urgency}. Result delivery \
+policy is stamped by the runtime from the current continuation and cannot be \
+supplied by the model."""
+
+[[params]]
+name = "schedule_id"
+type = "string"
+description = "Optional stable schedule id."
+
+[[params]]
+name = "requested_at_unix"
+type = "number"
+description = "Optional request timestamp for replay/tests."
+
+[[params]]
+name = "expires_at_unix"
+type = "number"
+description = "Optional expiry timestamp."
+
+[[params]]
+name = "recurrence_kind"
+type = "string"
+description = "Recurrence kind. Defaults to one_shot."
+enum = ["one_shot", "interval", "daily", "cron"]
+
+[[params]]
+name = "recurrence_interval_sec"
+type = "integer"
+description = """
+Required when recurrence_kind is interval; seconds between runs."""
+
+[[params]]
+name = "recurrence_hour"
+type = "integer"
+description = "Required when recurrence_kind is daily; local hour in 0..23."
+
+[[params]]
+name = "recurrence_minute"
+type = "integer"
+description = """
+Required when recurrence_kind is daily; local minute in 0..59."""
+
+[[params]]
+name = "recurrence_second"
+type = "integer"
+description = """
+Optional when recurrence_kind is daily; local second in 0..59."""
+
+[[params]]
+name = "recurrence_cron"
+type = "string"
+description = """
+Required when recurrence_kind is cron. Standard 5-field cron expression: \
+minute hour day-of-month month day-of-week. Supports wildcards, comma lists, \
+numeric ranges, and steps such as */15 or 1-5/2."""
+
+[[params]]
+name = "recurrence_timezone"
+type = "string"
+description = """
+Required when recurrence_kind is daily or cron. Fixed-offset only: UTC, \
+Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. \
+DST-aware IANA zones are not supported."""
+
+[[params]]
+name = "allow_unregistered_keeper"
+type = "boolean"
+description = """
+Allow a masc.keeper_wake schedule whose target keeper has no durable \
+metadata yet. Default false: creation is rejected because such a wake can \
+never be settled until the keeper exists."""
+
+[[params]]
+name = "requested_by_id"
+type = "string"
+description = "Requester actor id. Defaults to operator."
+
+[[params]]
+name = "requested_by_kind"
+type = "string"
+enum = ["human_operator", "automated_actor", "system"]
+
+[[params]]
+name = "requested_by_display_name"
+type = "string"
+description = "Requester display name."
+
+[[params]]
+name = "scheduled_by_id"
+type = "string"
+description = "Scheduler actor id. Defaults to caller agent name."
+
+[[params]]
+name = "scheduled_by_kind"
+type = "string"
+enum = ["human_operator", "automated_actor", "system"]
+
+[[params]]
+name = "scheduled_by_display_name"
+type = "string"
+description = "Scheduler display name."
+
+[[params]]
+name = "source"
+type = "string"
+enum = ["operator_request", "automated_request", "system_request"]

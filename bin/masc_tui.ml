@@ -247,13 +247,7 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
               in
               (match read_csi () with
                | None -> key "esc"
-               | Some ("", 'A') -> key "up"
-               | Some ("", 'B') -> key "down"
-               | Some ("", 'H') -> key "home"
-               | Some ("", 'F') -> key "end"
-               | Some ("", 'Z') -> key "shift-tab"
-               | Some ("1", '~') -> key "home"
-               | Some ("4", '~') -> key "end"
+
                (* The terminal says the next bytes were pasted, not typed.
                   Every newline in them is text; without this mode each one
                   arrives as Return and a three-line paste is three sends. *)
@@ -263,8 +257,6 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                         (Masc_tui_paste.read ~next_byte:(fun () ->
                              take_input_byte reader
                                ~timeout:paste_byte_timeout_seconds)))
-               | Some ("5", '~') -> key "pageup"
-               | Some ("6", '~') -> key "pagedown"
                (* A parameter span starting with [<] is an SGR mouse report.
                   Wheel reports become the same keys the arrows make, so every
                   surface's scroll binding answers the wheel; a report nothing
@@ -291,7 +283,14 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                         match Masc.Tui_decode.x10_wheel_key button with
                         | Some wheel_key -> key wheel_key
                         | None -> key "unknown-esc"))
-               | Some (_, _) -> key "unknown-esc")
+               (* Every named key, legacy or modifier-reporting, comes from
+                  one vocabulary now. It was seven arms here that could not
+                  see a second parameter, so Shift+Up and Ctrl+P both reached
+                  the surface as "unknown-esc". *)
+               | Some (parameters, final) -> (
+                   match Masc_tui_csi.name ~parameters ~final with
+                   | Some named -> key named
+                   | None -> key "unknown-esc"))
           | Some _ | None -> key "esc")
       | Some byte -> (
           match Masc_tui_message_layout.utf8_scalar_byte_length byte with
@@ -4196,6 +4195,9 @@ let main () =
          disturb that read. *)
       output_string stdout mouse_tracking_disable;
       output_string stdout bracketed_paste_disable;
+      (* The mode belongs to this program's screen. A shell that inherited it
+         would see its own keys reported in a form it does not read. *)
+      output_string stdout Masc_tui_csi.disable_kitty_keyboard;
       flush stdout
     end
   in
@@ -4239,6 +4241,11 @@ let main () =
     ~flush:(fun () -> flush stdout);
   output_string stdout mouse_tracking_enable;
   output_string stdout bracketed_paste_enable;
+  (* Asks the terminal to report which modifiers were held. A terminal that
+     does not know the request ignores it and keeps sending the legacy forms,
+     which the same vocabulary already reads -- so this is written without a
+     capability query, the way the two modes above are. *)
+  output_string stdout Masc_tui_csi.enable_kitty_keyboard;
   flush stdout;
 
   (* Initial load *)

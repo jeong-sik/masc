@@ -1,0 +1,110 @@
+(** The file changes a keeper made, read back out of the tool-call log.
+
+    {!Keeper_tool_call_log} persists every call with its full input, so the
+    exact text an [Edit] replaced and the text it wrote are both still there
+    after the turn ends. This module reads one of those rows and answers what
+    changed — or says why it could not.
+
+    Nothing here consults [.masc-ide/]. That store keeps addressed code facts
+    for an IDE to overlay; this is a projection of the call log itself, which
+    is the only place the before/after text survives.
+
+    How far back the answer reaches is the log's retention window, not this
+    module's: {!Keeper_tool_call_log.init} prunes at
+    [MASC_TOOL_CALL_LOG_RETENTION_DAYS] (30 days by default). Past that the
+    change is gone from disk and no projection can recover it. *)
+
+type location =
+  | In_repo of {
+      repo_id : string;
+      relative_path : string;
+    }
+      (** The file sits inside one of the keeper's repository clones.
+          [relative_path] is relative to that clone's root, which is the
+          address the same file has in anyone else's checkout. *)
+  | In_bundle of { bundle_path : string }
+      (** The file sits in the keeper's playground but under no repository —
+          a scratch script, a note. Real, and not addressable as repository
+          code. Kept rather than dropped: a keeper that wrote a file did
+          write a file, and a projection that silently omitted it would
+          undercount the turn's work. *)
+
+type kind =
+  | Edited of {
+      before : string;
+      after : string;
+      replace_all : bool;
+    }  (** The exact strings the call swapped. *)
+  | Written of { content : string }
+      (** The whole file body the call wrote. There is no [before]: a write
+          replaces the file without reading it, so the call itself never knew
+          the previous contents. *)
+
+type t = {
+  at : float;  (** Unix time the call was logged. *)
+  keeper : string;
+  turn : int option;
+  task_id : string option;
+  execution_id : string option;
+  location : location;
+  kind : kind;
+  succeeded : bool;
+      (** Whether the call itself reported success. A failed write is still a
+          change the keeper attempted, and reading the attempt is often the
+          point, so it is projected with this flag rather than filtered out. *)
+}
+
+type unreadable_reason =
+  | Input_exceeded_log_budget
+      (** The call's arguments serialized past the tool-call log's inline
+          budget ([Keeper_tool_call_log.max_output_len], 4,000 bytes), so the
+          log kept a truncated preview string in place of the object. The
+          change happened and the row records that it happened; the text it
+          wrote is not on disk to be read back.
+
+          This is the ordinary fate of a large change, not a defect — measured
+          at 10 of 182 file-writing calls on 2026-08-24. It is separated from
+          {!Malformed} because the two ask different things of an operator:
+          nothing can be done about a change that outgrew the budget, and a
+          malformed row means a producer is writing something unexpected. *)
+  | Malformed of string
+      (** The row claimed a file-writing tool but did not carry what a change
+          needs, for a reason the log's own budget does not explain. *)
+
+type classification =
+  | Not_a_file_change
+      (** The call ran a tool that does not write files, or ran a
+          composition-surface tool that carries no descriptor at all. *)
+  | File_change of t
+  | Unreadable of unreadable_reason
+      (** Named rather than dropped: a row that should have projected and did
+          not would otherwise be indistinguishable from a read. *)
+
+val classify : base_path:string -> Yojson.Safe.t -> classification
+(** [classify ~base_path row] decides what one logged call was.
+
+    The tool's identity comes from the descriptor its route evidence names, so
+    the decision is a match over {!Keeper_tool_descriptor.runtime_handler} and
+    not over a display name. A row whose descriptor is unknown to this build
+    is {!Unreadable}, not a read.
+
+    [base_path] is the server's base path, needed to resolve the call's
+    bundle-relative target against the playground layout. *)
+
+type tally = {
+  changes : t list;  (** In the order the rows came. *)
+  not_file_changes : int;
+  over_budget : int;
+      (** File changes whose text the log did not keep. A caller that draws
+          changes owes its reader this number: without it a turn that wrote
+          one small file and three large ones looks like a turn that wrote
+          one file. *)
+  malformed : int;
+}
+
+val classify_all : base_path:string -> Yojson.Safe.t list -> tally
+(** [classify_all ~base_path rows] classifies each row and counts the
+    outcomes. The counts are returned rather than logged so a caller can put
+    them in its own answer. *)
+
+val to_json : t -> Yojson.Safe.t

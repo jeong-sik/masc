@@ -220,14 +220,6 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let snippet = preview (Yojson.Safe.to_string redacted) in
     Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
 
-(** Lenient wrapper: logs warning and returns option for backward compat *)
-let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
-  match entry_of_json_r json with
-  | Ok entry -> Some entry
-  | Error reason ->
-      Log.Misc.warn "audit_log: entry parse failed: %s" reason;
-      None
-
 (** {1 File Operations} *)
 
 type config = Workspace_utils.config

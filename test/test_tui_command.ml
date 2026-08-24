@@ -12,6 +12,12 @@ let describe = function
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
   | Command.Toggle_thinking -> "toggle-thinking"
+  (* [describe] is total on purpose: it is what makes a new command show up
+     here as a compile error instead of silently going untested. #30234 added
+     these two and the match was not swept, which is exactly the miss the
+     totality is for. *)
+  | Command.View_image path -> "image:" ^ path
+  | Command.View_image_missing_path -> "image-missing-path"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_plain_text_is_a_message () =
@@ -34,16 +40,25 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task   "))
 
 let test_pane_commands_parse_by_word () =
-  check (list string) "help, keeper, interrupt and thinking"
+  check (list string) "help, keeper, interrupt, thinking and image"
     [ "help"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
     ; "toggle-thinking"
+    ; "image:shots/frame.png"
+    ; "image-missing-path"
     ]
     (List.map
        (fun text -> describe (Command.parse text))
-       [ "/help"; "/keeper orbiter"; "/keeper   "; "/interrupt"; "/thinking" ])
+       [ "/help"
+       ; "/keeper orbiter"
+       ; "/keeper   "
+       ; "/interrupt"
+       ; "/thinking"
+       ; "/image shots/frame.png"
+       ; "/image   "
+       ])
 
 let test_every_command_has_a_help_line () =
   (* /help itself and every slash word the parser knows appear in the list,

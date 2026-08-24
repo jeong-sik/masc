@@ -317,17 +317,33 @@ let sync ~domain ~read ~files ~dest_dir () =
          let missing = String_set.diff current managed in
          let extra = String_set.diff managed current in
          if not (String_set.is_empty missing && String_set.is_empty extra)
-         then
+         then (
+           (* Both sides live inside this binary: [current] is what the crunch
+              step embedded, [managed] is what the embedded manifest declares.
+              They can only disagree in a half-built binary, so name the
+              direction and the remedy. The previous wording ("manifest differs
+              from current assets") left the reader to guess whether the
+              runtime directory, the source tree, or the build was at fault;
+              one 2026-08-25 recovery attempt spent half an hour on that
+              guess while the server stayed down. *)
+           let render set =
+             if String_set.is_empty set
+             then "(none)"
+             else String.concat ", " (String_set.elements set)
+           in
            { initial with
              failed =
                [ ( manifest_path domain
                  , Printf.sprintf
-                     "embedded managed manifest differs from current %s assets (missing: %s; extra: %s)"
+                     "half-built binary: its embedded %s set and its %s do not \
+                      match, so rebuild before starting. Embedded but unlisted: \
+                      %s. Listed but not embedded: %s."
                      (noun domain)
-                     (String.concat ", " (String_set.elements missing))
-                     (String.concat ", " (String_set.elements extra)) )
+                     (manifest_path domain)
+                     (render missing)
+                     (render extra) )
                ]
-           }
+           })
          else (
            match runtime_asset_paths ~domain ~dest_dir with
            | Error msg -> { initial with failed = [ manifest_path domain, msg ] }

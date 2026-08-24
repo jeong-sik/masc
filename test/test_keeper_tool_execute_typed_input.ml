@@ -569,6 +569,53 @@ let test_a_separator_is_not_reported_as_a_redirect () =
       Execute_input.pp_validation_error e
 ;;
 
+(* The refusal above is behaviour; this is the sentence the model reads before
+   it decides. They had drifted apart: the description listed ';' among the
+   things read as structure, so a Keeper that believed it sent a line the
+   parser refuses by name, and learned from that the typed form is unreliable.
+   Measured over 2026-08-20..24, ';' is the single largest reason a shell line
+   cannot be said in typed fields — 33% of 1,109 Execute calls that invoked a
+   shell — which makes this the sentence most likely to be acted on. *)
+let script_description () =
+  let rec find = function
+    | `Assoc fields ->
+      (match List.assoc_opt "script" fields with
+       | Some (`Assoc script_fields) ->
+         (match List.assoc_opt "description" script_fields with
+          | Some (`String description) -> Some description
+          | Some _ | None -> None)
+       | Some _ | None ->
+         List.fold_left
+           (fun found (_, value) ->
+              match found with Some _ -> found | None -> find value)
+           None
+           fields)
+    | `List items ->
+      List.fold_left
+        (fun found value ->
+           match found with Some _ -> found | None -> find value)
+        None
+        items
+    | _ -> None
+  in
+  match find Tool_shard_types.tool_execute_schema.input_schema with
+  | Some description -> description
+  | None -> Alcotest.fail "the execute schema has no script description"
+;;
+
+let test_the_script_description_matches_what_the_parser_does () =
+  let description = script_description () in
+  let mentions sub = String_util.contains_substring description sub in
+  Alcotest.(check bool)
+    "the description does not offer ';' as something read as structure"
+    false
+    (mentions "'&&', '||', ';'" || mentions "';' and redirections");
+  Alcotest.(check bool)
+    "the description says what happens to a line using it"
+    true
+    (mentions "';'")
+;;
+
 let test_script_and_argv_together_are_refused () =
   let msg =
     parse_json_error
@@ -1743,6 +1790,10 @@ let suite =
           "of_json_timeout_is_optional_and_preserved"
           `Quick
           test_of_json_timeout_is_optional_and_preserved
+      ; Alcotest.test_case
+          "the_script_description_matches_what_the_parser_does"
+          `Quick
+          test_the_script_description_matches_what_the_parser_does
       ; Alcotest.test_case
           "of_json_rejects_invalid_explicit_timeout"
           `Quick

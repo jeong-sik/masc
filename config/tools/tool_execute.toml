@@ -25,8 +25,9 @@ description = """
 Non-empty process vector: argv[0] is the executable and remaining tokens are \
 arguments, all passed verbatim. There is no shell, so a literal '|', '&&' or \
 '>' token is data, not an operator, and wildcards (*, ?, [...]) are not \
-expanded: 'foo*.ml' names a file called 'foo*.ml'. Use pipeline, then, and \
-the redirect fields instead, and pass exact paths. Filesystem arguments use \
+expanded: 'foo*.ml' names a file called 'foo*.ml'. Use script for a line you would \
+have given a shell, or pipeline, then and the redirect fields to say the \
+same thing field by field, and pass exact paths. Filesystem arguments use \
 the selected sandbox namespace; relative operands resolve against the typed \
 cwd, and Docker cannot reach host absolute paths."""
 
@@ -437,7 +438,8 @@ type = "string"
 min_length = 1
 description = """
 Shell form: one command line, parsed rather than handed to a shell. Pipes, \
-'&&', '||', ';' and redirections are read as structure. Use this instead of \
+'&&', '||' and redirections are read as structure; ';' is not, and a line \
+using it is refused by name. Use this instead of \
 putting a script in argv as 'bash -c'. Constructs outside the supported \
 subset are refused by name rather than run. Mutually exclusive with 'argv' \
 and 'pipeline'."""

@@ -15,6 +15,11 @@ let tagged : Markdown.palette =
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
   ; quote_gutter = "\xe2\x96\x8f "
+  ; code_keyword = ("<k>", "</k>")
+  ; code_string = ("<s>", "</s>")
+  ; code_comment = ("<m>", "</m>")
+  ; code_number = ("<n>", "</n>")
+  ; code_type = ("<t>", "</t>")
   }
 
 let render ?(width = 40) ?(palette = tagged) text =
@@ -121,11 +126,56 @@ let test_rule_fills_the_width () =
 (* {1 Fenced code} *)
 
 (* Wrapping a diff at a word boundary destroys the alignment that made it worth
-   fencing, so fenced lines keep their own breaks. *)
+   fencing, so fenced lines keep their own breaks. An [ocaml] tag also
+   colours: reserved words as keywords, literals as numbers. *)
 let test_fenced_code_keeps_its_line_breaks () =
   check_rows "fence"
-    [ "<c>\xe2\x94\x82 let x = 1</c>"; "<c>\xe2\x94\x82 let y = 2</c>" ]
+    [ "\xe2\x94\x82 <k>let</k><c> x = </c><n>1</n>"
+    ; "\xe2\x94\x82 <k>let</k><c> y = </c><n>2</n>" ]
     (render "```ocaml\nlet x = 1\nlet y = 2\n```")
+
+(* {1 Fenced-code highlighting} *)
+
+(* The tag decides: the same body, untagged, stays the single code span --
+(* colouring a grammar nobody lexed is decoration pretending to be
+   syntax. *) *)
+let test_untagged_fence_stays_single_span () =
+  check_rows "no tag, no colour" [ "<c>\xe2\x94\x82 let x = 1</c>" ]
+    (render "```\nlet x = 1\n```")
+
+let test_unknown_language_stays_single_span () =
+  check_rows "unknown tag, no colour" [ "<c>\xe2\x94\x82 fn main() {}</c>" ]
+    (render "```rust\nfn main() {}\n```")
+
+(* Strings, and a capitalised identifier as a constructor or module. *)
+let test_ocaml_strings_and_types () =
+  check_rows "string and constructor"
+    [ "\xe2\x94\x82 <k>let</k><c> name = </c><s>\"polisher\"</s>"
+    ; "\xe2\x94\x82 <k>match</k><c> x </c><k>with</k><c> </c><t>Some</t><c> y -> y</c>" ]
+    (render "```ocaml\nlet name = \"polisher\"\nmatch x with Some y -> y\n```")
+
+(* A comment opened on one row and closed on a later one colours every row it
+   covers: the lexer reads the body whole for exactly this. *)
+let test_ocaml_comment_spans_rows () =
+  check_rows "comment covers its rows"
+    [ "\xe2\x94\x82 <m>(* opened here</m>"
+    ; "\xe2\x94\x82 <m>   and closed here *)</m>"
+    ; "\xe2\x94\x82 <k>let</k><c> x = </c><n>1</n>" ]
+    (render "```ocaml\n(* opened here\n   and closed here *)\nlet x = 1\n```")
+
+(* JSON: a key reads as a field, a string as a string, a number as a
+   number. *)
+let test_json_keys_strings_numbers () =
+  check_rows "json row"
+    [ "\xe2\x94\x82 <c>{</c><t>\"name\"</t><c>: </c><s>\"alpha\"</s><c>, </c><t>\"turns\"</t><c>: </c><n>42</n><c>}</c>" ]
+    (render "```json\n{\"name\": \"alpha\", \"turns\": 42}\n```")
+
+(* Bash: strings stay strings, a [#] that starts a word comments to the row's
+   end. *)
+let test_bash_comment_and_string () =
+  check_rows "bash row"
+    [ "\xe2\x94\x82 <c>dune build </c><s>\"--root\"</s><c> . </c><m># from the runbook</m>" ]
+    (render ~width:60 "```bash\ndune build \"--root\" . # from the runbook\n```")
 
 let test_fence_markers_are_not_drawn () =
   Alcotest.(check bool)
@@ -249,6 +299,20 @@ let () =
             test_tilde_fence_is_a_fence
         ; Alcotest.test_case "fenced content is not reparsed" `Quick
             test_fenced_content_is_not_reparsed
+        ] )
+    ; ( "fenced highlighting"
+      , [ Alcotest.test_case "no tag means no colour" `Quick
+            test_untagged_fence_stays_single_span
+        ; Alcotest.test_case "an unknown language means no colour" `Quick
+            test_unknown_language_stays_single_span
+        ; Alcotest.test_case "ocaml strings and constructors" `Quick
+            test_ocaml_strings_and_types
+        ; Alcotest.test_case "an ocaml comment covers its rows" `Quick
+            test_ocaml_comment_spans_rows
+        ; Alcotest.test_case "json keys, strings, numbers" `Quick
+            test_json_keys_strings_numbers
+        ; Alcotest.test_case "bash comment and string" `Quick
+            test_bash_comment_and_string
         ] )
     ; ( "width"
       , [ Alcotest.test_case "no row exceeds the width" `Quick

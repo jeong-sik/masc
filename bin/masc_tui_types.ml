@@ -384,6 +384,7 @@ type surface_needs = {
   needs_board : bool;
   needs_planning : bool;
   needs_system_logs : bool;
+  needs_keeper_chat : bool;
 }
 
 let nothing =
@@ -393,6 +394,7 @@ let nothing =
     needs_board = false;
     needs_planning = false;
     needs_system_logs = false;
+    needs_keeper_chat = false;
   }
 
 (* Each datum is read by the one surface that draws it, so a refresh spends a
@@ -404,8 +406,18 @@ let surface_needs : surface -> surface_needs = function
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
-  | Keepers _ ->
+  (* Exhaustive over the sub-mode rather than [Keepers _]: the chat pane is
+     the one that was missed. It loaded its history when it opened and never
+     again, so a message that arrived while it was on screen only appeared
+     after leaving and coming back. *)
+  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls) ->
       { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+  | Keepers Keeper_message ->
+      { nothing with
+        needs_keeper_roster = true
+      ; needs_fleet_safety = true
+      ; needs_keeper_chat = true
+      }
   | Board -> { nothing with needs_board = true }
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }

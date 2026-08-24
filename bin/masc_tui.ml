@@ -4795,14 +4795,17 @@ let main () =
             | "?" | "esc" ->
                 state.help_open <- false;
                 state.help_scroll <- 0
-            | "j" | "down" ->
-                (* Clamped against the real sheet so overshoot does not bank
-                   presses the way unbounded counters did elsewhere. *)
-                let ceiling =
-                  max 0 (List.length (Masc_tui_render.help_lines ()) - 1)
+            | "j" | "down" | "k" | "up" ->
+                (* Bounded against the sheet the frame draws, which folds to
+                   two columns on a wide terminal and so holds half the rows
+                   the lines were written as. *)
+                let count, height = Masc_tui_render.help_viewport () in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
                 in
-                state.help_scroll <- min ceiling (state.help_scroll + 1)
-            | "k" | "up" -> state.help_scroll <- max 0 (state.help_scroll - 1)
+                state.help_scroll <- move ~count ~height state.help_scroll
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted

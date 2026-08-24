@@ -20,7 +20,7 @@ refuse. The arms have nothing in common except that the Phase 1 subset does not
 parse them, and collapsing four different kinds of thing into one answer is what
 produces the escape.
 
-Measured over 23,082 Execute records (`~/me/.masc/tool_calls/2026-08/*.jsonl`,
+Measured over 23,082 Execute records (`<base-path>/.masc/tool_calls/2026-08/*.jsonl`,
 counted 2026-08-23):
 
 | observation | count |

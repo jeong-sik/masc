@@ -116,8 +116,7 @@ val json_response :
 (** Polling-friendly JSON envelope: [generated_at_iso],
     [dashboard_surface], [source], [retention], [query],
     [events], [count], [total_matching_events], [after_seq],
-    [next_after_seq], [limit], [workspace_id] (kept as ["default"]
-    for backward-compat), [kinds], [latest_seq], and
+    [next_after_seq], [limit], [kinds], [latest_seq], and
     [latest_matching_seq].  [next_after_seq] is the seq of the
     last returned event so the caller can resume cleanly on the
     next poll.  [latest_seq] is the max of the persisted counter

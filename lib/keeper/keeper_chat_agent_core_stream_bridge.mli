@@ -20,7 +20,10 @@ type translated_event = {
 }
 (** Result of translating one typed AGENT_CORE stream event. *)
 
-val empty_state : state
+val empty_state : unit -> state
+(** Reads the generated-media wire cap once, so every decision in this stream
+    is made against one number even if an operator edits the env var while it
+    runs. *)
 
 val terminal_message_had_text : state -> bool
 (** [true] when the last completed provider message (or the currently open

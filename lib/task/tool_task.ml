@@ -231,34 +231,34 @@ and handle_transition ~tool_name ~start_time ctx args =
       "Strict task release requires handoff_context.summary"
   else
   let action_s = Masc_domain.task_action_to_string action in
-  let default_time = Time_compat.now () -. 60.0 in
-  let timestamp_or_default value =
-    match Masc_domain.parse_iso8601_opt value with
-    | Some timestamp -> timestamp
-    | None -> default_time
+  (* [now () -. 60.0] used to stand in whenever the status carried no usable
+     start: Todo, Done, Cancelled, an unparseable timestamp, or no task at all.
+     That number reaches [Metrics_store_eio] as [started_at] and the average is
+     computed as [completed_at -. started_at], so every such task recorded a
+     duration of exactly one minute — indistinguishable in the aggregate from a
+     task that really took one. Absence is [None] and the metric is not
+     recorded (#29355). *)
+  let started_at_of value = Masc_domain.parse_iso8601_opt value in
+  let collaborators_of assignee =
+    if (not (String.equal assignee "")) && not (String.equal assignee ctx.agent_name)
+    then [ assignee ]
+    else []
   in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
         | Masc_domain.InProgress { started_at; assignee } ->
-            let ts = timestamp_or_default started_at in
-            let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
-            (ts, collabs)
+            (started_at_of started_at, collaborators_of assignee)
         | Masc_domain.Claimed { claimed_at; assignee } ->
-            let ts = timestamp_or_default claimed_at in
-            let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
-            (ts, collabs)
-        | Masc_domain.AwaitingVerification { submitted_at; assignee; _ } ->
-            let ts = timestamp_or_default submitted_at in
-            let collabs =
-              if
-                not (String.equal assignee "")
-                && not (String.equal assignee ctx.agent_name)
-              then [ assignee ]
-              else []
-            in
-            (ts, collabs)
-        | _ -> (default_time, []))
-    | None -> (default_time, [])
+            (started_at_of claimed_at, collaborators_of assignee)
+        (* [started_at] is the producer's original work start, preserved across
+           submission and rejection (see task_status). [submitted_at] is when
+           verification began, so using it reported the wait, not the work. *)
+        | Masc_domain.AwaitingVerification { started_at; assignee; _ } ->
+            (started_at_of started_at, collaborators_of assignee)
+        | Masc_domain.Todo
+        | Masc_domain.Done _
+        | Masc_domain.Cancelled _ -> (None, []))
+    | None -> (None, [])
   in
   let completion_owner =
     match task_opt with
@@ -357,34 +357,39 @@ and handle_transition ~tool_name ~start_time ctx args =
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
-  (match result, action with
-   | Ok _, Masc_domain.Done_action ->
+  (* A metric with no real start cannot say how long the work took, and an
+     invented one is worse than a missing row: it lands in the same average.
+     The transition itself is already recorded elsewhere; this hook exists to
+     measure duration. *)
+  (match result, action, started_at_actual with
+   | Ok _, Masc_domain.Done_action, Some started_at ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
          ~agent_id:completion_owner
          ~task_id
-         ~started_at:started_at_actual
+         ~started_at
          ~completed_at:(Some (Time_compat.now ()))
          ~success:true
          ~error_message:None
          ~collaborators:completion_collaborators
          ~handoff_from:None
          ~handoff_to:None
-   | Ok _, Masc_domain.Cancel ->
+   | Ok _, Masc_domain.Cancel, Some started_at ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
          ~agent_id:ctx.agent_name
          ~task_id
-         ~started_at:started_at_actual
+         ~started_at
          ~completed_at:(Some (Time_compat.now ()))
          ~success:false
          ~error_message:(Some (if String.equal reason "" then "Cancelled" else reason))
          ~collaborators:collaborators_from_task
          ~handoff_from:None
          ~handoff_to:None
+  | Ok _, (Masc_domain.Done_action | Masc_domain.Cancel), None
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Release)
-  | Error _, _ -> ());
+            | Masc_domain.Release), _
+  | Error _, _, _ -> ());
   let transition_result_to_response = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
       workflow_rejection_result

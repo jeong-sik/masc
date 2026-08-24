@@ -342,12 +342,27 @@ let resolve_body ~config ~actor ~body =
       | Error { code; message; _ } -> code ^ ": " ^ message
       | Ok _ -> "official-client recovery resolution failed"
     in
-    ignore
-      (audit_resolution
+    (* The success path carries its audit result into the response, so an
+       operator sees a failed audit write. This path dropped it with [ignore],
+       which is the moment it matters most: the resolution already failed, and
+       the record of that failure could fail too with nothing left behind
+       (#29361). The response shape here is the typed error, so the audit
+       outcome goes to the log rather than the body. *)
+    (match
+       audit_resolution
          config
          ~actor
          request
          ~application:None
-         ~outcome:(Audit_log.Failure detail));
+         ~outcome:(Audit_log.Failure detail)
+     with
+     | Ok () -> ()
+     | Error audit_error ->
+       Log.Server.error
+         "official_client_session_recovery_resolve: audit write failed for \
+          recovery_id=%s after resolution failure (%s): %s"
+         request.recovery_id
+         detail
+         audit_error);
     mapped
 ;;

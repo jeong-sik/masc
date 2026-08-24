@@ -158,6 +158,10 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
 thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -456,6 +460,10 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
 thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 

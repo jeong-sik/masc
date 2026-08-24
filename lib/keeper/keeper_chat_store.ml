@@ -256,7 +256,10 @@ let redact_attachment redaction att =
   { att with data = Keeper_secret_redaction.redact_text redaction att.data }
 
 let persisted_attachment_ref (att : attachment) =
-  let digest = Digest.to_hex (Digest.string att.data) in
+  (* SHA-256, not Stdlib.Digest (MD5): this is attachment content identity,
+     not a display checksum (#26720). Nothing reads the digest back out of the
+     URI — [att.id] is the locator — so rows written before this keep working. *)
+  let digest = Digestif.SHA256.(digest_string att.data |> to_hex) in
   Printf.sprintf "masc://attachment/%s/%s" att.id digest
 
 let persisted_attachment (att : attachment) =

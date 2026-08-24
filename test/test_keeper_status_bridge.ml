@@ -88,6 +88,49 @@ let test_shutdown_phase_names_are_pinned () =
   check "joined_idle" Keeper_shutdown_types.Joined_idle
 ;;
 
+(* [quiet_reason] and [next_action_path] cross into the dashboard as bare
+   strings. There the union is checked by membership: an unlisted
+   [next_action_path] makes normalizeKeeperDiagnostic drop the whole
+   diagnostic, and an unlisted [quiet_reason] silently erases the reason. The
+   compiler cannot see a TypeScript union, so the match below pins each
+   constructor's wire form — adding one is a compile error here, and the list
+   it must be added to is the same list dashboard/src/types/core.ts mirrors. *)
+let quiet_reason_wire =
+  let open Keeper_status_runtime in
+  [ Proactive_disabled; Keepalive_not_running; Starting_up; Never_started ]
+  |> List.map (fun reason ->
+       ( match reason with
+         | Proactive_disabled -> "disabled"
+         | Keepalive_not_running -> "not_running"
+         | Starting_up -> "startup"
+         | Never_started -> "never_started" )
+       , keeper_quiet_reason_to_string reason )
+;;
+
+let next_action_path_wire =
+  let open Keeper_status_runtime in
+  [ Auto_restart; Recover; Probe; Direct_message ]
+  |> List.map (fun path ->
+       ( match path with
+         | Auto_restart -> "auto_restart"
+         | Recover -> "recover"
+         | Probe -> "probe"
+         | Direct_message -> "direct_message" )
+       , keeper_next_action_path_to_string path )
+;;
+
+let test_quiet_reason_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    quiet_reason_wire
+;;
+
+let test_next_action_path_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    next_action_path_wire
+;;
+
 let shutdown_operation_with_phase phase =
   let trace_id =
     match Keeper_id.Trace_id.of_string "trace-status-bridge-fence-test" with
@@ -335,6 +378,17 @@ let () =
             "admission fence is any-record, not latest"
             `Quick
             test_admission_fence_is_any_not_latest;
+        ] );
+      ( "keeper diagnostic wire vocabulary",
+        [
+          Alcotest.test_case
+            "quiet_reason strings are pinned for the dashboard union"
+            `Quick
+            test_quiet_reason_wire_strings_are_pinned;
+          Alcotest.test_case
+            "next_action_path strings are pinned for the dashboard union"
+            `Quick
+            test_next_action_path_wire_strings_are_pinned;
         ] );
     ]
 ;;

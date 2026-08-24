@@ -17,7 +17,14 @@ type t =
   }
 
 (** Compute a deterministic cache key from request parameters.
-    Includes model_id, messages (role + text), temperature, and tools.
+
+    Every {!Provider_config.t} field that changes what the provider is asked
+    reaches the key, along with the messages and tools. Transport limits,
+    delivery-shape flags, the local rotation counter, and the capability
+    overrides that gate which fields may be sent are excluded; [cache.ml]
+    names each exclusion at the destructuring. The record is matched field by
+    field, so a new field stops the build until it is placed on one side.
+
     Two identical requests always produce the same key. *)
 val request_fingerprint
   :  config:Provider_config.t

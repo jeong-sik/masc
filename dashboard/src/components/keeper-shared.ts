@@ -104,36 +104,30 @@ function GhostButton({
   `
 }
 
-function quietReasonLabel(reason?: string | null): string {
+function quietReasonLabel(
+  reason: NonNullable<KeeperDiagnostic['quiet_reason']>,
+): string {
   switch (reason) {
-    case 'quiet_hours':
-      return 'quiet hours'
-    case 'min_gap':
-      return 'cooldown gate'
-    case 'no_recent_activity':
-      return 'waiting for activity'
     case 'disabled':
       return 'runtime disabled'
+    case 'not_running':
+      return 'keepalive not running'
     case 'startup':
       return 'warming up'
-    case 'model_error':
-      return 'model error'
-    case 'graphql_error':
-      return 'graphql error'
     case 'never_started':
       return 'never started'
-    default:
-      return 'unknown'
   }
 }
 
-function nextActionLabel(path: string): string {
+function nextActionLabel(path: KeeperDiagnostic['next_action_path']): string {
   switch (path) {
-    case 'probe':
-      return 'probe'
+    case 'auto_restart':
+      return 'auto restart'
     case 'recover':
       return 'recover'
-    default:
+    case 'probe':
+      return 'probe'
+    case 'direct_message':
       return 'message'
   }
 }

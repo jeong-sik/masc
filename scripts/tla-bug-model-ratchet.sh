@@ -94,6 +94,17 @@ count_bug_model_specs() {
   )
 }
 
+# Raw file count, the ceiling the verdict-capable count can never exceed.
+# A baseline above this describes an inventory that does not exist, so the
+# ratchet would report "a Bug Model was removed" for a deletion that never
+# happened and block every PR touching specs/ (#27578).
+count_bug_model_cfg_files() {
+  ( set +o pipefail
+    cd "$REPO_ROOT"
+    find specs -name '*-buggy*.cfg' -not -path '*/states/*' 2>/dev/null | wc -l | tr -d ' '
+  )
+}
+
 count_domains_without_bug_model() {
   # For each specs/<domain>/, check whether it has at least one .tla
   # AND zero *-buggy*.cfg files.
@@ -170,7 +181,7 @@ baseline_file, cov, dom = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 data = {
     "_comment": "TLA+ Bug Model coverage baseline. Regenerate with scripts/tla-bug-model-ratchet.sh --regenerate.",
     "_metrics": "See scripts/tla-bug-model-ratchet.sh STRICT_METRICS array.",
-    "_metric_change": "bug_model_coverage_specs now counts VERDICT-CAPABLE buggy cfgs (resolvable parent .tla AND >=1 INVARIANT/PROPERTY), not the raw *-buggy.cfg file count. The previous file-count baseline (74) over-counted spec-level theatre: an orphan cfg and assertion-less cfgs inflated coverage without any TLC verdict. Removing the KeeperCampaignLifecycle orphan and counting only verdict-capable cfgs yields the current value.",
+    "_metric": "bug_model_coverage_specs counts verdict-capable buggy cfgs: a resolvable parent .tla AND at least one INVARIANT/PROPERTY. A cfg with no parent never runs, and one that asserts nothing produces a no-op pass, so neither is coverage. The count is therefore a subset of the *-buggy*.cfg files under specs/ and can never exceed them.",
     "_audit": "docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md",
     "bug_model_coverage_specs": cov,
     "domains_without_bug_model": dom,
@@ -184,6 +195,15 @@ PYEOF
 
 check() {
   local drift=0
+  local cfg_files baseline_cov
+  cfg_files=$(count_bug_model_cfg_files)
+  baseline_cov=$(baseline_value bug_model_coverage_specs)
+  if (( baseline_cov > cfg_files )); then
+    echo "[tla-bug-model-ratchet] IMPOSSIBLE BASELINE: bug_model_coverage_specs baseline=$baseline_cov exceeds the $cfg_files *-buggy*.cfg files under specs/" >&2
+    echo "  A verdict-capable count is a subset of the files, so this floor can never be met." >&2
+    echo "  The baseline was written without measuring. Run --regenerate; do not add models to satisfy it." >&2
+    return 1
+  fi
   for spec in "${STRICT_METRICS[@]}"; do
     local name="${spec%%|*}"
     local rest="${spec#*|}"

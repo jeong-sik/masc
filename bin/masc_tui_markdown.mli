@@ -29,6 +29,14 @@ type palette = {
   bullet : string;  (** Drawn in place of the source's [-], [*] or [+]. *)
   code_gutter : string;  (** Drawn left of every fenced-code row. *)
   quote_gutter : string;
+  (* Styles for fenced code that names a language this module lexes
+     (ocaml, bash/sh, json). A fence with no tag, or one naming anything
+     else, keeps the single [code] span for the whole body. *)
+  code_keyword : span;
+  code_string : span;
+  code_comment : span;
+  code_number : span;
+  code_type : span;  (** Also JSON object keys: a field name reads as one. *)
 }
 
 val plain_palette : palette
@@ -40,7 +48,16 @@ val render : palette:palette -> width:int -> string -> string list
 
     Fenced code keeps its own line breaks — wrapping a diff at a word boundary
     destroys the alignment that made it worth fencing — and is hard-split only
-    where a line is wider than the row. Everything else wraps at spaces.
+    where a line is wider than the row (a row past the width also keeps the
+    single code span: alignment outranks colour). Everything else wraps at
+    spaces.
+
+    A fence whose tag names a language this module lexes — [ocaml], [ml],
+    [bash] or friends, [json] — has its body tokenised whole: reserved words
+    as keywords, string and char literals as strings, OCaml comments (nested,
+    multi-row included) as comments, numbers as numbers, and capitalised
+    identifiers or JSON object keys as types. Any other tag, or none, keeps
+    the single code span for the whole body.
 
     Styling that spans a wrap is reopened on the next row, so a bold sentence
     stays bold past the break instead of ending at it. *)

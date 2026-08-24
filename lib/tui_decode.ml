@@ -2991,3 +2991,121 @@ let decode_transport_health json =
       th_grpc_port;
       th_events_dropped;
     }
+
+(* ── Keeper file changes (/api/v1/keepers/<name>/file-changes) ──────────
+
+   The route answers with the projection in [Keeper_tool_call_file_change],
+   and the three location shapes are the ones that projection distinguishes.
+   Decoded into a variant here rather than kept as a tagged object: a reader
+   that wants to open a file needs to know whether it has a repository
+   address or an absolute path, and a string tag would make every such reader
+   re-decide. *)
+
+type file_change_location =
+  | Fc_in_repo of {
+      repo_id : string;
+      relative_path : string;
+    }
+  | Fc_in_bundle of { bundle_path : string }
+  | Fc_at_absolute_path of { path : string }
+
+type file_change_kind =
+  | Fc_edited of {
+      before : string;
+      after : string;
+      replace_all : bool;
+    }
+  | Fc_written of { content : string }
+
+type file_change = {
+  fc_at : float;
+  fc_keeper : string;
+  fc_turn : int option;
+  fc_task_id : string option;
+  fc_location : file_change_location;
+  fc_kind : file_change_kind;
+  fc_succeeded : bool;
+}
+
+type file_change_snapshot = {
+  fcs_keeper : string;
+  fcs_window_hours : float;
+  fcs_calls_in_window : int;
+  fcs_changes : file_change list;
+  fcs_over_budget : int;
+      (** Changes whose text the tool-call log did not keep. Carried to the
+          surface because a list that silently omitted them would say a turn
+          wrote less than it did. *)
+  fcs_malformed : int;
+}
+
+let optional_int_or_null json key =
+  match member key json with
+  | `Int value -> Ok (Some value)
+  | `Intlit raw -> (
+      match int_of_string_opt raw with
+      | Some value -> Ok (Some value)
+      | None -> Error (Printf.sprintf "field '%s' has invalid int %S" key raw))
+  | `Null -> Ok None
+  | bad -> field_type_error key "an int or null" bad
+
+let decode_file_change_location json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "repo" ->
+      let* repo_id = required_string_field json "repo_id" in
+      let* relative_path = required_string_field json "path" in
+      Ok (Fc_in_repo { repo_id; relative_path })
+  | "bundle" ->
+      let* bundle_path = required_string_field json "path" in
+      Ok (Fc_in_bundle { bundle_path })
+  | "absolute" ->
+      let* path = required_string_field json "path" in
+      Ok (Fc_at_absolute_path { path })
+  | other ->
+      (* A tag this build does not know is an error, not a bundle path. The
+         producer and this reader are the same repository; a new shape means
+         one of them moved without the other. *)
+      Error (Printf.sprintf "unknown file change location kind %S" other)
+
+let decode_file_change_kind json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "edit" ->
+      let* before = required_string_field json "before" in
+      let* after = required_string_field json "after" in
+      let* replace_all = optional_bool_field json "replace_all" in
+      Ok (Fc_edited { before; after; replace_all = Option.value ~default:false replace_all })
+  | "write" ->
+      let* content = required_string_field json "content" in
+      Ok (Fc_written { content })
+  | other -> Error (Printf.sprintf "unknown file change kind %S" other)
+
+let decode_file_change json =
+  let* fc_at = require_float_field json "at" in
+  let* fc_keeper = required_string_field json "keeper" in
+  let* fc_turn = optional_int_or_null json "turn" in
+  let* fc_task_id = optional_string_field json "task_id" in
+  let* location_json = required_object_field json "location" in
+  let* fc_location = decode_file_change_location location_json in
+  let* kind_json = required_object_field json "change" in
+  let* fc_kind = decode_file_change_kind kind_json in
+  let* fc_succeeded = required_bool_field json "succeeded" in
+  Ok { fc_at; fc_keeper; fc_turn; fc_task_id; fc_location; fc_kind; fc_succeeded }
+
+let decode_file_change_snapshot json =
+  let* fcs_keeper = required_string_field json "keeper" in
+  let* fcs_window_hours = require_float_field json "window_hours" in
+  let* fcs_calls_in_window = required_int_field json "calls_in_window" in
+  let* changes_json = required_list_field json "changes" in
+  let* fcs_changes = decode_list "changes" decode_file_change changes_json in
+  let* fcs_over_budget = required_int_field json "over_budget" in
+  let* fcs_malformed = required_int_field json "malformed" in
+  Ok
+    { fcs_keeper
+    ; fcs_window_hours
+    ; fcs_calls_in_window
+    ; fcs_changes
+    ; fcs_over_budget
+    ; fcs_malformed
+    }

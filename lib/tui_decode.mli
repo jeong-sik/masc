@@ -840,3 +840,55 @@ val bounded_parent_depth :
   'a ->
   int
 val parse_keeper_chat_response : string -> (string, string) result
+
+(** {1 Keeper file changes}
+
+    The files a keeper wrote, as [GET /api/v1/keepers/<name>/file-changes]
+    answers. See {!Keeper_tool_call_file_change} for what the server projects
+    and what it cannot: a change whose arguments outgrew the tool-call log's
+    inline budget is counted, not carried. *)
+
+type file_change_location =
+  | Fc_in_repo of {
+      repo_id : string;
+      relative_path : string;
+    }
+      (** Inside one of the keeper's repository clones. [relative_path] is the
+          address the same file has in any other checkout. *)
+  | Fc_in_bundle of { bundle_path : string }
+      (** Under the keeper's playground and no clone -- a scratch file. *)
+  | Fc_at_absolute_path of { path : string }
+      (** The write resolver recorded an absolute path: a worktree checked out
+          beside the clones, or a write outside any playground. *)
+
+type file_change_kind =
+  | Fc_edited of {
+      before : string;
+      after : string;
+      replace_all : bool;
+    }
+  | Fc_written of { content : string }
+
+type file_change = {
+  fc_at : float;
+  fc_keeper : string;
+  fc_turn : int option;
+  fc_task_id : string option;
+  fc_location : file_change_location;
+  fc_kind : file_change_kind;
+  fc_succeeded : bool;
+      (** Whether the call reported success. A failed write is still a change
+          the keeper attempted. *)
+}
+
+type file_change_snapshot = {
+  fcs_keeper : string;
+  fcs_window_hours : float;
+  fcs_calls_in_window : int;
+  fcs_changes : file_change list;
+  fcs_over_budget : int;
+  fcs_malformed : int;
+}
+
+val decode_file_change_snapshot :
+  Yojson.Safe.t -> (file_change_snapshot, string) result

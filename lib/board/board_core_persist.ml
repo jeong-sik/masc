@@ -372,10 +372,23 @@ let save_posts_jsonl_result content =
   with
   | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
 ;;
-let save_posts_jsonl content = ignore (save_posts_jsonl_result content)
+(* The only caller rewrites the snapshot to drop an orphan row an aborted
+   append left on disk. Dropping the write's Error meant a failed rewrite left
+   the orphan there with nothing scheduled to try again, so a restart revived a
+   post that never reached memory -- the loader cannot tell a self-contained
+   row was never committed. Re-marking puts the snapshot back in the queue for
+   the next flush, the same way board_votes recovers (#29361). *)
 let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_posts_jsonl content)
+  with_persist_lock store (fun () ->
+    match save_posts_jsonl_result content with
+    | Ok () -> ()
+    | Error _ ->
+      with_lock store (fun () ->
+        store.dirty_posts <- true;
+        Hashtbl.iter
+          (fun key _ -> Hashtbl.replace store.dirty_post_ids key ())
+          store.posts))
 ;;
 let comments_jsonl_unlocked store =
   let buf = Buffer.create 4096 in

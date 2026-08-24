@@ -2216,6 +2216,10 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    (* Held tool calls ride every tick, not just the Approvals surface: the
+       strip's Approvals badge is drawn from every surface, and a stale count
+       there would be worse than none. The payload is a handful of rows. *)
+    launch_keeper_tool_approvals_load state ~mailbox;
 
     let run_refresh () =
       try

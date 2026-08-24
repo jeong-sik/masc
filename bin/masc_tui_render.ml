@@ -281,7 +281,21 @@ let surface_strip (state : state) ~cols =
   let ring = Masc_tui_types.surface_ring in
   let n = List.length ring in
   let active = Masc_tui_types.surface_ring_index state.view in
-  let label i = snd (List.nth ring i) in
+  (* A count rides the entry it belongs to, so pending work is visible from
+     every surface without a spare row. Zero draws nothing -- an always-on
+     badge would be texture, not information. *)
+  let badge surface =
+    match (surface : surface) with
+    | Approvals ->
+        (match List.length (Masc_tui_types.approval_items state) with
+         | 0 -> ""
+         | pending -> Printf.sprintf "\xc2\xb7%d" pending)
+    | _ -> ""
+  in
+  let label i =
+    let surface, name = List.nth ring i in
+    name ^ badge surface
+  in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
     String.length (label i)

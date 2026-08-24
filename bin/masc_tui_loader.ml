@@ -806,6 +806,12 @@ let load_keeper_roster ~(host : string) ~(port : int) :
 (* The two detail-pane tab reads. Lines are built here so the renderer draws
    what one place formatted; a decode that only feeds a read-only pane keeps
    the JSON generic instead of growing a typed mirror of the config shape. *)
+(* Every line these views hand the renderer goes through the terminal
+   sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
+   escaped, not a control to replay into the frame. *)
+let sanitize_view_lines lines =
+  List.map Masc.Tui_decode.sanitize_terminal_text lines
+
 let json_block_lines (json : Yojson.Safe.t) =
   Yojson.Safe.pretty_to_string json |> String.split_on_char '\n'
 
@@ -847,11 +853,12 @@ let load_keeper_config_view ~(host : string) ~(port : int)
       | None -> []
     in
     Ok
-      (("# instructions" :: instructions_lines)
-       @ ("" :: "# effective system prompt" :: effective_lines)
-       @ (match sources_lines with
-          | [] -> []
-          | lines -> "" :: "# sources" :: lines))
+      (sanitize_view_lines
+         (("# instructions" :: instructions_lines)
+          @ ("" :: "# effective system prompt" :: effective_lines)
+          @ (match sources_lines with
+             | [] -> []
+             | lines -> "" :: "# sources" :: lines)))
 
 let load_keeper_github_identity_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -859,7 +866,7 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
     Masc_tui_http.fetch_keeper_github_identity ~host ~port ~keeper_name
   with
   | Error err -> Error ("github identity load failed: " ^ err)
-  | Ok json -> Ok (json_block_lines json)
+  | Ok json -> Ok (sanitize_view_lines (json_block_lines json))
 
 let load_runtime_config_view ~(host : string) ~(port : int) :
     (string * string list, string) result =
@@ -873,5 +880,5 @@ let load_runtime_config_view ~(host : string) ~(port : int) :
     in
     (match member "path", member "source_text" with
      | Some (`String path), Some (`String text) ->
-       Ok (path, String.split_on_char '\n' text)
+       Ok (path, sanitize_view_lines (String.split_on_char '\n' text))
      | _ -> Error "runtime config response missing path/source_text")

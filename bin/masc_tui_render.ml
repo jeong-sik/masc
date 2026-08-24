@@ -288,7 +288,9 @@ let surface_strip (state : state) ~cols =
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
-    String.length (label i)
+    (* Cells, not bytes: the Approvals badge's middle dot is two bytes and
+       one cell, and a byte count windows the strip one entry early. *)
+    Message_layout.display_width (label i)
     + (if i = active then 1 else 0)
     + (if i > lo then 2 else 0)
   in
@@ -336,6 +338,11 @@ let surface_strip (state : state) ~cols =
     Buffer.add_string parts
       (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
   Buffer.contents parts
+
+(* Side-by-side panes share one threshold and one context-pane width, so
+   every split surface folds at the same terminal size. *)
+let keeper_split_threshold_cols = 110
+let keeper_roster_pane_cols = 30
 
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
@@ -1208,13 +1215,10 @@ let render_board_list (state : state) =
       ~cols buf
 
 (** Render the Board surface (read view). *)
-let render_board_read (state : state) (list_post : board_post) =
-  let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
-  let buf = Buffer.create 4096 in
-
+(* The read post alone -- borders, header, body, comments -- at [cols]
+   wide, footer excluded, so a caller can lay it beside the post list.
+   Returns the scroll the frame used. *)
+let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   let detail =
     Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
   in
@@ -1316,11 +1320,90 @@ let render_board_read (state : state) (list_post : board_post) =
   end;
 
   box_bottom buf cols;
+  scroll.normalized_scroll
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next");
+(* The post list beside the read: position context with the open post
+   marked, exactly the roster-beside-detail shape. *)
+let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
+  framed_top buf cols;
+  framed_line buf cols
+    (Ansi.dim
+     ^ Printf.sprintf " Board (%d)" (List.length state.board_posts)
+     ^ Ansi.reset);
+  framed_divider buf cols;
+  let content_height = max 0 (rows - 5) in
+  let selected_index =
+    let rec find i = function
+      | [] -> 0
+      | (post : board_post) :: rest ->
+          if String.equal post.bp_id open_post.bp_id then i
+          else find (i + 1) rest
+    in
+    find 0 state.board_posts
+  in
+  let first =
+    if selected_index < content_height then 0
+    else selected_index - content_height + 1
+  in
+  for i = 0 to content_height - 1 do
+    match List.nth_opt state.board_posts (first + i) with
+    | Some (post : board_post) ->
+        let title = Terminal_text.single_line post.bp_title in
+        let line =
+          if first + i = selected_index then
+            Theme.selection ^ " " ^ title
+            ^ String.make
+                (max 0 (cols - 5 - Message_layout.display_width title))
+                ' '
+            ^ Ansi.reset
+          else " " ^ title
+        in
+        framed_line buf cols line
+    | None -> framed_empty buf cols
+  done;
+  framed_bottom buf cols
 
-  finish_surface state ~clamped:(Board_read scroll.normalized_scroll) ~surface_key:"board-read" ~rows:terminal_rows
-      ~cols buf
+let render_board_read (state : state) (list_post : board_post) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let footer =
+    footer_line state ~hints:"j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next"
+  in
+  if cols < keeper_split_threshold_cols then begin
+    let scroll = board_read_pane state list_post ~rows ~cols buf in
+    Buffer.add_string buf footer;
+    finish_surface state ~clamped:(Board_read scroll)
+      ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
+  end
+  else begin
+    let left_cols = keeper_roster_pane_cols in
+    let right_cols = cols - left_cols in
+    let left_buf = Buffer.create 1024 in
+    let right_buf = Buffer.create 4096 in
+    board_list_pane state ~open_post:list_post ~rows ~cols:left_cols left_buf;
+    let scroll =
+      board_read_pane state list_post ~rows ~cols:right_cols right_buf
+    in
+    let blank_left = String.make left_cols ' ' in
+    let rec zip left right =
+      match left, right with
+      | [], [] -> []
+      | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+      | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+      | l :: lt, [] -> l :: zip lt []
+    in
+    List.iter
+      (fun line ->
+        Buffer.add_string buf line;
+        Buffer.add_char buf '\n')
+      (zip (frame_lines left_buf) (frame_lines right_buf));
+    Buffer.add_string buf footer;
+    finish_surface state ~clamped:(Board_read scroll)
+      ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
+  end
 
 let planning_phase_label phase = Goal_phase.to_string phase
 
@@ -2393,7 +2476,12 @@ let render_lanes (state : state) =
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = listing_chrome ~error:state.lanes_error in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The overflow indicator spends a content row rather than growing the
+     frame past its budget, where the truncation's casualty was the footer. *)
+  let base_height = max 1 (rows - chrome_rows) in
+  let content_height =
+    if shown > base_height then max 1 (base_height - 1) else base_height
+  in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lanes_scroll max_scroll) in
   if shown = 0 then begin
@@ -2599,18 +2687,30 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              else Ansi.dim ^ label ^ Ansi.reset)
       |> String.concat "  "
     in
+    let tab_hint =
+      match state.detail_tab with
+      | Detail_github -> "[ ]:tab  L:login"
+      | Detail_info | Detail_instructions -> "[ ]:tab"
+    in
     let title =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s[ ]:tab%s" Ansi.bold
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tabs Ansi.dim Ansi.reset
+        Ansi.reset tabs Ansi.dim tab_hint Ansi.reset
     in
     box_line buf cols title;
 
     (* Divider *)
     box_divider buf cols;
 
-    (* Content area with scrolling *)
-    let content_height = max 0 (rows - 6) in  (* header + title + divider + bottom + footer + extra *)
+    (* Content area with scrolling. Chrome is 4 rows (top, title, divider,
+       bottom); the indicator, when the content overflows, spends one
+       content row rather than growing the pane, so the pane's height is
+       rows - 1 in both cases and the split's two bottoms stay level. *)
+    let base_height = max 0 (rows - 5) in
+    let content_height =
+      if total_lines > base_height then max 0 (base_height - 1)
+      else base_height
+    in
     let visible_lines = min content_height total_lines in
     let scroll =
       Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
@@ -2671,8 +2771,6 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
   done;
   framed_bottom buf cols
 
-let keeper_split_threshold_cols = 110
-let keeper_roster_pane_cols = 30
 
 let render_keeper_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3071,8 +3169,22 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
+    (* The row [keeper_message_status_rows] reserves for the older-page
+       fetch. Counting it without drawing it floated the footer a row up,
+       and a failed page load was silent -- the one thing it must not be. *)
+    (if state.msg_older_loading then
+       box_line_styled chat_buf chat_cols ~style:Ansi.dim
+         "  (loading older messages\xe2\x80\xa6)"
+     else
+       match state.msg_older_error with
+       | Some detail ->
+           box_line_styled chat_buf chat_cols ~style:Theme.warn
+             ("  older messages could not be loaded: " ^ detail)
+       | None -> ());
     (match state.msg_live with
-     | Some live ->
+     | Some live
+       when state.msg_target_keeper_name
+            = Some (Keeper_chat_transcript.keeper_name live) ->
          List.iter
            (fun (kind, text) ->
              (* The streaming turn is the row the eye waits on: drawn in the
@@ -3089,7 +3201,7 @@ let render_keeper_message (state : state) =
               | Keeper_chat_transcript.Attention ->
                   box_line_styled chat_buf chat_cols ~style:Theme.warn ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
-     | None -> ());
+     | Some _ | None -> ());
     (* What is waiting, in the order it will go. Drawn in full rather than as
        a count: an operator who typed three lines during a turn needs to see
        which three, and a queue that only says "3 waiting" is the same silence
@@ -4888,14 +5000,24 @@ let render_resources (state : state) =
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
-    (match state.resources_error with
-     | Some detail ->
-         framed_line pane_buf pane_cols
-           (Theme.bad ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
-     | None ->
-         if total = 0 then
-           framed_line pane_buf pane_cols
-             (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset));
+    (* The status line spends one of the budgeted rows, not an extra one:
+       an extra row pushed the pane past its height and the frame's last
+       casualty was the footer. *)
+    let status_rows =
+      match state.resources_error with
+      | Some detail ->
+          framed_line pane_buf pane_cols
+            (Theme.bad ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
+          1
+      | None ->
+          if total = 0 then begin
+            framed_line pane_buf pane_cols
+              (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset);
+            1
+          end
+          else 0
+    in
+    let list_rows_budget = max 0 (list_rows_budget - status_rows) in
     let first =
       if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
     in
@@ -5115,6 +5237,7 @@ let help_sections : (string * (string * string) list) list =
       ; "t", "tool calls"
       ; "u", "pick a runtime lane"
       ; "[ / ]", "detail tabs: Info / Instructions / GitHub"
+      ; "L", "on the GitHub tab: start the gh device-flow login"
       ; "g", "toggle yolo tool approval"
       ; "p / w", "pause / wake"
       ; "s", "shutdown"

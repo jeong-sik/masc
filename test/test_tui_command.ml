@@ -12,6 +12,8 @@ let describe = function
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
   | Command.Toggle_thinking -> "toggle-thinking"
+  | Command.View_image path -> "image:" ^ path
+  | Command.View_image_missing_path -> "image-missing-path"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_plain_text_is_a_message () =

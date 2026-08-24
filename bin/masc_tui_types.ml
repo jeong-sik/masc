@@ -378,6 +378,15 @@ type keeper_chat_return =
   | Keeper_chat_return_detail
 
 (** Top-level TUI surface. *)
+(* A picture currently on the terminal. Only the drawn case: a refusal has
+   nothing to draw, and putting one here would take the screen away from the
+   frame to show a message the frame is the only thing that can show. Refusals
+   go to the pane as text, like every other thing that did not happen. *)
+type image_shown = {
+  image_path : string;
+  image_bytes : int;
+}
+
 type surface =
   | Overview
   | Acting
@@ -391,6 +400,7 @@ type surface =
   | Harness
   | Fusion
   | Repositories
+  | Changes
   | Connectors
   | Runtime
   | Config
@@ -414,6 +424,7 @@ let surface_ring : (surface * string) list =
     (Harness, "Harness");
     (Fusion, "Fusion");
     (Repositories, "Repos");
+    (Changes, "Changes");
     (Connectors, "Connectors");
     (Runtime, "Runtime");
     (Config, "Config");
@@ -488,7 +499,7 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Lanes | Approvals | Schedules | Verification | Harness | Fusion
-  | Repositories | Connectors | Runtime | Config | Resources | Tools ->
+  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -539,6 +550,13 @@ type state = {
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
   mutable help_scroll: int;
+  (* An image the operator asked to see, drawn over the whole terminal rather
+     than into a frame. A picture does not live in a row: the terminal keeps
+     it in its own layer, and the frame presenter redraws only the rows that
+     changed, so a frame drawn on top would clear part of the picture and
+     leave the rest. While this is set the loop draws no frames at all, and
+     the next key takes the picture away and repaints everything. *)
+  mutable image_open: image_shown option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -705,6 +723,15 @@ type state = {
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
+  (* The keeper whose changes the Changes surface is showing, and what it
+     answered. The name is held separately from the snapshot because a
+     surface that has asked and not yet heard back is a different state from
+     one that has never asked, and the scroll belongs to the list on screen
+     rather than to the keeper. *)
+  mutable changes_keeper: string option;
+  mutable changes: Tui_decode.file_change_snapshot option;
+  mutable changes_error: string option;
+  mutable changes_scroll: int;
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
@@ -799,6 +826,11 @@ type state = {
      The keeper travels with the text because the operator can switch keepers
      while a turn runs; sending a queued line to whoever happens to be selected
      later would put it in front of the wrong keeper. *)
+  (* A paste too big for the composer. The draft carries one line saying what
+     it is; the text itself waits here and goes back into the message on the
+     way out. Kept beside the draft rather than in it because the draft is
+     what the operator reads, and five rows cannot hold four hundred lines. *)
+  mutable msg_spill: Masc_tui_paste_spill.t option;
   mutable msg_queued: Masc_tui_keeper_chat_queue.t;
   (* One request per keeper, not one per workspace. Dispatch used to be
      serialized on a single slot because the durable recovery fence held one
@@ -892,6 +924,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   task_focus = false;
   help_open = false;
   help_scroll = 0;
+  image_open = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -1001,6 +1034,10 @@ let create_state ~workspace ~port ~refresh_interval = {
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;
+  changes_keeper = None;
+  changes = None;
+  changes_error = None;
+  changes_scroll = 0;
   harness = None;
   harness_error = None;
   harness_scroll = 0;
@@ -1047,6 +1084,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_older_loading = false;
   msg_older_error = None;
   msg_thinking_collapsed = false;
+  msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
   detail_scroll = 0;
@@ -1164,6 +1202,11 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         (match state.repositories with
          | None -> 0
          | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Changes ->
+      listing ~error:state.changes_error
+        (match state.changes with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.fcs_changes)
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with

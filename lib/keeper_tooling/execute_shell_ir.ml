@@ -53,9 +53,12 @@ let with_cwd ~raw ~cwd ir =
 
 type dispatch_error =
   | Gate_reject of string
-  | Cannot_parse
-  | Too_complex
+  | Cannot_parse of Shell_gate.parse_reason
+  | Too_complex of Shell_gate.too_complex_reason
   | Path_reject of string
+
+let parse_reason_tag = Shell_gate.parse_reason_tag
+let too_complex_reason_tag = Shell_gate.too_complex_reason_tag
 
 let validate_paths ~workdir ir =
   Exec_policy.validate_shell_ir_paths ~workdir ir
@@ -79,8 +82,8 @@ let dispatch
   in
   match gate_verdict with
   | Shell_gate.Reject { diagnostic; _ } -> Error (Gate_reject diagnostic)
-  | Shell_gate.Cannot_parse _ -> Error Cannot_parse
-  | Shell_gate.Too_complex _ -> Error Too_complex
+  | Shell_gate.Cannot_parse { reason } -> Error (Cannot_parse reason)
+  | Shell_gate.Too_complex { reason } -> Error (Too_complex reason)
   | Shell_gate.Allow _context ->
     (match validate_paths ~workdir ir with
      | Error error -> Error (Path_reject error)

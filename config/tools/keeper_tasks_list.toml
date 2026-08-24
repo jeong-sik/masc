@@ -1,0 +1,10 @@
+
+[help]
+short_description = "List MASC backlog tasks visible to this keeper."
+when_to_use = "Use before claiming work, checking awaiting verification items, or diagnosing current task state."
+key_constraints = [
+  "include_done defaults to false.",
+  "Use status to narrow the list when inspecting a specific lifecycle state.",
+]
+details_markdown = "Rows: id, title, priority, created_at, status, assignee; projection=full adds the task body."
+examples = ["status='todo' include_done=false limit=20"]

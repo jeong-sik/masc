@@ -268,6 +268,33 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
       | exception Yojson.Json_error detail ->
           Error ("tool calls were not JSON: " ^ detail))
 
+(** Fetch the files a keeper wrote
+    ([GET /api/v1/keepers/:name/file-changes]).
+
+    The window is time rather than a row count. A count could not say what it
+    had covered -- the server scans a multiple of it in fleet rows, so a
+    keeper that made no more calls and a scan that stopped short arrive
+    looking the same. The server bounds the window at what the read costs and
+    states in its answer the window it actually covered. *)
+let fetch_keeper_file_changes ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(window_hours : float) :
+    (Masc.Tui_decode.file_change_snapshot, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/file-changes?window_hours=%g"
+      (percent_encode_path_segment keeper_name)
+      (Float.max 0.0 window_hours)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "file changes returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_file_change_snapshot json
+      | exception Yojson.Json_error detail ->
+          Error ("file changes were not JSON: " ^ detail))
+
 (** Open the MCP session the observer feed is registered under.
 
     The transport registers an SSE observer only for a session it has seen

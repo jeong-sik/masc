@@ -2742,6 +2742,11 @@
  (libraries alcotest masc_tui_message_layout))
 
 (test
+ (name test_tui_editor_jump)
+ (modules test_tui_editor_jump)
+ (libraries alcotest masc_tui_editor_jump masc.string_util unix))
+
+(test
  (name test_tui_observation_layout)
  (modules test_tui_observation_layout)
  (libraries alcotest masc_tui_observation_layout masc))

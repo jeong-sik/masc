@@ -396,6 +396,12 @@
  (libraries unix))
 
 (library
+ (name masc_tui_editor_jump)
+ (wrapped false)
+ (modules masc_tui_editor_jump)
+ (libraries masc_tui_editor unix))
+
+(library
  (name masc_tui_credential)
  (modules masc_tui_credential))
 
@@ -477,6 +483,7 @@
   masc_tui_tool_tree
   masc_tui_terminal_write_repair
   masc_tui_editor
+  masc_tui_editor_jump
   masc.dashboard
   masc.server
   masc.config

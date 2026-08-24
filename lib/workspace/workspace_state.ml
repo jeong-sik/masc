@@ -24,7 +24,7 @@ open Workspace_utils
 let normalized_string_list values =
   let seen = Hashtbl.create (List.length values) in
   values
-  |> List.filter_map (fun value -> String_util.option_trim (Some value))
+  |> List.filter_map (fun value -> String_util.trim_nonempty value)
   |> List.filter (fun value ->
          if Hashtbl.mem seen value then
            false
@@ -37,7 +37,7 @@ let normalized_string_list values =
 (* ============================================ *)
 
 let recover_active_agent_name = function
-  | `String name -> String_util.option_trim (Some name)
+  | `String name -> String_util.trim_nonempty name
   | _ -> None
 
 let recover_workspace_state config json =

@@ -398,6 +398,74 @@ let test_overlay_swap_replaces_merged_cache () =
     (lookup_overlay_row ())
 ;;
 
+(* Two rows under one key used to both survive the parse, and the winner was
+   whichever came first in the file. The rows below differ 900-fold in price,
+   so "whichever came first" is a 900x difference in what a call is charged,
+   with nothing said about it. *)
+let expect_duplicate_rejected ~what toml =
+  match Model_catalog.of_toml_string ~source:"duplicate probe" toml with
+  | Ok _ -> failf "%s: duplicate rows parsed instead of being rejected" what
+  | Error msg ->
+    check
+      bool
+      (Printf.sprintf "%s: message names what was declared twice" what)
+      true
+      (let contains needle =
+         let n = String.length needle in
+         let rec at i = i + n <= String.length msg && (String.sub msg i n = needle || at (i + 1)) in
+         at 0
+       in
+       contains "twice")
+;;
+
+let test_duplicate_bare_rows_are_rejected () =
+  expect_duplicate_rejected
+    ~what:"bare"
+    (bare_row ~model:"dup-model" ~max_context:1000
+     ^ "input_per_million = 1.0\n"
+     ^ bare_row ~model:"dup-model" ~max_context:999999
+     ^ "input_per_million = 900.0\n")
+;;
+
+let test_duplicate_rows_are_matched_case_insensitively () =
+  expect_duplicate_rejected
+    ~what:"case"
+    (bare_row ~model:"Dup-Model" ~max_context:1000
+     ^ bare_row ~model:"dup-model" ~max_context:2000)
+;;
+
+let test_duplicate_scoped_rows_are_rejected () =
+  expect_duplicate_rejected
+    ~what:"scoped"
+    (scoped_row ~provider:"p1" ~model:"m" ~max_context:1000 ()
+     ^ scoped_row ~provider:"p1" ~model:"m" ~max_context:2000 ())
+;;
+
+let test_same_model_under_different_providers_is_not_a_duplicate () =
+  (* The scoping is the point of provider_name: one model id served by two
+     providers is two rows, not a conflict. *)
+  let catalog =
+    catalog_of
+      ~suite:"scoped"
+      (scoped_row ~provider:"p1" ~model:"m" ~max_context:1000 ()
+       ^ scoped_row ~provider:"p2" ~model:"m" ~max_context:2000 ())
+  in
+  let ctx provider =
+    match Model_catalog.lookup_for_provider catalog ~provider_name:provider ~model_id:"m" with
+    | Some entry -> entry.max_context_tokens
+    | None -> failf "row for %s did not survive" provider
+  in
+  check (option int) "p1 keeps its own row" (Some 1000) (ctx "p1");
+  check (option int) "p2 keeps its own row" (Some 2000) (ctx "p2")
+;;
+
+let test_shipped_catalog_has_no_duplicate_rows () =
+  (* The guard is worth nothing if the catalog it ships with cannot pass it. *)
+  match Model_catalog.load_default () with
+  | Ok _ -> ()
+  | Error msg -> failf "the embedded catalog no longer parses: %s" msg
+;;
+
 let () =
   run
     "model_catalog_overlay"
@@ -447,6 +515,22 @@ let () =
             "wire-kind label never canonicalized"
             `Quick
             test_wire_kind_label_is_never_alias_canonicalized
+        ] )
+    ; ( "duplicate-rows"
+      , [ test_case "bare rows rejected" `Quick test_duplicate_bare_rows_are_rejected
+        ; test_case
+            "case-insensitive"
+            `Quick
+            test_duplicate_rows_are_matched_case_insensitively
+        ; test_case "scoped rows rejected" `Quick test_duplicate_scoped_rows_are_rejected
+        ; test_case
+            "same model, two providers is not a duplicate"
+            `Quick
+            test_same_model_under_different_providers_is_not_a_duplicate
+        ; test_case
+            "shipped catalog passes the guard"
+            `Quick
+            test_shipped_catalog_has_no_duplicate_rows
         ] )
     ]
 ;;

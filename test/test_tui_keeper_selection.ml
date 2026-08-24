@@ -14,6 +14,9 @@ let pp_navigation formatter = function
   | Selection.Message_keeper { keeper_name; cursor } ->
       Format.fprintf formatter
         "Message_keeper { keeper_name = %S; cursor = %d }" keeper_name cursor
+  | Selection.Calls_keeper { keeper_name; cursor } ->
+      Format.fprintf formatter "Calls_keeper { keeper_name = %S; cursor = %d }"
+        keeper_name cursor
 
 let navigation = testable pp_navigation ( = )
 

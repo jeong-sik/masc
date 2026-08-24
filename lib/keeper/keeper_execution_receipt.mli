@@ -218,6 +218,20 @@ type operator_disposition_reason =
       (masc#28885). Same [Disp_unknown] pairing as
       [Reason_provider_attempt_effect_fenced]; the label separates a lost
       correction from an ordinary fenced provider failure. *)
+  | Reason_accept_rejected
+  (** The provider answered and MASC's own accept contract found nothing
+      usable in the response. Paired with [Disp_fail_open_next_runtime]: no
+      operator broadcast, because the keeper carries on and the action this
+      points at is a lane's output budget, not an incident. Reached only when
+      no degraded retry or runtime fallback claimed the receipt first — those
+      say what the system did about it, which is the more specific fact. *)
+  | Reason_terminal_effect_failed
+  (** The tool that ends the turn by producing an external artifact failed, or
+      returned no typed receipt for what it did. Paired with [Disp_unknown]:
+      whether the artifact reached the outside world is unknown, the turn is
+      never replayed and the stimulus is retired, so a human decides. Same
+      pairing as [Reason_provider_attempt_effect_fenced] and
+      [Reason_tool_correction_lost]; only the label differs. *)
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string

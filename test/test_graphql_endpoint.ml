@@ -47,6 +47,39 @@ let test_default_falls_back_to_railway_production () =
         "https://second-brain-graphql-production.up.railway.app/graphql"
         (Graphql_endpoint.graphql_url ()))
 
+let check_scheme label ~override ~expected =
+  with_graphql_env ~graphql_url:override
+    ~railway_url:"second-brain-graphql-production.up.railway.app" (fun () ->
+      Alcotest.(check string) label expected (Graphql_endpoint.graphql_url ()))
+
+(* The scheme used to be picked by string prefix, so anything starting with a
+   loopback literal was served over plain http and any other loopback address
+   was not (#27219). *)
+let test_loopback_lookalike_host_is_not_local () =
+  check_scheme "127.0.0.1.example.com is a remote host"
+    ~override:"127.0.0.1.example.com/graphql"
+    ~expected:"https://127.0.0.1.example.com/graphql"
+
+let test_localhost_lookalike_host_is_not_local () =
+  check_scheme "localhost.example.com is a remote host"
+    ~override:"localhost.example.com/graphql"
+    ~expected:"https://localhost.example.com/graphql"
+
+let test_whole_loopback_network_is_local () =
+  check_scheme "127.0.0.53 is loopback"
+    ~override:"127.0.0.53:8935"
+    ~expected:"http://127.0.0.53:8935/graphql"
+
+let test_bracketed_ipv6_loopback_is_local () =
+  check_scheme "[::1] is loopback"
+    ~override:"[::1]:8935"
+    ~expected:"http://[::1]:8935/graphql"
+
+let test_wildcard_bind_host_is_local () =
+  check_scheme "0.0.0.0 is a wildcard bind"
+    ~override:"0.0.0.0:8935"
+    ~expected:"http://0.0.0.0:8935/graphql"
+
 let () =
   Alcotest.run "Graphql_endpoint"
     [
@@ -60,5 +93,15 @@ let () =
             test_railway_url_without_scheme_is_normalized;
           Alcotest.test_case "default uses Railway production" `Quick
             test_default_falls_back_to_railway_production;
+          Alcotest.test_case "loopback-lookalike host stays https" `Quick
+            test_loopback_lookalike_host_is_not_local;
+          Alcotest.test_case "localhost-lookalike host stays https" `Quick
+            test_localhost_lookalike_host_is_not_local;
+          Alcotest.test_case "whole 127/8 is local" `Quick
+            test_whole_loopback_network_is_local;
+          Alcotest.test_case "bracketed ::1 is local" `Quick
+            test_bracketed_ipv6_loopback_is_local;
+          Alcotest.test_case "wildcard bind host is local" `Quick
+            test_wildcard_bind_host_is_local;
         ] );
     ]

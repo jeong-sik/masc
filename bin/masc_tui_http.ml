@@ -13,6 +13,7 @@ let mcp_path = "/mcp"
 let observer_stream_path = "/mcp?sse_kind=observer"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
+let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -742,6 +743,17 @@ let fetch_repositories ~(host : string) ~(port : int) :
 let fetch_harness_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
+
+(** Fetch the retained Fusion run registry list. *)
+let fetch_fusion_runs ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:fusion_runs_path
+
+(** Fetch one run joined to its exact typed-origin Board evidence. *)
+let fetch_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(fusion_runs_path ^ "/" ^ percent_encode_path_segment run_id)
 
 (** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
     lists what is waiting rather than the whole history. *)

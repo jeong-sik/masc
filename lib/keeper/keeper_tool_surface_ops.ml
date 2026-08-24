@@ -302,12 +302,18 @@ let keeper_list_row_json ~runtime_class config name =
              ~now_ts
       in
       let status = Keeper_status_runtime.keeper_surface_status ~diagnostic in
+      let phase =
+        match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+        | Some p -> Keeper_state_machine.phase_to_string p
+        | None -> "offline"
+      in
       Some
         (`Assoc (
           [
             ("runtime_class", `String runtime_class); ("name", `String meta.name);
             ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
-            ("status", `String status); ("keepalive_running", `Bool keepalive_running);
+            ("status", `String status); ("phase", `String phase);
+            ("keepalive_running", `Bool keepalive_running);
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);

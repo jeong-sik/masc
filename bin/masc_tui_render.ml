@@ -130,7 +130,7 @@ let awaiting_approval_notice (state : state) =
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools
-            | Autonomy | System_logs ->
+            | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -1576,16 +1576,22 @@ let keeper_status_word (status : Status.control_plane_status option) =
   | Some value -> Status.control_plane_status_to_string value
 
 (* The runtime id is [provider.model], and the provider half repeats inside the
-   model half often enough that printing both costs the column its width. *)
+   model half often enough that printing both costs the column its width. The
+   phase is the fine-grained state-machine reading from GET /api/v1/gate/keepers,
+   shown ahead of the model so an operator scanning the column sees lifecycle
+   state first. *)
 let keeper_runtime_label (runtime : keeper_runtime option) =
   match runtime with
   | None -> "\xe2\x80\x94"
   | Some row -> (
       let raw = Terminal_text.single_line row.kr_runtime_id in
-      match String.index_opt raw '.' with
-      | Some idx when idx + 1 < String.length raw ->
-          String.sub raw (idx + 1) (String.length raw - idx - 1)
-      | Some _ | None -> raw)
+      let model =
+        match String.index_opt raw '.' with
+        | Some idx when idx + 1 < String.length raw ->
+            String.sub raw (idx + 1) (String.length raw - idx - 1)
+        | Some _ | None -> raw
+      in
+      Printf.sprintf "%s %s" (Terminal_text.single_line row.kr_phase) model)
 
 (* Two dispositions an operator needs before stopping anything: whether the
    keeper comes back by itself, and whether it takes turns without being
@@ -1665,7 +1671,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints ?(offers_chat = true) state reading =
+let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -1714,7 +1720,7 @@ let keeper_action_hints ?(offers_chat = true) state reading =
                between surfaces reads as a key that does not exist. *)
           ; (if offers_chat then Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
              else Ansi.dim ^ "c chat" ^ Ansi.reset)
-          ; (if offers_chat then Ansi.dim ^ "esc back" ^ Ansi.reset
+          ; (if offers_back then Ansi.dim ^ "esc back" ^ Ansi.reset
              else Ansi.cyan ^ "enter" ^ Ansi.reset ^ " detail")
           ; Ansi.dim ^ "r refresh" ^ Ansi.reset
           ; Ansi.dim ^ "q quit" ^ Ansi.reset
@@ -1929,7 +1935,7 @@ let render_keeper_list (state : state) =
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
   Buffer.add_string buf
-    (keeper_action_hints ~offers_chat:false state selected_reading ^ "\n");
+    (keeper_action_hints ~offers_back:false state selected_reading ^ "\n");
 
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf
@@ -3249,147 +3255,6 @@ let render_tools (state : state) =
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
-(* Which autonomy features have behaviour evidence, and which still need it.
-
-   The server already computes this report; the surface draws it rather than
-   deriving a second opinion. Each feature that falls short gets its own
-   continuation rows: the keepers that have not exercised it, the ones whose
-   record would not open, and what the server says would close the gap. A
-   status column on its own says a feature is unproven without saying who to
-   go look at, which is the part an operator acts on. *)
-let autonomy_status_style (status : Masc.Tui_decode.feature_proof_status) =
-  match status with
-  | Masc.Tui_decode.Fp_pass -> Ansi.green
-  | Masc.Tui_decode.Fp_warn -> Ansi.yellow
-  (* An unreadable status is drawn like a failure on purpose: this build
-     cannot tell whether the feature works, and the safe reading of "I do not
-     know" is not "it does". *)
-  | Masc.Tui_decode.Fp_fail | Masc.Tui_decode.Fp_unreadable _ -> Ansi.red
-
-let autonomy_rows (features : Masc.Tui_decode.feature_proof list) =
-  let open Masc.Tui_decode in
-  List.concat_map
-    (fun f ->
-      let head =
-        Printf.sprintf "  %-30s %-6s %-7s %s"
-          (Terminal_text.single_line f.fp_label)
-          (feature_proof_status_label f.fp_status)
-          (Printf.sprintf "%d/%d" (List.length f.fp_observed) f.fp_keeper_count)
-          (Terminal_text.single_line f.fp_summary)
-      in
-      let head_row = (autonomy_status_style f.fp_status, head) in
-      if not (feature_proof_is_gap f.fp_status) then [ head_row ]
-      else
-        let missing_row =
-          match f.fp_missing with
-          | [] -> []
-          | names ->
-              [ ( Ansi.dim
-                , Printf.sprintf "      no evidence yet: %s"
-                    (Terminal_text.single_line (String.concat ", " names)) )
-              ]
-        in
-        let unreadable_row =
-          match f.fp_read_errors with
-          | [] -> []
-          | names ->
-              [ ( Ansi.red
-                , Printf.sprintf "      record would not open: %s"
-                    (Terminal_text.single_line (String.concat ", " names)) )
-              ]
-        in
-        let action_row =
-          [ ( Ansi.dim
-            , Printf.sprintf "      -> %s"
-                (Terminal_text.single_line f.fp_next_action) )
-          ]
-        in
-        (head_row :: missing_row) @ unreadable_row @ action_row)
-    features
-
-let render_autonomy (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
-  let buf = Buffer.create 4096 in
-  let features =
-    match state.autonomy with
-    | None -> []
-    | Some s -> s.Masc.Tui_decode.au_features
-  in
-  let lines = autonomy_rows features in
-  let shown = List.length lines in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
-  let header =
-    match state.autonomy with
-    | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Autonomy")
-          timestamp
-          (connection_badge state.connection_status)
-    | Some s ->
-        let open Masc.Tui_decode in
-        (* Proven against total, then the gap count. The pair is the whole
-           reading: five features all passing and five features where four
-           reports failed to load both leave the same "5" if only one number
-           is drawn. *)
-        Printf.sprintf "%s (%d/%d proven, %d gap%s, %d keepers)  %s  %s"
-          (screen_title " MASC Autonomy")
-          s.au_pass_count s.au_feature_count s.au_gap_count
-          (if s.au_gap_count = 1 then "" else "s")
-          s.au_keeper_count timestamp
-          (connection_badge state.connection_status)
-  in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  let col_hdr =
-    Printf.sprintf "  %-30s %-6s %-7s %s" "Feature" "Proof" "Keepers"
-      "What the report measured"
-  in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
-  box_divider buf cols;
-  (match state.autonomy_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:Ansi.red
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  let chrome_rows = if Option.is_some state.autonomy_error then 9 else 7 in
-  let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.autonomy_scroll max_scroll) in
-  if shown = 0 then begin
-    let empty =
-      match empty_page_of ~snapshot:state.autonomy ~error:state.autonomy_error with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
-      | Page_empty -> "  (the report named no features)"
-    in
-    box_line_styled buf cols ~style:Ansi.dim empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      match List.nth_opt lines idx with
-      | None -> box_empty buf cols
-      | Some (style, text) -> box_line_styled buf cols ~style text
-    done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
-      (Printf.sprintf "[%d rows, scroll %d]" shown scroll);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
-       Ansi.dim state.port Ansi.reset);
-  finish_surface state ~clamped:(Autonomy scroll) ~surface_key:"autonomy" ~rows:terminal_rows ~cols buf
-
 (* One keeper's durable tool-call log, the row vocabulary the chat pane
    uses: the finished glyph for a call that returned, the failure glyph for
    one that returned an error, the subject the trail names the call by. The
@@ -3786,7 +3651,6 @@ let render_surface (state : state) =
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
   | Tools -> render_tools state
-  | Autonomy -> render_autonomy state
   | Acting -> render_acting state
   | System_logs -> render_system_logs state
   | Schedules -> render_schedules state

@@ -361,7 +361,6 @@ type surface =
   | Repositories
   | Connectors
   | Tools
-  | Autonomy
   | System_logs
 
 (** What a surface needs loaded to draw itself.
@@ -404,7 +403,7 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Approvals | Schedules | Verification | Harness | Repositories | Connectors
-  | Tools | Autonomy ->
+  | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -561,9 +560,6 @@ type state = {
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
-  mutable autonomy: Tui_decode.autonomy_snapshot option;
-  mutable autonomy_error: string option;
-  mutable autonomy_scroll: int;
   mutable observer: observer_status;
   mutable mcp_session: string option;
       (** The MCP session the server issued, kept across streams: the server
@@ -770,9 +766,6 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
-  autonomy = None;
-  autonomy_error = None;
-  autonomy_scroll = 0;
   observer = Observer_off;
   mcp_session = None;
   acting = [];
@@ -877,7 +870,6 @@ type clamped_scroll =
   | Board_read of int
   | Keeper_detail of int
   | Keeper_calls of int
-  | Autonomy of int
   | Acting of int
 
 let apply_clamped_scroll (state : state) = function
@@ -886,7 +878,6 @@ let apply_clamped_scroll (state : state) = function
   | Board_read value -> state.board_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
-  | Autonomy value -> state.autonomy_scroll <- value
   | Acting value -> state.acting_scroll <- value
 
 let scrolled_surface (state : state) : surface -> scrolled option =
@@ -922,13 +913,12 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         (match state.tools_inventory with
          | None -> 0
          | Some s -> List.length s.Tui_decode.ts_tools)
-  (* Autonomy and Acting count rows the drawing builds out of formatted text,
-     not rows the state holds; counting them here would be a second copy of
-     the formatting, so they report a [clamped_scroll] instead. Overview,
-     Keepers, Board, Planning and Schedules move a cursor or a detail pane
-     rather than a plain list. *)
-  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
-  | Autonomy ->
+  (* Acting counts rows the drawing builds out of formatted text, not rows the
+     state holds; counting them here would be a second copy of the formatting,
+     so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
+     Planning and Schedules move a cursor or a detail pane rather than a plain
+     list. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules ->
       None
 
 let keeper_message_status_rows (state : state) =

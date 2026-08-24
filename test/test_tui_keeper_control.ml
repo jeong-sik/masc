@@ -8,13 +8,15 @@ module Decode = Masc.Tui_decode
 
 let runtime ?(keepalive_running = true) ?(status = Status.Surface_active)
     ?(autoboot_enabled = true) ?(proactive_enabled = true)
-    ?(runtime_id = "anthropic.claude-opus-5") name : Decode.keeper_runtime =
+    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = "running") name :
+    Decode.keeper_runtime =
   { kr_name = name
   ; kr_status = status
   ; kr_keepalive_running = keepalive_running
   ; kr_autoboot_enabled = autoboot_enabled
   ; kr_proactive_enabled = proactive_enabled
   ; kr_runtime_id = runtime_id
+  ; kr_phase = phase
   }
 
 let complete rows = Control.Roster_complete rows
@@ -469,13 +471,13 @@ let test_empty_error_body_names_the_status () =
 
 (* {1 Roster decode} *)
 
-let gate_row ?(status = "active") name =
+let gate_row ?(status = "active") ?(phase = "running") name =
   Printf.sprintf
     {|{"runtime_class":"keeper","name":%S,"agent_name":"keeper-%s-agent",
-       "status":%S,"keepalive_running":true,"autoboot_enabled":true,
+       "status":%S,"phase":%S,"keepalive_running":true,"autoboot_enabled":true,
        "proactive_enabled":true,"runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
-    name name status
+    name name status phase
 
 let test_roster_decode_reads_rows () =
   let json =

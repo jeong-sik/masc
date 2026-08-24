@@ -224,7 +224,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Board | Approvals | Planning | Schedules | Verification
-    | Harness | Repositories | Connectors | Tools | Autonomy | System_logs ->
+    | Harness | Repositories | Connectors | Tools | System_logs ->
         None
   in
   let current_navigation =
@@ -665,14 +665,6 @@ let load_harness ~(host : string) ~(port : int) :
   match fetch_harness_health ~host ~port with
   | Error err -> Error ("harness load failed: " ^ err)
   | Ok json -> Tui_decode.decode_harness_snapshot json
-
-(** Load the autonomy feature-proof report from
-    /api/v1/dashboard/keeper-feature-proof *)
-let load_autonomy ~(host : string) ~(port : int) :
-    (Tui_decode.autonomy_snapshot, string) result =
-  match fetch_keeper_feature_proof ~host ~port with
-  | Error err -> Error ("autonomy load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_autonomy_snapshot json
 
 (** Load the verification queue from /api/v1/verification/requests *)
 let load_verification ~(host : string) ~(port : int) ~(limit : int) :

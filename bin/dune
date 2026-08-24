@@ -145,16 +145,6 @@
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver masc.agent_core unix))
 
-;; Read-only keeper feature proof CLI: renders the same JSON as
-;; /api/v1/dashboard/keeper-feature-proof without starting a server.
-
-(executable
- (name keeper_feature_proof_report)
- (modules keeper_feature_proof_report)
- (public_name masc-keeper-feature-proof)
- (package masc)
- (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
-
 ;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
 ;; without writing to the keeper's chat, checkpoint, or memory, which is what
 ;; made the 2026-08-12 sweep measure its own traffic (masc#28414).
@@ -473,11 +463,6 @@
 ; Depends on tool_schemas_specs (types-only sibling library) to share
 ; spec records with future schema-lint / doc-gen tooling. The cycle is
 ; avoided because tool_schemas_specs does not depend on masc_tool_schemas.
-
-(executable
- (name gen_tool_descriptors)
- (modules gen_tool_descriptors)
- (libraries masc.tool_schemas_specs yojson))
 
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —

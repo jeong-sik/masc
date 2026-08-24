@@ -1772,33 +1772,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keeper-feature-proof" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let window_hours =
-           match Server_utils.query_param req "window_hours" with
-           | Some s ->
-             (match float_of_string_opt s with
-              | Some value when Float.is_finite value ->
-                Some (max 0.1 (min 168.0 value))
-              | Some _ | None -> None)
-           | None -> None
-         in
-         let config = (Mcp_server.workspace_config state) in
-         let cache_key =
-           Printf.sprintf "keeper_feature_proof:%s:%s"
-             config.base_path
-             (match window_hours with
-              | Some w -> Printf.sprintf "%.2f" w
-              | None -> "-")
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_keeper_feature_proof.json
-                 ~config ?window_hours ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          (* No route cache here. The producer is not a computation — it reads a

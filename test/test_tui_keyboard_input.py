@@ -3355,6 +3355,10 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         # send (and its 503 from the fixture) is on screen; the POST bodies
         # above are the proof of what went out.
         send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
 
 def duplicated_attention_briefing() -> HttpResponse:
     item = {

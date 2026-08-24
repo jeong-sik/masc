@@ -410,8 +410,8 @@ let test_rejections () =
     "must be an integer";
   check_rejects ~name:"t"
     ~contents:
-      (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"string\"\ndefault = \"hot\"\n")
-    "not supported for type string";
+      (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"number\"\ndefault = 1.5\n")
+    "not supported for type number";
   check_rejects ~name:"t"
     ~contents:
       (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"string\"\nminimum = 1\n")
@@ -611,6 +611,19 @@ let test_array_items_carry_max_items_and_required () =
      | _ -> false)
 ;;
 
+(* A string default names which value a caller gets by omitting the key, the
+   same way an integer one does. It was refused, so masc_dashboard — whose
+   [scope] defaults to a string — could not be declared in TOML at all. *)
+let test_a_string_default_is_accepted () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t" ^ "[[params]]\nname = \"scope\"\ntype = \"string\"\ndefault = \"hot\"\n")
+  in
+  check bool "the default reaches the property" true
+    (member (property schema [ "scope" ]) "default" = Some (`String "hot"))
+;;
+
 let () =
   run "tool_definition_toml"
     [ ( "load"
@@ -636,6 +649,7 @@ let () =
             "array items carry max_items and required"
             `Quick
             test_array_items_carry_max_items_and_required
+        ; test_case "a string default is accepted" `Quick test_a_string_default_is_accepted
         ; test_case "unknown keys, values, and missing keys reject" `Quick
             test_rejections
         ] )

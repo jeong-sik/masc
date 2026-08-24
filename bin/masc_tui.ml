@@ -473,7 +473,6 @@ type async_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
-  | Autonomy_loaded of (Masc.Tui_decode.autonomy_snapshot, string) result
   | Keeper_chat_approval_answered of
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
@@ -706,26 +705,6 @@ let launch_keeper_calls_load state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_calls_loaded (keeper_name, Error "Eio switch is unavailable"))
-
-let launch_autonomy_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_autonomy ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Autonomy_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Autonomy_loaded (Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -2600,14 +2579,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None
       | Error detail -> state.tools_error <- Some detail)
-  | Autonomy_loaded result -> (
-      match result with
-      | Ok snapshot ->
-          state.autonomy <- Some snapshot;
-          state.autonomy_error <- None
-      (* The previous report is kept: a failed refresh must not turn a screen
-         that said "3/5 proven" into one that says nothing is proven. *)
-      | Error detail -> state.autonomy_error <- Some detail)
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -2713,6 +2684,14 @@ let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
 
 (** Main loop *)
 let main () =
+  (* The provider layer reports through [Llm_provider.Diag], whose default sink
+     writes to stderr -- which here is the terminal this draws on. One INFO line
+     about the embedded model catalog lands between two frames and the screen is
+     no longer what the frame presenter believes it wrote. The server routes
+     these into the structured log at boot; this surface has the same terminal
+     to protect, so it routes them the same way and before anything can ask the
+     catalog a question. *)
+  Provider_diag_log_sink.install ();
   let (base_path, workspace, port, refresh) = parse_args () in
   require_interactive_terminal ();
   (* The console mirror writes every record to stderr, and stderr is this
@@ -3000,7 +2979,6 @@ let main () =
                 launch_repositories_load state ~mailbox:async_messages
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
             | Tools -> launch_tools_load state ~mailbox:async_messages
-            | Autonomy -> launch_autonomy_load state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
@@ -3039,10 +3017,7 @@ let main () =
             | Connectors ->
                 launch_tools_load state ~mailbox:async_messages;
                 state.view <- Tools
-            | Tools ->
-                launch_autonomy_load state ~mailbox:async_messages;
-                state.view <- Autonomy
-            | Autonomy -> state.view <- System_logs
+            | Tools -> state.view <- System_logs
             | System_logs -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
@@ -3104,7 +3079,7 @@ let main () =
                 end
                 else state.task_focus <- false
             | Acting | Keepers Keeper_list | Approvals | Schedules | Verification
-            | Harness | Repositories | Connectors | Tools | Autonomy
+            | Harness | Repositories | Connectors | Tools
             | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
@@ -3194,7 +3169,6 @@ let main () =
             | Tools -> state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.tools_scroll
-            | Autonomy -> state.autonomy_scroll <- state.autonomy_scroll + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
             | System_logs -> state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -3290,9 +3264,6 @@ let main () =
                   state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.tools_scroll
-            | Autonomy ->
-                if state.autonomy_scroll > 0 then
-                  state.autonomy_scroll <- state.autonomy_scroll - 1
             | Acting ->
                 if state.acting_scroll > 0 then begin
                   state.acting_scroll <- state.acting_scroll - 1;
@@ -3355,7 +3326,7 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Approvals | Schedules | Verification | Harness | Repositories
-            | Connectors | Tools | Autonomy | System_logs -> ())
+            | Connectors | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -3387,7 +3358,7 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
+            | Verification | Harness | Repositories | Connectors | Tools | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -3451,16 +3422,14 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
-           (* Chat, from detail only. Opening detail is the act that names the
-              target: on the roster the cursor moves by itself when a refresh
-              drops a row, so a keeper that disappears while the operator is
-              reaching for this key would hand the message to whichever keeper
-              slid under the cursor. [c] is an alias for [m] because the footer
-              names the action rather than the mnemonic. *)
+           (* Chat, from the roster as well as from detail, for the same reason
+              logs are reachable from both: the keeper an operator wants to
+              talk to is the one under the cursor. [c] is an alias for [m]
+              because the footer names the action rather than the mnemonic. *)
            (match state.view with
-            | Keepers Keeper_detail
+            | Keepers (Keeper_list | Keeper_detail)
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
@@ -3472,7 +3441,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -3494,7 +3463,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) ->
@@ -3503,7 +3472,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -3524,7 +3493,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | Autonomy | System_logs
+            | Repositories | Connectors | Tools | System_logs
             -> ())
       | _ -> ());
 
@@ -3592,11 +3561,6 @@ let main () =
              (* The inventory is near-static, but a tool whose projection
                 changes is exactly what this surface is read for. *)
              launch_tools_load state ~mailbox:async_messages
-         | Autonomy ->
-             (* The whole point of the screen is watching a gap close while
-                the runtime runs, so it refreshes rather than holding the
-                reading taken when the operator arrived. *)
-             launch_autonomy_load state ~mailbox:async_messages
          | Schedules ->
              (* Rows cross their due time and turn terminal while an operator
                 watches; the page that answers "why is this keeper awake"

@@ -110,6 +110,12 @@ export function statusLabel(value?: string | null): string {
       return '스냅샷 준비 안 됨'
     case 'zombie':
       return '좀비'
+    case 'timeout':
+      return '시간 초과'
+    // keeper/keeper_board_attention_partition.ml (state_to_string): the
+    // partition is done and its slot has been released.
+    case 'settled':
+      return '정리됨'
     case 'unknown':
     case '':
       return UNKNOWN_STATUS_LABEL

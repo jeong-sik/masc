@@ -23,6 +23,10 @@ let judge_role_of_outcome = function
   | Synthesized node -> node.role
   | Judge_failed node -> node.failed_role
 
+(* Otel metric label, not the dashboard wire. [Fusion_sink.judge_role_fields]
+   owns the "role" the frontend renders and spells this same constructor
+   "refine". Both are correct for their consumer; a static scan that pairs them
+   by field name reports a false gap (#27165). *)
 let judge_role_label = function
   | Single -> "single"
   | Refine_pass -> "refine_pass"

@@ -157,3 +157,12 @@ val last_page_start : height:int -> int list -> int
     item costs two rows, half of them sit past the end of that bound. An item
     taller than the whole height is still reachable -- it is drawn as far as
     the height allows rather than skipped. *)
+
+val age_text : now:float -> since:float -> string option
+(** How long something has been outstanding, as [12s] or [3m07s].
+
+    An age, not a countdown: it says how long a thing has been going so a
+    reader can tell slow from stuck. Rendered from a clock the caller passes
+    rather than one read here, so a test can state the instant and two rows in
+    one frame can share a single read. A clock that moved backwards says
+    nothing rather than a negative age. *)

@@ -543,3 +543,11 @@ let last_page_start ~height row_costs =
     in
     min (count - 1) (walk (count - 1) 0)
   end
+
+let age_text ~now ~since =
+  let seconds = now -. since in
+  if seconds < 0. then None
+  else
+    let whole = int_of_float seconds in
+    if whole < 60 then Some (Printf.sprintf "%ds" whole)
+    else Some (Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60))

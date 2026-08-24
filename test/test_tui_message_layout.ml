@@ -524,6 +524,32 @@ let test_last_page_start_keeps_the_last_item_reachable () =
   check int "a zero cost still spends a row" 1
     (Layout.last_page_start ~height:1 [ 0; 0 ])
 
+(* An age reads as seconds until a minute, then as minutes and a zero-padded
+   remainder so a column of them lines up. It is what tells an operator that a
+   turn taking minutes is advancing rather than stuck, so the boundary and the
+   padding are the parts worth pinning. *)
+let test_age_reads_as_seconds_then_minutes () =
+  List.iter
+    (fun (since, expected) ->
+      check (option string)
+        (Printf.sprintf "age at %.1fs" (100. -. since))
+        expected
+        (Layout.age_text ~now:100. ~since))
+    [ (100., Some "0s")
+    ; (99.5, Some "0s")
+    ; (99., Some "1s")
+    ; (41., Some "59s")
+    ; (40., Some "1m00s")
+    ; (33., Some "1m07s")
+    ; (-100., Some "3m20s")
+    ]
+
+(* A clock that moved backwards says nothing rather than a negative age: the
+   row that shows this has no way to draw "-4s" that a reader could use. *)
+let test_a_backwards_clock_says_nothing () =
+  check (option string) "later start than now" None
+    (Layout.age_text ~now:100. ~since:104.)
+
 let () =
   run "tui_message_layout"
     [ ( "message rows"
@@ -545,6 +571,10 @@ let () =
             test_last_page_start_counts_rows_not_items
         ; test_case "last page keeps the last item reachable" `Quick
             test_last_page_start_keeps_the_last_item_reachable
+        ; test_case "age reads as seconds then minutes" `Quick
+            test_age_reads_as_seconds_then_minutes
+        ; test_case "a backwards clock says nothing" `Quick
+            test_a_backwards_clock_says_nothing
         ; test_case "history wraps by cells without byte loss" `Quick
             test_history_wraps_by_cells_without_losing_bytes
         ; test_case "history never splits grapheme clusters" `Quick

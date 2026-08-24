@@ -2396,25 +2396,39 @@ let render_keeper_message (state : state) =
     (* Input line *)
     (* This keeper's own turn first, then any other keeper's — talking here
        does not stop those, so the pane says they are going. *)
+    (* One clock read for the whole group so two rows drawn in the same frame
+       cannot report ages a tick apart. The age says how long the turn has
+       been going, which is what separates slow from stuck: a keeper turn
+       running minutes is ordinary here, and without it these rows look the
+       same at three seconds and at thirteen minutes. It changes the text of
+       a row, never how many there are, so the row budget is untouched. *)
+    let now = Unix.gettimeofday () in
+    let sending_age entry =
+      match Message_layout.age_text ~now ~since:entry.sent_at with
+      | None -> ""
+      | Some age -> " · " ^ age
+    in
     (match
        List.partition
-         (fun (request : Keeper_chat.request) ->
-           String.equal request.keeper_name keeper_name)
+         (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
          state.msg_inflight
      with
      | mine, others ->
          List.iter
-           (fun (request : Keeper_chat.request) ->
+           (fun entry ->
              box_line_styled buf cols ~style:Ansi.yellow
-               (Printf.sprintf "  (sending %s…)"
-                  (Keeper_chat.compact_request_id request.request_id)))
+               (Printf.sprintf "  (sending %s%s…)"
+                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
+                  (sending_age entry)))
            mine;
          List.iter
-           (fun (request : Keeper_chat.request) ->
+           (fun entry ->
              box_line_styled buf cols ~style:Ansi.dim
-               (Printf.sprintf "  (also sending to %s: %s)"
-                  (Keeper_chat.terminal_safe_text request.keeper_name)
-                  (Keeper_chat.compact_request_id request.request_id)))
+               (Printf.sprintf "  (also sending to %s: %s%s)"
+                  (Keeper_chat.terminal_safe_text
+                     entry.sent_request.keeper_name)
+                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
+                  (sending_age entry)))
            others);
     (if scroll > 0 then
        box_line_styled buf cols ~style:Ansi.yellow

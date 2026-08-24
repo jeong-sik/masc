@@ -25,6 +25,10 @@ exception Break
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
+(* What one wheel detent moves. Terminals report three lines per detent, so a
+   notch here is worth what a notch is worth in a pager. *)
+let wheel_notch_rows = 3
+
 let maximum_input_wait_seconds = 0.016
 let nanoseconds_per_second = 1_000_000_000.0
 
@@ -296,6 +300,62 @@ let keeper_message_page_rows state =
   let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
   max 1 (rows - chrome - keeper_message_status_rows state)
 
+(* What this pane has sent to the keeper on screen, oldest first. The arrows
+   walk it the way a shell walks its own history. That is why the wheel no
+   longer arrives as the same key: one of the two had to be wrong while they
+   shared it, and scrolling has the wheel and the page keys. *)
+let own_sent_messages (state : state) =
+  let target = Option.value ~default:"" state.msg_target_keeper_name in
+  state.msg_history
+  |> List.filter (fun entry ->
+         (match entry.me_role with
+          | Message_user label -> String.equal label "you"
+          | Message_keeper | Message_status | Message_error | Message_tool
+          | Message_thinking ->
+              false)
+         && String.equal entry.me_keeper_name target)
+  |> List.map (fun entry -> entry.me_text)
+
+let set_composer_text (state : state) text =
+  Buffer.clear state.msg_input;
+  Buffer.add_string state.msg_input text
+
+(* The draft is put aside on the first step back and handed over on the way
+   forward past the newest, so a walk through the history never costs what was
+   already typed. *)
+let recall_older (state : state) =
+  let sent = own_sent_messages state in
+  let count = List.length sent in
+  if count = 0 then ()
+  else begin
+    let at =
+      match state.msg_recall_at with
+      | None ->
+          state.msg_recall_draft <- Buffer.contents state.msg_input;
+          0
+      | Some at -> min (at + 1) (count - 1)
+    in
+    state.msg_recall_at <- Some at;
+    set_composer_text state (List.nth sent (count - 1 - at))
+  end
+
+let recall_newer (state : state) =
+  match state.msg_recall_at with
+  | None -> ()
+  | Some 0 ->
+      state.msg_recall_at <- None;
+      set_composer_text state state.msg_recall_draft
+  | Some at ->
+      let sent = own_sent_messages state in
+      let at = at - 1 in
+      state.msg_recall_at <- Some at;
+      let count = List.length sent in
+      if count > at then set_composer_text state (List.nth sent (count - 1 - at))
+
+(* Typing makes the composer the operator's again: the walk is over, so a step
+   forward must not replace what they just wrote with a draft from before it. *)
+let forget_recall (state : state) = state.msg_recall_at <- None
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) (key : string) : bool =
@@ -322,6 +382,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       (* Back to the newest row: the turn that is about to start is drawn
          there, and staying scrolled back would hide the send. *)
       state.msg_scroll <- 0;
+      forget_recall state;
       submit_message text
     end;
     true
@@ -329,22 +390,29 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     (* Ctrl-J, or Return on a terminal that still translates it. A composer
        that cannot hold two lines makes an operator send two messages for one
        thought. *)
+    forget_recall state;
     Buffer.add_char state.msg_input '\n';
     true
   | "up" ->
-    state.msg_scroll <- state.msg_scroll + 1;
-    (* Scrolling into the oldest rows is the ask for older ones. Fetching on
-       the keypress rather than on reaching an exact row means the page is
-       usually there before the reader arrives; the render clamps the position
-       either way, so an early fetch costs nothing on screen. *)
+    recall_older state;
+    true
+  | "down" ->
+    recall_newer state;
+    true
+  | "wheel-up" ->
+    (* A notch is worth more than a row. The wheel used to arrive as the arrow
+       key and moved one row with it, so reading back through a keeper turn --
+       hundreds of rows -- took hundreds of notches. Three is what a terminal
+       reports per detent, so a notch here covers what a notch covers
+       everywhere else. *)
+    state.msg_scroll <- state.msg_scroll + wheel_notch_rows;
     (match state.msg_older_cursor with
-     | Some before
-       when state.msg_older_exist && not state.msg_older_loading ->
+     | Some before when state.msg_older_exist && not state.msg_older_loading ->
          load_older ~before
      | Some _ | None -> ());
     true
-  | "down" ->
-    state.msg_scroll <- max 0 (state.msg_scroll - 1);
+  | "wheel-down" ->
+    state.msg_scroll <- max 0 (state.msg_scroll - wheel_notch_rows);
     true
   | "pageup" ->
     (* A keeper's turn is many rows, so one row per press walks back through a
@@ -359,6 +427,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.msg_scroll <- 0;
     true
   | "\127" | "\b" ->
+    forget_recall state;
     let new_content =
       Buffer.contents state.msg_input
       |> Masc_tui_message_layout.drop_last_utf8_scalar
@@ -405,6 +474,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          Buffer.add_string state.msg_input text);
       true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
+      forget_recall state;
       Buffer.add_string state.msg_input s;
       true
     end else
@@ -3554,7 +3624,7 @@ let main () =
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
             | Verification | Harness | Repositories | Connectors | Tools
             | System_logs -> ())
-       | Some "j" | Some "down" ->
+       | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Keepers Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
@@ -3651,7 +3721,7 @@ let main () =
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.system_logs_scroll
             | Keepers Keeper_message -> ())
-       | Some "k" | Some "up" ->
+       | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Keepers Keeper_list ->
                 if state.keeper_cursor > 0 then begin

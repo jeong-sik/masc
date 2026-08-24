@@ -1261,20 +1261,22 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
        | Ok other -> Alcotest.failf "expected error, got %s" other)
     cases
 
-(* A wheel report must become the same key an arrow makes, and nothing
-   else -- clicks and releases arriving on the same encoding must not leak
-   into the key stream. *)
-let test_sgr_wheel_up_is_arrow_up () =
+(* A wheel report must claim a key of its own -- not the arrow's. The wheel
+   moves further than one row per notch, and the chat composer answers the
+   arrows with its history, so a shared key made one of the two wrong. Clicks
+   and releases arriving on the same encoding must still not leak into the key
+   stream. *)
+let test_sgr_wheel_up_is_its_own_key () =
   match Tui_decode.sgr_wheel_key "<64;10;5" 'M' with
-  | Some "up" -> ()
-  | Some other -> Alcotest.failf "expected up, got %s" other
-  | None -> Alcotest.fail "wheel up should claim the up key"
+  | Some "wheel-up" -> ()
+  | Some other -> Alcotest.failf "expected wheel-up, got %s" other
+  | None -> Alcotest.fail "wheel up should claim a key"
 
-let test_sgr_wheel_down_is_arrow_down () =
+let test_sgr_wheel_down_is_its_own_key () =
   match Tui_decode.sgr_wheel_key "<65;10;5" 'M' with
-  | Some "down" -> ()
-  | Some other -> Alcotest.failf "expected down, got %s" other
-  | None -> Alcotest.fail "wheel down should claim the down key"
+  | Some "wheel-down" -> ()
+  | Some other -> Alcotest.failf "expected wheel-down, got %s" other
+  | None -> Alcotest.fail "wheel down should claim a key"
 
 let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
   let cases = [ ("<0;10;5", 'M'); ("<32;10;5", 'M'); ("<66;10;5", 'M'); ("<0;10;5", 'm') ] in
@@ -2115,10 +2117,10 @@ let () =
       ] );
     ( "sgr_mouse",
       [
-        Alcotest.test_case "wheel up is arrow up" `Quick
-          test_sgr_wheel_up_is_arrow_up;
-        Alcotest.test_case "wheel down is arrow down" `Quick
-          test_sgr_wheel_down_is_arrow_down;
+        Alcotest.test_case "wheel up claims its own key" `Quick
+          test_sgr_wheel_up_is_its_own_key;
+        Alcotest.test_case "wheel down claims its own key" `Quick
+          test_sgr_wheel_down_is_its_own_key;
         Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
           `Quick
           test_sgr_click_and_horizontal_wheel_stay_unclaimed;

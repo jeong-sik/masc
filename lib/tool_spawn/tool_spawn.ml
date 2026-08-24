@@ -218,5 +218,3 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Tool_schemas_spawn.Stop; _ } -> handle handle_stop
   | None -> None
 ;;
-
-let schemas = Tool_schemas_spawn.schemas

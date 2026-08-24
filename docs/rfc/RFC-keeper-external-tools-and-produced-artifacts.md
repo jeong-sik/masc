@@ -196,6 +196,38 @@ Execute 로 화면 캡처 → 산출물 등록(handle) → analyze_image 로 확
 
 MCP 도, Chrome 확장도 필요 없다.
 
+### 4.1 재사용할 것 (2026-08-25 확인)
+
+새로 쓸 로직은 거의 없다. 세 조각이 이미 있다.
+
+| 하는 일 | 있는 것 |
+|---|---|
+| path jail | `Keeper_tool_filesystem_runtime.resolve_read_file_target ~config ~meta ~args ~raw_path` |
+| 파일 읽기 | `Keeper_sandbox_read_runner.read_file ?turn_sandbox_factory ~config ~meta ~host_path ~max_bytes ~timeout_sec ()` |
+| 저장 | `Keeper_vision_tool.store_artifact ~dir:(vision_store_dir ~keeper_name)` — 호출자 0개 |
+
+handler 를 `keeper_tool_filesystem_runtime.ml` 안에 두면 앞의 둘을 그대로 쓴다.
+
+### 4.2 닫힌 variant 의 비용
+
+`runtime_handler` 가 closed variant 라서 도구 하나가 exhaustive match **13곳**을 건드린다.
+`Tool_analyze_image` 가 나오는 자리와 같다.
+
+```
+keeper_tool_descriptor.ml     147 (정의) · 266 (문자열) · 291 (group) · 498 (실행 모드) · 1969 (descriptor)
+keeper_tool_descriptor.mli    151 (정의)
+keeper_tool_runtime.ml         98 · 157 (둘 다 -> None) · 400 (dispatch)
+keeper_tool_call_file_change.ml 104 (writes_files -> false) · 197 (분류 unreachable arm)
+unified_tool_registry.ml      105 (-> Mod_external)
+```
+
+전부 `| Tool_masc_local_runtime_dispatch` 다음 줄이 앵커다. 스키마는
+`config/tools/<name>.toml` + `keeper_runtime_schemas_toml.ml` 한 줄 +
+`keeper_tool_runtime_schemas.ml` 의 `schemas` 목록.
+
+설계 A 의 `Tool_mcp_call` 이 variant 를 하나로 묶는 이유가 여기 있다 — 중계 도구마다
+13곳을 반복할 수는 없다.
+
 ## 5. 기각한 대안
 
 ### 5.1 Chrome 확장으로 붙기

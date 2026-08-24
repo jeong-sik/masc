@@ -18,6 +18,9 @@
   tool_task_schemas
   tool_task_schemas_toml
   workflow_rejection_payload)
+ ; tool_task_schemas_toml is an implementation detail of
+ ; tool_task_schemas (no consumer outside this library).
+ (private_modules tool_task_schemas_toml)
  (flags
   (:standard -w -4 -w +37))
  (libraries

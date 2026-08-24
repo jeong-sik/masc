@@ -1028,8 +1028,10 @@ let find_masc_schema_opt name =
 let find_cluster_schema_opt name =
   (* Keeper taskboard tools are checked before voice, misc, and public
      aggregates. Board descriptors use their typed registry directly.
-     The namespaces are expected to be disjoint; this order is not a conflict
-     resolver. Control descriptors use their dedicated typed schema projection
+     The namespaces are disjoint because every registry reached here is also
+     concatenated into [Config.raw_all_tool_schemas], whose module initialiser
+     runs [Config.validate_schemas] and raises on a repeated name. This order
+     is therefore not a conflict resolver. Control descriptors use their dedicated typed schema projection
      and do not enter this name-based lookup. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema

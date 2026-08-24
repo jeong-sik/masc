@@ -34,10 +34,13 @@ module Make (Config : Config) = struct
   let stale_after_sec () =
     Env_config_core.get_int ~default:30 Config.stale_after_env_name
 
+  (* [raw_value_opt] rather than [Sys.getenv_opt]: it falls back to the
+     boot-time config overrides, so a path declared in runtime.toml is seen
+     the way every other MASC setting is (#21972 P2-1). *)
   let configured_write_path env_names ~default =
     env_names
     |> List.find_map (fun name ->
-           Sys.getenv_opt name |> Env_config_core.trim_opt)
+           Env_config_core.raw_value_opt name |> Env_config_core.trim_opt)
     |> Option.value ~default
     |> Env_config_core.resolve_against_base_path
 

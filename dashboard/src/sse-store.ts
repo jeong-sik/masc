@@ -181,6 +181,18 @@ export function registerBoardHearthsRefresh(fn: () => void): () => void {
   }
 }
 
+// The fusion detail browser reads the board-sink posts, not the run registry,
+// and post_created carries only a 200-char preview with no meta — so the run's
+// panels and judge cannot be built from the event. Refetch instead, which is
+// what the surface's manual Refresh does (#21822).
+let _refreshFusionBoardFn: (() => void) | null = null
+export function registerFusionBoardRefresh(fn: () => void): () => void {
+  _refreshFusionBoardFn = fn
+  return () => {
+    if (_refreshFusionBoardFn === fn) _refreshFusionBoardFn = null
+  }
+}
+
 // --- Debounced scheduling ---
 
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
@@ -289,6 +301,14 @@ function scheduleTargetRefresh(
 ): void {
   if (!routeWantsRefreshTarget(route.value, target)) return
   scheduleRefresh(target, fn, delayMs)
+}
+
+function scheduleFusionBoardRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
+  if (!_refreshFusionBoardFn) return
+  if (!routeWantsRefreshTarget(route.value, 'fusion')) return
+  scheduleRefresh('fusion-board', () => {
+    _refreshFusionBoardFn?.()
+  }, delayMs)
 }
 
 function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
@@ -899,8 +919,11 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'post_created' && handleBoardPostCreated(event)) {
-    return true
+  if (event.type === 'post_created') {
+    // Before the board branch: the fusion surface needs the refetch whether or
+    // not the board could prepend, and the prepend path returns early.
+    scheduleFusionBoardRefresh()
+    if (handleBoardPostCreated(event)) return true
   }
 
   return false

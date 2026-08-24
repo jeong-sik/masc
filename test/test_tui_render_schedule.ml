@@ -288,24 +288,25 @@ let test_overview_frame_always_fills_the_terminal () =
     [ true; false ]
 
 (* A long attention list must not take the whole viewport: the backlog is the
-   other half of what this surface answers. *)
+   other half of what this surface answers. The panel is bounded, so a list of
+   eighty costs the backlog nothing. *)
 let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
   let crowded =
     Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
       ~attention_count:80 ~event_count:0 ~task_count:20 ~has_task_error:false
   in
-  check bool "tasks survive a long attention list" true (crowded.task_rows > 0);
-  check bool "attention still takes the larger share" true
-    (crowded.attention_rows > crowded.task_rows)
+  check int "the panel stops at its ceiling" 6 crowded.attention_rows;
+  check int "every task is still drawn" 20 crowded.task_rows
 
-(* Both blocks are bounded by their own item counts, so a tall terminal shows
-   everything there is and pads the rest rather than cropping at a constant. *)
+(* The task block is bounded by its item count rather than by a constant, so a
+   tall terminal shows the whole backlog and pads the rest. The panel keeps its
+   ceiling: rows past the sixth are scrolled to, not read at a glance. *)
 let test_overview_blocks_grow_to_their_item_counts () =
   let roomy =
     Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
       ~attention_count:9 ~event_count:0 ~task_count:12 ~has_task_error:false
   in
-  check int "every attention item is drawn" 9 roomy.attention_rows;
+  check int "the panel stops at its ceiling" 6 roomy.attention_rows;
   check int "every task is drawn" 12 roomy.task_rows;
   check bool "the remainder becomes filler" true (roomy.filler_rows > 0)
 

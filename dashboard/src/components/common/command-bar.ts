@@ -2,7 +2,7 @@
 //
 // MASC dashboard sec09 Phase 1 reference: fuzzy search, windowing,
 // split pane. This is the inline command bar (not the modal CommandPalette
-// which uses ninja-keys).
+// which renders the design's cmdk-* markup).
 
 import { html } from 'htm/preact'
 import { useMemo, useRef, useState } from 'preact/hooks'

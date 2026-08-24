@@ -110,6 +110,11 @@ val record_runtime_mcp_keeper_tool_trace :
 
 (** {1 [tools/call] dispatcher} *)
 
+exception Managed_agent_translation_failed of string
+(** Raised by {!handle_call_tool_eio} when a managed-agent tool name cannot be
+    translated. The protocol layer answers it with [Invalid_params]; the payload
+    is the reason to report. *)
+
 val handle_call_tool_eio :
   execute_tool_eio:
     (sw:'sw ->

@@ -1024,14 +1024,18 @@ let handle_request
                              outcome_s);
                         result)
 	                    with
-	                    | Invalid_argument msg
-		                      when String.starts_with
-		                             ~prefix:"managed agent tool translation failed:"
-		                             msg ->
+	                    | Mcp_server_eio_call_tool.Managed_agent_translation_failed
+		                        reason ->
+		                      (* The sentence the caller reads. It carried the
+		                         dispatch decision before; now it only carries
+		                         the words, so rewording it cannot change which
+		                         error code comes back. *)
 		                      failed_tool_call_error
 		                        ~tool_name:name
 		                        Mcp_error_code.Invalid_params
-	                        msg))
+	                        (Printf.sprintf
+	                           "managed agent tool translation failed: %s"
+	                           reason)))
                 in
                 with_required_auth
                   ~base_path

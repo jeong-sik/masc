@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-08-21T02:25:29Z (HEAD: 070f0c5e0a)
+Generated: 2026-08-24T14:26:14Z (HEAD: 76b114dee9)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -34,7 +34,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} | 693e4344e4bd |
+| AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} | 05b2c78ba784 |
 | AutonomousPhase.tla | AutonomousPhase | manual | 2 | 1 | clean={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} buggy={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} | 54e3dc0e6baa |
 
 ### specs/boundary (7 specs)
@@ -72,13 +72,13 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | 2f736860c52f |
-| KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | 8aeb85fd761e |
+| KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | c8a632b01ad1 |
 | KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cf9b1da37ed0 |
 | KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | d143b5beae39 |
 | KeeperHitlDeferred.tla | KeeperHitlDeferred | manual | 4 | 3 | clean={inv:Safety, prop:UnrelatedLaneKeepsProgressing, prop:ResolutionEventuallyConsumed} blocking-buggy={inv:DeferredImmediately} consume-buggy={inv:ResolutionConsumedAtMostOnce} wake-buggy={inv:ResolutionWakesOriginOnly} | b5b3c09a5b2e |
 | KeeperLastBlockerLatch.tla | KeeperLastBlockerLatch | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 853f5fe4c394 |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 3e90e9343f92 |
-| KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, inv:PausedRequiresOperator, inv:StoppedRequiresOperatorStop, inv:RestartingRequiresTypedIntent, prop:StoppedIsForever} buggy={inv:TypeOK, inv:StoppedRequiresOperatorStop} | 380b7f7ff91c |
+| KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, inv:PausedRequiresOperator, inv:StoppedRequiresOperatorStop, inv:RestartingRequiresTypedIntent, prop:StoppedIsForever} buggy={inv:TypeOK, inv:StoppedRequiresOperatorStop} | 96e14494faa0 |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | f17bf704fc3b |
 
 ### specs/keeper-switch-hierarchy (3 specs)

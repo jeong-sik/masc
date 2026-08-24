@@ -496,6 +496,46 @@ let test_readable_history_without_turns_is_still_missing () =
   check string "a keeper that never persisted a turn still fails" "fail" U.(member "status" feature |> to_string)
 ;;
 
+(* The summary used to be recovered by re-reading the status string out of the
+   payload each feature had just written, with anything unrecognised counted as
+   a failure. The status is now carried as a value, so this pins the
+   relationship that round-trip was maintaining: what the summary counts and
+   what each feature publishes are the same statuses. *)
+let test_summary_counts_agree_with_published_feature_statuses () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"live" ~last_turn_ts:(now -. hour_seconds)
+    ~autonomous_at:(iso_ago hour_seconds) ();
+  seed_keeper config ~name:"stopped" ~last_turn_ts:(now -. (72.0 *. hour_seconds)) ();
+  append_turn_exchange config "live" (now -. (25.0 *. hour_seconds));
+  append_turn_exchange config "live" now;
+  let payload = Feature_proof.json ~config ~now () in
+  let published =
+    payload
+    |> U.member "features"
+    |> U.to_list
+    |> List.map (fun feature -> U.member "status" feature |> U.to_string)
+  in
+  let count status = List.length (List.filter (String.equal status) published) in
+  let summary = U.member "summary" payload in
+  check int "feature_count counts the published features"
+    (List.length published) U.(member "feature_count" summary |> to_int);
+  check int "pass_count counts the features that published pass"
+    (count "pass") U.(member "pass_count" summary |> to_int);
+  check int "warn_count counts the features that published warn"
+    (count "warn") U.(member "warn_count" summary |> to_int);
+  check int "fail_count counts the features that published fail"
+    (count "fail") U.(member "fail_count" summary |> to_int);
+  let worst =
+    if count "fail" > 0 then "fail" else if count "warn" > 0 then "warn" else "pass"
+  in
+  check string "the report status is the worst status any feature published"
+    worst U.(member "status" payload |> to_string);
+  (* A mix, so the assertions above are not all comparing zero to zero. *)
+  check bool "the fixture produces more than one distinct feature status" true
+    (List.length (List.sort_uniq String.compare published) > 1)
+;;
+
 let () =
   run
     "dashboard_keeper_feature_proof"
@@ -540,6 +580,12 @@ let () =
             "future timestamps cannot prove a duration tier"
             `Quick
             test_persistence_duration_tiers_reject_future_turns
+        ] )
+    ; ( "summary_projection"
+      , [ test_case
+            "summary counts agree with the published feature statuses"
+            `Quick
+            test_summary_counts_agree_with_published_feature_statuses
         ] )
     ; ( "unreached_history_is_not_missing"
       , [ test_case

@@ -578,6 +578,20 @@ type state = {
   refresh_interval: float;
 }
 
+(* One reading of the state for both the send path and the footer; the order
+   and the reasoning live in [Masc_tui_send_disposition]. *)
+type send_disposition =
+  Masc_tui_keeper_chat_projection.request Masc_tui_send_disposition.t
+
+let send_disposition state : send_disposition =
+  Masc_tui_send_disposition.of_state ~prepared:state.msg_prepared
+    ~cleanup_pending:state.msg_cleanup_pending
+    ~recovery_blocked:
+      (match state.msg_recovery_error with
+       | Some (Recovery_blocked detail) -> Some detail
+       | None -> None)
+    ~inflight:state.msg_inflight ~unverified:state.msg_unverified
+
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
 let keeper_reading (state : state) (keeper : keeper) :
@@ -742,6 +756,22 @@ let create_state ~workspace ~port ~refresh_interval = {
    concatenated -- a notice the TUI wrote belongs where it happened, not after
    everything the server knows about. Ties keep the loaded row first, which is
    what [stable_sort] over [loaded @ session] gives. *)
+(* What a polled surface can say when it has no rows to draw. Three facts,
+   not one: nothing has been read yet, the read failed, or the read came back
+   with nothing. The first was drawn as the third -- "nothing waiting on a
+   verdict" on a Verification surface that had not yet asked -- so an
+   operator read an empty queue off a screen that knew no queue at all. *)
+type empty_page =
+  | Page_unread
+  | Page_failed
+  | Page_empty
+
+let empty_page_of ~snapshot ~error =
+  match (snapshot, error) with
+  | _, Some _ -> Page_failed
+  | None, None -> Page_unread
+  | Some _, None -> Page_empty
+
 let chat_rows_for (state : state) keeper_name =
   let loaded =
     match state.msg_loaded_keeper with

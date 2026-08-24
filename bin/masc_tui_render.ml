@@ -1167,7 +1167,7 @@ let render_planning_list (state : state) =
               ^ fit_width err (cols - 24)
               ^ ")" ^ Ansi.reset)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (no planning data)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
        for _ = 1 to rows - 10 do
          box_empty buf cols
        done
@@ -1377,7 +1377,7 @@ let render_schedules (state : state) =
               ^ fit_width err (cols - 24)
               ^ ")" ^ Ansi.reset)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (no schedule data)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
        for _ = 1 to rows - 10 do
          box_empty buf cols
        done
@@ -1511,7 +1511,7 @@ let render_schedules (state : state) =
    glyph per label. *)
 let keeper_status_glyph (status : Status.control_plane_status option) =
   match status with
-  | None -> (Ansi.dim, "?")
+  | None -> (Ansi.dim, "-")
   | Some Status.Cp_paused -> (Ansi.yellow, "\xe2\x97\x8b")
   | Some (Status.Cp_surface surface) -> (
       match surface with
@@ -1522,9 +1522,13 @@ let keeper_status_glyph (status : Status.control_plane_status option) =
       | Status.Surface_inactive -> (Ansi.yellow, "\xe2\x97\x90")
       | Status.Surface_offline -> (Ansi.gray, "\xc3\x97"))
 
+(* [None] is a roster that was not read, not a status the roster could not
+   name: the word says so, and it is the word the header's tally uses for
+   the same keepers, so a column of ten of them and "10 unread" above it
+   are one fact drawn twice rather than two. *)
 let keeper_status_word (status : Status.control_plane_status option) =
   match status with
-  | None -> "unknown"
+  | None -> "unread"
   | Some value -> Status.control_plane_status_to_string value
 
 (* The runtime id is [provider.model], and the provider half repeats inside the
@@ -2601,39 +2605,34 @@ let render_keeper_message (state : state) =
 
     (* Footer *)
     let enter_hint =
-      match state.msg_inflight, state.msg_inflight_kind, state.msg_unverified with
-      | Some _, Some Dispatch_claim, _ ->
-          "waiting for serialized dispatch  Enter:blocked"
-      | Some _, Some Operation_get, _ ->
-          "reconciling exact operation  Enter:blocked"
-      | Some _, Some Cleanup_delete, _ ->
-          "finishing durable cleanup  Enter:blocked"
-      | Some _, Some Chat_post, Some _ ->
-          "replaying exact request  Enter:blocked"
-      (* A turn is running and nothing durable is blocking: Enter holds the
-         line for the next one. Saying "wait" was the honest hint while the
-         send was refused; now the honest hint is what the key does. *)
-      | Some _, (Some Chat_post | None), _ | None, Some _, _ ->
-          (match Masc_tui_keeper_chat_queue.length state.msg_queued with
-           | 0 -> "Enter:queue for next turn"
-           | waiting ->
-             Printf.sprintf
-               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
-               waiting)
-      | None, None, _ ->
-      match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
-      with
-      | Some _, _, _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
-      | None, Some _, _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
-      | None, None, Some (Recovery_blocked _) ->
+      (* What the key does is read once, by [send_disposition]; the in-flight
+         kind only names what is happening while it does it. Answering both
+         here from a subset of the state is what let the footer say
+         [Enter:blocked] on a screen that also showed "queued 1". *)
+      let queue_hint () =
+        match Masc_tui_keeper_chat_queue.length state.msg_queued with
+        | 0 -> "Enter:queue for next turn"
+        | waiting ->
+            Printf.sprintf
+              "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+              waiting
+      in
+      (* What the in-flight work is stays out of the footer: the box above it
+         already names it ("polling the exact operation", "durable cleanup is
+         in progress"), and repeating it here pushed the footer past a narrow
+         terminal. *)
+      match send_disposition state with
+      | Queues_behind _ -> queue_hint ()
+      | Refused_cleanup _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
+      | Refused_prepared _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
+      | Refused_recovery_blocked _ ->
           "Ctrl-R:reload exact recovery  Enter:blocked"
-      | None, None, None ->
-          (match state.msg_unverified, target_registered with
-           | Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
-           | None, false when Option.is_some state.keepers_error ->
-               "Enter:disabled (roster unavailable)"
-           | None, false -> "Enter:disabled (Keeper unavailable)"
-           | None, true -> "Enter:send")
+      | Refused_unverified _ -> "Ctrl-R:resume exact request  Enter:blocked"
+      | Sends ->
+          if target_registered then "Enter:send"
+          else if Option.is_some state.keepers_error then
+            "Enter:disabled (roster unavailable)"
+          else "Enter:disabled (Keeper unavailable)"
     in
     let scroll_hint =
       if scroll > 0 then
@@ -2733,9 +2732,12 @@ let render_system_logs (state : state) =
   state.system_logs_scroll <- scroll;
   if total_entries = 0 then begin
     let empty =
-      match state.system_logs_error with
-      | Some _ -> "  (load failed; the count above is not a reading)"
-      | None -> "  (no entries)"
+      match
+        empty_page_of ~snapshot:state.system_logs ~error:state.system_logs_error
+      with
+      | Page_failed -> "  (load failed; the count above is not a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no entries)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -2826,9 +2828,13 @@ let render_verification (state : state) =
   state.verification_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.verification_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (nothing waiting on a verdict)"
+      match
+        empty_page_of ~snapshot:state.verification
+          ~error:state.verification_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (nothing waiting on a verdict)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -2951,9 +2957,10 @@ let render_harness (state : state) =
   state.harness_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.harness_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no verdicts recorded)"
+      match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no verdicts recorded)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3051,9 +3058,13 @@ let render_repositories (state : state) =
   state.repositories_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.repositories_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no repositories registered)"
+      match
+        empty_page_of ~snapshot:state.repositories
+          ~error:state.repositories_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no repositories registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3149,9 +3160,12 @@ let render_connectors (state : state) =
   state.connectors_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.connectors_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no connectors registered)"
+      match
+        empty_page_of ~snapshot:state.connectors ~error:state.connectors_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no connectors registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3254,9 +3268,12 @@ let render_tools (state : state) =
   state.tools_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.tools_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (no tools registered)"
+      match
+        empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no tools registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3410,9 +3427,10 @@ let render_autonomy (state : state) =
   state.autonomy_scroll <- scroll;
   if shown = 0 then begin
     let empty =
-      match state.autonomy_error with
-      | Some _ -> "  (load failed; nothing here is a reading)"
-      | None -> "  (the report named no features)"
+      match empty_page_of ~snapshot:state.autonomy ~error:state.autonomy_error with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (the report named no features)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do

@@ -152,6 +152,15 @@ let read_key ?(timeout = 0.1) reader () : string option =
                | Some ("4", '~') -> Some "end"
                | Some ("5", '~') -> Some "pageup"
                | Some ("6", '~') -> Some "pagedown"
+               (* A parameter span starting with [<] is an SGR mouse report.
+                  Wheel reports become the same keys the arrows make, so every
+                  surface's scroll binding answers the wheel; a report nothing
+                  consumes stays unclaimed rather than leaking into a key. *)
+               | Some (params, final)
+                 when String.length params > 0 && params.[0] = '<' -> (
+                   match Masc.Tui_decode.sgr_wheel_key params final with
+                   | Some key -> Some key
+                   | None -> Some "unknown-esc")
                | Some (_, _) -> Some "unknown-esc")
           | Some _ | None -> Some "esc")
       | Some byte -> (
@@ -815,18 +824,46 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
 (* Rows this session wrote that the transcript now carries. Dropped so the same
    turn is not drawn twice, once from each source.
 
-   Notices are kept: the server has no row for "the dispatch was blocked" or
-   "the recovery fence needs Ctrl-R". A transport failure is the one overlap --
-   the server records those too -- so one can show twice. Keeping a duplicate
-   error beats dropping one the server never saw. *)
-let forget_session_rows_the_transcript_holds state keeper_name =
+   Four roles go on sight: the server holds every user line, keeper line, tool
+   block and reasoning block.
+
+   Errors used to be kept on sight for the opposite reason. Most are notices
+   the server has no row for -- a blocked dispatch, a recovery fence waiting on
+   Ctrl-R -- and dropping those loses the only record of them. A failed turn is
+   the overlap the server does record, so it showed twice, which was the price
+   of not being able to tell the two apart.
+
+   The transcript can say which it is. The server persists a failed turn under
+   the operation it ran, and that operation is the id this session dispatched
+   under, so a session error row goes exactly when the transcript arrives
+   carrying one for its request. Until then it stays -- a persist the server
+   could not finish never produces that row, and the session keeps the only
+   record, which is what keeping every error row was protecting. *)
+let forget_session_rows_the_transcript_holds state keeper_name rows =
+  let failures_the_transcript_holds =
+    List.filter_map
+      (fun (row : Keeper_chat_history.row) ->
+        match row.Keeper_chat_history.kind with
+        | Keeper_chat_history.Delivery_failed { origin_request_id } ->
+            origin_request_id
+        | Keeper_chat_history.Addressed_to_keeper _
+        | Keeper_chat_history.Said_by_keeper | Keeper_chat_history.Tool_calls _
+        | Keeper_chat_history.Reasoning _ -> None)
+      rows
+  in
   state.msg_history <-
     List.filter
       (fun entry ->
         (not (String.equal entry.me_keeper_name keeper_name))
         ||
         match entry.me_role with
-        | Message_status | Message_error -> true
+        | Message_status -> true
+        | Message_error ->
+            String.equal entry.me_request_id ""
+            || not
+                 (List.exists
+                    (String.equal entry.me_request_id)
+                    failures_the_transcript_holds)
         | Message_user _ | Message_keeper | Message_tool | Message_thinking ->
             false)
       state.msg_history
@@ -838,7 +875,7 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         ( Message_user (Keeper_chat_history.addressed_label speaker surface)
         , row.text )
     | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text)
-    | Keeper_chat_history.Delivery_failed -> (Message_error, row.text)
+    | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text)
     | Keeper_chat_history.Tool_calls rows ->
         (Message_tool, String.concat "\n" rows)
     | Keeper_chat_history.Reasoning lines ->
@@ -948,31 +985,24 @@ let queue_keeper_message state ~keeper_name text =
 ;;
 
 let rec start_keeper_message ?keeper_name state ~base_path ~mailbox text =
-  match state.msg_prepared with
-  | Some request ->
+  (* The order lives in [send_disposition] so the footer reads the same state
+     the same way; see its note. *)
+  match send_disposition state with
+  | Refused_prepared request ->
       add_event state "error"
         (Printf.sprintf
            "Keeper request %s is prepared for its first serialized dispatch; use Ctrl-R to retry its recovery fence"
            request.request_id)
-  | None ->
-  match state.msg_cleanup_pending with
-  | Some request ->
+  | Refused_cleanup request ->
       add_event state "error"
         (Printf.sprintf
            "Keeper request %s is settled but its durable cleanup is incomplete; use Ctrl-R to finish cleanup"
            request.request_id)
-  | None ->
-  match state.msg_recovery_error with
-  | Some (Recovery_blocked detail) ->
+  | Refused_recovery_blocked detail ->
       add_event state "error"
         ("Cannot send while Keeper chat recovery is blocked; use Ctrl-R to reload the durable state: "
        ^ detail)
-  | None ->
-  match state.msg_inflight with
-  | Some request -> (
-      (* A turn is running. Hold the line rather than refusing it: the operator
-         pressed Enter meaning "send this next", and the turn settling is what
-         "next" is. *)
+  | Queues_behind request -> (
       match
         match keeper_name with
         | Some _ -> keeper_name
@@ -990,14 +1020,12 @@ let rec start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                    (Keeper_chat.terminal_safe_text target)
                    request.request_id
                    waiting)))
-  | None -> (
-      match state.msg_unverified with
-      | Some request ->
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
-               request.request_id)
-      | None ->
+  | Refused_unverified request ->
+      add_event state "error"
+        (Printf.sprintf
+           "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
+           request.request_id)
+  | Sends -> (
       match
         (match keeper_name with Some _ -> keeper_name | None -> state.msg_target_keeper_name)
       with
@@ -1072,31 +1100,17 @@ and launch_keeper_reconciliation state ~mailbox request =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
       in
-      match result with
-      | Ok (Keeper_chat.Operation_pending _ as pending) ->
-          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
-           | `Poll remaining ->
-               Eio.Time.sleep clock 1.5;
-               poll remaining
-           | `Stop ->
-               enqueue_async mailbox
-                 (Keeper_chat_reconciled (request, Ok pending)))
-      | Error (Keeper_chat.Http_error { status = 404; _ })
-        as not_found ->
-          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
-           | `Poll remaining ->
-               Eio.Time.sleep clock 1.5;
-               poll remaining
-           | `Stop ->
-               enqueue_async mailbox
-                 (Keeper_chat_reconciled (request, not_found)))
-      | (Ok
-          (Keeper_chat.Operation_succeeded _ | Keeper_chat.Operation_failed _
-          | Keeper_chat.Operation_cancelled)
-        | Error _) as settled ->
-          enqueue_async mailbox (Keeper_chat_reconciled (request, settled))
+      (* Every answer reaches the operator the same way; what differs is
+         whether it is worth another poll first, and that is a question about
+         the answer rather than about this loop. *)
+      match Keeper_chat_recovery.after_reconciliation_poll ~remaining result with
+      | Keeper_chat_recovery.Watch_again remaining ->
+          Eio.Time.sleep clock 1.5;
+          poll remaining
+      | Keeper_chat_recovery.Report ->
+          enqueue_async mailbox (Keeper_chat_reconciled (request, result))
     in
-    poll Keeper_chat_recovery.max_reconciliation_polls
+    poll Keeper_chat_recovery.max_absent_operation_polls
   in
   match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
   | Some sw, Some clock ->
@@ -2975,7 +2989,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               None rows;
           state.msg_older_exist <- Option.is_some state.msg_older_cursor;
           state.msg_older_error <- None;
-          forget_session_rows_the_transcript_holds state keeper_name
+          forget_session_rows_the_transcript_holds state keeper_name rows
       | Error detail ->
           (* The transcript is left as it was and the session rows stay: a
              failed load must not be the reason the pane goes blank. *)
@@ -3081,6 +3095,14 @@ let invalidate_frame_for_resize frame_presenter render_schedule =
 let request_console_write_repair render_schedule =
   Terminal_write_repair.request_repaint render_schedule
 
+(* One enable/disable pair for SGR mouse reports. Without tracking the
+   terminal keeps the wheel for its own scrollback -- which scrolls past the
+   TUI's frame on a non-alternate screen -- or turns it into arrow keys only
+   if configured to. With it, wheel reports arrive here and read_key maps
+   them to the same keys the arrows make. *)
+let mouse_tracking_enable = "\x1b[?1006;1000h"
+let mouse_tracking_disable = "\x1b[?1006;1000l"
+
 let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
     ~new_term =
   at_exit cleanup;
@@ -3118,6 +3140,9 @@ let main () =
   let resize_requested = Atomic.make false in
 
   let restore_terminal () =
+    (* No tracking-off here: suspend runs this too, and a terminal that
+       re-enters raw mode after Ctrl-Z would silently lose the wheel. The
+       off byte is written once, in [cleanup], at real process exit. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
     Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
@@ -3129,7 +3154,13 @@ let main () =
     if Atomic.compare_and_set cleanup_started false true then begin
       Console_sink.set_after_write_observer None;
       restore_terminal ();
-      print_endline "Goodbye!"
+      print_endline "Goodbye!";
+      (* Tracking off after Goodbye: a terminal left in report mode keeps
+         swallowing the wheel after this process is gone, and the farewell
+         line is the last thing a reader matches on -- a byte after it cannot
+         disturb that read. *)
+      output_string stdout mouse_tracking_disable;
+      flush stdout
     end
   in
 
@@ -3153,6 +3184,16 @@ let main () =
   if Terminal_write_repair.console_sink_writes_to_terminal () then
     Console_sink.set_after_write_observer
       (Some (fun () -> Terminal_write_repair.note ()));
+
+  (* Written here rather than at session entry, inside enter_terminal_session:
+     a byte written the moment raw mode is taken races the handshake reads a
+     harness (or terminal) performs on the very first output, and the PTY
+     regression's quit scenario reliably loses that race. Between session
+     entry and the first frame the stream is quiet, and the enable is not
+     urgent anyway -- the first wheel event always arrives after the first
+     frame. *)
+  output_string stdout mouse_tracking_enable;
+  flush stdout;
 
   (* Initial load *)
   load_from_masc_dir state base_path;

@@ -19,11 +19,6 @@ let status_to_string = function
   | Warn -> "warn"
   | Fail -> "fail"
 
-let status_rank = function
-  | Pass -> 0
-  | Warn -> 1
-  | Fail -> 2
-
 let overall_status statuses =
   if List.exists (( = ) Fail) statuses then Fail
   else if List.exists (( = ) Warn) statuses then Warn
@@ -189,17 +184,18 @@ let meta_counter_feature
     else if List.length observed = total then Pass
     else Warn
   in
-  meta_feature_json
-    ~id
-    ~label
-    ~status
-    ~summary:
-      (Printf.sprintf "%d/%d %s" (List.length observed) total summary_label)
-    ~observed_keepers:observed
-    ~missing_keepers:missing
-    ~evidence_refs
-    ~next_action
-    eligible_snapshots
+  ( status
+  , meta_feature_json
+      ~id
+      ~label
+      ~status
+      ~summary:
+        (Printf.sprintf "%d/%d %s" (List.length observed) total summary_label)
+      ~observed_keepers:observed
+      ~missing_keepers:missing
+      ~evidence_refs
+      ~next_action
+      eligible_snapshots )
 
 let runtime_liveness_feature ~now snapshots =
   meta_counter_feature snapshots
@@ -219,15 +215,15 @@ let runtime_liveness_feature ~now snapshots =
        fleet-wide autonomy."
 
 let persistent_turn_exchange_feature ~config ~now snapshots =
-  let stats =
+  (* Pair each snapshot with its own stat rather than looking the stat up by
+     name. The lookup needed a branch for "this keeper has no stat", which
+     cannot happen - the list is built from these same snapshots - and would
+     have re-read every segment from disk once per keeper per tier if it
+     ever did. *)
+  let measured =
     snapshots
     |> List.map (fun snapshot ->
-      snapshot.keeper_name, Decision.turn_span_stats ~config ~now snapshot.keeper_name)
-  in
-  let stat_for keeper_name =
-    match List.assoc_opt keeper_name stats with
-    | Some stat -> stat
-    | None -> Decision.turn_span_stats ~config ~now keeper_name
+      snapshot, Decision.turn_span_stats ~config ~now snapshot.keeper_name)
   in
   (* Three disjoint sets, not two. A keeper whose earliest turn row the head
      scan never reached has not failed to persist turns - the reader ran out
@@ -237,11 +233,8 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
   let keepers_by_reading ~required_span_hours =
     let met, not_met, undetermined =
       List.fold_left
-        (fun (met, not_met, undetermined) snapshot ->
-          match
-            Decision.persistent_turn_span_reading ~required_span_hours ~now
-              (stat_for snapshot.keeper_name)
-          with
+        (fun (met, not_met, undetermined) (snapshot, stat) ->
+          match Decision.persistent_turn_span_reading ~required_span_hours ~now stat with
           | Decision.Span_met ->
             snapshot.keeper_name :: met, not_met, undetermined
           | Decision.Span_not_met ->
@@ -249,7 +242,7 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
           | Decision.Span_undetermined ->
             met, not_met, snapshot.keeper_name :: undetermined)
         ([], [], [])
-        snapshots
+        measured
     in
     uniq_sorted met, uniq_sorted not_met, uniq_sorted undetermined
   in
@@ -268,10 +261,9 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
   in
   let status = span_status ~met:observed ~undetermined in
   let per_keeper =
-    snapshots
-    |> List.map (fun snapshot ->
-      Decision.turn_span_evidence_json ~now snapshot.keeper_name
-        (stat_for snapshot.keeper_name))
+    measured
+    |> List.map (fun (snapshot, stat) ->
+      Decision.turn_span_evidence_json ~now snapshot.keeper_name stat)
   in
   let duration_tiers =
     Decision.persistence_tiers
@@ -296,6 +288,7 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
         ; "undetermined_keepers", Json_util.json_string_list undetermined_keepers
         ])
   in
+  status,
   `Assoc [
     ("id", `String "persistent_24h_turn_exchange");
     ("label", `String "24h persistent turn exchange");
@@ -470,6 +463,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         ("decision_log", Decision.scheduled_evidence_json stat);
       ])
   in
+  status,
   `Assoc [
     ("id", `String "scheduled_proactive_autonomy");
     ("label", `String "Scheduled proactive cycles");
@@ -503,17 +497,8 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         "Fix scheduler or per-keeper blockers until every proactive-enabled keeper has meta or decision-log evidence for scheduled autonomous cycles." );
   ]
 
-let status_of_feature_json json =
-  match Safe_ops.json_string_opt "status" json with
-  | Some "pass" -> Pass
-  | Some "warn" -> Warn
-  | Some "fail" -> Fail
-  | _ -> Fail
-
 let count_status needle statuses =
-  statuses
-  |> List.filter (fun status -> status_rank status = status_rank needle)
-  |> List.length
+  statuses |> List.filter (fun status -> status = needle) |> List.length
 
 let json ~config ?window_hours ?now () =
   let now = Option.value ~default:(Unix.gettimeofday ()) now in
@@ -537,7 +522,8 @@ let json ~config ?window_hours ?now () =
       scheduled_proactive_feature ~config ?window_hours ~now snapshots;
     ]
   in
-  let statuses = List.map status_of_feature_json features in
+  let statuses = List.map fst features in
+  let feature_payloads = List.map snd features in
   let overall = overall_status statuses in
   let pass_count = count_status Pass statuses in
   let warn_count = count_status Warn statuses in
@@ -559,7 +545,7 @@ let json ~config ?window_hours ?now () =
          | Some hours -> `Float hours
          | None -> `Null));
      ]);
-    ("features", `List features);
+    ("features", `List feature_payloads);
     ("evidence_refs",
      `List [
        route_evidence "/api/v1/dashboard/execution";

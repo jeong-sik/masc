@@ -33,10 +33,45 @@ type staged_writer =
 
 let schema = "masc.tui_keeper_chat_recovery.v3"
 let filename = "tui-keeper-chat-recovery.json"
-let max_reconciliation_polls = 40
+let max_absent_operation_polls = 40
 
-let next_reconciliation_poll ~remaining =
-  if remaining > 1 then `Poll (remaining - 1) else `Stop
+type reconciliation_step =
+  | Watch_again of int
+  | Report
+
+(* The budget is for absence, not for duration.
+
+   An answer that names the operation settles the only question the fence
+   exists for -- did this dispatch create anything -- so the watch continues
+   and the absence budget is restored. Only an answer that cannot find the
+   operation spends one, and a terminal answer stops the watch outright.
+
+   One countdown used to serve both answers, which reported a healthy turn as
+   an unverified outcome sixty seconds in: a keeper turn that ran 13m34s and
+   ended in a provider rate limit answered "running" on all forty polls. An
+   unverified outcome fences the send queue for every keeper, so the operator
+   could only press Ctrl-R, which started the same sixty seconds over.
+
+   A terminal acceptance state arriving under [Operation_pending] is a shape
+   neither side writes; polling again would spin on it, so it is reported. *)
+let after_reconciliation_poll ~remaining answer =
+  match answer with
+  | Ok
+      (Masc_tui_keeper_chat_projection.Operation_pending
+        ( Masc_tui_keeper_chat_projection.Queued
+        | Masc_tui_keeper_chat_projection.Running )) ->
+    Watch_again max_absent_operation_polls
+  | Error (Masc_tui_keeper_chat_projection.Http_error { status = 404; _ }) ->
+    if remaining > 1 then Watch_again (remaining - 1) else Report
+  | Ok
+      (Masc_tui_keeper_chat_projection.Operation_pending
+        ( Masc_tui_keeper_chat_projection.Succeeded
+        | Masc_tui_keeper_chat_projection.Failed
+        | Masc_tui_keeper_chat_projection.Cancelled )
+      | Masc_tui_keeper_chat_projection.Operation_succeeded _
+      | Masc_tui_keeper_chat_projection.Operation_failed _
+      | Masc_tui_keeper_chat_projection.Operation_cancelled)
+  | Error _ -> Report
 
 let recovery_path ~base_path =
   Filename.concat (Filename.concat base_path Common.masc_dirname) filename

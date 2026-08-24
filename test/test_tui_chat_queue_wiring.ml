@@ -85,6 +85,24 @@ let test_the_row_budget_counts_the_queue () =
       n
 ;;
 
+(* The footer says what Enter does, and it has to say what Enter actually
+   does. It used to work that out from [msg_inflight_kind] while the send path
+   read the durable fences first, so a request being reconciled or cleaned up
+   drew "queued 1" and [Enter:blocked] on the same screen. Both now read
+   [send_disposition], which is where the order lives. *)
+let test_both_readers_share_one_disposition () =
+  List.iter
+    (fun (module_path, what) ->
+      let n = calls ~module_path ~callee:"send_disposition" in
+      if n < 1 then
+        failf
+          "%s must decide %s from send_disposition, not from its own reading            of the state; it is called %d time(s)"
+          module_path what n)
+    [ ("bin/masc_tui.ml", "what Enter does")
+    ; ("bin/masc_tui_render.ml", "what the footer says Enter does")
+    ]
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -95,6 +113,8 @@ let () =
             test_a_settled_turn_drains_the_queue
         ; test_case "the row budget counts the queue" `Quick
             test_the_row_budget_counts_the_queue
+        ; test_case "both readers share one disposition" `Quick
+            test_both_readers_share_one_disposition
         ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick

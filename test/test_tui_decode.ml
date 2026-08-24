@@ -1224,6 +1224,31 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
        | Ok other -> Alcotest.failf "expected error, got %s" other)
     cases
 
+(* A wheel report must become the same key an arrow makes, and nothing
+   else -- clicks and releases arriving on the same encoding must not leak
+   into the key stream. *)
+let test_sgr_wheel_up_is_arrow_up () =
+  match Tui_decode.sgr_wheel_key "<64;10;5" 'M' with
+  | Some "up" -> ()
+  | Some other -> Alcotest.failf "expected up, got %s" other
+  | None -> Alcotest.fail "wheel up should claim the up key"
+
+let test_sgr_wheel_down_is_arrow_down () =
+  match Tui_decode.sgr_wheel_key "<65;10;5" 'M' with
+  | Some "down" -> ()
+  | Some other -> Alcotest.failf "expected down, got %s" other
+  | None -> Alcotest.fail "wheel down should claim the down key"
+
+let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
+  let cases = [ ("<0;10;5", 'M'); ("<32;10;5", 'M'); ("<66;10;5", 'M'); ("<0;10;5", 'm') ] in
+  List.iter
+    (fun (params, final) ->
+       match Tui_decode.sgr_wheel_key params final with
+       | None -> ()
+       | Some other ->
+           Alcotest.failf "report %S should stay unclaimed, got %s" params other)
+    cases
+
 type parent_node = {
   node_id : string;
   parent_id : string option;
@@ -2038,6 +2063,16 @@ let () =
           test_tool_envelope_outcome_rejection_carries_message;
         Alcotest.test_case "tool envelope rejects unexpected shapes" `Quick
           test_tool_envelope_outcome_rejects_unexpected_shapes;
+      ] );
+    ( "sgr_mouse",
+      [
+        Alcotest.test_case "wheel up is arrow up" `Quick
+          test_sgr_wheel_up_is_arrow_up;
+        Alcotest.test_case "wheel down is arrow down" `Quick
+          test_sgr_wheel_down_is_arrow_down;
+        Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
+          `Quick
+          test_sgr_click_and_horizontal_wheel_stay_unclaimed;
       ] );
     ( "bounded_parent_depth",
       [

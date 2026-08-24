@@ -56,6 +56,49 @@ let consume_truncation_info ~invocation () =
     | None -> 0, None)
 ;;
 
+(** The typed disposition, keyed the same way and for the same reason.
+
+    The row this module writes is the only per-call record MASC keeps, and
+    until now the ordinary path filled its outcome from a boolean: the hook
+    receives AGENT_CORE's [tool_result], which says whether the call errored
+    and not why. [Deferred] has no representation there at all, and
+    agent_core's own error class is a different taxonomy. The value exists at
+    the masc dispatch boundary and is already handed to two other stores
+    ([Keeper_registry.record_tool_use], [Tool_registry.record_call]); this
+    carries it to the third.
+
+    Same weak key as the truncation table above, so a cancelled invocation
+    releases its pending entry rather than holding it. *)
+let pending_disposition :
+      (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
+        Invocation_table.t
+  =
+  Invocation_table.create 8
+;;
+
+let pending_disposition_mu = Stdlib.Mutex.create ()
+
+let with_pending_disposition_lock f =
+  Stdlib.Mutex.lock pending_disposition_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_disposition_mu)
+    f
+;;
+
+let set_disposition ~invocation ~disposition =
+  with_pending_disposition_lock (fun () ->
+    Invocation_table.replace pending_disposition invocation disposition)
+;;
+
+let consume_disposition ~invocation () =
+  with_pending_disposition_lock (fun () ->
+    match Invocation_table.find_opt pending_disposition invocation with
+    | Some disposition ->
+      Invocation_table.remove pending_disposition invocation;
+      Some disposition
+    | None -> None)
+;;
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 
 let create_turn_ctx_cell = Keeper_tool_call_log_context.create_cell
@@ -439,6 +482,7 @@ let log_call
       ?batch_size
       ?execution_mode
       ?typed_result
+      ?disposition
       ?composition_tool
       ?composition_run_id
       ?composition_node_id
@@ -588,7 +632,16 @@ let log_call
           @ (if artifact_refs = []
              then []
              else [ "artifact_refs", `List artifact_refs ])
-        | None -> []
+        | None ->
+          (* The ordinary path knows the disposition but not the payload, so it
+             cannot supply [typed_result] and cannot name artifact refs. Kept
+             as a separate argument rather than a synthesised result: a made-up
+             payload would put an empty [artifact_refs] on a row that simply
+             does not know. *)
+          (match disposition with
+           | Some d ->
+             [ "disposition", `String (Tool_result.string_of_disposition d) ]
+           | None -> [])
       in
       let composition_fields =
         [ "composition_tool", composition_tool

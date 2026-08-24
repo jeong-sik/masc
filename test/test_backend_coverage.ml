@@ -509,6 +509,30 @@ let test_eio_fs_list_keys_ignores_atomic_tmp_orphans () =
 (* Test Suite                                                    *)
 (* ============================================================ *)
 
+(* node_id is the owner written on a workspace lock, so two processes holding
+   the same one each read the other's lock as their own. The suffix used to be
+   a 16-bit hash of the wall clock, which repeats far sooner than it looks
+   (#26718). *)
+let test_node_id_suffix_does_not_repeat () =
+  let count = 4096 in
+  let ids = List.init count (fun _ -> Backend_types.generate_node_id ()) in
+  let unique = List.sort_uniq String.compare ids in
+  check int "generated node ids are all distinct" count (List.length unique);
+  match ids with
+  | [] -> check bool "at least one id was generated" true false
+  | id :: _ ->
+    (* hostname-pid-<suffix>: the suffix is the last dash-separated field. *)
+    let suffix =
+      match List.rev (String.split_on_char '-' id) with
+      | last :: _ -> last
+      | [] -> ""
+    in
+    check int
+      (Printf.sprintf "%S carries a full-width suffix" id)
+      (2 * Backend_types.node_id_suffix_bytes)
+      (String.length suffix)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -560,6 +584,10 @@ let () =
       test_case "invalid json" `Quick test_lock_info_invalid_json;
       test_case "blank json" `Quick test_lock_info_blank_json;
       test_case "missing field" `Quick test_lock_info_missing_field;
+    ];
+    "node_identity", [
+      test_case "node id suffix does not repeat" `Quick
+        test_node_id_suffix_does_not_repeat;
     ];
     "eio_fs_edge", [
       test_case "unicode keys" `Quick test_eio_fs_unicode_keys;

@@ -41,11 +41,23 @@ type config = {
 
 let pubsub_max_messages = 1000
 
+(* [node_id] is the owner recorded on a workspace lock, so two live processes
+   holding the same one each read the other's lock as their own. Hostname and
+   pid already separate concurrent processes; the suffix is what separates a
+   run from an earlier one that reused its pid.
+
+   It used to be [Hashtbl.hash (gettimeofday ())] masked to 16 bits (#26718).
+   A hash of the clock is only as distinct as the clock, and 16 bits is a
+   birthday collision every few hundred draws. This is 64 bits from the entropy
+   source the rest of the tree uses. Nothing parses the id — it is an opaque
+   owner string and a health-check key suffix — so the width is free. *)
+let node_id_suffix_bytes = 8
+
 let generate_node_id () =
   let hostname = try Unix.gethostname () with Unix.Unix_error _ -> "unknown" in
   let pid = Unix.getpid () in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF in
-  Printf.sprintf "%s-%d-%04x" hostname pid hash
+  Printf.sprintf "%s-%d-%s" hostname pid (Random_id.hex ~bytes:node_id_suffix_bytes)
+;;
 
 let default_config () = {
   base_path = Common.masc_dirname;

@@ -88,6 +88,44 @@ let test_the_row_budget_counts_the_queue () =
       n
 ;;
 
+(* The other half of the budget check above. Counting rows nothing draws is
+   the same defect as drawing rows nothing counts, and it is the one that
+   actually shipped: #29818 rewrote the in-flight block and took the queue
+   rows out with it, leaving the count. Both halves are asserted so neither
+   side can move alone. *)
+let test_the_pane_draws_the_queue_it_counts () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"Masc_tui_keeper_chat_queue.waiting"
+  in
+  if n < 1 then
+    failf
+      "render_keeper_message must draw the waiting lines the row budget \
+       reserves for it; Masc_tui_keeper_chat_queue.waiting is called %d \
+       time(s)"
+      n
+;;
+
+(* A line waiting for the next turn is the newest thing the operator typed.
+   The arrows walked [msg_history], which is only written on dispatch, so the
+   walk stepped straight over it: the queued line could be neither read back
+   nor pulled into the composer. *)
+let test_the_arrow_walk_includes_the_queue () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"own_typed_messages"
+      ~callee:"Chat_queue.waiting"
+  in
+  if n < 1 then
+    failf
+      "own_typed_messages must offer the waiting lines to the arrows; \
+       Chat_queue.waiting is called %d time(s)"
+      n
+;;
+
 (* The footer says what Enter does, and it has to say what Enter actually
    does. It used to work that out from [msg_inflight_kind] while the send path
    read the durable fences first, so a request being reconciled or cleaned up
@@ -148,6 +186,10 @@ let () =
             test_a_settled_turn_drains_the_queue
         ; test_case "the row budget counts the queue" `Quick
             test_the_row_budget_counts_the_queue
+        ; test_case "the pane draws the queue it counts" `Quick
+            test_the_pane_draws_the_queue_it_counts
+        ; test_case "the arrow walk includes the queue" `Quick
+            test_the_arrow_walk_includes_the_queue
         ; test_case "both readers share one disposition" `Quick
             test_both_readers_share_one_disposition
         ; test_case "the calls table says what came back" `Quick

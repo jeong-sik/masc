@@ -96,9 +96,11 @@ class GatedHttpResponse:
         response: HttpResponse,
         *,
         subsequent_response: HttpResponse | None = None,
+        hold_seconds: float = 5.0,
     ) -> None:
         self.response = response
         self.subsequent_response = subsequent_response
+        self.hold_seconds = hold_seconds
         self.requested = threading.Event()
         self.release = threading.Event()
         self.completed = threading.Event()
@@ -113,7 +115,7 @@ class GatedHttpResponse:
             return self.subsequent_response
         self.requested.set()
         try:
-            if not self.release.wait(timeout=5.0):
+            if not self.release.wait(timeout=self.hold_seconds):
                 return 504, {"error": "fixture response gate timed out"}
             return self.response
         finally:
@@ -3014,6 +3016,141 @@ def wait_for_http_request(
         select.select([master_fd], [], [], min(0.05, remaining))
 
 
+CURSOR_ROW_RE = re.compile(rb"\x1b\[(\d+);1H")
+
+
+def frame_row_of(frame: bytes, needle: bytes) -> int:
+    """Which terminal row the given text was drawn on.
+
+    The pane redraws only the rows that changed, addressing each one
+    absolutely, so a frame is a set of (row, text) pairs rather than a picture
+    -- reading a row number out of it is reading what the pane decided, not
+    inferring it."""
+    offset = frame.find(needle)
+    if offset < 0:
+        raise AssertionError(f"frame does not contain {needle!r}: {frame!r}")
+    positions = [
+        match for match in CURSOR_ROW_RE.finditer(frame) if match.start() < offset
+    ]
+    if not positions:
+        raise AssertionError(f"no row address before {needle!r}: {frame!r}")
+    return int(positions[-1].group(1))
+
+
+def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    # The turn has to still be running while the scenario types the lines that
+    # queue behind it, so the fixture holds the answer rather than sending one.
+    gate = GatedHttpResponse(
+        (503, {"error": "released after the queue was read"}),
+        hold_seconds=30.0,
+    )
+    return {"/api/v1/keepers/chat/stream": gate}, gate
+
+
+def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
+    """A line typed during a turn is shown, not just counted, and the arrows
+    walk back to it.
+
+    #29818 rewrote the in-flight rows and took the queue rows with them,
+    leaving the row budget that reserves them behind. The count in the footer
+    kept saying "2 waiting" over a pane that had lost two rows of conversation
+    and showed neither line."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        send_and_wait(
+            process, master_fd, output, b"first-line", composer_showing(b"first-line")
+        )
+        # The turn has to be running before the next Enter can queue behind
+        # it, and the pane says so itself. Waiting on the fixture's own event
+        # instead would stop pumping the terminal, and a TUI whose output
+        # nobody reads blocks before it ever posts.
+        sending = send_and_wait(process, master_fd, output, b"\r", b"(sending ")
+        footer_while_sending = frame_row_of(sending, b"  Enter:")
+
+        send_and_wait(
+            process, master_fd, output, b"queued-one", composer_showing(b"queued-one")
+        )
+        first_queued = send_and_wait(process, master_fd, output, b"\r", b"queued 1")
+        send_and_wait(
+            process, master_fd, output, b"queued-two", composer_showing(b"queued-two")
+        )
+        second_queued = send_and_wait(process, master_fd, output, b"\r", b"queued 2")
+
+        frame = frame_containing(second_queued, b"queued 2")
+        plain = CSI_RE.sub(b"", frame)
+        for expected in (b"queued 1: queued-one", b"queued 2: queued-two"):
+            if expected not in plain:
+                raise AssertionError(
+                    f"the pane counted a waiting line it did not draw; "
+                    f"missing {expected!r}: {plain!r}"
+                )
+        if b"Enter:queue (2 waiting)" not in plain:
+            raise AssertionError(f"the footer lost its count: {plain!r}")
+
+        # Every variable row -- sending, queued, errors -- comes out of the
+        # history above it, so the pane ends on the same terminal row whatever
+        # it is saying. When rows are reserved and not drawn, the pane comes
+        # out short and everything below walks up the screen: one row per
+        # waiting line, which is exactly what an operator sees.
+        footer_with_queue = frame_row_of(second_queued, b"  Enter:")
+        if footer_with_queue != footer_while_sending:
+            raise AssertionError(
+                "the pane lost rows to the queue: the footer was on row "
+                f"{footer_while_sending} while sending and on row "
+                f"{footer_with_queue} with two lines waiting"
+            )
+        del first_queued
+
+        # The newest thing the operator typed is the first thing the arrows
+        # hand back, whether or not it has been dispatched.
+        send_and_wait(
+            process, master_fd, output, b"\x1b[A", composer_showing(b"queued-two")
+        )
+        send_and_wait(
+            process, master_fd, output, b"\x1b[A", composer_showing(b"queued-one")
+        )
+
+        # Let the turn settle and the queue drain into it. Until it does, Esc
+        # means "interrupt the turn" and q is just a letter in the composer.
+        send_and_wait(process, master_fd, output, b"\x15", b"> ")
+        gate.release.set()
+        read_available(master_fd, output)
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Enter:send",
+            start=0,
+            timeout=10.0,
+        )
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def utf8_message_interaction(requests: HttpRequests) -> Interaction:
     expected_text = "Aé한🙂"
     expected_bytes = expected_text.encode()
@@ -4727,6 +4864,13 @@ def run_keyboard_regression(executable: str) -> None:
         runtime_http_fixtures()
     )
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    chat_queue_fixtures, chat_queue_gate = chat_queue_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Keeper chat queue is drawn and walked",
+        interact=chat_queue_interaction(chat_queue_gate),
+        http_fixtures=chat_queue_fixtures,
+    )
     run_terminal_scenario(
         executable,
         description="UTF-8 message input",

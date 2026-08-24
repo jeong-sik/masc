@@ -8,6 +8,7 @@ type auth_change =
 type token_lifetime =
   | With_expiry
   | Long_lived
+  | Expires_in_hours of int
 
 type t = {
   base_path : string;
@@ -79,6 +80,9 @@ let ensure_required_bearer_auth ~base_path ~agent_name ~role =
 let create_token_for_lifetime = function
   | With_expiry -> Auth.create_token
   | Long_lived -> Auth.create_token_without_expiry
+  | Expires_in_hours hours ->
+      fun config ~agent_name ~role ->
+        Auth.create_token_expiring_in config ~agent_name ~role ~hours
 
 let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
     ~token_lifetime () =

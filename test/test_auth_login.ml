@@ -146,6 +146,67 @@ let test_login_long_lived_passes_env_var_through () =
          |> Yojson.Safe.Util.member "token_env_var"
          |> Yojson.Safe.Util.to_string)
 
+(* Expires_in_hours path: the caller names the window and the credential
+   carries it. The workspace default is a day, so a credential that outlives a
+   day is proof the caller's number won rather than the config's.
+
+   The bound is checked by bracketing rather than parsing: rfc3339 UTC strings
+   are fixed-width and zero-padded, so string order is time order, and a
+   two-day bracket around the target cannot flake on clock skew or on the test
+   running across a midnight. *)
+let test_login_expires_in_hours_outlives_the_config_window () =
+  with_temp_dir "auth-login-named-window" @@ fun base_path ->
+  let hours = 24 * 30 in
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"month-long-client" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours hours) ()
+  with
+  | Error err ->
+      failf "named-window login mint failed: %s"
+        (Masc_domain.masc_error_to_string err)
+  | Ok report -> (
+      match
+        Auth.find_credential_by_token base_path ~token:report.bearer_token
+      with
+      | Error err ->
+          failf "minted named-window token did not verify: %s"
+            (Masc_domain.masc_error_to_string err)
+      | Ok cred -> (
+          match cred.expires_at with
+          | None ->
+              fail "a named window must still expire; this one never does"
+          | Some expires_at ->
+              let day = 24. *. 3600. in
+              let at offset_days =
+                Masc_domain.iso8601_of_unix_seconds
+                  (Unix.gettimeofday () +. (offset_days *. day))
+              in
+              check bool "later than twenty-nine days out" true
+                (String.compare expires_at (at 29.) > 0);
+              check bool "sooner than thirty-one days out" true
+                (String.compare expires_at (at 31.) < 0)))
+
+(* A window the auth config could never hold comes back as an error. The config
+   path answers the same question by raising, because a config that got past
+   decoding cannot be out of range; a number a caller computed can be, and the
+   caller is the one who can report it. *)
+let test_login_rejects_a_window_outside_the_bound () =
+  with_temp_dir "auth-login-impossible-window" @@ fun base_path ->
+  let mint hours =
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"impossible-window" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours hours) ()
+  in
+  check bool "zero hours is not a window" true (Result.is_error (mint 0));
+  check bool "a negative window is not a window" true
+    (Result.is_error (mint (-1)));
+  check bool "beyond a year is not a window" true
+    (Result.is_error (mint 8_761));
+  check bool "a year exactly still is" true (Result.is_ok (mint 8_760))
+
 let test_login_url_uses_uri_components () =
   with_temp_dir "auth-login-uri" @@ fun base_path ->
   match
@@ -197,6 +258,10 @@ let () =
             test_login_with_expiry_uses_caller_env_var;
           test_case "long-lived honors caller env var + no expires_at"
             `Quick test_login_long_lived_passes_env_var_through;
+          test_case "a named window outlives the config window" `Quick
+            test_login_expires_in_hours_outlives_the_config_window;
+          test_case "a window outside the bound is refused, not raised" `Quick
+            test_login_rejects_a_window_outside_the_bound;
           test_case "URL uses URI components" `Quick
             test_login_url_uses_uri_components;
           test_case "persisted token round-trips" `Quick

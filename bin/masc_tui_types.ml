@@ -225,6 +225,35 @@ type workspace_health =
   | Workspace_health_ok
   | Workspace_health_unknown
 
+(** What the runtime event feed ([GET /mcp?sse_kind=observer]) is doing.
+    The feed is opened once the server has answered a refresh and reopened
+    on the refresh cadence after it closes, so an operator reads the same
+    row for "no server yet" and "the stream dropped" -- with the reason. *)
+type observer_status =
+  | Observer_off  (** not opened: no server has answered yet *)
+  | Observer_opening  (** initialize and subscribe in flight *)
+  | Observer_live of {
+      session_id : string;
+      since : float;
+      events : int;  (** frames received on this stream *)
+    }
+  | Observer_closed of {
+      reason : string;
+      at : float;
+      events : int;  (** frames the stream delivered before it closed *)
+    }
+
+(** One event off the feed, kept for the Acting surface. *)
+type acting_entry = {
+  ae_at : float;  (** when the TUI received it *)
+  ae_event : Masc_tui_observer.event;
+}
+
+(* How many feed events the TUI keeps. On the live runtime the feed ran at
+   about four events a second, so this is a few minutes of scrollback; what
+   falls off the end is counted in [acting_dropped], not lost in silence. *)
+let acting_retained_entries = 1000
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
@@ -477,6 +506,15 @@ type state = {
   mutable autonomy: Tui_decode.autonomy_snapshot option;
   mutable autonomy_error: string option;
   mutable autonomy_scroll: int;
+  mutable observer: observer_status;
+  mutable mcp_session: string option;
+      (** The MCP session the server issued, kept across streams: the server
+          holds it after a stream closes, so reopening the feed and calling
+          tools reuse it rather than minting one per attempt. Cleared when
+          the server refuses it. *)
+  mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
+  mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
+  mutable acting_undecodable: int;  (** frames the feed reader could not read *)
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -651,6 +689,11 @@ let create_state ~workspace ~port ~refresh_interval = {
   autonomy = None;
   autonomy_error = None;
   autonomy_scroll = 0;
+  observer = Observer_off;
+  mcp_session = None;
+  acting = [];
+  acting_dropped = 0;
+  acting_undecodable = 0;
   verification = None;
   verification_error = None;
   verification_scroll = 0;

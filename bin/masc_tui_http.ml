@@ -9,6 +9,8 @@ let keeper_chat_timeout_sec = 180.0
    two ways of reading the same turn, not two endpoints, and a contract test
    pins that this literal appears once so they cannot drift apart. *)
 let keeper_chat_stream_path = "/api/v1/keepers/chat/stream"
+let mcp_path = "/mcp"
+let observer_stream_path = "/mcp?sse_kind=observer"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 
@@ -177,6 +179,56 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
         response.Masc_http_client.Pool.body
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
+
+(** Open the MCP session the observer feed is registered under.
+
+    The transport registers an SSE observer only for a session it has seen
+    [initialize]; the id of the new session comes back in the
+    [Mcp-Session-Id] response header. *)
+let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
+    : (string, string) result =
+  let url = url_of ~host ~port ~path:mcp_path in
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream") :: auth_headers ())
+  in
+  let body = Masc_tui_observer.initialize_request_body ~client_version in
+  match
+    Masc_http_client.post_response_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers ~body ()
+  with
+  | Error detail -> Error (report_err "MCP initialize failed" detail)
+  | Ok { Masc_http_client.status; body; _ }
+    when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "MCP initialize returned %d: %s" status body)
+  | Ok { Masc_http_client.headers; _ } ->
+      Masc_tui_observer.session_id_of_headers headers
+
+(** Read the runtime's event feed until it ends.
+
+    Blocks on the calling fiber for the life of the stream and hands every
+    body chunk to [on_chunk] as it arrives. The silence bound is the one
+    the keeper chat stream uses: a feed from a runtime with keepers turning
+    that says nothing for that long has gone quiet, and the caller reopens
+    it on its own schedule. [Ok ()] is the server closing the stream; a
+    refusal and a transport failure both come back as [Error]. *)
+let observe_runtime_events ~clock ~(host : string) ~(port : int)
+    ~(session_id : string) ~(on_chunk : string -> unit) : (unit, string) result
+    =
+  let url = url_of ~host ~port ~path:observer_stream_path in
+  let headers =
+    ("Accept", "text/event-stream")
+    :: ("Mcp-Session-Id", sanitize_header_value session_id)
+    :: auth_headers ()
+  in
+  match
+    Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
+      ~url ~headers ~on_chunk ()
+  with
+  | Error detail -> Error (report_err "observer stream failed" detail)
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      Error (Printf.sprintf "observer stream refused with %d: %s" status body)
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
 (** Fetch a keeper's durable chat transcript.
 

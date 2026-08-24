@@ -2647,6 +2647,11 @@
  (libraries alcotest fmt masc_tui_keeper_chat_live yojson))
 
 (test
+ (name test_tui_observer)
+ (modules test_tui_observer)
+ (libraries alcotest masc_tui_observer yojson))
+
+(test
  (name test_tui_keeper_chat_projection)
  (modules test_tui_keeper_chat_projection)
  (libraries

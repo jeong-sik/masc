@@ -2713,6 +2713,14 @@ let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
 
 (** Main loop *)
 let main () =
+  (* The provider layer reports through [Llm_provider.Diag], whose default sink
+     writes to stderr -- which here is the terminal this draws on. One INFO line
+     about the embedded model catalog lands between two frames and the screen is
+     no longer what the frame presenter believes it wrote. The server routes
+     these into the structured log at boot; this surface has the same terminal
+     to protect, so it routes them the same way and before anything can ask the
+     catalog a question. *)
+  Provider_diag_log_sink.install ();
   let (base_path, workspace, port, refresh) = parse_args () in
   require_interactive_terminal ();
   (* The console mirror writes every record to stderr, and stderr is this

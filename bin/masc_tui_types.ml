@@ -581,18 +581,9 @@ let inflight_for_keeper state keeper_name =
     state.msg_inflight
 ;;
 
-(* [prepared], [cleanup_pending], [recovery_blocked] and [unverified] were the
-   durable chat fence's states. The fence is gone — the server refuses a second
-   submission of the same request id, so the client does not carry its own —
-   and with it those four are always absent. Passed as [None] rather than
-   removed from the vocabulary: this module's ordering contract is what makes
-   the footer and the send path agree, and narrowing it is a separate change
-   from removing the states it ranked. *)
 let send_disposition state ~keeper_name : send_disposition =
-  Masc_tui_send_disposition.of_state ~prepared:None ~cleanup_pending:None
-    ~recovery_blocked:None
+  Masc_tui_send_disposition.of_state
     ~inflight:(inflight_for_keeper state keeper_name)
-    ~unverified:None
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)

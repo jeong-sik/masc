@@ -275,6 +275,14 @@ type verification_snapshot = {
   vs_total : int;  (** Requests the server holds, not the number returned. *)
 }
 
+type keeper_phase
+(** A validated Keeper lifecycle phase from the live roster. The underlying
+    state-machine type stays behind this decoder boundary so TUI executables do
+    not need a second dependency on the Keeper runtime library. *)
+
+val keeper_phase_of_string : string -> keeper_phase option
+val keeper_phase_to_string : keeper_phase -> string
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
@@ -282,7 +290,7 @@ type keeper_runtime = {
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
-  kr_phase : string;
+  kr_phase : keeper_phase;
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.
@@ -295,8 +303,8 @@ type keeper_runtime = {
 val decode_keeper_runtime_list :
   Yojson.Safe.t -> (keeper_runtime list * bool * int, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
-    [(rows, truncated, total)]. A row whose [status] is outside the surface
-    vocabulary fails the whole reading rather than defaulting, so producer
+    [(rows, truncated, total)]. A row whose [status] or lifecycle [phase] is
+    outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph. *)
 
 type fleet_safety = {

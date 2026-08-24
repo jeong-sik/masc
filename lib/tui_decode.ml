@@ -42,6 +42,11 @@ type keeper = {
    that wants the published control-plane status composes the two. Parsing the
    status into the closed variant here means a producer that grows a seventh
    label is a rejected row, not a row that silently reads as something else. *)
+type keeper_phase = Keeper_state_machine.phase
+
+let keeper_phase_of_string = Keeper_state_machine.phase_of_string
+let keeper_phase_to_string = Keeper_state_machine.phase_to_string
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
@@ -49,7 +54,7 @@ type keeper_runtime = {
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
-  kr_phase : string;
+  kr_phase : keeper_phase;
 }
 
 type goal_proof =
@@ -1493,7 +1498,15 @@ let decode_keeper_runtime json =
   let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
   let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
   let* kr_runtime_id = required_string_field json "runtime_id" in
-  let* kr_phase = required_string_field json "phase" in
+  let* raw_phase = required_string_field json "phase" in
+  let* kr_phase =
+    match keeper_phase_of_string raw_phase with
+    | Some phase -> Ok phase
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown lifecycle phase %S" kr_name
+             raw_phase)
+  in
   Ok
     { kr_name
     ; kr_status

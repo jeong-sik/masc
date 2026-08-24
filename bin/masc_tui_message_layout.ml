@@ -312,6 +312,19 @@ let chat_input_prompt_cells = display_width chat_input_prompt_prefix
    space after it before any content starts. *)
 let chat_input_box_cells = 2
 
+let scroll_hint ~scrolled_back ~older_exist =
+  if scrolled_back <= 0 then "up:scroll back"
+  else if older_exist then
+    Printf.sprintf "up/down:scroll  Ctrl-E:newest  (%d back)" scrolled_back
+  else
+    (* At the oldest row with nothing more to fetch that is the more useful
+       fact than the distance: an operator pressing up against a pane that will
+       not move should know it is the start of the conversation rather than a
+       stuck key, and at the start the distance says what "start" already
+       says. Saying both is also what would have made this hint wider than the
+       one it replaced. *)
+    "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in
   (* Three things sit left of the caret: the box, the prompt, and what was

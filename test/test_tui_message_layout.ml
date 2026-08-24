@@ -89,13 +89,16 @@ let test_terminal_cell_width_and_fit () =
      of each part rather than quoted whole. The fixture used to be a short
      blocked hint and stopped being the widest when the queue hint arrived,
      without anything going red: this check passes on any string over the
-     budget, so a stale fixture stays green while covering less than it says. *)
+     budget, so a stale fixture stays green while covering less than it says.
+
+     The scrolling part is taken from the function the pane calls rather than
+     quoted, so that one cannot go stale the same way. *)
   let longest_footer =
     String.concat "  "
       [ "\x1B[2m"
       ; "Enter:queue (99 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
       ; "Ctrl-J:newline"
-      ; "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+      ; Layout.scroll_hint ~scrolled_back:9999 ~older_exist:false
       ; "Esc:interrupt turn"
       ; "Ctrl-U:clear\x1B[0m"
       ]
@@ -107,6 +110,30 @@ let test_terminal_cell_width_and_fit () =
         (Printf.sprintf "%d-column footer avoids autowrap" terminal_cols)
         (terminal_cols - 1) (Layout.display_width fitted))
     [ 11; 20; 40 ]
+
+(* The count the composer's status row used to carry. That row was drawn from
+   the clamped scroll position and counted from the unclamped one, so an [up]
+   press on a conversation that already fits left the pane a row short: the
+   budget reserved a row the pane did not draw. The count lives in the footer
+   now, which is drawn unconditionally, so nothing about the pane's height
+   turns on it. *)
+let test_scroll_hint_says_how_far_back () =
+  let hint ?(older_exist = true) scrolled_back =
+    Layout.scroll_hint ~scrolled_back ~older_exist
+  in
+  check string "an unscrolled pane offers the key" "up:scroll back" (hint 0);
+  check string "a clamped position is not scrolled" "up:scroll back" (hint (-1));
+  check string "a scrolled pane says how far back"
+    "up/down:scroll  Ctrl-E:newest  (3 back)" (hint 3);
+  check string "at the start, that is said instead of the distance"
+    "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+    (hint ~older_exist:false 3);
+  (* The footer was narrowed on purpose in #29946. Carrying the count must not
+     spend that back, so the widest hint stays the width it already was. *)
+  check bool "the widest hint is no wider than before the count moved here" true
+    (Layout.display_width (hint ~older_exist:false 9999)
+     <= String.length "up/down:scroll  Ctrl-E:newest  (start of conversation)")
+;;
 
 let test_utf8_scalar_input_contract () =
   List.iter
@@ -559,6 +586,8 @@ let () =
             test_keeps_newest_metadata_and_bytes
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
+        ; test_case "the scroll hint says how far back" `Quick
+            test_scroll_hint_says_how_far_back
         ; test_case "UTF-8 scalar input contract" `Quick
             test_utf8_scalar_input_contract
         ; test_case "backspace removes one UTF-8 scalar" `Quick

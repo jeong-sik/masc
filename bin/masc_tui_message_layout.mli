@@ -51,6 +51,16 @@ val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading [~] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
+val scroll_hint : scrolled_back:int -> older_exist:bool -> string
+(** The footer's scrolling hint: which keys move the pane, how far back it
+    sits, and whether anything older is left to fetch.
+
+    The count used to be a row of its own above the composer. That row was
+    drawn from the clamped position and counted from the unclamped one, so the
+    pane came out a row short whenever they disagreed -- an [up] press on a
+    conversation that already fits does it. The count says the same thing here
+    without a row whose presence the pane's own height depends on. *)
+
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
     immediately before the right border. Measured from the prefix the pane

@@ -98,6 +98,28 @@ let test_the_message_says_where_to_look () =
         [ kept.Spill.file_name; "working directory" ]
 ;;
 
+(* The placeholder is what marks the spot. Text around it is the operator's
+   own writing and has to survive untouched. *)
+let test_substitution_keeps_what_surrounds_it () =
+  match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
+  | None -> failf "did not spill"
+  | Some kept ->
+      let draft = "before " ^ Spill.draft_line kept ^ " after" in
+      check (option string) "only the placeholder moves"
+        (Some "before REPLACED after")
+        (Spill.substituted kept ~replacement:"REPLACED" draft)
+;;
+
+(* An operator who deleted the line meant to drop the paste. Putting it back
+   somewhere of the function's own choosing would send text they removed. *)
+let test_a_deleted_placeholder_substitutes_nothing () =
+  match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
+  | None -> failf "did not spill"
+  | Some kept ->
+      check (option string) "nothing to put it into" None
+        (Spill.substituted kept ~replacement:"REPLACED" "no placeholder here")
+;;
+
 let () =
   run
     "tui_paste_spill"
@@ -116,6 +138,10 @@ let () =
             test_the_draft_line_is_one_line
         ; test_case "the message says where to look" `Quick
             test_the_message_says_where_to_look
+        ; test_case "substitution keeps what surrounds it" `Quick
+            test_substitution_keeps_what_surrounds_it
+        ; test_case "a deleted placeholder substitutes nothing" `Quick
+            test_a_deleted_placeholder_substitutes_nothing
         ] )
     ]
 ;;

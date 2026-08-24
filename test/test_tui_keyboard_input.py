@@ -3338,6 +3338,89 @@ def paste_spill_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def seed_playground_workspace(base_path: str) -> None:
+    """Give alpha the directory a local keeper reads its files from.
+
+    A keeper reads paths relative to its own sandbox root. For a local
+    keeper that is .masc/playground/<name>/; a Docker one has a `docker`
+    directory in the middle. Declaring the profile here is what makes this
+    scenario about the first."""
+    Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
+    Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
+        '[keeper]\nsandbox_profile = "local"\n', encoding="utf-8"
+    )
+    Path(base_path, ".masc", "playground", "alpha").mkdir(parents=True, exist_ok=True)
+
+
+def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
+    """A spilled paste is written where the keeper can read it, and the
+    message names the file instead of carrying the text."""
+
+    pasted = "\r".join(f"line {index}" for index in range(400))
+    expected_file = "\n".join(f"line {index}" for index in range(400))
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        read_available(master_fd, output)
+        start = len(output)
+        write_all(master_fd, output, PASTE_START + pasted.encode() + PASTE_END)
+        wait_for_output(process, master_fd, output, b"[pasted ", start=start, timeout=10.0)
+
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body).get("message") or ""
+
+        playground = Path(base_path, ".masc", "playground", "alpha")
+        written = sorted(playground.glob("pasted-*.txt"))
+        if len(written) != 1:
+            raise AssertionError(
+                f"expected one file in the keeper's directory, found {written!r}"
+            )
+        if written[0].read_text(encoding="utf-8") != expected_file:
+            raise AssertionError("the file is not what was pasted")
+
+        # The message points at the file rather than carrying the text: that
+        # is the whole reason for writing one.
+        if written[0].name not in message:
+            raise AssertionError(f"the message does not name the file: {message!r}")
+        if "line 399" in message:
+            raise AssertionError(
+                f"the message carried the text as well as the file: {message[:120]!r}"
+            )
+
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
@@ -5171,6 +5254,20 @@ def run_keyboard_regression(executable: str) -> None:
         interact=image_view_interaction(),
         prepare_workspace=seed_image_workspace,
         preload_input=GRAPHICS_SUPPORTED_REPLY,
+    )
+    to_file_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="A spilled paste is written where the keeper reads",
+        interact=paste_to_file_interaction(to_file_requests),
+        http_fixtures={
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after the spill-to-file request capture"},
+            )
+        },
+        http_requests=to_file_requests,
+        prepare_workspace=seed_playground_workspace,
     )
     spill_requests: HttpRequests = []
     run_terminal_scenario(

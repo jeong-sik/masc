@@ -2982,6 +2982,7 @@
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
 (include stanzas/test_tui_paste_spill.inc)
+(include stanzas/test_keeper_sandbox_root_by_profile.inc)
 
 (test
  (name test_code_address)

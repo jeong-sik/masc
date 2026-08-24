@@ -1315,6 +1315,26 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
 ;;
 
+(* A failed turn used to be drawn twice: the server records it in the
+   transcript, the pane records it in the session, and the filter that drops
+   session rows the transcript holds could only see the role. Every error row
+   was kept, because most of them are notices the server has no row for and
+   dropping those loses the only record.
+
+   The transcript now says which is which -- a persisted failure carries the
+   operation it ran under, which is the id the session dispatched with -- so
+   the filter reads the rows rather than the role alone. A body that stopped
+   gathering ids from the transcript would be back to keeping every error row
+   and drawing the failure twice. *)
+let test_the_session_filter_reads_the_transcript () =
+  check bool "the row filter gathers failure ids from the transcript" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"forget_session_rows_the_transcript_holds"
+       ~callee:"List.filter_map"
+     >= 1)
+;;
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -1367,6 +1387,10 @@ let () =
           "renderers sanitize untrusted terminal fields"
           `Quick
           test_renderers_sanitize_untrusted_terminal_fields;
+        test_case
+          "the session row filter reads the transcript"
+          `Quick
+          test_the_session_filter_reads_the_transcript;
       ]
     )
   ]

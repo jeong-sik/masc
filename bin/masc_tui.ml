@@ -2715,6 +2715,16 @@ let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
 let main () =
   let (base_path, workspace, port, refresh) = parse_args () in
   require_interactive_terminal ();
+  (* The console mirror writes every record to stderr, and stderr is this
+     terminal. A library Info line printed between two frames lands inside the
+     drawn screen, and the repaint that follows does not unprint it -- it is
+     already in the scrollback the frame occupies. Warn is the floor because a
+     warning is worth that cost and a routine "loaded N entries" is not.
+
+     MASC_LOG_LEVEL still wins: init_from_env runs after, so an operator who
+     asks for Info gets it, terminal or not. *)
+  Log.set_level Log.Warn;
+  Log.init_from_env ();
   let state = create_state ~workspace ~port ~refresh_interval:refresh in
   state.view <- Overview;
 

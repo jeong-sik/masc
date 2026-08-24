@@ -1988,6 +1988,8 @@
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
 
+(include stanzas/test_pause_authority_agrees.inc)
+
 (include stanzas/test_keeper_meta_config_not_durable.inc)
 
 (include stanzas/test_keeper_mutex_coverage.inc)

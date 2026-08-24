@@ -1792,8 +1792,8 @@ def keeper_selection_identity_interaction(
     failures = []
     if find_needle(missing_plain, screen_header(b"MASC Keepers", b" (1)")) < 0:
         failures.append("missing beta detail did not return to MASC Keepers (1)")
-    if b"Keeper: alpha" in missing_plain:
-        failures.append("missing beta detail silently retargeted to Keeper: alpha")
+    if b"Keepers \xe2\x96\xb8 alpha" in missing_plain:
+        failures.append("missing beta detail silently retargeted to alpha")
 
     after_selection = send_and_wait(
         process,
@@ -1903,7 +1903,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             screen_header(b"MASC Keepers", b" (1)"),
         )
         keepers_frame = frame_containing(keepers, screen_header(b"MASC Keepers", b" (1)"))
-        if b"Keeper: alpha" in CSI_RE.sub(b"", keepers_frame):
+        if b"Keepers \xe2\x96\xb8 alpha" in CSI_RE.sub(b"", keepers_frame):
             raise AssertionError(
                 f"Esc opened alpha detail after beta disappeared: {keepers!r}"
             )
@@ -3545,9 +3545,9 @@ def live_markdown_interaction(
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
-    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
-    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
     tail = b"task478-server-unreadable-store"
     wait_for_output(
         process,
@@ -3574,7 +3574,7 @@ def live_markdown_interaction(
         raise AssertionError(f"language header has no neutral background: {frame!r}")
     if b"```bash" in plain:
         raise AssertionError(f"raw fence marker leaked into the chat: {frame!r}")
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     os.write(master_fd, b"q")
 
 

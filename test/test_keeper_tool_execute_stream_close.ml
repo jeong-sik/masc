@@ -131,10 +131,16 @@ let rejected_cases =
              "gate denied by policy")) )
   ; ( "cannot_parse"
     , `String "cannot_parse"
-    , (fun () -> Error Keeper_tooling.Execute_shell_ir.Cannot_parse) )
+    , (fun () ->
+        Error
+          (Keeper_tooling.Execute_shell_ir.Cannot_parse
+             Masc_exec_command_gate.Shell_command_gate.Parse_error)) )
   ; ( "too_complex"
     , `String "too_complex"
-    , (fun () -> Error Keeper_tooling.Execute_shell_ir.Too_complex) )
+    , (fun () ->
+        Error
+          (Keeper_tooling.Execute_shell_ir.Too_complex
+             Masc_exec_command_gate.Shell_command_gate.Unsupported_nested_pipeline)) )
   ; ( "path_reject"
     , `String "path_reject"
     , (fun () ->

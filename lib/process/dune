@@ -6,6 +6,8 @@
  (wrapped false)
  (modules
   process_eio
+  spawn_handle
+  spawn_registry
   process_eio_detached
   process_eio_stderr
   file_lock_eio

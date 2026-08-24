@@ -1,5 +1,6 @@
 type t =
   | Ok
+  | Idle
   | Warming
   | Snapshot_not_ready
   | Degraded

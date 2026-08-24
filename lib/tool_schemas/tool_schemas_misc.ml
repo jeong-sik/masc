@@ -16,9 +16,9 @@ let control_operation_id = function
 ;;
 
 let control_schema = function
-  | Pause -> Tool_descriptors_gen.masc_pause_schema
-  | Resume -> Tool_descriptors_gen.masc_resume_schema
-  | Pause_status -> Tool_descriptors_gen.masc_pause_status_schema
+  | Pause -> Tool_schemas_operator_surface.pause
+  | Resume -> Tool_schemas_operator_surface.resume
+  | Pause_status -> Tool_schemas_operator_surface.pause_status
 ;;
 
 let control_schemas = List.map control_schema control_operations
@@ -136,9 +136,10 @@ let web_fetch_schema : tool_schema =
 
 let web_schemas = [ web_search_schema; web_fetch_schema ]
 
-(* [schemas] is the generated public misc schema set. Operator control and web
-   runtime schemas use the dedicated projections above. *)
-let schemas : tool_schema list = Tool_descriptors_gen.schemas
+(* [schemas] is the public misc schema set, now read from
+   config/tools/masc_*.toml. Operator control and web runtime schemas use the
+   dedicated projections above. *)
+let schemas : tool_schema list = Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
   | Start

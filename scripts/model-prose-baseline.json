@@ -2,7 +2,7 @@
   "_comment": "Model-facing prose inside OCaml. Regenerate with scripts/model-prose-ratchet.sh --update.",
   "_scanner": "scripts/model-prose-scan.py (rules (i) structural slots, (ii) allowlist files)",
   "_rfc": "docs/rfc/RFC-prompts-and-tool-definitions-outside-ocaml.md",
-  "measured_commit": "ca99c6d49ef853ba948ae1226cdf46792a003f7d",
+  "measured_commit": "7795a562f05610cc1c066d8448af5b2b48d6df17",
   "allowlist_files": [
     "lib/eval_calibration.ml",
     "lib/exec_policy/exec_policy.ml",
@@ -43,14 +43,10 @@
     "packages/agent_core/lib/sessions_types.ml": "inline let%test fixtures"
   },
   "total": {
-    "bytes": 75869,
-    "count": 822
+    "bytes": 71739,
+    "count": 781
   },
   "files": {
-    "bin/gen_tool_descriptors.ml": {
-      "bytes": 4130,
-      "count": 41
-    },
     "lib/agent_core_tool_contract.ml": {
       "bytes": 655,
       "count": 11

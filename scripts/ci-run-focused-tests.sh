@@ -239,6 +239,7 @@ normal_targets=(
   @test/runtest-test_tool_call_quality_benchmark
   @test/runtest-test_filesystem_tool_toml_parity
   @test/runtest-test_task_tool_toml_parity
+  @test/runtest-test_operator_surface_toml_parity
   @test/runtest-test_client_identity
   @test/runtest-test_mcp_session_task_lifecycle
   @test/runtest-test_mcp_server_eio
@@ -842,7 +843,6 @@ newly_wired_followup_targets=(
   @test/runtest-test_tool_call_replay_harness
   @test/runtest-test_tool_capability_typed
   @test/runtest-test_tool_control_coverage
-  @test/runtest-test_tool_descriptors_gen
   @test/runtest-test_tool_dispatch
   @test/runtest-test_tool_dispatch_emit
   @test/runtest-test_tool_diversity

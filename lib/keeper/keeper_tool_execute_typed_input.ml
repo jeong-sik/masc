@@ -767,6 +767,41 @@ let rec stamp_context ~sandbox ~cwd ~env (ir : Masc_exec.Shell_ir.t) =
    ratchet counts the caller files -- so the shell form crosses the same
    boundary a shell frontend would. [gate_raw] has carried this entrypoint,
    with tests, and had no production caller until now. *)
+(* RFC execute-subset-dispositions step 1.
+
+   [argv:["sh";"-c";S]] reaches the gate as one opaque program with two literal
+   arguments, so whatever S contains is counted as nothing at all.  This walks
+   the staged form, recognises the ones that are a script in an argv costume,
+   and says what the gate would have made of each.
+
+   Recognition and classification only: nothing here changes what runs.  It
+   builds the gate context the same way {!script_to_shell_ir} does, on purpose
+   -- a tap that constructs its own policy would drift from the path it is
+   meant to measure.  [Script] sources yield nothing, because they already
+   crossed the gate and are not hiding anything. *)
+let hidden_script_findings ~sandbox { source; _ } =
+  let gate_sandbox = { Shell_gate.target = sandbox } in
+  let syntax_policy =
+    { Shell_gate.redirect_allowed = true; allow_pipes = true }
+  in
+  let of_stage (stage : exec_stage) =
+    Option.map
+      (fun costume ->
+         ( costume.Keeper_tooling.Shell_costume.shell
+         , Keeper_tooling.Shell_costume.finding_tag
+             (Keeper_tooling.Shell_costume.classify
+                ~syntax_policy
+                ~sandbox:gate_sandbox
+                costume) ))
+      (Keeper_tooling.Shell_costume.of_argv stage.argv)
+  in
+  let of_program { head; tail } = List.filter_map of_stage (head :: tail) in
+  match source with
+  | Script _ -> []
+  | Staged { program; next } ->
+    of_program program @ List.concat_map (fun (_, p) -> of_program p) next
+;;
+
 let script_to_shell_ir ~sandbox ~cwd ~env script =
   let gate_sandbox = { Shell_gate.target = sandbox } in
   let syntax_policy =

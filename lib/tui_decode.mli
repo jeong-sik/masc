@@ -439,6 +439,12 @@ val decode_json_response_body :
     outcome; a shape the endpoints never send is an error, not a guessed
     success. *)
 val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
+
+(** Decode one SGR mouse report into the [up]/[down] key a wheel turns
+    into, or [None] for reports nothing consumes (clicks, releases,
+    horizontal wheel). [parameters] is the raw CSI parameter span
+    (["<64;10;5"]), [final] the CSI final byte. *)
+val sgr_wheel_key : string -> char -> string option
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result

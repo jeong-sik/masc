@@ -1242,6 +1242,51 @@ def navigate_with_arrows_and_quit(
     send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
     send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
 
+
+def wheel_scrolls_and_clicks_do_not(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # The enable sequence must be out before any wheel can arrive: without it
+    # the terminal keeps the wheel for its own scrollback and the TUI never
+    # sees the report at all.
+    wait_for_output(
+        process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # An SGR wheel report moves the cursor exactly as the arrow key does.
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[<65;5;5M",
+        keeper_row_selected(b"beta"),
+    )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[<64;5;5M",
+        keeper_row_selected(b"alpha"),
+    )
+    # Click press and release must not leak into a key: after both, the next
+    # wheel-down still starts from alpha and lands on beta.
+    read_available(master_fd, output)
+    os.write(master_fd, b"\x1b[<0;5;5M")
+    os.write(master_fd, b"\x1b[<0;5;5m")
+    time.sleep(0.3)
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[<65;5;5M",
+        keeper_row_selected(b"beta"),
+    )
+    send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
+
     resize_and_wait(
         process,
         master_fd,
@@ -3236,6 +3281,11 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="q",
         interact=navigate_with_arrows_and_quit,
+    )
+    run_terminal_scenario(
+        executable,
+        description="wheel scrolls, clicks do not",
+        interact=wheel_scrolls_and_clicks_do_not,
     )
     run_terminal_scenario(
         executable,

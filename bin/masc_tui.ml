@@ -152,6 +152,15 @@ let read_key ?(timeout = 0.1) reader () : string option =
                | Some ("4", '~') -> Some "end"
                | Some ("5", '~') -> Some "pageup"
                | Some ("6", '~') -> Some "pagedown"
+               (* A parameter span starting with [<] is an SGR mouse report.
+                  Wheel reports become the same keys the arrows make, so every
+                  surface's scroll binding answers the wheel; a report nothing
+                  consumes stays unclaimed rather than leaking into a key. *)
+               | Some (params, final)
+                 when String.length params > 0 && params.[0] = '<' -> (
+                   match Masc.Tui_decode.sgr_wheel_key params final with
+                   | Some key -> Some key
+                   | None -> Some "unknown-esc")
                | Some (_, _) -> Some "unknown-esc")
           | Some _ | None -> Some "esc")
       | Some byte -> (
@@ -3048,6 +3057,14 @@ let invalidate_frame_for_resize frame_presenter render_schedule =
 let request_console_write_repair render_schedule =
   Terminal_write_repair.request_repaint render_schedule
 
+(* One enable/disable pair for SGR mouse reports. Without tracking the
+   terminal keeps the wheel for its own scrollback -- which scrolls past the
+   TUI's frame on a non-alternate screen -- or turns it into arrow keys only
+   if configured to. With it, wheel reports arrive here and read_key maps
+   them to the same keys the arrows make. *)
+let mouse_tracking_enable = "\x1b[?1006;1000h"
+let mouse_tracking_disable = "\x1b[?1006;1000l"
+
 let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
     ~new_term =
   at_exit cleanup;
@@ -3085,6 +3102,9 @@ let main () =
   let resize_requested = Atomic.make false in
 
   let restore_terminal () =
+    (* No tracking-off here: suspend runs this too, and a terminal that
+       re-enters raw mode after Ctrl-Z would silently lose the wheel. The
+       off byte is written once, in [cleanup], at real process exit. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
     Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
@@ -3096,7 +3116,13 @@ let main () =
     if Atomic.compare_and_set cleanup_started false true then begin
       Console_sink.set_after_write_observer None;
       restore_terminal ();
-      print_endline "Goodbye!"
+      print_endline "Goodbye!";
+      (* Tracking off after Goodbye: a terminal left in report mode keeps
+         swallowing the wheel after this process is gone, and the farewell
+         line is the last thing a reader matches on -- a byte after it cannot
+         disturb that read. *)
+      output_string stdout mouse_tracking_disable;
+      flush stdout
     end
   in
 
@@ -3120,6 +3146,16 @@ let main () =
   if Terminal_write_repair.console_sink_writes_to_terminal () then
     Console_sink.set_after_write_observer
       (Some (fun () -> Terminal_write_repair.note ()));
+
+  (* Written here rather than at session entry, inside enter_terminal_session:
+     a byte written the moment raw mode is taken races the handshake reads a
+     harness (or terminal) performs on the very first output, and the PTY
+     regression's quit scenario reliably loses that race. Between session
+     entry and the first frame the stream is quiet, and the enable is not
+     urgent anyway -- the first wheel event always arrives after the first
+     frame. *)
+  output_string stdout mouse_tracking_enable;
+  flush stdout;
 
   (* Initial load *)
   load_from_masc_dir state base_path;

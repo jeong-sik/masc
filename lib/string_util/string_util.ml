@@ -275,6 +275,17 @@ let was_truncated = function
   | Untouched _ -> false
   | Truncated _ -> true
 
+let is_valid_utf8 s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len then true
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then loop (i + dlen) else false
+  in
+  loop 0
+
 let utf8_prefix ~max_bytes s =
   if max_bytes <= 0 then ""
   else

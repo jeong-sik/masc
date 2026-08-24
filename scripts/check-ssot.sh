@@ -131,6 +131,15 @@ else
   echo "OK[R7-metric-label-keeper-name]: 0 occurrences (baseline 0)."
 fi
 
+# SSOT-R8 — TUI state colours are semantic Theme tokens, not renderer-local
+# ANSI choices. Syntax colours have their own Theme.Syntax namespace, so the
+# renderer has no reason to reach for raw red/yellow/green either.
+check_rule "R8-tui-status-color" 0 \
+  "Theme.ok / Theme.warn / Theme.bad (or Theme.Syntax for code content)" \
+  'Ansi\.(red|yellow|green)' \
+  '' \
+  bin/masc_tui_render.ml
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

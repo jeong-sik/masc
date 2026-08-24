@@ -84,8 +84,8 @@ let chat_markdown_palette : Markdown.palette =
   (* Fenced-code tokens, inside the cyan the plain code span already uses:
      one hue per role a keeper's eye scans for -- what binds, what is data,
      what the reader can skip. *)
-  ; code_keyword = (Ansi.yellow, Ansi.reset)
-  ; code_string = (Ansi.green, Ansi.reset)
+  ; code_keyword = (Theme.Syntax.keyword, Ansi.reset)
+  ; code_string = (Theme.Syntax.string, Ansi.reset)
   ; code_comment = (Ansi.gray, Ansi.reset)
   ; code_number = (Ansi.magenta, Ansi.reset)
   ; code_type = (Ansi.bold ^ Ansi.blue, Ansi.reset)

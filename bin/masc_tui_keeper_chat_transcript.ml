@@ -65,6 +65,11 @@ type live_tool_call =
   ; result_ready : bool
   }
 
+(* [call_id] and [tool_name] are also fields of [tool_activity] above. OCaml
+   resolves an unannotated field access to the last record type that declares
+   the name, which is this one, so a lambda over [tool_activity list] that
+   reads either field has to say the type it is over. #30231 landed two such
+   lambdas without annotations and main did not compile. *)
 type awaiting_approval =
   { call_id : string
   ; tool_name : string
@@ -230,7 +235,7 @@ let pad_to width text =
 let render_activity_rows (activities : tool_activity list) =
   let name_width =
     List.fold_left
-      (fun widest activity ->
+      (fun widest (activity : tool_activity) ->
         max widest (String.length activity.tool_name))
       0 activities
   in
@@ -239,7 +244,7 @@ let render_activity_rows (activities : tool_activity list) =
     | Some trailer -> Printf.sprintf "%s \xc2\xb7 %s" text trailer
   in
   List.map
-    (fun activity ->
+    (fun (activity : tool_activity) ->
       let marker = marker_of_outcome activity.outcome in
       match activity.subject with
       | None ->

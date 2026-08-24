@@ -1,0 +1,14 @@
+name = "masc_spawn"
+description = "Start a program and return while it runs, so a long-lived process (a server, a watcher, a TUI) can be read from and waited on without blocking this call. The process ends when the turn does; nothing here survives into the next one. Use Execute for a command that finishes on its own."
+additional_properties = false
+
+[[params]]
+name = "argv"
+type = "array"
+required = true
+description = "Program and its arguments, passed verbatim. No shell: a metacharacter here is a literal argument."
+
+[[params]]
+name = "cwd"
+type = "string"
+description = "Absolute directory to run in. Defaults to the keeper workspace."

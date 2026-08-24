@@ -377,6 +377,7 @@ normal_targets=(
   @test/runtest-test_keeper_overflow_recovery
   @test/runtest-test_keeper_post_turn_wirein_order
   @test/runtest-test_keeper_checkpoint_purge
+  @test/runtest-test_store_unreadable
 )
 
 board_attention_targets=(

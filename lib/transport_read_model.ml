@@ -29,16 +29,7 @@ let websocket_url_from_base_url base_url =
 let configured_http_port () = Env_config_core.masc_http_port_int ()
 let configured_http_host () = Env_config_core.masc_host ()
 
-let ipaddr_is_unspecified = function
-  | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
-  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-;;
-
-let is_unspecified_host host =
-  match Ipaddr.of_string (String.trim host) with
-  | Ok ip -> ipaddr_is_unspecified ip
-  | Error _ -> false
-;;
+let is_unspecified_host = Masc_network_defaults.is_unspecified_host
 
 let is_canonical_loopback_alias host =
   let normalized = String.trim host |> String.lowercase_ascii in
@@ -58,16 +49,20 @@ let normalize_advertised_host host =
   else trimmed
 ;;
 
+(* Rebuild through [Uri] even when the host is unchanged. [Uri.of_string]
+   reads the leading dotted quad of "127.0.0.1.example.com" as an IPv4 literal
+   and pushes the rest into the path, so returning the original text here left
+   [host] naming 127.0.0.1 while every URL built from [base_url] still went to
+   example.com. Serializing what was parsed makes the two agree: the caller
+   gets a URL whose authority is the host the check ran on (#29806). *)
 let normalize_loopback_base_url base_url =
   let trimmed = trim_trailing_slashes base_url in
   let uri = Uri.of_string trimmed in
   match Uri.host uri with
   | Some host ->
-    let normalized_host = normalize_advertised_host host in
-    if String.equal normalized_host host
-    then trimmed
-    else
-      Uri.with_host uri (Some normalized_host) |> Uri.to_string |> trim_trailing_slashes
+    Uri.with_host uri (Some (normalize_advertised_host host))
+    |> Uri.to_string
+    |> trim_trailing_slashes
   | None -> trimmed
 ;;
 

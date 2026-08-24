@@ -8,6 +8,10 @@ type navigation =
       keeper_name : string;
       cursor : int;
     }
+  | Calls_keeper of {
+      keeper_name : string;
+      cursor : int;
+    }
   | Message_keeper of {
       keeper_name : string;
       cursor : int;
@@ -34,6 +38,10 @@ let reconcile ~current_ids ~next_ids ~current =
   | Logs_keeper { keeper_name; cursor } ->
       (match find_index keeper_name next_ids with
        | Some next_cursor -> Logs_keeper { keeper_name; cursor = next_cursor }
+       | None -> List_cursor (fallback_cursor ~cursor next_ids))
+  | Calls_keeper { keeper_name; cursor } ->
+      (match find_index keeper_name next_ids with
+       | Some next_cursor -> Calls_keeper { keeper_name; cursor = next_cursor }
        | None -> List_cursor (fallback_cursor ~cursor next_ids))
   | Message_keeper { keeper_name; cursor } ->
       let cursor =

@@ -111,6 +111,18 @@ spelled out - a steady queue that drops is not a healthy transport.
 
 This tail is read only while Overview is the current surface.
 
+The same row ends with the runtime event feed: `feed: live 1240` while the
+TUI is subscribed to `GET /mcp?sse_kind=observer` and counting the frames it
+has received, `feed: opening` while the MCP session and the subscription are
+being set up, and `feed: closed after N` once the stream has ended (the
+reason is in Recent Events and on the Acting status row) -
+the count stays so a stream that dropped after a thousand events and one that
+never opened do not read alike. The feed is opened after the first refresh
+that reaches the server and reopened on the refresh cadence after it closes;
+both transitions land in Recent Events. Every keeper's tool calls, turn
+boundaries, heartbeats, and turn settlements arrive on it; this build keeps
+the last 1,000 and counts what falls off the end.
+
 Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
 the full backlog rows, not the active projection.
@@ -187,6 +199,25 @@ rather than skipped. Rejected rows consume the 200-row window and are never
 backfilled with older data. A current-schema row whose `name` does not match the
 selected keeper is rejected instead of being attributed to it by file location.
 
+### Keeper calls
+
+`t` from the roster or from detail. The keeper's durable tool-call log, the
+newest page of `GET /api/v1/keepers/<name>/tool-calls`: one row per call
+with the finished glyph or `✗` for one that returned an error, the tool,
+its duration, the turn it ran in, and the subject the call is known by -
+the same naming the chat rows use. The header carries the server's own
+freshness verdict (`ok · latest 12s ago`), so a stale page does not read
+as a quiet keeper, and a row naming another keeper is counted and not
+drawn rather than attributed by file position.
+
+```
+ Keeper Calls: rondo (100)  ok · latest 8s ago  02:51:40  [connected]
+   Time     Tool                     Dur      Turn   Subject
+   11:36:57 ✓ Read                   28ms     2143   keeper_owner_reducer.ml
+   11:36:38 ✗ tool_execute           14.5s    2142   dune build
+  j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh  | Port: 8935
+```
+
 ### Keeper message
 
 `m` from detail. Sends to the keeper over `POST /api/v1/keepers/chat/stream`
@@ -206,15 +237,22 @@ its own is drawn as what it did, not as a blank line: a `thinking` row with
 the reasoning the server kept and a count of the steps it withheld, then a
 `tools` block with one row per call - the finished glyph for a call that
 returned, `✗` for one that returned an error, `·` for one the trace never
-saw finish, each with its duration - and then whatever the turn said.
+saw finish, `?` for one whose outcome the trace did not record - and then
+whatever the turn said. A call that finished carries its duration, in
+milliseconds as the server records it; a call still open when the trace
+closed has none.
 
 ```
  [21:41:34] thinking
    (2 reasoning steps, content withheld)
  [21:41:34] tools
    ✓ masc_task_history · 32ms
-   ✗ tool_execute · 1.2s
+   ✗ tool_execute · 1200ms
 ```
+
+Only rows the server marks as autonomous turns are read this way. A turn
+in the conversation itself already has its calls in the transcript as tool
+rows, so its trace block is not drawn a second time.
 
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
@@ -474,6 +512,18 @@ missing key currently reads back as an empty JSON object, so an absent
 `.masc/tasks/backlog.json` surfaces as the schema complaint
 `backlog must contain exactly one tasks list, last_updated string, and positive
 version`. Check that the path exists before treating it as a schema problem.
+
+**A surface says `(not loaded yet)`.** Nothing has been read for it: the
+request is still out, or the surface was opened before a server was reachable.
+It is not an empty result. A read that came back with nothing says so in its
+own words - `(nothing waiting on a verdict)`, `(no verdicts recorded)` - and
+only after the header has stopped saying `(not loaded)`.
+
+**Keepers shows `- unread` in the STATUS column.** The live roster at
+`GET /api/v1/gate/keepers` has not been read for that keeper - the first load
+is still out, the read failed (the reason is printed above the list), or the
+roster came back short and did not carry that keeper. It is not a status the
+keeper is in. The header's `N unread` counts the same rows.
 
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and

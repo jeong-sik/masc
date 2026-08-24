@@ -62,6 +62,10 @@ export function lifecycleEventLabel(event: string): string {
     case 'restarted':         return '재시작됨'
     case 'supervisor_cleaned': return '부재 Keeper 정리됨'
     case 'purged':            return '완전 삭제됨'
+    case 'admission_denied':  return '기동 거부됨'
+    // Keeper_lifecycle_events.event_of_string maps anything outside the custom
+    // vocabulary to None on purpose: phase-derived and operator strings reach
+    // this timeline too, so the wire set here is open and default stays.
     default:                  return event.replace(/_/g, ' ')
   }
 }

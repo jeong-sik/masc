@@ -230,9 +230,17 @@ val complete_serialized
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
   -> (Types.api_response, Http_client.http_error) result
-(** [body_timeout_s] is the exact caller-owned deadline, in seconds, for a
-    non-streaming transport call after a cache miss. It must be finite and
-    greater than zero and requires [clock]. The contract is validated before
+(** [body_timeout_s] is the caller-owned deadline, in seconds, for the provider
+    round-trip of a non-streaming call after a cache miss. It must be finite and
+    greater than zero and requires [clock].
+
+    It starts once the endpoint's admission permit is held, not when [complete]
+    is called. When [config.max_concurrent_requests] is declared and the
+    endpoint is saturated, the wait for a permit is FIFO queueing and is
+    unbounded by this value, so a caller that sets 30 seconds can still wait
+    longer than that in total. There is no parameter that bounds the queueing
+    as well; a caller needing a wall-clock ceiling over both has to impose it
+    itself (#27888). The contract is validated before
     cache lookup, so an invalid value or missing clock is rejected as [Error
     (AcceptRejected _)] even when a cached response exists.
 

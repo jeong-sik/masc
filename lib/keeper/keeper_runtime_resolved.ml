@@ -35,17 +35,12 @@ let source_to_string = function
   | Default -> "default"
   | Failsafe_floor -> "failsafe_floor"
 
-(* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
-   (same env var, same clamp [10, 600]). Opt-in: unset -> None.
-   AGENT_CORE applies this only to non-streaming sync body reads; streaming
-   liveness is progress-based. *)
-let body_timeout_override_sec_live () =
-  match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
-  | Some raw ->
-      (match Float.of_string_opt (String.trim raw) with
-       | Some v -> Some (Float.max 10.0 (Float.min 600.0 v))
-       | None -> None)
-  | None -> None
+(* AGENT_CORE applies this only to non-streaming sync body reads; streaming
+   liveness is progress-based. The parse and the clamp belong to
+   Env_config_keeper — a second copy here read the same variable and would
+   drift on any change to either. *)
+let body_timeout_override_sec_live =
+  Env_config_keeper.KeeperKeepalive.body_timeout_sec_override_live
 
 (* SSOT: Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override
    (same env var, same clamp [30, 3600]). Opt-in: unset -> None, no failsafe
@@ -55,15 +50,8 @@ let body_timeout_override_sec_live () =
    Durable channel (#27416): runtime.toml [turn.provider_call_deadline_sec]
    reaches this reader through the boot-override layer behind
    [Env_config_core.raw_value_opt]; a set process env var still wins. *)
-let provider_call_deadline_sec_live () =
-  match
-    Env_config_core.raw_value_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
-  with
-  | Some raw ->
-      (match Float.of_string_opt (String.trim raw) with
-       | Some v -> Some (Float.max 30.0 (Float.min 3600.0 v))
-       | None -> None)
-  | None -> None
+let provider_call_deadline_sec_live =
+  Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override_live
 
 (* Fail-safe liveness floor for the streaming inter-line idle timeout
    (seconds). When neither [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] nor runtime.toml

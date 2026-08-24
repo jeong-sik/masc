@@ -1119,6 +1119,7 @@
   test_trajectory
   test_eval_harness
   test_tool_board_coverage
+  test_board_comment_id_is_visible
   test_yojson_type_error_board
   test_tool_registry
   test_tool_registry_consistency
@@ -1258,6 +1259,7 @@
   test_trajectory
   test_eval_harness
   test_tool_board_coverage
+  test_board_comment_id_is_visible
   test_yojson_type_error_board
   test_tool_registry
   test_tool_registry_consistency
@@ -2647,6 +2649,11 @@
  (libraries alcotest fmt masc_tui_keeper_chat_live yojson))
 
 (test
+ (name test_tui_observer)
+ (modules test_tui_observer)
+ (libraries alcotest masc_tui_observer yojson))
+
+(test
  (name test_tui_keeper_chat_projection)
  (modules test_tui_keeper_chat_projection)
  (libraries
@@ -2657,18 +2664,6 @@
   masc_tui_keeper_chat_projection
   masc.masc_random_id
   yojson))
-
-(test
- (name test_tui_keeper_chat_recovery)
- (modules test_tui_keeper_chat_recovery)
- (libraries
-  alcotest
-  eio
-  masc_tui_keeper_chat_projection
-  masc_tui_keeper_chat_recovery
-  fs_compat
-  threads
-  unix))
 
 (test
  (name test_tui_message_layout)
@@ -2709,6 +2704,11 @@
  (name test_tui_composer)
  (modules test_tui_composer)
  (libraries alcotest masc_tui_composer masc_tui_render_schedule))
+
+(test
+ (name test_tui_credential)
+ (modules test_tui_credential)
+ (libraries alcotest masc.string_util masc_tui_credential))
 
 (test
  (name test_tui_keeper_control)
@@ -2858,6 +2858,7 @@
 (include stanzas/test_keeper_memory_journal_projection.inc)
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
+(include stanzas/test_tui_send_disposition.inc)
 
 (test
  (name test_code_address)

@@ -15,7 +15,7 @@ let addressed ?(ts = 1.0) ?speaker_name ?surface content =
      @ (match surface with None -> [] | Some json -> [ "surface", json ]))
 ;;
 
-let row ?(ts = 1.0) ~role ?kind ?tool_call_name content =
+let row ?(ts = 1.0) ~role ?kind ?tool_call_name ?delivery_key content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String role
@@ -23,35 +23,52 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_name content =
      ; "ts", `Float ts
      ]
      @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
+     @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
      @ (match tool_call_name with
         | None -> []
         | Some name -> [ "tool_call_name", `String name ]))
+
+let operation_key id =
+  `Assoc [ "kind", `String "operation"; "operation_id", `String id ]
+
+let origin_request_id = function
+  | History.Delivery_failed { origin_request_id } -> origin_request_id
+  | History.Addressed_to_keeper _ | History.Said_by_keeper
+  | History.Tool_calls _ | History.Reasoning _ -> None
 
 let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
       Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
   | History.Said_by_keeper -> "keeper"
-  | History.Delivery_failed -> "delivery_failed"
+  | History.Delivery_failed _ -> "delivery_failed"
   | History.Tool_calls rows ->
       Printf.sprintf "tools[%s]" (String.concat " | " rows)
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
 
-(* An assistant row the way an autonomous turn persists it: blank [content]
-   and a [t: "trace"] block of steps. *)
-let autonomous_turn ?(ts = 1.0) ?(content = "") ?omitted steps =
+(* An assistant row the way an autonomous turn persists it: the server's
+   [autonomous_turn] marker, a blank [content], and a [t: "trace"] block of
+   steps. [content] is [null] on the wire when the turn said nothing
+   ([server_dashboard_http_keeper_api.ml], the autonomous row encoder), so
+   the default here is the wire's shape, not an empty string. *)
+let autonomous_turn ?(ts = 1.0) ?(content = `Null) ?(marked = true) ?omitted steps
+    =
   `Assoc
-    [ "id", `String "autonomous:trace-1#54"
-    ; "role", `String "assistant"
-    ; "content", `String content
-    ; "ts", `Float ts
-    ; ( "blocks"
+    ([ "id", `String "autonomous:trace-1#54"
+     ; "role", `String "assistant"
+     ; "content", content
+     ; "ts", `Float ts
+     ]
+    @ (if marked then
+         [ "autonomous_turn", `Assoc [ "turn_id", `String "trace-1#54" ] ]
+       else [])
+    @ [ ( "blocks"
       , `List
           [ `Assoc
               ([ "t", `String "trace"; "trace", `List steps ]
                @ (match omitted with None -> [] | Some n -> [ "omitted", `Int n ]))
           ] )
-    ]
+      ])
 
 let think_withheld =
   `Assoc [ "kind", `String "think"; "text", `String ""; "content_withheld", `Bool true ]
@@ -86,6 +103,35 @@ let test_roles_map_to_what_the_pane_draws () =
     [ "고쳐줘"; "고쳤어요"; "slack 5xx" ]
     (List.map (fun r -> r.History.text) decoded.History.rows)
 
+(* The pane writes its own row when a turn fails, because most error rows are
+   notices the server has no row for. A failed turn is the one it does record,
+   and it comes back under the operation the client dispatched -- which is what
+   lets the pane drop its own copy instead of drawing the failure twice.
+
+   Only an operation key names a turn this client dispatched. A row the server
+   wrote under another producer's key reads as [None] rather than handing back
+   an id that belongs to someone else. *)
+let test_a_failed_turn_names_the_request_it_came_from () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+             ~delivery_key:(operation_key "tui-28e58beb") "provider closed the connection"
+         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+             ~delivery_key:
+               (`Assoc
+                  [ "kind", `String "fusion_run"; "request_id", `String "fusion-1" ])
+             "provider closed the connection"
+         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure"
+             "provider closed the connection"
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  check (list (option string)) "an operation key is the request, anything else is not"
+    [ Some "tui-28e58beb"; None; None ]
+    (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
+;;
+
 (* A [role: "user"] row is whatever was put in front of the keeper, and most of
    them are not the operator. One live keeper carried 92 such rows from 23
    distinct speakers — taskmaster, an MCP client, the exact-lane verifier, a
@@ -96,7 +142,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; surface } ->
         History.addressed_label speaker surface
-    | History.Said_by_keeper | History.Delivery_failed | History.Tool_calls _
+    | History.Said_by_keeper | History.Delivery_failed _ | History.Tool_calls _
     | History.Reasoning _ ->
         failf "expected an addressed row"
   in
@@ -163,7 +209,7 @@ let test_consecutive_tool_rows_become_one_block () =
            check bool "the rows carry the finished marker" true
              (List.for_all (fun r -> String.length r > 0) rows)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
-       | History.Delivery_failed | History.Reasoning _ ->
+       | History.Delivery_failed _ | History.Reasoning _ ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
         tools.History.at
@@ -197,7 +243,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
              [ think_withheld
              ; tool ~status:"ok" ~dur:"32ms" "masc_task_history"
              ; think_withheld
-             ; tool ~status:"err" ~dur:"1.2s" "tool_execute"
+             ; tool ~status:"err" ~dur:"1200ms" "tool_execute"
              ; tool ~status:"pending" "keeper_task_claim"
              ; tool "read_file"
              ]
@@ -229,7 +275,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
            check bool "a step with no status says it was not recorded" true
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper
-       | History.Delivery_failed | History.Reasoning _ ->
+       | History.Delivery_failed _ | History.Reasoning _ ->
            fail "expected the second row to be a tool block");
       check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
   | rows -> failf "expected two rows, got %d" (List.length rows)
@@ -238,7 +284,8 @@ let test_a_turn_that_also_spoke_keeps_the_order_it_ran_in () =
   let decoded =
     decode
       (`List
-         [ autonomous_turn ~ts:6.0 ~content:"\xea\xb3\xa0\xec\xb3\xa4\xec\x96\xb4\xec\x9a\x94"
+         [ autonomous_turn ~ts:6.0
+             ~content:(`String "\xea\xb3\xa0\xec\xb3\xa4\xec\x96\xb4\xec\x9a\x94")
              [ reason "the test names the old label"
              ; tool ~status:"ok" "edit_file"
              ]
@@ -265,6 +312,40 @@ let test_steps_the_server_dropped_are_counted () =
         "(3 steps not carried by the transcript)"
         (List.nth rows (List.length rows - 1))
   | _ -> fail "expected one tool block"
+
+(* A direct-conversation turn can carry a trace block too: the server joins
+   the raw trace onto rows that have a turn ref. Its calls are already in the
+   transcript as [role: "tool"] rows, so reading the block as well drew every
+   call twice. The marker the server puts on autonomous rows is what tells
+   the two apart. *)
+let test_a_direct_turn_s_trace_is_not_drawn_twice () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"tool" ~tool_call_name:"read_file" "{}"
+         ; autonomous_turn ~ts:2.0 ~marked:false ~content:(`String "done")
+             [ think_withheld; tool ~status:"ok" "read_file" ]
+         ])
+  in
+  check (list string) "one tool block from the tool rows, then the text"
+    [ "tools"; "keeper" ]
+    (decoded.History.rows
+     |> List.map (fun r ->
+            match r.History.kind with
+            | History.Tool_calls _ -> "tools"
+            | other -> kind_to_string other))
+
+let test_a_null_content_is_the_wire_s_blank () =
+  let decoded =
+    decode (`List [ autonomous_turn ~ts:3.0 [ tool ~status:"ok" "read_file" ] ])
+  in
+  check (list string) "null content draws the trace and no text row"
+    [ "tools" ]
+    (decoded.History.rows
+     |> List.map (fun r ->
+            match r.History.kind with
+            | History.Tool_calls _ -> "tools"
+            | other -> kind_to_string other))
 
 let test_a_blank_turn_with_no_trace_keeps_its_line () =
   (* The server holds an empty row for it; drawing nothing would hide that a
@@ -400,6 +481,8 @@ let () =
     [ ( "rows"
       , [ test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
+        ; test_case "a failed turn names the request it came from" `Quick
+            test_a_failed_turn_names_the_request_it_came_from
         ; test_case "an addressed row is labelled by who sent it" `Quick
             test_an_addressed_row_is_labelled_by_who_sent_it
         ; test_case "consecutive tool rows become one block" `Quick
@@ -415,6 +498,10 @@ let () =
             test_steps_the_server_dropped_are_counted
         ; test_case "a blank turn with no trace keeps its line" `Quick
             test_a_blank_turn_with_no_trace_keeps_its_line
+        ; test_case "a direct turn's trace is not drawn twice" `Quick
+            test_a_direct_turn_s_trace_is_not_drawn_twice
+        ; test_case "a null content is the wire's blank" `Quick
+            test_a_null_content_is_the_wire_s_blank
         ] )
     ; ( "paging"
       , [ test_case "a page decodes its rows and cursor" `Quick

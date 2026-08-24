@@ -812,6 +812,26 @@ let tool_envelope_outcome (json : Yojson.Safe.t) : (string, string) result =
       | _ -> Error "unexpected tool response envelope")
   | _ -> Error "unexpected tool response envelope"
 
+(** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a key.
+
+    The TUI turns wheel reports into the same [up]/[down] keys the arrow keys
+    produce, so every surface's existing scroll and cursor bindings apply to
+    the wheel without a second dispatch. Wheel-up is button [64], wheel-down
+    [65]; the horizontal wheel, clicks, and releases stay [None] -- the
+    terminal sends them, but nothing consumes them yet, and an unconsumed
+    report must not masquerade as a claimed key. [parameters] is the raw CSI
+    parameter span (["<64;10;5"] for a wheel-up at column 10, row 5) and
+    [final] the CSI final byte. *)
+let sgr_wheel_key (parameters : string) (final : char) : string option =
+  if final <> 'M' then None
+  else
+    match String.split_on_char ';' parameters with
+    | button :: _ ->
+        if String.equal button "<64" then Some "up"
+        else if String.equal button "<65" then Some "down"
+        else None
+    | [] -> None
+
 let missing_field key =
   Error (Printf.sprintf "missing required field '%s'" key)
 
@@ -1015,6 +1035,27 @@ type system_log_level =
   | System_warn
   | System_error
   | System_level_unknown of string
+
+type keeper_call = {
+  kc_at : float;
+  kc_tool : string;
+  kc_input : string;
+  kc_success : bool;
+  kc_duration_ms : float option;
+  kc_turn : int option;
+  kc_task_id : string option;
+  kc_model : string option;
+}
+
+type keeper_calls_snapshot = {
+  kcs_keeper : string;
+  kcs_entries : keeper_call list;
+  kcs_count : int;
+  kcs_health : string;
+  kcs_latest_age_s : float option;
+  kcs_stale_reason : string option;
+  kcs_mismatched : int;
+}
 
 type system_log_entry = {
   sl_seq : int;
@@ -1386,6 +1427,85 @@ let decode_autonomy_snapshot json =
     ; au_gap_count
     ; au_keeper_count
     ; au_window_hours
+    }
+
+let decode_keeper_call json =
+  let* kc_at = require_float_field json "ts" in
+  let* kc_tool = required_string_field json "tool" in
+  let* keeper = required_string_field json "keeper" in
+  let* kc_success =
+    match member "success" json with
+    | `Bool value -> Ok value
+    | `Null -> Error "keeper call has no success field"
+    | _ -> Error "keeper call success is not a bool"
+  in
+  let kc_input =
+    match member "input" json with
+    | `String value -> value
+    | other -> Yojson.Safe.to_string other
+  in
+  let kc_duration_ms =
+    match member "duration_ms" json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let kc_turn = match member "turn" json with `Int value -> Some value | _ -> None in
+  let string_opt key =
+    match member key json with
+    | `String value when String.trim value <> "" -> Some value
+    | _ -> None
+  in
+  Ok
+    ( keeper
+    , { kc_at
+      ; kc_tool
+      ; kc_input
+      ; kc_success
+      ; kc_duration_ms
+      ; kc_turn
+      ; kc_task_id = string_opt "task_id"
+      ; kc_model = string_opt "model"
+      } )
+
+let decode_keeper_calls_snapshot ~requested_keeper json =
+  let* kcs_keeper = required_string_field json "keeper" in
+  let* kcs_count = required_int_field json "count" in
+  let* kcs_health = required_string_field json "health" in
+  let* entries_json = required_list_field json "entries" in
+  let* rows =
+    decode_list "entries" decode_keeper_call entries_json
+  in
+  (* A row naming another keeper is the store's problem to surface, not a
+     row to draw under this keeper's name. *)
+  let kcs_entries, kcs_mismatched =
+    List.fold_left
+      (fun (kept, mismatched) (keeper, row) ->
+        if String.equal keeper requested_keeper then (row :: kept, mismatched)
+        else (kept, mismatched + 1))
+      ([], 0) rows
+  in
+  let kcs_latest_age_s =
+    match member "latest_age_s" json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let kcs_stale_reason =
+    match member "stale_reason" json with
+    | `String value when String.trim value <> "" && not (String.equal value "fresh")
+      ->
+        Some value
+    | _ -> None
+  in
+  Ok
+    { kcs_keeper
+    ; kcs_entries = List.rev kcs_entries
+    ; kcs_count
+    ; kcs_health
+    ; kcs_latest_age_s
+    ; kcs_stale_reason
+    ; kcs_mismatched
     }
 
 let decode_system_log_snapshot json =

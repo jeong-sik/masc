@@ -21,8 +21,13 @@ export interface KeeperPersistenceTierProof {
   keeperCount: number
   observedCount: number
   missingCount: number
+  undeterminedCount: number
   observedKeepers: string[]
   missingKeepers: string[]
+  // Keepers whose earliest turn row the backend never reached: the segment
+  // head budget ran out first. They did not fail the span - the reader
+  // stopped before it could tell - so they are neither observed nor missing.
+  undeterminedKeepers: string[]
 }
 
 export interface DashboardKeeperPersistenceProofResponse {
@@ -81,9 +86,17 @@ function keeperNames(value: unknown, context: string): string[] {
   return names
 }
 
-function expectedStatus(keeperCount: number, observedCount: number): KeeperFeatureProofStatus {
-  if (keeperCount === 0 || observedCount === 0) return 'fail'
+function expectedStatus(
+  keeperCount: number,
+  observedCount: number,
+  undeterminedCount: number,
+): KeeperFeatureProofStatus {
+  if (keeperCount === 0) return 'fail'
   if (observedCount === keeperCount) return 'pass'
+  // 'fail' asserts that no Keeper met the span. That is only sayable once
+  // every Keeper produced an answer; with an unread history in the mix the
+  // backend does not know, and neither does this decoder.
+  if (observedCount === 0 && undeterminedCount === 0) return 'fail'
   return 'warn'
 }
 
@@ -111,20 +124,34 @@ function parseTier(
   const keeperCount = nonNegativeInteger(raw.keeper_count, `${context}.keeper_count`)
   const observedCount = nonNegativeInteger(raw.observed_count, `${context}.observed_count`)
   const missingCount = nonNegativeInteger(raw.missing_count, `${context}.missing_count`)
+  const undeterminedCount = nonNegativeInteger(
+    raw.undetermined_count,
+    `${context}.undetermined_count`,
+  )
   const observedKeepers = keeperNames(raw.observed_keepers, `${context}.observed_keepers`)
   const missingKeepers = keeperNames(raw.missing_keepers, `${context}.missing_keepers`)
-  if (observedCount !== observedKeepers.length || missingCount !== missingKeepers.length) {
+  const undeterminedKeepers = keeperNames(
+    raw.undetermined_keepers,
+    `${context}.undetermined_keepers`,
+  )
+  if (observedCount !== observedKeepers.length
+    || missingCount !== missingKeepers.length
+    || undeterminedCount !== undeterminedKeepers.length) {
     protocolError(`${context} counts must match keeper arrays`)
   }
-  if (observedCount + missingCount !== keeperCount) {
-    protocolError(`${context} observed_count + missing_count must equal keeper_count`)
+  if (observedCount + missingCount + undeterminedCount !== keeperCount) {
+    protocolError(
+      `${context} observed_count + missing_count + undetermined_count must equal keeper_count`,
+    )
   }
   const observed = new Set(observedKeepers)
-  if (missingKeepers.some(name => observed.has(name))) {
-    protocolError(`${context} observed and missing keepers must not overlap`)
+  const missing = new Set(missingKeepers)
+  if (missingKeepers.some(name => observed.has(name))
+    || undeterminedKeepers.some(name => observed.has(name) || missing.has(name))) {
+    protocolError(`${context} observed, missing and undetermined keepers must not overlap`)
   }
   const status = proofStatus(raw.status, `${context}.status`)
-  const derivedStatus = expectedStatus(keeperCount, observedCount)
+  const derivedStatus = expectedStatus(keeperCount, observedCount, undeterminedCount)
   if (status !== derivedStatus) {
     protocolError(`${context}.status=${status} does not match derived status=${derivedStatus}`)
   }
@@ -136,8 +163,10 @@ function parseTier(
     keeperCount,
     observedCount,
     missingCount,
+    undeterminedCount,
     observedKeepers,
     missingKeepers,
+    undeterminedKeepers,
   }
 }
 
@@ -164,16 +193,32 @@ export function parseKeeperPersistenceProofResponse(
   const tiers = feature.duration_tiers.map(parseTier)
   const firstTier = tiers[0]
   if (firstTier == null) protocolError('persistence.duration_tiers must not be empty')
-  const fleet = new Set([...firstTier.observedKeepers, ...firstTier.missingKeepers])
+  const fleet = new Set([
+    ...firstTier.observedKeepers,
+    ...firstTier.missingKeepers,
+    ...firstTier.undeterminedKeepers,
+  ])
   for (let index = 1; index < tiers.length; index += 1) {
     const previous = tiers[index - 1]
     const current = tiers[index]
     if (previous == null || current == null) {
       protocolError(`persistence.duration_tiers[${index}] is absent`)
     }
-    const currentFleet = new Set([...current.observedKeepers, ...current.missingKeepers])
+    const currentFleet = new Set([
+      ...current.observedKeepers,
+      ...current.missingKeepers,
+      ...current.undeterminedKeepers,
+    ])
     if (current.keeperCount !== firstTier.keeperCount || !sameNames(fleet, currentFleet)) {
       protocolError(`persistence.duration_tiers[${index}] must describe the same Keeper fleet`)
+    }
+    // Being unread does not depend on how long a span the tier asks for, so
+    // the undetermined set is the same at every tier. A tier that moves a
+    // Keeper in or out of it is reporting a read that changed mid-report.
+    if (!sameNames(new Set(previous.undeterminedKeepers), new Set(current.undeterminedKeepers))) {
+      protocolError(
+        `persistence.duration_tiers[${index}] must report the same unread Keepers as every tier`,
+      )
     }
     const previousObserved = new Set(previous.observedKeepers)
     const currentMissing = new Set(current.missingKeepers)

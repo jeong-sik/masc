@@ -114,6 +114,18 @@ val scrolled_rows :
     newest entry holds its metadata row and loses body lines instead. Scrolled
     back, every row is already whole, and the window is a plain slice. *)
 
+val clamp_scroll :
+  ?markdown:(width:int -> string -> string list) ->
+  inner_width:int ->
+  height:int ->
+  int ->
+  entry list ->
+  int
+(** [clamp_scroll ~height requested entries] is [requested] held within what
+    the transcript can scroll, the same answer as [min requested (max_scroll
+    ...)]. It reads only as far back as the answer depends on, so a pane that
+    is not scrolled does not pay for the whole conversation on every frame. *)
+
 val max_scroll :
   ?markdown:(width:int -> string -> string list) ->
   inner_width:int ->

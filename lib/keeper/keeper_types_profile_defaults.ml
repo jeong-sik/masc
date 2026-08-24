@@ -28,6 +28,11 @@ type keeper_profile_defaults = {
   (* RFC-0390: how much of an official client's built-in tool surface this
      keeper may use. [None] keeps each runtime's own default posture. *)
   native_tool_posture : Runtime_native_tools.posture option;
+  (* RFC-0389: per-keeper model tool groups (raw TOML strings). [None]
+     inherits the default (every model-visible tool). Converted to
+     [Keeper_tool_descriptor.tool_surface] at the consumption site to avoid
+     a dependency cycle through Keeper_meta_contract. *)
+  tool_groups : string list option;
   (* Per-keeper AGENT_CORE CLI transport env vars (AGENT_CORE 0.159+).
      Parsed from [[keeper.agent_core_env]] table.  Keys MUST match
      ^AGENT_CORE_[A-Z]+_.+ — any other entries are dropped with
@@ -57,6 +62,7 @@ let empty_keeper_profile_defaults =
     telemetry_feedback_window_hours = None;
     always_allow = None;
     native_tool_posture = None;
+    tool_groups = None;
     agent_core_env = [];
   }
 ;;

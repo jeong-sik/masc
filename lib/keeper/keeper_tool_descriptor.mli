@@ -47,6 +47,14 @@ type keeper_tool_group =
   | Meta_group
   | Core_group
 
+(** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
+    every model-visible descriptor. [Declared] narrows the surface to the
+    declared groups; [Core_group] and [Meta_group] are always retained so a
+    Keeper can always introspect its own surface. *)
+type tool_surface =
+  | All
+  | Declared of { groups : keeper_tool_group list }
+
 (** Provenance of the descriptor input schema. A missing canonical cluster
     schema excludes that descriptor from model projection and is reported by
     the schema injection boundary. *)
@@ -191,6 +199,17 @@ val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
+
+(** Strict inverse of {!keeper_tool_group_to_string}. Unknown strings are
+    [None] — a typo in [keeper.tools] must fail the TOML load, never silently
+    keep the full surface (RFC-0389). *)
+val keeper_tool_group_of_string : string -> keeper_tool_group option
+
+(** Convert raw TOML group names to a [tool_surface].
+    [None] or empty list → [All] (inherit, no narrowing).
+    Unknown names are logged and silently excluded (fail-open). *)
+val tool_groups_to_surface : string list option -> tool_surface
+
 val runtime_handler_to_string : runtime_handler -> string
 val tool_kind_to_string : tool_kind -> string
 
@@ -226,8 +245,13 @@ val model_schema_errors : t -> string list
     missing/structurally invalid schemas are excluded. *)
 val model_visible_descriptors : unit -> t list
 
-(** Exact schema projection admitted by the Keeper model surface. *)
-val model_visible_schemas : unit -> Masc_domain.tool_schema list
+(** Exact schema projection admitted by the Keeper model surface.
+
+    [All] returns every model-visible descriptor (the current behavior).
+    [Declared { groups }] narrows the surface to the declared groups, always
+    retaining [Core_group] and [Meta_group] (RFC-0389). *)
+val model_visible_schemas :
+  surface:tool_surface -> Masc_domain.tool_schema list
 
 (** The sole active Keeper model name. Empty only for an exact
     [Operator_only], [Transport_alias], or a descriptor without a resolved

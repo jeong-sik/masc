@@ -46,6 +46,11 @@ let keeper_toml_field_names = List.map fst keeper_toml_fields
 
 let canonical_keeper_toml_key_names = keeper_toml_field_names
 
+(* RFC-0389: [keeper.tools] is a nested table (like [keeper.agent_core_env]),
+   so its keys arrive flattened as [keeper.tools.<group>]. Declare the prefix
+   so unknown-key detection accepts it and the loader can read it. *)
+let tools_key_prefix = "keeper.tools."
+
 (** One current-key detector shared by profile loading and config audit. *)
 let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let known =
@@ -56,10 +61,17 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
     String.length key > agent_core_env_prefix_len
     && String.starts_with key ~prefix:agent_core_env_key_prefix
   in
+  let tools_prefix_len = String.length tools_key_prefix in
+  let starts_with_tools key =
+    String.length key > tools_prefix_len
+    && String.starts_with key ~prefix:tools_key_prefix
+  in
   doc
   |> List.map fst
   |> List.filter (fun key ->
-       not (List.mem key known) && not (starts_with_agent_core_env key))
+       not (List.mem key known)
+       && not (starts_with_agent_core_env key)
+       && not (starts_with_tools key))
   |> dedupe_keep_order
 
 let toml_value_kind = function
@@ -101,6 +113,7 @@ let validate_known_keeper_field_types doc =
   |> List.find_map (fun (key, value) ->
        if String.starts_with key ~prefix:"keeper."
           && not (String.starts_with key ~prefix:agent_core_env_key_prefix)
+          && not (String.starts_with key ~prefix:tools_key_prefix)
        then
          match expected key with
          | Some (expected_kind, accepts) when not (accepts value) ->
@@ -119,6 +132,17 @@ let validate_known_keeper_field_types doc =
               "%s must be a scalar TOML value, got %s"
               key
               (toml_value_kind value))
+       else if String.starts_with key ~prefix:tools_key_prefix
+               && String.equal key "keeper.tools.groups"
+               && (match value with
+                   | Keeper_toml_loader.Toml_string_array _ -> false
+                   | _ -> true)
+       then
+         Some
+           (Printf.sprintf
+              "%s must be a TOML string array, got %s"
+              key
+              (toml_value_kind value))
        else None)
   |> function None -> Ok () | Some error -> Error error
 ;;
@@ -132,6 +156,15 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let agent_core_env = extract_agent_core_env_from_doc doc in
+  (* RFC-0389: [keeper.tools] nested table — read groups as string array. *)
+  let tool_groups =
+    match List.assoc_opt "keeper.tools.groups" doc with
+    | None -> None
+    | Some (Keeper_toml_loader.Toml_string_array groups) ->
+      let normalized = normalize_name_list groups in
+      if normalized = [] then None else Some normalized
+    | Some _ -> None
+  in
   let result =
     match detect_unknown_keeper_toml_keys doc with
     | [] -> Ok ()
@@ -255,6 +288,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         always_allow = bool_ "always_allow";
         native_tool_posture =
           Option.bind (str "tools.native") Runtime_native_tools.of_string;
+        tool_groups;
         agent_core_env;
       })
       max_context_override_result)
@@ -307,6 +341,7 @@ let merge_keeper_profile_defaults
     always_allow = prefer overlay.always_allow base.always_allow;
     native_tool_posture =
       prefer overlay.native_tool_posture base.native_tool_posture;
+    tool_groups = prefer overlay.tool_groups base.tool_groups;
     agent_core_env =
       (let overlay_keys = List.map fst overlay.agent_core_env in
        let surviving_base =

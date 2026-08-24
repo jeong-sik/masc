@@ -567,6 +567,33 @@ type state = {
   refresh_interval: float;
 }
 
+(* One reading of the state for both the send path and the footer; the order
+   and the reasoning live in [Masc_tui_send_disposition]. *)
+type send_disposition =
+  Masc_tui_keeper_chat_projection.request Masc_tui_send_disposition.t
+
+(* The keeper the composer is pointed at, since a turn running for another
+   keeper does not decide what Enter does here. *)
+let inflight_for_keeper state keeper_name =
+  List.find_opt
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+      String.equal request.keeper_name keeper_name)
+    state.msg_inflight
+;;
+
+(* [prepared], [cleanup_pending], [recovery_blocked] and [unverified] were the
+   durable chat fence's states. The fence is gone — the server refuses a second
+   submission of the same request id, so the client does not carry its own —
+   and with it those four are always absent. Passed as [None] rather than
+   removed from the vocabulary: this module's ordering contract is what makes
+   the footer and the send path agree, and narrowing it is a separate change
+   from removing the states it ranked. *)
+let send_disposition state ~keeper_name : send_disposition =
+  Masc_tui_send_disposition.of_state ~prepared:None ~cleanup_pending:None
+    ~recovery_blocked:None
+    ~inflight:(inflight_for_keeper state keeper_name)
+    ~unverified:None
+
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
 let keeper_reading (state : state) (keeper : keeper) :
@@ -723,6 +750,22 @@ let create_state ~workspace ~port ~refresh_interval = {
    concatenated -- a notice the TUI wrote belongs where it happened, not after
    everything the server knows about. Ties keep the loaded row first, which is
    what [stable_sort] over [loaded @ session] gives. *)
+(* What a polled surface can say when it has no rows to draw. Three facts,
+   not one: nothing has been read yet, the read failed, or the read came back
+   with nothing. The first was drawn as the third -- "nothing waiting on a
+   verdict" on a Verification surface that had not yet asked -- so an
+   operator read an empty queue off a screen that knew no queue at all. *)
+type empty_page =
+  | Page_unread
+  | Page_failed
+  | Page_empty
+
+let empty_page_of ~snapshot ~error =
+  match (snapshot, error) with
+  | _, Some _ -> Page_failed
+  | None, None -> Page_unread
+  | Some _, None -> Page_empty
+
 let chat_rows_for (state : state) keeper_name =
   let loaded =
     match state.msg_loaded_keeper with

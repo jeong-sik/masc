@@ -277,6 +277,11 @@
  (libraries uucp uuseg))
 
 (library
+ (name masc_tui_send_disposition)
+ (wrapped false)
+ (modules masc_tui_send_disposition))
+
+(library
  (name masc_tui_frame_presenter)
  (wrapped false)
  (modules masc_tui_frame_presenter))
@@ -387,6 +392,7 @@
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_message_layout
+  masc_tui_send_disposition
   masc_tui_metrics_tail
   masc_tui_observation_layout
   masc_tui_operator_projection

@@ -811,6 +811,26 @@ let tool_envelope_outcome (json : Yojson.Safe.t) : (string, string) result =
       | _ -> Error "unexpected tool response envelope")
   | _ -> Error "unexpected tool response envelope"
 
+(** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a key.
+
+    The TUI turns wheel reports into the same [up]/[down] keys the arrow keys
+    produce, so every surface's existing scroll and cursor bindings apply to
+    the wheel without a second dispatch. Wheel-up is button [64], wheel-down
+    [65]; the horizontal wheel, clicks, and releases stay [None] -- the
+    terminal sends them, but nothing consumes them yet, and an unconsumed
+    report must not masquerade as a claimed key. [parameters] is the raw CSI
+    parameter span (["<64;10;5"] for a wheel-up at column 10, row 5) and
+    [final] the CSI final byte. *)
+let sgr_wheel_key (parameters : string) (final : char) : string option =
+  if final <> 'M' then None
+  else
+    match String.split_on_char ';' parameters with
+    | button :: _ ->
+        if String.equal button "<64" then Some "up"
+        else if String.equal button "<65" then Some "down"
+        else None
+    | [] -> None
+
 let missing_field key =
   Error (Printf.sprintf "missing required field '%s'" key)
 

@@ -15,7 +15,7 @@ let addressed ?(ts = 1.0) ?speaker_name ?surface content =
      @ (match surface with None -> [] | Some json -> [ "surface", json ]))
 ;;
 
-let row ?(ts = 1.0) ~role ?kind ?tool_call_name content =
+let row ?(ts = 1.0) ~role ?kind ?tool_call_name ?delivery_key content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String role
@@ -23,15 +23,24 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_name content =
      ; "ts", `Float ts
      ]
      @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
+     @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
      @ (match tool_call_name with
         | None -> []
         | Some name -> [ "tool_call_name", `String name ]))
+
+let operation_key id =
+  `Assoc [ "kind", `String "operation"; "operation_id", `String id ]
+
+let origin_request_id = function
+  | History.Delivery_failed { origin_request_id } -> origin_request_id
+  | History.Addressed_to_keeper _ | History.Said_by_keeper
+  | History.Tool_calls _ | History.Reasoning _ -> None
 
 let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
       Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
   | History.Said_by_keeper -> "keeper"
-  | History.Delivery_failed -> "delivery_failed"
+  | History.Delivery_failed _ -> "delivery_failed"
   | History.Tool_calls rows ->
       Printf.sprintf "tools[%s]" (String.concat " | " rows)
   | History.Reasoning lines ->
@@ -94,6 +103,35 @@ let test_roles_map_to_what_the_pane_draws () =
     [ "고쳐줘"; "고쳤어요"; "slack 5xx" ]
     (List.map (fun r -> r.History.text) decoded.History.rows)
 
+(* The pane writes its own row when a turn fails, because most error rows are
+   notices the server has no row for. A failed turn is the one it does record,
+   and it comes back under the operation the client dispatched -- which is what
+   lets the pane drop its own copy instead of drawing the failure twice.
+
+   Only an operation key names a turn this client dispatched. A row the server
+   wrote under another producer's key reads as [None] rather than handing back
+   an id that belongs to someone else. *)
+let test_a_failed_turn_names_the_request_it_came_from () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+             ~delivery_key:(operation_key "tui-28e58beb") "provider closed the connection"
+         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+             ~delivery_key:
+               (`Assoc
+                  [ "kind", `String "fusion_run"; "request_id", `String "fusion-1" ])
+             "provider closed the connection"
+         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure"
+             "provider closed the connection"
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  check (list (option string)) "an operation key is the request, anything else is not"
+    [ Some "tui-28e58beb"; None; None ]
+    (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
+;;
+
 (* A [role: "user"] row is whatever was put in front of the keeper, and most of
    them are not the operator. One live keeper carried 92 such rows from 23
    distinct speakers — taskmaster, an MCP client, the exact-lane verifier, a
@@ -104,7 +142,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; surface } ->
         History.addressed_label speaker surface
-    | History.Said_by_keeper | History.Delivery_failed | History.Tool_calls _
+    | History.Said_by_keeper | History.Delivery_failed _ | History.Tool_calls _
     | History.Reasoning _ ->
         failf "expected an addressed row"
   in
@@ -171,7 +209,7 @@ let test_consecutive_tool_rows_become_one_block () =
            check bool "the rows carry the finished marker" true
              (List.for_all (fun r -> String.length r > 0) rows)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
-       | History.Delivery_failed | History.Reasoning _ ->
+       | History.Delivery_failed _ | History.Reasoning _ ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
         tools.History.at
@@ -237,7 +275,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
            check bool "a step with no status says it was not recorded" true
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper
-       | History.Delivery_failed | History.Reasoning _ ->
+       | History.Delivery_failed _ | History.Reasoning _ ->
            fail "expected the second row to be a tool block");
       check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
   | rows -> failf "expected two rows, got %d" (List.length rows)
@@ -443,6 +481,8 @@ let () =
     [ ( "rows"
       , [ test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
+        ; test_case "a failed turn names the request it came from" `Quick
+            test_a_failed_turn_names_the_request_it_came_from
         ; test_case "an addressed row is labelled by who sent it" `Quick
             test_an_addressed_row_is_labelled_by_who_sent_it
         ; test_case "consecutive tool rows become one block" `Quick

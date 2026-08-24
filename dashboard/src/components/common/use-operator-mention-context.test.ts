@@ -56,9 +56,9 @@ describe('useOperatorMentionContext', () => {
 
   it('filters keepers via isKeeperOperatorTargetable (paused stays, offline drops)', async () => {
     operatorSnapshot.value = snapshotWithKeepers([
-      { name: 'alpha', status: 'active' } as OperatorKeeperSnapshot,
-      { name: 'beta',  status: 'offline' } as OperatorKeeperSnapshot,
-      { name: 'gamma', status: 'paused', paused: true } as OperatorKeeperSnapshot,
+      { name: 'alpha', health: 'healthy' } as OperatorKeeperSnapshot,
+      { name: 'beta',  health: 'offline' } as OperatorKeeperSnapshot,
+      { name: 'gamma', health: 'healthy', paused: true } as OperatorKeeperSnapshot,
     ])
 
     render(

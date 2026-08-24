@@ -2060,6 +2060,16 @@ let render_keeper_list (state : state) =
   let heading =
     Printf.sprintf " %sMASC Keepers (%d)%s" Ansi.bold (List.length state.keepers)
       Ansi.reset
+    ^ (match state.roster_search with
+       | Some query ->
+           Printf.sprintf "  %s/%s%s\xe2\x96\x8c%s" Ansi.cyan
+             (Terminal_text.single_line query) Ansi.reset Ansi.reset
+       | None ->
+           if state.roster_search_last = "" then ""
+           else
+             Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
+               (Terminal_text.single_line state.roster_search_last)
+               Ansi.reset)
     ^ (match keeper_roster_summary readings with
        | [] -> ""
        | parts ->
@@ -2611,7 +2621,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~rows ~cols buf =
    cursor the way the detail follows the selection. *)
 let keeper_roster_pane (state : state) ~rows ~cols buf =
   box_top buf cols;
-  box_line buf cols (Ansi.bold ^ " Keepers" ^ Ansi.reset);
+  box_line buf cols (Ansi.dim ^ " Keepers" ^ Ansi.reset);
   box_divider buf cols;
   let content_height = max 0 (rows - 5) in
   let first =
@@ -2623,10 +2633,14 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
     | Some (k : keeper) ->
         let selected = first + i = state.keeper_cursor in
         let name = Terminal_text.single_line k.k_name in
+        (* Reverse video is the one selection signal every terminal
+           renders, colour or not. *)
         let line =
           if selected then
-            Ansi.bold ^ Ansi.cyan ^ "\xe2\x96\xb8 " ^ name ^ Ansi.reset
-          else "  " ^ name
+            Ansi.reverse ^ " " ^ name
+            ^ String.make (max 0 (cols - 5 - Message_layout.display_width name)) ' '
+            ^ Ansi.reset
+          else " " ^ name
         in
         box_line buf cols line
     | None -> box_empty buf cols
@@ -4849,6 +4863,8 @@ let help_sections : (string * (string * string) list) list =
       ] )
   ; ( "Keepers"
     , [ "j / k", "move the roster cursor"
+      ; "/", "search names; Enter keeps the query"
+      ; "n / N", "next / previous search match"
       ; "Enter", "keeper detail"
       ; "c", "chat with the keeper"
       ; "l", "logs"
@@ -4930,8 +4946,12 @@ let render_palette (state : state) =
        let selected = first + visible_index = cursor in
        let line =
          if selected then
-           Ansi.bold ^ Ansi.cyan ^ "\xe2\x96\xb8 " ^ label ^ Ansi.reset
-         else "  " ^ label
+           Ansi.reverse ^ " " ^ label
+           ^ String.make
+               (max 0 (cols - 5 - Message_layout.display_width label))
+               ' '
+           ^ Ansi.reset
+         else " " ^ label
        in
        box_line buf cols line);
   if total = 0 then

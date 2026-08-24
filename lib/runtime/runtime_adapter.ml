@@ -463,6 +463,15 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
+            (* The declared effort is the only control this dialect has: under
+               [Reasoning_effort] the wire field comes from here, not from
+               [enable_thinking] (reasoning_dialect.ml: Chat_completions,
+               Reasoning_effort -> normalized_effort_field). Without this the
+               model row could name an effort that no HTTP request ever read,
+               which is how a model whose endpoint does honour the control was
+               left reasoning on every turn. Official-client runtimes read the
+               same field through Runtime_inference.resolve_reasoning_effort. *)
+            ?reasoning_effort:spec.reasoning_effort
             ?keep_alive
             ?num_ctx
             ?repeat_penalty
@@ -492,6 +501,15 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
+            (* The declared effort is the only control this dialect has: under
+               [Reasoning_effort] the wire field comes from here, not from
+               [enable_thinking] (reasoning_dialect.ml: Chat_completions,
+               Reasoning_effort -> normalized_effort_field). Without this the
+               model row could name an effort that no HTTP request ever read,
+               which is how a model whose endpoint does honour the control was
+               left reasoning on every turn. Official-client runtimes read the
+               same field through Runtime_inference.resolve_reasoning_effort. *)
+            ?reasoning_effort:spec.reasoning_effort
             ?keep_alive
             ?num_ctx
             ?repeat_penalty

@@ -38,19 +38,27 @@ export interface KeeperPausedInput {
   phase?: Keeper['phase'] | string | null
   pipeline_stage?: Keeper['pipeline_stage'] | string | null
   pause_state?: Keeper['pause_state'] | string | null
+  /** Read by `isKeeperOperatorTargetable` through `KeeperOfflineInput`.
+   *  `isKeeperPaused` itself no longer looks at it — see below. */
   status?: string | null
 }
 
-/** Operator considers the keeper paused on any of: explicit `paused`
- *  flag, FSM phase `Paused`, pipeline stage `paused`, or lowercased
- *  status `paused`. */
+/** Operator considers the keeper paused on the explicit `paused` flag, FSM
+ *  phase `Paused`, pipeline stage `paused`, or pause state `paused`.
+ *
+ *  `status = 'paused'` is not one of them. The server builds that word from
+ *  the same `ld_paused` the flag comes from, so it carries nothing new — and
+ *  it can outlive the flag: the execution-cache override keeps an existing
+ *  `Cp_paused` when a `Stopped` phase event arrives
+ *  (server_dashboard_http_execution_surfaces.ml), leaving `paused: false`
+ *  next to `status: 'paused'` on one row. Reading the word there shows a
+ *  stopped keeper as resumable. */
 export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
   if (keeper.paused === true) return true
   if (lowerToken(keeper.lifecycle_phase) === PAUSED_PHASE_LOWER) return true
   if (lowerToken(keeper.phase) === PAUSED_PHASE_LOWER) return true
   if (lowerToken(keeper.pipeline_stage) === PAUSED_LOWER_TOKEN) return true
   if (lowerToken(keeper.pause_state) === PAUSED_LOWER_TOKEN) return true
-  if (lowerToken(keeper.status) === PAUSED_LOWER_TOKEN) return true
   return false
 }
 
@@ -101,12 +109,36 @@ export function isCrashedPhase(phase: string | null | undefined): boolean {
 export interface KeeperOfflineInput {
   lifecycle_phase?: Keeper['lifecycle_phase'] | string | null
   phase?: Keeper['phase'] | string | null
-  status?: string | null
+  /** Keeper health, one axis published in two placements: the keeper brief
+   *  row carries it top-level, the execution route nests it under
+   *  `diagnostic`. `Keeper['diagnostic']` types `health_state` as a closed
+   *  union while operator snapshots keep an untyped record, so both read
+   *  `unknown` and narrow below. */
+  health?: unknown
+  diagnostic?: { health_state?: unknown } | null
 }
 
-/** Operator considers the keeper offline / down on any of: terminal
- *  FSM phases (Offline/Stopped/Crashed) or one of the
- *  off-tokens emitted in `keeper.status`. */
+const OFFLINE_HEALTH = 'offline'
+
+function healthToken(keeper: KeeperOfflineInput): string | null {
+  const raw = keeper.health ?? keeper.diagnostic?.health_state
+  return typeof raw === 'string' ? raw.toLowerCase() : null
+}
+
+/** Operator considers the keeper offline / down on either axis that
+ *  states it directly: a terminal lifecycle phase (Offline/Stopped/Crashed)
+ *  or `health_state = offline`, which the backend computes fresh from
+ *  `keepalive_running` and heartbeat age.
+ *
+ *  It deliberately ignores `keeper.status`. That field folds health and
+ *  phase back into one word and is refreshed by a different path than the
+ *  axes it summarises, so the two can disagree on the same row — measured
+ *  2026-08-24: `rondo` carried `status=offline` beside `health=healthy`,
+ *  `phase=Running` for the whole observation window. Reading it here made
+ *  a live keeper look shut down, which offered `boot` and `purge` and hid
+ *  `wakeup`. `inactive` was the worse half: it stood for stale, degraded
+ *  and zombie at once, so a keeper that had merely gone quiet was counted
+ *  as one that had stopped. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   const phase = lowerToken(keeper.lifecycle_phase ?? keeper.phase)
   if (
@@ -116,18 +148,7 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   ) {
     return true
   }
-  const status = lowerToken(keeper.status)
-  // RFC-0139 PR-2: the `'stopped'` status token is emitted from
-  // `Keeper_state_machine.phase_to_string`
-  // (lib/keeper/keeper_lifecycle_events.ml:74) when only the
-  // wire-format status string is in hand (no PascalCase phase yet).
-  // The legacy `lib/status-utils.isOfflineStatus` recognised it; folded
-  // in here so `isOfflineStatus` can be retired as strict-subset
-  // duplication.
-  return status === 'offline'
-    || status === 'inactive'
-    || status === 'unbooted'
-    || status === 'stopped'
+  return healthToken(keeper) === OFFLINE_HEALTH
 }
 
 /** Closed set of blocker classes that the wakeup action is intended
@@ -207,20 +228,26 @@ export function isKeeperOperatorTargetable(keeper: KeeperPausedInput & KeeperOff
 // with a self-doc comment admitting the duplication. The full literal
 // set lives here so a new lifecycle phase added to the running cluster
 // is reflected in every consumer at once.
-const RUNNING_STATUS_TOKENS = new Set<string>([
-  'active',
-  'running',
-  'idle',
-  'busy',
-  'listening',
-])
-
 const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>([
   'Running',
   'Failing',
   'Compacting',
   'HandingOff',
   'Draining',
+])
+
+const RUNNING_PHASES_LOWERCASE: ReadonlySet<string> = new Set<string>(
+  [...RUNNING_PHASES_EXCLUDING_RESTARTING].map(p => p.toLowerCase()),
+)
+
+// Health values that mean the process is still taking turns. `stale` is one
+// of them on purpose: a late heartbeat is a keeper that has gone quiet, not
+// one that has stopped, and an operator still needs shutdown on it.
+const RUNNING_HEALTH: ReadonlySet<string> = new Set<string>([
+  'healthy',
+  'idle',
+  'stale',
+  'degraded',
 ])
 
 /** Keeper is "running" for action-panel purposes — turn-producing,
@@ -255,10 +282,20 @@ export const BUFFER_PHASES: ReadonlySet<string> = new Set<string>(
   [...ATTENTION_PHASES].filter(p => p !== 'Crashed'),
 )
 
-export function isKeeperRunningExcludingRestarting(keeper: Keeper): boolean {
-  const status = (keeper.status ?? '').toLowerCase()
-  if (RUNNING_STATUS_TOKENS.has(status)) return true
-  const phase = keeper.phase
-  if (typeof phase === 'string' && RUNNING_PHASES_EXCLUDING_RESTARTING.has(phase)) return true
-  return false
+export function isKeeperRunningExcludingRestarting(
+  keeper: Keeper & KeeperOfflineInput,
+): boolean {
+  // `lifecycle_phase ?? phase` matches its three sibling predicates. This one
+  // read `phase` alone, so a snapshot that carried only the lifecycle field
+  // fell through to the status word — the drift this module exists to stop.
+  const phase = lowerToken(keeper.lifecycle_phase ?? keeper.phase)
+  if (phase !== '') return RUNNING_PHASES_LOWERCASE.has(phase)
+  // No phase on this snapshot, so health answers instead. It used to be the
+  // status word, whose running set held `busy` and `listening` — the *agent*
+  // vocabulary from types_core.ml, which no keeper producer emits — plus
+  // `running`, which is not a keeper status either. Worse, the word was read
+  // first, so a `Crashed` or `Restarting` keeper whose cached status still
+  // said `active` came back running and the panel offered it a pause button.
+  const health = healthToken(keeper)
+  return health !== null && RUNNING_HEALTH.has(health)
 }

@@ -47,7 +47,9 @@ let synchronized_output_enabled () =
    is about to be cleared, which is the last moment a person can see it. *)
 let redirect_stderr_off_terminal ~base_path =
   match
-    let dir = Filename.concat (Filename.concat base_path ".masc") "logs" in
+    let dir =
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "logs"
+    in
     let path =
       Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
     in
@@ -1115,6 +1117,29 @@ let launch_verification_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+
+(* Move the roster cursor to the next keeper whose name contains [query],
+   scanning forward from [after] and wrapping. A miss moves nothing. *)
+let roster_search_jump state ~query ~after =
+  let query = String.lowercase_ascii query in
+  let total = List.length state.keepers in
+  if String.length query > 0 && total > 0 then begin
+    let matches index =
+      match List.nth_opt state.keepers index with
+      | Some (k : keeper) ->
+          Masc_tui_types.palette_contains ~needle:query k.k_name
+      | None -> false
+    in
+    let rec scan step =
+      if step > total then ()
+      else begin
+        let index = (after + step + total) mod total in
+        if matches index then state.keeper_cursor <- index
+        else scan (step + 1)
+      end
+    in
+    scan 1
+  end
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -3757,7 +3782,9 @@ let main () =
       in
       (match key with
        | Some _ when composer_claimed -> ()
-       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
+       | Some k
+         when Render_schedule.Input_shortcut.is_quit ~message_mode k
+              && Option.is_none state.roster_search ->
            raise Break
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
@@ -3811,6 +3838,63 @@ let main () =
                 state.palette_query <- state.palette_query ^ s;
                 state.palette_cursor <- 0
             | _ -> ())
+       (* Roster search: typing moves the cursor live to the first match
+          from the top; Enter keeps the query for n/N, Esc keeps nothing.
+          The list itself never narrows -- see [roster_search] in types. *)
+       | Some k
+         when state.view = Keepers Keeper_list
+              && Option.is_some state.roster_search ->
+           let query = Option.value state.roster_search ~default:"" in
+           (match k with
+            | "esc" -> state.roster_search <- None
+            | "\r" ->
+                state.roster_search <- None;
+                state.roster_search_last <- query
+            | "\127" | "\b" ->
+                let shorter =
+                  Masc_tui_message_layout.drop_last_utf8_scalar query
+                in
+                state.roster_search <- Some shorter;
+                roster_search_jump state ~query:shorter ~after:(-1)
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                let longer = query ^ s in
+                state.roster_search <- Some longer;
+                roster_search_jump state ~query:longer ~after:(-1)
+            | _ -> ())
+       | Some "/" when state.view = Keepers Keeper_list ->
+           state.roster_search <- Some ""
+       | Some "n"
+         when state.view = Keepers Keeper_list
+              && state.roster_search_last <> "" ->
+           roster_search_jump state ~query:state.roster_search_last
+             ~after:state.keeper_cursor
+       | Some "N"
+         when state.view = Keepers Keeper_list
+              && state.roster_search_last <> "" ->
+           (* Backwards: the same wrap walked the other way. *)
+           let total = List.length state.keepers in
+           let query = String.lowercase_ascii state.roster_search_last in
+           if total > 0 then begin
+             let matches index =
+               match List.nth_opt state.keepers index with
+               | Some (k : keeper) ->
+                   Masc_tui_types.palette_contains ~needle:query k.k_name
+               | None -> false
+             in
+             let rec scan step =
+               if step > total then ()
+               else begin
+                 let index =
+                   (state.keeper_cursor - step + (total * 2)) mod total
+                 in
+                 if matches index then state.keeper_cursor <- index
+                 else scan (step + 1)
+               end
+             in
+             scan 1
+           end
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =

@@ -39,6 +39,7 @@ import { KeeperStateDiagramPanel } from './keeper-state-diagram'
 import { KeeperCompactionPanel } from './keeper-compaction-panel'
 import { AgentJournalStream } from './agent-detail-journal'
 import { SessionTraceView } from './session-trace/session-trace-view'
+import { isKeeperOffline } from '../lib/keeper-predicates'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
@@ -112,7 +113,7 @@ export function KeeperDetailBody({
         >
           <${KeeperCommsPanel} keeper=${keeper} />
           <${CollapsibleSection} title="세션 활동 로그" open=${false} mountWhenOpen=${true}>
-            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} />
+            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperOffline=${isKeeperOffline(keeper)} />
           <//>
         <//>
 

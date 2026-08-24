@@ -327,11 +327,18 @@ let test_refusal_distinguishes_absent_from_rejected () =
     Control.roster_failure_message ~credential_sent:true
       Control.Roster_unauthorized
   in
-  Alcotest.(check bool) "no bearer asks for one" true (has "need an operator token" absent);
-  Alcotest.(check bool) "no bearer is not called rejected" false (has "rejected" absent);
-  Alcotest.(check bool) "a sent bearer is reported rejected" true (has "rejected" rejected);
-  Alcotest.(check bool) "a sent bearer is not asked for again" false
-    (has "need an operator token" rejected);
+  Alcotest.(check bool) "no bearer is named absent" true
+    (has "holds no operator token" absent);
+  Alcotest.(check bool) "no bearer is not called refused" false
+    (has "was refused" absent);
+  Alcotest.(check bool) "a sent bearer is named refused" true
+    (has "was refused" rejected);
+  Alcotest.(check bool) "a sent bearer is not called absent" false
+    (has "holds no operator token" rejected);
+  Alcotest.(check bool) "both name the command that mints one" true
+    (has "masc login" absent && has "masc login" rejected);
+  Alcotest.(check bool) "both keep the surface's own subject" true
+    (has "live keeper status" absent && has "live keeper status" rejected);
   (* The other failures say nothing about credentials either way. *)
   List.iter
     (fun credential_sent ->

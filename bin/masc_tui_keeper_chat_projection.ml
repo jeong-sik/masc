@@ -190,7 +190,10 @@ let stream_error_to_string = function
   | Missing_text_end ->
       "Keeper chat run finished without the current text-message terminal"
   | Run_failed { accepted; message; code } ->
-      let phase = if accepted then "accepted Keeper turn failed" else "Keeper chat rejected" in
+      (* "accepted" was in this label to mark the phase, which the other arm
+         already carries: a rejected request never became a turn. Saying it
+         twice spent the row's first words on protocol vocabulary. *)
+      let phase = if accepted then "Keeper turn failed" else "Keeper chat rejected" in
       let code = Option.fold ~none:"" ~some:(Printf.sprintf " (%s)") code in
       Printf.sprintf "%s%s: %s" phase code message
   | Replayed_failed -> "Keeper chat request already has a failed terminal operation"
@@ -215,24 +218,16 @@ let reader_unauthenticated = function
   | Http_error { status = 401 | 403; _ } -> true
   | Http_error _ | Transport_error _ | Protocol_error _ -> false
 
-(* A refusal names two different situations and only one of them is fixed by
-   providing a token. Since #29793 this client finds the bearer masc login left
-   in the workspace, so it usually does present one -- and then a refusal means
-   the stored credential was rejected, where "you have no token" is both false
-   and useless advice. The distinction is #29790's. *)
+(* The sentence itself belongs to Masc_tui_credential, which every refusal
+   surface shares. What is specific here is the consequence: a refused read
+   says nothing about the operation, so the operator needs to know it survived
+   and how to come back to it. *)
 let refused_reader_remedy ~credential_sent =
-  let cause =
-    if credential_sent then
-      "The operator token this masc-tui presented was refused, so it cannot \
-       read the operation back"
-    else
-      "This masc-tui holds no operator token, so it cannot read the operation \
-       back"
-  in
-  cause
-  ^ "; the operation itself is untouched on the server. Run \
-     'masc login --agent masc-tui --client-env MASC_TOKEN', restart masc-tui, \
-     then press Ctrl-R to settle this request."
+  Printf.sprintf
+    "the operation could not be read back: %s. The operation itself is \
+     untouched on the server, so %s, then press Ctrl-R to settle this request."
+    (Masc_tui_credential.refusal_cause ~credential_sent)
+    Masc_tui_credential.remedy
 
 let reconciliation_failure_detail ~credential_sent error =
   if reader_unauthenticated error then refused_reader_remedy ~credential_sent

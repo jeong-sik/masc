@@ -219,21 +219,22 @@ let wrap_tokens palette ~width tokens =
     Buffer.clear current;
     current_cells := 0
   in
-  let push token =
+  (* The word is measured once by [place] and carried in: measuring it again
+     to decide the row and a third time to advance the count segmented every
+     word of every rendered line three times over. *)
+  let push ~word_cells token =
     let separator = if !current_cells > 0 && token.space_before then " " else "" in
-    let cells =
-      Layout.display_width separator + Layout.display_width token.word
-    in
+    let cells = Layout.display_width separator + word_cells in
     if !current_cells > 0 && !current_cells + cells > width then flush ();
     let separator = if !current_cells > 0 && token.space_before then " " else "" in
     Buffer.add_string current separator;
     Buffer.add_string current (render_token palette token);
     current_cells :=
-      !current_cells + Layout.display_width separator
-      + Layout.display_width token.word
+      !current_cells + Layout.display_width separator + word_cells
   in
   let place token =
-    if Layout.display_width token.word <= width then push token
+    let word_cells = Layout.display_width token.word in
+    if word_cells <= width then push ~word_cells token
     else begin
       (* A word wider than the row is split between scalars rather than allowed
          to push the frame past its border. The tail stays open so the next

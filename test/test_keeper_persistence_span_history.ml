@@ -94,6 +94,20 @@ let float_field name json =
   | Some (`Int i) -> Some (float_of_int i)
   | _ -> None
 
+(* The two ways [has_persistent_turn_span] answers false, told apart. Both are
+   correct answers to "was the span proven"; only one of them is an answer
+   about the keeper. *)
+let reading_name ~now stat =
+  match
+    Proof.persistent_turn_span_reading
+      ~required_span_hours:Proof.persistent_turn_window_hours
+      ~now
+      stat
+  with
+  | Proof.Span_met -> "met"
+  | Proof.Span_not_met -> "not_met"
+  | Proof.Span_undetermined -> "undetermined"
+
 let origin_segment json =
   match json_field "first_ts_origin" json with
   | Some origin -> (
@@ -126,6 +140,7 @@ let rotated_segment_reached () =
       let stat, json = evidence ~now ~base ~keeper:"rotor" in
       check bool "gate passes on two days of durable turn exchange" true
         (Proof.has_persistent_turn_span ~now stat);
+      check string "a proven span reads as met" "met" (reading_name ~now stat);
       (* 48.0 is asserted as a literal: deriving it from the reader under test
          would make the assertion an identity. *)
       let span = float_field "span_hours" json in
@@ -211,6 +226,8 @@ let no_turn_rows_is_explicit () =
       let stat, json = evidence ~now ~base ~keeper:"quiet" in
       check bool "no turn rows cannot satisfy the gate" false
         (Proof.has_persistent_turn_span ~now stat);
+      check string "an empty history is an answer about the keeper" "not_met"
+        (reading_name ~now stat);
       check string "absence is named, not defaulted" "none" (origin_segment json))
 
 (* A bounded head read is allowed, but exhausting that budget is not evidence
@@ -230,6 +247,8 @@ let head_budget_exhaustion_is_explicit () =
       let stat, json = evidence ~now ~base ~keeper:"bounded" in
       check bool "an unscanned suffix cannot satisfy the gate" false
         (Proof.has_persistent_turn_span ~now stat);
+      check string "an unscanned suffix leaves the span unknown, not short"
+        "undetermined" (reading_name ~now stat);
       check string "budget exhaustion is not collapsed into absence"
         "scan_exhausted" (origin_segment json);
       check (option int) "recent turns remain visible" (Some 2)

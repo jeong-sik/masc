@@ -287,6 +287,24 @@ def wait_for_output(
         select.select([master_fd], [], [], min(0.1, remaining))
 
 
+def write_all(master_fd: int, output: bytearray, data: bytes) -> None:
+    """Write every byte, draining the TUI as it goes.
+
+    A terminal's input queue is small -- 1024 bytes on macOS -- and the master
+    is non-blocking here, so one os.write of a real paste returns short and
+    the rest is simply gone. A scenario that pastes 4 kB and asserts on what
+    arrived would be asserting on the first kilobyte. Reading between writes
+    is what lets the TUI drain the queue so the next chunk fits.
+    """
+    offset = 0
+    while offset < len(data):
+        try:
+            offset += os.write(master_fd, data[offset : offset + 512])
+        except BlockingIOError:
+            pass
+        read_available(master_fd, output)
+
+
 def send_and_wait(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -3254,6 +3272,72 @@ def image_view_interaction() -> Interaction:
     return interact
 
 
+def paste_spill_interaction(requests: HttpRequests) -> Interaction:
+    """A paste too big for the composer shows as one line and is sent whole.
+
+    The composer is five rows. Four hundred lines in it is a draft the
+    operator cannot read, and a draft they cannot read is a message they
+    cannot check. The text is kept and goes back in on the way out."""
+
+    pasted = "\r".join(f"line {index}" for index in range(400))
+    expected = "\n".join(f"line {index}" for index in range(400))
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        read_available(master_fd, output)
+        start = len(output)
+        write_all(master_fd, output, PASTE_START + pasted.encode() + PASTE_END)
+        wait_for_output(process, master_fd, output, b"[pasted ", start=start, timeout=10.0)
+        frame = frame_containing(bytes(output[start:]), b"[pasted ")
+        plain = CSI_RE.sub(b"", frame)
+        if b"400 line(s)" not in plain:
+            raise AssertionError(f"the placeholder does not say the size: {plain!r}")
+        # The point of the placeholder: the pasted text is not in the composer.
+        if b"line 399" in plain:
+            raise AssertionError(f"the draft still flooded: {plain!r}")
+
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body).get("message")
+        if message != expected:
+            head = "" if message is None else message[:80]
+            raise AssertionError(
+                f"the keeper was sent the placeholder, not the paste: {head!r}"
+            )
+
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
@@ -5087,6 +5171,19 @@ def run_keyboard_regression(executable: str) -> None:
         interact=image_view_interaction(),
         prepare_workspace=seed_image_workspace,
         preload_input=GRAPHICS_SUPPORTED_REPLY,
+    )
+    spill_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="A big paste is one line in the draft",
+        interact=paste_spill_interaction(spill_requests),
+        http_fixtures={
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after the spill request capture"},
+            )
+        },
+        http_requests=spill_requests,
     )
     paste_requests: HttpRequests = []
     run_terminal_scenario(

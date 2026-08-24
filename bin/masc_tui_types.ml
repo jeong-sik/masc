@@ -815,6 +815,11 @@ type state = {
      The keeper travels with the text because the operator can switch keepers
      while a turn runs; sending a queued line to whoever happens to be selected
      later would put it in front of the wrong keeper. *)
+  (* A paste too big for the composer. The draft carries one line saying what
+     it is; the text itself waits here and goes back into the message on the
+     way out. Kept beside the draft rather than in it because the draft is
+     what the operator reads, and five rows cannot hold four hundred lines. *)
+  mutable msg_spill: Masc_tui_paste_spill.t option;
   mutable msg_queued: Masc_tui_keeper_chat_queue.t;
   (* One request per keeper, not one per workspace. Dispatch used to be
      serialized on a single slot because the durable recovery fence held one
@@ -1064,6 +1069,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_older_loading = false;
   msg_older_error = None;
   msg_thinking_collapsed = false;
+  msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
   detail_scroll = 0;

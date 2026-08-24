@@ -407,10 +407,13 @@ type http_surface_results = {
   http_overview: (overview_snapshot, string) result;
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
-  http_board: (board_post list, string) result;
-  http_planning: (planning_snapshot, string) result;
-  http_system_logs: (system_log_snapshot, string) result;
-  http_fleet_safety: (Tui_decode.fleet_safety, string) result;
+  (* [None] on surfaces that do not draw them. Each is read by one surface, and
+     leaving it out keeps whatever that surface last observed rather than
+     dropping it. *)
+  http_board: (board_post list, string) result option;
+  http_planning: (planning_snapshot, string) result option;
+  http_system_logs: (system_log_snapshot, string) result option;
+  http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -1320,13 +1323,15 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation ~wants_transport
-    ~wants_keeper_roster =
+let load_http_surfaces ~host ~port ~approval_generation
+    ~(needs : Masc_tui_types.surface_needs) =
+  let when_needed wanted load = if wanted then Some (load ()) else None in
   let http_overview = load_overview ~host ~port in
   (* Only the Overview row shows this, so a refresh on another surface does not
      spend a request on it. [None] leaves whatever the last read observed. *)
   let http_transport =
-    if wants_transport then Some (load_transport_health ~host ~port) else None
+    when_needed needs.needs_transport (fun () ->
+        load_transport_health ~host ~port)
   in
   let http_approvals =
     Option.map
@@ -1334,12 +1339,22 @@ let load_http_surfaces ~host ~port ~approval_generation ~wants_transport
          { ao_generation; ao_result = load_approvals ~host ~port })
       approval_generation
   in
-  let http_board = load_board_list ~host ~port in
-  let http_planning = load_planning ~host ~port in
-  let http_system_logs = load_system_logs ~host ~port ~limit:system_log_page in
-  let http_fleet_safety = load_fleet_safety ~host ~port in
+  let http_board =
+    when_needed needs.needs_board (fun () -> load_board_list ~host ~port)
+  in
+  let http_planning =
+    when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
+  in
+  let http_system_logs =
+    when_needed needs.needs_system_logs (fun () ->
+        load_system_logs ~host ~port ~limit:system_log_page)
+  in
+  let http_fleet_safety =
+    when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
+  in
   let http_keeper_roster =
-    if wants_keeper_roster then Some (load_keeper_roster ~host ~port) else None
+    when_needed needs.needs_keeper_roster (fun () ->
+        load_keeper_roster ~host ~port)
   in
   { http_overview
   ; http_transport
@@ -1355,30 +1370,27 @@ let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
   Option.iter (apply_transport_load state) results.http_transport;
   Option.iter (apply_approval_observation state) results.http_approvals;
-  apply_board_list_load state results.http_board;
-  apply_planning_load state results.http_planning;
-  apply_system_logs_load state results.http_system_logs;
-  apply_fleet_safety_load state results.http_fleet_safety;
+  Option.iter (apply_board_list_load state) results.http_board;
+  Option.iter (apply_planning_load state) results.http_planning;
+  Option.iter (apply_system_logs_load state) results.http_system_logs;
+  Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
-  let approval_status =
-    Option.map
-      (fun observation ->
-         Result.map (fun _ -> ()) observation.ao_result
-         |> Result.map_error (fun _ -> ()))
-      results.http_approvals
-    |> Option.to_list
+  let reached result =
+    Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
+  let reached_if_asked result = Option.map reached result |> Option.to_list in
+  (* Only the requests this refresh actually made say anything about the
+     connection. Overview runs on every surface, so the reading never rests on
+     an empty list. *)
   state.connection_status <-
     refresh_status
-      (
-      [
-        Result.map (fun _ -> ()) results.http_overview
-        |> Result.map_error (fun _ -> ());
-        Result.map (fun _ -> ()) results.http_board
-        |> Result.map_error (fun _ -> ());
-        Result.map (fun _ -> ()) results.http_planning
-        |> Result.map_error (fun _ -> ());
-      ] @ approval_status)
+      ([ reached results.http_overview ]
+       @ reached_if_asked results.http_board
+       @ reached_if_asked results.http_planning
+       @ (Option.map
+            (fun observation -> reached observation.ao_result)
+            results.http_approvals
+          |> Option.to_list))
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
@@ -1453,14 +1465,12 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        | Connected | Degraded -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs = Masc_tui_types.surface_needs state.view in
-    let wants_transport = needs.needs_transport in
-    let wants_keeper_roster = needs.needs_keeper_roster in
+
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation ~wants_transport
-                ~wants_keeper_roster))
+             (load_http_surfaces ~host ~port ~approval_generation ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -1477,8 +1487,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation ~wants_transport
-                ~wants_keeper_roster))
+               (load_http_surfaces ~host ~port ~approval_generation ~needs))
   end
 
 let board_detail_request_still_current state request =
@@ -2623,6 +2632,12 @@ let main () =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
+  (* A surface that is fetched only while it is open has nothing to draw the
+     moment it opens, and waiting out the refresh interval would read as "there
+     is nothing here". Watching the surface from the loop catches every way it
+     can change, rather than asking each of the places that change it to
+     remember. *)
+  let drawn_surface = ref state.view in
   let input_reader = create_input_reader () in
   let run_loop () =
     while true do
@@ -3240,6 +3255,17 @@ let main () =
             | Repositories | Connectors | Tools | Autonomy | System_logs
             -> ())
       | _ -> ());
+
+      (* A refresh already running was asked for the surface that was open when
+         it started, so it brings nothing for this one. The surface is recorded
+         as fetched only once a request for it has actually gone out; until
+         then the next pass through the loop tries again. *)
+      if state.view <> !drawn_surface && not !http_refresh_inflight then begin
+        drawn_surface := state.view;
+        start_http_refresh state ~host:(Env_config_core.masc_host ())
+          ~port:state.port ~refresh_inflight:http_refresh_inflight
+          ~mailbox:async_messages
+      end;
 
       Eio.Fiber.yield ();
       if

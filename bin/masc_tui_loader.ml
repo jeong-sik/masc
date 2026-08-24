@@ -3,6 +3,7 @@
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
@@ -31,6 +32,42 @@ let summarize_errors label errors =
 
 (** Load keepers through the canonical metadata classifier and typed store.
     The classifier preserves valid dotted names and excludes sidecars. *)
+(* Every refresh read all ten meta files whole, and in a thirty-second sample
+   not one of them changed. A file nothing has written to since the last read
+   still decodes to what it decoded then, so the read is skipped and that value
+   reused -- the same size-and-modification-time test [Workspace_backlog]
+   already applies to the backlog. [Unix.stat] carries sub-second times here, so
+   a write cannot land inside one without moving it. *)
+type cached_keeper_meta = {
+  cached_mtime : float;
+  cached_size : int;
+  cached_keeper : keeper;
+}
+
+let keeper_meta_cache : (string, cached_keeper_meta) Hashtbl.t =
+  Hashtbl.create 16
+
+let stat_opt path =
+  try Some (Unix.stat path) with Unix.Unix_error _ | Sys_error _ -> None
+
+let cached_keeper_for name stat =
+  match stat, Hashtbl.find_opt keeper_meta_cache name with
+  | Some (st : Unix.stats), Some entry
+    when st.Unix.st_mtime = entry.cached_mtime
+         && st.Unix.st_size = entry.cached_size ->
+      Some entry.cached_keeper
+  | (Some _ | None), (Some _ | None) -> None
+
+let remember_keeper name stat keeper =
+  match stat with
+  | None -> ()
+  | Some (st : Unix.stats) ->
+      Hashtbl.replace keeper_meta_cache name
+        { cached_mtime = st.Unix.st_mtime;
+          cached_size = st.Unix.st_size;
+          cached_keeper = keeper;
+        }
+
 let load_keepers (base_path : string) : keeper list * string option =
   let config = Workspace_core.default_config base_path in
   match Keeper_meta_store.persisted_keeper_names_result config with
@@ -38,17 +75,37 @@ let load_keepers (base_path : string) : keeper list * string option =
       report (Keeper_types_profile.keeper_dir config) err;
       [], Some ("keeper metadata unavailable: " ^ err)
   | Ok names ->
+      (* A keeper that is gone keeps nothing behind it. *)
+      Hashtbl.filter_map_inplace
+        (fun name entry -> if List.mem name names then Some entry else None)
+        keeper_meta_cache;
+      (* [keeper_meta_path] resolves the directory again for every name it is
+         handed, and resolving it takes a lock and a stat each time. The
+         directory is the same for all of them, so it is resolved once and the
+         file names hung off it. *)
+      let keepers_dir = Keeper_types_profile.keeper_dir config in
+      let meta_path name =
+        Filename.concat keepers_dir
+          (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name
+             Keeper_runtime_root_entry.Metadata)
+      in
       let keepers, errors =
         List.fold_left
           (fun (keepers, errors) name ->
-             let path = Keeper_types_profile.keeper_meta_path config name in
-             match Keeper_meta_store.read_meta config name with
-             | Ok (Some meta) ->
-                 Tui_decode.keeper_of_meta meta :: keepers, errors
-             | Ok None -> keepers, errors
-             | Error err ->
-                 report path err;
-                 keepers, (Printf.sprintf "%s: %s" name err :: errors))
+             let path = meta_path name in
+             let stat = stat_opt path in
+             match cached_keeper_for name stat with
+             | Some keeper -> keeper :: keepers, errors
+             | None -> (
+                 match Keeper_meta_store.read_meta config name with
+                 | Ok (Some meta) ->
+                     let keeper = Tui_decode.keeper_of_meta meta in
+                     remember_keeper name stat keeper;
+                     keeper :: keepers, errors
+                 | Ok None -> keepers, errors
+                 | Error err ->
+                     report path err;
+                     keepers, (Printf.sprintf "%s: %s" name err :: errors)))
           ([], []) names
       in
       ( List.sort (fun a b -> String.compare a.k_name b.k_name) keepers

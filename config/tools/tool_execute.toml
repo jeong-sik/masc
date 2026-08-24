@@ -343,8 +343,10 @@ name = "timeout_sec"
 type = "number"
 exclusive_minimum = 0.0
 description = """
-Optional explicit subprocess wall-clock timeout in seconds. When absent, \
-Execute is unbounded and remains cancellable."""
+Explicit subprocess wall-clock timeout in seconds. When absent it is 600, so \
+name one for a command that legitimately runs longer, such as a whole test \
+suite. A call that runs out of time is stopped and says so; it does not \
+continue in the background."""
 
 [[params]]
 name = "stdin"

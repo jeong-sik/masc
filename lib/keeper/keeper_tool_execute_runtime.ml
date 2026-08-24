@@ -341,7 +341,7 @@ let handle_tool_execute_typed
                 ~turn_sandbox_factory
                 ~meta
                 ~cwd
-                ?timeout_sec
+                ~timeout_sec
                 ()
               |> Result.map
                    (fun
@@ -357,7 +357,7 @@ let handle_tool_execute_typed
                   ; github_secret_files =
                       (fun () ->
                          Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
-                           ?timeout_sec
+                           ~timeout_sec
                            dispatch.runtime)
                   ; cleanup = Fun.id
                   })
@@ -600,7 +600,7 @@ let handle_tool_execute_typed
               Keeper_tooling.Execute_shell_ir.dispatch
                 ~workdir:cwd
                 ~sandbox:dispatch_sandbox
-                ?timeout_sec
+                ~timeout_sec
                 ?base_host_env
                 ~on_output_chunk
                 ir

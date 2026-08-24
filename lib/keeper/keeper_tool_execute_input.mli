@@ -4,7 +4,12 @@ val has_typed_execute_input_key : Yojson.Safe.t -> bool
 val assoc_upsert : string -> Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 val typed_input_command_text : Keeper_tool_execute_typed_input.execute_input -> string
 val typed_input_has_env : Keeper_tool_execute_typed_input.execute_input -> bool
-val typed_input_timeout_sec : Keeper_tool_execute_typed_input.execute_input -> float option
+val default_timeout_sec : float
+(** Wall-clock budget for an Execute call whose caller named none. *)
+
+val typed_input_timeout_sec : Keeper_tool_execute_typed_input.execute_input -> float
+(** The call's wall-clock budget. An absent [timeout_sec] resolves to
+    {!default_timeout_sec} here, so nothing downstream can run unbounded. *)
 
 val typed_validation_error_text
   :  Keeper_tool_execute_typed_input.validation_error

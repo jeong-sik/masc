@@ -269,13 +269,39 @@ let test_of_json_timeout_is_optional_and_preserved () =
       timeout_sec
   in
   Alcotest.(check (option (float 0.0)))
-    "absence remains unbounded"
+    "a caller who named no budget is recorded as having named none"
     None
     (timeout without_timeout);
   Alcotest.(check (option (float 0.0)))
     "explicit timeout is preserved"
     (Some 12.5)
     (timeout with_timeout)
+;;
+
+(* The parsed record above says what the caller wrote. This says what the call
+   actually runs under: absence is resolved once, here, so nothing downstream
+   is handed [None] and left to decide that it means forever. *)
+let test_absent_timeout_resolves_to_the_default () =
+  let without_timeout =
+    parse_json_exn (`Assoc [ "argv", `List [ `String "sleep" ] ])
+  in
+  let with_timeout =
+    parse_json_exn
+      (`Assoc [ "argv", `List [ `String "sleep" ]; "timeout_sec", `Float 12.5 ])
+  in
+  Alcotest.(check (float 0.0))
+    "an unnamed budget becomes the default rather than forever"
+    Keeper_tool_execute_input.default_timeout_sec
+    (Keeper_tool_execute_input.typed_input_timeout_sec without_timeout);
+  Alcotest.(check (float 0.0))
+    "a named budget is what runs"
+    12.5
+    (Keeper_tool_execute_input.typed_input_timeout_sec with_timeout);
+  Alcotest.(check bool)
+    "the default sits inside the range callers already ask for"
+    true
+    (Keeper_tool_execute_input.default_timeout_sec > 0.
+     && Keeper_tool_execute_input.default_timeout_sec <= 900.)
 ;;
 
 let test_of_json_rejects_invalid_explicit_timeout () =
@@ -1848,6 +1874,10 @@ let suite =
           "the_script_description_matches_what_the_parser_does"
           `Quick
           test_the_script_description_matches_what_the_parser_does
+      ; Alcotest.test_case
+          "absent_timeout_resolves_to_the_default"
+          `Quick
+          test_absent_timeout_resolves_to_the_default
       ; Alcotest.test_case
           "of_json_rejects_invalid_explicit_timeout"
           `Quick

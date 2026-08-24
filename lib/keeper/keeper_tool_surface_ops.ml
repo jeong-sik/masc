@@ -670,10 +670,27 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_res
    the dashboard thread, which is where they are watching. Registry
    membership decides it, not the shape of the name: writing a queue for a
    name no Keeper owns would leave the answer somewhere nobody drains. *)
+type delegate_continuation =
+  | Answer_reaches_the_asker of Keeper_continuation_channel.t
+      (** the submitter is a registered Keeper and owns the queue named here *)
+  | Answer_reaches_the_dashboard
+      (** the submitter is not a Keeper, so the dashboard thread is where it
+          is watching *)
+  | Asker_has_no_queue of string
+      (** the submitter is a registered Keeper, but its queue could not be
+          named. Distinct from {!Answer_reaches_the_dashboard} on purpose: the
+          two used to collapse into [None], and a Keeper whose channel failed
+          to build had its answer posted to a dashboard thread it is not
+          reading. Silently answering the wrong place is worse than not
+          answering. *)
+
 let delegate_continuation_channel ~(config : Workspace.config) ~submitted_by =
-  if Keeper_registry.is_registered ~base_path:config.base_path submitted_by
-  then Keeper_continuation_channel.keeper ~keeper_name:submitted_by |> Result.to_option
-  else None
+  if not (Keeper_registry.is_registered ~base_path:config.base_path submitted_by)
+  then Answer_reaches_the_dashboard
+  else (
+    match Keeper_continuation_channel.keeper ~keeper_name:submitted_by with
+    | Ok channel -> Answer_reaches_the_asker channel
+    | Error error -> Asker_has_no_queue error)
 ;;
 
 let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
@@ -684,10 +701,25 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
       |> message_error
     in
     let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
+    let* continuation_channel =
+      match delegate_continuation_channel ~config:ctx.config ~submitted_by with
+      | Answer_reaches_the_dashboard -> Ok None
+      | Answer_reaches_the_asker channel -> Ok (Some channel)
+      | Asker_has_no_queue error ->
+        (* Refusing here costs the caller a retry.  Continuing would accept the
+           delegation and deliver its answer to a thread the asker is not
+           reading, which costs the caller the answer. *)
+        message_error
+          (Error
+             (Printf.sprintf
+                "%s is a registered Keeper but its continuation queue could not \
+                 be named, so the reply would not reach it: %s"
+                submitted_by
+                error))
+    in
     submit_agent_operation
       ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
-      ?continuation_channel:
-        (delegate_continuation_channel ~config:ctx.config ~submitted_by)
+      ?continuation_channel
       ~submitted_by
       ~keeper_name:(Keeper_invocation_contract.target_name request)
       ~message:(Keeper_invocation_contract.prompt request)

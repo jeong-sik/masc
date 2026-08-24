@@ -246,19 +246,25 @@ let only_a_keeper_is_answered_on_its_queue () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:asker;
     (match Ops.delegate_continuation_channel ~config ~submitted_by:asker with
-     | Some (Keeper_continuation_channel.Keeper { keeper_name }) ->
-       check string "a Keeper is answered on its own queue" asker keeper_name
-     | Some other ->
+     | Ops.Answer_reaches_the_asker (Keeper_continuation_channel.Keeper { keeper_name })
+       -> check string "a Keeper is answered on its own queue" asker keeper_name
+     | Ops.Answer_reaches_the_asker other ->
        fail
          ("a Keeper must be answered on its own queue, got "
           ^ Keeper_continuation_channel.kind_label other)
-     | None -> fail "a Keeper must be answered on its own queue");
-    check
-      bool
-      "a caller that owns no queue keeps the channel it is watching"
-      true
-      (Option.is_none
-         (Ops.delegate_continuation_channel ~config ~submitted_by:"operator")))
+     | Ops.Answer_reaches_the_dashboard ->
+       fail "a Keeper must be answered on its own queue"
+     | Ops.Asker_has_no_queue error ->
+       fail ("a registered Keeper must have a nameable queue, got: " ^ error));
+    (* A caller that owns no queue is a different answer from a Keeper whose
+       queue could not be named.  Before this was a variant both were [None],
+       and the second was delivered to a thread the asker is not reading. *)
+    match Ops.delegate_continuation_channel ~config ~submitted_by:"operator" with
+    | Ops.Answer_reaches_the_dashboard -> ()
+    | Ops.Answer_reaches_the_asker _ ->
+      fail "a caller that owns no queue must keep the channel it is watching"
+    | Ops.Asker_has_no_queue error ->
+      fail ("an unregistered caller must not be treated as a Keeper, got: " ^ error))
 ;;
 
 let () =

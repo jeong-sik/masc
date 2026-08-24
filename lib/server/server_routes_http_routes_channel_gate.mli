@@ -16,14 +16,6 @@ val record_validation_error_metric :
 
 val resolve_connector_status_name : ?name:string -> unit -> string option
 
-val handle_gate_keeper_status_by_name :
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  unit
-
 val keeper_exists : Mcp_server.server_state -> string -> (bool, string) result
 
 val respond_keeper_tool_json :

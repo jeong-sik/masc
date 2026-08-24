@@ -7,6 +7,7 @@
  (private_modules
   keeper_grpc_heartbeat
   server_grpc_tool_dispatch
+  server_dashboard_fusion_run_projection
   server_dashboard_http_schedule_actions
   server_dashboard_http_keeper_event_queue_operator_execute
   server_schedule_runner_policy)

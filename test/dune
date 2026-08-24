@@ -887,6 +887,11 @@
  (modules test_fusion_status_tool)
  (libraries masc_test_deps masc.fusion_core))
 
+(test
+ (name test_dashboard_fusion_run_projection)
+ (modules test_dashboard_fusion_run_projection)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; 적대 리뷰 #22087 §1 — Fusion_judge.attach_usage가 파싱 실패 시에도 심판 usage를
 ; 보존함을 핀한다 (refine degrade 비용 undercount 회귀 방지).
 

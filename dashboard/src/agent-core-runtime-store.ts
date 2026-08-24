@@ -2,7 +2,8 @@ import { appendLiveAgentCoreEvent } from './components/session-trace/session-tra
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toKeeperPhase } from './keeper-store-normalize'
 import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
-import { AGENT_CORE_TELEMETRY_REPLAY_LIMIT, AGENT_CORE_EVENT_PREFIX } from './config/constants'
+import { AGENT_CORE_TELEMETRY_REPLAY_LIMIT } from './config/constants'
+import { isAgentCoreEventType } from './lib/sse-event-type'
 import {
   agentCoreTotalEvents,
   agentCoreReplayLoadedEvents,
@@ -504,7 +505,7 @@ function ingestRuntimeProjection(
 function coerceAgentCoreRuntimeEnvelope(raw: unknown): AgentCoreRuntimeEnvelope | null {
   if (!isRecord(raw)) return null
   const type = asString(raw.type)
-  if (!type || !type.startsWith(AGENT_CORE_EVENT_PREFIX)) return null
+  if (!type || !isAgentCoreEventType(type)) return null
   return {
     ...raw,
     type,

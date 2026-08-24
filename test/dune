@@ -2710,6 +2710,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tool_transport_prefix)
+ (modules test_tool_transport_prefix)
+ (libraries alcotest masc_tool_dispatch))
+
+(test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
  (libraries alcotest masc_tui_types))

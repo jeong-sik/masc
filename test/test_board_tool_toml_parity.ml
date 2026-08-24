@@ -800,7 +800,6 @@ let expected_cleanup : Masc_domain.tool_schema =
                     ; "description", `String "Max posts to process (default: 10, max: 50)"
                     ] )
               ] )
-        ; "required", `List []
         ]
   }
 ;;

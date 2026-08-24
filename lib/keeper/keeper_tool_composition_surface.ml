@@ -1,11 +1,12 @@
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
 
+(* No ["required"] key: an empty one says nothing an absent one does not, and
+   both readers fold them together. *)
 let empty_input_schema =
   `Assoc
     [ "type", `String "object"
     ; "properties", `Assoc []
-    ; "required", `List []
     ; "additionalProperties", `Bool false
     ]
 ;;

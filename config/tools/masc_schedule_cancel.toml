@@ -1,0 +1,26 @@
+name = "masc_schedule_cancel"
+description = "Cancel a scheduled or due request before execution."
+additional_properties = false
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Schedule id to cancel."
+
+[[params]]
+name = "cancelled_by_id"
+type = "string"
+required = true
+description = "Human or system actor id cancelling the schedule."
+
+[[params]]
+name = "cancelled_by_kind"
+type = "string"
+enum = ["human_operator", "automated_actor", "system"]
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = "Reason for operator-visible cancellation."

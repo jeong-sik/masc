@@ -269,6 +269,11 @@ let assemble_hooks
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
+        ~on_after_turn_response:
+          (fun ~response ->
+             Keeper_run_tools_hook_accumulator.record_assistant_turn_text
+               acc
+               response)
         ?on_tool_result_ready:ctx.on_tool_result_ready
         ?trajectory_acc
         ~on_tool_executed:

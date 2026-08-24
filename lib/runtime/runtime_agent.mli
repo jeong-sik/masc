@@ -28,6 +28,10 @@ type stop_reason = Runtime_agent_context.stop_reason =
       tool_name : string;
       repeated_count : int;
     }
+  | Yielded_after_repeated_assistant_text of {
+      turns_used : int;
+      repeated_count : int;
+    }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;
@@ -41,6 +45,7 @@ type cooperative_yield_reason =
       tool_name : string;
       repeated_count : int;
     }
+  | Repeated_assistant_text of { repeated_count : int }
   | Terminal_tool_completed
 
 type cooperative_yield_decision =
@@ -61,6 +66,9 @@ type cooperative_yield_probe =
     chat must receive an acknowledgement rather than a transport failure.
     [Yielded_after_repeated_tool_call] fires only after repeated exact tool
     input and output prove that the provider loop is not advancing.
+    [Yielded_after_repeated_assistant_text] fires when the trailing provider
+    turns each emitted the same non-blank assistant text — the loop signal
+    that appears before tool fingerprints repeat.
     [InputRequired] means Agent Core returned a typed elicitation request whose
     question and checkpoint must be surfaced without provider fallback. These
     typed non-completion stops persist checkpoints rather than claiming a

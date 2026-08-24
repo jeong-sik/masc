@@ -2295,6 +2295,28 @@ let track_connection_eof connection =
   Eio.Resource.T ((), operations), eof_seen
 ;;
 
+(* The peer closed and something upstream reported it as prose.
+
+   cohttp-eio reads the response through the flow above, and on a closed
+   connection [Io.Response.read] answers [`Eof], which it turns into
+   [Failure "connection closed by peer"] (cohttp-eio/client.ml:60).
+   [classify_network_exn] declines to read that message — inventing a network
+   kind from prose is how a classifier starts guessing — so the exception used
+   to escape [with_post_stream] entirely. It then reached the runtime runner's
+   outermost handler and was recorded as [internal_unhandled_exception], an
+   internal defect. It is not one: the socket ended. masc counts that against
+   the keeper's crash threshold, so a provider hanging up walked keepers toward
+   termination (masc#29951; 185 occurrences over 2026-08-18/20/24).
+
+   The evidence here is structural, not textual. [track_connection_eof] routes
+   every transport read through one [single_read], and nothing but a real
+   [End_of_file] on the socket sets the flag, so a set flag at the moment an
+   unclassified exception surfaces means the read that failed is the close. The
+   original exception text is kept as the message. *)
+let eof_error exn =
+  NetworkError { message = Printexc.to_string exn; kind = End_of_file }
+;;
+
 let with_post_stream
       ?cache
       ?clock
@@ -2399,6 +2421,7 @@ let with_post_stream
         Eio.Resource.close conn;
         (match classify_network_exn exn with
          | Some e -> Error e
+         | None when !transport_eof_seen -> Error (eof_error exn)
          | None -> raise exn))
   in
   (* Phase 1b: body consumption. Deliberately OUTSIDE [catch_network]: a
@@ -2429,6 +2452,7 @@ let with_post_stream
     | exn ->
       (match classify_network_exn exn with
        | Some e -> Error e
+       | None when !transport_eof_seen -> Error (eof_error exn)
        | None ->
          (* Unclassified exceptions (including cancellation) escape, so close
               the connection before re-raising to avoid leaking a cached socket

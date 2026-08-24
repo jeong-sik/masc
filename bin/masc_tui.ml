@@ -428,10 +428,13 @@ type http_surface_results = {
   http_overview: (overview_snapshot, string) result;
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
-  http_board: (board_post list, string) result;
-  http_planning: (planning_snapshot, string) result;
-  http_system_logs: (system_log_snapshot, string) result;
-  http_fleet_safety: (Tui_decode.fleet_safety, string) result;
+  (* [None] on surfaces that do not draw them. Each is read by one surface, and
+     leaving it out keeps whatever that surface last observed rather than
+     dropping it. *)
+  http_board: (board_post list, string) result option;
+  http_planning: (planning_snapshot, string) result option;
+  http_system_logs: (system_log_snapshot, string) result option;
+  http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -488,6 +491,17 @@ type async_msg =
   | Observer_opened of string
   | Observer_received of Masc_tui_observer.decoded list
   | Observer_closed of string
+  | Task_dispatched of {
+      keeper : string;
+      task_id : string;
+      title : string;
+      body : string;
+    }
+  | Task_dispatch_failed of {
+      keeper : string;
+      detail : string;
+      original : string;
+    }
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -1097,6 +1111,100 @@ let chat_status_text completed =
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 
+(* /task in the composer or the chat pane: create the task first, then hand
+   the keeper the operator's words with the task id in front. Creation runs
+   on a daemon fiber; only the mailbox result mutates state. The MCP session
+   is the one the observer feed keeps; without one, this call opens one and
+   the observer reuses it. *)
+let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let session = state.mcp_session in
+  (* A JSON-RPC id for this one call: the answer must name it back. Wall
+     clock is identity enough for correlation on a single request. *)
+  let request_id = Printf.sprintf "tui-task-%.6f" (Unix.gettimeofday ()) in
+  let run () =
+    let result =
+      try
+        let session_result =
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
+        in
+        match session_result with
+        | Error detail -> Error detail
+        | Ok session_id -> (
+            let arguments =
+              ("title", `String title)
+              ::
+              (if String.trim body = "" then []
+               else [ ("description", `String body) ])
+            in
+            match
+              Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
+                ~tool:"masc_add_task" ~arguments
+            with
+            | Error detail -> Error detail
+            | Ok outcome ->
+                if outcome.Masc_tui_mcp.is_error then
+                  Error outcome.Masc_tui_mcp.text
+                else Masc_tui_mcp.task_id_of_add_task outcome.Masc_tui_mcp.text)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (match result with
+       | Ok task_id ->
+           Task_dispatched { keeper = keeper_name; task_id; title; body }
+       | Error detail ->
+           Task_dispatch_failed { keeper = keeper_name; detail; original })
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Task_dispatch_failed
+           { keeper = keeper_name
+           ; detail = "Eio switch is unavailable"
+           ; original
+           })
+
+(* One reading of what the operator typed, wherever they typed it: the
+   composer row or the chat pane's input. Text goes to the keeper as it
+   always did; a slash word is the TUI's to act on, and a mistyped one is
+   reported rather than sent to the keeper as an instruction. *)
+let send_operator_text ?keeper_name state ~mailbox text =
+  match Masc_tui_command.parse text with
+  | Masc_tui_command.Say _ ->
+      start_keeper_message ?keeper_name state ~mailbox text
+  | Masc_tui_command.Task_missing_title ->
+      add_event state "error" "/task needs a title on the same line"
+  | Masc_tui_command.Unknown word ->
+      add_event state "error"
+        (Printf.sprintf
+           "unknown command /%s (text is sent as typed; /task <title> creates             work)"
+           word)
+  | Masc_tui_command.Task_for_keeper { title; body } -> (
+      let target =
+        match keeper_name with
+        | Some _ as named -> named
+        | None -> state.msg_target_keeper_name
+      in
+      match target with
+      | None -> add_event state "error" "/task needs a keeper to hand the work to"
+      | Some keeper ->
+          Buffer.clear state.msg_input;
+          add_event state "task"
+            (Printf.sprintf "creating a task for %s: %s" keeper title);
+          launch_task_dispatch state ~mailbox ~keeper_name:keeper ~title ~body
+            ~original:text)
+
 let apply_keeper_chat_result state request result =
   match inflight_by_request_id state request.Keeper_chat.request_id with
   | Some current when Keeper_chat.same_request_identity current request ->
@@ -1360,13 +1468,15 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation ~wants_transport
-    ~wants_keeper_roster =
+let load_http_surfaces ~host ~port ~approval_generation
+    ~(needs : Masc_tui_types.surface_needs) =
+  let when_needed wanted load = if wanted then Some (load ()) else None in
   let http_overview = load_overview ~host ~port in
   (* Only the Overview row shows this, so a refresh on another surface does not
      spend a request on it. [None] leaves whatever the last read observed. *)
   let http_transport =
-    if wants_transport then Some (load_transport_health ~host ~port) else None
+    when_needed needs.needs_transport (fun () ->
+        load_transport_health ~host ~port)
   in
   let http_approvals =
     Option.map
@@ -1374,12 +1484,22 @@ let load_http_surfaces ~host ~port ~approval_generation ~wants_transport
          { ao_generation; ao_result = load_approvals ~host ~port })
       approval_generation
   in
-  let http_board = load_board_list ~host ~port in
-  let http_planning = load_planning ~host ~port in
-  let http_system_logs = load_system_logs ~host ~port ~limit:system_log_page in
-  let http_fleet_safety = load_fleet_safety ~host ~port in
+  let http_board =
+    when_needed needs.needs_board (fun () -> load_board_list ~host ~port)
+  in
+  let http_planning =
+    when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
+  in
+  let http_system_logs =
+    when_needed needs.needs_system_logs (fun () ->
+        load_system_logs ~host ~port ~limit:system_log_page)
+  in
+  let http_fleet_safety =
+    when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
+  in
   let http_keeper_roster =
-    if wants_keeper_roster then Some (load_keeper_roster ~host ~port) else None
+    when_needed needs.needs_keeper_roster (fun () ->
+        load_keeper_roster ~host ~port)
   in
   { http_overview
   ; http_transport
@@ -1395,30 +1515,27 @@ let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
   Option.iter (apply_transport_load state) results.http_transport;
   Option.iter (apply_approval_observation state) results.http_approvals;
-  apply_board_list_load state results.http_board;
-  apply_planning_load state results.http_planning;
-  apply_system_logs_load state results.http_system_logs;
-  apply_fleet_safety_load state results.http_fleet_safety;
+  Option.iter (apply_board_list_load state) results.http_board;
+  Option.iter (apply_planning_load state) results.http_planning;
+  Option.iter (apply_system_logs_load state) results.http_system_logs;
+  Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
-  let approval_status =
-    Option.map
-      (fun observation ->
-         Result.map (fun _ -> ()) observation.ao_result
-         |> Result.map_error (fun _ -> ()))
-      results.http_approvals
-    |> Option.to_list
+  let reached result =
+    Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
+  let reached_if_asked result = Option.map reached result |> Option.to_list in
+  (* Only the requests this refresh actually made say anything about the
+     connection. Overview runs on every surface, so the reading never rests on
+     an empty list. *)
   state.connection_status <-
     refresh_status
-      (
-      [
-        Result.map (fun _ -> ()) results.http_overview
-        |> Result.map_error (fun _ -> ());
-        Result.map (fun _ -> ()) results.http_board
-        |> Result.map_error (fun _ -> ());
-        Result.map (fun _ -> ()) results.http_planning
-        |> Result.map_error (fun _ -> ());
-      ] @ approval_status)
+      ([ reached results.http_overview ]
+       @ reached_if_asked results.http_board
+       @ reached_if_asked results.http_planning
+       @ (Option.map
+            (fun observation -> reached observation.ao_result)
+            results.http_approvals
+          |> Option.to_list))
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
@@ -1493,14 +1610,12 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        | Connected | Degraded -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs = Masc_tui_types.surface_needs state.view in
-    let wants_transport = needs.needs_transport in
-    let wants_keeper_roster = needs.needs_keeper_roster in
+
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation ~wants_transport
-                ~wants_keeper_roster))
+             (load_http_surfaces ~host ~port ~approval_generation ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -1517,8 +1632,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation ~wants_transport
-                ~wants_keeper_roster))
+               (load_http_surfaces ~host ~port ~approval_generation ~needs))
   end
 
 let board_detail_request_still_current state request =
@@ -2138,9 +2252,16 @@ let handle_composer_key state ~base_path ~mailbox key =
   | Composer.Send ->
       state.composer_focused <- false;
       let text = Buffer.contents state.msg_input in
-      state.msg_scroll <- 0;
-      state.view <- Keepers Keeper_message;
-      start_keeper_message state ~mailbox text;
+      (match Masc_tui_command.parse text with
+       | Masc_tui_command.Say _ ->
+           state.msg_scroll <- 0;
+           state.view <- Keepers Keeper_message
+       | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
+       | Masc_tui_command.Unknown _ ->
+           (* A command keeps the surface: the operator asked the TUI, not
+              the keeper, and the answer lands in Recent Events. *)
+           ());
+      send_operator_text state ~mailbox text;
       true
   | Composer.Edit ->
       let _handled =
@@ -2197,6 +2318,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         state.acting_dropped <-
           state.acting_dropped + (kept - Masc_tui_types.acting_retained_entries)
       end
+  | Task_dispatched { keeper; task_id; title; body } ->
+      add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
+      state.msg_scroll <- 0;
+      state.view <- Keepers Keeper_message;
+      start_keeper_message ~keeper_name:keeper state ~mailbox
+        (Masc_tui_command.task_message ~task_id ~title ~body)
+  | Task_dispatch_failed { keeper; detail; original } ->
+      (* The operator's words come back to the input so nothing typed is
+         lost with the failure. *)
+      Buffer.clear state.msg_input;
+      Buffer.add_string state.msg_input original;
+      add_event state "error"
+        (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed reason ->
       let events =
         match state.observer with
@@ -2683,6 +2817,12 @@ let main () =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
+  (* A surface that is fetched only while it is open has nothing to draw the
+     moment it opens, and waiting out the refresh interval would read as "there
+     is nothing here". Watching the surface from the loop catches every way it
+     can change, rather than asking each of the places that change it to
+     remember. *)
+  let drawn_surface = ref state.view in
   let input_reader = create_input_reader () in
   let run_loop () =
     while true do
@@ -2757,7 +2897,7 @@ let main () =
              let _handled =
                handle_message_key state
                  ~submit_message:
-                   (start_keeper_message state ~mailbox:async_messages)
+                   (send_operator_text state ~mailbox:async_messages)
                  ~answer_approval:(fun ~tool_call_id ~allow ->
                    match
                      Option.bind state.msg_live (fun live ->
@@ -3375,6 +3515,17 @@ let main () =
             | Repositories | Connectors | Tools | Autonomy | System_logs
             -> ())
       | _ -> ());
+
+      (* A refresh already running was asked for the surface that was open when
+         it started, so it brings nothing for this one. The surface is recorded
+         as fetched only once a request for it has actually gone out; until
+         then the next pass through the loop tries again. *)
+      if state.view <> !drawn_surface && not !http_refresh_inflight then begin
+        drawn_surface := state.view;
+        start_http_refresh state ~host:(Env_config_core.masc_host ())
+          ~port:state.port ~refresh_inflight:http_refresh_inflight
+          ~mailbox:async_messages
+      end;
 
       Eio.Fiber.yield ();
       if

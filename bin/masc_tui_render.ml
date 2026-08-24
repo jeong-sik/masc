@@ -17,6 +17,7 @@ module Markdown = Masc_tui_markdown
 module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
+module Tool_tree = Masc_tui_tool_tree
 module Status = Masc.Keeper_status_runtime
 
 let frame_lines buf =
@@ -46,7 +47,18 @@ let chat_markdown_palette : Markdown.palette =
   { strong = (Ansi.bold, Ansi.reset)
   ; emphasis = (Ansi.dim, Ansi.reset)
   ; code = (Ansi.cyan, Ansi.reset)
-  ; heading = (Ansi.bold ^ Ansi.white, Ansi.reset)
+  (* Bold alone. [white] is a colour like any other -- on a light background
+     it is the background -- so painting a heading with it hid the heading on
+     exactly the terminals that read it as text. Bold already says heading. *)
+  (* Which heading is inside which, said the way a terminal can: the top
+     level is underlined as well as bold, the next is bold, and the rest are
+     bold and dim so they still read as headings without competing with the
+     two above. One span for every level drew a document with no shape. *)
+  ; heading =
+      (fun level ->
+        if level <= 1 then (Ansi.bold ^ Ansi.underline, Ansi.reset)
+        else if level = 2 then (Ansi.bold, Ansi.reset)
+        else (Ansi.bold ^ Ansi.dim, Ansi.reset))
   ; quote = (Ansi.dim, Ansi.reset)
   ; link_text = (Ansi.blue, Ansi.reset)
   ; link_target = (Ansi.dim, Ansi.reset)
@@ -54,6 +66,16 @@ let chat_markdown_palette : Markdown.palette =
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
   ; quote_gutter = "\xe2\x96\x8f "
+  ; table_header = (Ansi.bold, Ansi.reset)
+  ; table_gutter = " \xe2\x94\x82 "
+  (* Fenced-code tokens, inside the cyan the plain code span already uses:
+     one hue per role a keeper's eye scans for -- what binds, what is data,
+     what the reader can skip. *)
+  ; code_keyword = (Ansi.yellow, Ansi.reset)
+  ; code_string = (Ansi.green, Ansi.reset)
+  ; code_comment = (Ansi.gray, Ansi.reset)
+  ; code_number = (Ansi.magenta, Ansi.reset)
+  ; code_type = (Ansi.bold ^ Ansi.blue, Ansi.reset)
   }
 
 let chat_markdown ~width body =
@@ -427,11 +449,16 @@ let render_overview (state : state) =
         let a = List.nth attention_items i in
         let sev_color = attention_severity_color a.ai_severity in
         let severity_label = attention_severity_label a.ai_severity in
+          (* Fitted once, by the fit that draws the row. Fitting the summary
+             here as well meant guessing how many cells the label ahead of it
+             spends, and the events column beside this one guessed one too
+             many: every event row came out a cell over its budget and was
+             marked truncated whether or not anything was cut. The severity
+             label keeps its own fit -- that one is a fixed column, not a
+             guess at the rest of the row. *)
           Printf.sprintf "%s[%s]%s %s"
             sev_color (fit_width severity_label 5) Ansi.reset
-            (fit_width
-               (Terminal_text.single_line a.ai_summary)
-               (panel_width - 12))
+            (Terminal_text.single_line a.ai_summary)
       else ""
     in
     let event_str =
@@ -440,8 +467,7 @@ let render_overview (state : state) =
         let e = List.nth state.events event_index in
         Printf.sprintf "%s[%s]%s %s"
           Ansi.dim e.timestamp Ansi.reset
-          (fit_width (Terminal_text.single_line e.content)
-             (right_panel_width - 12))
+          (Terminal_text.single_line e.content)
       else ""
     in
     Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
@@ -1093,6 +1119,18 @@ let render_board_read (state : state) (list_post : board_post) =
 
 let planning_phase_label phase = Goal_phase.to_string phase
 
+(* As wide as the widest phase rather than a literal. Three of the four labels
+   are nine cells and the column was eight, so nearly every planning row read
+   [complet~] with sixty columns of space to its right -- the mark that says
+   "there was more" on a value nothing was cut from. Taken from the phase list
+   so a new phase widens the column instead of losing its last letter. *)
+let planning_phase_column =
+  List.fold_left
+    (fun widest phase ->
+      max widest (Message_layout.display_width (planning_phase_label phase)))
+    0
+    Goal_phase.all
+
 let planning_phase_color = function
   | Goal_phase.Executing -> Ansi.cyan
   | Goal_phase.Verifying -> Ansi.magenta
@@ -1225,7 +1263,7 @@ let render_planning_list (state : state) =
              let line =
                Printf.sprintf "%s%s%s[%s]%s %s P%d  %s%s"
                  indent branch status_color
-                 (fit_width status_label 8)
+                 (fit_width status_label planning_phase_column)
                  Ansi.reset
                  (planning_proof_mark g.pg_proof)
                  g.pg_priority
@@ -1276,7 +1314,7 @@ let render_planning_detail (state : state)
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s[%s]%s  %s"
     (screen_title " MASC Planning")
-    status_color (fit_width status_label 8) Ansi.reset
+    status_color (fit_width status_label planning_phase_column) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
 
@@ -3103,6 +3141,7 @@ let render_tools (state : state) =
     | None -> []
     | Some s -> s.Masc.Tui_decode.ts_tools
   in
+  let tool_rows = Tool_tree.rows tools in
   let shown = List.length tools in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -3135,7 +3174,7 @@ let render_tools (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-30s %-8s %s" "Tool" "Direct" "Surfaces"
+    Printf.sprintf "  %-32s %-8s %s" "Tool" "Direct" "Surfaces"
   in
   box_line_styled buf cols ~style:Ansi.dim col_hdr;
   box_divider buf cols;
@@ -3147,16 +3186,27 @@ let render_tools (state : state) =
        box_divider buf cols);
   let chrome_rows = if Option.is_some state.tools_error then 9 else 7 in
   let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
+  let drawable = List.length tool_rows in
+  let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min state.tools_scroll max_scroll) in
   if shown = 0 then begin
+    let warming =
+      match state.tools_inventory with
+      | Some { Masc.Tui_decode.ts_freshness = Masc.Tui_decode.Warming; _ } -> true
+      | Some _ | None -> false
+    in
     let empty =
-      match
-        empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
-      with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
-      | Page_empty -> "  (no tools registered)"
+      (* A server still building its inventory answers with an empty list, and
+         reading that as "none" told an operator their workspace had no tools
+         when it has a hundred. The payload says which of the two it is. *)
+      if warming then "  (the server is still building its tool inventory)"
+      else
+        match
+          empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
+        with
+        | Page_failed -> "  (load failed; nothing here is a reading)"
+        | Page_unread -> "  (not loaded yet)"
+        | Page_empty -> "  (no tools registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3166,25 +3216,30 @@ let render_tools (state : state) =
   else
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match List.nth_opt tools idx with
+      match List.nth_opt tool_rows idx with
       | None -> box_empty buf cols
-      | Some t ->
+      | Some (Tool_tree.Family { name; count }) ->
+          box_line_styled buf cols ~style:Ansi.bold
+            (Printf.sprintf "  %s  (%d)" (Terminal_text.single_line name) count)
+      | Some (Tool_tree.Tool t) ->
           let open Masc.Tui_decode in
           let surfaces =
             match t.tl_surfaces with
             | [] -> "none"
             | names -> String.concat ", " names
           in
+          (* Indented under the heading above it, so the name column reads as
+             a tree rather than as a hundred equals. *)
           let line =
-            Printf.sprintf "  %-30s %-8s %s"
+            Printf.sprintf "    %-30s %-8s %s"
               (Terminal_text.single_line t.tl_name)
               (if t.tl_direct_call then "yes" else "no")
               (Terminal_text.single_line surfaces)
           in
-          let style = if t.tl_surfaces = [] then Ansi.yellow else Ansi.reset in
+          let style = if t.tl_surfaces = [] then Ansi.yellow else Ansi.dim in
           box_line_styled buf cols ~style line
     done;
-  if shown > content_height then
+  if drawable > content_height then
     box_line_styled buf cols ~style:Ansi.dim
       (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
   box_bottom buf cols;

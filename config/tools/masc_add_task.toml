@@ -1,0 +1,81 @@
+name = "masc_add_task"
+description = """
+Add a new task to the backlog for agents to claim. Task contracts provide \
+completion/evidence context to the judge; they do not select a completion \
+lane. Write one when you know what done looks like: none is derived from the \
+title, so a task without a contract reaches the judge with no criteria and \
+is judged against a standard the worker never saw. Every task must be \
+submitted for an out-of-band system LLM completion-authority verdict. \
+submit_for_verification creates an asynchronous review state that no agent \
+or Keeper can claim. The application-owned system LLM agent reads the \
+immutable submitted-evidence snapshot and commits the typed verdict; an \
+authenticated human operator is the separate HITL path. To re-run completed \
+work, create a new task with predecessor_task_id instead of touching the \
+done one. Priority 1=urgent, 5=low (default 3). Returns task-XXX ID for \
+tracking. Example: masc_add_task({title: 'Fix login bug', priority: 1, \
+description: 'Users cannot login with SSO'})"""
+
+[[params]]
+name = "title"
+type = "string"
+required = true
+description = "Task title"
+
+[[params]]
+name = "priority"
+type = "integer"
+description = "Priority 1-5 (1=highest)"
+default = 3
+
+[[params]]
+name = "description"
+type = "string"
+description = "Task description"
+
+[[params]]
+name = "goal_id"
+type = "string"
+description = """
+Optional structured goal link for rollups. If omitted, the task is created \
+unscoped (goalless); pass goal_id explicitly to link it to a goal."""
+
+[[params]]
+name = "predecessor_task_id"
+type = "string"
+description = """
+Optional re-run provenance link (RFC-0323): the terminal (done/cancelled) \
+task this one re-runs. Rejected if the id is unknown or the predecessor is \
+not terminal. To re-run completed work, create a new task with this link \
+instead of re-claiming the old one."""
+
+[[params]]
+name = "contract"
+type = "object"
+additional_properties = false
+description = """
+What counts as done for this task, and what evidence shows it. Recorded at \
+creation and never rewritten. Omit it and the task carries no criteria."""
+
+[[params.params]]
+name = "strict"
+type = "boolean"
+
+[[params.params]]
+name = "completion_contract"
+type = "array"
+items = { type = "string" }
+
+[[params.params]]
+name = "required_evidence"
+type = "array"
+items = { type = "string" }
+
+[[params.params]]
+name = "inspect_gate_evidence"
+type = "array"
+items = { type = "string" }
+
+[[params.params]]
+name = "verify_gate_evidence"
+type = "array"
+items = { type = "string" }

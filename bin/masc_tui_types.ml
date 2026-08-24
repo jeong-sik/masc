@@ -374,15 +374,38 @@ type surface =
 type surface_needs = {
   needs_transport : bool;
   needs_keeper_roster : bool;
+  needs_fleet_safety : bool;
+  needs_board : bool;
+  needs_planning : bool;
+  needs_system_logs : bool;
 }
 
+let nothing =
+  { needs_transport = false;
+    needs_keeper_roster = false;
+    needs_fleet_safety = false;
+    needs_board = false;
+    needs_planning = false;
+    needs_system_logs = false;
+  }
+
+(* Each datum is read by the one surface that draws it, so a refresh spends a
+   request and a decode on it only while that surface is open. The planning and
+   system-log payloads are tens of kilobytes each, and fetching them behind
+   every other surface cost that on every tick for rows nobody was looking at. *)
 let surface_needs : surface -> surface_needs = function
-  | Overview -> { needs_transport = true; needs_keeper_roster = false }
-  | Acting -> { needs_transport = false; needs_keeper_roster = false }
-  | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
-  | Board | Approvals | Planning | Schedules | Verification | Harness
-  | Repositories | Connectors | Tools | Autonomy | System_logs ->
-      { needs_transport = false; needs_keeper_roster = false }
+  | Overview -> { nothing with needs_transport = true }
+  (* Its rows come from the acting store and the keeper list, neither of which
+     is fetched here. *)
+  | Acting -> nothing
+  | Keepers _ ->
+      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+  | Board -> { nothing with needs_board = true }
+  | Planning -> { nothing with needs_planning = true }
+  | System_logs -> { nothing with needs_system_logs = true }
+  | Approvals | Schedules | Verification | Harness | Repositories | Connectors
+  | Tools | Autonomy ->
+      nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
 
@@ -394,9 +417,9 @@ let surface_needs : surface -> surface_needs = function
     reads.
 
     [None] is a surface whose rows the state cannot count: its row count is
-    built by the drawing, out of text the drawing formats. Those still clamp
-    where they draw, and [scripts/ci/check-tui-render-purity.sh] counts them
-    so the number can only fall. *)
+    built by the drawing, out of text the drawing formats. Those report the
+    value they used as a {!clamped_scroll} beside the frame instead, so the
+    drawing still does not write. *)
 type scrolled = {
   sc_count : int;  (** rows of content the surface has *)
   sc_chrome : int;  (** rows it spends on its own frame *)
@@ -901,8 +924,9 @@ let scrolled_surface (state : state) : surface -> scrolled option =
          | Some s -> List.length s.Tui_decode.ts_tools)
   (* Autonomy and Acting count rows the drawing builds out of formatted text,
      not rows the state holds; counting them here would be a second copy of
-     the formatting. Overview, Keepers, Board, Planning and Schedules move a
-     cursor or a detail pane rather than a plain list. *)
+     the formatting, so they report a [clamped_scroll] instead. Overview,
+     Keepers, Board, Planning and Schedules move a cursor or a detail pane
+     rather than a plain list. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
   | Autonomy ->
       None

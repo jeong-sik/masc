@@ -256,7 +256,8 @@ let apply_accept
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
        would turn them into [Accept_rejected] and incorrectly rotate providers,

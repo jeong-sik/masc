@@ -250,6 +250,17 @@
  (libraries masc_tui_keeper_chat_projection yojson))
 
 (library
+ (name masc_tui_command)
+ (wrapped false)
+ (modules masc_tui_command))
+
+(library
+ (name masc_tui_mcp)
+ (wrapped false)
+ (modules masc_tui_mcp)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
  (name masc_tui_acting)
  (wrapped false)
  (modules masc_tui_acting)
@@ -338,6 +349,12 @@
  (modules masc_tui_planning_selection))
 
 (library
+ (name masc_tui_tool_tree)
+ (wrapped false)
+ (modules masc_tui_tool_tree)
+ (libraries masc))
+
+(library
  (name masc_tui_markdown)
  (wrapped false)
  (modules masc_tui_markdown)
@@ -400,6 +417,8 @@
   masc_tui_keeper_chat_queue
   masc_tui_observer
   masc_tui_acting
+  masc_tui_command
+  masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_keeper_control
@@ -416,6 +435,7 @@
   masc_tui_planning_selection
   masc_tui_task_selection
   masc_tui_render_schedule
+  masc_tui_tool_tree
   masc_tui_terminal_write_repair
   masc.dashboard
   masc.server

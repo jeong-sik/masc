@@ -152,42 +152,14 @@ function runtimeProvidersPayload() {
   }
 }
 
-function nativeProbePayload() {
-  return {
-    generated_at: '2026-04-10T00:00:00Z',
-    cache_hit: true,
-    cache_age_sec: 3.2,
-    probe: {
-      source: 'ollama native runtime',
-      effective_model: 'qwen3.5:35b-a3b-coding-nvfp4',
-      server_url: 'http://127.0.0.1:11434',
-      model_loaded_before_probe: true,
-      model_loaded_after_probe: true,
-      loaded_models_after: [{ name: 'qwen3.5:35b-a3b-coding-nvfp4' }],
-      runs: [
-        {
-          load_duration_ms: 33.6,
-          prompt_tokens_per_second: 26.1,
-          generation_tokens_per_second: 65.5,
-        },
-      ],
-      kv_cache_assessment: {
-        signal: 'likely_reused',
-        note: 'Prompt evaluation time dropped materially on a repeated prompt.',
-        prompt_eval_duration_reduction_ratio: 0.42,
-      },
-      observations: ['Repeated prompt_eval_duration_ms dropped enough to suggest repeated-prefix reuse.'],
-      errors: [],
-      probe_ok: true,
-    },
-  }
-}
-
 function providerProbePayload() {
   return {
     generated_at: '2026-07-05T00:00:00Z',
+    refreshed_at_unix: 1783219200,
+    cache_ttl_sec: 30,
     cache_hit: false,
     cache_age_sec: 0,
+    refresh_state: 'served_stale',
     probe: {
       source: 'runtime.toml',
       status: 'reachable',
@@ -205,15 +177,31 @@ function providerProbePayload() {
         {
           runtime_id: 'runpod_mtp.qwen',
           provider_id: 'runpod_mtp',
+          provider_display_name: 'RunPod MTP',
+          model_id: 'qwen',
           model_api_name: 'Qwen/Qwen3-32B',
+          protocol: 'openai-compatible-http',
+          runtime_kind: 'http',
+          transport: 'http',
+          auth_kind: 'env:RUNPOD_API_KEY',
+          credential_required: true,
+          auth_present: true,
           status: 'reachable',
           reachable: true,
           http_status: 200,
           latency_ms: 42.5,
+          model_count: 1,
+          content_type: 'application/json',
+          downloaded_bytes: 128,
+          endpoint_url: 'https://example.invalid/v1',
           probe_url: 'https://example.invalid/v1/models',
+          error: null,
+          checked_at: '2026-07-05T00:00:00Z',
         },
       ],
       errors: [],
+      observations: ['runtime.toml provider reachability: 1 reachable, 0 failed, 0 skipped'],
+      limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
     },
   }
 }
@@ -253,7 +241,7 @@ function responseForPayload(payload: unknown): Response {
   })
 }
 
-function stubRuntimeFetch(probePayload: unknown = nativeProbePayload()): void {
+function stubRuntimeFetch(probePayload: unknown = providerProbePayload()): void {
   vi.stubGlobal(
     'fetch',
     vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -356,9 +344,9 @@ describe('ConfigResolutionPanel', () => {
     expect(container.querySelector('.v2-lab-card')).not.toBeNull()
     expect(container.querySelector('.v2-lab-panel')).not.toBeNull()
     expect(container.querySelector('.v2-lab-action')).not.toBeNull()
-    expect(container.textContent).toContain('ollama warm / kv probe')
-    expect(container.textContent).toContain('kv likely reused')
-    expect(container.textContent).toContain('qwen3.5:35b-a3b-coding-nvfp4')
+    expect(container.textContent).toContain('provider reachability')
+    expect(container.textContent).toContain('refreshing stale cache')
+    expect(container.textContent).toContain('runpod_mtp.qwen')
     expect(container.textContent).toContain('keeper runtime configuration')
     expect(container.textContent).toContain('Explicit keeper runtime settings. Disabled timeouts are not inferred from provider/model kind.')
     expect(container.textContent).toContain('stream idle timeout (opt-in)')

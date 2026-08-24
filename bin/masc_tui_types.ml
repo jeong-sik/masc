@@ -374,15 +374,38 @@ type surface =
 type surface_needs = {
   needs_transport : bool;
   needs_keeper_roster : bool;
+  needs_fleet_safety : bool;
+  needs_board : bool;
+  needs_planning : bool;
+  needs_system_logs : bool;
 }
 
+let nothing =
+  { needs_transport = false;
+    needs_keeper_roster = false;
+    needs_fleet_safety = false;
+    needs_board = false;
+    needs_planning = false;
+    needs_system_logs = false;
+  }
+
+(* Each datum is read by the one surface that draws it, so a refresh spends a
+   request and a decode on it only while that surface is open. The planning and
+   system-log payloads are tens of kilobytes each, and fetching them behind
+   every other surface cost that on every tick for rows nobody was looking at. *)
 let surface_needs : surface -> surface_needs = function
-  | Overview -> { needs_transport = true; needs_keeper_roster = false }
-  | Acting -> { needs_transport = false; needs_keeper_roster = false }
-  | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
-  | Board | Approvals | Planning | Schedules | Verification | Harness
-  | Repositories | Connectors | Tools | Autonomy | System_logs ->
-      { needs_transport = false; needs_keeper_roster = false }
+  | Overview -> { nothing with needs_transport = true }
+  (* Its rows come from the acting store and the keeper list, neither of which
+     is fetched here. *)
+  | Acting -> nothing
+  | Keepers _ ->
+      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+  | Board -> { nothing with needs_board = true }
+  | Planning -> { nothing with needs_planning = true }
+  | System_logs -> { nothing with needs_system_logs = true }
+  | Approvals | Schedules | Verification | Harness | Repositories | Connectors
+  | Tools | Autonomy ->
+      nothing
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out.

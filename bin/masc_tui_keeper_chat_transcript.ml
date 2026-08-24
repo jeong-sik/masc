@@ -229,6 +229,10 @@ let pad_to width text =
    without one draws exactly as before. *)
 let render_activity_rows (activities : tool_activity list) =
   let name_width =
+    (* [awaiting_approval] is declared after [tool_activity] and reuses
+       [tool_name], so an unannotated [activity] here resolves to the later
+       record and drags the whole list with it. The parameter annotation above
+       does not reach inside the lambda. *)
     List.fold_left
       (fun widest (activity : tool_activity) ->
         max widest (String.length activity.tool_name))

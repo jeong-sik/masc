@@ -572,10 +572,19 @@ let run_keeper_cycle
                    (fun consume -> consume ())
                    on_deferred_runtime_consumed)
               deferred_runtime_lane;
+            (* The wire code stays exactly what the typed encoder produced.
+               [record_pre_dispatch_terminal_observation] already records that
+               the turn never dispatched, in three typed fields:
+               [completion_contract_result = Completion_not_dispatched],
+               [runtime_outcome = Runtime_not_dispatched] and
+               [runtime_attempt_count = 0]. A "pre_dispatch_" prefix on top of
+               those said nothing new, and it broke the one consumer that
+               reads this field: [Keeper_terminal_reason.of_wire] compares
+               against ["config_error"] by equality, so the decorated form
+               fell through to [Unknown] and every pre-dispatch config failure
+               reached the operator as an unmapped runtime state (#29929). *)
             let terminal_reason_code =
-              Printf.sprintf
-                "pre_dispatch_%s"
-                (Keeper_agent_error.terminal_reason_code_of_core_error err)
+              Keeper_agent_error.terminal_reason_code_of_core_error err
             in
             let error_message = Agent_core.Error.to_string err in
             Log.Keeper.error

@@ -2666,18 +2666,6 @@
   yojson))
 
 (test
- (name test_tui_keeper_chat_recovery)
- (modules test_tui_keeper_chat_recovery)
- (libraries
-  alcotest
-  eio
-  masc_tui_keeper_chat_projection
-  masc_tui_keeper_chat_recovery
-  fs_compat
-  threads
-  unix))
-
-(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries alcotest masc_tui_message_layout))
@@ -2870,6 +2858,7 @@
 (include stanzas/test_keeper_memory_journal_projection.inc)
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
+(include stanzas/test_tui_send_disposition.inc)
 
 (test
  (name test_code_address)

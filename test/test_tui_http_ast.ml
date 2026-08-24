@@ -98,127 +98,19 @@ let test_keeper_chat_uses_current_async_contract () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_keeper_message"
        ~callee:"chat_rows_for"
      >= 1);
-  check int "same-ID reconnect never mints a fresh request" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message"
-       ~callee:"Keeper_chat.create_request");
-  check int "prepared retry never recreates a missing recovery fence" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message"
-       ~callee:"Keeper_chat_recovery.persist_pending");
-  check bool "recovery errors can reload durable state" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message"
-       ~callee:"Keeper_chat_recovery.load_pending"
-     >= 1);
-  check bool "prepared retry dispatches only after its persistence branch" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message" ~callee:"launch_keeper_request"
-     >= 1);
-  check bool "prepared replay preserves prior outcome uncertainty" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message" ~callee:"remember_unverified"
-     >= 1);
-  check bool "prepared replay deduplicates the user history row" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message" ~callee:"append_user_history_once"
-     >= 1);
   check bool "draft cleanup checks Keeper and message identity" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"consume_dispatched_message_draft" ~callee:"String.equal"
      >= 3);
-  check bool "settled cleanup retry uses durable fence removal" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message"
-       ~callee:"launch_keeper_cleanup"
-     >= 1);
-  check bool "cleanup retry holds the cross-process dispatch lock" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_cleanup"
-       ~callee:"Keeper_chat_recovery.with_dispatch_lock"
-     >= 1);
-  check bool "cleanup retry removes only the exact durable fence" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_cleanup"
-       ~callee:"Keeper_chat_recovery.clear_pending"
-     >= 1);
-  check int "settled cleanup helper never POSTs" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"clear_keeper_chat_recovery"
-       ~callee:"launch_keeper_request");
-  check int "settled cleanup helper never GETs" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"clear_keeper_chat_recovery"
-       ~callee:"launch_keeper_reconciliation");
-  check bool "chat POST owns a cross-process dispatch claim" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_request"
-       ~callee:"Keeper_chat_recovery.with_dispatch_claim"
-     >= 1);
   check bool "dispatch lock waits for main-state acknowledgement" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"enqueue_dispatch_ack" ~callee:"Eio.Promise.await"
-     >= 1);
-  check int "cleanup retry issues no chat POST" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_cleanup"
-       ~callee:"Masc_tui_http.post_keeper_chat");
-  check int "cleanup retry issues no operation GET" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_cleanup"
-       ~callee:"Masc_tui_http.fetch_keeper_chat_operation");
-  check bool "same-ID recovery uses exact operation reconciliation" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"retry_keeper_message"
-       ~callee:"launch_keeper_reconciliation"
-     >= 1);
-  check int "same-ID recovery never re-POSTs the chat request" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_reconciliation"
-       ~callee:"Masc_tui_http.post_keeper_chat");
-  check bool "request is durably fenced before POST" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"start_keeper_message"
-       ~callee:"persist_keeper_message_fence"
-     >= 1);
-  check bool "startup restores the durable request fence" true
-    (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name:"main"
-       ~callee:"Keeper_chat_recovery.load_pending"
-     >= 1);
-  check bool "startup routes prepared and accepted phases explicitly" true
-    (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name:"main"
-       ~callee:"Keeper_chat_recovery.resume_pending"
-     >= 1);
-  check bool "accepted interrupted streams persist their recovery phase" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"apply_keeper_chat_result"
-       ~callee:"mark_keeper_chat_accepted"
-     >= 1);
-  check bool "verified rejection persists a no-dispatch terminal phase" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"apply_keeper_chat_result"
-       ~callee:"mark_keeper_chat_rejected"
-     >= 1);
-  check bool "unverified outcome durably gates exact-ID replay" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"apply_keeper_chat_result"
-       ~callee:"mark_keeper_chat_replayable"
-     >= 1);
-  check bool "result handling consumes decoder acceptance provenance" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"apply_keeper_chat_result"
-       ~callee:"Keeper_chat.error_acceptance_observed"
      >= 1);
   check bool "HTTP projection preserves stream acceptance provenance" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_http.ml"
        ~binding_name:"post_keeper_chat"
        ~callee:"Masc_tui_keeper_chat_projection.decode_response_with_provenance"
-     >= 1);
-  check bool "recovery polls the exact durable operation" true
-    (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_reconciliation"
-       ~callee:"Masc_tui_http.fetch_keeper_chat_operation"
      >= 1);
   let render_path = "bin/masc_tui_render.ml" in
   List.iter
@@ -900,22 +792,6 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "Console_sink observer marks the terminal write" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Terminal_write_repair.note");
-  check int "keeper fence wrapper marks possible direct stderr damage" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"persist_keeper_message_fence"
-       ~callee:"Terminal_write_repair.note");
-  check int "keeper fence wrapper performs one persistence attempt" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"persist_keeper_message_fence"
-       ~callee:"Keeper_chat_recovery.persist_pending");
-  check int "message submit uses the guarded persistence boundary" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"start_keeper_message"
-       ~callee:"persist_keeper_message_fence");
-  check int "message submit has no unguarded persistence call" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"start_keeper_message"
-       ~callee:"Keeper_chat_recovery.persist_pending");
   check int "loader routes its diagnostic through Console_sink" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"report"
@@ -1081,7 +957,7 @@ let test_missing_operator_token_is_reported () =
   check int "the chat surface asks whether a bearer was presented" 1
     (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
        ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"apply_keeper_chat_reconciliation"
+       ~binding_name:"apply_keeper_chat_result"
        ~callee:"Keeper_chat.reconciliation_failure_detail"
        ~label:"credential_sent"
        ~nested_callee:"Masc_tui_http.operator_token_present");
@@ -1337,6 +1213,26 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
 ;;
 
+(* A failed turn used to be drawn twice: the server records it in the
+   transcript, the pane records it in the session, and the filter that drops
+   session rows the transcript holds could only see the role. Every error row
+   was kept, because most of them are notices the server has no row for and
+   dropping those loses the only record.
+
+   The transcript now says which is which -- a persisted failure carries the
+   operation it ran under, which is the id the session dispatched with -- so
+   the filter reads the rows rather than the role alone. A body that stopped
+   gathering ids from the transcript would be back to keeping every error row
+   and drawing the failure twice. *)
+let test_the_session_filter_reads_the_transcript () =
+  check bool "the row filter gathers failure ids from the transcript" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"forget_session_rows_the_transcript_holds"
+       ~callee:"List.filter_map"
+     >= 1)
+;;
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -1389,6 +1285,10 @@ let () =
           "renderers sanitize untrusted terminal fields"
           `Quick
           test_renderers_sanitize_untrusted_terminal_fields;
+        test_case
+          "the session row filter reads the transcript"
+          `Quick
+          test_the_session_filter_reads_the_transcript;
       ]
     )
   ]

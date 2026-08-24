@@ -78,28 +78,6 @@ let scalar_cell_width scalar =
   else if Uucp.Emoji.is_emoji_presentation scalar then 2
   else max 0 (Uucp.Break.tty_width_hint scalar)
 
-let grapheme_cell_width grapheme =
-  let rec loop offset width max_width has_hangul_l has_hangul_vt =
-    if offset >= String.length grapheme then
-      if has_hangul_l && has_hangul_vt then max_width else width
-    else
-      let decoded = String.get_utf_8_uchar grapheme offset in
-      let valid = Uchar.utf_decode_is_valid decoded in
-      let scalar_length = max 1 (Uchar.utf_decode_length decoded) in
-      if not valid then
-        loop (offset + scalar_length) (width + 1) (max 1 max_width)
-          has_hangul_l has_hangul_vt
-      else
-        let scalar = Uchar.utf_decode_uchar decoded in
-        let scalar_width = scalar_cell_width scalar in
-        let hangul_type = Uucp.Hangul.syllable_type scalar in
-        loop (offset + scalar_length) (width + scalar_width)
-          (max max_width scalar_width)
-          (has_hangul_l || hangul_type = `L)
-          (has_hangul_vt || hangul_type = `V || hangul_type = `T)
-  in
-  loop 0 0 0 false false
-
 type display_piece = {
   start_offset : int;
   end_offset : int;
@@ -128,34 +106,105 @@ let scalar_pieces text start_offset end_offset reversed =
   in
   loop start_offset reversed
 
+(* [String.is_valid_utf_8] wants a string of its own, and taking one meant
+   copying the run before a single width was read. This asks the same question
+   of the range in place. A scalar that would reach past [end_offset] is the
+   truncated tail the copy would have rejected too. *)
+let valid_utf_8_range text start_offset end_offset =
+  let rec loop offset =
+    if offset >= end_offset then true
+    else
+      let decoded = String.get_utf_8_uchar text offset in
+      if not (Uchar.utf_decode_is_valid decoded) then false
+      else
+        let length = Uchar.utf_decode_length decoded in
+        if offset + length > end_offset then false else loop (offset + length)
+  in
+  loop start_offset
+
+(* What a piece needs is a byte span and a width, and neither needs the cluster
+   to exist as a string. Going through [Uuseg_string.fold_utf_8] re-encoded
+   every scalar into a buffer and cut a string out of it at each boundary --
+   one allocation per character on screen, thrown away as soon as it was
+   measured. The segmenter is driven directly here and the spans are read off
+   [text]. The width is the same fold [grapheme_cell_width] did over the
+   cluster, run as the scalars arrive. *)
 let grapheme_pieces text start_offset end_offset reversed =
   if start_offset >= end_offset then reversed
-  else
-    let run = String.sub text start_offset (end_offset - start_offset) in
-    if not (String.is_valid_utf_8 run) then
-      scalar_pieces text start_offset end_offset reversed
-    else
-      Uuseg_string.fold_utf_8 `Grapheme_cluster
-        (fun (offset, reversed) grapheme ->
-          let next = offset + String.length grapheme in
-          ( next
-          , { start_offset = offset;
-              end_offset = next;
-              cell_width = grapheme_cell_width grapheme;
-              ansi = false;
-            }
-            :: reversed ))
-        (start_offset, reversed) run
-      |> snd
+  else if not (valid_utf_8_range text start_offset end_offset) then
+    scalar_pieces text start_offset end_offset reversed
+  else begin
+    let segmenter = Uuseg.create `Grapheme_cluster in
+    let pieces = ref reversed in
+    let cluster_start = ref start_offset in
+    let cluster_end = ref start_offset in
+    let width = ref 0 in
+    let widest = ref 0 in
+    let hangul_l = ref false in
+    let hangul_vt = ref false in
+    let close_cluster () =
+      if !cluster_end > !cluster_start then begin
+        let cells = if !hangul_l && !hangul_vt then !widest else !width in
+        pieces :=
+          { start_offset = !cluster_start;
+            end_offset = !cluster_end;
+            cell_width = cells;
+            ansi = false;
+          }
+          :: !pieces;
+        cluster_start := !cluster_end;
+        width := 0;
+        widest := 0;
+        hangul_l := false;
+        hangul_vt := false
+      end
+    in
+    let take_scalar scalar =
+      cluster_end := !cluster_end + Uchar.utf_8_byte_length scalar;
+      let scalar_width = scalar_cell_width scalar in
+      width := !width + scalar_width;
+      widest := max !widest scalar_width;
+      let hangul_type = Uucp.Hangul.syllable_type scalar in
+      hangul_l := !hangul_l || hangul_type = `L;
+      hangul_vt := !hangul_vt || hangul_type = `V || hangul_type = `T
+    in
+    let rec drain event =
+      match Uuseg.add segmenter event with
+      | `Uchar scalar ->
+          take_scalar scalar;
+          drain `Await
+      | `Boundary ->
+          close_cluster ();
+          drain `Await
+      | `Await | `End -> ()
+    in
+    let rec feed offset =
+      if offset >= end_offset then begin
+        drain `End;
+        close_cluster ()
+      end
+      else
+        let decoded = String.get_utf_8_uchar text offset in
+        drain (`Uchar (Uchar.utf_decode_uchar decoded));
+        feed (offset + Uchar.utf_decode_length decoded)
+    in
+    feed start_offset;
+    !pieces
+  end
 
 let display_pieces text =
   let length = String.length text in
+  (* Only an escape can open a sequence, so the scan jumps to the next escape
+     rather than asking at every byte of every rendered line. *)
   let rec find_ansi offset =
     if offset >= length then None
     else
-      match ansi_csi_end text offset with
-      | Some next -> Some (offset, next)
-      | None -> find_ansi (offset + 1)
+      match String.index_from_opt text offset '\x1B' with
+      | None -> None
+      | Some escape -> (
+          match ansi_csi_end text escape with
+          | Some next -> Some (escape, next)
+          | None -> find_ansi (escape + 1))
   in
   let rec loop offset reversed =
     match find_ansi offset with
@@ -431,13 +480,57 @@ let total_rows ?markdown ~inner_width entries =
 let max_scroll ?markdown ~inner_width ~height entries =
   max 0 (total_rows ?markdown ~inner_width entries - max 1 height)
 
+(* Nothing older than the newest [from_bottom + height] rows can reach the
+   window, so the walk stops once it holds them. Laying out the whole
+   transcript to slice a screenful out of the end made every scrolled frame
+   cost what the conversation had accumulated. *)
 let scrolled_rows ?markdown ~inner_width ~height ~from_bottom entries =
   if from_bottom <= 0 then visible_rows ?markdown ~inner_width ~height entries
   else begin
     let inner_width = max 1 inner_width in
     let height = max 0 height in
-    let all = List.concat_map (rows_of_entry ?markdown ~inner_width) entries in
-    let bottom = max 0 (List.length all - from_bottom) in
+    let wanted = from_bottom + height in
+    let rec collect gathered gathered_count = function
+      | [] -> gathered, gathered_count
+      | _ when gathered_count >= wanted -> gathered, gathered_count
+      | entry :: older ->
+          let rows = rows_of_entry ?markdown ~inner_width entry in
+          collect (rows @ gathered) (gathered_count + List.length rows) older
+    in
+    let newest, newest_count = collect [] 0 (List.rev entries) in
+    let bottom = max 0 (newest_count - from_bottom) in
     let first = max 0 (bottom - height) in
-    List.filteri (fun index _ -> index >= first && index < bottom) all
+    List.filteri (fun index _ -> index >= first && index < bottom) newest
   end
+
+(* A clamp needs the row count only up to where the answer stops moving: once
+   [requested + height] rows exist the limit is at least [requested], and what
+   lies further back cannot change the result. Reaching that through
+   {!max_scroll} counted the whole transcript on every frame, including the
+   frames where nobody had scrolled at all. *)
+let clamp_scroll ?markdown ~inner_width ~height requested entries =
+  if requested <= 0 then requested
+  else begin
+    let inner_width = max 1 inner_width in
+    (* {!max_scroll} measures against at least one row, and this has to answer
+       the same as it does. *)
+    let height = max 1 height in
+    let enough = requested + height in
+    let rec count total = function
+      | [] -> total
+      | _ when total >= enough -> total
+      | entry :: older ->
+          count
+            (total + List.length (rows_of_entry ?markdown ~inner_width entry))
+            older
+    in
+    min requested (max 0 (count 0 (List.rev entries) - height))
+  end
+
+let age_text ~now ~since =
+  let seconds = now -. since in
+  if seconds < 0. then None
+  else
+    let whole = int_of_float seconds in
+    if whole < 60 then Some (Printf.sprintf "%ds" whole)
+    else Some (Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60))

@@ -85,8 +85,20 @@ let test_terminal_cell_width_and_fit () =
     (Layout.fit_width "\x1B[31m한글\x1B[0m" 3);
   check string "emoji grapheme is never split by fit" " ~"
     (Layout.fit_width "👍🏽A" 2);
+  (* The widest footer the chat pane assembles, built from the longest value
+     of each part rather than quoted whole. The fixture used to be a short
+     blocked hint and stopped being the widest when the queue hint arrived,
+     without anything going red: this check passes on any string over the
+     budget, so a stale fixture stays green while covering less than it says. *)
   let longest_footer =
-    "\x1B[2m  reconciling exact operation  Enter:blocked  Esc:back  Ctrl-U:clear line\x1B[0m"
+    String.concat "  "
+      [ "\x1B[2m"
+      ; "Enter:queue (99 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+      ; "Ctrl-J:newline"
+      ; "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+      ; "Esc:interrupt turn"
+      ; "Ctrl-U:clear\x1B[0m"
+      ]
   in
   List.iter
     (fun terminal_cols ->
@@ -301,6 +313,76 @@ let test_a_row_carrying_an_escape_wraps_by_its_real_width () =
     [ "\x1B[0m ab"; "cd ef" ]
     (Layout.wrap_words ~max_cells:5 finished)
 
+(* The two readers below stop as soon as further messages cannot change their
+   answer. These pin that the stop lands in the same place the full walk would
+   have: [max_scroll] still counts the whole transcript, so it is the oracle
+   for the clamp, and a window wide enough to exhaust the transcript is the
+   oracle for the scrolled window. *)
+let transcript count =
+  List.init count (fun index ->
+      { Layout.style = Layout.Keeper;
+        timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
+        role_label = "code-reviewer";
+        request_label = Printf.sprintf "turn-%d" index;
+        body =
+          Printf.sprintf
+            "turn %d closed and wrote a line long enough that it wraps more \
+             than once at the widths this test uses"
+            index;
+      })
+
+let test_clamping_a_scroll_reads_only_as_far_as_it_must () =
+  List.iter
+    (fun count ->
+       let entries = transcript count in
+       List.iter
+         (fun height ->
+            List.iter
+              (fun requested ->
+                 let limit =
+                   Layout.max_scroll ~inner_width:30 ~height entries
+                 in
+                 check int
+                   (Printf.sprintf "%d messages, height %d, scroll %d" count
+                      height requested)
+                   (min requested limit)
+                   (Layout.clamp_scroll ~inner_width:30 ~height requested
+                      entries))
+              [ -3; 0; 1; 4; 17; 200 ])
+         [ 0; 1; 5; 40 ])
+    [ 0; 1; 3; 12 ]
+
+let test_a_scrolled_window_matches_the_full_walk () =
+  List.iter
+    (fun count ->
+       let entries = transcript count in
+       let total = Layout.total_rows ~inner_width:30 entries in
+       List.iter
+         (fun height ->
+            List.iter
+              (fun from_bottom ->
+                 (* Wide enough that the walk runs out of messages, which is
+                    the path this replaced. *)
+                 let exhaustive =
+                   Layout.scrolled_rows ~inner_width:30
+                     ~height:(total + from_bottom + 1) ~from_bottom entries
+                 in
+                 let expected =
+                   let drop = max 0 (List.length exhaustive - height) in
+                   List.filteri (fun index _ -> index >= drop) exhaustive
+                 in
+                 check (list string)
+                   (Printf.sprintf "%d messages, height %d, back %d" count
+                      height from_bottom)
+                   (List.map (fun (row : Layout.row) -> row.text) expected)
+                   (List.map
+                      (fun (row : Layout.row) -> row.text)
+                      (Layout.scrolled_rows ~inner_width:30 ~height ~from_bottom
+                         entries)))
+              [ 1; 2; 6; 19 ])
+         [ 1; 3; 10 ])
+    [ 1; 3; 12 ]
+
 let test_history_never_splits_grapheme_clusters () =
   let body = "A👍🏽🇰🇷❤️B" in
   let rows =
@@ -420,6 +502,32 @@ let test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping () =
     (Layout.scrolled_rows ~inner_width:40 ~height:6 ~from_bottom:100 ten_entries
      |> text_of)
 
+(* An age reads as seconds until a minute, then as minutes and a zero-padded
+   remainder so a column of them lines up. It is what tells an operator that a
+   turn taking minutes is advancing rather than stuck, so the boundary and the
+   padding are the parts worth pinning. *)
+let test_age_reads_as_seconds_then_minutes () =
+  List.iter
+    (fun (since, expected) ->
+      check (option string)
+        (Printf.sprintf "age at %.1fs" (100. -. since))
+        expected
+        (Layout.age_text ~now:100. ~since))
+    [ (100., Some "0s")
+    ; (99.5, Some "0s")
+    ; (99., Some "1s")
+    ; (41., Some "59s")
+    ; (40., Some "1m00s")
+    ; (33., Some "1m07s")
+    ; (-100., Some "3m20s")
+    ]
+
+(* A clock that moved backwards says nothing rather than a negative age: the
+   row that shows this has no way to draw "-4s" that a reader could use. *)
+let test_a_backwards_clock_says_nothing () =
+  check (option string) "later start than now" None
+    (Layout.age_text ~now:100. ~since:104.)
+
 let () =
   run "tui_message_layout"
     [ ( "message rows"
@@ -437,6 +545,10 @@ let () =
             test_input_viewport_keeps_latest_complete_scalars
         ; test_case "input cursor uses visible cells" `Quick
             test_input_cursor_uses_visible_terminal_cells
+        ; test_case "age reads as seconds then minutes" `Quick
+            test_age_reads_as_seconds_then_minutes
+        ; test_case "a backwards clock says nothing" `Quick
+            test_a_backwards_clock_says_nothing
         ; test_case "history wraps by cells without byte loss" `Quick
             test_history_wraps_by_cells_without_losing_bytes
         ; test_case "history never splits grapheme clusters" `Quick
@@ -445,6 +557,10 @@ let () =
             test_an_unterminated_escape_absorbs_the_space_after_it
         ; test_case "a row carrying an escape wraps by its real width" `Quick
             test_a_row_carrying_an_escape_wraps_by_its_real_width
+        ; test_case "clamping a scroll reads only as far as it must" `Quick
+            test_clamping_a_scroll_reads_only_as_far_as_it_must
+        ; test_case "a scrolled window matches the full walk" `Quick
+            test_a_scrolled_window_matches_the_full_walk
         ; test_case "trailing newlines keep reply visible" `Quick
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick

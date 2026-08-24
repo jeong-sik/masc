@@ -70,13 +70,7 @@ type msg_entry = {
   me_at: float;
 }
 
-type msg_recovery_error = Recovery_blocked of string
 
-type msg_inflight_kind =
-  | Dispatch_claim
-  | Chat_post
-  | Operation_get
-  | Cleanup_delete
 
 (** Attention item for the Overview surface *)
 type attention_severity =
@@ -349,6 +343,7 @@ type keeper_mode =
   | Keeper_list
   | Keeper_detail
   | Keeper_logs
+  | Keeper_calls
   | Keeper_message
 
 (** Top-level TUI surface. *)
@@ -387,6 +382,16 @@ let surface_needs : surface -> surface_needs = function
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
+(* A request that has been POSTed and has not settled, with when it went out.
+   The instant rides with the request rather than in a second structure keyed
+   by id: a turn taking minutes is normal here and an operator watching one
+   needs to see it advancing, but two structures for one fact drift the moment
+   somebody adds a third place that removes a request. *)
+type inflight =
+  { sent_request : Masc_tui_keeper_chat_projection.request
+  ; sent_at : float
+  }
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -428,6 +433,9 @@ type state = {
   mutable last_refresh: float;
   mutable view: surface;
   mutable keeper_cursor: int;
+  mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
+  mutable keeper_calls_error: string option;
+  mutable keeper_calls_scroll: int;
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
@@ -562,17 +570,44 @@ type state = {
      while a turn runs; sending a queued line to whoever happens to be selected
      later would put it in front of the wrong keeper. *)
   mutable msg_queued: Masc_tui_keeper_chat_queue.t;
-  mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_inflight_kind: msg_inflight_kind option;
-  mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_unverified: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_cleanup_pending: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_recovery_error: msg_recovery_error option;
+  (* One request per keeper, not one per workspace. Dispatch used to be
+     serialized on a single slot because the durable recovery fence held one
+     un-acknowledged POST for the whole workspace; with that gone the only
+     reason left is per keeper, which is how the server runs turns anyway. *)
+  mutable msg_inflight: inflight list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
   refresh_interval: float;
 }
+
+(* One reading of the state for both the send path and the footer; the order
+   and the reasoning live in [Masc_tui_send_disposition]. *)
+type send_disposition =
+  Masc_tui_keeper_chat_projection.request Masc_tui_send_disposition.t
+
+(* The keeper the composer is pointed at, since a turn running for another
+   keeper does not decide what Enter does here. *)
+let inflight_for_keeper state keeper_name =
+  List.find_opt
+    (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
+    state.msg_inflight
+;;
+
+(* [prepared], [cleanup_pending], [recovery_blocked] and [unverified] were the
+   durable chat fence's states. The fence is gone — the server refuses a second
+   submission of the same request id, so the client does not carry its own —
+   and with it those four are always absent. Passed as [None] rather than
+   removed from the vocabulary: this module's ordering contract is what makes
+   the footer and the send path agree, and narrowing it is a separate change
+   from removing the states it ranked. *)
+let send_disposition state ~keeper_name : send_disposition =
+  Masc_tui_send_disposition.of_state ~prepared:None ~cleanup_pending:None
+    ~recovery_blocked:None
+    ~inflight:
+      (Option.map (fun entry -> entry.sent_request)
+         (inflight_for_keeper state keeper_name))
+    ~unverified:None
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
@@ -634,6 +669,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   last_refresh = 0.0;
   view = Overview;
   keeper_cursor = 0;
+  keeper_calls = None;
+  keeper_calls_error = None;
+  keeper_calls_scroll = 0;
   log_entries = [];
   log_error = None;
   log_scroll = 0;
@@ -713,12 +751,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_older_loading = false;
   msg_older_error = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
-  msg_inflight = None;
-  msg_inflight_kind = None;
-  msg_prepared = None;
-  msg_unverified = None;
-  msg_cleanup_pending = None;
-  msg_recovery_error = None;
+  msg_inflight = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -735,6 +768,22 @@ let create_state ~workspace ~port ~refresh_interval = {
    concatenated -- a notice the TUI wrote belongs where it happened, not after
    everything the server knows about. Ties keep the loaded row first, which is
    what [stable_sort] over [loaded @ session] gives. *)
+(* What a polled surface can say when it has no rows to draw. Three facts,
+   not one: nothing has been read yet, the read failed, or the read came back
+   with nothing. The first was drawn as the third -- "nothing waiting on a
+   verdict" on a Verification surface that had not yet asked -- so an
+   operator read an empty queue off a screen that knew no queue at all. *)
+type empty_page =
+  | Page_unread
+  | Page_failed
+  | Page_empty
+
+let empty_page_of ~snapshot ~error =
+  match (snapshot, error) with
+  | _, Some _ -> Page_failed
+  | None, None -> Page_unread
+  | Some _, None -> Page_empty
+
 let chat_rows_for (state : state) keeper_name =
   let loaded =
     match state.msg_loaded_keeper with
@@ -770,13 +819,7 @@ let keeper_message_status_rows (state : state) =
       -> 0
     | Some _ | None -> 1
   in
-  (if Option.is_some state.msg_inflight then 1 else 0)
-  + (if Option.is_none state.msg_inflight && Option.is_some state.msg_prepared
-     then 1
-     else 0)
-  + (if Option.is_some state.msg_unverified then 1 else 0)
-  + (if Option.is_some state.msg_cleanup_pending then 1 else 0)
-  + (if Option.is_some state.msg_recovery_error then 1 else 0)
+  List.length state.msg_inflight
   + unavailable_target
   + (match state.msg_live with
      | None -> 0

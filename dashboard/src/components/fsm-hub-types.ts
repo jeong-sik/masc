@@ -403,6 +403,11 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   phase_skipped: 'phase 건너뜀',
   transcript_corruption: '도구 호출 기록이 끊김 - 재기동 때 자동 복구',
   provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
+  // tool_correction_lost has been a backend reason since #29038 and was
+  // missing here, so the table fell back to printing the raw wire string.
+  tool_correction_lost: '도구 교정 유실 - 거절 응답이 전달되지 못함',
+  accept_rejected: '응답에 쓸 내용이 없어 거절 - 출력 예산 확인',
+  terminal_effect_failed: '턴을 닫는 도구가 실패 - 결과가 나갔는지 불명',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 

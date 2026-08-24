@@ -136,6 +136,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_typed_input.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_execute_typed_input.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_approval_mode.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_approval_mode.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_approval_gate.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_approval_gate.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_approval_policy.ml` - tool-surface-policy

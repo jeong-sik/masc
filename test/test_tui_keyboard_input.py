@@ -3785,6 +3785,338 @@ def keeper_lanes_interaction(
     return interact
 
 
+RUNTIME_PROBE_PATH = "/api/v1/dashboard/runtime-probe"
+RUNTIME_PROBE_FORCE_PATH = f"{RUNTIME_PROBE_PATH}?force=1"
+RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
+
+
+def runtime_probe_provider(
+    runtime_id: str,
+    *,
+    status: str,
+) -> dict[str, object]:
+    cli = status == "skipped_cli"
+    reachable = status == "reachable"
+    failed = not cli and not reachable
+    return {
+        "runtime_id": runtime_id,
+        "provider_id": f"probe-{runtime_id}",
+        "provider_display_name": "Probe label must not render",
+        "model_id": f"probe-model-{runtime_id}",
+        "model_api_name": f"probe-api-{runtime_id}",
+        "protocol": "openai",
+        "runtime_kind": "cli" if cli else "http",
+        "transport": "cli" if cli else "http",
+        "auth_kind": "none",
+        "credential_required": False,
+        "auth_present": False,
+        "status": status,
+        "reachable": None if cli else reachable,
+        "http_status": 200 if reachable else None,
+        "latency_ms": None if cli else (18.0 if reachable else 41.0),
+        "model_count": 4 if reachable else None,
+        "content_type": "application/json" if reachable else None,
+        "downloaded_bytes": 256 if reachable else None,
+        "endpoint_url": None if cli else "https://runtime.invalid/v1",
+        "probe_url": None if cli else "https://runtime.invalid/v1/models",
+        "error": (
+            "CLI runtimes do not expose an HTTP reachability endpoint"
+            if cli
+            else ("connection refused" if failed else None)
+        ),
+        "checked_at": "2026-08-24T10:20:00Z",
+    }
+
+
+def runtime_probe_response(*, fresh: bool) -> HttpResponse:
+    providers = [
+        runtime_probe_provider("runtime-a", status="reachable"),
+        runtime_probe_provider("runtime-b", status="skipped_cli"),
+        runtime_probe_provider(
+            "runtime-c",
+            status="reachable" if fresh else "network_error",
+        ),
+    ]
+    failed = 0 if fresh else 1
+    return (
+        200,
+        {
+            "generated_at": "2026-08-24T10:20:01Z",
+            "refreshed_at_unix": 1787566800.0,
+            "cache_ttl_sec": 15.0,
+            "cache_age_sec": 1.0 if fresh else 16.0,
+            "cache_hit": fresh,
+            "refresh_state": "fresh" if fresh else "served_stale",
+            "probe": {
+                "source": "runtime.toml",
+                "status": "reachable" if fresh else "degraded",
+                "probe_ok": fresh,
+                "checked_at": "2026-08-24T10:20:00Z",
+                "summary": {
+                    "runtimes": 3,
+                    "probed": 2,
+                    "reachable": 2 if fresh else 1,
+                    "failed": failed,
+                    "skipped": 1,
+                    "default_runtime_id": "runtime-a",
+                },
+                "providers": providers,
+                "errors": [] if fresh else ["runtime-c: network_error"],
+                "observations": ["provider metadata endpoints only"],
+                "limitations": ["no completion request"],
+            },
+        },
+    )
+
+
+def runtime_resolved_runtime(
+    runtime_id: str,
+    provider: str,
+    model: str,
+) -> dict[str, object]:
+    return {
+        "id": runtime_id,
+        "provider": provider,
+        "model": model,
+        "effective_max_context": 200_000,
+        "max_context_source": "capability",
+        "max_output_tokens": 8192,
+        "is_local": False,
+        # This binding flag is independent of the fleet's top-level default.
+        "is_default": False,
+        "keeper_dispatchable": True,
+        "keeper_dispatch_blocked_reason": None,
+    }
+
+
+def runtime_resolved_response() -> HttpResponse:
+    runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
+    return (
+        200,
+        {
+            "generated_at_iso": "2026-08-24T10:20:02Z",
+            "source": RUNTIME_RESOLVED_PATH,
+            "config_path": "/workspace/config/runtime.toml",
+            "default_runtime": runtime_a,
+            "runtimes": [
+                runtime_a,
+                runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),
+                runtime_resolved_runtime("runtime-c", "Resolved C", "model-c"),
+                runtime_resolved_runtime("runtime-d", "Resolved D", "model-d"),
+            ],
+            "lanes": [
+                {
+                    "id": "primary",
+                    "runtime_ids": ["runtime-a", "runtime-b"],
+                    "preferred_candidate": "runtime-b",
+                    "preferred_at_ts": 1787566700.0,
+                },
+                {
+                    "id": "degraded",
+                    "runtime_ids": ["runtime-c"],
+                    "preferred_candidate": None,
+                    "preferred_at_ts": None,
+                },
+                {
+                    "id": "unobserved",
+                    "runtime_ids": ["runtime-d"],
+                    "preferred_candidate": None,
+                    "preferred_at_ts": None,
+                },
+            ],
+            "assignments": [
+                {
+                    "keeper": "sangsu",
+                    "assignment_source": "default",
+                    "resolved": {"kind": "lane", "id": "primary"},
+                }
+            ],
+        },
+    )
+
+
+def runtime_http_fixtures() -> tuple[
+    HttpFixtures,
+    GatedHttpResponse,
+    SequencedHttpResponse,
+]:
+    fixtures = overview_event_http_fixtures()
+    initial_probe = GatedHttpResponse(
+        runtime_probe_response(fresh=False),
+        subsequent_response=runtime_probe_response(fresh=True),
+    )
+    force_probe = SequencedHttpResponse(
+        [(503, {"error": "forced probe refresh failed"})]
+    )
+    fixtures[RUNTIME_PROBE_PATH] = initial_probe
+    fixtures[RUNTIME_PROBE_FORCE_PATH] = force_probe
+    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+    return fixtures, initial_probe, force_probe
+
+
+def runtime_surface_interaction(
+    fixtures: HttpFixtures,
+    initial_probe: GatedHttpResponse,
+    force_probe: SequencedHttpResponse,
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        completed = False
+        try:
+            tab_until(process, master_fd, output, b"MASC Connectors")
+            read_available(master_fd, output)
+            start = len(output)
+            os.write(master_fd, b"\t")
+            if not initial_probe.requested.wait(timeout=3.0):
+                raise AssertionError("Runtime did not request provider probe")
+            # Several 50 ms ticks pass while the authenticated probe is held.
+            # The resolved request may finish, but the joined generation must
+            # remain single-flight until both authorities settle.
+            time.sleep(0.2)
+            if initial_probe.calls != 1:
+                raise AssertionError(
+                    "Runtime stacked probe reads while one was in flight: "
+                    f"{initial_probe.calls} calls"
+                )
+            initial_probe.release.set()
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"network_error",
+                start=start,
+                timeout=3.0,
+            )
+            stale_end = output.find(b"network_error", start) + len(b"network_error")
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                FRAME_END,
+                start=stale_end,
+                timeout=3.0,
+            )
+            stale_frame_end = output.find(FRAME_END, stale_end) + len(FRAME_END)
+            stale_plain = CSI_RE.sub(b"", bytes(output[start:stale_frame_end])).decode(
+                "utf-8"
+            )
+            for needle in (
+                "MASC Runtime",
+                "LANE",
+                "CANDIDATE",
+                "PROVIDER / MODEL",
+                "ROUTE / PROBE",
+                "primary",
+                "1/2 runtime-a",
+                "Resolved A / model-a",
+                "ready / reachable",
+                "CLI not probed",
+                "last success",
+                "unobserved",
+                "single candidate",
+            ):
+                if needle not in stale_plain:
+                    raise AssertionError(
+                        f"Runtime did not draw {needle!r}: {stale_plain!r}"
+                    )
+            if "Probe label must not render" in stale_plain:
+                raise AssertionError(
+                    f"Runtime used probe identity instead of resolved SSOT: {stale_plain!r}"
+                )
+
+            # The next ordinary poll carries the refreshed cache value. This
+            # proves served_stale is a state, not a local health inference.
+            fresh_start = stale_frame_end
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"fresh",
+                start=fresh_start,
+                timeout=3.0,
+            )
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                re.compile(
+                    rb"reachable(?:\x1b\[[0-9;]*m)* / "
+                    rb"(?:\x1b\[[0-9;]*m)*fresh"
+                ),
+                start=fresh_start,
+                timeout=3.0,
+            )
+
+            compact = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=13,
+                columns=100,
+                needle=b"[4 candidates, scroll 0]",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            if b"Tab:next" not in CSI_RE.sub(b"", compact):
+                raise AssertionError(
+                    f"Runtime overflow clipped its navigation footer: {compact!r}"
+                )
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=30,
+                columns=100,
+                needle=b"MASC Runtime",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+
+            fixtures[RUNTIME_PROBE_PATH] = (503, {"error": "probe refresh failed"})
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"r",
+                b"forced probe refresh failed",
+            )
+            if force_probe.served != 1:
+                raise AssertionError(
+                    "Runtime did not coalesce manual refresh into one force request: "
+                    f"{force_probe.served} calls"
+                )
+            preserved = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=30,
+                columns=99,
+                needle=b"runtime-a",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            preserved_plain = CSI_RE.sub(b"", preserved)
+            for needle in (b"runtime probe load failed", b"runtime-a", b"runtime-d"):
+                if needle not in preserved_plain:
+                    raise AssertionError(
+                        f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
+                    )
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Tools")
+            os.write(master_fd, b"q")
+            completed = True
+        finally:
+            initial_probe.release.set()
+            if not completed and process.poll() is None:
+                kill_process_group(process)
+
+    return interact
+
+
 FUSION_RUNS_PATH = "/api/v1/dashboard/fusion-runs"
 
 
@@ -4287,6 +4619,9 @@ def run_keyboard_regression(executable: str) -> None:
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
+        runtime_http_fixtures()
+    )
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
     run_terminal_scenario(
         executable,
@@ -4327,6 +4662,17 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper lanes unread, failed, empty, and populated",
         interact=keeper_lanes_interaction(lanes_fixtures, lanes_gate),
         http_fixtures=lanes_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Runtime lane candidates from joined projections",
+        interact=runtime_surface_interaction(
+            runtime_fixtures,
+            runtime_initial_probe,
+            runtime_force_probe,
+        ),
+        refresh=0.05,
+        http_fixtures=runtime_fixtures,
     )
     run_terminal_scenario(
         executable,

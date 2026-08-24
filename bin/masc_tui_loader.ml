@@ -224,7 +224,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Fusion | Repositories | Connectors | Tools
+    | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Tools
     | System_logs -> None
   in
   let current_navigation =
@@ -563,6 +563,45 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
   | Ok json -> Tui_decode.decode_runtime_resolved json
+
+type runtime_surface_load = {
+  rsl_resolved : Tui_decode.runtime_resolved_snapshot;
+  rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
+}
+
+(** Load the Runtime operator surface from its identity projection and optional
+    probe observation. The requests run together when an Eio switch is
+    available. A resolved failure rejects the load; a probe failure remains an
+    inner result so lane identity can still be drawn as unobserved. *)
+let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
+    (runtime_surface_load, string) result =
+  let requests =
+    [ (fun () -> fetch_runtime_probe ~host ~port ~force)
+    ; (fun () -> fetch_runtime_resolved ~host ~port)
+    ]
+  in
+  let results =
+    match Eio_context.get_switch_opt () with
+    | Some _ -> Eio.Fiber.List.map ~max_fibers:2 (fun request -> request ()) requests
+    | None -> List.map (fun request -> request ()) requests
+  in
+  match results with
+  | [ _; Error detail ] -> Error ("runtime resolved load failed: " ^ detail)
+  | [ probe_result; Ok resolved_json ] ->
+      (match Tui_decode.decode_runtime_resolved_snapshot resolved_json with
+       | Error detail -> Error ("runtime resolved decode failed: " ^ detail)
+       | Ok rsl_resolved ->
+           let rsl_probe =
+             match probe_result with
+             | Error detail -> Error ("runtime probe load failed: " ^ detail)
+             | Ok probe_json ->
+                 (match Tui_decode.decode_runtime_probe_snapshot probe_json with
+                  | Ok probe -> Ok probe
+                  | Error detail ->
+                      Error ("runtime probe decode failed: " ^ detail))
+           in
+           Ok { rsl_resolved; rsl_probe })
+  | _ -> Error "runtime surface loader lost one of its two projection reads"
 
 (** Load the tool calls keepers are holding, for the Approvals surface. *)
 let load_keeper_tool_approvals ~(host : string) ~(port : int) :

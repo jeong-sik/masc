@@ -210,6 +210,135 @@ type connector_snapshot = {
   cs_active : int;  (** How many the server counted as available. *)
 }
 
+(** Whether the non-blocking runtime-probe route served a cached reading or
+    scheduled background work. The wire vocabulary is closed so a producer
+    change cannot silently look fresh. *)
+type runtime_probe_refresh_state =
+  | Runtime_probe_fresh
+  | Runtime_probe_recent
+  | Runtime_probe_served_stale
+  | Runtime_probe_warming_up
+
+(** Fleet-level reachability verdict published by the runtime inventory
+    projection. This is provider metadata reachability, not a completion or
+    lane failover verdict. *)
+type runtime_probe_status =
+  | Runtime_probe_reachable
+  | Runtime_probe_no_http_runtimes
+  | Runtime_probe_degraded
+  | Runtime_probe_unreachable
+  | Runtime_probe_warming
+
+type runtime_provider_status =
+  | Runtime_provider_reachable
+  | Runtime_provider_missing_auth
+  | Runtime_provider_auth_failed
+  | Runtime_provider_network_error
+  | Runtime_provider_server_error
+  | Runtime_provider_endpoint_not_found
+  | Runtime_provider_http_error
+  | Runtime_provider_unknown_http_status
+  | Runtime_provider_skipped_cli
+  | Runtime_provider_invalid_endpoint
+  | Runtime_provider_invalid_execution_transport
+
+type runtime_probe_transport =
+  | Runtime_probe_http
+  | Runtime_probe_cli
+
+type runtime_provider_probe = {
+  rpp_runtime_id : string;
+  rpp_transport : runtime_probe_transport;
+  rpp_status : runtime_provider_status;
+  rpp_reachable : bool option;
+  rpp_http_status : int option;
+  rpp_latency_ms : float option;
+  rpp_error : string option;
+  rpp_checked_at : string;
+}
+
+type runtime_probe_summary = {
+  rpsu_runtimes : int;
+  rpsu_probed : int;
+  rpsu_reachable : int;
+  rpsu_failed : int;
+  rpsu_skipped : int;
+  rpsu_default_runtime_id : string option;
+}
+
+type runtime_probe_snapshot = {
+  rps_generated_at : string;
+  rps_refreshed_at_unix : float option;
+  rps_cache_ttl_sec : float;
+  rps_cache_age_sec : float option;
+  rps_cache_hit : bool;
+  rps_refresh_state : runtime_probe_refresh_state;
+  rps_status : runtime_probe_status;
+  rps_probe_ok : bool;
+  rps_checked_at : string;
+  rps_summary : runtime_probe_summary;
+  rps_providers : runtime_provider_probe list;
+  rps_errors : string list;
+  rps_observations : string list;
+  rps_limitations : string list;
+}
+
+(** One runtime row shared by the Keeper picker and Runtime surface.
+    [ro_is_default] is derived from the document's top-level
+    [default_runtime], not the row's independent binding flag. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_blocked_reason : string option;
+  ro_is_default : bool;
+}
+
+type runtime_resolved_lane = {
+  rrl_id : string;
+  rrl_runtime_ids : string list;
+  rrl_preferred_candidate : string option;
+  rrl_preferred_at_ts : float option;
+      (** Sticky last-success observation, not a failure timestamp. *)
+}
+
+type runtime_resolved_snapshot = {
+  rrs_generated_at_iso : string;
+  rrs_config_path : string option;
+  rrs_default_runtime_id : string option;
+  rrs_runtimes : runtime_option list;
+  rrs_lanes : runtime_resolved_lane list;
+}
+
+(** One lane candidate after an exact [runtime_id] join. Resolved inventory
+    owns provider/model identity; the probe owns only its optional observation.
+    A missing probe is unobserved, never inferred unhealthy. *)
+type runtime_candidate_row = {
+  rcr_lane_id : string;
+  rcr_position : int;
+  rcr_candidate_count : int;
+  rcr_runtime : runtime_option;
+  rcr_preferred_at_ts : float option;
+  rcr_probe : runtime_provider_probe option;
+}
+
+type runtime_surface_snapshot = {
+  rss_probe : runtime_probe_snapshot option;
+      (** Current or last-good optional observation. [None] means no provider
+          probe has been read; resolved lane identity remains usable. *)
+  rss_probe_error : string option;
+      (** Why the latest probe read failed. May coexist with [rss_probe] when
+          a last-good observation was preserved. *)
+  rss_resolved : runtime_resolved_snapshot;
+  rss_candidates : runtime_candidate_row list;
+  rss_unassigned_probe_count : int;
+}
+
+val runtime_probe_refresh_state_to_string : runtime_probe_refresh_state -> string
+val runtime_probe_status_to_string : runtime_probe_status -> string
+val runtime_provider_status_to_string : runtime_provider_status -> string
+
 (** A repository the workspace tracks. *)
 type repository = {
   rp_name : string;
@@ -486,29 +615,20 @@ val decode_keeper_tool_approvals :
 (** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with
     missing or mistyped fields rather than dropping them. *)
 
-(** One runtime a keeper can be pointed at, from
-    [GET /api/v1/runtime/resolved]. *)
-type runtime_option = {
-  ro_id : string;
-  ro_provider : string;
-  ro_model : string;
-  ro_dispatchable : bool;
-  ro_is_default : bool;
-}
-
 (** Where one keeper points today. [ra_source] is the server's word:
     ["default"] rides the fleet default, ["explicit"] was assigned. *)
 type runtime_assignment = {
   ra_keeper : string;
   ra_source : string;
-  ra_runtime_id : string option;
+  ra_target_id : string option;
+      (** Resolved lane id, or [None] when the assignment is missing. *)
 }
 
 val decode_runtime_resolved :
   Yojson.Safe.t ->
   (runtime_option list * runtime_assignment list, string) result
-(** Decode the picker's slice of the resolved-runtime document: the runtime
-    catalogue and the keeper assignments, both in server order. *)
+(** Decode the shared resolved-runtime document once, then project its runtime
+    catalogue and keeper assignments for the picker, both in server order. *)
 
 type fleet_safety = {
   fs_status : string;
@@ -607,6 +727,39 @@ val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
 
 val decode_connector_snapshot :
   Yojson.Safe.t -> (connector_snapshot, string) result
+
+val decode_runtime_probe_snapshot :
+  Yojson.Safe.t -> (runtime_probe_snapshot, string) result
+(** Strict decoder for [GET /api/v1/dashboard/runtime-probe]. It accepts only
+    the producer's closed status vocabularies, requires the cache and provider
+    fields the Runtime surface draws, and rejects count/reachability/default
+    identity contradictions instead of repairing them locally. *)
+
+val decode_runtime_resolved_snapshot :
+  Yojson.Safe.t -> (runtime_resolved_snapshot, string) result
+(** Strict Runtime-surface slice of [GET /api/v1/runtime/resolved]. Runtime and
+    lane identities must be unique, lane candidates must exist, and sticky
+    preferred candidate/time fields must be present or absent together.
+    Assignment and max-context fields belong to other consumers and are not
+    duplicated into this light projection. *)
+
+val decode_runtime_surface_snapshot :
+  probe_json:Yojson.Safe.t ->
+  resolved_json:Yojson.Safe.t ->
+  (runtime_surface_snapshot, string) result
+(** Decode and join the two server-owned projections by exact [runtime_id],
+    preserving lane and candidate order. Extra probe rows are counted; a lane
+    candidate absent from a stale probe remains [None]. *)
+
+val join_runtime_surface :
+  probe:runtime_probe_snapshot option ->
+  probe_error:string option ->
+  resolved:runtime_resolved_snapshot ->
+  (runtime_surface_snapshot, string) result
+(** Join a decoded resolved document to a current or last-good optional probe.
+    A probe error has a smaller failure radius than resolved identity: it is
+    carried beside unobserved or preserved probe rows rather than erasing the
+    lane table. *)
 
 val decode_repository_snapshot :
   Yojson.Safe.t -> (repository_snapshot, string) result

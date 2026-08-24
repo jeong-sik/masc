@@ -28,7 +28,9 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 ;;
 
-let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
+(* Two bindings can share a provider, so the model and base URL come along:
+   the label has to say which endpoint a call actually reached. *)
+let provider_endpoint_label_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
     let base_url = String.trim cfg.base_url in

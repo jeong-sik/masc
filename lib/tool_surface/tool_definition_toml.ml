@@ -427,6 +427,15 @@ and items_json ~context pairs =
     (* An element carries the same constraints a parameter of that type does.
        The two key sets used to differ, so a string element could not say how
        short it may be even though a string parameter could. *)
+    | "enum" ->
+      let* () = only_for ~context:key_context ~declared Ptype_string in
+      let* values = as_string_list ~context:key_context value in
+      let* () =
+        match values with
+        | [] -> Error (sprintf "%s must not be empty" key_context)
+        | _ :: _ -> Ok ()
+      in
+      Ok (Some ("enum", `List (List.map (fun v -> `String v) values)))
     | "description" ->
       let* text = as_non_empty_string ~context:key_context value in
       Ok (Some ("description", `String text))

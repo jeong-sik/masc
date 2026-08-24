@@ -16,54 +16,8 @@ let assertion_kind_enum_strings =
   [ "task_claimed"; "current_task_set" ]
 
 let schemas : tool_schema list = [
-  {
-    name = "masc_status";
-    description = "Get current project status: active agents, task queue, recent broadcasts, and cluster info. \
-Use when you need a snapshot of who is online and what tasks are available. \
-Call after masc_start to orient yourself. Pair with masc_tasks for detailed backlog.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("if_revision", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional producer revision from the previous snapshot; matching revisions return unchanged.");
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
-    name = "masc_check";
-    description = "Assert task preconditions on your agent state (task claimed, current task set, etc). \
-Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("assertions", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [
-            ("type", `String "string");
-            ("enum",
-             `List
-               (List.map (fun s -> `String s) assertion_kind_enum_strings));
-          ]);
-          ("description", `String "List of task-state assertions to check. Each returns true/false with a fix hint if false.");
-        ]);
-      ]);
-      ("required", `List [`String "assertions"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
+  Tool_schemas_workspace_core_toml.status;
+  Tool_schemas_workspace_core_toml.check;
 
-  {
-    name = "masc_heartbeat";
-    description = "Publish the caller's heartbeat observation. Heartbeats are \
-telemetry only and do not grant another component authority to stop, evict, or \
-release the caller's work.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-      ("additionalProperties", `Bool false);
-    ];
-  };
+  Tool_schemas_workspace_core_toml.heartbeat;
 ]

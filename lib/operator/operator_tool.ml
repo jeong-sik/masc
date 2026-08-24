@@ -108,12 +108,6 @@ let snapshot_schema ~remote =
 
 let digest_target_type_enums =
   [ `String Operator_action_constants.workspace_target_type ]
-let judgment_surface_enums =
-  [
-    `String "command.namespace";
-    `String "intervene";
-  ]
-
 let digest_schema ~remote =
   {
     name = "masc_operator_digest";
@@ -142,86 +136,9 @@ let digest_schema ~remote =
         ];
   }
 
-let board_attention_quarantine_requeue_schema =
-  { name = board_attention_quarantine_requeue_tool_name
-  ; description =
-      "Acknowledge and requeue exactly one Board-attention quarantine. The observed keeper, partition, candidate, and opaque quarantine id must all match; this tool never auto-retries."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "additionalProperties", `Bool false
-        ; ( "properties"
-          , schema_properties
-              [ ( "schema"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "enum"
-                      , `List
-                          [ `String
-                              Keeper_board_attention_quarantine_command
-                              .tool_command_schema
-                          ] )
-                    ] )
-              ; "keeper_name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "partition_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "candidate_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; ( "expected_quarantine_id"
-                , `Assoc [ "type", `String "string"; "minLength", `Int 1 ] )
-              ; ( "decision"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; "enum", `List [ `String "acknowledge_and_requeue" ]
-                    ] )
-              ] )
-        ; ( "required"
-          , `List
-              [ `String "schema"
-              ; `String "keeper_name"
-              ; `String "partition_id"
-              ; `String "candidate_id"
-              ; `String "expected_quarantine_id"
-              ; `String "decision"
-              ] )
-        ]
-  }
-;;
+let board_attention_quarantine_requeue_schema = Operator_tool_toml.quarantine_requeue
 
-let task_recovery_schema =
-  { name = task_recovery_tool_name
-  ; description =
-      "Recover exactly one claimed or in-progress Task to todo. The observed task_id, persisted assignee, and backlog version must all match; this tool performs no liveness or elapsed-time inference."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "additionalProperties", `Bool false
-        ; ( "properties"
-          , schema_properties
-              [ ( "schema"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "enum"
-                      , `List
-                          [ `String Operator_task_recovery_command.tool_command_schema ] )
-                    ] )
-              ; "task_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; ( "expected_assignee"
-                , `Assoc [ "type", `String "string"; "minLength", `Int 1 ] )
-              ; ( "expected_version"
-                , `Assoc
-                    [ "type", `String "integer"; "minimum", `Int 0 ] )
-              ; "reason", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ] )
-        ; ( "required"
-          , `List
-              [ `String "schema"
-              ; `String "task_id"
-              ; `String "expected_assignee"
-              ; `String "expected_version"
-              ; `String "reason"
-              ] )
-        ]
-  }
-;;
+let task_recovery_schema = Operator_tool_toml.task_recovery_resolve
 
 let action_schema ~remote =
   {
@@ -258,30 +175,7 @@ let action_schema ~remote =
         ];
   }
 
-let confirm_schema =
-  {
-    name = "masc_operator_confirm";
-    description =
-      "Confirm and execute a previously previewed operator action. Use this only after masc_operator_action returns confirm_required=true.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ("actor", `Assoc [ ("type", `String "string") ]);
-                ("confirm_token", `Assoc [ ("type", `String "string") ]);
-                ( "decision",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List [ `String "confirm"; `String "deny" ]);
-                    ] );
-              ] );
-          ("required", `List [ `String "confirm_token" ]);
-        ];
-  }
+let confirm_schema = Operator_tool_toml.confirm
 
 let board_attention_quarantine_failure_class = function
   | Keeper_board_attention_quarantine_command.Candidate_state_conflict _
@@ -430,63 +324,7 @@ let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =
          (Yojson.Safe.to_string data))
 ;;
 
-let judgment_write_schema =
-  {
-    name = "masc_operator_judgment_write";
-    description =
-      "Internal operator-judge write path. Use this to store a durable operator judgment for namespace supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ( "surface",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List judgment_surface_enums);
-                    ] );
-                ( "target_type",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List digest_target_type_enums);
-                    ] );
-                ("target_id", `Assoc [ ("type", `String "string") ]);
-                ("summary", `Assoc [ ("type", `String "string") ]);
-                ( "confidence",
-                  `Assoc
-                    [
-                      ("type", `String "number");
-                      ("minimum", `Float 0.0);
-                      ("maximum", `Float 1.0);
-                      ( "description",
-                        `String
-                          "How sure the judge is, 0.0-1.0. Shown to the \
-                           operator; no code compares it." );
-                    ] );
-                ("fresh_ttl_sec", `Assoc [ ("type", `String "integer") ]);
-                ("keeper_name", `Assoc [ ("type", `String "string") ]);
-                ("model_name", `Assoc [ ("type", `String "string") ]);
-                ("runtime_name", `Assoc [ ("type", `String "string") ]);
-                ( "evidence_refs",
-                  `Assoc
-                    [
-                      ("type", `String "array");
-                      ("items", `Assoc [ ("type", `String "string") ]);
-                    ] );
-                ("recommended_action", `Assoc [ ("type", `String "object") ]);
-                ("fallback_used", `Assoc [ ("type", `String "boolean") ]);
-                ("disagreement_with_truth", `Assoc [ ("type", `String "boolean") ]);
-              ] );
-          ("required",
-           `List
-             [ `String "surface"; `String "target_type"; `String "summary";
-               `String "confidence" ]);
-        ];
-  }
+let judgment_write_schema = Operator_tool_toml.judgment_write
 
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in

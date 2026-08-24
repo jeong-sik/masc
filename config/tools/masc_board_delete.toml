@@ -1,0 +1,17 @@
+name = "masc_board_delete"
+description = """
+Delete a board post and its associated comments and votes. Use for cleanup \
+of stale, test, or expired posts."""
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = "ID of the post to delete"
+
+[[params]]
+name = "author"
+type = "string"
+description = """
+Author identity. Auto-filled from the caller's agent identity when omitted \
+by MCP runtime clients."""

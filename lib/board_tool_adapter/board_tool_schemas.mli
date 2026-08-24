@@ -19,6 +19,8 @@ val tool_post_list : Masc_domain.tool_schema
 val tool_post_get : Masc_domain.tool_schema
 val tool_comment_add : Masc_domain.tool_schema
 val tool_vote : Masc_domain.tool_schema
+val tool_cleanup : Masc_domain.tool_schema
+val tool_delete : Masc_domain.tool_schema
 val tool_stats : Masc_domain.tool_schema
 val tool_search : Masc_domain.tool_schema
 val tool_comment_vote : Masc_domain.tool_schema

@@ -1,0 +1,68 @@
+name = "masc_operator_judgment_write"
+description = """
+Internal operator-judge write path. Use this to store a durable operator \
+judgment for namespace supervision. Hidden from the default catalog and \
+intended for keeper/automation experiments."""
+
+[[params]]
+name = "surface"
+type = "string"
+required = true
+enum = ["command.namespace", "intervene"]
+
+[[params]]
+name = "target_type"
+type = "string"
+required = true
+enum = ["workspace"]
+
+[[params]]
+name = "target_id"
+type = "string"
+
+[[params]]
+name = "summary"
+type = "string"
+required = true
+
+[[params]]
+name = "confidence"
+type = "number"
+required = true
+minimum = 0.0
+maximum = 1.0
+description = """
+How sure the judge is, 0.0-1.0. Shown to the operator; no code compares it."""
+
+[[params]]
+name = "fresh_ttl_sec"
+type = "integer"
+
+[[params]]
+name = "keeper_name"
+type = "string"
+
+[[params]]
+name = "model_name"
+type = "string"
+
+[[params]]
+name = "runtime_name"
+type = "string"
+
+[[params]]
+name = "evidence_refs"
+type = "array"
+items = { type = "string" }
+
+[[params]]
+name = "recommended_action"
+type = "object"
+
+[[params]]
+name = "fallback_used"
+type = "boolean"
+
+[[params]]
+name = "disagreement_with_truth"
+type = "boolean"

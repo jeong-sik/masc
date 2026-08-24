@@ -570,20 +570,22 @@ let pending_board_event_of_delegate_completion
       (dc : Keeper_event_queue.delegate_completion)
   : pending_board_event
   =
-  let title, message =
+  (* The row is already [event=... post_id=... author=... preview=...], so the
+     title states the outcome and nothing else: a sentence here would repeat
+     what the structured fields say, and model-facing prose belongs in the
+     config prompt files rather than in this module (RFC
+     prompts-and-tool-definitions-outside-ocaml). [Delegate_no_reply] has no
+     preview because there was no text; the outcome is the whole fact. *)
+  let outcome, message =
     match dc.dc_terminal with
-    | Keeper_event_queue.Delegate_replied reply ->
-      Printf.sprintf "%s answered your request" dc.dc_keeper, reply
-    | Keeper_event_queue.Delegate_no_reply ->
-      ( Printf.sprintf "%s finished without a reply" dc.dc_keeper
-      , "The delegated turn ended with no text to hand back." )
-    | Keeper_event_queue.Delegate_failed detail ->
-      Printf.sprintf "%s could not finish your request" dc.dc_keeper, detail
+    | Keeper_event_queue.Delegate_replied reply -> "replied", reply
+    | Keeper_event_queue.Delegate_no_reply -> "no_reply", ""
+    | Keeper_event_queue.Delegate_failed detail -> "failed", detail
   in
   { event_kind = Delegate_completed
   ; post_id = Keeper_event_queue.delegate_completion_post_id dc
   ; author = dc.dc_keeper
-  ; title
+  ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome
   ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
   ; hearth = None
   ; post_kind = Board.System_post

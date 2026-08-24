@@ -339,7 +339,11 @@ let consume_single_heartbeat_stimulus
       (* Same shape as [Fusion_completed]: a turn this Keeper asked another to
          run has ended, and the answer is surfaced as a pending_board_event so
          this turn acts on it. *)
-      Log.Keeper.info
+      (* The level comes from the outcome: a delegation the asker is still
+         waiting on that could not finish is not routine. *)
+      (match dc.dc_terminal with
+       | Keeper_event_queue.Delegate_failed _ -> Log.Keeper.warn
+       | Keeper_event_queue.Delegate_replied _ | Keeper_event_queue.Delegate_no_reply -> Log.Keeper.info)
         "turn entry: delegation answer delivered operation_id=%s from=%s \
          outcome=%s (keeper=%s)"
         dc.dc_operation_id

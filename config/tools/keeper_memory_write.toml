@@ -1,0 +1,21 @@
+name = "keeper_memory_write"
+description = """
+Record a durable claim that later turns read back. Your context resets \
+between turns, so a conclusion you leave only in this turn's reasoning is \
+gone. Task sequencing and operating constraints belong to their typed domain \
+stores, not memory prose. The runtime records explicit typed provenance and \
+returns validation or persistence failures directly."""
+additional_properties = false
+
+[[params]]
+name = "title"
+type = "string"
+description = "Short hook (≤120 chars). Optional; may be empty."
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = """
+Body. Required, must be non-empty. For decisions, lead with the decision \
+then **Why** and **How to apply** lines."""

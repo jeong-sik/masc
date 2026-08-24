@@ -41,9 +41,10 @@ let trajectory_max_limit = 500
 
    A count was tried first and could not say what it had covered:
    [Keeper_tool_call_log.read_recent] fills [n] rows for one keeper by scanning
-   a multiple of [n] fleet rows, so asking for 500 of rondo's calls returned
-   454 on 2026-08-24 and asking for 5,000 returned 1,409 -- and a caller
-   cannot tell a keeper that made no more calls from a scan that stopped short.
+   a multiple of [n] fleet rows, so asking for 500 of one keeper's calls
+   returned 454 on 2026-08-24 and asking for 5,000 returned 1,409 -- and a
+   caller cannot tell a keeper that made no more calls from a scan that
+   stopped short.
    [read_window] has no row cap, so everything in the window is in the answer
    and the window is a fact the response can state.
 

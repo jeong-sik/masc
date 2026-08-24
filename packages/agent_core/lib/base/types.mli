@@ -57,6 +57,7 @@ type agent_config =
       @since 0.151.0 *)
   ; initial_messages : message list
   ; yield_on_tool : bool
+  ; max_tool_rounds : int option
     (** Release provider capacity before tool execution. @since 0.100.0 *)
   }
 [@@deriving show]

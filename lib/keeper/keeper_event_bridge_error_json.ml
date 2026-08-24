@@ -119,6 +119,7 @@ let agent_failed_error_summary = function
     "terminal_tool_durability_failed"
   | Agent_core.Error.Agent
       (( Agent_core.Error.UnrecognizedStopReason _
+       | Agent_core.Error.ToolRoundLimitExceeded _
        | Agent_core.Error.HookExecutionFailed _
        | Agent_core.Error.GuardrailViolation _
        | Agent_core.Error.TripwireViolation _
@@ -200,6 +201,11 @@ let core_api_error_fields = function
 let core_agent_error_fields = function
   | Agent_core.Error.UnrecognizedStopReason { reason } ->
     [ "variant", `String "unrecognized_stop_reason"; "reason", `String reason ]
+  | Agent_core.Error.ToolRoundLimitExceeded { rounds; limit } ->
+    [ "variant", `String "tool_round_limit_exceeded"
+    ; "rounds", `Int rounds
+    ; "limit", `Int limit
+    ]
   | Agent_core.Error.HookExecutionFailed
       { hook_name; stage; tool_name; tool_use_id; detail } ->
     [ "variant", `String "hook_execution_failed"

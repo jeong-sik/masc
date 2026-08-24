@@ -3160,9 +3160,11 @@ let render_keeper_message (state : state) =
            others);
     (match state.msg_loaded_error with
      | Some detail ->
+         (* Cause first. The consequence -- this session only -- is the same
+            sentence every time and cost 66 cells before the reader reached the
+            part that differs, which the box then cut. *)
          box_line_styled chat_buf chat_cols ~style:Theme.warn
-           ("  saved conversation could not be loaded; showing this session \
-             only: " ^ detail)
+           ("  " ^ detail ^ " \xe2\x80\x94 showing this session only")
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:Theme.warn

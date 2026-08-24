@@ -870,10 +870,39 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
          !second_observed)
 ;;
 
+(* The post-tool-round predicate is the position of the last message, not
+   containment over history: an old Tool message earlier in the conversation
+   must not read as "this round follows tool execution" — that misread
+   suppressed the world state on the first round of ordinary turns
+   (sangsu turn 15, 2026-08-24). *)
+let message role content : Agent_core.Types.message =
+  { role; content = [ Agent_core.Types.Text content ]; name = None
+  ; tool_call_id = None; metadata = []
+  }
+
+let test_ends_with_tool_results_is_positional () =
+  let user = message Agent_core.Types.User "ask" in
+  let assistant = message Agent_core.Types.Assistant "plan" in
+  let tool = message Agent_core.Types.Tool "result" in
+  check bool "empty history is not post-tool" false
+    (Masc.Keeper_run_prompt.ends_with_tool_results []);
+  check bool "a turn's first round ends with the user" false
+    (Masc.Keeper_run_prompt.ends_with_tool_results [ user ]);
+  check bool "a round after tool execution ends with the tool" true
+    (Masc.Keeper_run_prompt.ends_with_tool_results [ user; assistant; tool ]);
+  check bool "an old tool message before a new user turn does not count" false
+    (Masc.Keeper_run_prompt.ends_with_tool_results [ user; assistant; tool; user ])
+
 let () =
   run
     "keeper_run_tools_hooks"
-    [ ( "observation_file_path"
+    [ ( "post_tool_round"
+      , [ test_case
+            "the predicate is positional, not containment"
+            `Quick
+            test_ends_with_tool_results_is_positional
+        ] )
+    ; ( "observation_file_path"
       , [ test_case
             "explicit cwd scopes relative file_path"
             `Quick

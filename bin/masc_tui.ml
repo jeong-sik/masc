@@ -1046,31 +1046,17 @@ and launch_keeper_reconciliation state ~mailbox request =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
       in
-      match result with
-      | Ok (Keeper_chat.Operation_pending _ as pending) ->
-          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
-           | `Poll remaining ->
-               Eio.Time.sleep clock 1.5;
-               poll remaining
-           | `Stop ->
-               enqueue_async mailbox
-                 (Keeper_chat_reconciled (request, Ok pending)))
-      | Error (Keeper_chat.Http_error { status = 404; _ })
-        as not_found ->
-          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
-           | `Poll remaining ->
-               Eio.Time.sleep clock 1.5;
-               poll remaining
-           | `Stop ->
-               enqueue_async mailbox
-                 (Keeper_chat_reconciled (request, not_found)))
-      | (Ok
-          (Keeper_chat.Operation_succeeded _ | Keeper_chat.Operation_failed _
-          | Keeper_chat.Operation_cancelled)
-        | Error _) as settled ->
-          enqueue_async mailbox (Keeper_chat_reconciled (request, settled))
+      (* Every answer reaches the operator the same way; what differs is
+         whether it is worth another poll first, and that is a question about
+         the answer rather than about this loop. *)
+      match Keeper_chat_recovery.after_reconciliation_poll ~remaining result with
+      | Keeper_chat_recovery.Watch_again remaining ->
+          Eio.Time.sleep clock 1.5;
+          poll remaining
+      | Keeper_chat_recovery.Report ->
+          enqueue_async mailbox (Keeper_chat_reconciled (request, result))
     in
-    poll Keeper_chat_recovery.max_reconciliation_polls
+    poll Keeper_chat_recovery.max_absent_operation_polls
   in
   match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
   | Some sw, Some clock ->

@@ -14,8 +14,11 @@ let channel = "discord"
 let default_binding_store_path = ".gate/runtime/discord/bindings.json"
 let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
 
+(* [raw_value_opt] rather than [Sys.getenv_opt]: it falls back to the
+   boot-time config overrides, so a path declared in runtime.toml is seen the
+   way every other MASC setting is (#21972 P2-1). *)
 let configured_write_path env_name ~default =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
+  match Env_config_core.raw_value_opt env_name |> Env_config_core.trim_opt with
   | Some raw -> Env_config_core.resolve_against_base_path raw
   | None -> Env_config_core.resolve_against_base_path default
 

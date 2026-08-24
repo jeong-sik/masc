@@ -479,6 +479,10 @@ type async_msg =
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
+  | Fusion_runs_loaded of
+      int * (Masc.Tui_decode.fusion_snapshot, string) result
+  | Fusion_detail_loaded of
+      int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
@@ -876,6 +880,66 @@ let launch_harness_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+
+let launch_fusion_runs_load state ~mailbox =
+  match state.fusion_runs_inflight with
+  | Some _ -> ()
+  | None ->
+      state.fusion_runs_generation <- state.fusion_runs_generation + 1;
+      let generation = state.fusion_runs_generation in
+      state.fusion_runs_inflight <- Some generation;
+      let host = Env_config_core.masc_host () in
+      let port = state.port in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_fusion_runs ~host ~port with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Fusion_runs_loaded (generation, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Fusion_runs_loaded
+                (generation, Error "Eio switch is unavailable")))
+
+let launch_fusion_detail_load state ~mailbox ~run_id =
+  let already_loading =
+    match state.fusion_detail_inflight with
+    | Some (generation, loading_run_id) ->
+        generation = state.fusion_detail_generation
+        && String.equal loading_run_id run_id
+    | None -> false
+  in
+  if not already_loading then begin
+    state.fusion_detail_generation <- state.fusion_detail_generation + 1;
+    let generation = state.fusion_detail_generation in
+    state.fusion_detail_inflight <- Some (generation, run_id);
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_fusion_detail ~host ~port ~run_id with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Fusion_detail_loaded
+             (generation, run_id, Error "Eio switch is unavailable"))
+  end
 
 let launch_lanes_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -1672,6 +1736,71 @@ let apply_planning_load state = function
         ~current_error:state.planning_error
         ~set_error:(fun value -> state.planning_error <- value)
         err
+
+let apply_fusion_runs_load state = function
+  | Ok snapshot ->
+      let current_selected_id =
+        match state.fusion_mode with
+        | Fusion_detail run_id -> Some run_id
+        | Fusion_list ->
+            Option.bind state.fusion_runs (fun current ->
+                List.nth_opt current.Tui_decode.fus_runs state.fusion_cursor
+                |> Option.map (fun run -> run.Tui_decode.fur_run_id))
+      in
+      let next_ids =
+        List.map
+          (fun run -> run.Tui_decode.fur_run_id)
+          snapshot.Tui_decode.fus_runs
+      in
+      let fallback_cursor =
+        min (max 0 state.fusion_cursor) (max 0 (List.length next_ids - 1))
+      in
+      let next_cursor =
+        match current_selected_id with
+        | None -> fallback_cursor
+        | Some run_id ->
+            Option.value
+              (List.find_index (String.equal run_id) next_ids)
+              ~default:fallback_cursor
+      in
+      state.fusion_runs <- Some snapshot;
+      state.fusion_error <- None;
+      state.fusion_cursor <- next_cursor;
+      (match state.fusion_mode, current_selected_id with
+       | Fusion_detail run_id, Some selected
+         when String.equal run_id selected
+              && List.exists (String.equal run_id) next_ids ->
+           ()
+       | Fusion_detail _, _ ->
+           state.fusion_mode <- Fusion_list;
+           state.fusion_scroll <- 0;
+           state.fusion_detail <- None;
+           state.fusion_detail_error <- None;
+           state.fusion_detail_generation <- state.fusion_detail_generation + 1
+       | Fusion_list, _ -> ())
+  | Error detail ->
+      (* Keep the previous rows. The error marks them stale instead of
+         translating a failed refresh into an empty registry. *)
+      state.fusion_error <- Some detail
+
+let apply_fusion_detail_load state generation run_id result =
+  if
+    generation = state.fusion_detail_generation
+    &&
+    match state.fusion_mode with
+    | Fusion_detail current -> String.equal current run_id
+    | Fusion_list -> false
+  then
+    match result with
+    | Ok detail when String.equal detail.Tui_decode.fud_run.fur_run_id run_id ->
+        state.fusion_detail <- Some detail;
+        state.fusion_detail_error <- None
+    | Ok detail ->
+        state.fusion_detail_error <-
+          Some
+            (Printf.sprintf "fusion detail returned run %s for request %s"
+               detail.Tui_decode.fud_run.fur_run_id run_id)
+    | Error detail -> state.fusion_detail_error <- Some detail
 
 let refresh_status results =
   let successes =
@@ -2964,6 +3093,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.harness <- Some snapshot;
           state.harness_error <- None
       | Error detail -> state.harness_error <- Some detail)
+  | Fusion_runs_loaded (generation, result) ->
+      (match state.fusion_runs_inflight with
+       | Some inflight when inflight = generation ->
+           state.fusion_runs_inflight <- None
+       | Some _ | None -> ());
+      if generation = state.fusion_runs_generation then
+        apply_fusion_runs_load state result
+  | Fusion_detail_loaded (generation, run_id, result) ->
+      (match state.fusion_detail_inflight with
+       | Some (inflight_generation, inflight_run_id)
+         when inflight_generation = generation
+              && String.equal inflight_run_id run_id ->
+           state.fusion_detail_inflight <- None
+       | Some _ | None -> ());
+      apply_fusion_detail_load state generation run_id result
   | Verification_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3443,6 +3587,13 @@ let main () =
                 launch_verification_load state ~mailbox:async_messages
             | Lanes -> launch_lanes_load state ~mailbox:async_messages
             | Harness -> launch_harness_load state ~mailbox:async_messages
+            | Fusion ->
+                launch_fusion_runs_load state ~mailbox:async_messages;
+                (match state.fusion_mode with
+                 | Fusion_list -> ()
+                 | Fusion_detail run_id ->
+                     launch_fusion_detail_load state ~mailbox:async_messages
+                       ~run_id)
             | Repositories ->
                 launch_repositories_load state ~mailbox:async_messages
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
@@ -3486,6 +3637,14 @@ let main () =
                 launch_harness_load state ~mailbox:async_messages;
                 state.view <- Harness
             | Harness ->
+                launch_fusion_runs_load state ~mailbox:async_messages;
+                (match state.fusion_mode with
+                 | Fusion_list -> ()
+                 | Fusion_detail run_id ->
+                     launch_fusion_detail_load state ~mailbox:async_messages
+                       ~run_id);
+                state.view <- Fusion
+            | Fusion ->
                 launch_repositories_load state ~mailbox:async_messages;
                 state.view <- Repositories
             | Repositories ->
@@ -3543,6 +3702,16 @@ let main () =
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
                  | Planning_list -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_detail _ ->
+                     state.fusion_mode <- Fusion_list;
+                     state.fusion_scroll <- 0;
+                     state.fusion_detail <- None;
+                     state.fusion_detail_error <- None;
+                     state.fusion_detail_generation <-
+                       state.fusion_detail_generation + 1
+                 | Fusion_list -> ())
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
                    a focused task panel hands j/k back to the event log. *)
@@ -3599,6 +3768,18 @@ let main () =
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     let count =
+                       match state.fusion_runs with
+                       | None -> 0
+                       | Some snapshot -> List.length snapshot.fus_runs
+                     in
+                     if state.fusion_cursor < count - 1 then
+                       state.fusion_cursor <- state.fusion_cursor + 1
+                 | Fusion_detail _ ->
+                     state.fusion_scroll <- state.fusion_scroll + 1)
             | Schedules ->
                 let count =
                   match state.schedules with
@@ -3694,6 +3875,14 @@ let main () =
                  | Planning_detail _ ->
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     if state.fusion_cursor > 0 then
+                       state.fusion_cursor <- state.fusion_cursor - 1
+                 | Fusion_detail _ ->
+                     if state.fusion_scroll > 0 then
+                       state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
                 if state.schedule_cursor > 0 then
                   state.schedule_cursor <- state.schedule_cursor - 1
@@ -3805,6 +3994,24 @@ let main () =
                           state.planning_scroll <- 0
                       | None -> ())
                  | Planning_detail _ -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     let runs =
+                       match state.fusion_runs with
+                       | None -> []
+                       | Some snapshot -> snapshot.fus_runs
+                     in
+                     (match List.nth_opt runs state.fusion_cursor with
+                      | Some run ->
+                          state.fusion_mode <- Fusion_detail run.fur_run_id;
+                          state.fusion_scroll <- 0;
+                          state.fusion_detail <- None;
+                          state.fusion_detail_error <- None;
+                          launch_fusion_detail_load state
+                            ~mailbox:async_messages ~run_id:run.fur_run_id
+                      | None -> ())
+                 | Fusion_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
@@ -3856,7 +4063,8 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Repositories | Connectors | Tools | System_logs -> ())
+            | Verification | Harness | Fusion | Repositories | Connectors | Tools
+            | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -3920,7 +4128,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
@@ -3949,7 +4157,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -3971,7 +4179,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) ->
@@ -3980,7 +4188,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -4001,7 +4209,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs
+            | Fusion | Repositories | Connectors | Tools | System_logs
             -> ())
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
@@ -4012,14 +4220,14 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
        | Some "a" | Some "A" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it
@@ -4079,6 +4287,13 @@ let main () =
              launch_verification_load state ~mailbox:async_messages
          | Lanes -> launch_lanes_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages
+         | Fusion ->
+             launch_fusion_runs_load state ~mailbox:async_messages;
+             (match state.fusion_mode with
+              | Fusion_list -> ()
+              | Fusion_detail run_id ->
+                  launch_fusion_detail_load state ~mailbox:async_messages
+                    ~run_id)
          | Repositories ->
              (* Registration and keeper assignment change from elsewhere, so
                 the list is refreshed on the tick like the surfaces above. *)

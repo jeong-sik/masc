@@ -173,6 +173,12 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
+(** One authority for the Fusion surface's list/detail state. The top-level
+    [surface] only says Fusion is open; it does not repeat this mode. *)
+type fusion_mode =
+  | Fusion_list
+  | Fusion_detail of string
+
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
   = {
@@ -366,6 +372,7 @@ type surface =
   | Schedules
   | Verification
   | Harness
+  | Fusion
   | Repositories
   | Connectors
   | Tools
@@ -422,8 +429,8 @@ let surface_needs : surface -> surface_needs = function
   | Board -> { nothing with needs_board = true }
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
-  | Lanes | Approvals | Schedules | Verification | Harness | Repositories
-  | Connectors | Tools ->
+  | Lanes | Approvals | Schedules | Verification | Harness | Fusion
+  | Repositories | Connectors | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -589,6 +596,22 @@ type state = {
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
+  mutable fusion_runs: Tui_decode.fusion_snapshot option;
+  mutable fusion_error: string option;
+  mutable fusion_cursor: int;
+  mutable fusion_scroll: int;
+  mutable fusion_mode: fusion_mode;
+  mutable fusion_runs_generation: int;
+  mutable fusion_runs_inflight: int option;
+  mutable fusion_detail: Tui_decode.fusion_detail option;
+  mutable fusion_detail_error: string option;
+  (* A detail GET captures this generation. A late response for a run the
+     operator already left cannot replace the exact run now on screen. *)
+  mutable fusion_detail_generation: int;
+  (* The current generation/run pair already being read. Periodic refreshes
+     do not pile another GET on top of it; changing runs still starts a new
+     request immediately, whose pair replaces this marker. *)
+  mutable fusion_detail_inflight: (int * string) option;
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
@@ -831,6 +854,17 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
+  fusion_runs = None;
+  fusion_error = None;
+  fusion_cursor = 0;
+  fusion_scroll = 0;
+  fusion_mode = Fusion_list;
+  fusion_runs_generation = 0;
+  fusion_runs_inflight = None;
+  fusion_detail = None;
+  fusion_detail_error = None;
+  fusion_detail_generation = 0;
+  fusion_detail_inflight = None;
   observer = Observer_off;
   mcp_session = None;
   acting = [];
@@ -939,6 +973,7 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Fusion_detail_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -947,6 +982,7 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Fusion_detail_scroll value -> state.fusion_scroll <- value
 
 let scrolled_surface (state : state) : surface -> scrolled option =
   let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
@@ -991,7 +1027,8 @@ let scrolled_surface (state : state) : surface -> scrolled option =
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
-  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules ->
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Fusion ->
       None
 
 let keeper_message_status_rows (state : state) =

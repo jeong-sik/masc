@@ -2785,6 +2785,14 @@
    %{dep:test_tui_keyboard_input.py}
    %{dep:../bin/masc_tui.exe})))
 
+; Keep the focused alias above for local evidence capture, and make the default
+; test alias run it too. CI asks only for @test/runtest; without this edge the
+; PTY suite compiles its TUI dependency but none of its interaction assertions
+; execute.
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input)))
+
 (test
  (name test_tui_metrics_tail)
  (modules test_tui_metrics_tail)

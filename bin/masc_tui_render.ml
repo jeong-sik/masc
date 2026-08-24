@@ -201,8 +201,8 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
-            | Schedules | Verification | Harness | Repositories | Connectors
-            | Tools | System_logs ->
+            | Schedules | Verification | Harness | Fusion | Repositories
+            | Connectors | Tools | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -3328,6 +3328,262 @@ let render_harness (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
+let fusion_run_status_color = function
+  | Fusion_running -> Ansi.cyan
+  | Fusion_completed -> Ansi.green
+  | Fusion_failed _ -> Ansi.red
+
+let fusion_run_clock run =
+  Terminal_text.clock_timestamp
+    (Masc_domain.iso8601_of_unix_seconds run.fur_started_at)
+
+let render_fusion_list (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let runs =
+    match state.fusion_runs with
+    | None -> []
+    | Some snapshot -> snapshot.fus_runs
+  in
+  let shown = List.length runs in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.fusion_runs with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Fusion") timestamp
+          (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf "%s (%d runs)  %s  %s"
+          (screen_title " MASC Fusion") shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  %-8s %-9s %-16s %-10s %-10s %s" "TIME" "STATUS"
+       "KEEPER" "PRESET" "TOPOLOGY" "RUN");
+  box_divider buf cols;
+  (match state.fusion_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = listing_chrome ~error:state.fusion_error in
+  let content_height = max 1 (rows - chrome_rows) in
+  let scroll =
+    if state.fusion_cursor >= content_height then
+      state.fusion_cursor - content_height + 1
+    else 0
+  in
+  if shown = 0 then begin
+    let empty =
+      match
+        empty_page_of ~snapshot:state.fusion_runs ~error:state.fusion_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no retained Fusion runs)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for index = 0 to content_height - 1 do
+      let row_index = index + scroll in
+      match List.nth_opt runs row_index with
+      | None -> box_empty buf cols
+      | Some run ->
+          let status = fusion_run_status_to_string run.fur_status in
+          let line =
+            Printf.sprintf "%-8s %s%-9s%s %-16s %-10s %-10s %s"
+              (fusion_run_clock run)
+              (fusion_run_status_color run.fur_status)
+              status Ansi.reset
+              (fit_width (Terminal_text.single_line run.fur_keeper) 16)
+              (fit_width (Terminal_text.single_line run.fur_preset) 10)
+              (fit_width
+                 (Fusion_types.fusion_topology_to_string run.fur_topology)
+                 10)
+              (Terminal_text.single_line run.fur_run_id)
+          in
+          if row_index = state.fusion_cursor then
+            box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
+          else box_line buf cols ("  " ^ line)
+    done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
+
+let fusion_wrapped_block ~width ~indent text =
+  let body_width = max 1 (width - Message_layout.display_width indent) in
+  String.split_on_char '\n' text
+  |> List.concat_map (fun raw ->
+         let safe = Terminal_text.single_line raw in
+         if String.equal safe "" then [ indent ^ "(empty)" ]
+         else
+           Message_layout.wrap_words ~max_cells:body_width safe
+           |> List.map (fun line -> indent ^ line))
+  |> List.map (fun line -> Ansi.reset, line)
+
+let fusion_labeled_block ~width ~label text =
+  (Ansi.bold, "  " ^ label)
+  :: fusion_wrapped_block ~width ~indent:"    " text
+
+let fusion_detail_lines ~width (detail : fusion_detail) =
+  let run = detail.fud_run in
+  let status = fusion_run_status_to_string run.fur_status in
+  let run_lines =
+    [ fusion_run_status_color run.fur_status, "  Status: " ^ status
+    ; Ansi.reset, "  Keeper: " ^ Terminal_text.single_line run.fur_keeper
+    ; Ansi.reset, "  Preset: " ^ Terminal_text.single_line run.fur_preset
+    ; ( Ansi.reset
+    , "  Topology: "
+      ^ Fusion_types.fusion_topology_to_string run.fur_topology )
+    ; Ansi.dim, "  Started: " ^ fusion_run_clock run
+    ]
+    @
+    match run.fur_status with
+    | Fusion_running | Fusion_completed -> []
+    | Fusion_failed failure ->
+        [ Ansi.red
+        , Printf.sprintf "  Registry failure [%s]: %s"
+            (Terminal_text.single_line failure.frs_failure_code)
+            (Terminal_text.single_line failure.frs_error)
+        ]
+  in
+  let evidence_lines =
+    match detail.fud_evidence_status, detail.fud_evidence with
+    | Fusion_evidence_pending, None ->
+        [ Ansi.yellow, "  Evidence: pending (run is still running)" ]
+    | Fusion_evidence_absent, None ->
+        [ Ansi.yellow
+        , "  Evidence: absent (no current Board projection for this retained run)"
+        ]
+    | Fusion_evidence_recorded, Some evidence ->
+        let panel_lines =
+          evidence.fe_panel
+          |> List.mapi (fun index result ->
+                 match result with
+                 | Fusion_panel_answered answer ->
+                     [ ( Ansi.green
+                       , Printf.sprintf
+                           "  Panel %d [answered] %s  (%d in / %d out)"
+                           (index + 1)
+                           (Terminal_text.single_line answer.fpa_model)
+                           answer.fpa_input_tokens answer.fpa_output_tokens )
+                     ]
+                     @ fusion_wrapped_block ~width ~indent:"    "
+                         answer.fpa_answer
+                 | Fusion_panel_failed failure ->
+                     [ ( Ansi.red
+                       , Printf.sprintf "  Panel %d [failed] %s  [%s]"
+                           (index + 1)
+                           (Terminal_text.single_line failure.fpf_model)
+                           (Terminal_text.single_line failure.fpf_reason_code) )
+                     ]
+                     @ fusion_wrapped_block ~width ~indent:"    "
+                         failure.fpf_reason_detail)
+          |> List.concat
+        in
+        let judge_lines =
+          match evidence.fe_judge with
+          | Fusion_judge_synthesized judge ->
+              [ ( Ansi.magenta
+                , "  Judge [synthesized] "
+                  ^ Terminal_text.single_line judge.fj_decision )
+              ]
+              @ fusion_labeled_block ~width ~label:"Resolved"
+                  judge.fj_resolved_answer
+              @ fusion_labeled_block ~width ~label:"Reason" judge.fj_reason
+          | Fusion_judge_failed failure ->
+              [ ( Ansi.red
+                , "  Judge [failed] ["
+                  ^ Terminal_text.single_line failure.fj_failure_code
+                  ^ "]" )
+              ]
+              @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
+        in
+        [ Ansi.green, "  Evidence: recorded"
+        ; Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
+        ]
+        @ fusion_labeled_block ~width ~label:"Question" evidence.fe_question
+        @ [ Ansi.dim, "" ]
+        @ panel_lines @ [ Ansi.dim, "" ] @ judge_lines
+    | Fusion_evidence_recorded, None
+    | Fusion_evidence_pending, Some _
+    | Fusion_evidence_absent, Some _ ->
+        (* The strict decoder makes these states unreachable. Keeping the row
+           explicit protects locally-constructed test state from looking like
+           a legitimate empty reading. *)
+        [ Ansi.red, "  Fusion evidence invariant violated" ]
+  in
+  run_lines @ [ Ansi.dim, "" ] @ evidence_lines
+
+let render_fusion_detail (state : state) run_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 8192 in
+  let detail =
+    match state.fusion_detail with
+    | Some detail when String.equal detail.fud_run.fur_run_id run_id ->
+        Some detail
+    | Some _ | None -> None
+  in
+  let header =
+    Printf.sprintf "%s  %s  %s" (screen_title " MASC Fusion")
+      (fit_width (Terminal_text.single_line run_id) 38)
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (match state.fusion_detail_error with
+   | None -> ()
+   | Some error ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text error);
+       box_divider buf cols);
+  let chrome_rows =
+    if Option.is_some state.fusion_detail_error then 7 else 5
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let lines =
+    match detail, state.fusion_detail_error with
+    | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
+    | None, Some _ ->
+        [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+    | Some detail, (Some _ | None) ->
+        fusion_detail_lines ~width:(max 1 (cols - 8)) detail
+  in
+  let total = List.length lines in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.fusion_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt lines (index + scroll) with
+    | None -> box_empty buf cols
+    | Some (style, line) -> box_line_styled buf cols ~style line
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:scroll (%d/%d)  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
+       Ansi.dim scroll max_scroll state.port Ansi.reset);
+  finish_surface state ~clamped:(Fusion_detail_scroll scroll)
+    ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
+
 (* The repositories a keeper can work in.
 
    Auto-sync and the assigned keepers are the two columns that change what an
@@ -4053,6 +4309,10 @@ let render_surface (state : state) =
   | Approvals -> render_approvals state
   | Verification -> render_verification state
   | Harness -> render_harness state
+  | Fusion ->
+      (match state.fusion_mode with
+       | Fusion_list -> render_fusion_list state
+       | Fusion_detail run_id -> render_fusion_detail state run_id)
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
   | Tools -> render_tools state

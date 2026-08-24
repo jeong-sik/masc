@@ -224,8 +224,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Repositories | Connectors | Tools | System_logs ->
-        None
+    | Verification | Harness | Fusion | Repositories | Connectors | Tools
+    | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -686,6 +686,20 @@ let load_harness ~(host : string) ~(port : int) :
   match fetch_harness_health ~host ~port with
   | Error err -> Error ("harness load failed: " ^ err)
   | Ok json -> Tui_decode.decode_harness_snapshot json
+
+(** Load the retained Fusion registry list. *)
+let load_fusion_runs ~(host : string) ~(port : int) :
+    (Tui_decode.fusion_snapshot, string) result =
+  match fetch_fusion_runs ~host ~port with
+  | Error err -> Error ("fusion runs load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_snapshot json
+
+(** Load one exact Fusion run/evidence projection. *)
+let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
+    (Tui_decode.fusion_detail, string) result =
+  match fetch_fusion_detail ~host ~port ~run_id with
+  | Error err -> Error ("fusion detail load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_detail json
 
 (** Load the verification queue from /api/v1/verification/requests *)
 let load_verification ~(host : string) ~(port : int) ~(limit : int) :

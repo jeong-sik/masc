@@ -1770,31 +1770,19 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
 
 (* Counted from the same readings the rows are drawn from, so the heading
    cannot disagree with the list under it. *)
+let keeper_roster_status_color = function
+  | "running" | "active" | "busy" | "listening" -> Ansi.green
+  | "inactive" | "paused" -> Ansi.yellow
+  | "offline" | "idle" -> Ansi.gray
+  | _ -> Ansi.dim
+
+(* The tally is [Keeper_control.status_tally], so every word here is a word the
+   status column shows for the same keeper. This function only paints it. *)
 let keeper_roster_summary readings =
-  let tally (live, paused, offline, unknown) reading =
-    match Keeper_control.display_status reading with
-    | None -> (live, paused, offline, unknown + 1)
-    | Some Status.Cp_paused -> (live, paused + 1, offline, unknown)
-    | Some (Status.Cp_surface Status.Surface_offline) ->
-        (live, paused, offline + 1, unknown)
-    | Some
-        (Status.Cp_surface
-           ( Status.Surface_active | Status.Surface_busy
-           | Status.Surface_listening | Status.Surface_idle
-           | Status.Surface_inactive )) ->
-        (live + 1, paused, offline, unknown)
-  in
-  let live, paused, offline, unknown =
-    List.fold_left tally (0, 0, 0, 0) readings
-  in
-  [ (live, "running", Ansi.green)
-  ; (paused, "paused", Ansi.yellow)
-  ; (offline, "offline", Ansi.gray)
-  ; (unknown, "unread", Ansi.dim)
-  ]
-  |> List.filter (fun (count, _, _) -> count > 0)
-  |> List.map (fun (count, label, color) ->
-         Printf.sprintf "%s%d %s%s" color count label Ansi.reset)
+  Keeper_control.status_tally readings
+  |> List.map (fun (label, count) ->
+         Printf.sprintf "%s%d %s%s" (keeper_roster_status_color label) count
+           label Ansi.reset)
 
 (* The two subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet

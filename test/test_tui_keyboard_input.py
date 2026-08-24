@@ -2903,6 +2903,52 @@ def autonomous_turn_history_interaction() -> Interaction:
     return interact
 
 
+def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
+    """A surface that has not been read says so; only a read that came back
+    empty says the queue is empty.
+
+    The Verification surface used to print "(nothing waiting on a verdict)"
+    under a header that still said "(not loaded)", so the two rows disagreed
+    about whether anything had been asked. The fixture holds the response
+    until the first frame has been read off.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        unread = tab_until(process, master_fd, output, b"MASC Verification")
+        if b"(not loaded)" not in unread:
+            raise AssertionError(
+                f"Verification header did not say not loaded: {unread!r}"
+            )
+        if b"(not loaded yet)" not in unread:
+            raise AssertionError(
+                f"Verification body claimed a reading before one was made: {unread!r}"
+            )
+        if b"nothing waiting" in unread:
+            raise AssertionError(
+                f"Verification body read an empty queue off no reading: {unread!r}"
+            )
+        if not gate.requested.wait(timeout=3.0):
+            raise AssertionError("Verification surface did not ask for its queue")
+        loaded = release_and_wait_for_frame(
+            process, master_fd, output, gate, b"(nothing waiting on a verdict)"
+        )
+        # The title and the count are asserted apart: a style reset may sit
+        # between them once surface titles carry their own styling.
+        if b"MASC Verification" not in loaded or b"(0 of 0)" not in loaded:
+            raise AssertionError(
+                f"Verification header did not report the read: {loaded!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
     b"event: message\n"
@@ -3051,6 +3097,15 @@ def run_keyboard_regression(executable: str) -> None:
         interact=autonomous_turn_history_interaction(),
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
+    )
+    verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))
+    run_terminal_scenario(
+        executable,
+        description="Verification unread before read",
+        interact=verification_unread_interaction(verification_gate),
+        http_fixtures={
+            "/api/v1/verification/requests?limit=200": verification_gate,
         },
     )
     observer_requests: HttpRequests = []

@@ -494,6 +494,18 @@ missing key currently reads back as an empty JSON object, so an absent
 `backlog must contain exactly one tasks list, last_updated string, and positive
 version`. Check that the path exists before treating it as a schema problem.
 
+**A surface says `(not loaded yet)`.** Nothing has been read for it: the
+request is still out, or the surface was opened before a server was reachable.
+It is not an empty result. A read that came back with nothing says so in its
+own words - `(nothing waiting on a verdict)`, `(no verdicts recorded)` - and
+only after the header has stopped saying `(not loaded)`.
+
+**Keepers shows `- unread` in the STATUS column.** The live roster at
+`GET /api/v1/gate/keepers` has not been read for that keeper - the first load
+is still out, the read failed (the reason is printed above the list), or the
+roster came back short and did not carry that keeper. It is not a status the
+keeper is in. The header's `N unread` counts the same rows.
+
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
 recorded in Recent Events.

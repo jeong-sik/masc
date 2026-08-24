@@ -735,6 +735,22 @@ let create_state ~workspace ~port ~refresh_interval = {
    concatenated -- a notice the TUI wrote belongs where it happened, not after
    everything the server knows about. Ties keep the loaded row first, which is
    what [stable_sort] over [loaded @ session] gives. *)
+(* What a polled surface can say when it has no rows to draw. Three facts,
+   not one: nothing has been read yet, the read failed, or the read came back
+   with nothing. The first was drawn as the third -- "nothing waiting on a
+   verdict" on a Verification surface that had not yet asked -- so an
+   operator read an empty queue off a screen that knew no queue at all. *)
+type empty_page =
+  | Page_unread
+  | Page_failed
+  | Page_empty
+
+let empty_page_of ~snapshot ~error =
+  match (snapshot, error) with
+  | _, Some _ -> Page_failed
+  | None, None -> Page_unread
+  | Some _, None -> Page_empty
+
 let chat_rows_for (state : state) keeper_name =
   let loaded =
     match state.msg_loaded_keeper with

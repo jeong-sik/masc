@@ -2946,3 +2946,13 @@
  (name test_goal_tool_toml_parity)
  (modules test_goal_tool_toml_parity)
  (libraries alcotest yojson masc.tool_schemas masc_types))
+
+(test
+ (name test_skill_definition)
+ (modules test_skill_definition)
+ (libraries alcotest masc))
+
+(test
+ (name test_keeper_task_skill_block)
+ (modules test_keeper_task_skill_block)
+ (libraries alcotest masc masc_types))

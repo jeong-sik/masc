@@ -563,6 +563,17 @@ type task = {
   cycle_count: int; [@default 0]
   reclaim_policy: task_reclaim_policy option; [@default None]
   do_not_reclaim_reason: string option; [@default None]
+  (* RFC skills-declared-not-discovered: which skills a keeper working this
+     task can read. Named by their directory under <base_path>/.masc/skills/.
+
+     Declared rather than discovered on purpose. The Agent Skills default is
+     to list every skill's description in the prompt and let the model pick,
+     which is a semantic match masc does not make elsewhere. A task that names
+     its skills answers "what was loaded on that turn" by being read, not by
+     replaying what the model decided.
+
+     Empty is the ordinary case and means no skill block is built at all. *)
+  skills: string list; [@default []]
 } [@@deriving show]
 
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
@@ -709,10 +720,20 @@ let task_to_yojson t =
     | None -> with_reclaim_policy
     | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
   in
+  (* Omitted when no skill is named, which is every task that does not need
+     one. Writing an empty list instead would put the key on every row in the
+     backlog to say nothing. *)
+  let with_skills =
+    match t.skills with
+    | [] -> with_do_not_reclaim
+    | skills ->
+        with_do_not_reclaim
+        @ [("skills", `List (List.map (fun s -> `String s) skills))]
+  in
   (* Merge status fields into task *)
   match status_json with
-  | `Assoc status_fields -> `Assoc (with_do_not_reclaim @ status_fields)
-  | _ -> `Assoc with_do_not_reclaim
+  | `Assoc status_fields -> `Assoc (with_skills @ status_fields)
+  | _ -> `Assoc with_skills
 
 (* Listing row for keeper tools: identity, ordering, and claim state without
    the body. A live backlog row averages 2.0 KB of which handoff_context,
@@ -740,6 +761,9 @@ let task_of_yojson json =
     let description = opt "description" |> Option.value ~default:"" in
     let priority = Json_util.get_int json "priority" |> Option.value ~default:3 in
     let files = Json_util.get_string_list json "files" in
+    (* Absent on every task written before skills existed, and on every task
+       that names none. Both read as the empty list, which is the same fact. *)
+    let skills = Json_util.get_string_list json "skills" in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
     (* The predecessor link is optional. *)
@@ -791,6 +815,7 @@ let task_of_yojson json =
             cycle_count;
             reclaim_policy;
             do_not_reclaim_reason;
+            skills;
           }
     | Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
     | _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)

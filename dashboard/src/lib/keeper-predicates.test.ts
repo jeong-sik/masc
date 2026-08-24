@@ -40,14 +40,42 @@ describe('isKeeperPaused — RFC-0135 PR-3 SSOT', () => {
   it('returns true on pause_state paused', () => {
     expect(isKeeperPaused(k({ pause_state: 'paused' }))).toBe(true)
   })
-  it('returns true on lowercased status paused', () => {
-    expect(isKeeperPaused(k({ status: 'paused' }))).toBe(true)
-  })
-  it('returns true on uppercased status PAUSED', () => {
-    expect(isKeeperPaused(k({ status: 'PAUSED' }))).toBe(true)
+  // 대소문자 무시는 그대로다. operator snapshot 은 소문자 토큰을,
+  // hydrate 된 Keeper 는 PascalCase 를 싣기 때문이다.
+  it('축 토큰의 대소문자를 가리지 않는다', () => {
+    // `Keeper` 쪽 필드는 닫힌 합타입이라 소문자/대문자 변형이 애초에 들어가지
+    // 않는다. 대소문자를 가리지 않는 건 구조적 입력, 즉 operator snapshot 몫이다.
+    expect(isKeeperPaused({ pipeline_stage: 'PAUSED' })).toBe(true)
+    expect(isKeeperPaused({ lifecycle_phase: 'paused' })).toBe(true)
   })
   it('returns false when no axis indicates paused', () => {
     expect(isKeeperPaused(k({ paused: false, phase: 'Running', status: 'active' }))).toBe(false)
+  })
+})
+
+// `paused` 불리언과 `status='paused'` 는 서버에서 같은 `ld_paused` 로 만들어진다.
+// 그런데 execution 캐시의 lifecycle override 는 `Stopped` 이벤트를 받으면
+// 기존 `Cp_paused` 를 그대로 두므로(server_dashboard_http_execution_surfaces.ml),
+// `paused: false` 와 `status: 'paused'` 가 한 행에 같이 남을 수 있다.
+// 그때 접힌 단어를 읽으면 이미 멈춘 키퍼가 "재개할 수 있다"로 보인다.
+describe('일시정지는 flag 로만 판정한다', () => {
+  it("paused=false 인데 status='paused' 면 일시정지가 아니다", () => {
+    expect(isKeeperPaused({ paused: false, status: 'paused' })).toBe(false)
+  })
+
+  it('paused=true 면 일시정지다', () => {
+    expect(isKeeperPaused({ paused: true })).toBe(true)
+  })
+
+  it("status='paused' 하나로는 일시정지가 되지 않는다", () => {
+    expect(isKeeperPaused({ status: 'paused' })).toBe(false)
+  })
+
+  it('phase 와 stage 는 그대로 일시정지를 말한다', () => {
+    expect(isKeeperPaused({ phase: 'Paused' })).toBe(true)
+    expect(isKeeperPaused({ lifecycle_phase: 'Paused' })).toBe(true)
+    expect(isKeeperPaused({ pipeline_stage: 'paused' })).toBe(true)
+    expect(isKeeperPaused({ pause_state: 'paused' })).toBe(true)
   })
 })
 

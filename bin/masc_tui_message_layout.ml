@@ -430,12 +430,45 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
-let rows_of_entry ?markdown ~inner_width entry =
-  let metadata, _, _ =
-    Printf.sprintf "[%s] %s %s" entry.timestamp entry.role_label
-      entry.request_label
-    |> fun text -> cell_prefix text inner_width
+(* Consecutive messages from one speaker share a heading. Repeating
+   "[time] speaker request" on each of them spent a row per message saying who
+   was talking, and a keeper answering in four parts said it four times.
+
+   What a continuation keeps depends on what changed. A different moment is
+   worth a row -- it says the pause between two things the same keeper said --
+   and the name column is left blank there, because that column is what the
+   eye follows down the pane and a blank in it reads as "still them". Two
+   messages stamped the same second have nothing left to say, so they get no
+   heading and read as the one message they look like. *)
+let continues_previous ~(previous : entry option) (entry : entry) =
+  match previous with
+  | None -> false
+  | Some previous ->
+      previous.style = entry.style
+      && String.equal previous.role_label entry.role_label
+      && String.equal previous.request_label entry.request_label
+
+let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
+  let text =
+    if not (continues_previous ~previous entry) then
+      Printf.sprintf "[%s] %s %s" entry.timestamp entry.role_label
+        entry.request_label
+    else
+      match previous with
+      | Some previous when String.equal previous.timestamp entry.timestamp -> ""
+      | Some _ | None ->
+          (* As wide as this row's own label rather than the shared column
+             width: the blank lines up with the name above it without this
+             having to assume the caller padded to that column. *)
+          Printf.sprintf "[%s] %s" entry.timestamp
+            (String.make (display_width entry.role_label) ' ')
   in
+  if String.equal text "" then None
+  else
+    let fitted, _, _ = cell_prefix text inner_width in
+    Some { style = entry.style; text = fitted }
+
+let rows_of_entry ?markdown ~inner_width ~previous entry =
   let body_width = max 4 (inner_width - 2) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
@@ -460,7 +493,9 @@ let rows_of_entry ?markdown ~inner_width entry =
     body_chunks
     |> List.map (fun chunk -> { style = entry.style; text = "  " ^ chunk })
   in
-  { style = entry.style; text = metadata } :: body_rows
+  match metadata_row ~previous ~inner_width entry with
+  | None -> body_rows
+  | Some metadata -> metadata :: body_rows
 
 let visible_rows ?markdown ~inner_width ~height entries =
   let inner_width = max 1 inner_width in
@@ -469,7 +504,10 @@ let visible_rows ?markdown ~inner_width ~height entries =
     | [] -> selected
     | _ when remaining = 0 -> selected
     | entry :: older ->
-        let rows = rows_of_entry ?markdown ~inner_width entry in
+        let rows =
+          rows_of_entry ?markdown ~inner_width
+            ~previous:(List.nth_opt older 0) entry
+        in
         let chosen =
           if List.length rows <= remaining then rows
           else if selected = [] then
@@ -486,9 +524,12 @@ let visible_rows ?markdown ~inner_width ~height entries =
 let total_rows ?markdown ~inner_width entries =
   let inner_width = max 1 inner_width in
   List.fold_left
-    (fun total entry ->
-       total + List.length (rows_of_entry ?markdown ~inner_width entry))
-    0 entries
+    (fun (previous, total) entry ->
+       ( Some entry
+       , total
+         + List.length (rows_of_entry ?markdown ~inner_width ~previous entry) ))
+    (None, 0) entries
+  |> snd
 
 let max_scroll ?markdown ~inner_width ~height entries =
   max 0 (total_rows ?markdown ~inner_width entries - max 1 height)
@@ -507,7 +548,10 @@ let scrolled_rows ?markdown ~inner_width ~height ~from_bottom entries =
       | [] -> gathered, gathered_count
       | _ when gathered_count >= wanted -> gathered, gathered_count
       | entry :: older ->
-          let rows = rows_of_entry ?markdown ~inner_width entry in
+          let rows =
+            rows_of_entry ?markdown ~inner_width
+              ~previous:(List.nth_opt older 0) entry
+          in
           collect (rows @ gathered) (gathered_count + List.length rows) older
     in
     let newest, newest_count = collect [] 0 (List.rev entries) in
@@ -534,7 +578,10 @@ let clamp_scroll ?markdown ~inner_width ~height requested entries =
       | _ when total >= enough -> total
       | entry :: older ->
           count
-            (total + List.length (rows_of_entry ?markdown ~inner_width entry))
+            (total
+             + List.length
+                 (rows_of_entry ?markdown ~inner_width
+                    ~previous:(List.nth_opt older 0) entry))
             older
     in
     min requested (max 0 (count 0 (List.rev entries) - height))

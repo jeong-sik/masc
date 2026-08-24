@@ -288,7 +288,9 @@ let surface_strip (state : state) ~cols =
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
-    String.length (label i)
+    (* Cells, not bytes: the Approvals badge's middle dot is two bytes and
+       one cell, and a byte count windows the strip one entry early. *)
+    Message_layout.display_width (label i)
     + (if i = active then 1 else 0)
     + (if i > lo then 2 else 0)
   in

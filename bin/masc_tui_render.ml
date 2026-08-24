@@ -202,7 +202,7 @@ let awaiting_approval_notice (state : state) =
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
             | Schedules | Verification | Harness | Fusion | Repositories
-            | Connectors | Tools | System_logs ->
+            | Connectors | Runtime | Tools | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -3783,6 +3783,276 @@ let render_connectors (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
 
+let runtime_refresh_badge refresh_state =
+  let open Masc.Tui_decode in
+  let label, style =
+    match refresh_state with
+    | Runtime_probe_fresh -> "fresh", Ansi.green
+    | Runtime_probe_recent -> "recent", Ansi.cyan
+    | Runtime_probe_served_stale -> "stale", Ansi.yellow
+    | Runtime_probe_warming_up -> "warming", Ansi.yellow
+  in
+  style ^ label ^ Ansi.reset
+
+let runtime_overall_badge status =
+  let open Masc.Tui_decode in
+  let style =
+    match status with
+    | Runtime_probe_reachable -> Ansi.green
+    | Runtime_probe_no_http_runtimes | Runtime_probe_warming -> Ansi.dim
+    | Runtime_probe_degraded -> Ansi.yellow
+    | Runtime_probe_unreachable -> Ansi.red
+  in
+  style ^ runtime_probe_status_to_string status ^ Ansi.reset
+
+let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
+  if runtime.ro_dispatchable then Ansi.cyan ^ "ready" ^ Ansi.reset
+  else Ansi.red ^ "blocked" ^ Ansi.reset
+
+let runtime_probe_badge = function
+  | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
+  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
+      let open Masc.Tui_decode in
+      let style =
+        match probe.rpp_status with
+        | Runtime_provider_reachable -> Ansi.green
+        | Runtime_provider_skipped_cli -> Ansi.dim
+        | Runtime_provider_missing_auth | Runtime_provider_auth_failed ->
+            Ansi.yellow
+        | Runtime_provider_network_error
+        | Runtime_provider_server_error
+        | Runtime_provider_endpoint_not_found
+        | Runtime_provider_http_error
+        | Runtime_provider_unknown_http_status
+        | Runtime_provider_invalid_endpoint
+        | Runtime_provider_invalid_execution_transport -> Ansi.red
+      in
+      let label =
+        match probe.rpp_status with
+        | Runtime_provider_skipped_cli -> "CLI not probed"
+        | status -> runtime_provider_status_to_string status
+      in
+      style ^ label ^ Ansi.reset
+
+let runtime_probe_detail = function
+  | None -> []
+  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
+      let latency =
+        Option.map (fun value -> Printf.sprintf "%.0fms" value) probe.rpp_latency_ms
+      in
+      let http =
+        Option.map (fun value -> Printf.sprintf "HTTP %d" value) probe.rpp_http_status
+      in
+      let error = Terminal_text.optional_single_line probe.rpp_error in
+      let checked =
+        Some ("checked " ^ Terminal_text.clock_timestamp probe.rpp_checked_at)
+      in
+      List.filter_map Fun.id [ latency; http; error; checked ]
+
+let runtime_column_widths cols =
+  if cols >= 140 then 18, 30, 30, 22
+  else if cols >= 120 then 14, 24, 24, 22
+  else 10, 20, 20, 22
+
+let runtime_column width text =
+  let clipped = fit_width text width in
+  clipped
+  ^ String.make
+      (max 0 (width - Message_layout.display_width clipped))
+      ' '
+
+(* Lane candidates come from /runtime/resolved; reachability comes from the
+   cached runtime-probe document. Exact runtime-id joining happened in the
+   decoder module, so drawing never parses ids or reconstructs a lane. *)
+let render_runtime (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let ( runtime_lane_width
+      , runtime_candidate_width
+      , runtime_identity_width
+      , runtime_status_width ) =
+    runtime_column_widths cols
+  in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let candidates =
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot -> snapshot.Masc.Tui_decode.rss_candidates
+  in
+  let shown = List.length candidates in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.runtime_surface with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Runtime") timestamp
+          (connection_badge state.connection_status)
+    | Some snapshot ->
+        let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
+        let probe_status =
+          match snapshot.Masc.Tui_decode.rss_probe with
+          | None -> Ansi.yellow ^ "probe unavailable" ^ Ansi.reset
+          | Some probe ->
+              runtime_overall_badge probe.rps_status ^ " / "
+              ^ runtime_refresh_badge probe.rps_refresh_state
+        in
+        let probe_read =
+          if Option.is_some snapshot.rss_probe_error then
+            Ansi.yellow ^ " / read failed" ^ Ansi.reset
+          else ""
+        in
+        Printf.sprintf "%s (%d lanes, %d candidates)  %s%s  %s  %s"
+          (screen_title " MASC Runtime") lane_count shown probe_status probe_read
+          timestamp (connection_badge state.connection_status)
+  in
+  let authority_line =
+    match state.runtime_surface with
+    | None ->
+        "  SSOT: runtime.toml  projections: /api/v1/runtime/resolved + runtime-probe"
+    | Some snapshot ->
+        let config =
+          Terminal_text.single_line_or ~default:"config path unavailable"
+            snapshot.rss_resolved.rrs_config_path
+        in
+        let summary_text =
+          match snapshot.Masc.Tui_decode.rss_probe with
+          | None -> "probe unavailable"
+          | Some probe ->
+              let summary = probe.rps_summary in
+              Printf.sprintf "%d reachable / %d failed / %d skipped"
+                summary.rpsu_reachable summary.rpsu_failed summary.rpsu_skipped
+        in
+        let probe_note =
+          match snapshot.rss_probe_error, snapshot.rss_probe with
+          | Some detail, _ -> "  probe: " ^ Terminal_text.single_line detail
+          | None, Some probe ->
+              (match probe.rps_errors with
+               | detail :: _ -> "  probe: " ^ Terminal_text.single_line detail
+               | [] -> "")
+          | None, None -> ""
+        in
+        let probe_only_note =
+          match snapshot.rss_unassigned_probe_count with
+          | 0 -> ""
+          | count -> Printf.sprintf "  %d probe-only" count
+        in
+        Printf.sprintf
+          "  SSOT: runtime.toml  projections: resolved + probe  %s  %s%s%s"
+          summary_text config probe_only_note probe_note
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  let authority_style =
+    match state.runtime_surface with
+    | Some snapshot when Option.is_some snapshot.rss_probe_error -> Ansi.yellow
+    | Some _ | None -> Ansi.dim
+  in
+  box_line_styled buf cols ~style:authority_style authority_line;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:Ansi.dim
+    ("  "
+     ^ runtime_column runtime_lane_width "LANE" ^ " "
+     ^ runtime_column runtime_candidate_width "CANDIDATE" ^ " "
+     ^ runtime_column runtime_identity_width "PROVIDER / MODEL" ^ " "
+     ^ runtime_column runtime_status_width "ROUTE / PROBE"
+     ^ " DETAIL");
+  box_divider buf cols;
+  (match state.runtime_surface_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = runtime_listing_chrome ~error:state.runtime_surface_error in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
+  if shown = 0 then begin
+    let empty =
+      match
+        empty_page_of ~snapshot:state.runtime_surface
+          ~error:state.runtime_surface_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no runtime lanes configured)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for index = 0 to content_height - 1 do
+      match List.nth_opt candidates (index + scroll) with
+      | None -> box_empty buf cols
+      | Some candidate ->
+          let open Masc.Tui_decode in
+          let runtime = candidate.rcr_runtime in
+          let candidate_label =
+            Printf.sprintf "%d/%d %s" candidate.rcr_position
+              candidate.rcr_candidate_count
+              (Terminal_text.single_line runtime.ro_id)
+          in
+          let provider_model =
+            Terminal_text.single_line
+              (runtime.ro_provider ^ " / " ^ runtime.ro_model)
+          in
+          let route_probe =
+            runtime_route_badge runtime ^ " / "
+            ^ runtime_probe_badge candidate.rcr_probe
+          in
+          let route_detail =
+            if runtime.ro_dispatchable then []
+            else
+              match Terminal_text.optional_single_line runtime.ro_blocked_reason with
+              | Some reason -> [ "blocked: " ^ reason ]
+              | None -> []
+          in
+          let lane_fact =
+            match candidate.rcr_preferred_at_ts with
+            | Some at ->
+                [ "last success "
+                  ^ Terminal_text.clock_timestamp
+                      (Masc_domain.iso8601_of_unix_seconds at)
+                ]
+            | None when candidate.rcr_candidate_count = 1 -> [ "single candidate" ]
+            | None -> []
+          in
+          let default_fact = if runtime.ro_is_default then [ "default" ] else [] in
+          let detail =
+            String.concat " \xc2\xb7 "
+              (route_detail @ default_fact @ lane_fact
+               @ runtime_probe_detail candidate.rcr_probe)
+          in
+          let line =
+            "  "
+            ^ runtime_column runtime_lane_width
+                (Terminal_text.single_line candidate.rcr_lane_id)
+            ^ " " ^ runtime_column runtime_candidate_width candidate_label
+            ^ " " ^ runtime_column runtime_identity_width provider_model
+            ^ " " ^ runtime_column runtime_status_width route_probe
+            ^ " " ^ detail
+          in
+          box_line buf cols line
+    done;
+  let scroll_hint =
+    if shown > content_height then
+      Printf.sprintf "[%d candidates, scroll %d]  " shown scroll
+    else ""
+  in
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  %sj/k:scroll  Tab:next  q:quit  r:live refresh  | Port: %d%s\n"
+       Ansi.dim scroll_hint state.port Ansi.reset);
+  finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
+
 (* The tools a keeper can reach.
 
    Surfaces is the column that carries the reading: a tool registered and
@@ -4401,6 +4671,7 @@ let render_surface (state : state) =
        | Fusion_detail run_id -> render_fusion_detail state run_id)
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
+  | Runtime -> render_runtime state
   | Tools -> render_tools state
   | Acting -> render_acting state
   | System_logs -> render_system_logs state

@@ -2,14 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   keeperPriority,
   isOfflineStatus,
-  isAttentionCodeSatisfied,
-  classifyCrashReasonLib,
-  isApproveVerdict,
-  verdictWithoutRejectPrefix,
+  parseHarnessVerdict,
+  verdictSummaryText,
   verdictToneClass,
   railStatusMessage,
 } from './keeper-classifiers'
-import type { KeeperPriority, LibCrashCategory } from './keeper-classifiers'
+import type { KeeperPriority } from './keeper-classifiers'
 
 describe('keeperPriority', () => {
   it.each(['active', 'running', 'busy', 'listening', 'claimed', 'in_progress'] as const)
@@ -47,64 +45,53 @@ describe('isOfflineStatus', () => {
   })
 })
 
-describe('isAttentionCodeSatisfied', () => {
-  it('returns true for "satisfied" prefix', () => {
-    expect(isAttentionCodeSatisfied('satisfied')).toBe(true)
-    expect(isAttentionCodeSatisfied('satisfied_with_caveats')).toBe(true)
+describe('parseHarnessVerdict', () => {
+  // 생산자는 lib/eval_calibration.ml:42 의 verdict_to_string 하나뿐이고,
+  // Approve | Reject of string 을 아래 세 모양으로만 내보낸다.
+  it('생산자가 내보내는 세 모양을 그대로 읽는다', () => {
+    expect(parseHarnessVerdict('approve')).toEqual({ kind: 'approve' })
+    expect(parseHarnessVerdict('reject')).toEqual({ kind: 'reject', reason: null })
+    expect(parseHarnessVerdict('reject:bad code')).toEqual({ kind: 'reject', reason: 'bad code' })
   })
 
-  it('returns false for non-satisfied codes', () => {
-    expect(isAttentionCodeSatisfied('violated')).toBe(false)
-    expect(isAttentionCodeSatisfied('unknown')).toBe(false)
-    expect(isAttentionCodeSatisfied('')).toBe(false)
-  })
-})
-
-describe('classifyCrashReasonLib', () => {
-  it.each([
-    ['heartbeat', 'heartbeat'],
-    ['heartbeat_timeout', 'heartbeat'],
-    ['HEARTBEAT_TIMEOUT', 'heartbeat'],
-    ['turn', 'turn'],
-    ['fiber', 'fiber'],
-    ['fiber_cancel', 'fiber'],
-    ['exception', 'exception'],
-    ['exception_io', 'exception'],
-  ] as const)
-  ('classifies "%s" as %s', (input, expected) => {
-    expect(classifyCrashReasonLib(input)).toBe<LibCrashCategory>(expected)
+  it('사유에 콜론이 들어가도 잘리지 않는다', () => {
+    expect(parseHarnessVerdict('reject:a:b')).toEqual({ kind: 'reject', reason: 'a:b' })
   })
 
-  it('returns unknown for unrecognized reason', () => {
-    expect(classifyCrashReasonLib('random_error')).toBe<LibCrashCategory>('unknown')
-    expect(classifyCrashReasonLib('')).toBe<LibCrashCategory>('unknown')
+  it('빈 사유는 없는 사유다', () => {
+    expect(parseHarnessVerdict('reject:')).toEqual({ kind: 'reject', reason: null })
+    expect(parseHarnessVerdict('reject:   ')).toEqual({ kind: 'reject', reason: null })
+  })
+
+  // 접두사 매칭이던 시절에는 이 둘이 approve 로 읽혔다. 생산자는 만들 수 없는
+  // 문자열이므로, 승인으로 오독하는 대신 모르는 값이라고 말한다.
+  it('생산자가 만들 수 없는 문자열은 승인이 아니다', () => {
+    expect(parseHarnessVerdict('approvex')).toEqual({ kind: 'unknown', raw: 'approvex' })
+    expect(parseHarnessVerdict('approve_with_comments'))
+      .toEqual({ kind: 'unknown', raw: 'approve_with_comments' })
+    expect(parseHarnessVerdict('pending')).toEqual({ kind: 'unknown', raw: 'pending' })
   })
 })
 
-describe('isApproveVerdict', () => {
-  it('returns true for approve variants', () => {
-    expect(isApproveVerdict('approve')).toBe(true)
-    expect(isApproveVerdict('approve_with_comments')).toBe(true)
+describe('verdictSummaryText', () => {
+  it('거절 사유를 보여준다', () => {
+    expect(verdictSummaryText('reject:bad code')).toBe('bad code')
   })
 
-  it('returns false for non-approve verdicts', () => {
-    expect(isApproveVerdict('reject:reason')).toBe(false)
-    expect(isApproveVerdict('pending')).toBe(false)
-  })
-})
-
-describe('verdictWithoutRejectPrefix', () => {
-  it('strips reject: prefix', () => {
-    expect(verdictWithoutRejectPrefix('reject:bad code')).toBe('bad code')
+  // 예전에는 콜론 없는 reject 가 startsWith('reject:') 를 통과하지 못해
+  // 사유 자리에 "reject" 라는 단어가 그대로 찍혔다.
+  it('사유 없는 거절을 사유처럼 보여주지 않는다', () => {
+    expect(verdictSummaryText('reject')).toBe('(no reject reason)')
+    expect(verdictSummaryText('reject:')).toBe('(no reject reason)')
+    expect(verdictSummaryText('reject:  ')).toBe('(no reject reason)')
   })
 
-  it('returns raw verdict if no prefix', () => {
-    expect(verdictWithoutRejectPrefix('approve')).toBe('approve')
+  it('승인은 그대로 승인이라고 쓴다', () => {
+    expect(verdictSummaryText('approve')).toBe('approve')
   })
 
-  it('handles empty reject reason', () => {
-    expect(verdictWithoutRejectPrefix('reject:')).toBe('(no reject reason)')
-    expect(verdictWithoutRejectPrefix('reject:  ')).toBe('(no reject reason)')
+  it('모르는 값은 원문을 보여준다', () => {
+    expect(verdictSummaryText('pending')).toBe('pending')
   })
 })
 

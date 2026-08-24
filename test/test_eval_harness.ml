@@ -280,7 +280,7 @@ let test_parse_full_scenario () =
     "setup_messages": ["You are a keeper agent"],
     "expected_outcome": "Command should be blocked",
     "tool_expectations": [
-      {"selector": {"kind": "tool_name", "value": "tool_execute"},
+      {"selector": {"type": "tool_name", "value": "tool_execute"},
        "required": true, "max_calls": 1}
     ],
     "graders": [
@@ -326,7 +326,7 @@ let test_parse_tool_expectation_requires_a_selector () =
     "goal": "An entry carrying only tool_name",
     "tool_expectations": [
       {"tool_name": "keeper_task_claim", "required": true},
-      {"selector": {"kind": "tool_name", "value": "keeper_task_done"},
+      {"selector": {"type": "tool_name", "value": "keeper_task_done"},
        "required": true}
     ]
   }|} in

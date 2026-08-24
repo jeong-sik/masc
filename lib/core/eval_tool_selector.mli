@@ -25,7 +25,6 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 
     Supported shapes:
 
-    - ["tool_execute"] as legacy shorthand for [Tool_name].
     - [{"type":"tool_name","value":"tool_execute"}].
     - [{"type":"descriptor_id","value":"masc.agent.card"}].
     - [{"type":"runtime_handler","value":"Tool_masc_agent_dispatch"}].
@@ -37,6 +36,6 @@ val matches : t -> call -> bool
     call's tool name or descriptor route evidence. *)
 
 val requires_route_evidence : t -> bool
-(** [requires_route_evidence selector] is [false] only for legacy
+(** [requires_route_evidence selector] is [false] only for
     [Tool_name] selectors. Descriptor/runtime/receipt/eval-tag selectors
     cannot be evaluated against name-only evidence. *)

@@ -332,6 +332,7 @@
   test_exec_shell_command_gate
   test_shell_costume
   test_spawn_registry
+  test_tool_spawn
   test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
@@ -668,6 +669,7 @@
   test_exec_shell_command_gate
   test_shell_costume
   test_spawn_registry
+  test_tool_spawn
   test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
@@ -808,6 +810,11 @@
 ; Reads lib/keeper sources through Ast_grep, so those sources are deps: without
 ; them dune keeps a cached pass and the suite never re-runs when the code it
 ; asserts on changes.
+(test
+ (name test_chat_send_checks_the_registry)
+ (modules test_chat_send_checks_the_registry)
+ (libraries alcotest ast_grep))
+
 (test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
@@ -2877,6 +2884,11 @@
  (libraries alcotest str masc_tui_footer))
 
 (test
+ (name test_tui_help_scroll)
+ (modules test_tui_help_scroll)
+ (libraries alcotest masc_tui_help masc_tui_scroll))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))
@@ -2978,6 +2990,9 @@
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_paste.inc)
+(include stanzas/test_tui_graphics.inc)
+(include stanzas/test_tui_paste_spill.inc)
+(include stanzas/test_keeper_sandbox_root_by_profile.inc)
 
 (test
  (name test_code_address)
@@ -3003,3 +3018,8 @@
  (name test_keeper_task_skill_block)
  (modules test_keeper_task_skill_block)
  (libraries alcotest masc masc_types))
+
+(test
+ (name test_asset_sync_report)
+ (modules test_asset_sync_report)
+ (libraries alcotest masc))

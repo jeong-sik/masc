@@ -295,6 +295,18 @@
  (modules masc_tui_paste))
 
 (library
+ (name masc_tui_paste_spill)
+ (wrapped false)
+ (modules masc_tui_paste_spill)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_graphics)
+ (wrapped false)
+ (modules masc_tui_graphics)
+ (libraries base64))
+
+(library
  (name masc_tui_message_layout)
  (wrapped false)
  (modules masc_tui_message_layout)
@@ -332,12 +344,18 @@
  (name masc_tui_observation_layout)
  (wrapped false)
  (modules masc_tui_observation_layout)
- (libraries masc))
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule))
+
+(library
+ (name masc_tui_help)
+ (wrapped false)
+ (modules masc_tui_help)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_footer)
@@ -438,6 +456,7 @@
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste
+  masc_tui_paste_spill
   masc_tui_send_disposition
   unix
   yojson))
@@ -455,6 +474,7 @@
  (libraries
   masc
   masc.auth
+  masc.masc_random_id
   terminal_size
   masc_tui_credential
   masc_tui_types
@@ -464,6 +484,7 @@
   ;; transitive library's module names, so masc_tui lists masc.fusion_core.
   masc.fusion_core
   masc_tui_footer
+  masc_tui_help
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity
@@ -479,8 +500,10 @@
   masc_tui_composer
   masc_tui_keeper_control
   masc_tui_markdown
+  masc_tui_graphics
   masc_tui_message_layout
   masc_tui_paste
+  masc_tui_paste_spill
   masc_tui_scroll
   masc_tui_send_disposition
   masc_tui_metrics_tail

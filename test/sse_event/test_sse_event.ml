@@ -162,8 +162,12 @@ let baseline_turn_completed ~agent_name ~turn =
 ;;
 
 let baseline_turn_ready ~agent_name ~turn ~tool_names =
+  (* OCaml's [Digest] is MD5 despite the name. Both the typed wrapper and the
+     runtime that publishes this line use SHA-256 (sse_event.ml:213,
+     keeper_event_bridge.ml:122), so the baseline was checking the typed path
+     against a digest nothing in the product computes. *)
   let names_hash =
-    Digest.to_hex (Digest.string (String.concat "\n" tool_names))
+    Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
   in
   let payload =
     `Assoc

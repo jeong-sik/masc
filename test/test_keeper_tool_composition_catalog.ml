@@ -459,7 +459,7 @@ execution = "async"
 [[compositions.params]]
 name = "query"
 type = "string"
-description = "carried nowhere"
+description = "bound at submission"
 
 [[compositions.nodes]]
 id = "search"
@@ -473,10 +473,22 @@ kind = "param"
 name = "query"
 |}
   in
+  (* An async composition binds params at submission — the broker never
+     replays a worker closure after a crash, so the bound plan lives exactly
+     as long as the run. The read-only gate still applies unchanged. *)
   match Catalog.parse async_with_params with
-  | Error (Catalog.Async_composition_with_params { name = "probe" }) -> ()
-  | Ok _ -> fail "async composition with params was accepted"
-  | Error error -> fail ("unexpected error: " ^ Catalog.error_to_string error)
+  | Ok catalog ->
+    (match Catalog.find catalog "probe" with
+     | Some entry ->
+       check string "async execution survives"
+         "async"
+         (Catalog.execution_mode_to_string entry.Catalog.execution);
+       check int "declared param survives" 1 (List.length entry.Catalog.params)
+     | None -> fail "async param composition lookup missed exact name")
+  | Error error ->
+    fail
+      ("async composition with params was rejected: "
+       ^ Catalog.error_to_string error)
 ;;
 
 let () =

@@ -339,3 +339,50 @@ let sync ~domain ~read ~files ~dest_dir () =
              List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
              |> write_runtime_manifest ~domain ~dest_dir content)))
 ;;
+
+(* Two lines, two budgets. The bootstrap used to concatenate copied,
+   overwritten and removed into one sample and cut it at ten: a version bump
+   copies enough assets to fill that sample on its own, so the removed paths
+   never reached the line and the operator got a count with no names. For
+   [Tools] those names are the whole message — a definition an operator put
+   in the runtime directory is deleted at the next boot, because tool
+   definitions have no runtime edit layer. *)
+let sample_budget = 10
+
+let sample paths =
+  let rec take n = function
+    | [] -> []
+    | _ when n = 0 -> []
+    | x :: rest -> x :: take (n - 1) rest
+  in
+  let shown = take sample_budget paths in
+  let omitted = List.length paths - List.length shown in
+  ( String.concat ", " shown
+  , if omitted > 0 then Printf.sprintf ", and %d more" omitted else "" )
+;;
+
+let distribution_line ~label result =
+  match result.copied, result.overwritten with
+  | [], [] -> None
+  | copied, overwritten ->
+    Some
+      (Printf.sprintf
+         "%s assets synced from binary: %d copied, %d overwritten"
+         label
+         (List.length copied)
+         (List.length overwritten))
+;;
+
+let removed_line ~label result =
+  match result.removed with
+  | [] -> None
+  | removed ->
+    let shown, more = sample removed in
+    Some
+      (Printf.sprintf
+         "%s assets deleted from the runtime directory (not in the embedded \
+          manifest): %s%s"
+         label
+         shown
+         more)
+;;

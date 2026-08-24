@@ -22,7 +22,7 @@ let json_string (schema : Masc_domain.tool_schema) =
 
 let check_loads ~name ~contents (expected : Masc_domain.tool_schema) =
   match Tool_definition_toml.load ~name ~contents with
-  | Ok { Tool_definition_toml.schema; keeper_projection } ->
+  | Ok { Tool_definition_toml.schema; keeper_projection; help = _ } ->
     check string "schema JSON" (json_string expected) (json_string schema);
     check bool "no keeper projection" true (Option.is_none keeper_projection)
   | Error message -> failf "expected a schema, got error: %s" message
@@ -810,11 +810,70 @@ let test_a_string_default_is_accepted () =
     (member (property schema [ "scope" ]) "default" = Some (`String "hot"))
 ;;
 
+let minimal_tool_with_help =
+  {|name = "probe"
+description = "Probe tool."
+
+[help]
+short_description = "Probe in one line."
+when_to_use = "Use in tests."
+key_constraints = ["One constraint."]
+details_markdown = "Longer probe guidance."
+doc_refs = ["docs/KEEPER-USER-MANUAL.md"]
+examples = ["probe()"]
+alternatives = ["masc_tool_help"]
+|}
+;;
+
+let test_help_table_round_trips () =
+  match Tool_definition_toml.load ~name:"probe" ~contents:minimal_tool_with_help with
+  | Error message -> failf "expected help to load, got error: %s" message
+  | Ok { Tool_definition_toml.help = None; _ } ->
+    fail "expected an authored help table, got none"
+  | Ok { Tool_definition_toml.help = Some help; _ } ->
+    check (option string) "short" (Some "Probe in one line.")
+      help.Tool_definition_toml.short_description;
+    check (option string) "when" (Some "Use in tests.")
+      help.Tool_definition_toml.when_to_use;
+    check (list string) "constraints" [ "One constraint." ]
+      help.Tool_definition_toml.key_constraints;
+    check (option string) "details" (Some "Longer probe guidance.")
+      help.Tool_definition_toml.details_markdown;
+    check (list string) "doc refs" [ "docs/KEEPER-USER-MANUAL.md" ]
+      help.Tool_definition_toml.doc_refs;
+    check (list string) "prompt hints stay empty when absent" []
+      help.Tool_definition_toml.prompt_hints;
+    check (list string) "examples" [ "probe()" ]
+      help.Tool_definition_toml.examples;
+    check (list string) "alternatives" [ "masc_tool_help" ]
+      help.Tool_definition_toml.alternatives
+;;
+
+let test_help_table_is_fail_closed () =
+  let unknown_key =
+    "name = \"probe\"\ndescription = \"Probe tool.\"\n\n[help]\nsummary = \"wrong key\"\n"
+  in
+  (match Tool_definition_toml.load ~name:"probe" ~contents:unknown_key with
+   | Ok _ -> fail "unknown help key was accepted"
+   | Error message ->
+     check bool "error names the help key" true
+       (contains ~needle:"help.summary" message));
+  let empty_help = "name = \"probe\"\ndescription = \"Probe tool.\"\n\n[help]\n" in
+  match Tool_definition_toml.load ~name:"probe" ~contents:empty_help with
+  | Ok _ -> fail "an empty help table was accepted"
+  | Error message ->
+    check bool "error says the table declares nothing" true
+      (contains ~needle:"declares nothing" message)
+;;
+
 let () =
   run "tool_definition_toml"
     [ ( "load"
       , [ test_case "full-feature TOML round-trips byte-identically" `Quick
             test_full_feature_round_trip
+        ; test_case "help table round-trips" `Quick test_help_table_round_trips
+        ; test_case "help decode is fail-closed" `Quick
+            test_help_table_is_fail_closed
         ; test_case "no params yields empty properties" `Quick
             test_no_params_yields_empty_properties
         ; test_case "published JSON preserves the author's key order" `Quick

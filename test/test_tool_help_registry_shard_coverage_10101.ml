@@ -120,6 +120,28 @@ let () =
             "every shard tool is in Config.raw_all_tool_schemas"
             `Quick test_every_shard_tool_is_in_authoritative_registry;
         ] );
+      ( "toml_help",
+        [
+          Alcotest.test_case "authored [help] table reaches the entry" `Quick
+            (fun () ->
+              match
+                Registry.find_entry Config.raw_all_tool_schemas "keeper_task_done"
+              with
+              | None -> Alcotest.fail "keeper_task_done schema missing"
+              | Some entry ->
+                Alcotest.(check string)
+                  "short_description comes from the TOML help table"
+                  "Submit your owned task for verification with a result \
+                   summary and evidence_refs."
+                  entry.Registry.short_description;
+                Alcotest.(check int)
+                  "authored constraints survive with their exact count" 3
+                  (List.length
+                     entry.Registry.key_constraints);
+                Alcotest.(check (list string))
+                  "authored alternatives survive" [ "masc_transition" ]
+                  entry.Registry.alternatives);
+        ] );
       ( "named_cases",
         [
           Alcotest.test_case "keeper_task_claim (issue's direct case)"

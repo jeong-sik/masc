@@ -412,6 +412,33 @@ always lands somewhere visible and addressed to the keeper the row named. With
 no keeper to send to, the paste is refused out loud in Recent Events rather
 than dropped.
 
+A paste longer than 50 lines, or larger than 8 KiB, is not put into the draft.
+The composer is five rows; a four-hundred-line paste in it is a draft nobody
+can read, and a draft nobody can read is a message nobody can check before
+sending. One line stands in its place:
+
+```
+   > [pasted 400 line(s), 3489 bytes → pasted-20260825-0211-01a034c1.txt]
+```
+
+When the message is sent, the text is written into the Keeper's own directory
+and the placeholder becomes a line naming that file. A Keeper reads paths
+relative to its sandbox root and refuses anything outside it - `/tmp` comes
+back as `path_outside_sandbox` - so the file goes into the root
+`Keeper_sandbox_config` reports for that Keeper's profile
+(`.masc/playground/<name>/`, or `.masc/playground/docker/<name>/` for a Docker
+Keeper) and the message names it bare.
+
+A Keeper that has never run has no directory, and one is not created for it -
+that would be this surface deciding something about the Keeper's own space.
+Nor is a failed write hidden: both cases put the pasted text into the message
+instead and say so in Recent Events. A paste that arrives as a large message
+is worse than one read off disk; a paste that arrives as neither is the thing
+this must not do.
+
+`Ctrl-U` drops both. Switching Keepers puts the text back into the draft
+first, so a saved draft never holds a placeholder whose text has gone.
+
 Line breaks arrive as CR, LF, or CRLF depending on the terminal and on what
 was copied; all three become one LF in the draft. Everything else that is not
 printable becomes a space - a paste is the one way a terminal escape sequence
@@ -420,6 +447,24 @@ could reach a message, since typed keys are filtered one scalar at a time.
 A paste over 1 MiB keeps the first 1 MiB. The rest is read - the end marker
 has to be consumed, or the tail of the paste arrives as keystrokes - and
 counted, and Recent Events says how many bytes are not in the draft.
+
+#### Looking at an image
+
+`/image <path>` draws an image file on the terminal, if the terminal can hold
+one. The picture takes the whole screen, with the path above it, and the next
+key press takes it away and repaints the frame - that key does nothing else,
+so dismissing a screenshot cannot also move a cursor.
+
+Whether the terminal draws pictures is asked once, before the first frame,
+with the Kitty graphics protocol's own capability query. Terminals that
+implement it (Ghostty, Kitty, WezTerm) answer; terminals that do not say
+nothing, and `/image` then refuses in words instead of writing base64 onto the
+screen. Inside tmux the escapes are wrapped for passthrough, which also needs
+`allow-passthrough on` in the tmux config - that is the operator's setting and
+the TUI cannot check it.
+
+A path that cannot be read, or a file that is empty, is refused as a line in
+the pane. Nothing takes the screen to report a failure.
 
 #### Lines typed during a turn
 

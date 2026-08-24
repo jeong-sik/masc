@@ -1308,19 +1308,20 @@ let send_operator_text ?keeper_name state ~mailbox text =
   | Masc_tui_command.Switch_keeper_missing_name ->
       notice ~role:Message_error "/keeper needs a name on the same line"
   | Masc_tui_command.Switch_keeper name -> (
-      match
-        List.find_opt
-          (fun (keeper : keeper) -> String.equal keeper.k_name name)
-          state.keepers
-      with
-      | Some keeper ->
+      let names =
+        List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+      in
+      match Masc_tui_command.resolve_keeper_name ~names name with
+      | Masc_tui_command.Keeper_found keeper_name ->
           Buffer.clear state.msg_input;
-          open_message_for_keeper ~return_to:state.msg_return state
-            keeper.k_name;
-          launch_keeper_history_load state ~mailbox
-            ~keeper_name:keeper.k_name;
+          open_message_for_keeper ~return_to:state.msg_return state keeper_name;
+          launch_keeper_history_load state ~mailbox ~keeper_name;
           state.view <- Keepers Keeper_message
-      | None ->
+      | Masc_tui_command.Keeper_ambiguous candidates ->
+          notice ~role:Message_error
+            (Printf.sprintf "%S names more than one keeper: %s" name
+               (String.concat ", " candidates))
+      | Masc_tui_command.Keeper_unknown ->
           notice ~role:Message_error
             (Printf.sprintf "no keeper named %S on the roster" name))
   | Masc_tui_command.Interrupt_turn -> (

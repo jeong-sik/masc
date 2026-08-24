@@ -475,7 +475,7 @@ type async_msg =
   | Keeper_chat_history_loaded of
       int * string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
-      string * float * (Keeper_chat_history.page, string) result
+      int * string * float * (Keeper_chat_history.page, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
@@ -792,6 +792,7 @@ let launch_verification_load state ~mailbox =
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = Env_config_core.masc_host () in
   let port = state.port in
+  let generation = state.msg_history_load_generation in
   state.msg_older_loading <- true;
   let run () =
     let result =
@@ -802,7 +803,8 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_chat_older_loaded (keeper_name, before, result))
+    enqueue_async mailbox
+      (Keeper_chat_older_loaded (generation, keeper_name, before, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -812,12 +814,13 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_older_loaded
-           (keeper_name, before, Error "Eio switch is unavailable"))
+           (generation, keeper_name, before, Error "Eio switch is unavailable"))
 
 let launch_keeper_history_load state ~mailbox ~keeper_name =
   let host = Env_config_core.masc_host () in
   let port = state.port in
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
+  state.msg_older_loading <- false;
   let generation = state.msg_history_load_generation in
   let run () =
     let result =
@@ -2663,18 +2666,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_error <- Some detail)
-  | Keeper_chat_older_loaded (keeper_name, before, result) ->
-      state.msg_older_loading <- false;
+  | Keeper_chat_older_loaded (generation, keeper_name, before, result) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
          above a transcript they do not belong to. *)
       let still_current =
-        (match state.msg_loaded_keeper with
-         | Some loaded -> String.equal loaded keeper_name
-         | None -> false)
+        generation = state.msg_history_load_generation
+        && (match state.msg_loaded_keeper with
+            | Some loaded -> String.equal loaded keeper_name
+            | None -> false)
         && state.msg_older_cursor = Some before
       in
       if still_current then (
+        state.msg_older_loading <- false;
         match result with
         | Ok page ->
             let rows =

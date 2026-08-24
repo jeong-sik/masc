@@ -358,7 +358,7 @@ type tool_call = { call_id; tool_name; args : string; subject; ended; result_rea
 | 단계 | 무엇 | 왜 이 순서 | 크기 |
 |---|---|---|---|
 | 0 | **region 수집이 끊긴 것을 이슈로** (§3.1a) + `line_start:1`·`turn:0` (§3.1) | 지금 이 데이터를 믿고 뭘 만들면 이틀 된 거짓 위에 짓는 것 | 이슈 1~2건 |
-| 1 | **`GET /api/v1/keepers/{id}/changes`** — tool_calls 를 타입 붙은 변경 목록으로 투영 (파일, 키퍼, 턴, task, old/new) | 정확하고 살아 있는 유일한 출처. curl 로 검증되니 TUI 없이 먼저 끝낼 수 있다 | 중간 |
+| 1 | ~~**`GET /api/v1/keepers/{name}/file-changes`**~~ **완료** — tool_calls 를 타입 붙은 변경 목록으로 투영 (파일, 키퍼, 턴, task, old/new) | 정확하고 살아 있는 유일한 출처 | 완료 |
 | 2 | **`--remote` 로 vim 열기** — 1 의 목록에서 파일:줄 을 눌러 nvim 점프 | 1 이 있으면 문자열 파싱이 필요 없다. 서버 변경 0 | 작음 |
 | 3 | **Kitty 키보드 프로토콜 + truecolor** | 이후 전부가 여기 막힌다. 독립적으로도 이득 (조합키가 열린다) | 중간 |
 | 4 | **프레임을 조각(span) 모델로** | diff 를 그리려면 필요. 1 없이 하면 목적 없는 리팩터가 된다 | 큼 |
@@ -376,7 +376,7 @@ type tool_call = { call_id; tool_name; args : string; subject; ended; result_rea
 정직하게 남긴다.
 
 1. **`turn:0` 의 원인.** region tracker 가 turn 을 못 받는 건지, 호출하는 쪽이 0 을 넘기는 건지 안 봤다.
-2. **tool_calls 의 보관 기간.** `~/.masc/tool_calls/2026-08/` 에 일자별 파일이 있는데 얼마나 오래 남는지, blob GC 가 `old_string` 을 언제 날리는지 안 봤다. diff 를 여기서 만든다면 "언제까지 볼 수 있나"가 계약이 된다.
+2. ~~**tool_calls 의 보관 기간.**~~ **답 나옴** — 기본 30일 (`MASC_TOOL_CALL_LOG_RETENTION_DAYS`, `Keeper_tool_call_log.init`). 별개로 더 센 제약이 하나 나왔다: 인자 직렬화가 4,000바이트(`max_output_len`)를 넘으면 `input` 전체가 미리보기 문자열로 눌려서 **텍스트가 아예 안 남는다**. 하루 8~13건, 파일 변경의 약 5%다. 큰 변경일수록 걸리므로 화면에 "N건은 너무 커서 못 보여줌"을 같이 그려야 한다 (`over_budget`).
 3. **원격 TUI.** TUI 는 `localhost:8935` 에도 붙고 `masc.crying.pictures` 터널에도 붙는다. 로컬 파일을 바로 읽는 지름길을 쓰면 원격에서 깨진다. 3번 단계를 HTTP 라우트로 하자는 이유가 이것이다.
 4. **웹 대시보드의 IDE 화면이 실제로 돌고 있는지.** 파일은 있는데 (`dashboard/src/components/ide/`) 사람이 쓰고 있는지는 확인 안 했다. 안 쓰는 화면이면 TUI 와 계약을 맞출 필요가 없고, 쓰는 화면이면 맞춰야 한다.
 5. **다른 언어 렉서를 늘릴지.** TypeScript 가 없으면 키즈노트 쪽 코드는 색이 안 붙는다. 손으로 렉서를 더 쓸지, 아니면 아예 안 칠할지는 결정이 필요하다.

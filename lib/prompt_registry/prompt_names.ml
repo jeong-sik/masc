@@ -38,4 +38,6 @@ let keeper_observation_current_task_absent_in_recovery =
 let keeper_observation_current_task_unobservable =
   "keeper.observation.current_task_unobservable"
 ;;
+
+let keeper_current_task_skills = "keeper.current_task.skills"
 let librarian = "librarian"

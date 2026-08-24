@@ -17,3 +17,24 @@ export const THEME_STORAGE_KEYS = ['dashboardTheme', 'masc-theme-v2'] as const
 export const THEME_SEARCH_PARAM = 'theme'
 
 export type ThemeId = 'styleseed' | 'paper' | null
+
+/**
+ * The opt-in themes, as values a CSS selector can match.
+ *
+ * Default/dark token sources load after these, so each one guards itself with
+ * a `:not([data-theme=...])` for every opt-in theme. Adding a theme means
+ * adding that exclusion everywhere; missing one silently reintroduces the
+ * override for that theme, and the assertions were literal selector strings,
+ * so a missed CSS site was a missed test site too (#21860).
+ *
+ * The list is here so a test can check every guard against it rather than
+ * against a string somebody remembered to update.
+ */
+export const OPT_IN_THEMES = ['paper', 'styleseed'] as const
+
+export type OptInTheme = (typeof OPT_IN_THEMES)[number]
+
+/** The `:not(...)` chain a default-token selector needs to yield to every
+ *  opt-in theme, in the order the stylesheets write it. */
+export const themeExclusionSuffix = (): string =>
+  OPT_IN_THEMES.map((theme) => `:not([data-theme="${theme}"])`).join('')

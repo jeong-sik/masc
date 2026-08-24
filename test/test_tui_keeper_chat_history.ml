@@ -1,6 +1,7 @@
 open Alcotest
 
 module History = Masc_tui_keeper_chat_history
+module Transcript = Masc_tui_keeper_chat_transcript
 
 let addressed ?(ts = 1.0) ?speaker_name ?surface content =
   `Assoc
@@ -15,7 +16,8 @@ let addressed ?(ts = 1.0) ?speaker_name ?surface content =
      @ (match surface with None -> [] | Some json -> [ "surface", json ]))
 ;;
 
-let row ?(ts = 1.0) ~role ?kind ?tool_call_name ?delivery_key content =
+let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?tool_call_name ?delivery_key
+    content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String role
@@ -24,6 +26,9 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_name ?delivery_key content =
      ]
      @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
      @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
+     @ (match tool_call_id with
+        | None -> []
+        | Some id -> [ "tool_call_id", `String id ])
      @ (match tool_call_name with
         | None -> []
         | Some name -> [ "tool_call_name", `String name ]))
@@ -36,13 +41,15 @@ let origin_request_id = function
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Tool_calls _ | History.Reasoning _ -> None
 
+let full_tool_rows = History.tool_rows
+
 let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
       Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
   | History.Said_by_keeper -> "keeper"
   | History.Delivery_failed _ -> "delivery_failed"
-  | History.Tool_calls rows ->
-      Printf.sprintf "tools[%s]" (String.concat " | " rows)
+  | History.Tool_calls block ->
+      Printf.sprintf "tools[%s]" (String.concat " | " (full_tool_rows block))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
 
@@ -75,9 +82,12 @@ let think_withheld =
 
 let reason text = `Assoc [ "kind", `String "reason"; "text", `String text ]
 
-let tool ?status ?dur name =
+let tool ?call_id ?status ?dur name =
   `Assoc
     ([ "kind", `String "tool"; "name", `String name ]
+     @ (match call_id with
+        | None -> []
+        | Some id -> [ "tool_call_id", `String id ])
      @ (match status with None -> [] | Some s -> [ "status", `String s ])
      @ (match dur with None -> [] | Some d -> [ "dur", `String d ]))
 
@@ -198,7 +208,8 @@ let test_consecutive_tool_rows_become_one_block () =
       check string "the keeper's line is last" "keeper"
         (kind_to_string keeper.History.kind);
       (match tools.History.kind with
-       | History.Tool_calls rows ->
+       | History.Tool_calls block ->
+           let rows = full_tool_rows block in
            check int "both calls are in one block" 2 (List.length rows);
            check bool "each row names the file it acted on" true
              (List.exists
@@ -214,6 +225,39 @@ let test_consecutive_tool_rows_become_one_block () =
       check (float 0.0) "the block is keyed to its first call" 2.0
         tools.History.at
   | rows -> failf "expected three rows, got %d" (List.length rows)
+
+let test_history_keeps_producer_tool_call_identity () =
+  let args_a = "{\"file_path\":\"lib/a.ml\"}" in
+  let args_b = "{\"file_path\":\"lib/b.ml\"}" in
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:2.0 ~role:"tool" ~tool_call_id:"c1"
+             ~tool_call_name:"read_file" args_a
+         ; row ~ts:3.0 ~role:"tool" ~tool_call_id:"c2"
+             ~tool_call_name:"edit_file" args_b
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Tool_calls block; _ } ] ->
+      let activities = block.activities in
+      check (list (option string)) "producer identities stay in source order"
+        [ Some "c1"; Some "c2" ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) -> activity.call_id)
+           activities);
+      check (list string) "the same subject authority names both calls"
+        [ "lib/a.ml"; "lib/b.ml" ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) ->
+             Option.value ~default:"" activity.subject)
+           activities);
+      check (list (option string)) "direct rows do not invent durations"
+        [ None; None ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) -> activity.duration)
+           activities)
+  | rows -> failf "expected one history tool block, got %d rows" (List.length rows)
 
 let test_tool_blocks_separated_by_speech_stay_separate () =
   let decoded =
@@ -241,10 +285,13 @@ let test_an_autonomous_turn_draws_what_it_did () =
       (`List
          [ autonomous_turn ~ts:5.0
              [ think_withheld
-             ; tool ~status:"ok" ~dur:"32ms" "masc_task_history"
+             ; tool ~call_id:"trace-1" ~status:"ok" ~dur:"32ms"
+                 "masc_task_history"
              ; think_withheld
-             ; tool ~status:"err" ~dur:"1200ms" "tool_execute"
-             ; tool ~status:"pending" "keeper_task_claim"
+             ; tool ~call_id:"trace-2" ~status:"err" ~dur:"1200ms"
+                 "tool_execute"
+             ; tool ~call_id:"trace-3" ~status:"pending"
+                 "keeper_task_claim"
              ; tool "read_file"
              ]
          ])
@@ -256,8 +303,20 @@ let test_an_autonomous_turn_draws_what_it_did () =
         "thinking[(2 reasoning steps, content withheld)]"
         (kind_to_string thinking.History.kind);
       (match tools.History.kind with
-       | History.Tool_calls rows ->
+       | History.Tool_calls block ->
+           let rows = full_tool_rows block in
            check int "every tool step is a row" 4 (List.length rows);
+           let activities = block.activities in
+           check (list (option string)) "trace identities stay typed"
+             [ Some "trace-1"; Some "trace-2"; Some "trace-3"; None ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) -> activity.call_id)
+                activities);
+           check (list (option string)) "trace durations are not inferred"
+             [ Some "32ms"; Some "1200ms"; None; None ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) -> activity.duration)
+                activities);
            let starts_with prefix row =
              String.length row >= String.length prefix
              && String.equal (String.sub row 0 (String.length prefix)) prefix
@@ -307,7 +366,8 @@ let test_steps_the_server_dropped_are_counted () =
     decode (`List [ autonomous_turn ~omitted:3 [ tool ~status:"ok" "read_file" ] ])
   in
   match decoded.History.rows with
-  | [ { History.kind = History.Tool_calls rows; _ } ] ->
+  | [ { History.kind = History.Tool_calls block; _ } ] ->
+      let rows = full_tool_rows block in
       check string "the count closes the block"
         "(3 steps not carried by the transcript)"
         (List.nth rows (List.length rows - 1))
@@ -461,7 +521,8 @@ let test_tool_rows_fold_in_a_page_as_they_do_in_the_transcript () =
          ])
   in
   match p.History.decoded.History.rows with
-  | [ { History.kind = History.Tool_calls rows; _ } ] ->
+  | [ { History.kind = History.Tool_calls block; _ } ] ->
+      let rows = full_tool_rows block in
       check int "consecutive calls are one block here too" 2
         (List.length rows)
   | rows -> failf "expected one folded block, got %d rows" (List.length rows)
@@ -487,6 +548,8 @@ let () =
             test_an_addressed_row_is_labelled_by_who_sent_it
         ; test_case "consecutive tool rows become one block" `Quick
             test_consecutive_tool_rows_become_one_block
+        ; test_case "history keeps producer tool-call identity" `Quick
+            test_history_keeps_producer_tool_call_identity
         ; test_case "speech splits tool blocks" `Quick
             test_tool_blocks_separated_by_speech_stay_separate
         ; test_case "the server's order is kept" `Quick test_server_order_is_kept

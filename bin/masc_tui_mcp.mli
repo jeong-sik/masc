@@ -33,3 +33,17 @@ val task_id_of_add_task : string -> (string, string) result
 (** The id of the task [masc_add_task] created, read from its text answer,
     which is a JSON object carrying [task_id]. [Error] for any other
     shape, with the text the tool did return. *)
+
+val resources_list_request_body : request_id:string -> string
+(** The [resources/list] request. *)
+
+val resources_read_request_body : request_id:string -> uri:string -> string
+(** The [resources/read] request for one resource. *)
+
+val resources_of_body :
+  request_id:string -> string -> ((string * string) list, string) result
+(** Read a [resources/list] answer into [(uri, name)] rows, in server order. *)
+
+val resource_text_of_body :
+  request_id:string -> string -> (string, string) result
+(** Read a [resources/read] answer's concatenated text contents. *)

@@ -5,7 +5,6 @@
 // boot, so keep validation direct and limited to the boundary guarantees the
 // handlers rely on.
 
-import { AGENT_CORE_EVENT_PREFIX } from '../config/constants'
 import type {
   Attribution,
   AttributionOutcome,
@@ -16,6 +15,7 @@ import type {
 import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from '../lib/keeper-chat-stream-contract'
 import type { KeeperChatCustomEventName } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
+import { isAgentCoreEventType } from '../lib/sse-event-type'
 
 type SchemaIssue = { path?: string; message: string }
 type SafeParseSuccess<T> = { success: true; data: T }
@@ -662,7 +662,7 @@ function isIgnorableMcpNotification(value: unknown): boolean {
 
 function isSSEEventType(value: unknown): value is SSEEventType {
   return typeof value === 'string' && (
-    FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith(AGENT_CORE_EVENT_PREFIX)
+    FIXED_SSE_EVENT_TYPES.has(value) || isAgentCoreEventType(value)
   )
 }
 
@@ -801,7 +801,7 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   if (
     value.payload != null
     && !isRecord(value.payload)
-    && !value.type.startsWith(AGENT_CORE_EVENT_PREFIX)
+    && !isAgentCoreEventType(value.type)
   ) {
     return fail('payload', 'Expected payload object')
   }

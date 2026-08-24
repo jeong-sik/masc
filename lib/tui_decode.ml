@@ -2942,8 +2942,8 @@ let parse_keeper_chat_response response =
                 | None -> Error "response JSON missing result"))
 
 type transport_health = {
-  th_primary_path : string;
-  th_queue_pressure : string;
+  th_primary_path : Transport_metrics.primary_path_kind;
+  th_queue_pressure : Transport_metrics.queue_pressure_kind;
   th_sse_sessions : int;
   th_websocket_sessions : int option;
   th_grpc_port : int option;
@@ -2962,8 +2962,23 @@ let require_object json key =
 let decode_transport_health json =
   let ( let* ) = Result.bind in
   let* summary = require_object json "summary" in
-  let* th_primary_path = require_string_field summary "primary_path" in
-  let* th_queue_pressure = require_string_field summary "queue_pressure" in
+  (* Parsed into the producer's own type rather than carried as text. A
+     spelling this build does not know is a decode failure here, where the
+     surface can say so, instead of a word the TUI prints as if it were a
+     transport path (#27652). *)
+  let* th_primary_path =
+    let* raw = require_string_field summary "primary_path" in
+    match Transport_metrics.primary_path_kind_of_string raw with
+    | Some kind -> Ok kind
+    | None -> Error (Printf.sprintf "summary.primary_path: unknown value %S" raw)
+  in
+  let* th_queue_pressure =
+    let* raw = require_string_field summary "queue_pressure" in
+    match Transport_metrics.queue_pressure_kind_of_string raw with
+    | Some kind -> Ok kind
+    | None ->
+      Error (Printf.sprintf "summary.queue_pressure: unknown value %S" raw)
+  in
   let* sse = require_object json "sse" in
   let* th_sse_sessions = require_int_field sse "sessions_total" in
   let* websocket = require_object json "websocket" in

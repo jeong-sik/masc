@@ -21,8 +21,7 @@ val plan_execute_input_schema : Yojson.Safe.t
 val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
 val make_tools
-  :  ?catalog:Keeper_tool_composition_catalog.t
-  -> ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
+  :  ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
        (** Composition entries declared by skills
            ({!Keeper_skill_catalog.composition_entries}). Same validated type
            as catalog entries; materialized by the same closure. The caller

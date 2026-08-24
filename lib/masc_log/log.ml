@@ -178,10 +178,11 @@ let timestamp_iso () = Time_codec.rfc3339_of_unix (Time_compat.now ())
     single site.  Exposed for unit tests that need to verify the
     KST/UTC boundary case (KST midnight = UTC 15:00) without
     depending on the host clock. *)
-let format_utc_date_of (t : float) =
-  let tm = Unix.gmtime t in
-  Printf.sprintf "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+(* The ring's date files sit in the same YYYY-MM/DD.jsonl layout every other
+   .masc store uses, and [Jsonl_writer.dated_path] is what puts them there.
+   Rebuilding the key here meant the reader could drift from the writer that
+   named the file; [day_key] is the writer's own key (#27143). *)
+let format_utc_date_of (t : float) = Jsonl_writer.day_key ~ts:t
 
 (** In-memory ring buffer for dashboard log viewer.
     Fixed capacity, oldest entries evicted on overflow.

@@ -20,7 +20,7 @@ import type {
   PreCompactEvent,
   HandoffEvent,
 } from './harness-health-state'
-import { verdictWithoutRejectPrefix, verdictToneClass, railStatusMessage } from '../lib/keeper-classifiers'
+import { verdictSummaryText, verdictToneClass, railStatusMessage } from '../lib/keeper-classifiers'
 
 function ItemTitle({ children, class: cx }: { children: unknown; class?: string }) {
   return html`<div class=${`text-sm font-medium text-[var(--color-fg-secondary)] ${cx ?? ''}`}>${children}</div>
@@ -176,7 +176,7 @@ export function verdictTone(verdict: string): string {
 }
 
 export function verdictSummary(verdict: string): string {
-  return verdictWithoutRejectPrefix(verdict)
+  return verdictSummaryText(verdict)
 }
 
 export function heroTitle(data: HarnessHealthData): string {

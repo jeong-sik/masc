@@ -872,6 +872,9 @@ let run_try_provider
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
+            (* Read per turn rather than captured at boot so the ceiling can be
+               tuned through the runtime-params API without a restart. *)
+          ; max_tool_rounds = Keeper_config.keeper_max_tool_rounds ()
           }
   in
   let local_agent_ref : Agent_core.Agent.t option ref = ref None in

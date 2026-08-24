@@ -8,4 +8,15 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
- (libraries unix threads.posix yojson time_compat masc.time_codec eio fs_compat masc_secret_patterns))
+ (libraries
+  unix
+  threads.posix
+  yojson
+  time_compat
+  masc.time_codec
+  ; Jsonl_writer.day_key: the ring's date files are named by the same writer
+  ; that names every other .masc dated store (#27143).
+  masc.jsonl_writer
+  eio
+  fs_compat
+  masc_secret_patterns))

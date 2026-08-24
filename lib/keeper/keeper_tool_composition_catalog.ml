@@ -63,6 +63,23 @@ type error =
       { path : string list
       ; field : string
       }
+  | Invalid_param_type of
+      { path : string list
+      ; type_name : string
+      }
+  | Duplicate_param_name of
+      { name : string
+      ; param : string
+      }
+  | Unknown_param_reference of
+      { name : string
+      ; param : string
+      }
+  | Unused_param of
+      { name : string
+      ; param : string
+      }
+  | Async_composition_with_params of { name : string }
   | Plan_rejected of
       { name : string
       ; error : Plan.error
@@ -72,10 +89,23 @@ type execution_mode =
   | Inline
   | Async
 
+type param_type =
+  | String_param
+  | Integer_param
+  | Number_param
+  | Boolean_param
+
+type param =
+  { param_name : string
+  ; param_type : param_type
+  ; param_description : string
+  }
+
 type entry =
   { name : string
   ; description : string option
   ; execution : execution_mode
+  ; params : param list
   ; plan : Plan.t
   }
 
@@ -102,19 +132,11 @@ let tool_kind (entry : entry) =
 let status_tool_kind = Keeper_tool_descriptor.Async_composition_tool
 let cancel_tool_kind = Keeper_tool_descriptor.Async_composition_tool
 
-let path ~config_root = Filename.concat config_root "tool-compositions.toml"
 
 let entries catalog = catalog
 
 let find catalog name =
   List.find_opt (fun entry -> String.equal entry.name name) catalog
-;;
-
-let model_tool_names catalog =
-  let entry_names = List.map tool_name catalog in
-  if List.exists (fun entry -> entry.execution = Async) catalog
-  then entry_names @ [ status_tool_name; cancel_tool_name ]
-  else entry_names
 ;;
 
 let first_duplicate fields =
@@ -235,9 +257,18 @@ let rec parse_template ~path value =
      | Error _ as error -> error
      | Ok "literal" -> parse_literal_template ~path fields
      | Ok "output" -> parse_output_template ~path fields
+     | Ok "param" -> parse_param_template ~path fields
      | Ok "object" -> parse_object_template ~path fields
      | Ok "array" -> parse_array_template ~path fields
      | Ok kind -> Error (Invalid_template_kind { path; kind }))
+
+and parse_param_template ~path fields =
+  match validate_fields ~path ~allowed:[ "kind"; "name" ] fields with
+  | Error _ as error -> error
+  | Ok () ->
+    (match required_nonempty_string ~path "name" fields with
+     | Error _ as error -> error
+     | Ok name -> Ok (Plan.Json_template.param ~name))
 
 and parse_literal_template ~path fields =
   match validate_fields ~path ~allowed:[ "kind"; "value" ] fields with
@@ -326,6 +357,92 @@ and parse_array_template ~path fields =
           parse_items 0 [] raw_items))
 ;;
 
+let parse_params ~path fields =
+  match List.assoc_opt "params" fields with
+  | None -> Ok []
+  | Some raw ->
+    (match table_array ~path ~field:"params" raw with
+     | Error _ as error -> error
+     | Ok raw_params ->
+       let rec parse_all index parsed = function
+         | [] -> Ok (List.rev parsed)
+         | raw_param :: rest ->
+           let param_path = path @ [ "params"; string_of_int index ] in
+           (match table_fields ~path:param_path ~field:"param" raw_param with
+            | Error _ as error -> error
+            | Ok param_fields ->
+              (match
+                 validate_fields
+                   ~path:param_path
+                   ~allowed:[ "name"; "type"; "description" ]
+                   param_fields
+               with
+               | Error _ as error -> error
+               | Ok () ->
+                 (match
+                    required_nonempty_string ~path:param_path "name" param_fields
+                  with
+                  | Error _ as error -> error
+                  | Ok param_name ->
+                    (match required_string ~path:param_path "type" param_fields with
+                     | Error _ as error -> error
+                     | Ok raw_type ->
+                       (match
+                          (match raw_type with
+                           | "string" -> Ok String_param
+                           | "integer" -> Ok Integer_param
+                           | "number" -> Ok Number_param
+                           | "boolean" -> Ok Boolean_param
+                           | type_name ->
+                             Error
+                               (Invalid_param_type { path = param_path; type_name }))
+                        with
+                        | Error _ as error -> error
+                        | Ok param_type ->
+                          (match
+                             required_nonempty_string
+                               ~path:param_path
+                               "description"
+                               param_fields
+                           with
+                           | Error _ as error -> error
+                           | Ok param_description ->
+                             parse_all
+                               (index + 1)
+                               ({ param_name; param_type; param_description }
+                                :: parsed)
+                               rest))))))
+       in
+       parse_all 0 [] raw_params)
+;;
+
+(* Declared and referenced parameter sets must agree exactly: a reference to
+   an undeclared name would fail only at invocation, and a declared name no
+   template reads is config without a consumer. *)
+let validate_declared_params ~name ~params plan =
+  let declared = List.map (fun param -> param.param_name) params in
+  let rec first_duplicate seen = function
+    | [] -> None
+    | value :: rest ->
+      if List.mem value seen then Some value else first_duplicate (value :: seen) rest
+  in
+  match first_duplicate [] declared with
+  | Some param -> Error (Duplicate_param_name { name; param })
+  | None ->
+    let used =
+      Plan.nodes plan
+      |> List.concat_map (fun (node : Plan.node) ->
+        Plan.Json_template.param_names node.input)
+      |> List.sort_uniq String.compare
+    in
+    (match List.find_opt (fun param -> not (List.mem param declared)) used with
+     | Some param -> Error (Unknown_param_reference { name; param })
+     | None ->
+       (match List.find_opt (fun param -> not (List.mem param used)) declared with
+        | Some param -> Error (Unused_param { name; param })
+        | None -> Ok ()))
+;;
+
 let parse_node ~path value =
   match table_fields ~path ~field:"node" value with
   | Error _ as error -> error
@@ -375,7 +492,7 @@ let parse_composition ~index value =
     (match
        validate_fields
          ~path
-         ~allowed:[ "name"; "description"; "execution"; "nodes" ]
+         ~allowed:[ "name"; "description"; "execution"; "params"; "nodes" ]
          fields
      with
      | Error _ as error -> error
@@ -411,6 +528,9 @@ let parse_composition ~index value =
                 |> (function
                  | Error _ as error -> error
                  | Ok execution ->
+             (match parse_params ~path fields with
+              | Error _ as error -> error
+              | Ok params ->
              (match required_field ~path "nodes" fields with
               | Error _ as error -> error
               | Ok raw_nodes ->
@@ -434,9 +554,17 @@ let parse_composition ~index value =
                        with
                        | Error error -> Error (Plan_rejected { name; error })
                        | Ok plan ->
+                         (match validate_declared_params ~name ~params plan with
+                          | Error _ as error -> error
+                          | Ok () ->
                          (match execution with
-                          | Inline -> Ok { name; description; execution; plan }
+                          | Inline ->
+                            Ok { name; description; execution; params; plan }
                           | Async ->
+                            (match params with
+                             | _ :: _ ->
+                               Error (Async_composition_with_params { name })
+                             | [] ->
                             (match
                                Plan.nodes plan
                                |> List.find_map (fun (node : Plan.node) ->
@@ -448,14 +576,15 @@ let parse_composition ~index value =
                                    None
                                  | Some _ | None -> Some node)
                              with
-                             | None -> Ok { name; description; execution; plan }
+                             | None ->
+                               Ok { name; description; execution; params; plan }
                              | Some node ->
                                Error
                                  (Async_tool_not_statically_read_only
                                     { name
                                     ; node_id = node.id
                                     ; tool_name = node.tool_name
-                                    })))))))))))))
+                                    }))))))))))))))))
 ;;
 
 let parse content =
@@ -528,6 +657,105 @@ let error_to_string = function
       "duplicate template object field %S at %s"
       field
       (String.concat "." path)
+  | Invalid_param_type { path; type_name } ->
+    Printf.sprintf
+      "invalid param type %S at %s (expected string, integer, number, or boolean)"
+      type_name
+      (String.concat "." path)
+  | Duplicate_param_name { name; param } ->
+    Printf.sprintf "composition %S declares param %S twice" name param
+  | Unknown_param_reference { name; param } ->
+    Printf.sprintf
+      "composition %S references param %S that its params list does not declare"
+      name
+      param
+  | Unused_param { name; param } ->
+    Printf.sprintf
+      "composition %S declares param %S that no node input references"
+      name
+      param
+  | Async_composition_with_params { name } ->
+    Printf.sprintf
+      "async composition %S cannot declare params: the durable broker does not \
+       carry invocation input"
+      name
   | Plan_rejected { name; error } ->
     Printf.sprintf "composition %S rejected: %s" name (Keeper_tool_plan.error_to_string error)
+;;
+
+let param_type_to_string = function
+  | String_param -> "string"
+  | Integer_param -> "integer"
+  | Number_param -> "number"
+  | Boolean_param -> "boolean"
+;;
+
+let input_schema_of_params = function
+  | [] ->
+    (* Mirrors the surface's zero-param schema: no ["required"] key, because
+       an empty one says nothing an absent one does not. *)
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc []
+      ; "additionalProperties", `Bool false
+      ]
+  | params ->
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            (List.map
+               (fun param ->
+                  ( param.param_name
+                  , `Assoc
+                      [ "type", `String (param_type_to_string param.param_type)
+                      ; "description", `String param.param_description
+                      ] ))
+               params) )
+      ; ( "required"
+        , `List (List.map (fun param -> `String param.param_name) params) )
+      ; "additionalProperties", `Bool false
+      ]
+;;
+
+type instantiation_error =
+  | Missing_argument of string
+  | Instantiated_plan_rejected of Plan.error
+
+let instantiation_error_to_string = function
+  | Missing_argument param -> Printf.sprintf "missing required argument %S" param
+  | Instantiated_plan_rejected error ->
+    "instantiated plan rejected: " ^ Plan.error_to_string error
+;;
+
+(* Bind one invocation's arguments into the entry's plan. The declared plan
+   keeps its [Param] leaves for the catalog's lifetime; execution takes the
+   param-free copy built here, revalidated by the same [Plan.create] that
+   admitted the declaration, so the executor never meets an unbound name. *)
+let instantiate ~descriptors ~args entry =
+  match entry.params with
+  | [] -> Ok entry.plan
+  | _ :: _ ->
+    let lookup name =
+      match args with
+      | `Assoc fields -> List.assoc_opt name fields
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+      | `Tuple _ | `Variant _ -> None
+    in
+    let rec rebuild rebuilt = function
+      | [] ->
+        (match Plan.create ~descriptors (List.rev rebuilt) with
+         | Ok plan -> Ok plan
+         | Error error -> Error (Instantiated_plan_rejected error))
+      | (node : Plan.node) :: rest ->
+        (match Plan.Json_template.substitute_params ~lookup node.input with
+         | Error (Plan.Json_template.Missing_param param) ->
+           Error (Missing_argument param)
+         | Ok input ->
+           rebuild
+             (Plan.node ~id:node.id ~tool_name:node.tool_name ~after:node.after ~input ()
+              :: rebuilt)
+             rest)
+    in
+    rebuild [] (Plan.nodes entry.plan)
 ;;

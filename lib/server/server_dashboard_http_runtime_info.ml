@@ -1099,14 +1099,19 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
   let reachable = count (fun p -> Option.equal Bool.equal p.reachable (Some true)) in
   let failed = count (fun p -> Option.equal Bool.equal p.reachable (Some false)) in
   let probed = List.length probes - skipped in
-  let status =
+  (* Published on the shared vocabulary. Spelled as this function's own words,
+     three of the four rungs — [reachable], [no_http_runtimes], [unreachable] —
+     were absent from it and arrived at readers as [Unknown], which ranks the
+     same as [Degraded]: every probe failing read no worse than some failing,
+     and a workspace with nothing to probe read as troubled (#27560). *)
+  let status : Health_status.t =
     if failed = 0 && probed > 0
-    then "reachable"
+    then Health_status.Ok
     else if failed = 0
-    then "no_http_runtimes"
+    then Health_status.Idle
     else if reachable > 0
-    then "degraded"
-    else "unreachable"
+    then Health_status.Degraded
+    else Health_status.Unavailable
   in
   let errors =
     probes
@@ -1118,7 +1123,7 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
   in
   `Assoc
     [ "source", `String runtime_inventory_source
-    ; "status", `String status
+    ; "status", `String (Health_status.to_string status)
     ; "probe_ok", `Bool (failed = 0)
     ; "checked_at", `String (Masc_domain.now_iso ())
     ; ( "summary"

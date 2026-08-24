@@ -60,6 +60,9 @@
   base64
   re
   ; existing
+  ; Health_status: channel health is published on the shared vocabulary, not
+  ; on words this library spells for itself (#27560).
+  masc.masc_types
   masc_config
   masc_core
   masc.time_codec

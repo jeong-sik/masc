@@ -702,9 +702,14 @@ let test_agent_scope_owns_effect_topology () =
         ; execution_mode = Tool_contract.Serial
         }
       in
+      (* A blank tool_use_id is not a legal identifier: the content-block
+         decoder refuses it so that two records of one execution cannot end up
+         under two invented stand-ins. This invocation is meant to be rejected
+         for its TURN, so it carries a real id -- otherwise the turn check is
+         never reached and the test proves something else. *)
       let wrong_turn =
         Tool_contract.Invocation.create
-          ~tool_use_id:""
+          ~tool_use_id:"tu-wrong-turn"
           ~turn:4
           ~schedule
           ~completion:Tool_contract.Continue_after_success
@@ -725,7 +730,7 @@ let test_agent_scope_owns_effect_topology () =
         (Writer.current_cursor writer |> Result.get_ok |> Journal.cursor_seq);
       let exact_invocation =
         Tool_contract.Invocation.create
-          ~tool_use_id:""
+          ~tool_use_id:"tu-effect-topology"
           ~turn:3
           ~schedule
           ~completion:Tool_contract.Continue_after_success
@@ -830,9 +835,15 @@ let test_agent_scope_owns_effect_topology () =
            , Event.Agent_turn { ordinal = 3 }
            , Event.Provider_attempt { ordinal = 0; _ }
            , Event.Tool_invocation
-               { provider_tool_use_id = Some ""; tool_name = "effect"; _ }
+               { provider_tool_use_id = Some "tu-effect-topology"
+               ; tool_name = "effect"
+               ; _
+               }
            , Types.ToolUse
-               { id = ""; name = "effect"; input = `Assoc [ ("value", `Int 7) ] } ) -> ()
+               { id = "tu-effect-topology"
+               ; name = "effect"
+               ; input = `Assoc [ ("value", `Int 7) ]
+               } ) -> ()
          | _ -> fail "scope did not retain exact typed topology")
       | _ -> fail "scope did not write its topology before the effect");
     with_existing codec dir (fun _sw writer ->

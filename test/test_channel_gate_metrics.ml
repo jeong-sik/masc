@@ -141,7 +141,12 @@ let test_snapshot_json_reports_health_and_latency () =
         (row |> U.member "slow_rate_pct" |> U.to_int);
       check int "success_rate_pct" 50
         (row |> U.member "success_rate_pct" |> U.to_int);
-      check string "health" "failing"
+      (* The wire now carries Health_status.to_string. This channel's worst
+         rung used to go out as "failing", a word the shared vocabulary did
+         not declare, so a reader decoding it landed on Unknown and ranked it
+         alongside Degraded. of_string still accepts "failing", so payloads
+         written by older builds decode where they always meant to (#27560). *)
+      check string "health" "error"
         (row |> U.member "health" |> U.to_string);
        check string "last_error" "upstream timeout"
          (row |> U.member "last_error" |> U.to_string))
@@ -172,11 +177,11 @@ let test_snapshot_json_includes_workspace_bindings () =
       in
       check string "alpha keeper" "luna"
         (alpha |> U.member "keeper" |> U.to_string);
-      check string "alpha health" "healthy"
+      check string "alpha health" "ok"
         (alpha |> U.member "health" |> U.to_string);
       check string "beta last error" "keeper offline"
         (beta |> U.member "last_error" |> U.to_string);
-      check string "beta health" "failing"
+      check string "beta health" "error"
         (beta |> U.member "health" |> U.to_string))
 
 let test_events_json_filters_newest_first () =

@@ -13,6 +13,12 @@ export const DEFAULT_MASC_ORIGIN = `http://${DEFAULT_MASC_HOST}:${DEFAULT_MASC_P
 // its strip length stay in sync across the parser and ingress guards.
 export const AGENT_CORE_EVENT_PREFIX = 'agent_core:'
 
+// --- MASC event namespace ---
+// A subset of events is published twice: once bare and once under this
+// namespace. `SSEEventType` lists both spellings; the prefix lived as a bare
+// literal in sse-store.ts and a local const in sse.ts before this.
+export const MASC_EVENT_PREFIX = 'masc/'
+
 // --- HTTP timeouts (milliseconds) ---
 // Backend dashboard timeout is 30s; frontend must wait slightly longer.
 export const DEFAULT_GET_TIMEOUT_MS = 35_000

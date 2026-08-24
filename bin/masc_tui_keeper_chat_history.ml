@@ -29,8 +29,12 @@ type kind =
       }
   | Said_by_keeper
   | Delivery_failed of { origin_request_id : string option }
-  | Tool_calls of string list
+  | Tool_calls of Transcript.tool_block
   | Reasoning of string list
+
+let tool_rows block =
+  let projection = Transcript.project_tool_block Transcript.Full block in
+  projection.rows
 
 (* The surface half of the label. An operator's own surfaces say nothing extra:
    a dashboard row from a named person is that person, and the pane the
@@ -103,6 +107,7 @@ type parsed =
   | Utterance of row
   | Tool_call of
       { at : float
+      ; call_id : string option
       ; tool_name : string
       ; args : string
       }
@@ -130,14 +135,13 @@ let non_blank_lines text =
 type trace_summary =
   { reasoning : string list  (** non-blank lines, in order *)
   ; withheld : int  (** reasoning steps the server scrubbed *)
-  ; tools :
-      (Transcript.persisted_tool_outcome * string * string * string option) list
+  ; tools : Transcript.tool_activity list
   ; omitted : int  (** steps the server dropped from this surface *)
   }
 
 let empty_trace = { reasoning = []; withheld = 0; tools = []; omitted = 0 }
 
-let persisted_outcome fields : Transcript.persisted_tool_outcome =
+let persisted_outcome fields : Transcript.tool_outcome =
   match string_field fields "status" with
   | Some "ok" -> Transcript.Returned
   | Some "err" -> Transcript.Failed
@@ -183,10 +187,10 @@ let add_trace_step summary (step : Yojson.Safe.t) =
               in
               { summary with
                 tools =
-                  ( persisted_outcome fields
-                  , tool_name
-                  , args
-                  , string_field fields "dur" )
+                  Transcript.make_tool_activity
+                    ~call_id:(string_field fields "tool_call_id") ~tool_name
+                    ~args ~outcome:(persisted_outcome fields)
+                    ~duration:(string_field fields "dur")
                   :: summary.tools
               })
       | Some _ | None -> { summary with omitted = summary.omitted + 1 })
@@ -259,21 +263,24 @@ let rows_of_trace at summary =
           (plural summary.withheld "reasoning step")
       ]
   in
-  let tool_rows = Transcript.persisted_tool_rows summary.tools in
-  match summary.reasoning @ withheld_note, tool_rows with
-  | [], [] ->
-      (* No reasoning and no calls: the omitted count, if any, is the only
-         thing the block said, and it counts steps. *)
-      List.map
-        (fun line -> Utterance { at; kind = Tool_calls [ line ]; text = "" })
-        omitted_note
-  | reasoning, [] ->
+  let reasoning = summary.reasoning @ withheld_note in
+  let tool_block =
+    Transcript.tool_block ~omitted_steps:summary.omitted summary.tools
+  in
+  match reasoning, summary.tools, summary.omitted with
+  | [], [], 0 -> []
+  | [], [], _ ->
+      (* No reasoning and no calls: the omitted count is the only thing the
+         block said, and remains a typed transcript omission rather than a
+         synthetic tool call. *)
+      [ Utterance { at; kind = Tool_calls tool_block; text = "" } ]
+  | reasoning, [], _ ->
       [ Utterance { at; kind = Reasoning (reasoning @ omitted_note); text = "" } ]
-  | [], tools ->
-      [ Utterance { at; kind = Tool_calls (tools @ omitted_note); text = "" } ]
-  | reasoning, tools ->
+  | [], _ :: _, _ ->
+      [ Utterance { at; kind = Tool_calls tool_block; text = "" } ]
+  | reasoning, _ :: _, _ ->
       [ Utterance { at; kind = Reasoning reasoning; text = "" }
-      ; Utterance { at; kind = Tool_calls (tools @ omitted_note); text = "" }
+      ; Utterance { at; kind = Tool_calls tool_block; text = "" }
       ]
 
 (* Annotated rather than inferred: an inferred parameter widens to an open
@@ -351,7 +358,14 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
              which says less than no row -- the same call the connector trail
              makes. *)
           match string_field fields "tool_call_name" with
-          | Some tool_name -> [ Tool_call { at; tool_name; args = content } ]
+          | Some tool_name ->
+              [ Tool_call
+                  { at
+                  ; call_id = string_field fields "tool_call_id"
+                  ; tool_name
+                  ; args = content
+                  }
+              ]
           | None -> [])
       | Some _ | None -> [])
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
@@ -364,17 +378,21 @@ let fold_tool_blocks parsed_rows =
   let flush pending acc =
     match List.rev pending with
     | [] -> acc
-    | (at, _, _) :: _ as calls ->
-        let rows =
-          Transcript.completed_tool_rows
-            (List.map (fun (_, tool_name, args) -> (tool_name, args)) calls)
+    | (at, _, _, _) :: _ as calls ->
+        let activities =
+          List.map
+            (fun (_, call_id, tool_name, args) ->
+              Transcript.make_tool_activity ~call_id ~tool_name ~args
+                ~outcome:Transcript.Returned ~duration:None)
+            calls
         in
-        { at; kind = Tool_calls rows; text = "" } :: acc
+        { at; kind = Tool_calls (Transcript.tool_block activities); text = "" }
+        :: acc
   in
   let rec loop pending acc = function
     | [] -> List.rev (flush pending acc)
-    | Tool_call { at; tool_name; args } :: rest ->
-        loop ((at, tool_name, args) :: pending) acc rest
+    | Tool_call { at; call_id; tool_name; args } :: rest ->
+        loop ((at, call_id, tool_name, args) :: pending) acc rest
     | Utterance row :: rest -> loop [] (row :: flush pending acc) rest
   in
   loop [] [] parsed_rows

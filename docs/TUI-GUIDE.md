@@ -91,6 +91,21 @@ reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
 Keeper sub-views spell their position as a breadcrumb in the header:
 `Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).
 
+The keeper detail pane has tabs, cycled with `[` and `]`: Info, the
+keeper's declared instructions with its effective system prompt, and its
+GitHub CLI identity observation. On the GitHub tab, `L` starts the gh
+device-flow login and streams its (redacted) output into the pane; when
+the stream ends the pane re-reads the identity observation.
+
+Reading a board post on a wide terminal keeps the post list beside it,
+with the open post marked.
+
+The Config surface shows `runtime.toml` as the server reads it; `e` opens
+it in `$EDITOR` and the server's preview validation gates the write. The
+Resources surface lists every MCP resource; `Enter` reads one beside the
+list. On Connectors, `b`/`u` open an editor form that binds or unbinds a
+channel.
+
 At 110 columns and wider, the keeper detail view keeps a roster pane on its
 left with the cursor marked; keys keep their detail meaning. Narrower
 terminals use the single-pane layout.

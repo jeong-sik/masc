@@ -406,7 +406,11 @@ let consume_dispatched_message_draft state request =
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
   let rows, _cols = get_terminal_size () in
-  let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
+  (* The pane's fixed chrome is 7 rows (render_keeper_message names them);
+     composer growth is already inside [keeper_message_status_rows]. Adding
+     composer_max_rows here counted it twice, and every PgUp jumped four
+     rows short of the screenful the comment promises. *)
+  let chrome = 7 in
   max 1 (rows - chrome - keeper_message_status_rows state)
 
 (* What this pane has of the operator's own lines for the keeper on screen,
@@ -490,9 +494,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
+  let live_is_on_screen live =
+    (* [msg_live] survives leaving the chat, so a prompt for keeper A must
+       not be answered (or interrupted) from keeper B's screen. *)
+    state.msg_target_keeper_name
+    = Some (Keeper_chat_transcript.keeper_name live)
+  in
   match state.msg_live, key with
   | Some live, ("y" | "Y" | "n" | "N")
-    when Option.is_some (Keeper_chat_transcript.awaiting_approval live) -> (
+    when live_is_on_screen live
+         && Option.is_some (Keeper_chat_transcript.awaiting_approval live) -> (
       match Keeper_chat_transcript.awaiting_approval live with
       | Some awaiting ->
           answer_approval ~tool_call_id:awaiting.Keeper_chat_transcript.call_id
@@ -724,6 +735,13 @@ type async_msg =
   | Schedule_cancel_done of (string, string) result
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
+  | Keeper_config_view_loaded of string * (string list, string) result
+  | Runtime_config_view_loaded of (string * string list, string) result
+  | Resources_listed of ((string * string) list, string) result
+  | Resource_read of string * (string list, string) result
+  | Github_identity_view_loaded of string * (string list, string) result
+  | Github_login_lines of string * string list
+  | Github_login_finished of string * (unit, string) result
   | Observer_opened of string
   | Observer_received of Masc_tui_observer.decoded list
   | Observer_closed of string
@@ -830,7 +848,15 @@ let settle_live_turn state (request : Keeper_chat.request) =
     when String.equal
            (Keeper_chat_transcript.request_id live)
            request.Keeper_chat.request_id ->
-      (match Keeper_chat_transcript.tool_rows live with
+      let block =
+        Keeper_chat_transcript.tool_block
+          (Keeper_chat_transcript.tool_calls live)
+      in
+      let projection =
+        Keeper_chat_transcript.project_tool_block Keeper_chat_transcript.Full
+          block
+      in
+      (match projection.rows with
        | [] -> ()
        | rows ->
            append_chat_history state request Message_tool
@@ -1038,6 +1064,231 @@ let launch_keeper_calls_load state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_calls_loaded (keeper_name, Error "Eio switch is unavailable"))
+
+(* The detail pane's two non-Info tabs. Same discipline as the call log:
+   the answer names the keeper it is for, so a stale load cannot be drawn
+   under another keeper's heading. *)
+(* The MCP resource inventory, and one resource's text. Each operation
+   opens its own session: a human-cadence browser does not earn a held
+   connection, and a stale session id would be a second failure mode. *)
+let launch_resources_list state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
+  let session = state.mcp_session in
+  let run () =
+    let result =
+      try
+        let session_result =
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
+        in
+        match session_result with
+        | Error detail -> Error detail
+        | Ok session_id ->
+            Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
+              ~request_id
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Resources_listed result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
+
+let launch_resource_read state ~mailbox ~uri =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
+  let session = state.mcp_session in
+  let run () =
+    let result =
+      try
+        let session_result =
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
+        in
+        match session_result with
+        | Error detail -> Error detail
+        | Ok session_id -> (
+            match
+              Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
+                ~request_id ~uri
+            with
+            | Ok text ->
+                Ok
+                  (String.split_on_char '\n' text
+                   |> List.map Masc.Tui_decode.sanitize_terminal_text)
+            | Error _ as error -> error)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Resource_read (uri, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Resource_read (uri, Error "Eio switch is unavailable"))
+
+(* The device-flow login, streamed. gh prints the one-time code on its
+   own output, which the server forwards redacted; every data line lands
+   in the GitHub tab as it arrives so the operator can read the code and
+   finish in the browser. When the stream ends the tab re-reads the
+   identity observation, which is the fact the login was for. *)
+let launch_github_login state ~mailbox keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    match Eio_context.get_clock_opt () with
+    | None ->
+        enqueue_async mailbox
+          (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
+    | Some clock ->
+        let pending = Buffer.create 256 in
+        let flush_lines () =
+          let text = Buffer.contents pending in
+          match String.rindex_opt text '\n' with
+          | None -> ()
+          | Some last ->
+              let complete = String.sub text 0 last in
+              let rest =
+                String.sub text (last + 1) (String.length text - last - 1)
+              in
+              Buffer.clear pending;
+              Buffer.add_string pending rest;
+              let lines =
+                String.split_on_char '\n' complete
+                |> List.filter_map (fun line ->
+                       let line = String.trim line in
+                       if String.length line > 6
+                          && String.sub line 0 6 = "data: "
+                       then
+                         let payload =
+                           String.sub line 6 (String.length line - 6)
+                         in
+                         match Yojson.Safe.from_string payload with
+                         | `Assoc fields -> (
+                             match List.assoc_opt "text" fields with
+                             | Some (`String text) ->
+                                 Some (String.split_on_char '\n' text)
+                             | _ -> (
+                                 match List.assoc_opt "message" fields with
+                                 | Some (`String message) ->
+                                     Some [ "error: " ^ message ]
+                                 | _ -> Some [ payload ]))
+                         | _ | (exception Yojson.Json_error _) ->
+                             Some [ payload ]
+                       else None)
+                |> List.concat
+                |> List.map Masc.Tui_decode.sanitize_terminal_text
+                |> List.filter (fun line -> String.trim line <> "")
+              in
+              if lines <> [] then
+                enqueue_async mailbox (Github_login_lines (keeper_name, lines))
+        in
+        let result =
+          try
+            Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
+              ~port ~keeper_name
+              ~on_chunk:(fun chunk ->
+                Buffer.add_string pending chunk;
+                flush_lines ())
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Github_login_finished (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_runtime_config_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_runtime_config_view ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Runtime_config_view_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_config_view state ~mailbox keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_config_view_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_config_view_loaded
+           (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_github_identity_view state ~mailbox keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_keeper_github_identity_view ~host ~port
+          ~keeper_name
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Github_identity_view_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Github_identity_view_loaded
+           (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -1372,6 +1623,8 @@ let goto_surface state ~mailbox (destination : surface) =
    | Connectors -> launch_connectors_load state ~mailbox
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
+   | Config -> launch_runtime_config_load state ~mailbox
+   | Resources -> launch_resources_list state ~mailbox
    | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
@@ -1505,8 +1758,8 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         , row.text )
     | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text)
     | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text)
-    | Keeper_chat_history.Tool_calls rows ->
-        (Message_tool, String.concat "\n" rows)
+    | Keeper_chat_history.Tool_calls block ->
+        (Message_tool, String.concat "\n" (Keeper_chat_history.tool_rows block))
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, String.concat "\n" lines)
   in
@@ -2421,7 +2674,14 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        in the surface bundle, so the tick asks for it here. Without this the
        pane read once on open and a message that arrived after that waited for
        the operator to leave and come back. *)
-    (if needs.Masc_tui_types.needs_keeper_chat then
+    (if
+       needs.Masc_tui_types.needs_keeper_chat
+       (* Not while reading back: the reload replaces the transcript with the
+          newest window, which throws away every older page the operator
+          fetched and snaps the view to the bottom mid-read. The next tick
+          after scroll returns to 0 catches the pane up. *)
+       && state.msg_scroll = 0
+     then
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
@@ -2982,7 +3242,9 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
       Buffer.add_string state.board_draft new_content;
       true
   | "\t" -> false
-  | s when String.length s = 1 ->
+  | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
+      (* The same printable test the chat draft uses: a Korean scalar is
+         three bytes and one keystroke, and a control byte is neither. *)
       Buffer.add_string state.board_draft s;
       true
   | _ -> true
@@ -3192,6 +3454,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       end
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
+      (* The jump lands on a clean screen: a modal or roster search opened
+         while the dispatch was in flight would otherwise sit over (or
+         zombie under) a surface it was not opened on. *)
+      state.help_open <- false;
+      state.palette_open <- false;
+      state.palette_query <- "";
+      state.palette_cursor <- 0;
+      state.roster_search <- None;
       state.msg_scroll <- 0;
       state.view <- Keepers Keeper_message;
       start_keeper_message ~keeper_name:keeper state ~mailbox
@@ -3308,6 +3578,75 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.keeper_calls <- Some snapshot;
             state.keeper_calls_error <- None
         | Error detail -> state.keeper_calls_error <- Some detail)
+  | Keeper_config_view_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok lines ->
+            state.keeper_config_view <- Some (keeper_name, lines);
+            state.keeper_config_view_error <- None
+        | Error detail -> state.keeper_config_view_error <- Some detail)
+  | Runtime_config_view_loaded result -> (
+      match result with
+      | Ok view ->
+          state.runtime_config_view <- Some view;
+          state.runtime_config_view_error <- None
+      | Error detail -> state.runtime_config_view_error <- Some detail)
+  | Resources_listed result -> (
+      match result with
+      | Ok rows ->
+          let rows =
+            List.map
+              (fun (uri, name) ->
+                ( Masc.Tui_decode.sanitize_terminal_text uri,
+                  Masc.Tui_decode.sanitize_terminal_text name ))
+              rows
+          in
+          state.resources_list <- Some rows;
+          state.resources_error <- None;
+          state.resources_cursor <-
+            max 0 (min state.resources_cursor (List.length rows - 1))
+      | Error detail -> state.resources_error <- Some detail)
+  | Resource_read (uri, result) -> (
+      match result with
+      | Ok lines ->
+          state.resource_content <- Some (uri, lines);
+          state.resource_content_error <- None;
+          state.resource_scroll <- 0
+      | Error detail -> state.resource_content_error <- Some detail)
+  | Github_identity_view_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok lines ->
+            state.github_identity_view <- Some (keeper_name, lines);
+            state.github_identity_view_error <- None
+        | Error detail -> state.github_identity_view_error <- Some detail)
+  | Github_login_lines (keeper_name, lines) ->
+      (* Append under the stamped view; a login for another keeper than the
+         one on screen still lands on its own stamp. *)
+      let existing =
+        match state.github_identity_view with
+        | Some (stamp, lines_before) when String.equal stamp keeper_name ->
+            lines_before
+        | Some _ | None -> [ "# github login" ]
+      in
+      state.github_identity_view <- Some (keeper_name, existing @ lines);
+      state.github_identity_view_error <- None
+  | Github_login_finished (keeper_name, result) -> (
+      (match result with
+       | Ok () -> add_event state "system" (keeper_name ^ ": github login stream ended")
+       | Error detail ->
+           add_event state "error" (keeper_name ^ ": github login: " ^ detail));
+      launch_github_identity_view state ~mailbox keeper_name)
   | Schedules_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3952,6 +4291,122 @@ let main () =
      has no view of the current settings to prefill from -- showing a
      guessed stem would invite an operator to "keep" a value that is not
      the one on disk. *)
+  (* runtime.toml edit: $EDITOR over the text the Config surface shows,
+     then the server's preview validation; only a preview that passes is
+     written. A failed preview keeps the operator's text out of the file
+     and puts the validator's words in Recent Events. *)
+  (* Connector bind/unbind: the form is three fields, and $EDITOR is the
+     form we already have. The name field picks the connector; the rest is
+     the route's body. *)
+  let handle_connector_form ~action ~stem ~post () =
+    match Masc_tui_editor.editor_command () with
+    | None ->
+      add_event state "error"
+        ("no $EDITOR set; export EDITOR to " ^ action ^ " here")
+    | Some _ -> (
+      match
+        Masc_tui_editor.roundtrip ~restore:restore_terminal
+          ~reenter:reenter_terminal stem
+      with
+      | None -> add_event state "system" (action ^ " cancelled")
+      | Some body -> (
+        match Yojson.Safe.from_string body with
+        | exception Yojson.Json_error e ->
+          add_event state "error" (action ^ ": body is not JSON: " ^ e)
+        | json -> (
+          let field key =
+            match json with
+            | `Assoc fields -> (
+                match List.assoc_opt key fields with
+                | Some (`String value) when String.trim value <> "" ->
+                    Some (String.trim value)
+                | _ -> None)
+            | _ -> None
+          in
+          match field "name" with
+          | None -> add_event state "error" (action ^ ": \"name\" is required")
+          | Some connector -> (
+            match post ~connector ~json with
+            | Ok _ ->
+              add_event state "system" (action ^ ": ok (" ^ connector ^ ")");
+              launch_connectors_load state ~mailbox:async_messages
+            | Error detail -> add_event state "error" (action ^ ": " ^ detail)))))
+  in
+  let handle_connector_bind () =
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    handle_connector_form ~action:"bind"
+      ~stem:
+        "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"\"\n}\n"
+      ~post:(fun ~connector ~json ->
+        Masc_tui_http.post_connector_bind ~host ~port ~connector
+          ~body_json:(Yojson.Safe.to_string json))
+      ()
+  in
+  let handle_connector_unbind () =
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    handle_connector_form ~action:"unbind"
+      ~stem:"{\n  \"name\": \"discord\",\n  \"channel_id\": \"\"\n}\n"
+      ~post:(fun ~connector ~json ->
+        Masc_tui_http.post_connector_unbind ~host ~port ~connector
+          ~body_json:(Yojson.Safe.to_string json))
+      ()
+  in
+  let handle_runtime_config_edit () =
+    match state.runtime_config_view with
+    | None -> add_event state "error" "config not loaded yet; r to reload"
+    | Some (_, lines) -> (
+      match Masc_tui_editor.editor_command () with
+      | None ->
+        add_event state "error"
+          "no $EDITOR set; export EDITOR to edit runtime.toml here"
+      | Some _ -> (
+        let stem = String.concat "\n" lines in
+        match
+          Masc_tui_editor.roundtrip ~restore:restore_terminal
+            ~reenter:reenter_terminal stem
+        with
+        | None -> add_event state "system" "runtime.toml unchanged"
+        | Some edited -> (
+          let host = Env_config_core.masc_host () in
+          let port = state.port in
+          match
+            Masc_tui_http.post_runtime_config_preview ~host ~port
+              ~source_text:edited
+          with
+          | Error detail -> add_event state "error" ("preview failed: " ^ detail)
+          | Ok preview -> (
+            let ok =
+              match preview with
+              | `Assoc fields -> (
+                  match List.assoc_opt "validation" fields with
+                  | Some (`Assoc v) -> (
+                      match List.assoc_opt "ok" v with
+                      | Some (`Bool value) -> Some value
+                      | _ -> None)
+                  | _ -> (
+                      match List.assoc_opt "ok" fields with
+                      | Some (`Bool value) -> Some value
+                      | _ -> None))
+              | _ -> None
+            in
+            match ok with
+            | Some false ->
+              add_event state "error"
+                ("preview rejected the edit: "
+                 ^ Terminal_text.single_line
+                     (Yojson.Safe.to_string preview))
+            | Some true | None -> (
+              match
+                Masc_tui_http.post_runtime_config_raw ~host ~port
+                  ~source_text:edited
+              with
+              | Ok _ ->
+                add_event state "system" "runtime.toml saved";
+                launch_runtime_config_load state ~mailbox:async_messages
+              | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
+  in
   let handle_keeper_settings_edit () =
     match selected_keeper state with
     | None -> ()
@@ -4074,6 +4529,8 @@ let main () =
         (not compact_viewport)
         && (not state.help_open)
         && (not state.palette_open)
+        && Option.is_none state.roster_search
+        && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
         &&
@@ -4085,7 +4542,10 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some k
          when Render_schedule.Input_shortcut.is_quit ~message_mode k
-              && Option.is_none state.roster_search ->
+              && Option.is_none state.roster_search
+              && not
+                   (state.view = Board
+                   && state.board_mode = Board_compose) ->
            raise Break
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the
@@ -4096,18 +4556,24 @@ let main () =
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
-       | Some k when state.help_open ->
+       | Some k when state.help_open && not compact_viewport ->
            (match k with
             | "?" | "esc" ->
                 state.help_open <- false;
                 state.help_scroll <- 0
-            | "j" | "down" -> state.help_scroll <- state.help_scroll + 1
+            | "j" | "down" ->
+                (* Clamped against the real sheet so overshoot does not bank
+                   presses the way unbounded counters did elsewhere. *)
+                let ceiling =
+                  max 0 (List.length (Masc_tui_render.help_lines ()) - 1)
+                in
+                state.help_scroll <- min ceiling (state.help_scroll + 1)
             | "k" | "up" -> state.help_scroll <- max 0 (state.help_scroll - 1)
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
-       | Some k when state.palette_open ->
+       | Some k when state.palette_open && not compact_viewport ->
            let close () =
              state.palette_open <- false;
              state.palette_query <- "";
@@ -4150,7 +4616,8 @@ let main () =
           The list itself never narrows -- see [roster_search] in types. *)
        | Some k
          when state.view = Keepers Keeper_list
-              && Option.is_some state.roster_search ->
+              && Option.is_some state.roster_search
+              && not compact_viewport ->
            let query = Option.value state.roster_search ~default:"" in
            (match k with
             | "esc" -> state.roster_search <- None
@@ -4170,8 +4637,62 @@ let main () =
                 state.roster_search <- Some longer;
                 roster_search_jump state ~query:longer ~after:(-1)
             | _ -> ())
-       | Some "/" when state.view = Keepers Keeper_list ->
+       | Some "/" when state.view = Keepers Keeper_list && not compact_viewport ->
            state.roster_search <- Some ""
+       | Some (("[" | "]") as bracket)
+         when state.view = Keepers Keeper_detail && not compact_viewport ->
+           (* Tabs inside the detail pane: [ and ] walk the same short list
+              the pane's title row draws. Non-Info tabs read over HTTP on
+              entry; the stamped keeper name keeps a slow answer from being
+              drawn under a different selection. *)
+           let tabs = Masc_tui_types.keeper_detail_tabs in
+           let count = List.length tabs in
+           let index =
+             let rec find i = function
+               | [] -> 0
+               | tab :: rest ->
+                   if tab = state.detail_tab then i else find (i + 1) rest
+             in
+             find 0 tabs
+           in
+           let step = if bracket = "]" then 1 else count - 1 in
+           state.detail_tab <- List.nth tabs ((index + step) mod count);
+           state.detail_scroll <- 0;
+           (match selected_keeper state, state.detail_tab with
+            | Some keeper, Detail_instructions ->
+                state.keeper_config_view <- None;
+                state.keeper_config_view_error <- None;
+                launch_keeper_config_view state ~mailbox:async_messages
+                  keeper.k_name
+            | Some keeper, Detail_github ->
+                state.github_identity_view <- None;
+                state.github_identity_view_error <- None;
+                launch_github_identity_view state ~mailbox:async_messages
+                  keeper.k_name
+            | _, Detail_info | None, _ -> ())
+       | Some "L"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_github
+              && not compact_viewport ->
+           (match selected_keeper state with
+            | Some keeper ->
+                state.github_identity_view <-
+                  Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
+                launch_github_login state ~mailbox:async_messages keeper.k_name
+            | None -> ())
+       | Some "\r" when state.view = Resources && not compact_viewport ->
+           (match
+              Option.bind state.resources_list (fun rows ->
+                  List.nth_opt rows state.resources_cursor)
+            with
+            | Some (uri, _) ->
+                state.resource_focus <- true;
+                launch_resource_read state ~mailbox:async_messages ~uri
+            | None -> ())
+       | Some "J" when state.view = Resources && not compact_viewport ->
+           state.resource_scroll <- state.resource_scroll + 1
+       | Some "K" when state.view = Resources && not compact_viewport ->
+           state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "n"
          when state.view = Keepers Keeper_list
               && state.roster_search_last <> "" ->
@@ -4253,10 +4774,10 @@ let main () =
               surface cycle keeps working, and quit was answered above. *)
            let _handled = handle_board_compose_key state ~mailbox:async_messages k in
            ()
-       | Some "?" ->
+       | Some "?" when not compact_viewport ->
            state.help_open <- true;
            state.help_scroll <- 0
-       | Some ":" ->
+       | Some ":" when not compact_viewport ->
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
@@ -4348,6 +4869,10 @@ let main () =
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
+            | Config ->
+                launch_runtime_config_load state ~mailbox:async_messages
+            | Resources ->
+                launch_resources_list state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
@@ -4392,8 +4917,10 @@ let main () =
                    ignored while the first is unanswered. *)
                 (match state.msg_live with
                  | Some live
-                   when Keeper_chat_transcript.interrupt live
-                        = Keeper_chat_transcript.Not_requested ->
+                   when state.msg_target_keeper_name
+                        = Some (Keeper_chat_transcript.keeper_name live)
+                        && Keeper_chat_transcript.interrupt live
+                           = Keeper_chat_transcript.Not_requested ->
                      (match
                         inflight_by_request_id state
                           (Keeper_chat_transcript.request_id live)
@@ -4436,7 +4963,10 @@ let main () =
                 end
                 else state.task_focus <- false
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
-            | Verification | Harness | Repositories | Changes | Connectors | Runtime | Tools
+            | Resources ->
+                state.resource_focus <- false
+            | Verification | Harness | Repositories | Changes | Connectors | Runtime
+            | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
@@ -4550,6 +5080,17 @@ let main () =
             | Tools -> state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.tools_scroll
+            | Config -> state.config_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.config_scroll
+            | Resources ->
+                let total =
+                  match state.resources_list with
+                  | Some rows -> List.length rows
+                  | None -> 0
+                in
+                if state.resources_cursor < total - 1 then
+                  state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
             | System_logs -> state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -4678,6 +5219,14 @@ let main () =
                   state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.tools_scroll
+            | Config ->
+                if state.config_scroll > 0 then
+                  state.config_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.config_scroll
+            | Resources ->
+                if state.resources_cursor > 0 then
+                  state.resources_cursor <- state.resources_cursor - 1
             | Acting ->
                 if state.acting_scroll > 0 then begin
                   state.acting_scroll <- state.acting_scroll - 1;
@@ -4731,7 +5280,23 @@ let main () =
                      state.view <- Keepers Keeper_detail;
                      state.detail_scroll <- 0;
                      load_live_context state base_path k;
-                     load_selected_keeper_logs state base_path 200 (Some k)
+                     load_selected_keeper_logs state base_path 200 (Some k);
+                     (* A sticky non-Info tab re-reads for the keeper the
+                        cursor now names; without this the pane shows
+                        "(loading)" forever after a cursor move, because the
+                        stamped answer names the previous keeper. *)
+                     (match state.detail_tab with
+                      | Detail_info -> ()
+                      | Detail_instructions ->
+                          state.keeper_config_view <- None;
+                          state.keeper_config_view_error <- None;
+                          launch_keeper_config_view state
+                            ~mailbox:async_messages k.k_name
+                      | Detail_github ->
+                          state.github_identity_view <- None;
+                          state.github_identity_view_error <- None;
+                          launch_github_identity_view state
+                            ~mailbox:async_messages k.k_name)
                  | None -> ())
             | Board ->
                 (match state.board_mode with
@@ -4782,7 +5347,7 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Changes | Connectors | Runtime | Tools | System_logs -> ())
+            | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -4854,7 +5419,7 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Tools
+            | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
@@ -4920,17 +5485,6 @@ let main () =
              | _ -> Goal_phase.Public_action.Reopen
            in
            handle_goal_action_key state ~mailbox:async_messages ~action
-       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
-           (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
-              letters stay navigation-free there. The first press arms, the
-              same press submits; the server owns the phase rules. *)
-           let action =
-             match key with
-             | Some ("c" | "C") -> Goal_phase.Public_action.Request_complete
-             | Some ("x" | "X") -> Goal_phase.Public_action.Drop
-             | _ -> Goal_phase.Public_action.Reopen
-           in
-           handle_goal_action_key state ~mailbox:async_messages ~action
        | Some "c" | Some "C" when state.view = Board ->
            (* Reply to the post being read. Same pane as a new post; the
               reply target decides the payload and where the operator
@@ -4973,7 +5527,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
@@ -5003,7 +5557,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -5026,7 +5580,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -5036,7 +5590,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -5058,7 +5612,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Tools | System_logs
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
             -> ())
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
@@ -5067,10 +5621,15 @@ let main () =
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
+            | Config -> handle_runtime_config_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
+       | Some "b" when state.view = Connectors && not compact_viewport ->
+           handle_connector_bind ()
+       | Some "u" when state.view = Connectors && not compact_viewport ->
+           handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -5078,7 +5637,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it
@@ -5104,7 +5663,9 @@ let main () =
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
-        state.pending_approval_action <- None;
+        (* The armed approval survives the tick: the snapshot apply already
+           disarms it when its token leaves the list, so clearing here only
+           made the second press race a two-second clock. *)
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
         let port = state.port in
@@ -5162,6 +5723,14 @@ let main () =
              (* The inventory is near-static, but a tool whose projection
                 changes is exactly what this surface is read for. *)
              launch_tools_load state ~mailbox:async_messages
+         | Config ->
+             (* The file moves under hot-reload edits from other agents. *)
+             launch_runtime_config_load state ~mailbox:async_messages
+         | Resources ->
+             (* Loaded on arrival and on r. A tick-cadence relist would open
+                an MCP session every two seconds for an inventory that moves
+                at human speed. *)
+             ()
          | Schedules ->
              (* Rows cross their due time and turn terminal while an operator
                 watches; the page that answers "why is this keeper awake"

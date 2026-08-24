@@ -54,7 +54,18 @@ let test_one_skill_is_named_with_its_path () =
     bool
     "the path is given"
     true
-    (contains ~needle:".masc/skills/<name>/SKILL.md" rendered)
+    (contains ~needle:".masc/skills/<name>/SKILL.md" rendered);
+  let rendered_skill_line =
+    lines rendered
+    |> List.find_opt (contains ~needle:"Skills named by this task")
+    |> Option.value ~default:""
+  in
+  check
+    string
+    "the complete instruction is unchanged"
+    "- Skills named by this task: humanize-korean. Each one is at \
+     .masc/skills/<name>/SKILL.md — read it before you use it."
+    rendered_skill_line
 ;;
 
 let test_several_skills_are_listed () =

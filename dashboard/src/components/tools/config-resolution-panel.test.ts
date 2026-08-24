@@ -15,8 +15,39 @@ function diag(
   return signal === undefined ? { ts, kind, message } : { ts, kind, message, signal }
 }
 
+// One round is a microtask drain followed by a macrotask turn. That pair is
+// what lets a preact render and the effect it schedules both land, and four
+// of them cover the panel's synchronous props.
+const RENDER_SETTLE_ROUNDS = 4
+
+// The ceiling on flushUntil. It is a stop, not an estimate: the loop leaves
+// the moment the condition holds, so this number only bounds how long a
+// condition that never holds takes to report -- measured at 1.3s, well inside
+// vitest's default timeout, which is what makes the failure a diff instead of
+// a timeout.
+const ASYNC_SETTLE_CEILING_ROUNDS = 40
+
 async function flush(): Promise<void> {
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < RENDER_SETTLE_ROUNDS; i += 1) {
+    await Promise.resolve()
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+}
+
+// The runtime-probe path ends in `await import('./schemas/runtime-probe')`
+// (#30099), and how many ticks a dynamic import costs is not a constant --
+// it depends on whether the module graph is already warm, which depends on
+// the machine and on what ran before. Four was enough until that import went
+// in; on a fast machine it is not, and the panel asserts against a chip that
+// has not been drawn yet. Pump until the caller's condition holds instead of
+// guessing a number. The assertions after this still run normally, so a real
+// failure prints a diff rather than a timeout.
+async function flushUntil(
+  until: () => boolean,
+  rounds = ASYNC_SETTLE_CEILING_ROUNDS,
+): Promise<void> {
+  for (let i = 0; i < rounds; i += 1) {
+    if (until()) return
     await Promise.resolve()
     await new Promise(resolve => setTimeout(resolve, 0))
   }
@@ -345,6 +376,7 @@ describe('ConfigResolutionPanel', () => {
     expect(container.querySelector('.v2-lab-panel')).not.toBeNull()
     expect(container.querySelector('.v2-lab-action')).not.toBeNull()
     expect(container.textContent).toContain('provider reachability')
+    await flushUntil(() => container.textContent?.includes('refreshing stale cache') === true)
     expect(container.textContent).toContain('refreshing stale cache')
     expect(container.textContent).toContain('runpod_mtp.qwen')
     expect(container.textContent).toContain('keeper runtime configuration')

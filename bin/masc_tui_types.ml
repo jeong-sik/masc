@@ -355,6 +355,21 @@ type keeper_mode =
   | Keeper_runtime_pick
       (** Choosing a runtime for the keeper under the roster cursor. *)
 
+(** Which face the detail pane is showing. Tabs inside one panel, cycled
+    with [ and ]: different views of the same selected keeper, exactly the
+    case a tab earns (unrelated content would want its own surface). *)
+type keeper_detail_tab =
+  | Detail_info
+  | Detail_instructions
+  | Detail_github
+
+let keeper_detail_tabs = [ Detail_info; Detail_instructions; Detail_github ]
+
+let keeper_detail_tab_label = function
+  | Detail_info -> "Info"
+  | Detail_instructions -> "Instructions"
+  | Detail_github -> "GitHub"
+
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
     legal destinations makes a new Keeper sub-view an explicit compiler error
     instead of silently becoming the detail view. *)
@@ -379,6 +394,8 @@ type surface =
   | Changes
   | Connectors
   | Runtime
+  | Config
+  | Resources
   | Tools
   | System_logs
 
@@ -401,6 +418,8 @@ let surface_ring : (surface * string) list =
     (Changes, "Changes");
     (Connectors, "Connectors");
     (Runtime, "Runtime");
+    (Config, "Config");
+    (Resources, "Resources");
     (Tools, "Tools");
     (System_logs, "Logs");
   ]
@@ -471,7 +490,7 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Lanes | Approvals | Schedules | Verification | Harness | Fusion
-  | Repositories | Changes | Connectors | Runtime | Tools ->
+  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -533,6 +552,28 @@ type state = {
      [roster_search_last] feeds n/N after Enter. *)
   mutable roster_search: string option;
   mutable roster_search_last: string;
+  (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
+     read is stamped with the keeper it answers for, so a cursor move cannot
+     show one keeper's instructions under another's name. *)
+  (* The Config surface: runtime.toml's path and text as the server read
+     them, refreshed on entry and after every save. *)
+  (* The Resources surface: the MCP resource inventory, and the one read
+     the content pane shows, stamped with its uri. *)
+  mutable resources_list: (string * string) list option;
+  mutable resources_error: string option;
+  mutable resources_cursor: int;
+  mutable resource_content: (string * string list) option;
+  mutable resource_content_error: string option;
+  mutable resource_scroll: int;
+  mutable resource_focus: bool;
+  mutable runtime_config_view: (string * string list) option;
+  mutable runtime_config_view_error: string option;
+  mutable config_scroll: int;
+  mutable detail_tab: keeper_detail_tab;
+  mutable keeper_config_view: (string * string list) option;
+  mutable keeper_config_view_error: string option;
+  mutable github_identity_view: (string * string list) option;
+  mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -867,6 +908,21 @@ let create_state ~workspace ~port ~refresh_interval = {
   palette_cursor = 0;
   roster_search = None;
   roster_search_last = "";
+  resources_list = None;
+  resources_error = None;
+  resources_cursor = 0;
+  resource_content = None;
+  resource_content_error = None;
+  resource_scroll = 0;
+  resource_focus = false;
+  runtime_config_view = None;
+  runtime_config_view_error = None;
+  config_scroll = 0;
+  detail_tab = Detail_info;
+  keeper_config_view = None;
+  keeper_config_view_error = None;
+  github_identity_view = None;
+  github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;
   task_detail_scroll = 0;
@@ -1146,13 +1202,18 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         (match state.tools_inventory with
          | None -> 0
          | Some s -> List.length s.Tui_decode.ts_tools)
+  | Config ->
+      listing ~error:state.runtime_config_view_error
+        (match state.runtime_config_view with
+         | None -> 0
+         | Some (_, lines) -> List.length lines)
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
-  | Fusion ->
+  | Fusion | Resources ->
       None
 
 let keeper_message_status_rows (state : state) =
@@ -1166,6 +1227,12 @@ let keeper_message_status_rows (state : state) =
   + unavailable_target
   + (match state.msg_live with
      | None -> 0
+     | Some live
+       when state.msg_target_keeper_name
+            <> Some (Masc_tui_keeper_chat_transcript.keeper_name live) ->
+         (* Another keeper's live turn draws nothing on this screen, so it
+            must reserve nothing -- the counter mirrors the pane. *)
+         0
      | Some live ->
          (* Same call the drawing makes, so the budget cannot count a
             different number of rows than the pane draws. The age in the

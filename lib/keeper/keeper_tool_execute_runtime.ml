@@ -177,6 +177,7 @@ let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
 let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
 let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
+let typed_input_timeout_budget = Keeper_tool_execute_input.typed_input_timeout_budget
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
 
 let typed_input_env
@@ -258,6 +259,7 @@ let handle_tool_execute_typed
              (error_json ~fields (typed_validation_error_text e))
          | Ok () ->
         let cmd = typed_input_command_text input in
+        let timeout_budget = typed_input_timeout_budget input in
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
         let sandbox_profile, _ =
@@ -341,7 +343,7 @@ let handle_tool_execute_typed
                 ~turn_sandbox_factory
                 ~meta
                 ~cwd
-                ?timeout_sec
+                ~timeout_sec
                 ()
               |> Result.map
                    (fun
@@ -357,7 +359,7 @@ let handle_tool_execute_typed
                   ; github_secret_files =
                       (fun () ->
                          Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
-                           ?timeout_sec
+                           ~timeout_sec
                            dispatch.runtime)
                   ; cleanup = Fun.id
                   })
@@ -600,7 +602,7 @@ let handle_tool_execute_typed
               Keeper_tooling.Execute_shell_ir.dispatch
                 ~workdir:cwd
                 ~sandbox:dispatch_sandbox
-                ?timeout_sec
+                ~timeout_sec
                 ?base_host_env
                 ~on_output_chunk
                 ir
@@ -779,11 +781,37 @@ let handle_tool_execute_typed
                           @ dispatched_model_location_fields)
                        "Execute completed, but its oversized output artifact could not be persisted."))
              | Ok output_fields ->
+               let timeout_fields =
+                 match
+                   Process_eio.exit_reason_of_status result.status, timeout_budget
+                 with
+                 | ( Process_eio.Timed_out
+                   , Keeper_tool_execute_input.Default seconds ) ->
+                   [ ( "timeout"
+                     , `Assoc
+                         [ "limit_sec", `Float seconds
+                         ; "source", `String "default"
+                         ] )
+                   ]
+                 | ( Process_eio.Timed_out
+                   , Keeper_tool_execute_input.Named_by_caller seconds ) ->
+                   [ ( "timeout"
+                     , `Assoc
+                         [ "limit_sec", `Float seconds
+                         ; "source", `String "timeout_sec"
+                         ] )
+                   ]
+                 | ( ( Process_eio.Completed _
+                     | Process_eio.Signaled _
+                     | Process_eio.Stopped _ )
+                   , _ ) -> []
+               in
                let payload =
                  `Assoc
                    ([ "ok", `Bool succeeded
                     ; "status", status_json
                     ]
+                    @ timeout_fields
                     @ output_fields
                     @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms

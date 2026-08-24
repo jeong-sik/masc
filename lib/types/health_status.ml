@@ -1,5 +1,6 @@
 type t =
   | Ok
+  | Idle
   | Warming
   | Snapshot_not_ready
   | Degraded
@@ -24,7 +25,18 @@ let of_string_opt raw =
      [Unknown], and the fleet health reader counts [Unknown] as unreachable, so
      a quiet fleet reported its event-queue storage and work as unavailable
      (#27560). *)
-  | "ok" | "good" | "healthy" | "empty" -> Some Ok
+  (* [reachable] is what the dashboard runtime probe emits when every runtime
+     it probed answered. Absent here it fell to [Unknown], which ranks 2 — the
+     same rung as [Degraded] — so a fully reachable fleet read as a troubled
+     one (#27560). *)
+  | "ok" | "good" | "healthy" | "empty" | "reachable" -> Some Ok
+  (* [idle] is what [Channel_gate_metrics.health_of_counts] emits for a channel
+     that carried no messages at all. It is not [Ok]: nothing succeeded, there
+     was simply nothing to do, and an operator reading a quiet channel wants
+     that difference. Absent here it fell to [Unknown], which ranks 2 — the
+     same rung as [Degraded] — so a silent channel read as a troubled one
+     (#27560). *)
+  | "idle" | "no_http_runtimes" -> Some Idle
   (* [initializing] is what the dashboard core and the operator digest emit for
      a workspace that has not finished starting. It was absent here, so it fell
      to [Unknown], which ranks 2 — the same rung as [Degraded] and [Stale] — and
@@ -35,7 +47,10 @@ let of_string_opt raw =
   | "degraded" | "interrupted" -> Some Degraded
   | "stale" -> Some Stale
   | "warning" | "warn" | "watch" | "risk" -> Some Warning
-  | "unavailable" -> Some Unavailable
+  (* [unreachable] is the same probe's worst rung: nothing answered. It fell
+     to [Unknown] too, so "none answered" and "some answered" arrived at the
+     same severity (#27560). *)
+  | "unavailable" | "unreachable" -> Some Unavailable
   | "blocked" -> Some Blocked
   | "error" | "bad" | "critical" | "failing" -> Some Error
   | "timeout" -> Some Timeout
@@ -52,6 +67,7 @@ let of_string raw =
 
 let to_string = function
   | Ok -> "ok"
+  | Idle -> "idle"
   | Warming -> "warming"
   | Snapshot_not_ready -> "snapshot_not_ready"
   | Degraded -> "degraded"
@@ -71,7 +87,7 @@ let rank = function
   | Blocked | Error | Timeout -> 3
   | Degraded | Stale | Warning | Unavailable | Unknown -> 2
   | Warming | Snapshot_not_ready -> 1
-  | Ok -> 0
+  | Ok | Idle -> 0
 
 let rank_string raw = raw |> of_string |> rank
 

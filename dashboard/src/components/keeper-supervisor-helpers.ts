@@ -1,14 +1,11 @@
 // Pure helpers for keeper-supervisor-diagnostics.
 // Kept separate so they are unit-testable without preact rendering.
 //
-// `SupervisorCrashCategory` is the production UI variant of crash-reason
-// classification. A separate RFC-0174 source (`LibCrashCategory` /
-// `classifyCrashReasonLib`) lives in `lib/keeper-classifiers.ts` and
-// diverges on the unmatched fallback (`'unknown'` there vs `'other'`
-// here). The two are intentional homonyms — the RFC-0174 source has no
-// production callsite today, so this variant is the de-facto production
-// SSOT, with `'other'` chosen as a UI-friendly bucket label. See the
-// lib file for the migration trade-off.
+// `SupervisorCrashCategory` is the only crash-reason classification left.
+// A second one lived in `lib/keeper-classifiers.ts` and disagreed with this
+// one on the unmatched fallback (`'unknown'` there, `'other'` here); it had
+// no callsite and was removed rather than reconciled, since two answers to
+// one question is the problem and picking between them is not.
 
 import type { KeeperSupervisorCrashLogEntry } from '../types'
 

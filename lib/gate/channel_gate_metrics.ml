@@ -499,18 +499,23 @@ let success_rate_pct (stats : channel_stats) =
 let slow_rate_pct (stats : channel_stats) =
   percent stats.slow_count stats.timed_count
 
-let health_of_counts ~message_count ~error_count ~success_count ~timed_count ~slow_count =
-  if message_count = 0 then "idle"
-  else if error_count = 0 then "healthy"
-  else if success_count = 0 then "failing"
+(* Returns the shared status type rather than a word of this module's own.
+   The ladder below distinguishes a channel that carried nothing from one that
+   lost everything; spelling those as free strings let both arrive at readers
+   as [Unknown], flattening the worst rung into the middle one (#27560). *)
+let health_of_counts ~message_count ~error_count ~success_count ~timed_count ~slow_count
+  : Health_status.t =
+  if message_count = 0 then Health_status.Idle
+  else if error_count = 0 then Health_status.Ok
+  else if success_count = 0 then Health_status.Error
   else
     let err_rate =
       percent error_count message_count
     in
     let slow_rate = percent slow_count timed_count in
-    if err_rate >= 50 then "failing"
-    else if err_rate >= 10 || slow_rate >= 25 then "degraded"
-    else "healthy"
+    if err_rate >= 50 then Health_status.Error
+    else if err_rate >= 10 || slow_rate >= 25 then Health_status.Degraded
+    else Health_status.Ok
 
 let health_of_stats (stats : channel_stats) =
   health_of_counts ~message_count:stats.message_count
@@ -658,7 +663,7 @@ let snapshot_json () =
         ("slow_rate_pct", `Int (slow_rate_pct stats));
         ("success_rate_pct", `Int (success_rate_pct stats));
         ("workspace_count", `Int stats.workspace_count);
-        ("health", `String (health_of_stats stats));
+        ("health", `String (Health_status.to_string (health_of_stats stats)));
       ]
   in
   let binding_json (stats : binding_stats) =
@@ -683,7 +688,7 @@ let snapshot_json () =
         ("avg_duration_ms", `Int avg_dur);
         ("max_duration_ms", `Int stats.max_duration_ms);
         ("success_rate_pct", `Int (binding_success_rate_pct stats));
-        ("health", `String (binding_health stats));
+        ("health", `String (Health_status.to_string (binding_health stats)));
       ]
   in
   `Assoc

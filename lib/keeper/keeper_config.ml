@@ -192,3 +192,23 @@ let keeper_enable_thinking_rp =
 
 let keeper_enable_thinking () : bool =
   Runtime_params.get keeper_enable_thinking_rp
+
+(* The AGENT_CORE run loop continues after every tool round and stops only when
+   the model finishes, errors, or runs a terminal tool, so a turn ended by
+   exhausting wall clock or context rather than by any declared bound. Measured
+   2026-08-24 over 4,416 keeper turns: p50 0 rounds, p90 6, p99 56, max 279;
+   20 turns went past 80. A run that reaches the ceiling fails with
+   ToolRoundLimitExceeded, which the turn's terminal reason code carries -- it
+   is not truncated into something that reads as a finished run. 0 keeps the
+   loop unbounded. *)
+let keeper_max_tool_rounds_rp =
+  _rp_int ~key:"keeper.turn.max_tool_rounds"
+    ~default:(fun () -> 0)
+    ~min_v:0 ~max_v:1000
+    ~description:"Ceiling on tool-continuation rounds in one keeper turn (0 = unbounded)" ()
+
+let keeper_max_tool_rounds () : int option =
+  match Runtime_params.get keeper_max_tool_rounds_rp with
+  | 0 -> None
+  | rounds -> Some rounds
+;;

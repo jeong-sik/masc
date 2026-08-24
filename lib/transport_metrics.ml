@@ -403,14 +403,37 @@ let http_listener_mode () =
   Env_config.Transport.effective_h2_mode ()
 ;;
 
+(* Closed so the reader lands on the same four values the writer can produce.
+   Spelled as free strings, the TUI carried whatever arrived and rendered it,
+   so a producer typo or a retired spelling reached the operator as a path
+   name rather than as a decode failure (#27652). *)
+type primary_path_kind =
+  | Grpc_subscribe
+  | Websocket
+  | Sse
+  | Streamable_http
+
+let primary_path_kind_to_string = function
+  | Grpc_subscribe -> "grpc_subscribe"
+  | Websocket -> "websocket"
+  | Sse -> "sse"
+  | Streamable_http -> "streamable_http"
+
+let primary_path_kind_of_string = function
+  | "grpc_subscribe" -> Some Grpc_subscribe
+  | "websocket" -> Some Websocket
+  | "sse" -> Some Sse
+  | "streamable_http" -> Some Streamable_http
+  | _ -> None
+
 let primary_path ~grpc_subscribers ~ws_sessions ~sse_sessions =
   if grpc_subscribers > 0
-  then "grpc_subscribe"
+  then Grpc_subscribe
   else if ws_sessions > 0
-  then "websocket"
+  then Websocket
   else if sse_sessions > 0
-  then "sse"
-  else "streamable_http"
+  then Sse
+  else Streamable_http
 ;;
 
 (* [relay_retry_total] and [relay_drop_total] used to feed this. They are
@@ -421,13 +444,29 @@ let primary_path ~grpc_subscribers ~ws_sessions ~sse_sessions =
 let queue_pressure_high_depth = 32
 let queue_pressure_watch_depth = 8
 
+type queue_pressure_kind =
+  | Steady
+  | Watch
+  | High
+
+let queue_pressure_kind_to_string = function
+  | Steady -> "steady"
+  | Watch -> "watch"
+  | High -> "high"
+
+let queue_pressure_kind_of_string = function
+  | "steady" -> Some Steady
+  | "watch" -> Some Watch
+  | "high" -> Some High
+  | _ -> None
+
 let queue_pressure ~sse_queue_max ~relay_queue_depth =
   let max_queue_depth = max sse_queue_max relay_queue_depth in
   if max_queue_depth >= queue_pressure_high_depth
-  then "high"
+  then High
   else if max_queue_depth >= queue_pressure_watch_depth
-  then "watch"
-  else "steady"
+  then Watch
+  else Steady
 ;;
 
 let ws_enabled () = Env_config.Transport.ws_enabled ()
@@ -541,10 +580,11 @@ let transport_health_json () =
   `Assoc
     [ ( "summary"
       , `Assoc
-          [ "primary_path", `String primary_path
+          [ "primary_path", `String (primary_path_kind_to_string primary_path)
           ; ( "queue_pressure"
             , `String
-                (queue_pressure ~sse_queue_max ~relay_queue_depth) )
+                (queue_pressure_kind_to_string
+                   (queue_pressure ~sse_queue_max ~relay_queue_depth)) )
           ; "external_fanout_targets", `Int sse_external_subscribers
           ] )
     ; ( "sse"

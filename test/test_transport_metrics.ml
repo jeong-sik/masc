@@ -565,6 +565,48 @@ let test_queue_pressure_tracks_current_depth () =
   check string "and it comes back down" "steady" (pressure_at 0)
 ;;
 
+(* The wire words and the type are one set. A value the producer can emit and
+   the reader cannot name is exactly the drift this pair was split to stop, so
+   both directions are walked rather than spot-checked (#27652). *)
+let test_summary_words_round_trip () =
+  List.iter
+    (fun kind ->
+       let word = Masc.Transport_metrics.primary_path_kind_to_string kind in
+       Alcotest.(check bool)
+         (Printf.sprintf "primary_path %s round trips" word)
+         true
+         (Masc.Transport_metrics.primary_path_kind_of_string word = Some kind))
+    [ Masc.Transport_metrics.Grpc_subscribe
+    ; Masc.Transport_metrics.Websocket
+    ; Masc.Transport_metrics.Sse
+    ; Masc.Transport_metrics.Streamable_http
+    ];
+  List.iter
+    (fun kind ->
+       let word = Masc.Transport_metrics.queue_pressure_kind_to_string kind in
+       Alcotest.(check bool)
+         (Printf.sprintf "queue_pressure %s round trips" word)
+         true
+         (Masc.Transport_metrics.queue_pressure_kind_of_string word = Some kind))
+    [ Masc.Transport_metrics.Steady
+    ; Masc.Transport_metrics.Watch
+    ; Masc.Transport_metrics.High
+    ]
+;;
+
+(* A word from outside the set does not become a value. Before the split the
+   TUI printed whatever arrived in this field. *)
+let test_unknown_summary_word_is_refused () =
+  Alcotest.(check bool)
+    "an unknown primary_path is refused"
+    true
+    (Masc.Transport_metrics.primary_path_kind_of_string "carrier_pigeon" = None);
+  Alcotest.(check bool)
+    "an unknown queue_pressure is refused"
+    true
+    (Masc.Transport_metrics.queue_pressure_kind_of_string "panicking" = None)
+;;
+
 let () =
   run "Transport_metrics" [
     ("init", [
@@ -607,6 +649,11 @@ let () =
       test_case "transport_health_json structure" `Quick test_transport_health_json;
       test_case "queue pressure tracks the current depth" `Quick
         test_queue_pressure_tracks_current_depth;
+    ]);
+    ("summary vocabulary", [
+      test_case "wire words round trip" `Quick test_summary_words_round_trip;
+      test_case "an unknown word is refused" `Quick
+        test_unknown_summary_word_is_refused;
     ]);
     ("listen_status", [
       test_case "grpc listen_status lifecycle" `Quick

@@ -188,6 +188,7 @@ module Json_template = struct
         { node_id : Node_id.t
         ; pointer : Json_pointer.t
         }
+    | Param of { name : string }
     | Object of (string * t) list
     | Array of t list
 
@@ -199,9 +200,13 @@ module Json_template = struct
         { node_id : Node_id.t
         ; error : Json_pointer.resolution_error
         }
+    | Param_not_substituted of string
+
+  type substitution_error = Missing_param of string
 
   let literal value = Literal value
   let output ~node_id ~pointer = Output { node_id; pointer }
+  let param ~name = Param { name }
   let array values = Array values
 
   let object_ fields =
@@ -217,7 +222,7 @@ module Json_template = struct
 
   let dependencies template =
     let rec collect acc = function
-      | Literal _ -> acc
+      | Literal _ | Param _ -> acc
       | Output { node_id; _ } ->
         if List.exists (Node_id.equal node_id) acc then acc else node_id :: acc
       | Object fields ->
@@ -229,7 +234,7 @@ module Json_template = struct
 
   let references template =
     let rec collect acc = function
-      | Literal _ -> acc
+      | Literal _ | Param _ -> acc
       | Output { node_id; pointer } -> (node_id, pointer) :: acc
       | Object fields ->
         List.fold_left (fun acc (_, value) -> collect acc value) acc fields
@@ -238,9 +243,56 @@ module Json_template = struct
     collect [] template |> List.rev
   ;;
 
+  let param_names template =
+    let rec collect acc = function
+      | Literal _ | Output _ -> acc
+      | Param { name } -> if List.mem name acc then acc else name :: acc
+      | Object fields ->
+        List.fold_left (fun acc (_, value) -> collect acc value) acc fields
+      | Array values -> List.fold_left collect acc values
+    in
+    collect [] template |> List.rev
+  ;;
+
+  (* Substitution rebuilds the template with every [Param] replaced by the
+     caller's value, so a plan created from the result is param-free and the
+     executor never meets an unbound name. Structure is preserved exactly:
+     no field is added or removed, so [Object] duplicate-field validity
+     carries over from the input template. *)
+  let substitute_params ~lookup template =
+    let rec substitute = function
+      | Literal _ as value -> Ok value
+      | Output _ as value -> Ok value
+      | Param { name } ->
+        (match lookup name with
+         | Some value -> Ok (Literal value)
+         | None -> Error (Missing_param name))
+      | Object fields ->
+        let rec substitute_all rebuilt = function
+          | [] -> Ok (Object (List.rev rebuilt))
+          | (name, value) :: rest ->
+            (match substitute value with
+             | Ok value -> substitute_all ((name, value) :: rebuilt) rest
+             | Error _ as error -> error)
+        in
+        substitute_all [] fields
+      | Array values ->
+        let rec substitute_all rebuilt = function
+          | [] -> Ok (Array (List.rev rebuilt))
+          | value :: rest ->
+            (match substitute value with
+             | Ok value -> substitute_all (value :: rebuilt) rest
+             | Error _ as error -> error)
+        in
+        substitute_all [] values
+    in
+    substitute template
+  ;;
+
   let resolve ~lookup template =
     let rec resolve_value = function
       | Literal value -> Ok value
+      | Param { name } -> Error (Param_not_substituted name)
       | Output { node_id; pointer } ->
         (match lookup node_id with
          | None -> Error (Missing_output node_id)

@@ -59,10 +59,44 @@ let typed_input_has_env
   env <> []
 ;;
 
-let typed_input_timeout_sec
+(* Execute's callable surface is synchronous: the call holds the Keeper's only
+   turn slot until the process ends, so a caller that names no budget is asking
+   the Keeper to wait for however long the command happens to take. Nothing
+   below this decides otherwise — an absent [timeout_sec] used to mean
+   unbounded.
+
+   Measured over 2026-08-20..24 on the reference workspace: 9,396 of 10,331
+   Execute calls named no budget, and those held 76% of all Execute wall clock.
+   The longest single untimed call ran 29 minutes.
+
+   600s is inside the range callers who do name a budget already use (10s to
+   900s), and it is above every legitimate run in that window except one
+   [dune test] at 1,077s. A whole test suite is the call that should state its
+   own budget, and being stopped is how its author finds that out. *)
+let default_timeout_sec = 600.
+
+(* Who set the budget, kept beside the number. A run stopped at a limit its
+   caller never chose reads as exit 124, which [Process_eio] documents as
+   indistinguishable from a program that exits 124 on its own — so the result
+   has to be able to say which limit stopped it. *)
+type timeout_budget =
+  | Named_by_caller of float
+  | Default of float
+
+let timeout_budget_seconds = function
+  | Named_by_caller seconds | Default seconds -> seconds
+;;
+
+let typed_input_timeout_budget
       ({ timeout_sec; _ } : Keeper_tool_execute_typed_input.execute_input)
   =
-  timeout_sec
+  match timeout_sec with
+  | Some seconds -> Named_by_caller seconds
+  | None -> Default default_timeout_sec
+;;
+
+let typed_input_timeout_sec input =
+  timeout_budget_seconds (typed_input_timeout_budget input)
 ;;
 
 let typed_validation_error_text error =

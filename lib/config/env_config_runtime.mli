@@ -30,6 +30,20 @@ module Sse_connect_guard : sig
   val connect_max_in_window : int
   (** Reconnects admitted inside one window. [<= 0] disables the window
       limit. *)
+
+  (** Re-readable reads of the same three knobs.  The [float]/[int]
+      bindings above are evaluated once at process start; these thunks
+      read the environment at each call, so tests can pin the
+      documented disable semantics ([<= 0], including negative
+      values) without forking a process.  An operator flipping the
+      env-var mid-flight is {e not} promised a hot reload — the
+      transport still reads the cached bindings — only that the
+      reader itself never clamps a negative to the default. *)
+  module Re_read : sig
+    val reconnect_min_interval_seconds : unit -> float
+    val connect_window_seconds : unit -> float
+    val connect_max_in_window : unit -> int
+  end
 end
 
 (** {1 Tempo (polling interval)} *)

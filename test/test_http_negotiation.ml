@@ -363,11 +363,62 @@ let test_preserve_guard_keeps_ag_ui_cooldown () =
           check bool "preserved retry-after is positive" true (retry_after_s > 0.0));
       ignore (Cleanup_view.reap_stale_guards ())
 
+(* task-534: the SSE reconnect guard's documented disable semantics are
+   "[<= 0]" — negative {e and} zero both disable (mli of
+   Env_config_runtime.Sse_connect_guard, docs/spec/09-server-transport.md,
+   and Server_mcp_transport_http_conn.mli all say so).  A reader that
+   routes these three knobs through the [*_nonneg] helpers would clamp a
+   negative to the default and silently turn "disable" back into
+   "default cooldown", with every doc still claiming otherwise.  These
+   tests pin the reader itself: the raw value comes through, whatever its
+   sign.  They use the [Re_read] thunks (per-call reads) because the
+   module-level bindings are fixed at process start. *)
+let with_env_var name value f =
+  let prev = Sys.getenv_opt name in
+  Unix.putenv name value;
+  let finally () =
+    match prev with
+    | Some v -> Unix.putenv name v
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect ~finally f
+
+let test_sse_guard_negative_disables_not_clamped () =
+  let module Reread = Env_config_runtime.Sse_connect_guard.Re_read in
+  with_env_var "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "-1" @@ fun () ->
+  check (float 0.0) "negative min-interval reads through (-1.0)" (-1.0)
+    (Reread.reconnect_min_interval_seconds ());
+  with_env_var "MASC_SSE_CONNECT_WINDOW_S" "-0.5" @@ fun () ->
+  check (float 0.0) "negative window reads through (-0.5)" (-0.5)
+    (Reread.connect_window_seconds ());
+  with_env_var "MASC_SSE_CONNECT_MAX_IN_WINDOW" "-3" @@ fun () ->
+  check int "negative max-in-window reads through (-3)" (-3)
+    (Reread.connect_max_in_window ())
+
+let test_sse_guard_zero_and_positive_read_through () =
+  let module Reread = Env_config_runtime.Sse_connect_guard.Re_read in
+  with_env_var "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "0" @@ fun () ->
+  check (float 0.0) "zero min-interval reads through (0.0)" 0.0
+    (Reread.reconnect_min_interval_seconds ());
+  with_env_var "MASC_SSE_CONNECT_WINDOW_S" "30" @@ fun () ->
+  check (float 0.0) "positive window reads through (30.0)" 30.0
+    (Reread.connect_window_seconds ());
+  with_env_var "MASC_SSE_CONNECT_MAX_IN_WINDOW" "5" @@ fun () ->
+  check int "positive max-in-window reads through (5)" 5
+    (Reread.connect_max_in_window ())
+
+(* Non-vacuous note: the guard's decision logic ([guard_deadline] /
+   [check_sse_connect_guard]) answers "disabled" exactly when the knob is
+   [<= 0.0]; that branch is already exercised by the two cooldown tests
+   above, and the reader tests here pin the other half of the contract —
+   that a negative value reaches that branch instead of being clamped to
+   the default by the reader.  A [*_nonneg] reader swap turns these three
+   checks red while every doc still says "[<= 0] disables". *)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  run "http_negotiation"
-    [
+  run "http_negotiation"    [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict classification" `Quick test_classify_mcp_accept]);
@@ -394,5 +445,13 @@ let () =
           test_sse_guard_registry_is_shared_with_cleanup_loop;
         test_case "preserve guard keeps cooldown" `Quick
           test_preserve_guard_keeps_ag_ui_cooldown;
+        test_case "sse guard knobs come from the config module" `Quick
+          test_sse_guard_knobs_come_from_the_config_module;
+      ]);
+      ("sse_guard_disable_semantics", [
+        test_case "negative reads through, not clamped to default" `Quick
+          test_sse_guard_negative_disables_not_clamped;
+        test_case "zero and positive read through unchanged" `Quick
+          test_sse_guard_zero_and_positive_read_through;
       ]);
     ]

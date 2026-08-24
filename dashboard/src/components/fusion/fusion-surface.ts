@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
 import type { FusionRunRecord, FusionRunStatusLabel, FusionTopologyLabel } from '../../api/dashboard'
 import { navigate, replaceRoute, route } from '../../router'
@@ -12,6 +12,7 @@ import {
   refreshFusionBoard,
   refreshFusionRuns,
 } from '../../store'
+import { registerFusionBoardRefresh } from '../../sse-store'
 import { FusionRunForm } from './fusion-run-form'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
@@ -1304,6 +1305,11 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
 }
 
 export function FusionSurface() {
+  // A completed deliberation lands as a board-sink post. post_created carries
+  // only a preview and no meta, so the detail browser cannot be built from the
+  // event — refetch the board-sink track instead, the same call the Refresh
+  // button makes (#21822).
+  useEffect(() => registerFusionBoardRefresh(() => { void refreshFusionBoard() }), [])
   const posts = fusionBoardPosts.value
   const runs = useMemo(() => buildFusionRuns(posts), [posts])
   const registryRuns = fusionRuns.value

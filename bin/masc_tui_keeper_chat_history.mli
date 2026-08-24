@@ -47,9 +47,9 @@ end
 (** Who put a [role: "user"] row in front of the keeper.
 
     Not always the operator. On one live keeper 92 of 128 rows carried that
-    role and 23 distinct speakers: taskmaster, an MCP client, the exact-lane
-    verifier, the dashboard, a dozen canary keepers. Drawing them all as "you"
-    told the operator they had said things they had never seen. *)
+    role and 23 distinct speakers: another keeper, an MCP client, the
+    exact-lane verifier, the dashboard, a dozen canary keepers. Drawing them
+    all as "you" told the operator they had said things they had never seen. *)
 type speaker =
   | Operator
       (** The row named no author, which is a person typing at an operator
@@ -97,9 +97,9 @@ type decoded =
 val addressed_label : speaker -> Surface.t option -> string
 (** The name to draw beside an {!Addressed_to_keeper} row. An unnamed operator
     row is ["you"], the way it always read. A named author is drawn, and a
-    surface that is not an operator's own is appended — ["taskmaster · agent"],
-    ["vincent · slack"] — so a fleet broadcast and a direct message do not look
-    alike. *)
+    surface that is not an operator's own is appended — ["<keeper> · agent"],
+    ["<operator> · slack"] — so a fleet broadcast and a direct message do not
+    look alike. *)
 
 (** One page of rows older than a cursor, from
     [GET /keepers/<name>/chat/history/page?before=<ts>].

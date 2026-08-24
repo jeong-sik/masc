@@ -81,7 +81,14 @@ let test_descriptor_is_typed_only () =
     false
     (List.mem "stages" props);
   let branches = one_of_required_names execute_schema.input_schema in
-  Alcotest.(check int) "2 oneOf branches" 2 (List.length branches);
+  (* One branch per shape the caller can send: a single process, a pipeline,
+     or a script the gate lowers.  The count is what it is; naming each one
+     is what keeps a retired shape from creeping back in. *)
+  Alcotest.(check int) "3 oneOf branches" 3 (List.length branches);
+  Alcotest.(check bool) "argv branch present" true (List.mem "argv" branches);
+  Alcotest.(check bool)
+    "pipeline branch present" true (List.mem "pipeline" branches);
+  Alcotest.(check bool) "script branch present" true (List.mem "script" branches);
   Alcotest.(check bool) "cmd branch absent" false (List.mem "cmd" branches);
   Alcotest.(check (option string))
     "no top-level required; oneOf owns branch selection"

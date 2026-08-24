@@ -10,9 +10,7 @@ type call =
   ; route_evidence : Yojson.Safe.t option
   }
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
+let trim_nonempty = String_util.trim_nonempty
 
 let label = function
   | Tool_name value -> "tool_name:" ^ value

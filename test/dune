@@ -2655,7 +2655,13 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries alcotest ast_grep masc_tui_keeper_chat_queue)
+ (libraries
+  alcotest
+  ast_grep
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
+  masc_tui_types)
  (deps
   (source_tree ../bin)))
 

@@ -568,6 +568,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
    Buffer.add_string state.msg_input materialised);
   save_message_draft state;
   state.msg_target_keeper_name <- Some keeper_name;
+  state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   Buffer.clear state.msg_input;
   List.assoc_opt keeper_name state.msg_drafts
@@ -1059,15 +1060,26 @@ let post_keeper_chat_watching ~mailbox ~port request =
       Masc_tui_http.post_keeper_chat_streaming ~clock ~host ~port ~on_chunk
         request
 
+let inflight_entry_by_request_id state request_id =
+  List.find_opt
+    (fun entry -> String.equal entry.sent_request.request_id request_id)
+    state.msg_inflight
+;;
+
+let inflight_by_request_id state request_id =
+  Option.map
+    (fun entry -> entry.sent_request)
+    (inflight_entry_by_request_id state request_id)
+;;
+
 (* The strict decode carries no tool information, so the rows the live pane
    drew are the only record of what the turn did. They are committed before
    the reply lands so the scrollback reads in the order it happened. *)
 let settle_live_turn state (request : Keeper_chat.request) =
-  match state.msg_live with
-  | Some live
-    when String.equal
-           (Keeper_chat_transcript.request_id live)
-           request.Keeper_chat.request_id ->
+  match inflight_entry_by_request_id state request.Keeper_chat.request_id with
+  | Some entry
+    when Keeper_chat.same_request_identity entry.sent_request request ->
+      let live = entry.live in
       let block =
         Keeper_chat_transcript.tool_block
           (Keeper_chat_transcript.tool_calls live)
@@ -1081,7 +1093,13 @@ let settle_live_turn state (request : Keeper_chat.request) =
        | rows ->
            append_chat_history state request Message_tool
              (String.concat "\n" rows));
-      state.msg_live <- None
+      (match state.msg_live with
+       | Some visible
+         when String.equal
+                (Keeper_chat_transcript.request_id visible)
+                request.Keeper_chat.request_id ->
+           state.msg_live <- None
+       | Some _ | None -> ())
   | Some _ | None -> ()
 
 (* Ask the server to interrupt the turn this request opened.
@@ -2124,14 +2142,6 @@ let inflight_for state keeper_name =
        state.msg_inflight)
 ;;
 
-let inflight_by_request_id state request_id =
-  Option.map
-    (fun entry -> entry.sent_request)
-    (List.find_opt
-       (fun entry -> String.equal entry.sent_request.request_id request_id)
-       state.msg_inflight)
-;;
-
 let drop_inflight state request =
   state.msg_inflight <-
     List.filter
@@ -2148,9 +2158,20 @@ let drop_inflight state request =
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
 let launch_keeper_request state ~mailbox request =
+  let live =
+    Keeper_chat_transcript.create
+      ~keeper_name:request.Keeper_chat.keeper_name
+      ~request_id:request.request_id
+      ~started_at:(Unix.gettimeofday ())
+  in
   state.msg_inflight <-
-    { sent_request = request; sent_at = Unix.gettimeofday () }
+    { sent_request = request; sent_at = Unix.gettimeofday (); live }
     :: state.msg_inflight;
+  if
+    Option.exists
+      (String.equal request.Keeper_chat.keeper_name)
+      state.msg_target_keeper_name
+  then state.msg_live <- Some live;
   let run () =
     if enqueue_dispatch_start mailbox request false
     then begin
@@ -4088,21 +4109,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       Fun.protect
         ~finally:(fun () -> Eio.Promise.resolve acknowledge !proceed)
         (fun () ->
-          match inflight_by_request_id state request.Keeper_chat.request_id with
-          | Some current
-            when Keeper_chat.same_request_identity current request ->
+          match
+            inflight_entry_by_request_id state request.Keeper_chat.request_id
+          with
+          | Some entry
+            when Keeper_chat.same_request_identity entry.sent_request request ->
               append_user_history_once state request;
               consume_dispatched_message_draft state request;
               add_event state "message"
                 (Printf.sprintf "%s Keeper request: %s"
                    (if was_replay then "Replaying exact" else "Dispatching")
                    request.request_id);
-              state.msg_live <-
-                Some
-                  (Keeper_chat_transcript.create
-                     ~keeper_name:request.Keeper_chat.keeper_name
-                     ~request_id:request.request_id
-                     ~started_at:(Unix.gettimeofday ()));
+              if
+                Option.exists
+                  (String.equal request.Keeper_chat.keeper_name)
+                  state.msg_target_keeper_name
+              then state.msg_live <- Some entry.live;
               proceed := true
           | Some _ | None -> ())
   | Keeper_chat_done (request, was_replay, result, acknowledge) ->
@@ -4130,14 +4152,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       (* The turn settled, so "next" has arrived for whatever was waiting. *)
       drain_queued_message state ~base_path ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
-      (* Identity-guarded: a late chunk from a superseded turn must not draw
-         into the one now running. *)
-      (match state.msg_live with
-       | Some live
-         when String.equal
-                (Keeper_chat_transcript.request_id live)
-                request.Keeper_chat.request_id ->
-           List.iter (Keeper_chat_transcript.apply live) deltas
+      (* Each Keeper can stream independently. Looking up the request keeps a
+         background turn from replacing the selected Keeper's transcript and
+         keeps its tool rows available when that turn settles. *)
+      (match
+         inflight_entry_by_request_id state request.Keeper_chat.request_id
+       with
+       | Some entry
+         when Keeper_chat.same_request_identity entry.sent_request request ->
+           List.iter (Keeper_chat_transcript.apply entry.live) deltas
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       append_chat_history state request Message_status detail
@@ -4229,11 +4252,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                (Keeper_chat.compact_request_id tool_call_id)
          | Error detail -> "could not answer the held call: " ^ detail)
   | Keeper_chat_interrupt_done (request, result) ->
-      (match state.msg_live with
-       | Some live
-         when String.equal
-                (Keeper_chat_transcript.request_id live)
-                request.Keeper_chat.request_id ->
+      (match
+         inflight_entry_by_request_id state request.Keeper_chat.request_id
+       with
+       | Some entry
+         when Keeper_chat.same_request_identity entry.sent_request request ->
+           let live = entry.live in
            let noted =
              match result with
              | Ok (Masc_tui_http.Signalled { turn_id }) ->

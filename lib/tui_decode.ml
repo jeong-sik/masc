@@ -39,11 +39,21 @@ type keeper = {
 type keeper_phase = Keeper_state_machine.phase
 
 let keeper_phase_of_string = Keeper_state_machine.phase_of_string
+
+type keeper_health = Keeper_types.keeper_health
+let keeper_health_to_string = Keeper_status_runtime.keeper_health_to_string
+let keeper_health_of_string = Keeper_status_runtime.keeper_health_of_string_opt
+
+let keeper_next_action_of_string =
+  Keeper_status_runtime.keeper_next_action_path_of_string_opt
 let keeper_phase_to_string = Keeper_state_machine.phase_to_string
 
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
+  kr_health : keeper_health;
+  kr_paused : bool;
+  kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
@@ -1539,6 +1549,29 @@ let decode_keeper_runtime json =
           (Printf.sprintf "keeper %S has unknown runtime status %S" kr_name
              raw_status)
   in
+  let* raw_health = required_string_field json "health" in
+  let* kr_health =
+    match keeper_health_of_string raw_health with
+    | Some health -> Ok health
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown health %S" kr_name raw_health)
+  in
+  let* kr_paused = required_bool_field json "paused" in
+  (* An absent action is absent, not a default one: the server publishes null
+     when the diagnostic named none, and a keeper with nothing to do is a
+     different reading from a keeper whose action this build cannot spell. *)
+  let* kr_next_action =
+    match member "next_action" json with
+    | `Null -> Ok None
+    | `String raw -> (
+      match keeper_next_action_of_string raw with
+      | Some action -> Ok (Some action)
+      | None ->
+          Error
+            (Printf.sprintf "keeper %S has unknown next action %S" kr_name raw))
+    | bad -> field_type_error "next_action" "a string or null" bad
+  in
   let* kr_keepalive_running = required_bool_field json "keepalive_running" in
   let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
   let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
@@ -1555,6 +1588,9 @@ let decode_keeper_runtime json =
   Ok
     { kr_name
     ; kr_status
+    ; kr_health
+    ; kr_paused
+    ; kr_next_action
     ; kr_keepalive_running
     ; kr_autoboot_enabled
     ; kr_proactive_enabled

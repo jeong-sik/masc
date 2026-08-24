@@ -785,6 +785,32 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
+      | `GET, "/api/v1/dashboard/fusion-runs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json =
+              Server_dashboard_fusion_run_projection.list_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, p
+        when String.starts_with
+               ~prefix:Server_dashboard_fusion_run_projection.detail_prefix
+               p ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let status, json =
+              Server_dashboard_fusion_run_projection.detail_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+                ~path
+            in
+            h2_respond_json_value
+              h2_reqd
+              json
+              ~status:(status :> H2.Status.t)
+              ~extra_headers:cors)
+
       (* H1 serves this through [with_public_read]
          (server_routes_http_routes_dashboard.ml). [with_server_state] only
          fetches state; under MASC_HTTP_AUTH_STRICT it left the workspace

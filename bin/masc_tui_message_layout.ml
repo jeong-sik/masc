@@ -486,6 +486,22 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
     let fitted, _, _ = cell_prefix text inner_width in
     Some { style = entry.style; kind = Metadata metadata; text = fitted }
 
+(* A body is a document, not a row. [sanitize] is applied to each line rather
+   than to the whole, because escaping a newline the way a terminal escape is
+   escaped turns the document into one unbroken run with the escape printed
+   where each break belonged. Per line the escape still covers what it is there
+   for -- a line cannot carry a control sequence into the terminal -- and the
+   breaks the author wrote survive. A line that wraps to nothing is a blank
+   line: a paragraph break, not an absence. The caller supplies [sanitize] so
+   this module keeps no terminal vocabulary of its own. *)
+let wrap_body ~max_cells ~sanitize text =
+  text
+  |> String.split_on_char '\n'
+  |> List.concat_map (fun line ->
+         match wrap_words ~max_cells (sanitize line) with
+         | [] -> [ "" ]
+         | rows -> rows)
+
 let rows_of_entry ?markdown ~inner_width ~previous entry =
   let body_width = max 4 (inner_width - 2) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this

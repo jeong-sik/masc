@@ -215,6 +215,27 @@ let test_another_tool_is_not_this_one () =
     (Option.is_none (Spawn.dispatch ctx ~name:"masc_schedule_list" ~args:(`Assoc [])))
 ;;
 
+(* --- the surface a keeper is actually offered --- *)
+
+(* Measured rather than assumed: the four are in the descriptor list a keeper
+   model is shown, not only in the schema module that declares them. Three
+   times in one session a thing was built, tested, and never registered --
+   green the whole way, and doing nothing. This is the assertion that would
+   have caught it. *)
+let test_a_keeper_is_offered_all_four () =
+  let module TD = Masc.Keeper_tool_descriptor in
+  let offered =
+    List.map (fun d -> d.TD.internal_name) (TD.model_visible_descriptors ())
+  in
+  List.iter
+    (fun name ->
+       Alcotest.(check bool)
+         ("a keeper is offered " ^ name)
+         true
+         (List.exists (String.equal name) offered))
+    [ "masc_spawn"; "masc_spawn_read"; "masc_spawn_wait"; "masc_spawn_stop" ]
+;;
+
 let () =
   Alcotest.run
     "tool_spawn"
@@ -250,6 +271,12 @@ let () =
             "another tool is not this one"
             `Quick
             test_another_tool_is_not_this_one
+        ] )
+    ; ( "surface"
+      , [ Alcotest.test_case
+            "a keeper is offered all four"
+            `Quick
+            test_a_keeper_is_offered_all_four
         ] )
     ]
 ;;

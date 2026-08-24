@@ -489,8 +489,8 @@ def assert_message_input_frame(
     rendered_row = CSI_RE.sub(b"", row_bytes).decode("utf-8").rstrip("\r\n")
     if f"> {input_text}" not in rendered_row:
         raise AssertionError(f"message row lost {input_text!r}: {rendered_row!r}")
-    if not rendered_row.endswith("│"):
-        raise AssertionError(f"message row lost its right border: {rendered_row!r}")
+    # The outer frame is gone (clutter audit); the row boundary is the
+    # positioning escape the regex above already found, not a border glyph.
     if "~" in rendered_row and "~" not in input_text:
         raise AssertionError(f"message row truncated fitting input: {rendered_row!r}")
     actual_width = fixture_cell_width(rendered_row)

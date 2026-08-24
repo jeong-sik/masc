@@ -22,7 +22,7 @@ module Event_id_set = Set.Make (String)
 
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
-let storage_generation = "v6"
+let storage_generation = "v7"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -71,7 +71,15 @@ let reaction_kind_of_string = function
   | other -> Error (Unknown_reaction_kind other)
 ;;
 
-let digest_id prefix payload = prefix ^ ":" ^ Digest.to_hex (Digest.string payload)
+(* The event id is recomputed on read and compared, so a collision is a replay
+   decision, not a display artefact -- two stimuli landing on one id make the
+   second read as the first. Stdlib.Digest is MD5; the schedule, auth and
+   cache identities in this repository already use Digestif.SHA256 (#26720).
+   The digest feeds the id readers compare, so the storage generation advances
+   with it: rows written under v6 stay in the v6 namespace and are not read. *)
+let digest_id prefix payload =
+  prefix ^ ":" ^ Digestif.SHA256.(digest_string payload |> to_hex)
+;;
 let board_stimulus_id ~post_id = "board:" ^ post_id
 
 let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =

@@ -37,9 +37,7 @@ val redact_stream_finish : stream_state -> string
     emit the remaining suffix. *)
 
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
-(** Redact all string leaves in a JSON value, preserving shape. *)
+(** Redact a JSON value's object keys as well as its string leaves, preserving
+    shape. A secret can be the key -- a header name, or a parameter a tool used
+    as a dict key -- so a leaves-only traversal emits it (#22941). *)
 
-val redact_json_keys : t -> Yojson.Safe.t -> Yojson.Safe.t
-(** Redact string literals that appear as JSON object keys. Values are left
-    untouched so this can be composed with {!redact_json} for full key+value
-    coverage without duplicating the traversal. *)

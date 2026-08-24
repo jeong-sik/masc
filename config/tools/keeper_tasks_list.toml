@@ -1,4 +1,4 @@
-
+name = "keeper_tasks_list"
 [help]
 short_description = "List MASC backlog tasks visible to this keeper."
 when_to_use = "Use before claiming work, checking awaiting verification items, or diagnosing current task state."

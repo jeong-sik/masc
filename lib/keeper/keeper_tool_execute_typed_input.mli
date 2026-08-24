@@ -182,6 +182,24 @@ val to_shell_ir_unvalidated :
     may use this entrypoint when the boundary has already been checked.  Argv
     is preserved byte-for-byte. *)
 
+val hidden_script_findings
+  :  sandbox:Masc_exec.Sandbox_target.t
+  -> execute_input
+  -> (string * string) list
+(** The scripts hidden inside argv, and what the gate would have called each.
+
+    [argv:["sh";"-c";S]] arrives as one opaque program with two literal
+    arguments, so S is counted as nothing at all while the guarantees that
+    apply to [script:S] -- path scope, redirect policy, the absence of [;] from
+    {!Masc_exec.Shell_ir.connector} -- stop applying inside it.  Each pair is
+    the shell name and a closed-vocabulary tag from
+    {!Keeper_tooling.Shell_costume.finding_tag}.
+
+    Recognition and classification only: calling this changes nothing about
+    what runs.  [Script] sources yield [[]] -- they already crossed the gate.
+    RFC execute-subset-dispositions step 1: this distribution is what decides
+    which constructs the subset rewrites first. *)
+
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
   ?namespace:redirect_namespace ->

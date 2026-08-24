@@ -15,6 +15,8 @@ let tagged : Markdown.palette =
   ; rule = ("<r>", "</r>")
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
+  ; code_header = ("<ch>", "</ch>")
+  ; code_border = ("<cb>", "</cb>")
   ; quote_gutter = "\xe2\x96\x8f "
   ; table_header = ("<th>", "</th>")
   ; table_gutter = " | "
@@ -30,6 +32,19 @@ let render ?(width = 40) ?(palette = tagged) text =
 
 let check_rows label expected actual =
   Alcotest.(check (list string)) label expected actual
+
+let horizontal cells =
+  String.concat "" (List.init cells (fun _ -> "\xe2\x94\x80"))
+
+let tagged_fence ?(width = 40) language body =
+  let stem = "\xe2\x94\x8c\xe2\x94\x80 " ^ language ^ " " in
+  let header =
+    "<ch>" ^ stem
+    ^ horizontal (width - Masc_tui_message_layout.display_width stem)
+    ^ "</ch>"
+  in
+  let footer = "<cb>\xe2\x94\x94" ^ horizontal (width - 1) ^ "</cb>" in
+  header :: body @ [ footer ]
 
 let segments_testable =
   Alcotest.(list (pair string string))
@@ -176,8 +191,10 @@ let test_rule_fills_the_width () =
    colours: reserved words as keywords, literals as numbers. *)
 let test_fenced_code_keeps_its_line_breaks () =
   check_rows "fence"
-    [ "\xe2\x94\x82 <k>let</k><c> x = </c><n>1</n>"
-    ; "\xe2\x94\x82 <k>let</k><c> y = </c><n>2</n>" ]
+    (tagged_fence "ocaml"
+       [ "\xe2\x94\x82 <k>let</k><c> x = </c><n>1</n>"
+       ; "\xe2\x94\x82 <k>let</k><c> y = </c><n>2</n>"
+       ])
     (render "```ocaml\nlet x = 1\nlet y = 2\n```")
 
 (* {1 Fenced-code highlighting} *)
@@ -190,37 +207,46 @@ let test_untagged_fence_stays_single_span () =
     (render "```\nlet x = 1\n```")
 
 let test_unknown_language_stays_single_span () =
-  check_rows "unknown tag, no colour" [ "<c>\xe2\x94\x82 fn main() {}</c>" ]
+  check_rows "unknown tag, no colour"
+    (tagged_fence "rust" [ "<c>\xe2\x94\x82 fn main() {}</c>" ])
     (render "```rust\nfn main() {}\n```")
 
 (* Strings, and a capitalised identifier as a constructor or module. *)
 let test_ocaml_strings_and_types () =
   check_rows "string and constructor"
-    [ "\xe2\x94\x82 <k>let</k><c> name = </c><s>\"polisher\"</s>"
-    ; "\xe2\x94\x82 <k>match</k><c> x </c><k>with</k><c> </c><t>Some</t><c> y -> y</c>" ]
+    (tagged_fence "ocaml"
+       [ "\xe2\x94\x82 <k>let</k><c> name = </c><s>\"polisher\"</s>"
+       ; "\xe2\x94\x82 <k>match</k><c> x </c><k>with</k><c> </c><t>Some</t><c> y -> y</c>"
+       ])
     (render "```ocaml\nlet name = \"polisher\"\nmatch x with Some y -> y\n```")
 
 (* A comment opened on one row and closed on a later one colours every row it
    covers: the lexer reads the body whole for exactly this. *)
 let test_ocaml_comment_spans_rows () =
   check_rows "comment covers its rows"
-    [ "\xe2\x94\x82 <m>(* opened here</m>"
-    ; "\xe2\x94\x82 <m>   and closed here *)</m>"
-    ; "\xe2\x94\x82 <k>let</k><c> x = </c><n>1</n>" ]
+    (tagged_fence "ocaml"
+       [ "\xe2\x94\x82 <m>(* opened here</m>"
+       ; "\xe2\x94\x82 <m>   and closed here *)</m>"
+       ; "\xe2\x94\x82 <k>let</k><c> x = </c><n>1</n>"
+       ])
     (render "```ocaml\n(* opened here\n   and closed here *)\nlet x = 1\n```")
 
 (* JSON: a key reads as a field, a string as a string, a number as a
    number. *)
 let test_json_keys_strings_numbers () =
   check_rows "json row"
-    [ "\xe2\x94\x82 <c>{</c><t>\"name\"</t><c>: </c><s>\"alpha\"</s><c>, </c><t>\"turns\"</t><c>: </c><n>42</n><c>}</c>" ]
+    (tagged_fence "json"
+       [ "\xe2\x94\x82 <c>{</c><t>\"name\"</t><c>: </c><s>\"alpha\"</s><c>, </c><t>\"turns\"</t><c>: </c><n>42</n><c>}</c>"
+       ])
     (render "```json\n{\"name\": \"alpha\", \"turns\": 42}\n```")
 
 (* Bash: strings stay strings, a [#] that starts a word comments to the row's
    end. *)
 let test_bash_comment_and_string () =
   check_rows "bash row"
-    [ "\xe2\x94\x82 <c>dune build </c><s>\"--root\"</s><c> . </c><m># from the runbook</m>" ]
+    (tagged_fence ~width:60 "bash"
+       [ "\xe2\x94\x82 <c>dune build </c><s>\"--root\"</s><c> . </c><m># from the runbook</m>"
+       ])
     (render ~width:60 "```bash\ndune build \"--root\" . # from the runbook\n```")
 
 let test_fence_markers_are_not_drawn () =
@@ -233,7 +259,15 @@ let test_fence_markers_are_not_drawn () =
 let test_unclosed_fence_still_renders_its_body () =
   check_rows "runs to the end"
     [ "<c>\xe2\x94\x82 orphan</c>" ]
-    (render "```\norphan")
+    (render "```\norphan");
+  let framed_without_footer =
+    match tagged_fence "bash" [ "\xe2\x94\x82 <c>orphan</c>" ] with
+    | [] -> assert false
+    | rows -> List.rev (List.tl (List.rev rows))
+  in
+  check_rows "an open tagged fence has no false closing border"
+    framed_without_footer
+    (render "```bash\norphan")
 
 let test_tilde_fence_is_a_fence () =
   check_rows "tilde"
@@ -245,6 +279,51 @@ let test_fenced_content_is_not_reparsed () =
   check_rows "markers are code"
     [ "<c>\xe2\x94\x82 # not a heading</c>"; "<c>\xe2\x94\x82 - not a bullet</c>" ]
     (render "```\n# not a heading\n- not a bullet\n```")
+
+(* This line is from a live Keeper reply (message
+   [msg-1787516761351436-321]).
+   The tagged lexer used to split it and immediately concatenate the chunks
+   back into one terminal row. The outer frame then cut off the branch name. *)
+let test_a_tagged_live_code_line_keeps_every_chunk () =
+  let width = 48 in
+  let source =
+    "cd <task478 worktree path>   # \xec\xa0\x80\xeb\x8f\x84 \xea\xb2\xbd\xeb\xa1\x9c\xeb\xa5\xbc \xec\x9e\x83\xec\x96\xb4\xeb\xb2\x84\xeb\xa0\xb8\xec\x8a\xb5\xeb\x8b\x88\xeb\x8b\xa4 \xe2\x80\x94 branch: task478-server-unreadable-store"
+  in
+  let rendered =
+    render ~width ~palette:Markdown.plain_palette
+      ("```bash\n" ^ source ^ "\n```\nafter the fence")
+  in
+  let expected_code_rows =
+    Masc_tui_message_layout.split_cells
+      ~max_cells:(width - Masc_tui_message_layout.display_width "| ")
+      source
+    |> List.map (fun chunk -> "| " ^ chunk)
+  in
+  let header =
+    let stem = "\xe2\x94\x8c\xe2\x94\x80 bash " in
+    stem ^ horizontal (width - Masc_tui_message_layout.display_width stem)
+  in
+  let footer = "\xe2\x94\x94" ^ horizontal (width - 1) in
+  check_rows "every split chunk is its own row"
+    (header :: expected_code_rows @ [ footer; "after the fence" ])
+    rendered;
+  let actual_code_rows =
+    List.filter
+      (fun row -> String.length row >= 2 && String.sub row 0 2 = "| ")
+      rendered
+  in
+  Alcotest.(check string) "every source scalar survives" source
+    (actual_code_rows
+     |> List.map (fun row -> String.sub row 2 (String.length row - 2))
+     |> String.concat "");
+  List.iter
+    (fun row ->
+       Alcotest.(check bool) "row stays inside the terminal budget" true
+         (Masc_tui_message_layout.display_width row <= width))
+    rendered;
+  Alcotest.(check string) "the next prose row is unstyled" "after the fence"
+    (List.hd (List.rev rendered))
+;;
 
 (* {1 Width} *)
 
@@ -353,6 +432,8 @@ let () =
             test_tilde_fence_is_a_fence
         ; Alcotest.test_case "fenced content is not reparsed" `Quick
             test_fenced_content_is_not_reparsed
+        ; Alcotest.test_case "a tagged live line keeps every chunk" `Quick
+            test_a_tagged_live_code_line_keeps_every_chunk
         ] )
     ; ( "fenced highlighting"
       , [ Alcotest.test_case "no tag means no colour" `Quick

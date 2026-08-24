@@ -139,9 +139,42 @@ let test_parse_playground_repo_path () =
   check (option (pair string string)) "docker keeper named repos"
     (Some ("masc", "lib/foo.ml"))
     (parse ".masc/playground/docker/repos/repos/masc/lib/foo.ml");
+  (* A keeper may be named "docker". Its bundle is one level up from where the
+     Docker marker would put it, so the Local reading has to stay reachable
+     after the Docker one does not resolve. *)
+  check (option (pair string string)) "keeper named docker"
+    (Some ("masc", "lib/foo.ml"))
+    (parse ".masc/playground/docker/repos/masc/lib/foo.ml");
   check (option (pair string string)) "nested repo-local pattern is not sandbox"
     None
     (parse "workspace/repo/.masc/playground/alpha/repos/masc/lib/foo.ml")
+
+(* The absolute parser and the bundle-relative one must find the same anchor,
+   or a file would carry one address when a keeper's own write path resolves it
+   and another when a reader parses the target that write recorded. *)
+let test_bundle_relative_agrees_with_absolute () =
+  let base_path = "/tmp/masc-base" in
+  let both bundle_relative =
+    List.map
+      (fun prefix ->
+        PP.parse_playground_repo_path
+          ~base_path
+          ~abs_path:(Filename.concat base_path (prefix ^ bundle_relative)))
+      [ ".masc/playground/alpha/"; ".masc/playground/docker/alpha/" ]
+  in
+  let cases =
+    [ "repos/masc/lib/foo.ml"; "repos/masc/x"; "verify-468.sh"; "repos/"; "repos/masc"; "" ]
+  in
+  List.iter
+    (fun bundle_relative ->
+      let direct = PP.parse_bundle_relative_repo_path bundle_relative in
+      List.iter
+        (fun absolute ->
+          check (option (pair string string))
+            ("same anchor for " ^ bundle_relative)
+            absolute direct)
+        (both bundle_relative))
+    cases
 
 let test_parse_playground_file_path () =
   let base_path = "/tmp/masc-base" in
@@ -199,6 +232,8 @@ let () =
       ]);
       ("parse", [
         test_case "parse playground repo path" `Quick test_parse_playground_repo_path;
+        test_case "bundle-relative agrees with absolute" `Quick
+          test_bundle_relative_agrees_with_absolute;
         test_case "parse playground file path" `Quick test_parse_playground_file_path;
       ]);
     ]

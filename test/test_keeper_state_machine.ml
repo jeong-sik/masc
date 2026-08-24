@@ -659,7 +659,7 @@ let test_can_transition_paused_to_latent_buffer_states () =
          ("Paused -> " ^ SM.phase_to_string to_phase)
          true
          (SM.can_transition ~from_phase:SM.Paused ~to_phase))
-    [ SM.Failing; SM.Overflowed; SM.HandingOff; SM.Restarting; SM.Offline ]
+    [ SM.Failing; SM.HandingOff; SM.Restarting; SM.Offline ]
 ;;
 
 let test_can_transition_paused_to_stopped () =
@@ -678,7 +678,7 @@ let test_can_execute_turn_work_capable_phases () =
          ("work-capable phase " ^ SM.phase_to_string phase)
          true
          (SM.can_execute_turn phase))
-    [ SM.Running; SM.Failing; SM.Overflowed; SM.Compacting; SM.HandingOff ]
+    [ SM.Running; SM.Failing; SM.Compacting; SM.HandingOff ]
 ;;
 
 let test_can_execute_turn_blocks_other_phases () =
@@ -1526,10 +1526,6 @@ let test_invariant_derive_matches_matrix () =
               | SM.Offline -> SM.default_conditions
               | SM.Running -> running_conditions
               | SM.Failing -> { running_conditions with heartbeat_healthy = false }
-              | SM.Overflowed ->
-                (* Retired phase (#26546): no conditions derive it, so the
-                   derive guard below skips this row. *)
-                running_conditions
               | SM.Compacting -> { running_conditions with compaction_active = true }
               | SM.HandingOff -> { running_conditions with handoff_active = true }
               | SM.Draining ->
@@ -1621,7 +1617,7 @@ let test_invariant_priority_chain () =
 
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
-let test_all_phases_covered () = check int "11 phases" 11 (List.length SM.all_phases)
+let test_all_phases_covered () = check int "10 phases" 10 (List.length SM.all_phases)
 
 (* ── Set/Clear Coverage ────────────────────────────────── *)
 
@@ -1976,7 +1972,7 @@ let () =
         ] )
     ; ( "roundtrip"
       , [ test_case "phase string roundtrip" `Quick test_phase_string_roundtrip
-        ; test_case "11 phases" `Quick test_all_phases_covered
+        ; test_case "10 phases" `Quick test_all_phases_covered
         ] )
     ; ( "lifecycle_chain"
       , [ test_case

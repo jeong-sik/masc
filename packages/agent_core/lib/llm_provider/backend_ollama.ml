@@ -89,7 +89,7 @@ let build_request_artifact
         ("Backend_ollama.build_request: "
          ^ Reasoning_history_projection.error_to_string error)
     | Ok projection ->
-      Reasoning_history_projection.observe ~component:"backend_ollama" projection;
+      Reasoning_history_projection.observe ~component:"backend_ollama" ~stream projection;
       projection.messages
   in
   let provider_messages =
@@ -208,6 +208,18 @@ let build_request_artifact
    | Some p when caps.supports_min_p -> options := ("min_p", `Float p) :: !options
    | Some _ ->
      Backend_openai.warn_capability_drop ~model_id:config.model_id ~field:"min_p"
+   | None -> ());
+  (* repeat_penalty / repeat_last_n are native Ollama options, not
+     capability-gated: every model served over /api/chat accepts them, and the
+     server applies its own default when they are absent. They exist because a
+     reasoning model can restate the same thought until the turn ends, and
+     raising the cost of tokens already in the window is Ollama's own control
+     for that. [repeat_last_n = -1] means the whole context, [0] disables. *)
+  (match config.repeat_penalty with
+   | Some p -> options := ("repeat_penalty", `Float p) :: !options
+   | None -> ());
+  (match config.repeat_last_n with
+   | Some n -> options := ("repeat_last_n", `Int n) :: !options
    | None -> ());
   (match caps.supports_seed, config.seed with
    | true, Some seed -> options := ("seed", `Int seed) :: !options
@@ -521,6 +533,82 @@ let%test "build_request config.num_ctx injected into options" =
   let json = Yojson.Safe.from_string body in
   let open Yojson.Safe.Util in
   json |> member "options" |> member "num_ctx" |> to_int = 8192
+;;
+
+let%test "build_request carries repeat_penalty and repeat_last_n into options" =
+  let config =
+    Provider_config.make
+      ~kind:Ollama
+      ~model_id:"deepseek-v4-flash:0731"
+      ~base_url:"http://127.0.0.1:11434"
+      ~repeat_penalty:1.15
+      ~repeat_last_n:1024
+      ()
+  in
+  let messages =
+    [ { role = User
+      ; content = [ Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let body = build_request ~config ~messages () in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let options = json |> member "options" in
+  Float.equal (options |> member "repeat_penalty" |> to_float) 1.15
+  && options |> member "repeat_last_n" |> to_int = 1024
+;;
+
+let%test "build_request omits the repetition samplers when unset" =
+  let config =
+    Provider_config.make
+      ~kind:Ollama
+      ~model_id:"deepseek-v4-flash:0731"
+      ~base_url:"http://127.0.0.1:11434"
+      ()
+  in
+  let messages =
+    [ { role = User
+      ; content = [ Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let body = build_request ~config ~messages () in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let options = json |> member "options" in
+  options |> member "repeat_penalty" = `Null
+  && options |> member "repeat_last_n" = `Null
+;;
+
+let%test "build_request keeps repeat_last_n = -1 meaning the whole context" =
+  let config =
+    Provider_config.make
+      ~kind:Ollama
+      ~model_id:"deepseek-v4-flash:0731"
+      ~base_url:"http://127.0.0.1:11434"
+      ~repeat_last_n:(-1)
+      ()
+  in
+  let messages =
+    [ { role = User
+      ; content = [ Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let body = build_request ~config ~messages () in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  json |> member "options" |> member "repeat_last_n" |> to_int = -1
 ;;
 
 let%test "build_request omits num_ctx when None" =

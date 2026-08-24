@@ -431,7 +431,7 @@ let assemble_hooks
                    assembly rides the wire as a trailing User-role message,
                    and re-broadcasting the world state there made models
                    re-answer it on every round of a tool loop (task-514,
-                   2026-08-24 sangsu — 36 single-call rounds restating one
+                   2026-08-24 one keeper — 36 single-call rounds restating one
                    answer). Which blocks still ride a post-tool round is the
                    typed declaration [Prompt_block_id.injected_on_post_tool_round];
                    the filter sits at assembly below so a new recording site
@@ -442,7 +442,7 @@ let assemble_hooks
                    the last Tool message anywhere in history, so it is
                    non-empty for almost every turn of a keeper that has ever
                    used a tool, and gating on it suppressed the world state on
-                   the first round of ordinary turns (live: sangsu turn 15,
+                   the first round of ordinary turns (live: one keeper's turn 15,
                    2026-08-24 08:08Z). *)
                 let post_tool_round =
                   Keeper_run_prompt.ends_with_tool_results messages

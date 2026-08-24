@@ -117,11 +117,11 @@ export function keeperPhaseLabel(keeper: Keeper): string {
  *  missing entry there.
  *
  *  Distinct from keeperBucket, which groups into the 4 coarse buckets
- *  (running/paused/stuck/offline) for the roster: a Failing or Overflowed
+ *  (running/paused/stuck/offline) for the roster: a Failing
  *  keeper is neither offline nor paused, so the bucket classifies it as
  *  "stuck" only when a blocker class is recorded — without one it lands in
  *  "running" and would render a green dot while actually degraded.
- *  PHASE_TONE handles this — Failing / Overflowed both map to `bad`. */
+ *  PHASE_TONE handles this — Failing maps to `bad`. */
 export function keeperStatusTone(keeper: Keeper): FleetTone {
   return PHASE_TONE[phaseTokenFromKeeper(keeper)]
 }

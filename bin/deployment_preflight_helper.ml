@@ -833,11 +833,76 @@ let board_posts_store =
   }
 ;;
 
+(* #29590 removed [generation] from TurnRecord as well as from the memory
+   snapshot. [Turn_record.of_json] rejects unknown fields, and
+   [Keeper_raw_trace_retention.protected_references] folds the whole sweep on
+   the first refusal while its caller only warns -- so raw traces stop being
+   collected and the disk grows with nothing failing loudly. The rows age out
+   after [history_limit] new turns, which is exactly the window this gate
+   exists to check before a deploy rather than after (#29666). *)
+let turn_record_store =
+  { store = "keeper turn records"
+  ; on_refusal =
+      "raw-trace retention folds its whole sweep on the first refused row and \
+       the caller only warns, so traces accumulate with no failing turn"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+         in
+         let store_dir =
+           Common.keeper_runtime_store_dirname Common.Keeper_turn_records
+         in
+         let recent_files keeper_dir =
+           let root = Filename.concat keeper_dir store_dir in
+           files_under root ~keep:(fun name ->
+             not (String.starts_with ~prefix:"." name))
+           |> List.concat_map (fun month ->
+             files_under month ~keep:(fun name ->
+               Filename.check_suffix name ".jsonl"))
+         in
+         let scan_file report path =
+           match open_in path with
+           | exception Sys_error _ -> report
+           | ic ->
+             Fun.protect
+               ~finally:(fun () -> close_in_noerr ic)
+               (fun () ->
+                  let acc = ref report in
+                  (try
+                     while true do
+                       let line = input_line ic in
+                       if String.trim line <> ""
+                       then
+                         acc :=
+                           count_row
+                             !acc
+                             (match Yojson.Safe.from_string line with
+                              | exception _ ->
+                                Error (Filename.basename path ^ ": not JSON")
+                              | json ->
+                                (match Turn_record.of_json json with
+                                 | Ok _ -> Ok ()
+                                 | Error detail ->
+                                   Error (Filename.basename path ^ ": " ^ detail)))
+                     done
+                   with End_of_file -> ());
+                  !acc)
+         in
+         Ok
+           (files_under keepers_dir ~keep:(fun name ->
+              not (Filename.check_suffix name ".json"))
+            |> List.concat_map recent_files
+            |> List.fold_left scan_file empty_report))
+  }
+;;
+
 let durable_stores =
   [ keeper_meta_store
   ; memory_os_current_store
   ; disposition_receipt_store
   ; board_posts_store
+  ; turn_record_store
   ]
 ;;
 

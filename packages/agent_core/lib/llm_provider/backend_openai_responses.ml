@@ -382,7 +382,7 @@ let build_request_artifact
         ("Backend_openai_responses.build_request: "
          ^ Reasoning_history_projection.error_to_string error)
     | Ok projection ->
-      Reasoning_history_projection.observe ~component:"backend_openai_responses" projection;
+      Reasoning_history_projection.observe ~component:"backend_openai_responses" ~stream projection;
       validate_projected_opaque_reasoning projection.messages;
       projection.messages
   in

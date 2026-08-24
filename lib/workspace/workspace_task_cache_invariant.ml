@@ -51,6 +51,7 @@ let clear_and_report ~config ~module_name ~signal ~status_label =
   match
     Task_cache_invariant.clear_stale_agent_task_if_matching
       config
+      ~cause:Task_cache_invariant.Desync
       ~agent_name:signal.subject_agent
       ~task_id:signal.task_id
       ~status_label

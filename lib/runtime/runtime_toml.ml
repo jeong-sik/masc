@@ -1161,6 +1161,29 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
   let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
   let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
+  let repeat_penalty_result =
+    match typed_find "a float" path tbl "repeat-penalty" Otoml.get_float with
+    | Ok (Some value) when Float.compare value 0.0 <= 0 ->
+      Error
+        (error
+           (path ^ ".repeat-penalty")
+           (Printf.sprintf
+              "repeat-penalty must be greater than 0 (1.0 disables the penalty); got %g"
+              value))
+    | other -> other
+  in
+  let repeat_last_n_result =
+    match typed_find "an integer" path tbl "repeat-last-n" Otoml.get_integer with
+    | Ok (Some value) when value < -1 ->
+      Error
+        (error
+           (path ^ ".repeat-last-n")
+           (Printf.sprintf
+              "repeat-last-n must be -1 (whole context), 0 (disabled), or a positive \
+               window; got %d"
+              value))
+    | other -> other
+  in
   let return_progress_result =
     typed_find "a boolean" path tbl "return-progress" Otoml.get_boolean
   in
@@ -1180,6 +1203,8 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let* price_output = price_output_result in
   let* keep_alive = keep_alive_result in
   let* num_ctx = num_ctx_result in
+  let* repeat_penalty = repeat_penalty_result in
+  let* repeat_last_n = repeat_last_n_result in
   let* return_progress = return_progress_result in
   Ok
     { Runtime_schema.provider_id
@@ -1193,6 +1218,8 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; price_output
     ; keep_alive
     ; num_ctx
+    ; repeat_penalty
+    ; repeat_last_n
     ; return_progress
     }
 ;;

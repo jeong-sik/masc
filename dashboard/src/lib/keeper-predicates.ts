@@ -218,7 +218,6 @@ const RUNNING_STATUS_TOKENS = new Set<string>([
 const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>([
   'Running',
   'Failing',
-  'Overflowed',
   'Compacting',
   'HandingOff',
   'Draining',
@@ -241,7 +240,6 @@ const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>
 // Both sites now import from here.
 export const ATTENTION_PHASES: ReadonlySet<string> = new Set<string>([
   'Failing',
-  'Overflowed',
   'Compacting',
   'HandingOff',
   'Draining',

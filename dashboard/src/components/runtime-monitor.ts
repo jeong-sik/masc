@@ -512,8 +512,8 @@ function runtimeParameterDetailRows(
   ].filter((row): row is RuntimeParameterDetailRow => row !== null)
 }
 
-function providerProbeKey(probe: DashboardRuntimeProviderProbe): string | null {
-  return probe.runtime_id ?? null
+function providerProbeKey(probe: DashboardRuntimeProviderProbe): string {
+  return probe.runtime_id
 }
 
 function providerRuntimeKey(provider: DashboardRuntimeProviderSnapshot): string {
@@ -522,12 +522,21 @@ function providerRuntimeKey(provider: DashboardRuntimeProviderSnapshot): string 
 
 function runtimeProbeTone(probe: DashboardRuntimeProviderProbe | null | undefined): string {
   if (!probe) return 'neutral'
-  if (probe.reachable === true) return 'ok'
-  if (probe.status === 'skipped_cli') return 'neutral'
-  if (probe.status === 'missing_auth' || probe.status === 'auth_failed') return 'bad'
-  if (probe.status === 'network_error' || probe.status === 'server_error') return 'bad'
-  if (probe.reachable === false) return 'bad'
-  return 'warn'
+  switch (probe.status) {
+    case 'reachable':
+      return 'ok'
+    case 'skipped_cli':
+      return 'neutral'
+    case 'auth_failed':
+    case 'endpoint_not_found':
+    case 'server_error':
+    case 'http_error':
+    case 'invalid_execution_transport':
+    case 'invalid_endpoint':
+    case 'missing_auth':
+    case 'network_error':
+      return 'bad'
+  }
 }
 
 function runtimeProbeLabel(probe: DashboardRuntimeProviderProbe | null | undefined): string {
@@ -549,8 +558,10 @@ function runtimeProbeLabel(probe: DashboardRuntimeProviderProbe | null | undefin
       return 'cli skipped'
     case 'invalid_endpoint':
       return 'bad endpoint'
-    default:
-      return probe.status ?? 'unknown'
+    case 'invalid_execution_transport':
+      return 'bad transport'
+    case 'http_error':
+      return 'http error'
   }
 }
 
@@ -560,16 +571,15 @@ function runtimeProbeAuthLabel(probe: DashboardRuntimeProviderProbe | null | und
 }
 
 function runtimeProbeSummaryText(probe: DashboardRuntimeProbeResponse | null): string {
-  const summary = probe?.probe?.summary
+  const summary = probe?.probe.summary
   if (!summary) return 'live probe 없음'
-  return `Reachable ${summary.reachable ?? 0} · Failed ${summary.failed ?? 0} · Skipped ${summary.skipped ?? 0}`
+  return `Reachable ${summary.reachable} · Failed ${summary.failed} · Skipped ${summary.skipped}`
 }
 
 function providerProbeMap(probe: DashboardRuntimeProbeResponse | null): Map<string, DashboardRuntimeProviderProbe> {
   const map = new Map<string, DashboardRuntimeProviderProbe>()
-  for (const item of probe?.probe?.providers ?? []) {
-    const key = providerProbeKey(item)
-    if (key) map.set(key, item)
+  for (const item of probe?.probe.providers ?? []) {
+    map.set(providerProbeKey(item), item)
   }
   return map
 }

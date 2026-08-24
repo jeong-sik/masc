@@ -896,22 +896,25 @@ let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
     [ "bin"; "lib"; "packages"; "test" ]
     |> List.concat_map (fun root -> ocaml_source_files (Filename.concat repo root))
   in
-  List.iter
-    (fun path ->
-       let source = read_text_file path |> String.lowercase_ascii in
-       List.iter
-         (fun identity ->
-            if
-              String_util.contains_substring
-                source
-                (String.lowercase_ascii identity)
-            then
-              failf
-                "concrete Keeper identity %S remains in OCaml source %s"
-                identity
-                path)
-         identities)
+  (* Every violation, not the first. [failf] inside the loop stopped at one
+     file, so four of the five that had accumulated by 2026-08-24 stayed
+     invisible until the one ahead of them was cleared -- and each round of
+     that costs a full CI build to learn the next name. *)
+  let violations =
     source_files
+    |> List.concat_map (fun path ->
+         let source = read_text_file path |> String.lowercase_ascii in
+         identities
+         |> List.filter (fun identity ->
+              String_util.contains_substring source (String.lowercase_ascii identity))
+         |> List.map (fun identity -> Printf.sprintf "%s: %S" path identity))
+  in
+  if violations <> []
+  then
+    failf
+      "concrete Keeper identities remain in OCaml source (%d):\n  %s"
+      (List.length violations)
+      (String.concat "\n  " violations)
 ;;
 
 let with_temp_dir prefix f =

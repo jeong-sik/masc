@@ -176,7 +176,10 @@ let test_keeper_sensitive_get_permissions_are_exact () =
          (permission path = Some Masc_domain.CanAdmin);
        check bool (suffix ^ " trailing segment") true
          (permission (path ^ "/extra") = None))
-    [ "raw-traces"; "raw-trace"; "memory-journal" ];
+    (* file-changes returns the exact text a keeper wrote to a file, which is
+       part of what raw-trace already holds. Same data, same gate — a lighter
+       one here would be a second door onto the first door's content. *)
+    [ "raw-traces"; "raw-trace"; "memory-journal"; "file-changes" ];
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true

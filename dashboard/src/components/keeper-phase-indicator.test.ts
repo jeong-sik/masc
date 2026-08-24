@@ -6,13 +6,12 @@ import { PHASE_STYLES, getPhaseStyle, pipelineStageDetailLabel } from './keeper-
 // ================================================================
 
 describe('PHASE_STYLES', () => {
-  it('has all 11 phases', () => {
+  it('has all 10 phases', () => {
     const phases = Object.keys(PHASE_STYLES)
-    expect(phases).toHaveLength(11)
+    expect(phases).toHaveLength(10)
     expect(phases).toContain('Offline')
     expect(phases).toContain('Running')
     expect(phases).toContain('Failing')
-    expect(phases).toContain('Overflowed')
     expect(phases).toContain('Compacting')
     expect(phases).toContain('HandingOff')
     expect(phases).toContain('Draining')
@@ -104,7 +103,7 @@ describe('getPhaseStyle', () => {
   })
 
   it('returns correct style for all phases', () => {
-    const phases: string[] = ['Offline', 'Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting']
+    const phases: string[] = ['Offline', 'Running', 'Failing', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting']
     for (const phase of phases) {
       const style = getPhaseStyle(phase)
       expect(style.label).toBeTruthy()

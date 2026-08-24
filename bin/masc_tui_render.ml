@@ -74,6 +74,10 @@ let chat_markdown_palette : Markdown.palette =
   ; rule = (Ansi.gray, Ansi.reset)
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
+  (* Reverse video uses the terminal's own foreground and background, so the
+     language banner stays legible on both light and dark themes. *)
+  ; code_header = (Ansi.reverse, Ansi.reset)
+  ; code_border = (Ansi.gray, Ansi.reset)
   ; quote_gutter = "\xe2\x96\x8f "
   ; table_header = (Ansi.bold, Ansi.reset)
   ; table_gutter = " \xe2\x94\x82 "
@@ -2218,7 +2222,7 @@ let keeper_lane_phase_style (phase : Tui_decode.keeper_lane_phase) =
       (Ansi.yellow, "\xe2\x97\x90")
   | Lane_phase_paused -> (Ansi.yellow, "\xe2\x97\x8b")
   | Lane_phase_offline | Lane_phase_stopped -> (Ansi.gray, "\xc3\x97")
-  | Lane_phase_overflowed | Lane_phase_unknown _ -> (Ansi.yellow, "?")
+  | Lane_phase_unknown _ -> (Ansi.yellow, "?")
 
 let keeper_lane_turn_style (phase : Tui_decode.keeper_lane_turn_phase) =
   match phase with

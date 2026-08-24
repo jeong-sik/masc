@@ -1,17 +1,24 @@
 name = "tool_write_file"
 description = """
-Write full file content into the keeper sandbox or an allowed path. Missing \
-parent directories are created safely; call Write directly instead of using \
-Execute mkdir."""
+Write or append a file. path is required. For mode='overwrite' (default) or \
+'append', content is required and non-empty. Good overwrite: \
+path='lib/foo.ml', content='let x = 1'. Bad: path='', content=''. Creates \
+parent dirs."""
 
 [[params]]
-name = "file_path"
+name = "path"
 type = "string"
 required = true
-description = "Absolute or sandbox-relative file path. Parent directories are created as needed."
+description = "Relative or absolute file path to write"
 
 [[params]]
 name = "content"
 type = "string"
 required = true
-description = "Full file content. Overwrites the existing file."
+description = "File content to write"
+
+[[params]]
+name = "mode"
+type = "string"
+enum = ["overwrite", "append"]
+description = "Write mode (default: overwrite)"

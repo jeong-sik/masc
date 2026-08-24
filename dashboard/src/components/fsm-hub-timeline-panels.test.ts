@@ -10,7 +10,7 @@ import {
 
 // Wire format: backend (keeper_state_machine.ml:21-35 + keeper_composite_observer.ml:141-201)
 // emits all lane values lowercase + snake_case. Prior fixtures asserted
-// PascalCase ('Failing', 'Overflowed', 'Stable', 'HandingOff') that the
+// PascalCase ('Failing', 'Stable', 'HandingOff') that the
 // backend never emits — mock↔mock loophole that hid the dead branches.
 describe('swimlaneSegmentColor', () => {
   it('returns alarm color for alarm values', () => {
@@ -24,8 +24,7 @@ describe('swimlaneSegmentColor', () => {
     expect(swimlaneSegmentColor('accumulating')).toBe('bg-[var(--color-bg-panel-alt)]')
   })
 
-  it('returns warn color for overflowed and compacting', () => {
-    expect(swimlaneSegmentColor('overflowed')).toBe('bg-[var(--amber-bright-45)]')
+  it('returns warn color for compacting', () => {
     expect(swimlaneSegmentColor('compacting')).toBe('bg-[var(--amber-bright-45)]')
   })
 
@@ -81,7 +80,7 @@ describe('filterTransitionHistory', () => {
     { ts: 1100, field: 'KCL', from: 'trying', to: 'idle' },
     { ts: 1200, field: 'KTC', from: 'Idle', to: 'Running' },
     { ts: 1300, field: 'KSM', from: 'Stable', to: 'Compacting' },
-    { ts: 1400, field: 'KMC', from: 'accumulating', to: 'Overflowed' },
+    { ts: 1400, field: 'KMC', from: 'accumulating', to: 'Draining' },
     { ts: 1500, field: 'KDP', from: 'guard_ok', to: 'tool_policy_selected' },
   ]
 
@@ -106,9 +105,9 @@ describe('filterTransitionHistory', () => {
   })
 
   it('filters by to state (case-insensitive)', () => {
-    const result = filterTransitionHistory(sample, 'overflowed')
+    const result = filterTransitionHistory(sample, 'draining')
     expect(result).toHaveLength(1)
-    expect(result[0]?.to).toBe('Overflowed')
+    expect(result[0]?.to).toBe('Draining')
   })
 
   it('matches substring across fields (trying matches both from and to)', () => {

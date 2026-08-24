@@ -276,6 +276,9 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_web_tool_toml_parity
+  test_search_files_toml_parity
+  test_filesystem_shard_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
@@ -602,6 +605,9 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_web_tool_toml_parity
+  test_search_files_toml_parity
+  test_filesystem_shard_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
@@ -1178,6 +1184,7 @@
   test_tool_metrics_persist
   test_model_inference_metrics
   test_keeper_tool_call_log
+  test_keeper_tool_call_file_change
   test_tool_unified
   test_build_identity
   test_lifecycle
@@ -1320,6 +1327,7 @@
   test_model_inference_metrics
   test_tool_unified
   test_keeper_tool_call_log
+  test_keeper_tool_call_file_change
   test_build_identity
   test_lifecycle
   test_grpc_workspace
@@ -2684,6 +2692,11 @@
 (test
  (name test_tui_surface_needs)
  (modules test_tui_surface_needs)
+ (libraries alcotest masc_tui_types))
+
+(test
+ (name test_tui_palette_matching)
+ (modules test_tui_palette_matching)
  (libraries alcotest masc_tui_types))
 
 (test

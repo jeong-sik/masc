@@ -30,7 +30,6 @@ describe('keeperStateTone (pure)', () => {
     expect(keeperStateTone('handing_off')).toBe('info')
     expect(keeperStateTone('draining')).toBe('info')
     expect(keeperStateTone('failing')).toBe('warn')
-    expect(keeperStateTone('overflowed')).toBe('warn')
     expect(keeperStateTone('restarting')).toBe('warn')
     expect(keeperStateTone('paused')).toBe('paused')
     expect(keeperStateTone('crashed')).toBe('bad')

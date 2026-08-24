@@ -72,14 +72,6 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
         SM.Stop_requested; SM.Operator_pause;
       ]
-    | SM.Overflowed ->
-      (* Retired phase (#26546): still a matchable variant for historical
-         decode, so keep exercising events from it. *)
-      [ SM.Operator_compact_requested;
-        SM.Operator_clear_requested { preserve_system = true; reason = "pbt" };
-        SM.Stop_requested;
-        SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
-      ]
     | SM.Compacting ->
       [ SM.Compaction_completed;
         SM.Compaction_failed { reason = "test" };

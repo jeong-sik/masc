@@ -21,6 +21,7 @@ let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_turn_records = "/turn-records"
+let keeper_suffix_file_changes = "/file-changes"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
 let keeper_suffix_trajectory = "/trajectory"
@@ -187,6 +188,11 @@ let keeper_get_permission ?(include_thinking = false) req_path =
     keeper_path_ends_with req_path keeper_suffix_raw_traces
     || keeper_path_ends_with req_path keeper_suffix_raw_trace
     || keeper_path_ends_with req_path keeper_suffix_memory_journal
+    (* Same data, same gate: [/file-changes] returns the exact text a keeper
+       wrote to a file, which is part of what the raw trace above already
+       holds. A lighter gate here would be a second door onto the first
+       door's content. *)
+    || keeper_path_ends_with req_path keeper_suffix_file_changes
   then Some Masc_domain.CanAdmin
   else None
 

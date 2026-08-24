@@ -14,7 +14,6 @@ let phase_to_mermaid_id = function
   | Offline -> "Offline"
   | Running -> "Running"
   | Failing -> "Failing"
-  | Overflowed -> "Overflowed"
   | Compacting -> "Compacting"
   | HandingOff -> "HandingOff"
   | Draining -> "Draining"
@@ -44,10 +43,6 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Failing --> Crashed : fiber death\n";
   p "    Failing --> Draining : stop requested\n";
   p "    Failing --> Paused : operator pause\n";
-  (* Overflowed is retired (#26546): no condition derives it, so it renders
-     without inbound edges — kept only for historical records that may still
-     name the phase. *)
-  p "    Overflowed --> Running : operator clear (retired phase)\n";
   p "    Compacting --> Running : compact done\n";
   p "    Compacting --> Running : compact failed (Lane retry queued)\n";
   p "    Compacting --> Failing : hb fail\n";
@@ -78,7 +73,7 @@ let phase_to_mermaid ~(current : phase) : string =
   (match current with
    | Stopped ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
-   | Failing | Overflowed | Compacting | HandingOff | Draining | Restarting | Crashed ->
+   | Failing | Compacting | HandingOff | Draining | Restarting | Crashed ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)
    | Running | Offline | Paused ->
      p "    class %s active\n" (phase_to_mermaid_id current));

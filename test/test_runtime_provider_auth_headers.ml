@@ -75,6 +75,8 @@ let runpod_binding =
   ; price_output = None
   ; keep_alive = None
   ; num_ctx = None
+  ; repeat_penalty = None
+  ; repeat_last_n = None
   ; return_progress = None
   }
 

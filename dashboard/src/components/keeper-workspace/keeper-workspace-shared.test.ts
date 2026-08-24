@@ -40,10 +40,9 @@ describe('keeperStatusTone', () => {
     expect(keeperStatusTone(mk({ status: 'running' }))).toBe('ok')
   })
   it('surfaces error phases as bad (not a healthy green dot)', () => {
-    // Failing/Overflowed are neither offline nor paused, so keeperBucket
+    // Failing is neither offline nor paused, so keeperBucket
     // classifies them as "running"; the tone must still flag them.
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Failing' }))).toBe('bad')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Overflowed' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Crashed' }))).toBe('bad')
   })
   it('maps transient phases to busy (working-through, not paused)', () => {

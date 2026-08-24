@@ -1,22 +1,26 @@
 name = "tool_search_files"
 description = """
-Search file contents with ripgrep: provide a regex `pattern` (and \
-optionally path/glob/type). To list a directory, read a file, or run \
-git status/log/diff, use the Execute tool (e.g. \
-argv=['ls','-la','<path>']). Patterns match within a single line; a \
-literal newline in `pattern` is rejected. To match across lines, run \
-`rg -U` through the Execute tool."""
+Search file contents with ripgrep. Provide a regex `pattern` (and optionally \
+path/glob/type). Paths resolve against your workspace root — pass a path \
+relative to it, never a host path like '.masc/playground/your-name/...'. To \
+list a directory, read a file, run find, or view git status/log/diff, use \
+the Execute tool."""
 
 [[params]]
 name = "pattern"
 type = "string"
 required = true
-description = "Regular expression to search file contents for (ripgrep)."
+description = """
+Regular expression in Rust regex syntax (ripgrep). No lookaround (?!...) \
+(?<=...) and no backreferences; alternation is a plain | (never \\|); a \
+literal double quote needs no backslash. PCRE/BRE-dialect patterns are \
+rejected with a regex parse error."""
 
 [[params]]
 name = "path"
 type = "string"
-description = "Directory or file to search in. Defaults to the keeper sandbox when omitted."
+description = """
+Directory or file to search in. Defaults to the keeper sandbox."""
 
 [[params]]
 name = "glob"
@@ -26,9 +30,11 @@ description = "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
 [[params]]
 name = "type"
 type = "string"
-description = "Ripgrep file-type filter, e.g. 'ml', 'py'."
+description = """
+Ripgrep file-type filter, e.g. 'ml', 'py'. May contain only letters, digits, \
+hyphens, and underscores."""
 
 [[params]]
-name = "-i"
-type = "boolean"
-description = "Case-insensitive search."
+name = "limit"
+type = "integer"
+description = "Maximum number of matches to return."

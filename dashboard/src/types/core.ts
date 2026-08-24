@@ -988,15 +988,13 @@ export interface KeeperStatusDetail {
 // (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy
 // `thinking` / `tool_use` (= trajectory content_type, never
 // pipeline_stage) and `scheduled_autonomous` (= turn channel, never
-// pipeline_stage). Added `overflowed` which the backend emits but
-// the type previously rejected.
+// pipeline_stage).
 export type PipelineStage =
   | 'idle'
   | 'compacting'
   | 'handoff'
   | 'offline'
   | 'failing'
-  | 'overflowed'
   | 'draining'
   | 'paused'
   | 'crashed'
@@ -1052,7 +1050,6 @@ export type KeeperPhase =
   | 'Offline'
   | 'Running'
   | 'Failing'
-  | 'Overflowed'
   | 'Compacting'
   | 'HandingOff'
   | 'Draining'

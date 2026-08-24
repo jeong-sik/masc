@@ -5,9 +5,6 @@
     sides can import the same value. *)
 
 let read_file_default_max_bytes = 20_000
-let read_file_default_max_bytes_string =
-  Int.to_string read_file_default_max_bytes
-
 (* The most a single Read may return, and the most of one evidence artifact a
    verification snapshot stores. These have to be one number: the completion
    authority reads files live through Read while an operator later reviews the

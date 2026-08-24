@@ -58,6 +58,7 @@ import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseAgentCorePayloadOrNull } from './schemas/sse-event-payload'
 import { hydrateAgentCoreTelemetrySample } from './agent-core-telemetry-store'
+import { sseEventFamily, withoutMascNamespace } from './lib/sse-event-type'
 import {
   SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_PENDING_EVENT,
@@ -358,7 +359,7 @@ const KEEPER_LIFECYCLE_EVENTS = new Set([
 ])
 
 function normalizeMascEventType(type: string): string {
-  return type.startsWith('masc/') ? type.slice('masc/'.length) : type
+  return withoutMascNamespace(type)
 }
 
 /** Hydrate project-snapshot signals directly from a push payload — zero HTTP fetch. */
@@ -730,7 +731,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
   }
 
   if (
-    event.type.startsWith('decision_')
+    sseEventFamily(event.type) === 'decision'
     || event.type === 'runtime_param_changed'
     || approvalRefreshEvent
   ) {

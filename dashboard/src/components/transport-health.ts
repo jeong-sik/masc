@@ -23,6 +23,7 @@ import { CopyIdButton } from './common/copy-id-button'
 import { ActionButton } from './common/button'
 import { StatTile } from './common/stat-tile'
 import { SectionCard } from './common/card'
+import { sseEventFamily } from '../lib/sse-event-type'
 
 export type StatusTone = 'ok' | 'warn' | 'bad'
 
@@ -125,9 +126,10 @@ export function shouldRefreshFromEvent(event: SSEEvent): boolean {
   if (!type) return false
   if (type === 'keeper_heartbeat') return false
   if (type === 'broadcast' || type === 'masc/broadcast') return true
-  if (type.startsWith('task_') || type.startsWith('masc/task_')) return true
-  if (type.startsWith('keeper_') || type.startsWith('masc/keeper_')) return true
-  return type.startsWith('decision_') || type === 'runtime_param_changed'
+  // 예전에는 계열마다 bare 이름과 masc/ 쌍둥이를 각각 startsWith 로 물었다.
+  const family = sseEventFamily(type)
+  if (family === 'task' || family === 'keeper' || family === 'decision') return true
+  return type === 'runtime_param_changed'
 }
 
 /**
